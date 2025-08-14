@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package fuwa;
+
+option go_package = "github.com/waifu-devs/fuwa/proto";
+
+import "types.proto";
+
+// Core event system - the fundamental primitive for the platform
+service EventService {
+  // Subscribe to events with optional filtering
+  rpc Subscribe(SubscribeRequest) returns (stream Event);
+
+  // Publish events to the system
+  rpc Publish(PublishRequest) returns (PublishResponse);
+
+  // Get event history for a specific scope
+  rpc GetEvents(GetEventsRequest) returns (GetEventsResponse);
+}
+
+// Event subscription configuration
+message SubscribeRequest {
+  // Event types to subscribe to (empty = all)
+  repeated string event_types = 1;
+
+  // Scopes to filter by (empty = all accessible)
+  repeated string scopes = 2;
+
+  // Start from this sequence number (0 = current, -1 = beginning)
+  int64 from_sequence = 3;
+
+  // Additional filtering metadata
+  map<string, string> filters = 4;
+}
+
+message PublishRequest {
+  Event event = 1;
+}
+
+message PublishResponse {
+  string event_id = 1;
+  int64 sequence = 2;
+  bool success = 3;
+  string error = 4;
+}
+
+message GetEventsRequest {
+  string scope = 1;
+  repeated string event_types = 2;
+  int64 from_sequence = 3;
+  int64 to_sequence = 4;
+  int32 limit = 5;
+}
+
+message GetEventsResponse {
+  repeated Event events = 1;
+  bool has_more = 2;
+  int64 next_sequence = 3;
+}

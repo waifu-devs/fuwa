@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package fuwa;
+
+option go_package = "github.com/waifu-devs/fuwa/proto";
+
+import "types.proto";
+
+// Channel management service
+service ChannelService {
+  rpc CreateChannel(CreateChannelRequest) returns (CreateChannelResponse);
+  rpc GetChannel(GetChannelRequest) returns (GetChannelResponse);
+  rpc ListChannels(ListChannelsRequest) returns (ListChannelsResponse);
+  rpc UpdateChannel(UpdateChannelRequest) returns (UpdateChannelResponse);
+  rpc DeleteChannel(DeleteChannelRequest) returns (DeleteChannelResponse);
+}
+
+// Channel service request/response types
+message CreateChannelRequest {
+  string name = 1;
+  ChannelType type = 2;
+  string server_id = 3;
+  string parent_id = 4;
+  map<string, string> metadata = 5;
+}
+
+message CreateChannelResponse {
+  Channel channel = 1;
+}
+
+message GetChannelRequest {
+  string channel_id = 1;
+}
+
+message GetChannelResponse {
+  Channel channel = 1;
+}
+
+message ListChannelsRequest {
+  string server_id = 1;
+  string parent_id = 2; // For listing channels in a category
+  int32 limit = 3;
+  string page_token = 4;
+}
+
+message ListChannelsResponse {
+  repeated Channel channels = 1;
+  string next_page_token = 2;
+}
+
+message UpdateChannelRequest {
+  string channel_id = 1;
+  string name = 2;
+  map<string, string> metadata = 3;
+  repeated string update_mask = 4; // Fields to update
+}
+
+message UpdateChannelResponse {
+  Channel channel = 1;
+}
+
+message DeleteChannelRequest {
+  string channel_id = 1;
+}
+
+message DeleteChannelResponse {
+  bool success = 1;
+}

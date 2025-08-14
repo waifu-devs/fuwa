@@ -1,0 +1,197 @@
+syntax = "proto3";
+
+package fuwa;
+
+option go_package = "github.com/waifu-devs/fuwa/proto";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
+
+// ============================================================================
+// Core Types
+// ============================================================================
+
+// The core event primitive - everything in Fuwa is an event
+message Event {
+  // Unique event identifier
+  string event_id = 1;
+
+  // Event type (e.g., "channel.created", "message.sent", "user.joined")
+  string event_type = 2;
+
+  // Event scope/namespace for filtering (e.g., "server:123", "channel:456")
+  string scope = 3;
+
+  // User/service that triggered the event
+  string actor_id = 4;
+
+  // When the event occurred
+  google.protobuf.Timestamp timestamp = 5;
+
+  // Event-specific data
+  google.protobuf.Any payload = 6;
+
+  // Optional metadata for routing/filtering
+  map<string, string> metadata = 7;
+
+  // Sequence number for ordering within a scope
+  int64 sequence = 8;
+}
+
+// Channel types
+enum ChannelType {
+  CHANNEL_TYPE_UNSPECIFIED = 0;
+  CHANNEL_TYPE_TEXT = 1;
+  CHANNEL_TYPE_VOICE = 2;
+  CHANNEL_TYPE_ANNOUNCEMENT = 3;
+  CHANNEL_TYPE_THREAD = 4;
+}
+
+message Channel {
+  string channel_id = 1;
+  string name = 2;
+  ChannelType type = 3;
+  string server_id = 4;
+  string parent_id = 5; // For threads/categories
+  map<string, string> metadata = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message Message {
+  string message_id = 1;
+  string channel_id = 2;
+  string author_id = 3;
+  string content = 4;
+  repeated Attachment attachments = 5;
+  repeated Embed embeds = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  string reply_to_id = 9; // For message replies
+}
+
+message Attachment {
+  string attachment_id = 1;
+  string filename = 2;
+  string content_type = 3;
+  int64 size = 4;
+  string url = 5;
+}
+
+message Embed {
+  string title = 1;
+  string description = 2;
+  string url = 3;
+  int32 color = 4;
+  repeated EmbedField fields = 5;
+  string thumbnail_url = 6;
+  string image_url = 7;
+}
+
+message EmbedField {
+  string name = 1;
+  string value = 2;
+  bool inline = 3;
+}
+
+// ============================================================================
+// Event Payloads
+// ============================================================================
+
+// Channel events
+message ChannelCreatedPayload {
+  Channel channel = 1;
+}
+
+message ChannelUpdatedPayload {
+  Channel channel = 1;
+  repeated string changed_fields = 2;
+}
+
+message ChannelDeletedPayload {
+  string channel_id = 1;
+  string server_id = 2;
+}
+
+// Message events
+message MessageSentPayload {
+  Message message = 1;
+}
+
+message MessageUpdatedPayload {
+  Message message = 1;
+  repeated string changed_fields = 2;
+}
+
+message MessageDeletedPayload {
+  string message_id = 1;
+  string channel_id = 2;
+}
+
+// ============================================================================
+// Config Events
+// ============================================================================
+
+message ConfigUpdatedPayload {
+  string scope = 1;
+  string key = 2;
+  ConfigValue old_value = 3;
+  ConfigValue new_value = 4;
+  string updated_by = 5;
+  string description = 6;
+  google.protobuf.Timestamp timestamp = 7;
+}
+
+message ConfigDeletedPayload {
+  string scope = 1;
+  string key = 2;
+  ConfigValue deleted_value = 3;
+  string deleted_by = 4;
+  string reason = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+// Config value types for the config service
+message ConfigValue {
+  oneof value {
+    string string_value = 1;
+    int64 int_value = 2;
+    double float_value = 3;
+    bool bool_value = 4;
+    ConfigObject object_value = 5;
+    ConfigArray array_value = 6;
+  }
+  ConfigValueType type = 7;
+  bool is_sensitive = 8;
+  ConfigConstraints constraints = 9;
+}
+
+message ConfigObject {
+  map<string, ConfigValue> fields = 1;
+}
+
+message ConfigArray {
+  repeated ConfigValue items = 1;
+}
+
+message ConfigConstraints {
+  int32 min_length = 1;
+  int32 max_length = 2;
+  string pattern = 3;
+  repeated string allowed_values = 4;
+  double min_value = 5;
+  double max_value = 6;
+  int32 min_items = 7;
+  int32 max_items = 8;
+  bool required = 9;
+}
+
+enum ConfigValueType {
+  CONFIG_VALUE_TYPE_UNSPECIFIED = 0;
+  CONFIG_VALUE_TYPE_STRING = 1;
+  CONFIG_VALUE_TYPE_INT = 2;
+  CONFIG_VALUE_TYPE_FLOAT = 3;
+  CONFIG_VALUE_TYPE_BOOL = 4;
+  CONFIG_VALUE_TYPE_OBJECT = 5;
+  CONFIG_VALUE_TYPE_ARRAY = 6;
+}

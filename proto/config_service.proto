@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+package fuwa;
+
+option go_package = "github.com/waifu-devs/fuwa/proto";
+
+import "google/protobuf/timestamp.proto";
+import "types.proto";
+
+// ============================================================================
+// Config Service - Event-driven configuration management
+// ============================================================================
+
+service ConfigService {
+  // Get configuration values for a specific scope
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  
+  // List available configuration keys for a scope
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+  
+  // Set configuration value (publishes config.updated event)
+  rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
+  
+  // Delete configuration key (publishes config.deleted event)
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+}
+
+// ============================================================================
+// Request/Response Messages
+// ============================================================================
+
+message GetConfigRequest {
+  // Configuration scope (e.g., "server:123", "channel:456", "user:789", "global")
+  string scope = 1;
+  
+  // Specific config keys to retrieve (if empty, returns all)
+  repeated string keys = 2;
+  
+  // Include sensitive values (requires admin permissions)
+  bool include_sensitive = 3;
+}
+
+message GetConfigResponse {
+  // Configuration values
+  map<string, ConfigValue> configs = 1;
+  
+  // Scope that was queried
+  string scope = 2;
+  
+  // Timestamp when configs were last updated
+  google.protobuf.Timestamp last_updated = 3;
+}
+
+message ListConfigsRequest {
+  // Configuration scope
+  string scope = 1;
+  
+  // Filter by config key prefix
+  string key_prefix = 2;
+  
+  // Include metadata about each config
+  bool include_metadata = 3;
+}
+
+message ListConfigsResponse {
+  // Available configuration keys with metadata
+  repeated ConfigInfo configs = 1;
+  
+  // Total count of configs in scope
+  int32 total_count = 2;
+}
+
+message SetConfigRequest {
+  // Configuration scope
+  string scope = 1;
+  
+  // Configuration key
+  string key = 2;
+  
+  // New configuration value
+  ConfigValue value = 3;
+  
+  // Optional description of the change
+  string description = 4;
+}
+
+message SetConfigResponse {
+  // Success status
+  bool success = 1;
+  
+  // Previous value (if any)
+  ConfigValue previous_value = 2;
+  
+  // Event ID of the published config.updated event
+  string event_id = 3;
+}
+
+message DeleteConfigRequest {
+  // Configuration scope
+  string scope = 1;
+  
+  // Configuration key to delete
+  string key = 2;
+  
+  // Optional reason for deletion
+  string reason = 3;
+}
+
+message DeleteConfigResponse {
+  // Success status
+  bool success = 1;
+  
+  // Deleted value
+  ConfigValue deleted_value = 2;
+  
+  // Event ID of the published config.deleted event
+  string event_id = 3;
+}
+
+// ============================================================================
+// Data Types
+// ============================================================================
+
+message ConfigInfo {
+  // Configuration key
+  string key = 1;
+  
+  // Value type
+  ConfigValueType type = 2;
+  
+  // Human-readable description
+  string description = 3;
+  
+  // Default value
+  ConfigValue default_value = 4;
+  
+  // Whether this config is sensitive
+  bool is_sensitive = 5;
+  
+  // Validation constraints
+  ConfigConstraints constraints = 6;
+  
+  // When this config was created
+  google.protobuf.Timestamp created_at = 7;
+  
+  // When this config was last updated
+  google.protobuf.Timestamp updated_at = 8;
+  
+  // Who last updated this config
+  string updated_by = 9;
+}

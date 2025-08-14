@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 )
 
 type Config struct {
+	DataPath       string
 	Port           int
 	Host           string
 	DatabaseURL    string
@@ -16,10 +18,14 @@ type Config struct {
 	JWTSecret      string
 	AllowedOrigins string
 	Environment    string
+	TursoURL       string
+	TursoAuthToken string
+	EncryptionKey  string
 }
 
 func LoadConfig() (*Config, error) {
 	config := &Config{
+		DataPath:       ".",
 		Port:           8080,
 		Host:           "localhost",
 		LogLevel:       "info",
@@ -80,6 +86,16 @@ func loadEnvFile(filename string) (map[string]string, error) {
 }
 
 func (c *Config) applyEnvVars(envVars map[string]string) {
+	if data, exists := envVars["FUWA_DATA_PATH"]; exists {
+		c.DataPath = data
+	} else {
+		data, err := os.UserHomeDir()
+		if err != nil {
+			c.DataPath = "."
+		} else {
+			c.DataPath = path.Join(data, ".fuwa")
+		}
+	}
 	if port, exists := envVars["FUWA_PORT"]; exists {
 		if p, err := strconv.Atoi(port); err == nil {
 			c.Port = p
@@ -97,8 +113,14 @@ func (c *Config) applyEnvVars(envVars map[string]string) {
 	if jwtSecret, exists := envVars["FUWA_JWT_SECRET"]; exists {
 		c.JWTSecret = jwtSecret
 	}
-	if origins, exists := envVars["FUWA_ALLOWED_ORIGINS"]; exists {
-		c.AllowedOrigins = origins
+	if tursoURL, exists := envVars["FUWA_TURSO_URL"]; exists {
+		c.TursoURL = tursoURL
+	}
+	if tursoToken, exists := envVars["FUWA_TURSO_AUTH_TOKEN"]; exists {
+		c.TursoAuthToken = tursoToken
+	}
+	if encKey, exists := envVars["FUWA_ENCRYPTION_KEY"]; exists {
+		c.EncryptionKey = encKey
 	}
 	if env, exists := envVars["FUWA_ENVIRONMENT"]; exists {
 		c.Environment = env
@@ -106,29 +128,29 @@ func (c *Config) applyEnvVars(envVars map[string]string) {
 }
 
 func (c *Config) applyFuwaEnvVars() {
-	if port := os.Getenv("FUWA_PORT"); port != "" {
-		if p, err := strconv.Atoi(port); err == nil {
-			c.Port = p
+	envVars := make(map[string]string)
+
+	envKeys := []string{
+		"FUWA_DATA_PATH",
+		"FUWA_PORT",
+		"FUWA_HOST",
+		"FUWA_DATABASE_URL",
+		"FUWA_LOG_LEVEL",
+		"FUWA_JWT_SECRET",
+		"FUWA_ALLOWED_ORIGINS",
+		"FUWA_ENVIRONMENT",
+		"FUWA_TURSO_URL",
+		"FUWA_TURSO_AUTH_TOKEN",
+		"FUWA_ENCRYPTION_KEY",
+	}
+
+	for _, key := range envKeys {
+		if value := os.Getenv(key); value != "" {
+			envVars[key] = value
 		}
 	}
-	if host := os.Getenv("FUWA_HOST"); host != "" {
-		c.Host = host
-	}
-	if dbURL := os.Getenv("FUWA_DATABASE_URL"); dbURL != "" {
-		c.DatabaseURL = dbURL
-	}
-	if logLevel := os.Getenv("FUWA_LOG_LEVEL"); logLevel != "" {
-		c.LogLevel = logLevel
-	}
-	if jwtSecret := os.Getenv("FUWA_JWT_SECRET"); jwtSecret != "" {
-		c.JWTSecret = jwtSecret
-	}
-	if origins := os.Getenv("FUWA_ALLOWED_ORIGINS"); origins != "" {
-		c.AllowedOrigins = origins
-	}
-	if env := os.Getenv("FUWA_ENVIRONMENT"); env != "" {
-		c.Environment = env
-	}
+
+	c.applyEnvVars(envVars)
 }
 
 func (c *Config) validate() error {
@@ -141,6 +163,9 @@ func (c *Config) validate() error {
 	if c.Environment == "production" && c.JWTSecret == "" {
 		return fmt.Errorf("JWT_SECRET is required in production environment")
 	}
+	if c.EncryptionKey == "" {
+		return fmt.Errorf("encryption key is required (set FUWA_ENCRYPTION_KEY)")
+	}
 	return nil
 }
 
@@ -150,6 +175,16 @@ func (c *Config) String() string {
 		jwtSecret = "***"
 	}
 
+	tursoAuthToken := c.TursoAuthToken
+	if tursoAuthToken != "" {
+		tursoAuthToken = "***"
+	}
+
+	encryptionKey := c.EncryptionKey
+	if encryptionKey != "" {
+		encryptionKey = "***"
+	}
+
 	return fmt.Sprintf(`Config:
   Host: %s
   Port: %d
@@ -157,7 +192,10 @@ func (c *Config) String() string {
   LogLevel: %s
   DatabaseURL: %s
   JWTSecret: %s
-  AllowedOrigins: %s`,
+  AllowedOrigins: %s
+  TursoURL: %s
+  TursoAuthToken: %s
+  EncryptionKey: %s`,
 		c.Host,
 		c.Port,
 		c.Environment,
@@ -165,5 +203,8 @@ func (c *Config) String() string {
 		c.DatabaseURL,
 		jwtSecret,
 		c.AllowedOrigins,
+		c.TursoURL,
+		tursoAuthToken,
+		encryptionKey,
 	)
 }

@@ -1,11 +1,9 @@
 -- +goose Up
--- +goose StatementBegin
 CREATE TABLE channels (
-  channel_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT
+  channel_id TEXT NOT NULL PRIMARY KEY,
+  name TEXT NOT NULL,
+  type INTEGER NOT NULL
 );
--- +goose StatementEnd
 
 -- +goose Down
--- +goose StatementBegin
 DROP TABLE channels;
--- +goose StatementEnd
