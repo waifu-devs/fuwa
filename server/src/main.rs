@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use fuwa_server::config::Config;
@@ -46,7 +47,11 @@ async fn main() -> ExitCode {
     };
 
     let filter = std::env::var("FUWA_LOG").unwrap_or_else(|_| "info,turso_core=warn".into());
-    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::new(filter)).init();
+    // Colors only on a terminal, so container logs stay plain text.
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
+        .with_ansi(std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none())
+        .init();
 
     match fuwa_server::app::run(config).await {
         Ok(()) => ExitCode::SUCCESS,
