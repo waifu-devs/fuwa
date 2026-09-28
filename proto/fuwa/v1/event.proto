@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// Each community server's event log, live or from history.
+service EventService {
+  // Streams events from any number of the caller's servers on this instance, as
+  // they happen. A cursor with `after_sequence` set first replays everything
+  // after it, so a client that reconnects with its last sequence misses nothing.
+  // A response without an event is a heartbeat.
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+}
+
+message ServerCursor {
+  string server_id = 1;
+  // Replay events after this sequence (0 replays from the start). Unset: only new events.
+  optional int64 after_sequence = 2;
+}
+
+message SubscribeRequest {
+  repeated ServerCursor servers = 1;
+}
+
+message SubscribeResponse {
+  Event event = 1;
+}
+
+message ListEventsRequest {
+  string server_id = 1;
+  int64 after_sequence = 2;
+  // 1 to 500; defaults to 100.
+  int32 limit = 3;
+}
+
+message ListEventsResponse {
+  repeated Event events = 1;
+  bool has_more = 2;
+}

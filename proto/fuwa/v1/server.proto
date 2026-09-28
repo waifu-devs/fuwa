@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// Community servers on this instance.
+service ServerService {
+  // Creates a server with a #general channel; the caller owns it.
+  rpc CreateServer(CreateServerRequest) returns (CreateServerResponse);
+  rpc GetServer(GetServerRequest) returns (GetServerResponse);
+  // The servers the caller is a member of.
+  rpc ListServers(ListServersRequest) returns (ListServersResponse);
+  // Servers anyone on this instance can find and join.
+  rpc DiscoverServers(DiscoverServersRequest) returns (DiscoverServersResponse);
+  rpc UpdateServer(UpdateServerRequest) returns (UpdateServerResponse);
+  // Deletes the server and its database. Owner or instance admin only.
+  rpc DeleteServer(DeleteServerRequest) returns (DeleteServerResponse);
+  // Joins a discoverable server.
+  rpc JoinServer(JoinServerRequest) returns (JoinServerResponse);
+  rpc LeaveServer(LeaveServerRequest) returns (LeaveServerResponse);
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
+  // What the server uses and the caps on it. Owner or instance admin only.
+  rpc GetServerUsage(GetServerUsageRequest) returns (GetServerUsageResponse);
+}
+
+message CreateServerRequest {
+  string name = 1;
+  string description = 2;
+  string icon_url = 3;
+  bool discoverable = 4;
+}
+
+message CreateServerResponse {
+  Server server = 1;
+}
+
+message GetServerRequest {
+  string server_id = 1;
+}
+
+message GetServerResponse {
+  Server server = 1;
+}
+
+message ListServersRequest {}
+
+message ListServersResponse {
+  repeated Server servers = 1;
+}
+
+message DiscoverServersRequest {}
+
+message DiscoverServersResponse {
+  repeated Server servers = 1;
+}
+
+message UpdateServerRequest {
+  string server_id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional string icon_url = 4;
+  optional bool discoverable = 5;
+}
+
+message UpdateServerResponse {
+  Server server = 1;
+}
+
+message DeleteServerRequest {
+  string server_id = 1;
+}
+
+message DeleteServerResponse {}
+
+message JoinServerRequest {
+  string server_id = 1;
+}
+
+message JoinServerResponse {
+  Server server = 1;
+  Member member = 2;
+}
+
+message LeaveServerRequest {
+  string server_id = 1;
+}
+
+message LeaveServerResponse {}
+
+message ListMembersRequest {
+  string server_id = 1;
+}
+
+message ListMembersResponse {
+  repeated Member members = 1;
+}
+
+message GetServerUsageRequest {
+  string server_id = 1;
+}
+
+message GetServerUsageResponse {
+  ServerUsage usage = 1;
+  // The caps in force: the server's own, else the instance defaults.
+  ServerLimits limits = 2;
+}

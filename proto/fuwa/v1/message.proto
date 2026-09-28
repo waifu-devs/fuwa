@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// Messages in a channel.
+service MessageService {
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc GetMessage(GetMessageRequest) returns (GetMessageResponse);
+  // A page of a channel's messages, oldest first.
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+  // Authors edit their own messages.
+  rpc UpdateMessage(UpdateMessageRequest) returns (UpdateMessageResponse);
+  // Authors delete their own messages; owners and admins delete any.
+  rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
+}
+
+message SendMessageRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  string content = 3;
+  repeated Attachment attachments = 4;
+  repeated Embed embeds = 5;
+  string reply_to_id = 6;
+}
+
+message SendMessageResponse {
+  Message message = 1;
+}
+
+message GetMessageRequest {
+  string server_id = 1;
+  string message_id = 2;
+}
+
+message GetMessageResponse {
+  Message message = 1;
+  User author = 2;
+}
+
+message ListMessagesRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // 1 to 100; defaults to 50.
+  int32 limit = 3;
+  // The page right before this message. With neither cursor set, the latest page.
+  string before_id = 4;
+  // The page right after this message.
+  string after_id = 5;
+}
+
+message ListMessagesResponse {
+  repeated Message messages = 1;
+  // Profiles of everyone who wrote a message on this page.
+  repeated User authors = 2;
+  // Whether there are more messages beyond this page, in the direction paged.
+  bool has_more = 3;
+}
+
+message UpdateMessageRequest {
+  string server_id = 1;
+  string message_id = 2;
+  string content = 3;
+}
+
+message UpdateMessageResponse {
+  Message message = 1;
+}
+
+message DeleteMessageRequest {
+  string server_id = 1;
+  string message_id = 2;
+}
+
+message DeleteMessageResponse {}

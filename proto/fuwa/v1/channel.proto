@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// Channels in a community server. Members can read them; owners and admins manage them.
+service ChannelService {
+  rpc CreateChannel(CreateChannelRequest) returns (CreateChannelResponse);
+  rpc GetChannel(GetChannelRequest) returns (GetChannelResponse);
+  rpc ListChannels(ListChannelsRequest) returns (ListChannelsResponse);
+  rpc UpdateChannel(UpdateChannelRequest) returns (UpdateChannelResponse);
+  rpc DeleteChannel(DeleteChannelRequest) returns (DeleteChannelResponse);
+}
+
+message CreateChannelRequest {
+  string server_id = 1;
+  string name = 2;
+  ChannelType type = 3;
+  string parent_id = 4;
+  string topic = 5;
+}
+
+message CreateChannelResponse {
+  Channel channel = 1;
+}
+
+message GetChannelRequest {
+  string server_id = 1;
+  string channel_id = 2;
+}
+
+message GetChannelResponse {
+  Channel channel = 1;
+}
+
+message ListChannelsRequest {
+  string server_id = 1;
+}
+
+message ListChannelsResponse {
+  // In display order.
+  repeated Channel channels = 1;
+}
+
+message UpdateChannelRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  optional string name = 3;
+  optional string topic = 4;
+  optional int32 position = 5;
+  // An empty string moves the channel out of its category.
+  optional string parent_id = 6;
+}
+
+message UpdateChannelResponse {
+  Channel channel = 1;
+}
+
+message DeleteChannelRequest {
+  string server_id = 1;
+  string channel_id = 2;
+}
+
+message DeleteChannelResponse {}

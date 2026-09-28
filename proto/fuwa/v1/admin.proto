@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// Instance administration: usage across every server and the caps on them.
+// Callable by instance admins, or with the operator's FUWA_ADMIN_TOKEN (for a
+// control plane such as the one behind the hosted tiers).
+service AdminService {
+  rpc GetNodeUsage(GetNodeUsageRequest) returns (GetNodeUsageResponse);
+  // Replaces a server's own caps. Unset fields fall back to the instance defaults.
+  rpc SetServerLimits(SetServerLimitsRequest) returns (SetServerLimitsResponse);
+}
+
+message GetNodeUsageRequest {}
+
+message GetNodeUsageResponse {
+  int64 accounts = 1;
+  int64 servers = 2;
+  repeated ServerUsage server_usage = 3;
+  // The instance-wide defaults every server gets unless it has its own.
+  ServerLimits default_limits = 4;
+}
+
+message SetServerLimitsRequest {
+  string server_id = 1;
+  ServerLimits limits = 2;
+}
+
+message SetServerLimitsResponse {
+  // The caps now in force.
+  ServerLimits limits = 1;
+}
