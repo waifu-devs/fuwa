@@ -13,6 +13,7 @@ export { SPRING };
 /**
  * One setting: a title, what it does, and whether it still follows the
  * instance's default. A changed setting can be put back with one click.
+ * Settings stack as flat rows with a rule between them, like Discord's.
  */
 export function Setting({
   title,
@@ -40,12 +41,12 @@ export function Setting({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ ...SPRING, delay }}
-      className="flex flex-col gap-3 rounded-2xl border bg-background/40 p-4"
+      className="flex flex-col gap-3 border-b border-border/70 py-6 first:pt-0 last:border-b-0"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-sm font-extrabold">{title}</h3>
-          {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
+          <h3 className="font-extrabold">{title}</h3>
+          {hint && <p className="mt-0.5 text-sm text-muted-foreground">{hint}</p>}
         </div>
         <AnimatePresence initial={false} mode="popLayout">
           {changed && onReset ? (
@@ -87,6 +88,27 @@ export function Setting({
       </div>
       {children}
     </motion.section>
+  );
+}
+
+/**
+ * A form with a live preview of the result, like Discord's profile editors:
+ * beside the form on wide screens, above it on narrow ones.
+ */
+export function WithPreview({ preview, children }: { preview: ReactNode; children: ReactNode }) {
+  return (
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:gap-10">
+      <div className="order-2 min-w-0 xl:order-1">{children}</div>
+      <motion.aside
+        initial={{ opacity: 0, y: 12, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ ...SPRING, delay: 0.08 }}
+        className="order-1 xl:sticky xl:top-16 xl:order-2 xl:self-start"
+      >
+        <p className="mb-2 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">Preview</p>
+        {preview}
+      </motion.aside>
+    </div>
   );
 }
 

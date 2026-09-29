@@ -15,7 +15,8 @@ export type SettingsSection = {
   danger?: boolean;
 };
 
-export type SettingsGroup = { label: string; sections: SettingsSection[] };
+/** Sections under a heading. A group without one (such as signing out or deleting) sits apart at the end. */
+export type SettingsGroup = { label?: string; sections: SettingsSection[] };
 
 /**
  * Unsaved edits hold the screen: closing it (or, for edits that belong to one
@@ -164,7 +165,7 @@ export function SettingsScreen({
                           <CloseButton onClose={attemptClose} compact />
                         </header>
                       )}
-                      <div className="flex w-full max-w-[52rem] flex-1">
+                      <div className="flex w-full max-w-[60rem] flex-1">
                         <div className="flex min-w-0 flex-1 flex-col px-4 pt-6 pb-4 sm:px-10 md:pt-16">
                           <AnimatePresence mode="wait" initial={false}>
                             <motion.div
@@ -248,12 +249,15 @@ function Menu({
             {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
           </div>
         )}
-        {groups.map((group) => (
-          <div key={group.label} className="flex flex-col gap-0.5">
-            <p className="mb-1 px-2 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">{group.label}</p>
+        {groups.map((group, g) => (
+          <div key={group.label ?? g} className={cn("flex flex-col gap-0.5", g > 0 && wide && "border-t border-border/70 pt-3")}>
+            {group.label && <p className="mb-1 px-2 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">{group.label}</p>}
             {group.sections.map((s) => {
               const active = s.id === section;
               const delay = n++ * 0.03;
+              // Like Discord: plain rows on the desktop menu, icons only on
+              // actions that stand apart; icons and chevrons on phones.
+              const trailing = wide && !group.label;
               return (
                 <motion.button
                   key={s.id}
@@ -282,13 +286,9 @@ function Menu({
                       className={cn("absolute inset-0 rounded-lg", s.danger ? "bg-destructive/12" : "bg-primary/15")}
                     />
                   )}
-                  <s.icon
-                    className={cn(
-                      "relative size-4 shrink-0 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:-rotate-12 group-hover:scale-110",
-                      !wide && "size-5",
-                    )}
-                  />
-                  <span className="relative truncate">{s.label}</span>
+                  {!wide && <s.icon className={cn(ICON, "size-5")} />}
+                  <span className="relative truncate transition-transform duration-200 group-hover:translate-x-0.5">{s.label}</span>
+                  {trailing && <s.icon className={cn(ICON, "ml-auto")} />}
                   {!wide && <ChevronRightIcon className="relative ml-auto size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />}
                 </motion.button>
               );
@@ -299,6 +299,8 @@ function Menu({
     </aside>
   );
 }
+
+const ICON = "relative size-4 shrink-0 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:-rotate-12 group-hover:scale-110";
 
 function CloseButton({ onClose, compact = false }: { onClose: () => void; compact?: boolean }) {
   return (

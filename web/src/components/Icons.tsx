@@ -5,7 +5,8 @@ import type { Connection } from "@/fuwa/store";
 import { displayName, hueOf, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-const hue = (id: string) => ({ "--h": hueOf(id) }) as CSSProperties;
+/** Sets `--h` to the hue that belongs to an id, for `.server-gradient`. */
+export const hue = (id: string) => ({ "--h": hueOf(id) }) as CSSProperties;
 
 /** A server's picture, or its initials on a gradient of its own hue. */
 export function ServerIcon({

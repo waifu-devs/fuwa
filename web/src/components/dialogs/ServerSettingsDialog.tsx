@@ -1,13 +1,14 @@
 import { useNavigate } from "@tanstack/react-router";
-import { ChartColumnIcon, GaugeIcon, LoaderCircleIcon, SettingsIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
-import { motion } from "motion/react";
+import { ChartColumnIcon, EyeOffIcon, GaugeIcon, LoaderCircleIcon, SettingsIcon, Trash2Icon, TriangleAlertIcon, UsersIcon } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { GetServerUsageResponse } from "@/gen/fuwa/v1/server_pb";
 import type { Server, ServerLimits } from "@/gen/fuwa/v1/types_pb";
 import { deleteServer, nodeUsage, run, serverUsage, setServerLimits, updateServer } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
-import { CountUp } from "@/components/motion";
+import { InlineMarkdown } from "@/components/Markdown";
+import { Count, CountUp, SPRING, SwapText } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { Cap, SaveBar } from "@/components/settings/controls";
+import { Cap, SaveBar, WithPreview } from "@/components/settings/controls";
 import { SettingsScreen } from "@/components/settings/SettingsScreen";
 
 export function ServerSettingsDialog({
@@ -58,7 +59,7 @@ export function ServerSettingsDialog({
       openToSection={initialTab !== "overview"}
       groups={[
         { label: server.name, sections },
-        ...(isOwner ? [{ label: "Danger zone", sections: [{ id: "danger", label: "Delete server", icon: Trash2Icon, danger: true }] }] : []),
+        ...(isOwner ? [{ sections: [{ id: "danger", label: "Delete server", icon: Trash2Icon, danger: true }] }] : []),
       ]}
     >
       {tab === "overview" && <Overview instanceKey={instanceKey} server={server} />}
@@ -93,35 +94,82 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
     });
   }
 
+  const shown = { ...server, name: name || server.name, description, discoverable };
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4">
-      <div className="flex items-center gap-4">
-        <motion.span key={initials(name || server.name)} initial={{ scale: 0.85, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 16 }}>
-          <ServerIcon server={{ ...server, name: name || server.name }} active className="size-20 text-2xl" />
-        </motion.span>
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <Label htmlFor="settings-name" className="font-bold">
-            Name
-          </Label>
-          <Input id="settings-name" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} className="h-11 rounded-xl" />
+    <form onSubmit={submit}>
+      <WithPreview preview={<BrowseCard server={shown} />}>
+        <div className="flex flex-col">
+          <div className="flex items-center gap-4 border-b border-border/70 pb-5">
+            <motion.span key={initials(shown.name)} initial={{ scale: 0.85, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 16 }}>
+              <ServerIcon server={shown} active className="size-20 text-2xl" />
+            </motion.span>
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <Label htmlFor="settings-name" className="font-extrabold">
+                Name
+              </Label>
+              <Input id="settings-name" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} className="h-11 rounded-xl" />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 border-b border-border/70 py-5">
+            <Label htmlFor="settings-description" className="font-extrabold">
+              Description
+            </Label>
+            <Textarea id="settings-description" rows={4} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} className="rounded-xl" />
+            <p className="text-sm text-muted-foreground">Shown in Browse. Markdown works.</p>
+          </div>
+          <label className="flex cursor-pointer items-center justify-between gap-4 py-5">
+            <span>
+              <span className="block font-extrabold">Show in Browse</span>
+              <span className="block text-sm text-muted-foreground">Anyone on this fuwa server can find and join it.</span>
+            </span>
+            <Switch checked={discoverable} onCheckedChange={setDiscoverable} />
+          </label>
         </div>
-      </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="settings-description" className="font-bold">
-          Description
-        </Label>
-        <Textarea id="settings-description" rows={4} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} className="rounded-xl" />
-        <p className="text-xs text-muted-foreground">Shown in Browse. Markdown works.</p>
-      </div>
-      <label className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl border p-4">
-        <span>
-          <span className="block text-sm font-bold">Show in Browse</span>
-          <span className="block text-xs text-muted-foreground">Anyone on this fuwa server can find and join it.</span>
-        </span>
-        <Switch checked={discoverable} onCheckedChange={setDiscoverable} />
-      </label>
-      <SaveBar count={changes} saving={save.pending} error={save.error} onSave={() => void submit()} onDiscard={discard} />
+        <SaveBar count={changes} saving={save.pending} error={save.error} onSave={() => void submit()} onDiscard={discard} />
+      </WithPreview>
     </form>
+  );
+}
+
+/** The server as people find it in Browse, or hidden from it. */
+function BrowseCard({ server }: { server: Server }) {
+  return (
+    <div className="relative overflow-hidden rounded-3xl border bg-card shadow-lg">
+      <motion.div animate={{ opacity: server.discoverable ? 1 : 0.2, filter: server.discoverable ? "blur(0px)" : "blur(3px)" }} transition={{ duration: 0.3 }} className="flex flex-col gap-3 p-5">
+        <div className="flex items-center gap-3">
+          <ServerIcon server={server} active className="size-14 text-lg" />
+          <div className="min-w-0">
+            <p className="truncate text-lg font-extrabold">
+              <SwapText className="truncate align-bottom">{server.name}</SwapText>
+            </p>
+            <p className="flex items-center gap-1 text-xs text-muted-foreground">
+              <UsersIcon className="size-3.5" /> <Count value={Number(server.memberCount)} /> {server.memberCount === 1n ? "member" : "members"}
+            </p>
+          </div>
+        </div>
+        <p className="line-clamp-4 text-sm break-words text-muted-foreground">
+          {server.description.trim() ? <InlineMarkdown>{server.description}</InlineMarkdown> : "No description yet."}
+        </p>
+        <span className="btn grid h-9 place-items-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">Join</span>
+      </motion.div>
+      <AnimatePresence>
+        {!server.discoverable && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={SPRING}
+            className="absolute inset-0 grid place-items-center p-6 text-center"
+          >
+            <span className="flex flex-col items-center gap-1.5">
+              <EyeOffIcon className="size-6 text-muted-foreground" />
+              <span className="text-sm font-extrabold">Hidden from Browse</span>
+              <span className="text-xs text-muted-foreground">Only its members see it.</span>
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -224,10 +272,8 @@ function Limits({ instanceKey, serverId }: { instanceKey: string; serverId: stri
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-3 rounded-2xl border bg-background/40 p-4">
-        <p className="text-xs text-muted-foreground">
-          Caps for this server only. A cap that's off follows the instance default, which you can change in the instance settings.
-        </p>
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-muted-foreground">A cap that's off follows the instance default, which you can change in the instance settings.</p>
         <Cap label="Members" value={draft.members} onChange={set("members")} placeholder={fallback("members")} />
         <Cap label="Channels" value={draft.channels} onChange={set("channels")} placeholder={fallback("channels")} />
         <Cap label="Storage" bytes value={draft.storageBytes} onChange={set("storageBytes")} placeholder={fallback("storageBytes", true)} />

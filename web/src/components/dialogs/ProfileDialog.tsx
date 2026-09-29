@@ -1,11 +1,12 @@
 import { CheckIcon, LogOutIcon, PaletteIcon, UserRoundIcon } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import type { User } from "@/gen/fuwa/v1/types_pb";
 import { forget, signOut, updateProfile } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
-import { UserAvatar } from "@/components/Icons";
+import { hue, UserAvatar } from "@/components/Icons";
 import { SwapText } from "@/components/motion";
-import { SaveBar } from "@/components/settings/controls";
+import { SaveBar, WithPreview } from "@/components/settings/controls";
 import { SettingsScreen } from "@/components/settings/SettingsScreen";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,7 +45,7 @@ export function ProfileDialog({
             { id: "look", label: "Appearance", icon: PaletteIcon, description: "The theme for this app, on every fuwa server you use here." },
           ],
         },
-        { label: "Session", sections: [{ id: "session", label: "Sign out", icon: LogOutIcon, danger: true }] },
+        { sections: [{ id: "session", label: "Sign out", icon: LogOutIcon, danger: true }] },
       ]}
     >
       {section === "profile" && <Profile instanceKey={instanceKey} />}
@@ -70,44 +71,74 @@ function Profile({ instanceKey }: { instanceKey: string }) {
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4">
-      <div className="flex items-center gap-4 rounded-3xl border bg-card/60 p-5">
-        <span className="avatar-ring rounded-full p-[3px]">
-          <UserAvatar user={preview} className="size-20 text-3xl ring-4 ring-card" />
-        </span>
-        <div className="min-w-0">
-          <p className="truncate text-xl font-extrabold">
-            <SwapText className="truncate align-bottom">{name || me.username}</SwapText>
-          </p>
-          <p className="truncate text-sm text-muted-foreground">@{me.username}</p>
+    <form onSubmit={submit}>
+      <WithPreview preview={<ProfileCard user={preview} />}>
+        <div className="flex flex-col">
+          <Row label="Display name" htmlFor="profile-name" hint="What people see next to your messages.">
+            <Input id="profile-name" maxLength={64} value={name} placeholder={me.username} onChange={(e) => setName(e.target.value)} className="h-11 rounded-xl" />
+          </Row>
+          <Row label="Avatar" htmlFor="profile-avatar" hint="A link to a picture. Without one you get your initial on your own color.">
+            <Input id="profile-avatar" type="url" placeholder="https://…" value={avatar} onChange={(e) => setAvatar(e.target.value)} className="h-11 rounded-xl" />
+          </Row>
+          <Row label="Username" hint="Set when the account was made.">
+            <p className="text-sm font-bold">@{me.username}</p>
+          </Row>
         </div>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="profile-name" className="font-bold">
-            Display name
-          </Label>
-          <Input id="profile-name" maxLength={64} value={name} onChange={(e) => setName(e.target.value)} className="h-11 rounded-xl" />
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="profile-avatar" className="font-bold">
-            Avatar URL
-          </Label>
-          <Input id="profile-avatar" type="url" placeholder="https://…" value={avatar} onChange={(e) => setAvatar(e.target.value)} className="h-11 rounded-xl" />
-        </div>
-      </div>
-      <SaveBar
-        count={changes}
-        saving={save.pending}
-        error={save.error}
-        onSave={() => void submit()}
-        onDiscard={() => {
-          setName(me.displayName);
-          setAvatar(me.avatarUrl);
-          save.setError(null);
-        }}
-      />
+        <SaveBar
+          count={changes}
+          saving={save.pending}
+          error={save.error}
+          onSave={() => void submit()}
+          onDiscard={() => {
+            setName(me.displayName);
+            setAvatar(me.avatarUrl);
+            save.setError(null);
+          }}
+        />
+      </WithPreview>
     </form>
+  );
+}
+
+/** One field of a form, as a flat row under a rule. */
+function Row({ label, htmlFor, hint, children }: { label: string; htmlFor?: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2 border-b border-border/70 py-5 first:pt-0 last:border-b-0">
+      <Label htmlFor={htmlFor} className="font-extrabold">
+        {label}
+      </Label>
+      {children}
+      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
+/** How others see you: a card with your color, avatar and name, and one of your messages. */
+function ProfileCard({ user }: { user: User }) {
+  const shown = user.displayName || user.username;
+  return (
+    <div className="overflow-hidden rounded-3xl border bg-card shadow-lg">
+      <motion.div key={user.avatarUrl} style={hue(user.id)} className="server-gradient h-24" initial={{ opacity: 0.6 }} animate={{ opacity: 1 }} />
+      <div className="relative -mt-11 px-4 pb-4">
+        <span className="avatar-ring inline-block rounded-full p-[3px]">
+          <UserAvatar user={user} className="size-20 text-3xl ring-4 ring-card" />
+        </span>
+        <p className="mt-2 truncate text-xl font-extrabold">
+          <SwapText className="truncate align-bottom">{shown}</SwapText>
+        </p>
+        <p className="truncate text-sm text-muted-foreground">@{user.username}</p>
+        <div className="mt-4 flex gap-2.5 rounded-2xl bg-muted/60 p-3">
+          <UserAvatar user={user} className="size-8 text-xs" />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-extrabold">
+              <SwapText className="truncate align-bottom">{shown}</SwapText>{" "}
+              <span className="text-xs font-normal text-muted-foreground">Today</span>
+            </p>
+            <p className="text-sm">This is how my messages look ✨</p>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

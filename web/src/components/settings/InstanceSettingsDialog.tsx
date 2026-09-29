@@ -168,7 +168,7 @@ export function InstanceSettingsDialog({
           ))}
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col">
           {tab === "general" && (
             <>
               <Setting title="Name" hint="Shown in the app and when people add this instance." defaultLabel={defaults.name} {...resetter("name")}>
@@ -449,7 +449,7 @@ function Startup({ config }: { config: InstanceConfig }) {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ ...SPRING, delay: 0.16 }}
-      className="rounded-2xl border border-dashed p-4"
+      className="mt-2 rounded-2xl border border-dashed p-4"
     >
       <h3 className="text-sm font-extrabold">Set when the instance starts</h3>
       <p className="mt-0.5 text-xs text-muted-foreground">Changed only by whoever runs it, through FUWA_* environment variables.</p>
