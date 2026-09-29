@@ -2,7 +2,13 @@
 //! `web` feature. Files are served as built; any other path gets `index.html`,
 //! so addresses like `/fuwa.waifu.dev/<server>/<channel>` open the app.
 
+use std::sync::Arc;
+
+use axum::response::IntoResponse;
 use axum::routing::MethodRouter;
+use http::{HeaderMap, Method, StatusCode, Uri};
+
+use crate::app::App;
 
 #[cfg(feature = "web")]
 mod embedded {
@@ -66,15 +72,32 @@ mod embedded {
     }
 }
 
-/// The handler for every path the API doesn't answer, or `None` when the
-/// client is off or wasn't built in.
-pub fn fallback(enabled: bool) -> Option<MethodRouter> {
-    #[cfg(feature = "web")]
-    if enabled {
-        return Some(axum::routing::get(embedded::serve));
-    }
-    let _ = enabled;
-    None
+/// The handler for every path the API doesn't answer: the web app when it's
+/// built in and switched on (checked per request, so admins can switch it
+/// live), otherwise a short note at `/` and 404 elsewhere.
+pub fn handler(app: Arc<App>) -> MethodRouter {
+    axum::routing::any(move |method: Method, uri: Uri, headers: HeaderMap| {
+        let app = app.clone();
+        async move {
+            if method != Method::GET && method != Method::HEAD {
+                return (StatusCode::NOT_FOUND, "not found\n").into_response();
+            }
+            #[cfg(feature = "web")]
+            if app.settings().web {
+                return embedded::serve(uri, headers).await;
+            }
+            let _ = &headers;
+            if uri.path() == "/" {
+                let info = app.node_info();
+                return format!(
+                    "{} is a fuwa instance (fuwa {}).\nConnect to it from a fuwa client with {}\n",
+                    info.name, info.version, info.public_url
+                )
+                .into_response();
+            }
+            (StatusCode::NOT_FOUND, "not found\n").into_response()
+        }
+    })
 }
 
 /// Whether this binary carries the web client.

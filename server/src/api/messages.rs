@@ -129,7 +129,7 @@ impl MessageService for Api {
             let (sdb, _) = self.membership(&account, &req.server_id).await?;
             check_content(&req.content, !req.attachments.is_empty() || !req.embeds.is_empty())?;
             check_extras(&mut req.attachments, &req.embeds)?;
-            let limits = sdb.limits(&self.app.config.limits).await?;
+            let limits = sdb.limits(&self.app.settings().limits).await?;
             if let Some(limit) = limits.storage_bytes
                 && sdb.storage_bytes() >= limit
             {

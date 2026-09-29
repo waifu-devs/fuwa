@@ -104,4 +104,6 @@ message GetServerUsageResponse {
   ServerUsage usage = 1;
   // The caps in force: the server's own, else the instance defaults.
   ServerLimits limits = 2;
+  // The server's own caps; unset fields follow the instance defaults.
+  ServerLimits own_limits = 3;
 }

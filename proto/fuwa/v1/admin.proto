@@ -3,14 +3,106 @@ syntax = "proto3";
 package fuwa.v1;
 
 import "fuwa/v1/types.proto";
+import "google/protobuf/field_mask.proto";
 
-// Instance administration: usage across every server and the caps on them.
-// Callable by instance admins, or with the operator's FUWA_ADMIN_TOKEN (for a
-// control plane such as the one behind the hosted tiers).
+// Instance administration: settings, usage across every server and the caps on
+// them. Callable by instance admins, or with the operator's FUWA_ADMIN_TOKEN
+// (for a control plane such as the one behind the hosted tiers).
 service AdminService {
+  // The instance's settings, where each one comes from, and how the process was started.
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
+  // Changes settings, or returns them to their defaults. Takes effect at once
+  // and survives restarts.
+  rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
   rpc GetNodeUsage(GetNodeUsageRequest) returns (GetNodeUsageResponse);
   // Replaces a server's own caps. Unset fields fall back to the instance defaults.
   rpc SetServerLimits(SetServerLimitsRequest) returns (SetServerLimitsResponse);
+}
+
+// Everything about an instance an admin can change while it runs. Each setting
+// starts from its FUWA_* environment variable (or a built-in default); a value
+// set through UpdateSettings is stored in the instance's database and wins.
+message InstanceSettings {
+  // FUWA_NODE_NAME.
+  string name = 1;
+  // The URL clients reach this instance on. FUWA_PUBLIC_URL.
+  string public_url = 2;
+  // Browser origins allowed to call the API, or just "*" for any.
+  // FUWA_ALLOWED_ORIGINS.
+  repeated string allowed_origins = 3;
+  // FUWA_LOCAL_ACCOUNTS.
+  LocalAccounts local_accounts = 4;
+  // FUWA_SERVER_CREATION.
+  ServerCreation server_creation = 5;
+  // Servers one account may own; unset for no cap. FUWA_LIMIT_SERVERS_PER_ACCOUNT.
+  optional int64 servers_per_account = 6;
+  // Caps every server gets unless it has its own; unset fields for no cap.
+  // FUWA_LIMIT_MEMBERS, _CHANNELS, _STORAGE and _ATTACHMENT_STORAGE.
+  ServerLimits default_limits = 7;
+  // The anonymous usage signal. FUWA_TELEMETRY (DO_NOT_TRACK=1 also turns it off).
+  bool telemetry = 8;
+  // Serve the web app at this instance's address. FUWA_WEB.
+  bool web = 9;
+}
+
+// Whether standalone accounts (a username and password kept on the instance) work.
+enum LocalAccounts {
+  LOCAL_ACCOUNTS_UNSPECIFIED = 0;
+  // Anyone can sign up.
+  LOCAL_ACCOUNTS_OPEN = 1;
+  // Existing accounts can sign in; nobody new can sign up.
+  LOCAL_ACCOUNTS_CLOSED = 2;
+  // No standalone accounts.
+  LOCAL_ACCOUNTS_OFF = 3;
+}
+
+// How the process was started. These come only from the environment, since
+// changing them means restarting or moving the instance.
+message StartupSettings {
+  // FUWA_PORT.
+  int32 port = 1;
+  // Whether FUWA_ENCRYPTION_KEY encrypts the databases at rest.
+  bool encryption = 2;
+  // Whether FUWA_ADMIN_TOKEN is set.
+  bool admin_token = 3;
+  // Whether this build carries the web app at all.
+  bool web_built_in = 4;
+  // FUWA_TELEMETRY_URL.
+  string telemetry_url = 5;
+  // FUWA_HOSTING.
+  bool hosted = 6;
+  string version = 7;
+}
+
+message InstanceConfig {
+  // The settings in force.
+  InstanceSettings settings = 1;
+  // What each setting is without changes made through UpdateSettings.
+  InstanceSettings defaults = 2;
+  // The settings changed through UpdateSettings, as field paths such as
+  // "name" or "default_limits.members".
+  repeated string overridden = 3;
+  StartupSettings startup = 4;
+}
+
+message GetSettingsRequest {}
+
+message GetSettingsResponse {
+  InstanceConfig config = 1;
+}
+
+message UpdateSettingsRequest {
+  // New values; only the fields named in update_mask are read.
+  InstanceSettings settings = 1;
+  // The settings to change, such as "name" or "default_limits.members"
+  // ("default_limits" means all four).
+  google.protobuf.FieldMask update_mask = 2;
+  // The settings to return to their defaults.
+  google.protobuf.FieldMask reset_mask = 3;
+}
+
+message UpdateSettingsResponse {
+  InstanceConfig config = 1;
 }
 
 message GetNodeUsageRequest {}

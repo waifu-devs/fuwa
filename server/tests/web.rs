@@ -84,5 +84,12 @@ async fn operators_can_turn_the_app_off() {
     let root = http.get(format!("http://{addr}/")).send().await.unwrap().text().await.unwrap();
     assert!(root.contains("is a fuwa instance"));
     assert_eq!(http.get(format!("http://{addr}/somewhere")).send().await.unwrap().status(), 404);
+
+    // Admins can switch it back on (and off) while the instance runs.
+    let mut settings = (*app.settings()).clone();
+    settings.web = true;
+    app.replace_settings(settings);
+    let root = http.get(format!("http://{addr}/")).send().await.unwrap().text().await.unwrap();
+    assert!(root.contains(r#"<div id="root">"#));
     app.shutdown.cancel();
 }

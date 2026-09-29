@@ -70,7 +70,7 @@ impl LocalAccounts {
 }
 
 /// Instance-wide caps. `None` is unlimited.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Limits {
     /// FUWA_LIMIT_SERVERS_PER_ACCOUNT: servers one account may own.
     pub servers_per_account: Option<i64>,

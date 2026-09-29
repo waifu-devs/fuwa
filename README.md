@@ -44,8 +44,15 @@ and HTTP/2.
 
 ### Configuration
 
-Everything is set with environment variables (a `.env` file in the working
-directory also works; real environment variables win).
+The instance starts from environment variables (a `.env` file in the working
+directory also works; real environment variables win). Instance admins can
+then change the name, public URL, allowed origins, accounts, server creation,
+default limits, the usage signal and the web app from the app's instance
+settings (or `AdminService.UpdateSettings`). Those changes are stored in
+`node.db`, apply at once and survive restarts; the variables stay as the
+defaults underneath, and resetting a setting returns to them. The data path,
+host, port, encryption key, admin token, telemetry URL, `FUWA_HOSTING` and
+the log filter are read only from the environment.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
@@ -71,8 +78,8 @@ directory also works; real environment variables win).
 | `FUWA_LOG` | `info,turso_core=warn` | Log filter ([syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)) |
 
 The `FUWA_LIMIT_*` values are instance-wide defaults. An admin can give a single
-server its own caps with `AdminService.SetServerLimits`; a server's own caps win
-over the defaults.
+server its own caps from that server's settings in the app (or
+`AdminService.SetServerLimits`); a server's own caps win over the defaults.
 
 ### Data
 

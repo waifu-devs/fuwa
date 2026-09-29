@@ -87,7 +87,7 @@ impl ChannelService for Api {
                 };
                 let name = channel_name(&req.name, kind)?;
                 let topic = text("topic", &req.topic, 0, 1024)?;
-                let limits = sdb.limits(&self.app.config.limits).await?;
+                let limits = sdb.limits(&self.app.settings().limits).await?;
                 let channel = sdb
                     .write(&account.id, async |conn, events| {
                         if let Some(limit) = limits.channels

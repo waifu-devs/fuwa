@@ -662,6 +662,123 @@ async fn operators_choose_which_accounts_exist() {
     instance.stop().await;
 }
 
+fn settings_update(settings: pb::InstanceSettings, update: &[&str], reset: &[&str]) -> pb::UpdateSettingsRequest {
+    let mask = |paths: &[&str]| Some(prost_types::FieldMask { paths: paths.iter().map(|p| p.to_string()).collect() });
+    pb::UpdateSettingsRequest { settings: Some(settings), update_mask: mask(update), reset_mask: mask(reset) }
+}
+
+async fn preflight_origin(instance: &Instance, origin: &str) -> Option<String> {
+    let response = reqwest::Client::new()
+        .request(reqwest::Method::OPTIONS, format!("http://{}/fuwa.v1.NodeService/GetNode", instance.addr))
+        .header("origin", origin)
+        .header("access-control-request-method", "POST")
+        .send()
+        .await
+        .unwrap();
+    response.headers().get("access-control-allow-origin").map(|v| v.to_str().unwrap().to_string())
+}
+
+#[tokio::test]
+async fn admins_change_settings_from_a_client() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = [("FUWA_NODE_NAME", "From env"), ("FUWA_LIMIT_MEMBERS", "10")];
+    let instance = start(dir.path(), &env).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let (member, _, _) = sign_up(&mut c, "member").await;
+
+    // Only instance admins see or change settings.
+    let denied = c.admin.get_settings(authed(&member, pb::GetSettingsRequest {})).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let config = c.admin.get_settings(authed(&admin, pb::GetSettingsRequest {})).await.unwrap().into_inner();
+    let config = config.config.unwrap();
+    let settings = config.settings.unwrap();
+    assert_eq!(settings.name, "From env");
+    assert_eq!(settings.default_limits.unwrap().members, Some(10));
+    assert_eq!(settings.local_accounts, pb::LocalAccounts::Open as i32);
+    assert!(config.overridden.is_empty());
+    assert!(config.startup.unwrap().admin_token);
+
+    // Changes apply at once: a new name, sign-ups closed, no member cap.
+    let closing = pb::InstanceSettings {
+        name: "  Renamed ".into(),
+        local_accounts: pb::LocalAccounts::Closed as i32,
+        default_limits: Some(pb::ServerLimits { members: None, ..Default::default() }),
+        ..Default::default()
+    };
+    let changed = c
+        .admin
+        .update_settings(authed(
+            &admin,
+            settings_update(closing, &["name", "local_accounts", "default_limits.members"], &[]),
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .config
+        .unwrap();
+    assert_eq!(changed.overridden, ["default_limits.members", "local_accounts", "name"]);
+    assert_eq!(changed.settings.unwrap().name, "Renamed");
+    assert_eq!(changed.defaults.unwrap().name, "From env");
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert_eq!(node.name, "Renamed");
+    assert!(!node.auth.unwrap().local_sign_up);
+    let closed = c
+        .auth
+        .sign_up(pb::SignUpRequest {
+            username: "late".into(),
+            password: "a fine password".into(),
+            display_name: String::new(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(closed.code(), Code::FailedPrecondition);
+    let usage = c.admin.get_node_usage(authed(&admin, pb::GetNodeUsageRequest {})).await.unwrap().into_inner();
+    assert_eq!(usage.default_limits.unwrap().members, None);
+
+    // Bad values, unknown settings and locking everyone out are refused.
+    let refuse = async |c: &mut Clients, token: &str, request: pb::UpdateSettingsRequest| {
+        c.admin.update_settings(authed(token, request)).await.unwrap_err().code()
+    };
+    let blank = pb::InstanceSettings { name: " ".into(), ..Default::default() };
+    assert_eq!(refuse(&mut c, &admin, settings_update(blank, &["name"], &[])).await, Code::InvalidArgument);
+    assert_eq!(
+        refuse(&mut c, &admin, settings_update(Default::default(), &["port"], &[])).await,
+        Code::InvalidArgument
+    );
+    let off = pb::InstanceSettings { local_accounts: pb::LocalAccounts::Off as i32, ..Default::default() };
+    assert_eq!(refuse(&mut c, &admin, settings_update(off, &["local_accounts"], &[])).await, Code::FailedPrecondition);
+    assert_eq!(
+        refuse(&mut c, &member, settings_update(Default::default(), &[], &["name"])).await,
+        Code::PermissionDenied
+    );
+
+    // Allowed origins apply to the very next request.
+    let origins = pb::InstanceSettings { allowed_origins: vec!["https://app.example/".into()], ..Default::default() };
+    c.admin.update_settings(authed(&admin, settings_update(origins, &["allowed_origins"], &[]))).await.unwrap();
+    assert_eq!(preflight_origin(&instance, "https://app.example").await.as_deref(), Some("https://app.example"));
+    assert_eq!(preflight_origin(&instance, "https://other.example").await, None);
+
+    // Settings survive a restart, over the same environment.
+    instance.stop().await;
+    let instance = start(dir.path(), &env).await;
+    let mut c = clients(&instance).await;
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert_eq!(node.name, "Renamed");
+
+    // Resetting returns them to the environment's values.
+    let reset =
+        settings_update(Default::default(), &[], &["name", "local_accounts", "allowed_origins", "default_limits"]);
+    let config = c.admin.update_settings(authed(&admin, reset)).await.unwrap().into_inner().config.unwrap();
+    assert!(config.overridden.is_empty());
+    assert_eq!(config.settings.unwrap().default_limits.unwrap().members, Some(10));
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert_eq!(node.name, "From env");
+    assert!(node.auth.unwrap().local_sign_up);
+    assert_eq!(preflight_origin(&instance, "https://other.example").await.as_deref(), Some("https://other.example"));
+    instance.stop().await;
+}
+
 #[tokio::test]
 async fn browsers_can_call_over_grpc_web() {
     let dir = tempfile::tempdir().unwrap();
@@ -669,7 +786,7 @@ async fn browsers_can_call_over_grpc_web() {
     let http = reqwest::Client::new();
     let base = format!("http://{}", instance.addr);
 
-    // CORS preflight from any origin.
+    // CORS preflight from any origin, which is echoed back.
     let preflight = http
         .request(reqwest::Method::OPTIONS, format!("{base}/fuwa.v1.NodeService/GetNode"))
         .header("origin", "https://fuwa.waifu.dev")
@@ -679,7 +796,7 @@ async fn browsers_can_call_over_grpc_web() {
         .await
         .unwrap();
     assert!(preflight.status().is_success());
-    assert_eq!(preflight.headers()["access-control-allow-origin"], "*");
+    assert_eq!(preflight.headers()["access-control-allow-origin"], "https://fuwa.waifu.dev");
 
     // An empty GetNodeRequest, framed for gRPC-Web: flag byte 0, then a 4-byte length.
     let response = http

@@ -13,7 +13,11 @@
     `ServerDb::write`, which appends events to the server's log in the same
     transaction and publishes them to the `Hub` after commit.
   - `db.rs`: Turso helpers: opening, `user_version` migrations, transactions.
-  - `config.rs`: `FUWA_*` environment variables.
+  - `config.rs`: `FUWA_*` environment variables: how the process starts, and
+    the defaults for settings.
+  - `settings.rs`: settings admins change from a client (`AdminService`), stored
+    in node.db's `settings` table over the environment's defaults. Read them
+    through `app.settings()`, never from `config`, so changes apply at once.
   - `telemetry.rs`: the anonymous usage signal (schema `fuwa.signal.v1`).
   - `migrations/node`, `migrations/server`: SQL applied in order, tracked in
     `PRAGMA user_version`. Never edit a migration that has shipped; add a new file
@@ -41,6 +45,11 @@
 - Timestamps are unix milliseconds in the database, `google.protobuf.Timestamp` on
   the wire. Ids are ULIDs (`id::new_id`).
 - Limits are unlimited unless configured. Never hardcode a usage cap.
+- Everything about an instance or a server must be configurable from the
+  client. A new operator switch is a field in `InstanceSettings` (with its
+  `FUWA_*` default) and a control in the app's settings, not only an
+  environment variable. Only how the process starts (paths, port, keys) stays
+  environment-only.
 - The usage signal must stay anonymous: no content, names or ids of people or
   servers. The end-to-end test checks this.
 - The web app talks only through the protocol; anything it needs from a server

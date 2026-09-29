@@ -2,17 +2,282 @@
 // @generated from file fuwa/v1/admin.proto (package fuwa.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { ServerLimits, ServerUsage } from "./types_pb";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { ServerCreation, ServerLimits, ServerUsage } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
+import type { FieldMask } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_field_mask } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file fuwa/v1/admin.proto.
  */
 export const file_fuwa_v1_admin: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL2FkbWluLnByb3RvEgdmdXdhLnYxIhUKE0dldE5vZGVVc2FnZVJlcXVlc3QilAEKFEdldE5vZGVVc2FnZVJlc3BvbnNlEhAKCGFjY291bnRzGAEgASgDEg8KB3NlcnZlcnMYAiABKAMSKgoMc2VydmVyX3VzYWdlGAMgAygLMhQuZnV3YS52MS5TZXJ2ZXJVc2FnZRItCg5kZWZhdWx0X2xpbWl0cxgEIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzIlIKFlNldFNlcnZlckxpbWl0c1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEiUKBmxpbWl0cxgCIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzIkAKF1NldFNlcnZlckxpbWl0c1Jlc3BvbnNlEiUKBmxpbWl0cxgBIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzMrEBCgxBZG1pblNlcnZpY2USSwoMR2V0Tm9kZVVzYWdlEhwuZnV3YS52MS5HZXROb2RlVXNhZ2VSZXF1ZXN0Gh0uZnV3YS52MS5HZXROb2RlVXNhZ2VSZXNwb25zZRJUCg9TZXRTZXJ2ZXJMaW1pdHMSHy5mdXdhLnYxLlNldFNlcnZlckxpbWl0c1JlcXVlc3QaIC5mdXdhLnYxLlNldFNlcnZlckxpbWl0c1Jlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types]);
+  fileDesc("ChNmdXdhL3YxL2FkbWluLnByb3RvEgdmdXdhLnYxIrgCChBJbnN0YW5jZVNldHRpbmdzEgwKBG5hbWUYASABKAkSEgoKcHVibGljX3VybBgCIAEoCRIXCg9hbGxvd2VkX29yaWdpbnMYAyADKAkSLgoObG9jYWxfYWNjb3VudHMYBCABKA4yFi5mdXdhLnYxLkxvY2FsQWNjb3VudHMSMAoPc2VydmVyX2NyZWF0aW9uGAUgASgOMhcuZnV3YS52MS5TZXJ2ZXJDcmVhdGlvbhIgChNzZXJ2ZXJzX3Blcl9hY2NvdW50GAYgASgDSACIAQESLQoOZGVmYXVsdF9saW1pdHMYByABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cxIRCgl0ZWxlbWV0cnkYCCABKAgSCwoDd2ViGAkgASgIQhYKFF9zZXJ2ZXJzX3Blcl9hY2NvdW50IpYBCg9TdGFydHVwU2V0dGluZ3MSDAoEcG9ydBgBIAEoBRISCgplbmNyeXB0aW9uGAIgASgIEhMKC2FkbWluX3Rva2VuGAMgASgIEhQKDHdlYl9idWlsdF9pbhgEIAEoCBIVCg10ZWxlbWV0cnlfdXJsGAUgASgJEg4KBmhvc3RlZBgGIAEoCBIPCgd2ZXJzaW9uGAcgASgJIqkBCg5JbnN0YW5jZUNvbmZpZxIrCghzZXR0aW5ncxgBIAEoCzIZLmZ1d2EudjEuSW5zdGFuY2VTZXR0aW5ncxIrCghkZWZhdWx0cxgCIAEoCzIZLmZ1d2EudjEuSW5zdGFuY2VTZXR0aW5ncxISCgpvdmVycmlkZGVuGAMgAygJEikKB3N0YXJ0dXAYBCABKAsyGC5mdXdhLnYxLlN0YXJ0dXBTZXR0aW5ncyIUChJHZXRTZXR0aW5nc1JlcXVlc3QiPgoTR2V0U2V0dGluZ3NSZXNwb25zZRInCgZjb25maWcYASABKAsyFy5mdXdhLnYxLkluc3RhbmNlQ29uZmlnIqUBChVVcGRhdGVTZXR0aW5nc1JlcXVlc3QSKwoIc2V0dGluZ3MYASABKAsyGS5mdXdhLnYxLkluc3RhbmNlU2V0dGluZ3MSLwoLdXBkYXRlX21hc2sYAiABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrEi4KCnJlc2V0X21hc2sYAyABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrIkEKFlVwZGF0ZVNldHRpbmdzUmVzcG9uc2USJwoGY29uZmlnGAEgASgLMhcuZnV3YS52MS5JbnN0YW5jZUNvbmZpZyIVChNHZXROb2RlVXNhZ2VSZXF1ZXN0IpQBChRHZXROb2RlVXNhZ2VSZXNwb25zZRIQCghhY2NvdW50cxgBIAEoAxIPCgdzZXJ2ZXJzGAIgASgDEioKDHNlcnZlcl91c2FnZRgDIAMoCzIULmZ1d2EudjEuU2VydmVyVXNhZ2USLQoOZGVmYXVsdF9saW1pdHMYBCABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cyJSChZTZXRTZXJ2ZXJMaW1pdHNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIlCgZsaW1pdHMYAiABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cyJAChdTZXRTZXJ2ZXJMaW1pdHNSZXNwb25zZRIlCgZsaW1pdHMYASABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cyp7Cg1Mb2NhbEFjY291bnRzEh4KGkxPQ0FMX0FDQ09VTlRTX1VOU1BFQ0lGSUVEEAASFwoTTE9DQUxfQUNDT1VOVFNfT1BFThABEhkKFUxPQ0FMX0FDQ09VTlRTX0NMT1NFRBACEhYKEkxPQ0FMX0FDQ09VTlRTX09GRhADMs4CCgxBZG1pblNlcnZpY2USSAoLR2V0U2V0dGluZ3MSGy5mdXdhLnYxLkdldFNldHRpbmdzUmVxdWVzdBocLmZ1d2EudjEuR2V0U2V0dGluZ3NSZXNwb25zZRJRCg5VcGRhdGVTZXR0aW5ncxIeLmZ1d2EudjEuVXBkYXRlU2V0dGluZ3NSZXF1ZXN0Gh8uZnV3YS52MS5VcGRhdGVTZXR0aW5nc1Jlc3BvbnNlEksKDEdldE5vZGVVc2FnZRIcLmZ1d2EudjEuR2V0Tm9kZVVzYWdlUmVxdWVzdBodLmZ1d2EudjEuR2V0Tm9kZVVzYWdlUmVzcG9uc2USVAoPU2V0U2VydmVyTGltaXRzEh8uZnV3YS52MS5TZXRTZXJ2ZXJMaW1pdHNSZXF1ZXN0GiAuZnV3YS52MS5TZXRTZXJ2ZXJMaW1pdHNSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_field_mask]);
+
+/**
+ * Everything about an instance an admin can change while it runs. Each setting
+ * starts from its FUWA_* environment variable (or a built-in default); a value
+ * set through UpdateSettings is stored in the instance's database and wins.
+ *
+ * @generated from message fuwa.v1.InstanceSettings
+ */
+export type InstanceSettings = Message<"fuwa.v1.InstanceSettings"> & {
+  /**
+   * FUWA_NODE_NAME.
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * The URL clients reach this instance on. FUWA_PUBLIC_URL.
+   *
+   * @generated from field: string public_url = 2;
+   */
+  publicUrl: string;
+
+  /**
+   * Browser origins allowed to call the API, or just "*" for any.
+   * FUWA_ALLOWED_ORIGINS.
+   *
+   * @generated from field: repeated string allowed_origins = 3;
+   */
+  allowedOrigins: string[];
+
+  /**
+   * FUWA_LOCAL_ACCOUNTS.
+   *
+   * @generated from field: fuwa.v1.LocalAccounts local_accounts = 4;
+   */
+  localAccounts: LocalAccounts;
+
+  /**
+   * FUWA_SERVER_CREATION.
+   *
+   * @generated from field: fuwa.v1.ServerCreation server_creation = 5;
+   */
+  serverCreation: ServerCreation;
+
+  /**
+   * Servers one account may own; unset for no cap. FUWA_LIMIT_SERVERS_PER_ACCOUNT.
+   *
+   * @generated from field: optional int64 servers_per_account = 6;
+   */
+  serversPerAccount?: bigint | undefined;
+
+  /**
+   * Caps every server gets unless it has its own; unset fields for no cap.
+   * FUWA_LIMIT_MEMBERS, _CHANNELS, _STORAGE and _ATTACHMENT_STORAGE.
+   *
+   * @generated from field: fuwa.v1.ServerLimits default_limits = 7;
+   */
+  defaultLimits?: ServerLimits | undefined;
+
+  /**
+   * The anonymous usage signal. FUWA_TELEMETRY (DO_NOT_TRACK=1 also turns it off).
+   *
+   * @generated from field: bool telemetry = 8;
+   */
+  telemetry: boolean;
+
+  /**
+   * Serve the web app at this instance's address. FUWA_WEB.
+   *
+   * @generated from field: bool web = 9;
+   */
+  web: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.InstanceSettings.
+ * Use `create(InstanceSettingsSchema)` to create a new message.
+ */
+export const InstanceSettingsSchema: GenMessage<InstanceSettings> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 0);
+
+/**
+ * How the process was started. These come only from the environment, since
+ * changing them means restarting or moving the instance.
+ *
+ * @generated from message fuwa.v1.StartupSettings
+ */
+export type StartupSettings = Message<"fuwa.v1.StartupSettings"> & {
+  /**
+   * FUWA_PORT.
+   *
+   * @generated from field: int32 port = 1;
+   */
+  port: number;
+
+  /**
+   * Whether FUWA_ENCRYPTION_KEY encrypts the databases at rest.
+   *
+   * @generated from field: bool encryption = 2;
+   */
+  encryption: boolean;
+
+  /**
+   * Whether FUWA_ADMIN_TOKEN is set.
+   *
+   * @generated from field: bool admin_token = 3;
+   */
+  adminToken: boolean;
+
+  /**
+   * Whether this build carries the web app at all.
+   *
+   * @generated from field: bool web_built_in = 4;
+   */
+  webBuiltIn: boolean;
+
+  /**
+   * FUWA_TELEMETRY_URL.
+   *
+   * @generated from field: string telemetry_url = 5;
+   */
+  telemetryUrl: string;
+
+  /**
+   * FUWA_HOSTING.
+   *
+   * @generated from field: bool hosted = 6;
+   */
+  hosted: boolean;
+
+  /**
+   * @generated from field: string version = 7;
+   */
+  version: string;
+};
+
+/**
+ * Describes the message fuwa.v1.StartupSettings.
+ * Use `create(StartupSettingsSchema)` to create a new message.
+ */
+export const StartupSettingsSchema: GenMessage<StartupSettings> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 1);
+
+/**
+ * @generated from message fuwa.v1.InstanceConfig
+ */
+export type InstanceConfig = Message<"fuwa.v1.InstanceConfig"> & {
+  /**
+   * The settings in force.
+   *
+   * @generated from field: fuwa.v1.InstanceSettings settings = 1;
+   */
+  settings?: InstanceSettings | undefined;
+
+  /**
+   * What each setting is without changes made through UpdateSettings.
+   *
+   * @generated from field: fuwa.v1.InstanceSettings defaults = 2;
+   */
+  defaults?: InstanceSettings | undefined;
+
+  /**
+   * The settings changed through UpdateSettings, as field paths such as
+   * "name" or "default_limits.members".
+   *
+   * @generated from field: repeated string overridden = 3;
+   */
+  overridden: string[];
+
+  /**
+   * @generated from field: fuwa.v1.StartupSettings startup = 4;
+   */
+  startup?: StartupSettings | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.InstanceConfig.
+ * Use `create(InstanceConfigSchema)` to create a new message.
+ */
+export const InstanceConfigSchema: GenMessage<InstanceConfig> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 2);
+
+/**
+ * @generated from message fuwa.v1.GetSettingsRequest
+ */
+export type GetSettingsRequest = Message<"fuwa.v1.GetSettingsRequest"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.GetSettingsRequest.
+ * Use `create(GetSettingsRequestSchema)` to create a new message.
+ */
+export const GetSettingsRequestSchema: GenMessage<GetSettingsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 3);
+
+/**
+ * @generated from message fuwa.v1.GetSettingsResponse
+ */
+export type GetSettingsResponse = Message<"fuwa.v1.GetSettingsResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.InstanceConfig config = 1;
+   */
+  config?: InstanceConfig | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.GetSettingsResponse.
+ * Use `create(GetSettingsResponseSchema)` to create a new message.
+ */
+export const GetSettingsResponseSchema: GenMessage<GetSettingsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 4);
+
+/**
+ * @generated from message fuwa.v1.UpdateSettingsRequest
+ */
+export type UpdateSettingsRequest = Message<"fuwa.v1.UpdateSettingsRequest"> & {
+  /**
+   * New values; only the fields named in update_mask are read.
+   *
+   * @generated from field: fuwa.v1.InstanceSettings settings = 1;
+   */
+  settings?: InstanceSettings | undefined;
+
+  /**
+   * The settings to change, such as "name" or "default_limits.members"
+   * ("default_limits" means all four).
+   *
+   * @generated from field: google.protobuf.FieldMask update_mask = 2;
+   */
+  updateMask?: FieldMask | undefined;
+
+  /**
+   * The settings to return to their defaults.
+   *
+   * @generated from field: google.protobuf.FieldMask reset_mask = 3;
+   */
+  resetMask?: FieldMask | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateSettingsRequest.
+ * Use `create(UpdateSettingsRequestSchema)` to create a new message.
+ */
+export const UpdateSettingsRequestSchema: GenMessage<UpdateSettingsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 5);
+
+/**
+ * @generated from message fuwa.v1.UpdateSettingsResponse
+ */
+export type UpdateSettingsResponse = Message<"fuwa.v1.UpdateSettingsResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.InstanceConfig config = 1;
+   */
+  config?: InstanceConfig | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateSettingsResponse.
+ * Use `create(UpdateSettingsResponseSchema)` to create a new message.
+ */
+export const UpdateSettingsResponseSchema: GenMessage<UpdateSettingsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 6);
 
 /**
  * @generated from message fuwa.v1.GetNodeUsageRequest
@@ -25,7 +290,7 @@ export type GetNodeUsageRequest = Message<"fuwa.v1.GetNodeUsageRequest"> & {
  * Use `create(GetNodeUsageRequestSchema)` to create a new message.
  */
 export const GetNodeUsageRequestSchema: GenMessage<GetNodeUsageRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 0);
+  messageDesc(file_fuwa_v1_admin, 7);
 
 /**
  * @generated from message fuwa.v1.GetNodeUsageResponse
@@ -59,7 +324,7 @@ export type GetNodeUsageResponse = Message<"fuwa.v1.GetNodeUsageResponse"> & {
  * Use `create(GetNodeUsageResponseSchema)` to create a new message.
  */
 export const GetNodeUsageResponseSchema: GenMessage<GetNodeUsageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 1);
+  messageDesc(file_fuwa_v1_admin, 8);
 
 /**
  * @generated from message fuwa.v1.SetServerLimitsRequest
@@ -81,7 +346,7 @@ export type SetServerLimitsRequest = Message<"fuwa.v1.SetServerLimitsRequest"> &
  * Use `create(SetServerLimitsRequestSchema)` to create a new message.
  */
 export const SetServerLimitsRequestSchema: GenMessage<SetServerLimitsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 2);
+  messageDesc(file_fuwa_v1_admin, 9);
 
 /**
  * @generated from message fuwa.v1.SetServerLimitsResponse
@@ -100,16 +365,76 @@ export type SetServerLimitsResponse = Message<"fuwa.v1.SetServerLimitsResponse">
  * Use `create(SetServerLimitsResponseSchema)` to create a new message.
  */
 export const SetServerLimitsResponseSchema: GenMessage<SetServerLimitsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 3);
+  messageDesc(file_fuwa_v1_admin, 10);
 
 /**
- * Instance administration: usage across every server and the caps on them.
- * Callable by instance admins, or with the operator's FUWA_ADMIN_TOKEN (for a
- * control plane such as the one behind the hosted tiers).
+ * Whether standalone accounts (a username and password kept on the instance) work.
+ *
+ * @generated from enum fuwa.v1.LocalAccounts
+ */
+export enum LocalAccounts {
+  /**
+   * @generated from enum value: LOCAL_ACCOUNTS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Anyone can sign up.
+   *
+   * @generated from enum value: LOCAL_ACCOUNTS_OPEN = 1;
+   */
+  OPEN = 1,
+
+  /**
+   * Existing accounts can sign in; nobody new can sign up.
+   *
+   * @generated from enum value: LOCAL_ACCOUNTS_CLOSED = 2;
+   */
+  CLOSED = 2,
+
+  /**
+   * No standalone accounts.
+   *
+   * @generated from enum value: LOCAL_ACCOUNTS_OFF = 3;
+   */
+  OFF = 3,
+}
+
+/**
+ * Describes the enum fuwa.v1.LocalAccounts.
+ */
+export const LocalAccountsSchema: GenEnum<LocalAccounts> = /*@__PURE__*/
+  enumDesc(file_fuwa_v1_admin, 0);
+
+/**
+ * Instance administration: settings, usage across every server and the caps on
+ * them. Callable by instance admins, or with the operator's FUWA_ADMIN_TOKEN
+ * (for a control plane such as the one behind the hosted tiers).
  *
  * @generated from service fuwa.v1.AdminService
  */
 export const AdminService: GenService<{
+  /**
+   * The instance's settings, where each one comes from, and how the process was started.
+   *
+   * @generated from rpc fuwa.v1.AdminService.GetSettings
+   */
+  getSettings: {
+    methodKind: "unary";
+    input: typeof GetSettingsRequestSchema;
+    output: typeof GetSettingsResponseSchema;
+  },
+  /**
+   * Changes settings, or returns them to their defaults. Takes effect at once
+   * and survives restarts.
+   *
+   * @generated from rpc fuwa.v1.AdminService.UpdateSettings
+   */
+  updateSettings: {
+    methodKind: "unary";
+    input: typeof UpdateSettingsRequestSchema;
+    output: typeof UpdateSettingsResponseSchema;
+  },
   /**
    * @generated from rpc fuwa.v1.AdminService.GetNodeUsage
    */

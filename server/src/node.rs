@@ -5,12 +5,13 @@ use std::path::Path;
 use tokio::sync::Mutex;
 use turso::{Connection, Database, Row};
 
-use crate::db::{self, EncryptionKey, query_one};
+use crate::db::{self, EncryptionKey, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms};
 use crate::pb;
 
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/node/0001_init.sql")];
+const MIGRATIONS: &[&str] =
+    &[include_str!("../migrations/node/0001_init.sql"), include_str!("../migrations/node/0002_settings.sql")];
 
 /// How long a session lasts after sign-in.
 pub const SESSION_TTL_MS: i64 = 60 * 24 * 60 * 60 * 1000;
@@ -233,6 +234,33 @@ impl NodeDb {
     pub async fn prune_sessions(&self) -> Result<u64> {
         let conn = self.writer.lock().await;
         Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now_ms()]).await?)
+    }
+
+    /// Settings changed from a client, by field path, as stored JSON.
+    pub async fn settings(&self) -> Result<Vec<(String, String)>> {
+        let conn = self.read()?;
+        query_all(&conn, "SELECT key, value FROM settings ORDER BY key", (), |r| Ok((r.get(0)?, r.get(1)?))).await
+    }
+
+    /// Stores changed settings and forgets reset ones, all at once.
+    pub async fn save_settings(&self, set: &[(String, String)], reset: &[String]) -> Result<()> {
+        let conn = self.writer.lock().await;
+        db::transaction(&conn, async |conn| {
+            let now = now_ms();
+            for (key, value) in set {
+                conn.execute(
+                    "INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)
+                     ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                    (key.as_str(), value.as_str(), now),
+                )
+                .await?;
+            }
+            for key in reset {
+                conn.execute("DELETE FROM settings WHERE key = ?1", [key.as_str()]).await?;
+            }
+            Ok(())
+        })
+        .await
     }
 
     pub async fn account_counts(&self) -> Result<AccountCounts> {

@@ -14,6 +14,7 @@ pub mod hub;
 pub mod id;
 pub mod node;
 pub mod servers;
+pub mod settings;
 pub mod telemetry;
 pub mod web;
 

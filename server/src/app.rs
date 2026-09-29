@@ -1,7 +1,7 @@
 //! The running instance: its state, its HTTP router, and serving it.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -24,9 +24,12 @@ use crate::pb::{
     server_service_server::ServerServiceServer,
 };
 use crate::servers::Servers;
+use crate::settings::Settings;
 
 pub struct App {
+    /// How the process was started. Settings admins can change live in `settings`.
     pub config: Config,
+    settings: RwLock<Arc<Settings>>,
     pub node: NodeDb,
     pub servers: Servers,
     pub hub: Arc<Hub>,
@@ -45,8 +48,10 @@ impl App {
         node.install_id().await?;
         let hub = Arc::new(Hub::default());
         let servers = Servers::open(&config.data_path, key, hub.clone()).await?;
+        let settings = Settings::load(&config, &node.settings().await?);
         Ok(Arc::new(Self {
             config,
+            settings: RwLock::new(Arc::new(settings)),
             node,
             servers,
             hub,
@@ -56,20 +61,30 @@ impl App {
         }))
     }
 
+    /// The settings in force right now.
+    pub fn settings(&self) -> Arc<Settings> {
+        self.settings.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+    }
+
+    /// Puts new settings in force for every request from now on.
+    pub fn replace_settings(&self, settings: Settings) {
+        *self.settings.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::new(settings);
+    }
+
     pub fn node_info(&self) -> pb::Node {
-        let config = &self.config;
+        let settings = self.settings();
         pb::Node {
-            name: config.node_name.clone(),
+            name: settings.name.clone(),
             version: crate::VERSION.into(),
-            public_url: config.public_url.clone(),
+            public_url: settings.public_url.clone(),
             auth: Some(pb::AuthMethods {
-                local_sign_in: config.local_accounts.sign_in(),
-                local_sign_up: config.local_accounts.sign_up(),
+                local_sign_in: settings.local_accounts.sign_in(),
+                local_sign_up: settings.local_accounts.sign_up(),
                 linked_sign_in: false,
                 linked_issuer: String::new(),
             }),
-            server_creation: config.server_creation as i32,
-            telemetry: config.telemetry.enabled,
+            server_creation: settings.server_creation as i32,
+            telemetry: settings.telemetry,
         }
     }
 
@@ -96,35 +111,18 @@ impl App {
             // Only the gRPC routes: gRPC-Web answers anything else over HTTP/1.1 with a 400.
             .layer(tonic_web::GrpcWebLayer::new());
 
-        let routes = grpc.route("/healthz", get(|| async { "ok" }));
-        let routes = match crate::web::fallback(self.config.web) {
-            // The web client answers every other GET, so its own addresses work on reload.
-            Some(web) => routes.fallback(web),
-            None => {
-                let info = self.node_info();
-                routes
-                    .route(
-                        "/",
-                        get(move || async move {
-                            format!(
-                                "{} is a fuwa instance (fuwa {}).\nConnect to it from a fuwa client with {}\n",
-                                info.name, info.version, info.public_url
-                            )
-                        }),
-                    )
-                    .fallback(|| async { (http::StatusCode::NOT_FOUND, "not found\n") })
-            }
-        };
-        routes.layer(self.cors())
+        grpc.route("/healthz", get(|| async { "ok" }))
+            // The web app (when it's on) answers every other GET, so its own addresses work on reload.
+            .fallback(crate::web::handler(self.clone()))
+            .layer(self.cors())
     }
 
-    fn cors(&self) -> CorsLayer {
-        let origins = &self.config.allowed_origins;
-        let allow_origin = if origins.iter().any(|origin| origin == "*") {
-            AllowOrigin::any()
-        } else {
-            AllowOrigin::list(origins.iter().filter_map(|origin| HeaderValue::from_str(origin).ok()))
-        };
+    /// CORS for browsers on other sites, such as a fuwa app served by another
+    /// instance. The allowed origins are read per request, so changes apply at once.
+    fn cors(self: &Arc<Self>) -> CorsLayer {
+        let app = self.clone();
+        let allow_origin =
+            AllowOrigin::predicate(move |origin: &HeaderValue, _| app.settings().allows_origin(origin.as_bytes()));
         let headers =
             |names: &[&'static str]| names.iter().map(|name| HeaderName::from_static(name)).collect::<Vec<_>>();
         CorsLayer::new()
@@ -161,10 +159,10 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     tracing::info!(
         version = crate::VERSION,
         %address,
-        public_url = %app.config.public_url,
+        public_url = %app.settings().public_url,
         data = %data_path.display(),
         servers,
-        local_accounts = app.config.local_accounts.as_str(),
+        local_accounts = app.settings().local_accounts.as_str(),
         "fuwa is up"
     );
 
