@@ -96,11 +96,14 @@ impl Limits {
 pub struct Telemetry {
     /// FUWA_TELEMETRY: on (default) | off. DO_NOT_TRACK=1 also turns it off.
     pub enabled: bool,
-    /// FUWA_TELEMETRY_URL, default https://signals.waifu.dev/v1/fuwa.
+    /// FUWA_TELEMETRY_URL, default https://analytics.waifu.dev/v1/fuwa/signals.
     pub url: String,
+    /// FUWA_HOSTING: self_hosted (default) | hosted. Only Waifu Devs' own hosted
+    /// instance says hosted, so the signal can tell the two apart.
+    pub hosted: bool,
 }
 
-pub const DEFAULT_TELEMETRY_URL: &str = "https://signals.waifu.dev/v1/fuwa";
+pub const DEFAULT_TELEMETRY_URL: &str = "https://analytics.waifu.dev/v1/fuwa/signals";
 
 impl Config {
     /// Reads the configuration from the environment (and `.env`).
@@ -197,6 +200,12 @@ impl Config {
             Some(other) => return Err(format!("FUWA_TELEMETRY must be on or off, got {other:?}")),
         };
 
+        let hosted = match get("FUWA_HOSTING").as_deref().map(str::trim) {
+            None | Some("self_hosted") => false,
+            Some("hosted") => true,
+            Some(other) => return Err(format!("FUWA_HOSTING must be self_hosted or hosted, got {other:?}")),
+        };
+
         Ok(Self {
             data_path,
             host: get("FUWA_HOST").unwrap_or_else(|| "0.0.0.0".into()),
@@ -212,6 +221,7 @@ impl Config {
             telemetry: Telemetry {
                 enabled: telemetry_enabled,
                 url: get("FUWA_TELEMETRY_URL").unwrap_or_else(|| DEFAULT_TELEMETRY_URL.into()),
+                hosted,
             },
         })
     }

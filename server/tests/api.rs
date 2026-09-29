@@ -619,7 +619,21 @@ async fn limits_are_unlimited_by_default_and_configurable() {
         (3, 1, 2, 3)
     );
     assert!(signal.config.limits_configured);
+    assert_eq!(signal.hosting, "self_hosted");
     let json = serde_json::to_string(&signal).unwrap();
+    // The fields the analytics service (site repo, apps/analytics/src/Signals.ts) reads.
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let keys = |v: &serde_json::Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+    assert_eq!(
+        keys(&value),
+        ["arch", "config", "hosting", "install_id", "os", "schema", "sent_at", "totals", "uptime_seconds", "version"]
+    );
+    assert_eq!(
+        keys(&value["config"]),
+        ["encryption", "limits_configured", "linked_accounts", "local_accounts", "server_creation"]
+    );
+    assert_eq!(value["totals"].as_object().unwrap().len(), 14);
+    assert_eq!(value["install_id"].as_str().unwrap().len(), 26);
     for private in ["owner", "guest", "Capped", server.id.as_str()] {
         assert!(!json.contains(private), "the usage signal must not contain {private:?}");
     }

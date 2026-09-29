@@ -26,6 +26,8 @@ pub struct Signal {
     pub install_id: String,
     /// Unix milliseconds.
     pub sent_at: i64,
+    /// "self_hosted", or "hosted" for Waifu Devs' own instance.
+    pub hosting: &'static str,
     pub version: &'static str,
     pub os: &'static str,
     pub arch: &'static str,
@@ -92,6 +94,7 @@ pub async fn collect(app: &App) -> Result<Signal> {
         schema: SCHEMA,
         install_id: app.node.install_id().await?,
         sent_at: now_ms(),
+        hosting: if config.telemetry.hosted { "hosted" } else { "self_hosted" },
         version: crate::VERSION,
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,

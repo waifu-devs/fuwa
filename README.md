@@ -56,7 +56,8 @@ directory also works; real environment variables win).
 | `FUWA_LIMIT_STORAGE` | unlimited | Database size per server, like `500MB` or `2GiB` |
 | `FUWA_LIMIT_ATTACHMENT_STORAGE` | unlimited | Uploaded files per server |
 | `FUWA_TELEMETRY` | `on` | The anonymous usage signal; `off` turns it off (so does `DO_NOT_TRACK=1`) |
-| `FUWA_TELEMETRY_URL` | `https://signals.waifu.dev/v1/fuwa` | Where the signal goes |
+| `FUWA_TELEMETRY_URL` | `https://analytics.waifu.dev/v1/fuwa/signals` | Where the signal goes |
+| `FUWA_HOSTING` | `self_hosted` | `hosted` only on Waifu Devs' own instance; reported in the signal |
 | `FUWA_LOG` | `info,turso_core=warn` | Log filter ([syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)) |
 
 The `FUWA_LIMIT_*` values are instance-wide defaults. An admin can give a single
@@ -85,6 +86,7 @@ used. Turn it off with `FUWA_TELEMETRY=off` or `DO_NOT_TRACK=1`. Each signal is
 also written to the log, so you can see exactly what left. It contains:
 
 - `schema` (`fuwa.signal.v1`), `sent_at`, `version`, `os`, `arch`, `uptime_seconds`
+- `hosting`: `self_hosted`, unless this is Waifu Devs' own hosted instance
 - `install_id`: a random id made once per instance, so consecutive signals can be
   told apart from other instances' signals. It says nothing about you.
 - `config`: whether standalone accounts are open, closed or off; whether linked
