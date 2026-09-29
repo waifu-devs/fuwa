@@ -8,10 +8,12 @@ import { CHANNEL_ICON, useMyRole } from "@/components/ChannelSidebar";
 import { Composer } from "@/components/chat/Composer";
 import { MemberList } from "@/components/chat/MemberList";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
+import { CopyId } from "@/components/CopyId";
 import { ConnDot, connectionLabel } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
 import { SPRING, SwapText } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
+import { setTitle } from "@/lib/notify";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 
@@ -29,9 +31,11 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
     return () => focusChannel(null, null);
   }, [instanceKey, channel.id]);
 
+  const serverName = inst?.servers.find((s) => s.id === serverId)?.name;
   useEffect(() => {
-    document.title = `#${channel.name} · ${inst?.servers.find((s) => s.id === serverId)?.name ?? "fuwa"}`;
-  }, [channel.name, inst?.servers, serverId]);
+    setTitle(`#${channel.name} · ${serverName ?? "fuwa"}`);
+  }, [channel.name, serverName]);
+  useEffect(() => () => setTitle("fuwa"), []);
 
   const connection = inst?.connection ?? "connecting";
 
@@ -70,6 +74,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
               <InlineMarkdown className="hidden min-w-0 truncate text-sm text-muted-foreground sm:block">{channel.topic}</InlineMarkdown>
             </>
           )}
+          <CopyId id={channel.id} what="channel ID" />
           <span className="flex-1" />
           <AnimatePresence>
             {connection !== "live" && (

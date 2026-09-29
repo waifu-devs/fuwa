@@ -170,37 +170,17 @@ export function themeStyle(variant: ThemeVariant): Record<string, string> {
 
 // ───────────────────────── fuwa ─────────────────────────
 // The themes above are the waifu.dev site's built-ins, copied as-is so fuwa
-// looks like the rest of Waifu Devs. Below: picking one in this browser.
-
-const THEME_KEY = "fuwa:theme";
-
-/** The saved theme, or Yoru in a dark system and Sakura in a light one. */
-export function savedTheme(): Theme {
-  let id: string | null = null;
-  try {
-    id = localStorage.getItem(THEME_KEY);
-  } catch {
-    // Storage blocked: fall through to the system default.
-  }
-  const dark = typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
-  return BUILTIN_THEMES.find((t) => t.id === id) ?? BUILTIN_THEMES.find((t) => t.id === (dark ? "yoru" : "sakura"))!;
-}
+// looks like the rest of Waifu Devs. Which one is on screen is an app
+// setting (lib/prefs.ts).
 
 /** Paints the whole page in a theme. The tokens are registered properties, so the change cross-fades. */
-export function applyTheme(theme: Theme, remember = true) {
+export function applyTheme(theme: Theme) {
   const root = document.documentElement;
   for (const [key, value] of Object.entries(themeStyle(theme.variant))) root.style.setProperty(key, value);
   const dark = isDark(theme);
   root.classList.toggle("dark", dark);
   root.style.colorScheme = dark ? "dark" : "light";
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme.variant.tokens.background);
-  if (remember) {
-    try {
-      localStorage.setItem(THEME_KEY, theme.id);
-    } catch {
-      // Not remembered, but still applied.
-    }
-  }
 }
 
 /** Dark when the background is darker than mid-grey. */

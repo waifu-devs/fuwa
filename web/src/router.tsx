@@ -7,7 +7,10 @@ import {
   useParams,
 } from "@tanstack/react-router";
 import { useInstanceOrder } from "@/fuwa/hooks";
+import { aliasToKey, keyToAlias } from "@/lib/streamer";
 import { rememberedPath, Shell } from "@/components/Shell";
+import { AppOverlays, StreamerBanner } from "@/components/Shortcuts";
+import { UserSettings } from "@/components/settings/UserSettings";
 import { InstanceHome } from "@/pages/InstanceHome";
 import { ChannelPage, ServerIndex } from "@/pages/ServerPages";
 import { Welcome } from "@/pages/Welcome";
@@ -17,8 +20,22 @@ import { Welcome } from "@/pages/Welcome";
  * /fuwa.waifu.dev/<server>/<channel> and work from any fuwa client.
  */
 
+/** Every page, with the app-wide screens (settings, shortcuts, the quick switcher) around it. */
+function Root() {
+  return (
+    <div className="flex h-full flex-col">
+      <StreamerBanner />
+      <div className="relative min-h-0 flex-1">
+        <Outlet />
+      </div>
+      <UserSettings />
+      <AppOverlays />
+    </div>
+  );
+}
+
 const root = createRootRoute({
-  component: Outlet,
+  component: Root,
   notFoundComponent: () => <Navigate to="/" replace />,
 });
 
@@ -82,7 +99,12 @@ const routeTree = root.addChildren([
   instance.addChildren([instanceIndex, server.addChildren([serverIndex, channel])]),
 ]);
 
-export const router = createRouter({ routeTree, defaultPreload: false });
+export const router = createRouter({
+  routeTree,
+  defaultPreload: false,
+  // Streamer mode shows instances by a local alias instead of their address.
+  rewrite: { input: ({ url }) => aliasToKey(url), output: ({ url }) => keyToAlias(url) },
+});
 
 declare module "@tanstack/react-router" {
   interface Register {

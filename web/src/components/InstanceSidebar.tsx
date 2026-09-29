@@ -5,6 +5,7 @@ import { useState, type Ref } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { useInstance } from "@/fuwa/hooks";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
+import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { SPRING, SwapText } from "@/components/motion";
 import { UserPanel } from "@/components/UserPanel";
@@ -15,16 +16,17 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
   const inst = useInstance(instanceKey);
   const { compact, setNavOpen } = useLayout();
   const [settings, setSettings] = useState(false);
+  const address = useAddress(instanceKey);
   if (!inst) return null;
   return (
     <>
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
         <div className="min-w-0 flex-1">
           <p className="truncate font-extrabold">
-            <SwapText className="truncate align-bottom">{inst.node?.name ?? instanceKey}</SwapText>
+            <SwapText className="truncate align-bottom">{inst.node?.name ?? address}</SwapText>
           </p>
           <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-            <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · {instanceKey}
+            <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · <Private text={instanceKey} />
           </p>
         </div>
         {inst.admin && (

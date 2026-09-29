@@ -2,6 +2,7 @@ import { Code } from "@connectrpc/connect";
 import { Effect, Fiber, FiberSet, Schedule, Stream, SubscriptionRef } from "effect";
 import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
 import type { Event } from "@/gen/fuwa/v1/types_pb";
+import { onLiveEvent } from "@/lib/notify";
 import { makeApi, type Api } from "./client";
 import { FuwaError, call, toFuwaError } from "./errors";
 import { instanceKey, loadSaved, storeSaved, type SavedInstance } from "./saved";
@@ -226,13 +227,15 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
         }
         const buffer = held.get(sid);
         if (buffer) buffer.push(event);
-        else
+        else {
           store.update((s) => {
             const current = s.instances[key];
             if (!current) return s;
             const focus = s.focus?.instance === key ? s.focus.channel : null;
             return { ...s, instances: { ...s.instances, [key]: applyEvent(current, event, focus) } };
           });
+          onLiveEvent(key, event);
+        }
         const me = store.get().instances[key]?.me?.id;
         const gone =
           event.payload.case === "serverDeleted" ||

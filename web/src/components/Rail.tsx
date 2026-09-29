@@ -9,6 +9,7 @@ import { AddInstanceDialog } from "@/components/dialogs/AddInstanceDialog";
 import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, FuwaMark, ServerIcon } from "@/components/Icons";
 import { Count, SPRING } from "@/components/motion";
+import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import {
   DropdownMenu,
@@ -77,7 +78,7 @@ export function Rail() {
               key={inst.key}
               onSelect={() => navigate({ to: "/$instance", params: { instance: inst.key } })}
             >
-              <CompassIcon /> Browse servers on {inst.node?.name ?? inst.key}
+              <CompassIcon /> Browse servers on {inst.node?.name ?? <Private text={inst.key} />}
             </DropdownMenuItem>
           ))}
           <DropdownMenuItem onSelect={() => setConnecting(true)}>
@@ -116,11 +117,12 @@ function Pop({ children, className, ref }: { children: ReactNode; className?: st
 
 function InstanceGroup({ inst, params }: { inst: InstanceState; params: { instance?: string; server?: string } }) {
   const here = params.instance === inst.key;
-  const label = inst.node?.name ?? inst.key;
+  const address = useAddress(inst.key);
+  const label = inst.node?.name ?? address;
   return (
     <>
       <Divider />
-      <RailItem label={`${label} · ${inst.key}`} active={here && !params.server} to="/$instance" params={{ instance: inst.key }} small>
+      <RailItem label={inst.node ? `${label} · ${address}` : label} active={here && !params.server} to="/$instance" params={{ instance: inst.key }} small>
         <span
           className={cn(
             "server-icon relative grid size-9 place-items-center bg-card text-[0.7rem] font-extrabold text-muted-foreground",

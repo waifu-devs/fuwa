@@ -6,6 +6,7 @@ import { ServerCreation } from "@/gen/fuwa/v1/types_pb";
 import { createServer } from "@/fuwa/actions";
 import { useAction, useInstances } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
+import { Private } from "@/components/Private";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -110,7 +111,7 @@ export function CreateServerDialog({
                       i.key === inst?.key ? "border-primary bg-primary/15 text-primary" : "hover:border-primary/50",
                     )}
                   >
-                    {i.node?.name ?? i.key}
+                    {i.node?.name ?? <Private text={i.key} />}
                   </button>
                 ))}
               </div>

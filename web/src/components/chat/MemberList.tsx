@@ -4,7 +4,9 @@ import { useMemo, type CSSProperties } from "react";
 import { MemberRole, type Member } from "@/gen/fuwa/v1/types_pb";
 import { useInstance } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
+import { CopyId } from "@/components/CopyId";
 import { Count } from "@/components/motion";
+import { Private } from "@/components/Private";
 import { displayName, hueOf, memberName } from "@/lib/format";
 
 const EMPTY: Member[] = [];
@@ -43,10 +45,10 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 16 }}
                   transition={{ type: "spring", stiffness: 500, damping: 36, delay: Math.min(n, 12) * 0.015 }}
-                  className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-muted/70"
+                  className="row-y group flex items-center gap-2.5 rounded-lg px-2 transition hover:bg-muted/70"
                 >
                   <UserAvatar user={m.user} className="size-8 transition group-hover:scale-105" />
-                  <span className="min-w-0">
+                  <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1">
                       <span className="name-tint truncate text-sm font-bold" style={{ "--h": hueOf(m.user?.id ?? "") } as CSSProperties}>
                         {memberName(m)}
@@ -54,10 +56,15 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
                       {section.icon && <section.icon className={`size-3 shrink-0 ${section.tint}`} />}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      @{m.user?.username}
+                      @{m.user?.id === inst?.me?.id ? <Private text={m.user?.username ?? ""} kind="name" /> : m.user?.username}
                       {m.nickname && m.nickname !== displayName(m.user) ? ` · ${displayName(m.user)}` : ""}
                     </span>
                   </span>
+                  {m.user && (
+                    <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                      <CopyId id={m.user.id} what="user ID" />
+                    </span>
+                  )}
                 </motion.li>
               ))}
             </AnimatePresence>

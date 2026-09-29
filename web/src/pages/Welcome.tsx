@@ -5,7 +5,8 @@ import { RotatingText, RotatingTextContainer } from "@/components/animate-ui/pri
 import { Connect } from "@/components/Connect";
 import { FuwaMark } from "@/components/Icons";
 import { Petals } from "@/components/Petals";
-import { mix, savedTheme } from "@/lib/themes";
+import { activeTheme, usePrefs } from "@/lib/prefs";
+import { mix } from "@/lib/themes";
 
 const PHRASES = ["on our servers.", "on your own box.", "with your friends.", "across instances."];
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -20,7 +21,7 @@ const FEATURES = [
 /** First visit: what fuwa is, and where to connect. */
 export function Welcome({ initialUrl }: { initialUrl?: string }) {
   const reduce = useReducedMotion();
-  const t = savedTheme().variant.tokens;
+  const t = usePrefs(activeTheme).variant.tokens;
   return (
     <div className="relative isolate min-h-full overflow-x-clip overflow-y-auto">
       <BubbleBackground

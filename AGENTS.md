@@ -39,7 +39,14 @@
     reducers (idempotent, since events can arrive twice); `actions.ts` are the
     calls the UI makes; `saved.ts` is the instance list kept in localStorage.
   - `src/components/`, `src/pages/`: the UI. Routes are
-    `/<instance>/<server>/<channel>`, where `<instance>` is the host.
+    `/<instance>/<server>/<channel>`, where `<instance>` is the host (or, in
+    streamer mode, a local alias like `/~waifu-devs`, see `lib/streamer.ts`).
+  - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
+    every instance (theme, density, keybinds, streamer mode...). Settings of
+    an instance or a server live on that instance instead.
+  - `src/lib/keybinds.ts`: every keyboard action and its default; the key
+    handler (`components/Shortcuts.tsx`), the shortcut sheet and the Keybinds
+    page all read this one list.
 
 ## Rules
 
@@ -65,6 +72,9 @@
   environment-only.
 - The usage signal must stay anonymous: no content, names or ids of people or
   servers. The end-to-end test checks this.
+- Anything that can show an instance's address or your own username goes
+  through `Private` or `usePrivateField` (`components/Private.tsx`), so
+  streamer mode hides it.
 - The web app talks only through the protocol; anything it needs from a server
   goes in `proto/` first, then `pnpm generate`.
 - Every screen ships with its motion: things enter and leave with a spring,

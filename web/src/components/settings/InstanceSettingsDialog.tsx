@@ -25,7 +25,9 @@ import { getSettings, run, updateSettings } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Private, usePrivateField } from "@/components/Private";
 import { formatBytes } from "@/lib/format";
+import { HIDDEN_ADDRESS } from "@/lib/streamer";
 import { cn } from "@/lib/utils";
 import { Cap, Choice, SaveBar, Setting, SPRING, Toggle } from "./controls";
 import { SettingsScreen } from "./SettingsScreen";
@@ -72,6 +74,7 @@ export function InstanceSettingsDialog({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState("general");
   const save = useAction(updateSettings);
+  const privateField = usePrivateField();
 
   useEffect(() => {
     if (!open) return;
@@ -138,10 +141,43 @@ export function InstanceSettingsDialog({
         {
           label: "Instance",
           sections: [
-            { id: "general", label: "General", icon: SlidersHorizontalIcon, description: `What everyone on ${name} gets. Changes apply right away.` },
-            { id: "accounts", label: "Accounts", icon: UsersIcon, description: "Who can join this instance and what they can make." },
-            { id: "limits", label: "Limits", icon: GaugeIcon, description: "Caps every server starts with." },
-            { id: "privacy", label: "Privacy", icon: ShieldCheckIcon, description: "What this instance tells Waifu Devs." },
+            {
+              id: "general",
+              label: "General",
+              icon: SlidersHorizontalIcon,
+              description: `What everyone on ${name} gets. Changes apply right away.`,
+              settings: [
+                { id: "name", label: "Name" },
+                { id: "public-url", label: "Public address", keywords: "url domain" },
+                { id: "web", label: "Web app" },
+                { id: "origins", label: "Sites that can connect", keywords: "cors origins allowed" },
+              ],
+            },
+            {
+              id: "accounts",
+              label: "Accounts",
+              icon: UsersIcon,
+              description: "Who can join this instance and what they can make.",
+              settings: [
+                { id: "local-accounts", label: "Standalone accounts", keywords: "sign up password" },
+                { id: "server-creation", label: "Who can create servers" },
+                { id: "servers-per-account", label: "Servers per account" },
+              ],
+            },
+            {
+              id: "limits",
+              label: "Limits",
+              icon: GaugeIcon,
+              description: "Caps every server starts with.",
+              settings: [{ id: "default-limits", label: "Default caps for every server", keywords: "members channels storage attachments" }],
+            },
+            {
+              id: "privacy",
+              label: "Privacy",
+              icon: ShieldCheckIcon,
+              description: "What this instance tells Waifu Devs.",
+              settings: [{ id: "telemetry", label: "Anonymous usage signal", keywords: "telemetry analytics" }],
+            },
           ],
         },
       ]}
@@ -171,13 +207,14 @@ export function InstanceSettingsDialog({
         <div className="flex flex-col">
           {tab === "general" && (
             <>
-              <Setting title="Name" hint="Shown in the app and when people add this instance." defaultLabel={defaults.name} {...resetter("name")}>
+              <Setting id="name" title="Name" hint="Shown in the app and when people add this instance." defaultLabel={defaults.name} {...resetter("name")}>
                 <Input value={draft.name} maxLength={64} onChange={(e) => patch((d) => (d.name = e.target.value))} className="h-10 rounded-xl" />
               </Setting>
               <Setting
+                id="public-url"
                 title="Public address"
                 hint="The URL people use to reach this instance."
-                defaultLabel={defaults.publicUrl}
+                defaultLabel={privateField ? HIDDEN_ADDRESS : defaults.publicUrl}
                 delay={0.04}
                 {...resetter("public_url")}
               >
@@ -187,11 +224,11 @@ export function InstanceSettingsDialog({
                     value={draft.publicUrl}
                     type="url"
                     onChange={(e) => patch((d) => (d.publicUrl = e.target.value))}
-                    className="h-10 rounded-xl pl-9"
+                    className={cn("h-10 rounded-xl pl-9", privateField)}
                   />
                 </div>
               </Setting>
-              <Setting title="Web app" delay={0.08} defaultLabel={defaults.web ? "on" : "off"} {...resetter("web")}>
+              <Setting id="web" title="Web app" delay={0.08} defaultLabel={defaults.web ? "on" : "off"} {...resetter("web")}>
                 <Toggle
                   checked={draft.web}
                   disabled={!config.startup?.webBuiltIn}
@@ -207,7 +244,7 @@ export function InstanceSettingsDialog({
               <Origins
                 draft={draft}
                 patch={patch}
-                defaultLabel={defaults.allowedOrigins.join(", ")}
+                defaultLabel={privateField ? HIDDEN_ADDRESS : defaults.allowedOrigins.join(", ")}
                 reset={resetter("allowed_origins")}
               />
               <Startup config={config} />
@@ -216,6 +253,7 @@ export function InstanceSettingsDialog({
           {tab === "accounts" && (
             <>
               <Setting
+                id="local-accounts"
                 title="Standalone accounts"
                 hint="A username and password kept on this instance only."
                 defaultLabel={LOCAL_LABEL[defaults.localAccounts]}
@@ -238,6 +276,7 @@ export function InstanceSettingsDialog({
                 />
               </Setting>
               <Setting
+                id="server-creation"
                 title="Who can create servers"
                 defaultLabel={CREATION_LABEL[defaults.serverCreation]}
                 delay={0.04}
@@ -254,6 +293,7 @@ export function InstanceSettingsDialog({
                 />
               </Setting>
               <Setting
+                id="servers-per-account"
                 title="Servers per account"
                 hint="How many servers one account may own."
                 defaultLabel={count(defaults.serversPerAccount)}
@@ -267,6 +307,7 @@ export function InstanceSettingsDialog({
           {tab === "limits" && (
             <>
               <Setting
+                id="default-limits"
                 title="Default caps for every server"
                 hint="A server can get its own caps from its settings. With a cap off, it's unlimited."
                 defaultLabel={[
@@ -288,7 +329,7 @@ export function InstanceSettingsDialog({
           )}
           {tab === "privacy" && (
             <>
-              <Setting title="Anonymous usage signal" defaultLabel={defaults.telemetry ? "on" : "off"} {...resetter("telemetry")}>
+              <Setting id="telemetry" title="Anonymous usage signal" defaultLabel={defaults.telemetry ? "on" : "off"} {...resetter("telemetry")}>
                 <Toggle
                   checked={draft.telemetry}
                   onChange={(telemetry) => patch((d) => (d.telemetry = telemetry))}
@@ -391,12 +432,14 @@ function Origins({
   reset: { changed: boolean; onReset: () => void; resetting: boolean };
 }) {
   const any = draft.allowedOrigins.includes("*");
+  const privateField = usePrivateField();
   const [list, setList] = useState(any ? "" : draft.allowedOrigins.join("\n"));
   useEffect(() => {
     if (!any) setList((current) => (current.split("\n").map((o) => o.trim()).filter(Boolean).join("\n") === draft.allowedOrigins.join("\n") ? current : draft.allowedOrigins.join("\n")));
   }, [any, draft.allowedOrigins]);
   return (
     <Setting
+      id="origins"
       title="Sites that can connect"
       hint="Web pages on other sites, such as the fuwa app on another instance, that may use this one from a browser."
       defaultLabel={defaultLabel === "*" ? "any site" : defaultLabel}
@@ -425,9 +468,9 @@ function Origins({
             setList(e.target.value);
             patch((d) => (d.allowedOrigins = e.target.value.split("\n").map((o) => o.trim()).filter(Boolean)));
           }}
-          className="rounded-xl font-mono text-xs"
+          className={cn("rounded-xl font-mono text-xs", privateField)}
         />
-        <p className="mt-1.5 text-xs text-muted-foreground">One per line, like https://chat.example.com. This page ({window.location.origin}) always works when served by this instance.</p>
+        <p className="mt-1.5 text-xs text-muted-foreground">One per line, like https://chat.example.com. This page (<Private text={window.location.origin} />) always works when served by this instance.</p>
       </motion.div>
     </Setting>
   );

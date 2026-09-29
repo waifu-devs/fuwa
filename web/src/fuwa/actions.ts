@@ -71,6 +71,10 @@ export const updateProfile = (key: string, displayName: string, avatarUrl: strin
     return true;
   });
 
+/** Changes a standalone account's password. The server signs out every other session. */
+export const changePassword = (key: string, currentPassword: string, newPassword: string) =>
+  call((signal) => api(key).auth.changePassword({ currentPassword, newPassword }, { signal })).pipe(Effect.as(true));
+
 // ───────────────────────── Servers ─────────────────────────
 
 const joined = (key: string, server: Server | undefined) =>
@@ -294,6 +298,21 @@ export function focusChannel(key: string | null, channelId: string | null) {
     }
     return next;
   });
+}
+
+/** Clears the unread counts of every channel in a server. Returns how many channels had some. */
+export function markServerRead(key: string, serverId: string): number {
+  let cleared = 0;
+  updateInstance(key, (i) => {
+    const unread = { ...i.unread };
+    for (const channel of i.channels[serverId] ?? []) {
+      if (!unread[channel.id]) continue;
+      delete unread[channel.id];
+      cleared++;
+    }
+    return cleared ? { ...i, unread } : i;
+  });
+  return cleared;
 }
 
 export { ChannelType };

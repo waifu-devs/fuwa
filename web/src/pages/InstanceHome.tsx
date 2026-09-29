@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRightIcon, CheckIcon, ChevronLeftIcon, LoaderCircleIcon, PlusIcon, SearchIcon, UsersIcon } from "lucide-react";
+import { ArrowRightIcon, CheckIcon, ChevronLeftIcon, LoaderCircleIcon, PlusIcon, SearchIcon, TvMinimalPlayIcon, UsersIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
@@ -10,6 +10,7 @@ import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
 import { Count, SwapText, Tilt } from "@/components/motion";
+import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,10 +50,30 @@ function Centered({ children }: { children: React.ReactNode }) {
 }
 
 function UnknownInstance({ instanceKey }: { instanceKey: string }) {
+  // A streamer mode link (/~name) only means something on the device that made it.
+  if (instanceKey.startsWith("~"))
+    return (
+      <Centered>
+        <div className="flex w-full max-w-md flex-col items-center gap-3 rounded-3xl border bg-card p-6 text-center shadow-xl sm:p-8">
+          <span className="float grid size-14 place-items-center rounded-full bg-primary/15 text-primary">
+            <TvMinimalPlayIcon className="size-7" />
+          </span>
+          <h1 className="text-xl font-extrabold">This link hides its server</h1>
+          <p className="text-sm text-muted-foreground">
+            It was copied while streamer mode was on, so it names the server by a nickname that only works on the device it came from.
+          </p>
+          <Button asChild className="btn mt-1 rounded-xl font-bold">
+            <Link to="/">Go to your servers</Link>
+          </Button>
+        </div>
+      </Centered>
+    );
   return (
     <Centered>
       <div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-xl sm:p-8">
-        <h1 className="mb-1 text-xl font-extrabold">Connect to {instanceKey.replaceAll("~", "/")}?</h1>
+        <h1 className="mb-1 text-xl font-extrabold">
+          Connect to <Private text={instanceKey.replaceAll("~", "/")} />?
+        </h1>
         <p className="mb-5 text-sm text-muted-foreground">You aren't signed in to this fuwa server in this browser yet.</p>
         <Connect initialUrl={instanceKey.replaceAll("~", "/")} />
       </div>
@@ -66,6 +87,7 @@ function Browse({ instanceKey }: { instanceKey: string }) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
+  const address = useAddress(instanceKey);
   const joinedIds = useMemo(() => new Set(inst.servers.map((s) => s.id)), [inst.servers]);
 
   useEffect(() => {
@@ -84,10 +106,10 @@ function Browse({ instanceKey }: { instanceKey: string }) {
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="flex items-center gap-2 text-sm font-bold text-muted-foreground">
-              <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · {instanceKey} · fuwa {inst.node?.version}
+              <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · <Private text={instanceKey} /> · fuwa {inst.node?.version}
             </p>
             <h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">
-              Welcome to <SwapText className="gradient-text">{inst.node?.name ?? instanceKey}</SwapText>
+              Welcome to <SwapText className="gradient-text">{inst.node?.name ?? address}</SwapText>
             </h1>
             <p className="mt-2 max-w-xl text-muted-foreground">
               Find a community to join, or start your own. Everything here lives on this fuwa server.

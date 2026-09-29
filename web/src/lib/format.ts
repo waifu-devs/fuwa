@@ -1,15 +1,30 @@
 import { timestampDate, type Timestamp } from "@bufbuild/protobuf/wkt";
 import type { Member, User } from "@/gen/fuwa/v1/types_pb";
+import { getPrefs, type Clock } from "@/lib/prefs";
 
 export const toDate = (ts: Timestamp | undefined) => (ts ? timestampDate(ts) : new Date(0));
 
-const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const day = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
 const dayWithYear = new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric", year: "numeric" });
-const full = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" });
 
-export const formatTime = (d: Date) => time.format(d);
-export const formatFull = (d: Date) => full.format(d);
+/** Times follow the 12 or 24 hour clock setting; "auto" is the language's own. */
+const clocks = new Map<Clock, { time: Intl.DateTimeFormat; full: Intl.DateTimeFormat }>();
+function clock() {
+  const setting = getPrefs().clock;
+  let formats = clocks.get(setting);
+  if (!formats) {
+    const hourCycle = setting === "24h" ? "h23" : setting === "12h" ? "h12" : undefined;
+    formats = {
+      time: new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", hourCycle }),
+      full: new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short", hourCycle }),
+    };
+    clocks.set(setting, formats);
+  }
+  return formats;
+}
+
+export const formatTime = (d: Date) => clock().time.format(d);
+export const formatFull = (d: Date) => clock().full.format(d);
 
 function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
@@ -61,4 +76,9 @@ export function hueOf(id: string) {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return h % 360;
+}
+
+/** Whether a message mentions someone by @username. */
+export function mentions(content: string, username: string) {
+  return new RegExp(`(^|[^\\w@])@${username.replace(/[.]/g, "\\.")}\\b`, "i").test(content);
 }
