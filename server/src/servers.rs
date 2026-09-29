@@ -94,6 +94,14 @@ impl ServerDb {
         storage_bytes(&self.path)
     }
 
+    /// The sequence of the last event committed, or 0 for none.
+    pub async fn head_sequence(&self) -> Result<i64> {
+        let conn = self.read()?;
+        Ok(query_one(&conn, "SELECT coalesce(max(sequence), 0) FROM events", (), |r| r.get::<i64>(0))
+            .await?
+            .unwrap_or(0))
+    }
+
     /// Events after `after`, oldest first.
     pub async fn events_after(&self, after: i64, limit: i64) -> Result<Vec<pb::Event>> {
         let conn = self.read()?;

@@ -112,7 +112,10 @@ grpcurl -plaintext -H "authorization: Bearer $TOKEN" -d '{"name":"Waifu Devs"}' 
 
 Sign up or sign in to get a session token, then send it as
 `authorization: Bearer <token>` on every call. `EventService.Subscribe` streams
-events from any number of your servers on the instance at once.
+events from any number of your servers on the instance at once. To stay in
+sync, subscribe first, wait for the `ready` message, then load each server's
+channels and members and apply the events that follow. When the stream drops,
+subscribe again with each server's last sequence and nothing is missed.
 
 ## Development
 

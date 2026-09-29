@@ -384,6 +384,7 @@ async fn a_community_end_to_end() {
 
     // Juan's stream replayed everything from the start and kept going live, in order.
     let mut seen = Vec::new();
+    let mut ready_after = None;
     while seen.len() < u.events as usize {
         let item = tokio::time::timeout(Duration::from_secs(5), juan_stream.next())
             .await
@@ -393,9 +394,15 @@ async fn a_community_end_to_end() {
         if let Some(event) = item.event {
             seen.push(event);
         }
+        if let Some(ready) = item.ready {
+            ready_after = Some((seen.len() as i64, ready.servers[0].sequence));
+        }
     }
     let sequences: Vec<i64> = seen.iter().map(|e| e.sequence).collect();
     assert_eq!(sequences, (1..=u.events).collect::<Vec<_>>());
+    // `ready` came right after the replay and names the last replayed event.
+    let (replayed, head) = ready_after.expect("ready arrives");
+    assert!(replayed >= 1 && replayed == head, "replayed {replayed}, head {head}");
     assert!(matches!(seen[0].payload, Some(Payload::MemberJoined(_))));
     assert!(matches!(seen.last().unwrap().payload, Some(Payload::MessageDeleted(_))));
     assert!(seen.iter().any(|e| matches!(&e.payload, Some(Payload::MemberJoined(j)) if j.member.as_ref().unwrap().user.as_ref().unwrap().id == mika_user.id)));
@@ -505,6 +512,8 @@ async fn a_community_end_to_end() {
         .await
         .unwrap()
         .into_inner();
+    let ready = tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap();
+    assert!(ready.ready.is_some());
     c.servers.delete_server(authed(&juan, pb::DeleteServerRequest { server_id: sid.clone() })).await.unwrap();
     let last = tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap();
     assert!(matches!(last.event.unwrap().payload, Some(Payload::ServerDeleted(_))));
@@ -754,6 +763,10 @@ async fn concurrent_writes_stay_ordered_and_counted() {
         .await
         .unwrap()
         .into_inner();
+    // The stream says where the server stands before anything live arrives.
+    let ready =
+        tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap().ready.unwrap();
+    assert_eq!(ready.servers, [pb::ServerHead { server_id: server.id.clone(), sequence: 2 }]);
 
     let sends = (0..50).map(|i| {
         let mut messages = c.messages.clone();

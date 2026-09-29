@@ -50,8 +50,20 @@ impl EventService for Api {
             let mut live = StreamMap::new();
             let mut last_sent: HashMap<String, i64> = HashMap::new();
 
+            let mut heads = Vec::with_capacity(followed.len());
             for (sdb, after, receiver) in followed {
-                let mut sequence = after.unwrap_or(0).max(0);
+                let mut sequence = match after {
+                    Some(after) => after.max(0),
+                    // Live only: anything committed up to now is already in the
+                    // state a client loads after `ready`.
+                    None => match sdb.head_sequence().await {
+                        Ok(head) => head,
+                        Err(err) => {
+                            send(Err(err.into())).await;
+                            return;
+                        }
+                    },
+                };
                 if after.is_some() {
                     loop {
                         let page = match sdb.events_after(sequence, REPLAY_PAGE).await {
@@ -64,14 +76,19 @@ impl EventService for Api {
                         let Some(last) = page.last() else { break };
                         sequence = last.sequence;
                         for event in page {
-                            if !send(Ok(pb::SubscribeResponse { event: Some(event) })).await {
+                            if !send(Ok(pb::SubscribeResponse { event: Some(event), ready: None })).await {
                                 return;
                             }
                         }
                     }
                 }
                 last_sent.insert(sdb.id.clone(), sequence);
+                heads.push(pb::ServerHead { server_id: sdb.id.clone(), sequence });
                 live.insert(sdb.id.clone(), BroadcastStream::new(receiver));
+            }
+            let ready = pb::SubscribeReady { servers: heads };
+            if !send(Ok(pb::SubscribeResponse { event: None, ready: Some(ready) })).await {
+                return;
             }
 
             let mut heartbeat = tokio::time::interval(HEARTBEAT);
@@ -81,7 +98,7 @@ impl EventService for Api {
                     _ = shutdown.cancelled() => return,
                     _ = tx.closed() => return,
                     _ = heartbeat.tick() => {
-                        if !send(Ok(pb::SubscribeResponse { event: None })).await {
+                        if !send(Ok(pb::SubscribeResponse { event: None, ready: None })).await {
                             return;
                         }
                     }
@@ -103,7 +120,7 @@ impl EventService for Api {
                                 Some(Payload::MemberLeft(left)) => left.user_id == account_id,
                                 _ => false,
                             };
-                            if !send(Ok(pb::SubscribeResponse { event: Some((*event).clone()) })).await {
+                            if !send(Ok(pb::SubscribeResponse { event: Some((*event).clone()), ready: None })).await {
                                 return;
                             }
                             if ends {
