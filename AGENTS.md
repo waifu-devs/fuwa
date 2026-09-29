@@ -9,7 +9,9 @@
   - `api/`: one file per gRPC service, all implemented on `Api`.
   - `node.rs`: the instance database (`node.db`): accounts and profiles,
     sessions (devices), two-step sign-in (TOTP secrets, backup codes, sign-in
-    tickets), notification settings, meta. What belongs to a person but not to
+    tickets), notification settings, meta (the install id, the announcement).
+    Admins can turn an account off (`disabled_at`): it loses its sessions and
+    can't sign in until it's turned back on. What belongs to a person but not to
     one server lives here; a server file keeps only a copy of what its members
     see (name, avatar, status) in its `users` table.
   - `twofactor.rs`: TOTP codes (RFC 6238) and backup codes for two-step sign-in.
@@ -43,7 +45,9 @@
     edited by hand.
   - `src/fuwa/`: talking to instances. `sync.ts` runs one Effect fiber per
     instance that subscribes, loads state after `ready`, applies events and
-    reconnects with the last sequences; `store.ts` holds the state and its
+    reconnects with the last sequences, and reads the instance's public
+    details (name, sign-ups, announcement) again every minute, since those
+    change without an event; `store.ts` holds the state and its
     reducers (idempotent, since events can arrive twice); `actions.ts` are the
     calls the UI makes; `saved.ts` is the instance list kept in localStorage.
   - `src/components/`, `src/pages/`: the UI. Routes are
@@ -63,6 +67,10 @@
     `dialogs/ServerSettingsDialog.tsx`. `components/ModerateDialog.tsx` is the
     one dialog for nicknames, time-outs, kicks and bans, from the Members page
     and from profile cards.
+  - `src/components/settings/instance/`: the instance admin pages beyond
+    settings (accounts, servers, announcement), shown by
+    `settings/InstanceSettingsDialog.tsx`. The announcement itself is drawn by
+    `components/AnnouncementBanner.tsx`, above the app for the instance you're on.
   - `src/lib/keybinds.ts`: every keyboard action and its default; the key
     handler (`components/Shortcuts.tsx`), the shortcut sheet and the Keybinds
     page all read this one list.
@@ -105,6 +113,10 @@
 - Anything that weakens an account (turning off two-step sign-in, new backup
   codes, deleting it) asks for the password again, and a code when two-step
   sign-in is on.
+- Instance admins act on other accounts, never their own (no turning yourself
+  off, resetting your own password or removing your own admin), and an
+  instance always keeps at least one admin. Admins are demoted before they're
+  turned off.
 - The web app talks only through the protocol; anything it needs from a server
   goes in `proto/` first, then `pnpm generate`.
 - Every screen ships with its motion: things enter and leave with a spring,

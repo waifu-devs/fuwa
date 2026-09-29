@@ -9,6 +9,9 @@ use crate::pb::{self, auth_service_server::AuthService};
 use crate::servers::{self as store, Payload};
 use crate::twofactor;
 
+/// What someone whose account was turned off hears when they sign in.
+const DISABLED: &str = "this account was turned off by the instance's admins";
+
 impl Api {
     async fn create_account(&self, req: pb::SignUpRequest, user_agent: &str) -> Result<pb::SignUpResponse> {
         if !self.app.settings().local_accounts.sign_up() {
@@ -46,6 +49,9 @@ impl Api {
             return Err(Error::Unauthenticated);
         };
         self.app.limiter.succeeded(&username);
+        if account.disabled {
+            return Err(Error::denied(DISABLED));
+        }
         if account.two_factor {
             let ticket = auth::new_token();
             self.app.node.create_ticket(&auth::hash_token(&ticket), &account.id).await?;
@@ -83,6 +89,9 @@ impl Api {
             return Err(Error::FailedPrecondition("this sign-in ran out; enter your password again".into()));
         }
         let account = self.app.node.account(&account_id).await?.ok_or(Error::Unauthenticated)?;
+        if account.disabled {
+            return Err(Error::denied(DISABLED));
+        }
         let token = auth::new_token();
         self.app.node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
         Ok(pb::VerifyTwoFactorResponse { token, user: Some(account.user()), admin: account.admin })

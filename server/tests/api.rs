@@ -2152,3 +2152,280 @@ async fn server_settings_and_moderation() {
 
     instance.stop().await;
 }
+
+async fn accounts(c: &mut Clients, token: &str, request: pb::ListAccountsRequest) -> pb::ListAccountsResponse {
+    c.admin.list_accounts(authed(token, request)).await.unwrap().into_inner()
+}
+
+async fn update_account(
+    c: &mut Clients,
+    token: &str,
+    request: pb::UpdateAccountRequest,
+) -> Result<pb::AccountSummary, tonic::Status> {
+    c.admin.update_account(authed(token, request)).await.map(|r| r.into_inner().account.unwrap())
+}
+
+async fn announce(
+    c: &mut Clients,
+    token: &str,
+    announcement: pb::Announcement,
+) -> Result<Option<pb::Announcement>, Code> {
+    c.admin
+        .set_announcement(authed(token, pb::SetAnnouncementRequest { announcement: Some(announcement) }))
+        .await
+        .map(|r| r.into_inner().announcement)
+        .map_err(|e| e.code())
+}
+
+async fn node_announcement(c: &mut Clients) -> Option<pb::Announcement> {
+    c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap().announcement
+}
+
+#[tokio::test]
+async fn instance_admins_manage_accounts_servers_and_announcements() {
+    let dir = tempfile::tempdir().unwrap();
+    // Encrypted, to show exports come out as plain SQLite anyway.
+    let key = [("FUWA_ENCRYPTION_KEY", "b1bbfda4f589dc9daaf004fe21111e00dc00c98237102f5c7002a5669fc76327")];
+    let instance = start(dir.path(), &key).await;
+    let mut c = clients(&instance).await;
+    let (juan, juan_user, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (kai, kai_user, _) = sign_up(&mut c, "kai").await;
+
+    // ── The accounts list: admins only, newest first, searchable, in pages.
+    let denied = c.admin.list_accounts(authed(&mika, pb::ListAccountsRequest::default())).await;
+    assert_eq!(denied.unwrap_err().code(), Code::PermissionDenied);
+    let all = accounts(&mut c, &juan, pb::ListAccountsRequest::default()).await;
+    let names: Vec<_> = all.accounts.iter().map(|a| a.user.as_ref().unwrap().username.as_str()).collect();
+    assert_eq!(names, ["kai", "mika", "juan"]);
+    let totals = all.totals.unwrap();
+    assert_eq!((totals.all, totals.admins, totals.disabled), (3, 1, 0));
+    assert!(all.accounts[2].admin && all.accounts[2].sessions == 1 && all.accounts[2].created_at.is_some());
+    let found = accounts(&mut c, &juan, pb::ListAccountsRequest { query: "MIK".into(), ..Default::default() }).await;
+    assert_eq!(found.accounts.len(), 1);
+    let page = accounts(&mut c, &juan, pb::ListAccountsRequest { limit: 2, ..Default::default() }).await;
+    assert!(page.has_more && page.accounts.len() == 2);
+    let rest = accounts(
+        &mut c,
+        &juan,
+        pb::ListAccountsRequest {
+            limit: 2,
+            before_id: page.accounts[1].user.as_ref().unwrap().id.clone(),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(!rest.has_more && rest.accounts[0].user.as_ref().unwrap().username == "juan");
+
+    // ── Admin rights: never your own, and never the last admin.
+    let own = update_account(
+        &mut c,
+        &juan,
+        pb::UpdateAccountRequest { account_id: juan_user.id.clone(), admin: Some(false), ..Default::default() },
+    )
+    .await;
+    assert_eq!(own.unwrap_err().code(), Code::FailedPrecondition);
+    let promoted = update_account(
+        &mut c,
+        &juan,
+        pb::UpdateAccountRequest { account_id: mika_user.id.clone(), admin: Some(true), ..Default::default() },
+    )
+    .await
+    .unwrap();
+    assert!(promoted.admin);
+    assert!(c.admin.list_accounts(authed(&mika, pb::ListAccountsRequest::default())).await.is_ok());
+
+    // ── Turning an account off: admins lose that first, devices sign out, sign-in stops.
+    let still_admin = update_account(
+        &mut c,
+        &juan,
+        pb::UpdateAccountRequest { account_id: mika_user.id.clone(), disabled: Some(true), ..Default::default() },
+    )
+    .await;
+    assert_eq!(still_admin.unwrap_err().code(), Code::FailedPrecondition);
+    let off = update_account(
+        &mut c,
+        &juan,
+        pb::UpdateAccountRequest {
+            account_id: mika_user.id.clone(),
+            admin: Some(false),
+            disabled: Some(true),
+            reason: "Spam from this account".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!off.admin && off.disabled && off.disabled_at.is_some() && off.sessions == 0);
+    assert_eq!(off.disabled_reason, "Spam from this account");
+    assert_eq!(me(&mut c, &mika).await.unwrap_err(), Code::Unauthenticated);
+    let refused = sign_in(&mut c, "mika", "correct horse battery").await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    assert!(refused.message().contains("turned off"));
+    let disabled = accounts(
+        &mut c,
+        &juan,
+        pb::ListAccountsRequest { filter: pb::AccountFilter::Disabled as i32, ..Default::default() },
+    )
+    .await;
+    assert_eq!(disabled.accounts.len(), 1);
+    assert_eq!(disabled.totals.unwrap().disabled, 1);
+    let back = update_account(
+        &mut c,
+        &juan,
+        pb::UpdateAccountRequest { account_id: mika_user.id.clone(), disabled: Some(false), ..Default::default() },
+    )
+    .await
+    .unwrap();
+    assert!(!back.disabled && back.disabled_reason.is_empty());
+    assert!(sign_in(&mut c, "mika", "correct horse battery").await.is_ok());
+
+    // The operator's token can do what an admin can, but not remove the last admin.
+    let last = update_account(
+        &mut c,
+        ADMIN_TOKEN,
+        pb::UpdateAccountRequest { account_id: juan_user.id.clone(), admin: Some(false), ..Default::default() },
+    )
+    .await;
+    assert_eq!(last.unwrap_err().code(), Code::FailedPrecondition);
+
+    // ── Password resets: a new password shown once, every device signed out.
+    let reset = c
+        .admin
+        .reset_account_password(authed(
+            &juan,
+            pb::ResetAccountPasswordRequest { account_id: kai_user.id.clone(), turn_off_two_factor: true },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .password;
+    assert_eq!(reset.len(), 19);
+    assert_eq!(me(&mut c, &kai).await.unwrap_err(), Code::Unauthenticated);
+    assert!(sign_in(&mut c, "kai", "correct horse battery").await.is_err());
+    let kai = sign_in(&mut c, "kai", &reset).await.unwrap().token;
+    let own_reset = c
+        .admin
+        .reset_account_password(authed(
+            &juan,
+            pb::ResetAccountPasswordRequest { account_id: juan_user.id.clone(), ..Default::default() },
+        ))
+        .await;
+    assert_eq!(own_reset.unwrap_err().code(), Code::FailedPrecondition);
+
+    // ── Every server, members or not, and a plain SQLite copy of one.
+    let corner = create_server(&mut c, &kai, "Kai's Corner!", false).await;
+    create_server(&mut c, &juan, "Admin HQ", false).await;
+    let general = c
+        .channels
+        .list_channels(authed(&kai, pb::ListChannelsRequest { server_id: corner.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.name == "general")
+        .unwrap();
+    send(&mut c, &kai, &corner.id, &general.id, "only in the export").await.unwrap();
+    let servers = c
+        .admin
+        .list_instance_servers(authed(&juan, pb::ListInstanceServersRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .servers;
+    assert_eq!(servers.len(), 2);
+    let listed = servers.iter().find(|s| s.server.as_ref().unwrap().id == corner.id).unwrap();
+    assert_eq!(listed.owner.as_ref().unwrap().id, kai_user.id);
+    assert!(!listed.member && listed.usage.as_ref().unwrap().messages >= 1 && listed.limits.is_some());
+    assert!(servers.iter().any(|s| s.member));
+
+    let denied = c.admin.export_server(authed(&kai, pb::ExportServerRequest { server_id: corner.id.clone() })).await;
+    assert_eq!(denied.unwrap_err().code(), Code::PermissionDenied);
+    let mut stream = c
+        .admin
+        .export_server(authed(&juan, pb::ExportServerRequest { server_id: corner.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    let mut bytes = Vec::new();
+    let mut first = None;
+    while let Some(piece) = stream.next().await {
+        let piece = piece.unwrap();
+        first.get_or_insert((piece.size, piece.filename.clone()));
+        bytes.extend_from_slice(&piece.chunk);
+    }
+    let (size, filename) = first.unwrap();
+    assert_eq!(filename, "kai-s-corner.db");
+    assert_eq!(size as usize, bytes.len());
+    assert!(bytes.starts_with(b"SQLite format 3\0"));
+    assert_eq!([bytes[18], bytes[19]], [2, 2], "exports come out in WAL mode");
+    let copy = dir.path().join("copy.db");
+    std::fs::write(&copy, &bytes).unwrap();
+    let exported = turso::Builder::new_local(copy.to_str().unwrap()).build().await.unwrap();
+    let conn = exported.connect().unwrap();
+    let mut rows = conn.query("SELECT content FROM messages WHERE kind = 0", ()).await.unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+    assert_eq!(row.get::<String>(0).unwrap(), "only in the export");
+    let leftovers = std::fs::read_dir(dir.path().join("exports")).unwrap().count();
+    assert_eq!(leftovers, 0, "the export's file is removed once it's sent");
+
+    // ── The announcement banner: on every client, even signed out.
+    assert!(node_announcement(&mut c).await.is_none());
+    let denied =
+        announce(&mut c, &kai, pb::Announcement { text: "hi".into(), ..Default::default() }).await.unwrap_err();
+    assert_eq!(denied, Code::PermissionDenied);
+    let up = announce(
+        &mut c,
+        &juan,
+        pb::Announcement {
+            text: "Maintenance tonight at **22:00 UTC**".into(),
+            tone: pb::AnnouncementTone::Warning as i32,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(!up.id.is_empty() && up.created_at.is_some());
+    assert_eq!(node_announcement(&mut c).await.unwrap().id, up.id);
+    // Same text, new tone: same banner, so anyone who closed it isn't shown it again.
+    let critical = announce(
+        &mut c,
+        &juan,
+        pb::Announcement { text: up.text.clone(), tone: pb::AnnouncementTone::Critical as i32, ..Default::default() },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(critical.id, up.id);
+    assert_eq!(critical.tone, pb::AnnouncementTone::Critical as i32);
+    let past = fuwa_server::id::timestamp(fuwa_server::id::now_ms() - 1000);
+    let late =
+        announce(&mut c, &juan, pb::Announcement { text: "late".into(), ends_at: Some(past), ..Default::default() })
+            .await;
+    assert_eq!(late.unwrap_err(), Code::InvalidArgument);
+    let soon = fuwa_server::id::timestamp(fuwa_server::id::now_ms() + 800);
+    let brief = announce(
+        &mut c,
+        &juan,
+        pb::Announcement { text: "Back soon".into(), ends_at: Some(soon), ..Default::default() },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_ne!(brief.id, up.id);
+    assert_eq!(node_announcement(&mut c).await.unwrap().text, "Back soon");
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert!(node_announcement(&mut c).await.is_none(), "it comes down by itself once it runs out");
+    announce(&mut c, &juan, pb::Announcement { text: "Stays up".into(), ..Default::default() }).await.unwrap();
+    drop(c);
+    instance.stop().await;
+
+    // It survives a restart; empty text takes it down.
+    let instance = start(dir.path(), &key).await;
+    let mut c = clients(&instance).await;
+    assert_eq!(node_announcement(&mut c).await.unwrap().text, "Stays up");
+    let down = announce(&mut c, &juan, pb::Announcement::default()).await.unwrap();
+    assert!(down.is_none() && node_announcement(&mut c).await.is_none());
+    instance.stop().await;
+}

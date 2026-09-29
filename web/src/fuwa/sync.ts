@@ -25,6 +25,9 @@ import {
  * nothing is missed or applied twice.
  */
 
+/** How often the instance's public details (and its announcement) are read again. */
+const NODE_REFRESH = "60 seconds";
+
 /** Retry quickly at first, then every 20 seconds at most. */
 const backoff = Schedule.exponential("400 millis", 2).pipe(
   Schedule.union(Schedule.spaced("20 seconds")),
@@ -141,6 +144,15 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
       servers.map((s) => s.id),
     );
     patchInstance(key, { connection: servers.length ? "connecting" : "live" });
+
+    // The instance's name, sign-up options and announcement change without an event.
+    yield* call((signal) => api.node.getNode({}, { signal })).pipe(
+      Effect.tap(({ node }) => Effect.sync(() => node && patchInstance(key, { node }))),
+      Effect.ignore,
+      Effect.repeat(Schedule.spaced(NODE_REFRESH)),
+      Effect.delay(NODE_REFRESH),
+      Effect.forkScoped,
+    );
 
     yield* followEvents(key, api, e.followed);
   }).pipe(

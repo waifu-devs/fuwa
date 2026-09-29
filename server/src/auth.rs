@@ -87,6 +87,16 @@ pub fn new_token() -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
+/// A password an admin hands someone to sign in with: four groups of four
+/// letters and digits that can't be misread (no 0/O, 1/l/I).
+pub fn temporary_password() -> String {
+    const ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).expect("the OS random number generator failed");
+    let chars: Vec<char> = bytes.iter().map(|b| ALPHABET[usize::from(*b) % ALPHABET.len()] as char).collect();
+    chars.chunks(4).map(|group| group.iter().collect::<String>()).collect::<Vec<_>>().join("-")
+}
+
 /// What's stored for a token: its SHA-256, so a leaked database leaks no sessions.
 pub fn hash_token(token: &str) -> String {
     Sha256::digest(token.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()

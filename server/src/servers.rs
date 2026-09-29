@@ -337,6 +337,29 @@ impl ServerDb {
             .collect()
     }
 
+    /// Writes a copy of this server's database to `dest` as a plain SQLite
+    /// file: not encrypted, and not in concurrent-writer mode, so any SQLite
+    /// tool opens it. Writes to the server wait while it's copied, so the copy
+    /// is one moment.
+    pub async fn export_to(&self, dest: &Path) -> Result<()> {
+        let path = dest
+            .to_str()
+            .filter(|p| !p.contains('\''))
+            .ok_or_else(|| Error::internal(format!("can't export to {}", dest.display())))?;
+        {
+            let _alone = self.gate.write().await;
+            let conn = self.read()?;
+            conn.execute(&format!("VACUUM INTO '{path}'"), ()).await?;
+        }
+        db::to_sqlite(dest, None).await?;
+        for suffix in ["-wal", "-log"] {
+            let mut side = dest.as_os_str().to_owned();
+            side.push(suffix);
+            let _ = std::fs::remove_file(side);
+        }
+        Ok(())
+    }
+
     pub async fn server(&self) -> Result<pb::Server> {
         let conn = self.read()?;
         load_server(&conn).await

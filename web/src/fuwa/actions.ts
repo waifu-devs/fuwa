@@ -1,11 +1,12 @@
 import { Effect } from "effect";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
-import type { InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
+import type { AccountFilter, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
 import type { ChannelPlacement } from "@/gen/fuwa/v1/channel_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
   ChannelType,
+  type AnnouncementTone,
   type Channel,
   type Member,
   type MemberRole,
@@ -196,14 +197,20 @@ export const refreshNotifications = (key: string) =>
     updateInstance(key, (i) => ({ ...i, notifications }));
   });
 
-/** Picks up notification settings changed on another device when you come back to this one. */
-export function watchNotificationSettings() {
+/**
+ * Picks up what changed without an event while you were away: notification
+ * settings from another device, and the instance's details and announcement.
+ */
+export function refreshOnFocus() {
   let last = Date.now();
   window.addEventListener("focus", () => {
     if (Date.now() - last < 60_000) return;
     last = Date.now();
     for (const [key, i] of Object.entries(store.get().instances)) {
-      if (i.me && i.connection === "live") run(refreshNotifications(key)).catch(() => {});
+      if (i.me && i.connection === "live") {
+        run(refreshNotifications(key)).catch(() => {});
+        run(refreshNode(key)).catch(() => {});
+      }
     }
   });
 }
@@ -412,6 +419,84 @@ export const setServerLimits = (key: string, serverId: string, limits: Omit<Serv
   call((signal) => api(key).admin.setServerLimits({ serverId, limits }, { signal })).pipe(
     Effect.map((r) => r.limits!),
   );
+
+/** Accounts on the instance, newest first, with what admins need to look after them. */
+export const listAccounts = (
+  key: string,
+  query: { query?: string; filter?: AccountFilter; beforeId?: string; limit?: number } = {},
+) => call((signal) => api(key).admin.listAccounts(query, { signal }));
+
+/** Makes an account an admin or not, and turns it off (with a reason) or back on. */
+export const updateAccount = (
+  key: string,
+  accountId: string,
+  change: { admin?: boolean; disabled?: boolean; reason?: string },
+) =>
+  call((signal) => api(key).admin.updateAccount({ accountId, ...change }, { signal })).pipe(
+    Effect.map((r) => r.account!),
+  );
+
+/** Gives an account a new random password, shown this once. Signs it out everywhere. */
+export const resetAccountPassword = (key: string, accountId: string, turnOffTwoFactor: boolean) =>
+  call((signal) => api(key).admin.resetAccountPassword({ accountId, turnOffTwoFactor }, { signal })).pipe(
+    Effect.map((r) => r.password),
+  );
+
+/** Every server on the instance, with its owner, usage and caps. */
+export const listInstanceServers = (key: string) =>
+  call((signal) => api(key).admin.listInstanceServers({}, { signal })).pipe(Effect.map((r) => r.servers));
+
+/**
+ * A server's whole database as one SQLite file. `progress` hears the bytes so
+ * far and the total once the first piece says it.
+ */
+export const exportServer = (key: string, serverId: string, progress: (bytes: number, total: number) => void) =>
+  Effect.tryPromise({
+    try: async (signal) => {
+      const parts: Uint8Array<ArrayBuffer>[] = [];
+      let bytes = 0;
+      let total = 0;
+      let filename = "server.db";
+      for await (const res of api(key).admin.exportServer({ serverId }, { signal })) {
+        if (res.filename) filename = res.filename;
+        if (res.size) total = Number(res.size);
+        parts.push(new Uint8Array(res.chunk));
+        bytes += res.chunk.length;
+        progress(bytes, total);
+      }
+      return { blob: new Blob(parts, { type: "application/vnd.sqlite3" }), filename };
+    },
+    catch: toFuwaError,
+  });
+
+/** Puts up the banner every client of this instance shows, or takes it down with empty text. */
+export const setAnnouncement = (
+  key: string,
+  announcement: { text: string; tone: AnnouncementTone; endsAt?: Date },
+) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) =>
+      api(key).admin.setAnnouncement(
+        {
+          announcement: {
+            text: announcement.text,
+            tone: announcement.tone,
+            endsAt: announcement.endsAt ? timestampFromDate(announcement.endsAt) : undefined,
+          },
+        },
+        { signal },
+      ),
+    );
+    updateInstance(key, (i) => (i.node ? { ...i, node: { ...i.node, announcement: res.announcement } } : i));
+    return res.announcement;
+  });
+
+/** Reads the instance's public details again: its name, sign-up options and announcement. */
+export const refreshNode = (key: string) =>
+  Effect.gen(function* () {
+    const { node } = yield* call((signal) => api(key).node.getNode({}, { signal }));
+    if (node) updateInstance(key, (i) => ({ ...i, node }));
+  });
 
 // ───────────────────────── Channels ─────────────────────────
 

@@ -1,19 +1,64 @@
+use std::pin::Pin;
+
+use futures::Stream;
+use tokio::io::AsyncReadExt;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
-use super::{Api, respond};
+use super::{Api, respond, text};
+use crate::auth::{self, Viewer};
 use crate::config::LocalAccounts;
 use crate::error::{Error, Result};
+use crate::id::{new_id, now_ms, timestamp};
+use crate::node::{AccountFilter, AccountSummary};
 use crate::pb::{self, admin_service_server::AdminService};
 use crate::servers::effective_limits;
 use crate::settings::{self, Settings};
 
+/// How much of an exported file goes in each message.
+const EXPORT_CHUNK: usize = 256 * 1024;
+
 impl Api {
-    async fn require_instance_admin(&self, metadata: &tonic::metadata::MetadataMap) -> Result<()> {
-        if !self.viewer(metadata).await?.is_instance_admin() {
+    async fn require_instance_admin(&self, metadata: &tonic::metadata::MetadataMap) -> Result<Viewer> {
+        let viewer = self.viewer(metadata).await?;
+        if !viewer.is_instance_admin() {
             return Err(Error::denied("only this instance's admins can do that"));
         }
-        Ok(())
+        Ok(viewer)
     }
+
+    fn account_summary_pb(&self, summary: AccountSummary) -> pb::AccountSummary {
+        let account = &summary.account;
+        let servers = self.app.servers.joined_ids(&account.id).len();
+        pb::AccountSummary {
+            user: Some(account.user()),
+            admin: account.admin,
+            disabled: account.disabled,
+            disabled_reason: summary.disabled_reason,
+            disabled_at: summary.disabled_at.map(timestamp),
+            two_factor: account.two_factor,
+            created_at: Some(timestamp(account.created_at)),
+            last_seen_at: Some(timestamp(account.last_seen_at)),
+            sessions: summary.sessions as i32,
+            servers: servers as i32,
+            servers_owned: self.app.servers.owned_count(&account.id) as i32,
+        }
+    }
+}
+
+/// A file name from a server's name: lowercase letters, digits and dashes.
+fn file_slug(name: &str) -> String {
+    let mut slug = String::new();
+    for c in name.chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else if !slug.ends_with('-') && !slug.is_empty() {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_end_matches('-');
+    if slug.is_empty() { "server".into() } else { slug.chars().take(48).collect() }
 }
 
 impl Api {
@@ -47,8 +92,12 @@ fn check_limit(field: &str, value: Option<i64>) -> Result<()> {
     Ok(())
 }
 
+type ExportStream = Pin<Box<dyn Stream<Item = Result<pb::ExportServerResponse, Status>> + Send>>;
+
 #[tonic::async_trait]
 impl AdminService for Api {
+    type ExportServerStream = ExportStream;
+
     async fn get_settings(
         &self,
         request: Request<pb::GetSettingsRequest>,
@@ -142,5 +191,247 @@ impl AdminService for Api {
             }
             .await,
         )
+    }
+    async fn list_accounts(
+        &self,
+        request: Request<pb::ListAccountsRequest>,
+    ) -> Result<Response<pb::ListAccountsResponse>, Status> {
+        respond(
+            async {
+                self.require_instance_admin(request.metadata()).await?;
+                let req = request.into_inner();
+                let filter = match pb::AccountFilter::try_from(req.filter) {
+                    Ok(pb::AccountFilter::Admins) => AccountFilter::Admins,
+                    Ok(pb::AccountFilter::Disabled) => AccountFilter::Disabled,
+                    _ => AccountFilter::All,
+                };
+                let limit = if req.limit <= 0 { 50 } else { i64::from(req.limit.min(200)) };
+                let (found, has_more) = self.app.node.list_accounts(&req.query, filter, &req.before_id, limit).await?;
+                let totals = self.app.node.account_totals().await?;
+                Ok(pb::ListAccountsResponse {
+                    accounts: found.into_iter().map(|summary| self.account_summary_pb(summary)).collect(),
+                    has_more,
+                    totals: Some(pb::AccountTotals {
+                        all: totals.all,
+                        admins: totals.admins,
+                        disabled: totals.disabled,
+                    }),
+                })
+            }
+            .await,
+        )
+    }
+
+    async fn update_account(
+        &self,
+        request: Request<pb::UpdateAccountRequest>,
+    ) -> Result<Response<pb::UpdateAccountResponse>, Status> {
+        respond(
+            async {
+                let viewer = self.require_instance_admin(request.metadata()).await?;
+                let req = request.into_inner();
+                if viewer.account().is_ok_and(|me| me.id == req.account_id) {
+                    return Err(Error::FailedPrecondition(
+                        "you can't change your own account here; ask another admin".into(),
+                    ));
+                }
+                let reason = text("reason", &req.reason, 0, 512)?;
+                self.app.node.account(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
+                // Taking admin away comes before turning off, and turning on before making admin.
+                if req.admin == Some(false) {
+                    self.app.node.set_admin(&req.account_id, false).await?;
+                }
+                if let Some(disabled) = req.disabled {
+                    self.app.node.set_disabled(&req.account_id, disabled, &reason).await?;
+                }
+                if req.admin == Some(true) {
+                    self.app.node.set_admin(&req.account_id, true).await?;
+                }
+                let by = viewer.account().map(|a| a.id.clone()).unwrap_or_else(|_| "operator".into());
+                tracing::info!(account = %req.account_id, admin = ?req.admin, disabled = ?req.disabled, by = %by, "account updated by an admin");
+                let summary = self.app.node.account_summary(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
+                Ok(pb::UpdateAccountResponse { account: Some(self.account_summary_pb(summary)) })
+            }
+            .await,
+        )
+    }
+
+    async fn reset_account_password(
+        &self,
+        request: Request<pb::ResetAccountPasswordRequest>,
+    ) -> Result<Response<pb::ResetAccountPasswordResponse>, Status> {
+        respond(
+            async {
+                let viewer = self.require_instance_admin(request.metadata()).await?;
+                let req = request.into_inner();
+                if viewer.account().is_ok_and(|me| me.id == req.account_id) {
+                    return Err(Error::FailedPrecondition("change your own password from your account settings".into()));
+                }
+                let account = self.app.node.account(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
+                if !account.has_password() {
+                    return Err(Error::FailedPrecondition("only standalone accounts have a password here".into()));
+                }
+                let password = auth::temporary_password();
+                let hash = auth::hash_password(password.clone()).await?;
+                self.app.node.reset_password(&account.id, &hash, req.turn_off_two_factor).await?;
+                tracing::info!(account = %account.id, two_factor_off = req.turn_off_two_factor, "password reset by an admin");
+                Ok(pb::ResetAccountPasswordResponse { password })
+            }
+            .await,
+        )
+    }
+
+    async fn list_instance_servers(
+        &self,
+        request: Request<pb::ListInstanceServersRequest>,
+    ) -> Result<Response<pb::ListInstanceServersResponse>, Status> {
+        respond(
+            async {
+                let viewer = self.require_instance_admin(request.metadata()).await?;
+                let me = viewer.account().map(|a| a.id.clone()).unwrap_or_default();
+                let defaults = self.app.settings().limits.clone();
+                let mut servers = Vec::new();
+                for id in self.app.servers.ids() {
+                    // A server deleted while listing is simply left out.
+                    let Ok(sdb) = self.app.servers.get(&id).await else { continue };
+                    let server = sdb.server().await?;
+                    let owner = match self.app.node.account(&server.owner_id).await? {
+                        Some(account) => Some(account.user()),
+                        None => crate::servers::user(&sdb.read()?, &server.owner_id).await?,
+                    };
+                    servers.push(pb::InstanceServer {
+                        owner,
+                        usage: Some(sdb.usage().await?),
+                        limits: Some(sdb.limits(&defaults).await?),
+                        member: !me.is_empty() && self.app.servers.is_member(&me, &id),
+                        server: Some(server),
+                    });
+                }
+                Ok(pb::ListInstanceServersResponse { servers })
+            }
+            .await,
+        )
+    }
+
+    async fn export_server(
+        &self,
+        request: Request<pb::ExportServerRequest>,
+    ) -> Result<Response<Self::ExportServerStream>, Status> {
+        let viewer = self.require_instance_admin(request.metadata()).await?;
+        let sdb = self.app.servers.get(&request.get_ref().server_id).await?;
+        let server = sdb.server().await?;
+        let dir = self.app.config.data_path.join("exports");
+        std::fs::create_dir_all(&dir).map_err(Error::from)?;
+        let path = dir.join(format!("{}.db", new_id()));
+        if let Err(err) = sdb.export_to(&path).await {
+            let _ = std::fs::remove_file(&path);
+            return Err(err.into());
+        }
+        let size = std::fs::metadata(&path).map_err(Error::from)?.len() as i64;
+        let by = viewer.account().map(|a| a.id.clone()).unwrap_or_else(|_| "operator".into());
+        tracing::info!(server = %sdb.id, bytes = size, by = %by, "server exported");
+
+        let filename = format!("{}.db", file_slug(&server.name));
+        let (tx, rx) = mpsc::channel::<Result<pb::ExportServerResponse, Status>>(4);
+        tokio::spawn(async move {
+            let sent = async {
+                let mut file = tokio::fs::File::open(&path).await?;
+                let mut first = true;
+                loop {
+                    let mut chunk = vec![0u8; EXPORT_CHUNK];
+                    let mut filled = 0;
+                    while filled < EXPORT_CHUNK {
+                        let n = file.read(&mut chunk[filled..]).await?;
+                        if n == 0 {
+                            break;
+                        }
+                        filled += n;
+                    }
+                    chunk.truncate(filled);
+                    if filled == 0 && !first {
+                        break;
+                    }
+                    let message = pb::ExportServerResponse {
+                        chunk,
+                        size: if first { size } else { 0 },
+                        filename: if first { filename.clone() } else { String::new() },
+                    };
+                    first = false;
+                    if tx.send(Ok(message)).await.is_err() || filled < EXPORT_CHUNK {
+                        break;
+                    }
+                }
+                std::io::Result::Ok(())
+            }
+            .await;
+            if let Err(err) = sent {
+                let _ = tx.send(Err(Status::internal(format!("couldn't read the export: {err}")))).await;
+            }
+            let _ = tokio::fs::remove_file(&path).await;
+        });
+        Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
+    }
+
+    async fn set_announcement(
+        &self,
+        request: Request<pb::SetAnnouncementRequest>,
+    ) -> Result<Response<pb::SetAnnouncementResponse>, Status> {
+        respond(
+            async {
+                self.require_instance_admin(request.metadata()).await?;
+                let next = request.into_inner().announcement.unwrap_or_default();
+                let body = text("announcement.text", &next.text, 0, 300)?;
+                if body.is_empty() {
+                    self.app.node.set_announcement(None).await?;
+                    self.app.replace_announcement(None);
+                    tracing::info!("announcement taken down");
+                    return Ok(pb::SetAnnouncementResponse { announcement: None });
+                }
+                if next.ends_at.as_ref().is_some_and(|end| crate::id::millis(end) <= now_ms()) {
+                    return Err(Error::invalid("announcement.ends_at is already past"));
+                }
+                let tone = match pb::AnnouncementTone::try_from(next.tone) {
+                    Ok(pb::AnnouncementTone::Warning) => pb::AnnouncementTone::Warning,
+                    Ok(pb::AnnouncementTone::Critical) => pb::AnnouncementTone::Critical,
+                    _ => pb::AnnouncementTone::Info,
+                };
+                // The same text keeps its id, so people who closed it don't see it again.
+                let current = self.app.node.announcement().await?;
+                let (id, created_at) = match current {
+                    Some(current) if current.text == body => (current.id, current.created_at),
+                    _ => (new_id(), Some(timestamp(now_ms()))),
+                };
+                let announcement =
+                    pb::Announcement { id, text: body, tone: tone as i32, created_at, ends_at: next.ends_at };
+                self.app.node.set_announcement(Some(&announcement)).await?;
+                self.app.replace_announcement(Some(announcement.clone()));
+                tracing::info!(id = %announcement.id, "announcement put up");
+                Ok(pb::SetAnnouncementResponse { announcement: Some(announcement) })
+            }
+            .await,
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn export_file_names() {
+        assert_eq!(file_slug("Kai's Corner!"), "kai-s-corner");
+        assert_eq!(file_slug("  Waifu   Devs  "), "waifu-devs");
+        assert_eq!(file_slug("ふわ"), "server");
+        assert_eq!(file_slug(&"a".repeat(80)).len(), 48);
+    }
+
+    #[test]
+    fn temporary_passwords_read_clearly() {
+        let password = auth::temporary_password();
+        assert_eq!(password.len(), 19);
+        assert!(password.split('-').all(|group| group.len() == 4));
+        assert!(!password.chars().any(|c| "01loI".contains(c)));
+        assert_ne!(password, auth::temporary_password());
+        assert!(auth::validate_password(&password).is_ok());
     }
 }

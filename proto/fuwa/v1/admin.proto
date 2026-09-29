@@ -4,10 +4,12 @@ package fuwa.v1;
 
 import "fuwa/v1/types.proto";
 import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
 
-// Instance administration: settings, usage across every server and the caps on
-// them. Callable by instance admins, or with the operator's FUWA_ADMIN_TOKEN
-// (for a control plane such as the one behind the hosted tiers).
+// Instance administration: settings, accounts, every server with its usage and
+// caps, and the announcement banner. Callable by instance admins, or with the
+// operator's FUWA_ADMIN_TOKEN (for a control plane such as the one behind the
+// hosted tiers).
 service AdminService {
   // The instance's settings, where each one comes from, and how the process was started.
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
@@ -17,6 +19,29 @@ service AdminService {
   rpc GetNodeUsage(GetNodeUsageRequest) returns (GetNodeUsageResponse);
   // Replaces a server's own caps. Unset fields fall back to the instance defaults.
   rpc SetServerLimits(SetServerLimitsRequest) returns (SetServerLimitsResponse);
+
+  // Accounts on this instance, newest first, a page at a time.
+  rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
+  // Makes an account an instance admin or takes that away, or turns the
+  // account off or back on. A turned-off account can't sign in and its devices
+  // are signed out. Admins can't change their own account here, and the last
+  // admin stays one.
+  rpc UpdateAccount(UpdateAccountRequest) returns (UpdateAccountResponse);
+  // Gives a standalone account a new random password, shown once, and signs
+  // out its devices. Optionally turns off its two-step sign-in too, for
+  // someone who lost their authenticator.
+  rpc ResetAccountPassword(ResetAccountPasswordRequest) returns (ResetAccountPasswordResponse);
+
+  // Every community server on the instance, with its owner, usage and caps,
+  // members or not.
+  rpc ListInstanceServers(ListInstanceServersRequest) returns (ListInstanceServersResponse);
+  // A copy of a server's database as a plain SQLite file any SQLite tool can
+  // open, sent in pieces. It is never encrypted, even when the instance
+  // encrypts its files.
+  rpc ExportServer(ExportServerRequest) returns (stream ExportServerResponse);
+
+  // Puts a banner on every client of this instance, or takes it down.
+  rpc SetAnnouncement(SetAnnouncementRequest) returns (SetAnnouncementResponse);
 }
 
 // Everything about an instance an admin can change while it runs. Each setting
@@ -123,4 +148,122 @@ message SetServerLimitsRequest {
 message SetServerLimitsResponse {
   // The caps now in force.
   ServerLimits limits = 1;
+}
+
+// ───────────────────────── Accounts ─────────────────────────
+
+// An account as instance admins see it.
+message AccountSummary {
+  User user = 1;
+  bool admin = 2;
+  // Turned off by an admin: it can't sign in.
+  bool disabled = 3;
+  // Why, as the admin put it. Only admins see it.
+  string disabled_reason = 4;
+  google.protobuf.Timestamp disabled_at = 5;
+  bool two_factor = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp last_seen_at = 8;
+  // Devices signed in right now.
+  int32 sessions = 9;
+  // Servers it's a member of, and how many of those it owns.
+  int32 servers = 10;
+  int32 servers_owned = 11;
+}
+
+enum AccountFilter {
+  // Every account.
+  ACCOUNT_FILTER_UNSPECIFIED = 0;
+  ACCOUNT_FILTER_ADMINS = 1;
+  ACCOUNT_FILTER_DISABLED = 2;
+}
+
+message ListAccountsRequest {
+  // Matches usernames and display names.
+  string query = 1;
+  AccountFilter filter = 2;
+  // For the next page: the id of the last account on the page before.
+  string before_id = 3;
+  // At most this many; 50 when unset, and never more than 200.
+  int32 limit = 4;
+}
+
+message ListAccountsResponse {
+  repeated AccountSummary accounts = 1;
+  bool has_more = 2;
+  // Across the whole instance, whatever the query and filter.
+  AccountTotals totals = 3;
+}
+
+message AccountTotals {
+  int64 all = 1;
+  int64 admins = 2;
+  int64 disabled = 3;
+}
+
+message UpdateAccountRequest {
+  string account_id = 1;
+  optional bool admin = 2;
+  optional bool disabled = 3;
+  // Why it's being turned off, up to 512 characters. Only admins see it.
+  string reason = 4;
+}
+
+message UpdateAccountResponse {
+  AccountSummary account = 1;
+}
+
+message ResetAccountPasswordRequest {
+  string account_id = 1;
+  bool turn_off_two_factor = 2;
+}
+
+message ResetAccountPasswordResponse {
+  // The new password. It isn't kept anywhere readable, so this is the only
+  // time it can be shown.
+  string password = 1;
+}
+
+// ───────────────────────── Servers ─────────────────────────
+
+// A community server as instance admins see it.
+message InstanceServer {
+  Server server = 1;
+  User owner = 2;
+  ServerUsage usage = 3;
+  // The caps in force, the server's own or the instance defaults.
+  ServerLimits limits = 4;
+  // Whether the caller is a member, and can open its own settings.
+  bool member = 5;
+}
+
+message ListInstanceServersRequest {}
+
+message ListInstanceServersResponse {
+  repeated InstanceServer servers = 1;
+}
+
+message ExportServerRequest {
+  string server_id = 1;
+}
+
+// One piece of an exported file. The first also says what the whole is.
+message ExportServerResponse {
+  bytes chunk = 1;
+  // The whole file's size in bytes. First piece only.
+  int64 size = 2;
+  // A name to save it under. First piece only.
+  string filename = 3;
+}
+
+// ───────────────────────── Announcement ─────────────────────────
+
+message SetAnnouncementRequest {
+  // Empty text takes the banner down.
+  Announcement announcement = 1;
+}
+
+message SetAnnouncementResponse {
+  // What clients now show, if anything.
+  Announcement announcement = 1;
 }

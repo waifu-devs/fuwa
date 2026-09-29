@@ -34,5 +34,11 @@ export default defineConfig({
   build: {
     target: "es2022",
     chunkSizeWarningLimit: 1500,
+    // Libraries in their own file: the app's code changes far more often, and each stays under the limit.
+    rolldownOptions: {
+      output: {
+        codeSplitting: { groups: [{ name: "vendor", test: /node_modules/ }] },
+      },
+    },
   },
 });

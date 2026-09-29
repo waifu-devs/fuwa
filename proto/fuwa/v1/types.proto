@@ -19,6 +19,30 @@ message Node {
   ServerCreation server_creation = 5;
   // Whether this instance sends the anonymous usage signal.
   bool telemetry = 6;
+  // A banner the instance's admins put up for everyone, while it runs.
+  Announcement announcement = 7;
+}
+
+// A notice from an instance's admins, shown on every client, signed in or not.
+message Announcement {
+  // Changes with the text, so a banner someone closed comes back for a new one.
+  string id = 1;
+  // Inline Markdown, up to 300 characters.
+  string text = 2;
+  AnnouncementTone tone = 3;
+  google.protobuf.Timestamp created_at = 4;
+  // When it comes down by itself. Unset: it stays until an admin takes it down.
+  google.protobuf.Timestamp ends_at = 5;
+}
+
+enum AnnouncementTone {
+  // Same as INFO.
+  ANNOUNCEMENT_TONE_UNSPECIFIED = 0;
+  ANNOUNCEMENT_TONE_INFO = 1;
+  // Something is about to change, such as planned maintenance.
+  ANNOUNCEMENT_TONE_WARNING = 2;
+  // Something is wrong now. Clients don't let people close it.
+  ANNOUNCEMENT_TONE_CRITICAL = 3;
 }
 
 // Which kinds of account this instance accepts. The operator switches each on or off.
