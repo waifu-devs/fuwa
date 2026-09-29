@@ -1,10 +1,11 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import type { Event } from "@/gen/fuwa/v1/types_pb";
+import { LeaveReason, MessageKind, type Event } from "@/gen/fuwa/v1/types_pb";
 import { store, type InstanceState } from "@/fuwa/store";
 import { displayName, memberName, mentions } from "@/lib/format";
 import { effectiveNotifications, mentionsEveryone, shouldAlert } from "@/lib/notifications";
 import { getPrefs, subscribePrefs } from "@/lib/prefs";
 import { play } from "@/lib/sounds";
+import { toast } from "@/lib/ui";
 
 /**
  * What this device does when something happens while you're elsewhere:
@@ -42,7 +43,8 @@ export function onLiveEvent(key: string, event: Event) {
   const p = event.payload;
   if (p.case === "messageCreated") {
     const message = p.value.message;
-    if (!message || message.authorId === me.id) return;
+    // Join messages chime through memberJoined instead.
+    if (!message || message.authorId === me.id || message.kind !== MessageKind.UNSPECIFIED) return;
     const looking = !document.hidden && s.focus?.instance === key && s.focus.channel === message.channelId;
     const settings = effectiveNotifications(inst, event.serverId, message.channelId);
     const mention =
@@ -57,6 +59,12 @@ export function onLiveEvent(key: string, event: Event) {
     const viewing = s.focus?.instance === key && (inst.channels[event.serverId] ?? []).some((c) => c.id === s.focus!.channel);
     if (user && user.id !== me.id && viewing) playSome("join", 800);
   }
+}
+
+/** Tells you when an owner or admin took you out of a server. Called with its name, which is gone from the store by then. */
+export function onRemoved(serverName: string, reason: LeaveReason) {
+  if (reason === LeaveReason.KICKED) toast(`You were removed from ${serverName}`);
+  else if (reason === LeaveReason.BANNED) toast(`You were banned from ${serverName}`);
 }
 
 function notify(inst: InstanceState, serverId: string, channelId: string, authorId: string, content: string, mention: boolean) {

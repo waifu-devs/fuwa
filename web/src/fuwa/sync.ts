@@ -2,7 +2,7 @@ import { Code } from "@connectrpc/connect";
 import { Effect, Fiber, FiberSet, Schedule, Stream, SubscriptionRef } from "effect";
 import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
 import type { Event } from "@/gen/fuwa/v1/types_pb";
-import { onLiveEvent } from "@/lib/notify";
+import { onLiveEvent, onRemoved } from "@/lib/notify";
 import { makeApi, type Api } from "./client";
 import { FuwaError, call, toFuwaError } from "./errors";
 import { instanceKey, loadSaved, storeSaved, type SavedInstance } from "./saved";
@@ -233,6 +233,11 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           cursors.set(sid, event.sequence);
         }
         const buffer = held.get(sid);
+        const me = store.get().instances[key]?.me?.id;
+        const removed =
+          event.payload.case === "memberLeft" && event.payload.value.userId === me
+            ? { name: store.get().instances[key]?.servers.find((s) => s.id === sid)?.name, reason: event.payload.value.reason }
+            : null;
         if (buffer) buffer.push(event);
         else {
           store.update((s) => {
@@ -243,7 +248,7 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           });
           onLiveEvent(key, event);
         }
-        const me = store.get().instances[key]?.me?.id;
+        if (removed?.name) onRemoved(removed.name, removed.reason);
         const gone =
           event.payload.case === "serverDeleted" ||
           (event.payload.case === "memberLeft" && event.payload.value.userId === me);

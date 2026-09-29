@@ -2,17 +2,19 @@
 // @generated from file fuwa/v1/server.proto (package fuwa.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Member, Server, ServerLimits, ServerUsage } from "./types_pb";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Member, MemberRole, NotificationLevel, Server, ServerLimits, ServerUsage, User } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file fuwa/v1/server.proto.
  */
 export const file_fuwa_v1_server: GenFile = /*@__PURE__*/
-  fileDesc("ChRmdXdhL3YxL3NlcnZlci5wcm90bxIHZnV3YS52MSJgChNDcmVhdGVTZXJ2ZXJSZXF1ZXN0EgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSEAoIaWNvbl91cmwYAyABKAkSFAoMZGlzY292ZXJhYmxlGAQgASgIIjcKFENyZWF0ZVNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIiUKEEdldFNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjQKEUdldFNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIhQKEkxpc3RTZXJ2ZXJzUmVxdWVzdCI3ChNMaXN0U2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciIYChZEaXNjb3ZlclNlcnZlcnNSZXF1ZXN0IjsKF0Rpc2NvdmVyU2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciK+AQoTVXBkYXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEQoEbmFtZRgCIAEoCUgAiAEBEhgKC2Rlc2NyaXB0aW9uGAMgASgJSAGIAQESFQoIaWNvbl91cmwYBCABKAlIAogBARIZCgxkaXNjb3ZlcmFibGUYBSABKAhIA4gBAUIHCgVfbmFtZUIOCgxfZGVzY3JpcHRpb25CCwoJX2ljb25fdXJsQg8KDV9kaXNjb3ZlcmFibGUiNwoUVXBkYXRlU2VydmVyUmVzcG9uc2USHwoGc2VydmVyGAEgASgLMg8uZnV3YS52MS5TZXJ2ZXIiKAoTRGVsZXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiFgoURGVsZXRlU2VydmVyUmVzcG9uc2UiJgoRSm9pblNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIlYKEkpvaW5TZXJ2ZXJSZXNwb25zZRIfCgZzZXJ2ZXIYASABKAsyDy5mdXdhLnYxLlNlcnZlchIfCgZtZW1iZXIYAiABKAsyDy5mdXdhLnYxLk1lbWJlciInChJMZWF2ZVNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIhUKE0xlYXZlU2VydmVyUmVzcG9uc2UiJwoSTGlzdE1lbWJlcnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSI3ChNMaXN0TWVtYmVyc1Jlc3BvbnNlEiAKB21lbWJlcnMYASADKAsyDy5mdXdhLnYxLk1lbWJlciJdChNVcGRhdGVNZW1iZXJSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhUKCG5pY2tuYW1lGAMgASgJSACIAQFCCwoJX25pY2tuYW1lIjcKFFVwZGF0ZU1lbWJlclJlc3BvbnNlEh8KBm1lbWJlchgBIAEoCzIPLmZ1d2EudjEuTWVtYmVyIioKFUdldFNlcnZlclVzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkijwEKFkdldFNlcnZlclVzYWdlUmVzcG9uc2USIwoFdXNhZ2UYASABKAsyFC5mdXdhLnYxLlNlcnZlclVzYWdlEiUKBmxpbWl0cxgCIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzEikKCm93bl9saW1pdHMYAyABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0czLVBgoNU2VydmVyU2VydmljZRJLCgxDcmVhdGVTZXJ2ZXISHC5mdXdhLnYxLkNyZWF0ZVNlcnZlclJlcXVlc3QaHS5mdXdhLnYxLkNyZWF0ZVNlcnZlclJlc3BvbnNlEkIKCUdldFNlcnZlchIZLmZ1d2EudjEuR2V0U2VydmVyUmVxdWVzdBoaLmZ1d2EudjEuR2V0U2VydmVyUmVzcG9uc2USSAoLTGlzdFNlcnZlcnMSGy5mdXdhLnYxLkxpc3RTZXJ2ZXJzUmVxdWVzdBocLmZ1d2EudjEuTGlzdFNlcnZlcnNSZXNwb25zZRJUCg9EaXNjb3ZlclNlcnZlcnMSHy5mdXdhLnYxLkRpc2NvdmVyU2VydmVyc1JlcXVlc3QaIC5mdXdhLnYxLkRpc2NvdmVyU2VydmVyc1Jlc3BvbnNlEksKDFVwZGF0ZVNlcnZlchIcLmZ1d2EudjEuVXBkYXRlU2VydmVyUmVxdWVzdBodLmZ1d2EudjEuVXBkYXRlU2VydmVyUmVzcG9uc2USSwoMRGVsZXRlU2VydmVyEhwuZnV3YS52MS5EZWxldGVTZXJ2ZXJSZXF1ZXN0Gh0uZnV3YS52MS5EZWxldGVTZXJ2ZXJSZXNwb25zZRJFCgpKb2luU2VydmVyEhouZnV3YS52MS5Kb2luU2VydmVyUmVxdWVzdBobLmZ1d2EudjEuSm9pblNlcnZlclJlc3BvbnNlEkgKC0xlYXZlU2VydmVyEhsuZnV3YS52MS5MZWF2ZVNlcnZlclJlcXVlc3QaHC5mdXdhLnYxLkxlYXZlU2VydmVyUmVzcG9uc2USSAoLTGlzdE1lbWJlcnMSGy5mdXdhLnYxLkxpc3RNZW1iZXJzUmVxdWVzdBocLmZ1d2EudjEuTGlzdE1lbWJlcnNSZXNwb25zZRJLCgxVcGRhdGVNZW1iZXISHC5mdXdhLnYxLlVwZGF0ZU1lbWJlclJlcXVlc3QaHS5mdXdhLnYxLlVwZGF0ZU1lbWJlclJlc3BvbnNlElEKDkdldFNlcnZlclVzYWdlEh4uZnV3YS52MS5HZXRTZXJ2ZXJVc2FnZVJlcXVlc3QaHy5mdXdhLnYxLkdldFNlcnZlclVzYWdlUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
+  fileDesc("ChRmdXdhL3YxL3NlcnZlci5wcm90bxIHZnV3YS52MSJgChNDcmVhdGVTZXJ2ZXJSZXF1ZXN0EgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSEAoIaWNvbl91cmwYAyABKAkSFAoMZGlzY292ZXJhYmxlGAQgASgIIjcKFENyZWF0ZVNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIiUKEEdldFNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjQKEUdldFNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIhQKEkxpc3RTZXJ2ZXJzUmVxdWVzdCI3ChNMaXN0U2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciIYChZEaXNjb3ZlclNlcnZlcnNSZXF1ZXN0IjsKF0Rpc2NvdmVyU2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciLOAgoTVXBkYXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEQoEbmFtZRgCIAEoCUgAiAEBEhgKC2Rlc2NyaXB0aW9uGAMgASgJSAGIAQESFQoIaWNvbl91cmwYBCABKAlIAogBARIZCgxkaXNjb3ZlcmFibGUYBSABKAhIA4gBARI+ChVkZWZhdWx0X25vdGlmaWNhdGlvbnMYBiABKA4yGi5mdXdhLnYxLk5vdGlmaWNhdGlvbkxldmVsSASIAQESHgoRc3lzdGVtX2NoYW5uZWxfaWQYByABKAlIBYgBAUIHCgVfbmFtZUIOCgxfZGVzY3JpcHRpb25CCwoJX2ljb25fdXJsQg8KDV9kaXNjb3ZlcmFibGVCGAoWX2RlZmF1bHRfbm90aWZpY2F0aW9uc0IUChJfc3lzdGVtX2NoYW5uZWxfaWQiNwoUVXBkYXRlU2VydmVyUmVzcG9uc2USHwoGc2VydmVyGAEgASgLMg8uZnV3YS52MS5TZXJ2ZXIiKAoTRGVsZXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiFgoURGVsZXRlU2VydmVyUmVzcG9uc2UiJgoRSm9pblNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIlYKEkpvaW5TZXJ2ZXJSZXNwb25zZRIfCgZzZXJ2ZXIYASABKAsyDy5mdXdhLnYxLlNlcnZlchIfCgZtZW1iZXIYAiABKAsyDy5mdXdhLnYxLk1lbWJlciInChJMZWF2ZVNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIhUKE0xlYXZlU2VydmVyUmVzcG9uc2UiJwoSTGlzdE1lbWJlcnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSI3ChNMaXN0TWVtYmVyc1Jlc3BvbnNlEiAKB21lbWJlcnMYASADKAsyDy5mdXdhLnYxLk1lbWJlciKOAQoTVXBkYXRlTWVtYmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIVCghuaWNrbmFtZRgDIAEoCUgAiAEBEiYKBHJvbGUYBCABKA4yEy5mdXdhLnYxLk1lbWJlclJvbGVIAYgBAUILCglfbmlja25hbWVCBwoFX3JvbGUiNwoUVXBkYXRlTWVtYmVyUmVzcG9uc2USHwoGbWVtYmVyGAEgASgLMg8uZnV3YS52MS5NZW1iZXIiKgoVR2V0U2VydmVyVXNhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSKPAQoWR2V0U2VydmVyVXNhZ2VSZXNwb25zZRIjCgV1c2FnZRgBIAEoCzIULmZ1d2EudjEuU2VydmVyVXNhZ2USJQoGbGltaXRzGAIgASgLMhUuZnV3YS52MS5TZXJ2ZXJMaW1pdHMSKQoKb3duX2xpbWl0cxgDIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzIlsKFFRpbWVPdXRNZW1iZXJSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEg8KB3NlY29uZHMYAyABKAMSDgoGcmVhc29uGAQgASgJIjgKFVRpbWVPdXRNZW1iZXJSZXNwb25zZRIfCgZtZW1iZXIYASABKAsyDy5mdXdhLnYxLk1lbWJlciJHChFLaWNrTWVtYmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIOCgZyZWFzb24YAyABKAkiFAoSS2lja01lbWJlclJlc3BvbnNlImYKEEJhbk1lbWJlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAkSDgoGcmVhc29uGAMgASgJEh4KFmRlbGV0ZV9tZXNzYWdlX3NlY29uZHMYBCABKAMiSAoRQmFuTWVtYmVyUmVzcG9uc2USGQoDYmFuGAEgASgLMgwuZnV3YS52MS5CYW4SGAoQZGVsZXRlZF9tZXNzYWdlcxgCIAEoAyI4ChJVbmJhbk1lbWJlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAkiFQoTVW5iYW5NZW1iZXJSZXNwb25zZSIkCg9MaXN0QmFuc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIlEKEExpc3RCYW5zUmVzcG9uc2USGgoEYmFucxgBIAMoCzIMLmZ1d2EudjEuQmFuEiEKCm1vZGVyYXRvcnMYAiADKAsyDS5mdXdhLnYxLlVzZXIieAoDQmFuEhsKBHVzZXIYASABKAsyDS5mdXdhLnYxLlVzZXISDgoGcmVhc29uGAIgASgJEhQKDGJhbm5lZF9ieV9pZBgDIAEoCRIuCgpjcmVhdGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKCAQoTTGlzdEF1ZGl0TG9nUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDQoFbGltaXQYAiABKAUSEQoJYmVmb3JlX2lkGAMgASgJEhAKCGFjdG9yX2lkGAQgASgJEiQKBmFjdGlvbhgFIAEoDjIULmZ1d2EudjEuQXVkaXRBY3Rpb24ibAoUTGlzdEF1ZGl0TG9nUmVzcG9uc2USJAoHZW50cmllcxgBIAMoCzITLmZ1d2EudjEuQXVkaXRFbnRyeRIcCgV1c2VycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCCLgAQoKQXVkaXRFbnRyeRIKCgJpZBgBIAEoCRIQCghhY3Rvcl9pZBgCIAEoCRIkCgZhY3Rpb24YAyABKA4yFC5mdXdhLnYxLkF1ZGl0QWN0aW9uEhEKCXRhcmdldF9pZBgEIAEoCRIUCgxjaGFubmVsX25hbWUYBSABKAkSDgoGcmVhc29uGAYgASgJEiUKB2NoYW5nZXMYByADKAsyFC5mdXdhLnYxLkF1ZGl0Q2hhbmdlEi4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIjsKC0F1ZGl0Q2hhbmdlEg0KBWZpZWxkGAEgASgJEg4KBmJlZm9yZRgCIAEoCRINCgVhZnRlchgDIAEoCSI+ChhUcmFuc2Zlck93bmVyc2hpcFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAkiPAoZVHJhbnNmZXJPd25lcnNoaXBSZXNwb25zZRIfCgZzZXJ2ZXIYASABKAsyDy5mdXdhLnYxLlNlcnZlciqzAwoLQXVkaXRBY3Rpb24SHAoYQVVESVRfQUNUSU9OX1VOU1BFQ0lGSUVEEAASHgoaQVVESVRfQUNUSU9OX1NFUlZFUl9VUERBVEUQARIfChtBVURJVF9BQ1RJT05fQ0hBTk5FTF9DUkVBVEUQAhIfChtBVURJVF9BQ1RJT05fQ0hBTk5FTF9VUERBVEUQAxIfChtBVURJVF9BQ1RJT05fQ0hBTk5FTF9ERUxFVEUQBBIhCh1BVURJVF9BQ1RJT05fQ0hBTk5FTFNfUkVPUkRFUhAFEh4KGkFVRElUX0FDVElPTl9NRU1CRVJfVVBEQVRFEAYSIAocQVVESVRfQUNUSU9OX01FTUJFUl9USU1FX09VVBAHEhwKGEFVRElUX0FDVElPTl9NRU1CRVJfS0lDSxAIEhsKF0FVRElUX0FDVElPTl9NRU1CRVJfQkFOEAkSHQoZQVVESVRfQUNUSU9OX01FTUJFUl9VTkJBThAKEh8KG0FVRElUX0FDVElPTl9NRVNTQUdFX0RFTEVURRALEiMKH0FVRElUX0FDVElPTl9PV05FUlNISVBfVFJBTlNGRVIQDDLkCgoNU2VydmVyU2VydmljZRJLCgxDcmVhdGVTZXJ2ZXISHC5mdXdhLnYxLkNyZWF0ZVNlcnZlclJlcXVlc3QaHS5mdXdhLnYxLkNyZWF0ZVNlcnZlclJlc3BvbnNlEkIKCUdldFNlcnZlchIZLmZ1d2EudjEuR2V0U2VydmVyUmVxdWVzdBoaLmZ1d2EudjEuR2V0U2VydmVyUmVzcG9uc2USSAoLTGlzdFNlcnZlcnMSGy5mdXdhLnYxLkxpc3RTZXJ2ZXJzUmVxdWVzdBocLmZ1d2EudjEuTGlzdFNlcnZlcnNSZXNwb25zZRJUCg9EaXNjb3ZlclNlcnZlcnMSHy5mdXdhLnYxLkRpc2NvdmVyU2VydmVyc1JlcXVlc3QaIC5mdXdhLnYxLkRpc2NvdmVyU2VydmVyc1Jlc3BvbnNlEksKDFVwZGF0ZVNlcnZlchIcLmZ1d2EudjEuVXBkYXRlU2VydmVyUmVxdWVzdBodLmZ1d2EudjEuVXBkYXRlU2VydmVyUmVzcG9uc2USSwoMRGVsZXRlU2VydmVyEhwuZnV3YS52MS5EZWxldGVTZXJ2ZXJSZXF1ZXN0Gh0uZnV3YS52MS5EZWxldGVTZXJ2ZXJSZXNwb25zZRJFCgpKb2luU2VydmVyEhouZnV3YS52MS5Kb2luU2VydmVyUmVxdWVzdBobLmZ1d2EudjEuSm9pblNlcnZlclJlc3BvbnNlEkgKC0xlYXZlU2VydmVyEhsuZnV3YS52MS5MZWF2ZVNlcnZlclJlcXVlc3QaHC5mdXdhLnYxLkxlYXZlU2VydmVyUmVzcG9uc2USSAoLTGlzdE1lbWJlcnMSGy5mdXdhLnYxLkxpc3RNZW1iZXJzUmVxdWVzdBocLmZ1d2EudjEuTGlzdE1lbWJlcnNSZXNwb25zZRJLCgxVcGRhdGVNZW1iZXISHC5mdXdhLnYxLlVwZGF0ZU1lbWJlclJlcXVlc3QaHS5mdXdhLnYxLlVwZGF0ZU1lbWJlclJlc3BvbnNlElEKDkdldFNlcnZlclVzYWdlEh4uZnV3YS52MS5HZXRTZXJ2ZXJVc2FnZVJlcXVlc3QaHy5mdXdhLnYxLkdldFNlcnZlclVzYWdlUmVzcG9uc2USTgoNVGltZU91dE1lbWJlchIdLmZ1d2EudjEuVGltZU91dE1lbWJlclJlcXVlc3QaHi5mdXdhLnYxLlRpbWVPdXRNZW1iZXJSZXNwb25zZRJFCgpLaWNrTWVtYmVyEhouZnV3YS52MS5LaWNrTWVtYmVyUmVxdWVzdBobLmZ1d2EudjEuS2lja01lbWJlclJlc3BvbnNlEkIKCUJhbk1lbWJlchIZLmZ1d2EudjEuQmFuTWVtYmVyUmVxdWVzdBoaLmZ1d2EudjEuQmFuTWVtYmVyUmVzcG9uc2USSAoLVW5iYW5NZW1iZXISGy5mdXdhLnYxLlVuYmFuTWVtYmVyUmVxdWVzdBocLmZ1d2EudjEuVW5iYW5NZW1iZXJSZXNwb25zZRI/CghMaXN0QmFucxIYLmZ1d2EudjEuTGlzdEJhbnNSZXF1ZXN0GhkuZnV3YS52MS5MaXN0QmFuc1Jlc3BvbnNlEksKDExpc3RBdWRpdExvZxIcLmZ1d2EudjEuTGlzdEF1ZGl0TG9nUmVxdWVzdBodLmZ1d2EudjEuTGlzdEF1ZGl0TG9nUmVzcG9uc2USWgoRVHJhbnNmZXJPd25lcnNoaXASIS5mdXdhLnYxLlRyYW5zZmVyT3duZXJzaGlwUmVxdWVzdBoiLmZ1d2EudjEuVHJhbnNmZXJPd25lcnNoaXBSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.CreateServerRequest
@@ -185,6 +187,20 @@ export type UpdateServerRequest = Message<"fuwa.v1.UpdateServerRequest"> & {
    * @generated from field: optional bool discoverable = 5;
    */
   discoverable?: boolean | undefined;
+
+  /**
+   * Unset, ALL or MENTIONS.
+   *
+   * @generated from field: optional fuwa.v1.NotificationLevel default_notifications = 6;
+   */
+  defaultNotifications?: NotificationLevel | undefined;
+
+  /**
+   * A text channel, or empty to post no system messages.
+   *
+   * @generated from field: optional string system_channel_id = 7;
+   */
+  systemChannelId?: string | undefined;
 };
 
 /**
@@ -364,6 +380,13 @@ export type UpdateMemberRequest = Message<"fuwa.v1.UpdateMemberRequest"> & {
    * @generated from field: optional string nickname = 3;
    */
   nickname?: string | undefined;
+
+  /**
+   * Member or admin. Owner only; ownership moves with TransferOwnership.
+   *
+   * @generated from field: optional fuwa.v1.MemberRole role = 4;
+   */
+  role?: MemberRole | undefined;
 };
 
 /**
@@ -437,6 +460,554 @@ export type GetServerUsageResponse = Message<"fuwa.v1.GetServerUsageResponse"> &
  */
 export const GetServerUsageResponseSchema: GenMessage<GetServerUsageResponse> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_server, 21);
+
+/**
+ * @generated from message fuwa.v1.TimeOutMemberRequest
+ */
+export type TimeOutMemberRequest = Message<"fuwa.v1.TimeOutMemberRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string user_id = 2;
+   */
+  userId: string;
+
+  /**
+   * Up to 28 days. Zero ends a time-out early.
+   *
+   * @generated from field: int64 seconds = 3;
+   */
+  seconds: bigint;
+
+  /**
+   * Kept in the audit log.
+   *
+   * @generated from field: string reason = 4;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message fuwa.v1.TimeOutMemberRequest.
+ * Use `create(TimeOutMemberRequestSchema)` to create a new message.
+ */
+export const TimeOutMemberRequestSchema: GenMessage<TimeOutMemberRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 22);
+
+/**
+ * @generated from message fuwa.v1.TimeOutMemberResponse
+ */
+export type TimeOutMemberResponse = Message<"fuwa.v1.TimeOutMemberResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.Member member = 1;
+   */
+  member?: Member | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.TimeOutMemberResponse.
+ * Use `create(TimeOutMemberResponseSchema)` to create a new message.
+ */
+export const TimeOutMemberResponseSchema: GenMessage<TimeOutMemberResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 23);
+
+/**
+ * @generated from message fuwa.v1.KickMemberRequest
+ */
+export type KickMemberRequest = Message<"fuwa.v1.KickMemberRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string user_id = 2;
+   */
+  userId: string;
+
+  /**
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message fuwa.v1.KickMemberRequest.
+ * Use `create(KickMemberRequestSchema)` to create a new message.
+ */
+export const KickMemberRequestSchema: GenMessage<KickMemberRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 24);
+
+/**
+ * @generated from message fuwa.v1.KickMemberResponse
+ */
+export type KickMemberResponse = Message<"fuwa.v1.KickMemberResponse"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.KickMemberResponse.
+ * Use `create(KickMemberResponseSchema)` to create a new message.
+ */
+export const KickMemberResponseSchema: GenMessage<KickMemberResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 25);
+
+/**
+ * @generated from message fuwa.v1.BanMemberRequest
+ */
+export type BanMemberRequest = Message<"fuwa.v1.BanMemberRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string user_id = 2;
+   */
+  userId: string;
+
+  /**
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
+
+  /**
+   * Also deletes what they sent in this many seconds before the ban, up to
+   * seven days. Zero keeps their messages.
+   *
+   * @generated from field: int64 delete_message_seconds = 4;
+   */
+  deleteMessageSeconds: bigint;
+};
+
+/**
+ * Describes the message fuwa.v1.BanMemberRequest.
+ * Use `create(BanMemberRequestSchema)` to create a new message.
+ */
+export const BanMemberRequestSchema: GenMessage<BanMemberRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 26);
+
+/**
+ * @generated from message fuwa.v1.BanMemberResponse
+ */
+export type BanMemberResponse = Message<"fuwa.v1.BanMemberResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.Ban ban = 1;
+   */
+  ban?: Ban | undefined;
+
+  /**
+   * How many of their messages went with them.
+   *
+   * @generated from field: int64 deleted_messages = 2;
+   */
+  deletedMessages: bigint;
+};
+
+/**
+ * Describes the message fuwa.v1.BanMemberResponse.
+ * Use `create(BanMemberResponseSchema)` to create a new message.
+ */
+export const BanMemberResponseSchema: GenMessage<BanMemberResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 27);
+
+/**
+ * @generated from message fuwa.v1.UnbanMemberRequest
+ */
+export type UnbanMemberRequest = Message<"fuwa.v1.UnbanMemberRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string user_id = 2;
+   */
+  userId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.UnbanMemberRequest.
+ * Use `create(UnbanMemberRequestSchema)` to create a new message.
+ */
+export const UnbanMemberRequestSchema: GenMessage<UnbanMemberRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 28);
+
+/**
+ * @generated from message fuwa.v1.UnbanMemberResponse
+ */
+export type UnbanMemberResponse = Message<"fuwa.v1.UnbanMemberResponse"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.UnbanMemberResponse.
+ * Use `create(UnbanMemberResponseSchema)` to create a new message.
+ */
+export const UnbanMemberResponseSchema: GenMessage<UnbanMemberResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 29);
+
+/**
+ * @generated from message fuwa.v1.ListBansRequest
+ */
+export type ListBansRequest = Message<"fuwa.v1.ListBansRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ListBansRequest.
+ * Use `create(ListBansRequestSchema)` to create a new message.
+ */
+export const ListBansRequestSchema: GenMessage<ListBansRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 30);
+
+/**
+ * @generated from message fuwa.v1.ListBansResponse
+ */
+export type ListBansResponse = Message<"fuwa.v1.ListBansResponse"> & {
+  /**
+   * Newest first.
+   *
+   * @generated from field: repeated fuwa.v1.Ban bans = 1;
+   */
+  bans: Ban[];
+
+  /**
+   * Whoever banned them, for names.
+   *
+   * @generated from field: repeated fuwa.v1.User moderators = 2;
+   */
+  moderators: User[];
+};
+
+/**
+ * Describes the message fuwa.v1.ListBansResponse.
+ * Use `create(ListBansResponseSchema)` to create a new message.
+ */
+export const ListBansResponseSchema: GenMessage<ListBansResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 31);
+
+/**
+ * @generated from message fuwa.v1.Ban
+ */
+export type Ban = Message<"fuwa.v1.Ban"> & {
+  /**
+   * @generated from field: fuwa.v1.User user = 1;
+   */
+  user?: User | undefined;
+
+  /**
+   * @generated from field: string reason = 2;
+   */
+  reason: string;
+
+  /**
+   * @generated from field: string banned_by_id = 3;
+   */
+  bannedById: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 4;
+   */
+  createdAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.Ban.
+ * Use `create(BanSchema)` to create a new message.
+ */
+export const BanSchema: GenMessage<Ban> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 32);
+
+/**
+ * @generated from message fuwa.v1.ListAuditLogRequest
+ */
+export type ListAuditLogRequest = Message<"fuwa.v1.ListAuditLogRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * 1 to 100; defaults to 50.
+   *
+   * @generated from field: int32 limit = 2;
+   */
+  limit: number;
+
+  /**
+   * The page right before this entry. Empty for the newest.
+   *
+   * @generated from field: string before_id = 3;
+   */
+  beforeId: string;
+
+  /**
+   * Only what this person did.
+   *
+   * @generated from field: string actor_id = 4;
+   */
+  actorId: string;
+
+  /**
+   * Only this kind of action.
+   *
+   * @generated from field: fuwa.v1.AuditAction action = 5;
+   */
+  action: AuditAction;
+};
+
+/**
+ * Describes the message fuwa.v1.ListAuditLogRequest.
+ * Use `create(ListAuditLogRequestSchema)` to create a new message.
+ */
+export const ListAuditLogRequestSchema: GenMessage<ListAuditLogRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 33);
+
+/**
+ * @generated from message fuwa.v1.ListAuditLogResponse
+ */
+export type ListAuditLogResponse = Message<"fuwa.v1.ListAuditLogResponse"> & {
+  /**
+   * Newest first.
+   *
+   * @generated from field: repeated fuwa.v1.AuditEntry entries = 1;
+   */
+  entries: AuditEntry[];
+
+  /**
+   * Everyone the entries name, as actor or target, for names and faces.
+   *
+   * @generated from field: repeated fuwa.v1.User users = 2;
+   */
+  users: User[];
+
+  /**
+   * @generated from field: bool has_more = 3;
+   */
+  hasMore: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.ListAuditLogResponse.
+ * Use `create(ListAuditLogResponseSchema)` to create a new message.
+ */
+export const ListAuditLogResponseSchema: GenMessage<ListAuditLogResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 34);
+
+/**
+ * One thing an owner or admin did.
+ *
+ * @generated from message fuwa.v1.AuditEntry
+ */
+export type AuditEntry = Message<"fuwa.v1.AuditEntry"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string actor_id = 2;
+   */
+  actorId: string;
+
+  /**
+   * @generated from field: fuwa.v1.AuditAction action = 3;
+   */
+  action: AuditAction;
+
+  /**
+   * A user for member and message actions, a channel for channel actions,
+   * empty for the server itself.
+   *
+   * @generated from field: string target_id = 4;
+   */
+  targetId: string;
+
+  /**
+   * The channel's name at the time, for channel actions and deleted messages.
+   *
+   * @generated from field: string channel_name = 5;
+   */
+  channelName: string;
+
+  /**
+   * @generated from field: string reason = 6;
+   */
+  reason: string;
+
+  /**
+   * What changed, for updates.
+   *
+   * @generated from field: repeated fuwa.v1.AuditChange changes = 7;
+   */
+  changes: AuditChange[];
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 8;
+   */
+  createdAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.AuditEntry.
+ * Use `create(AuditEntrySchema)` to create a new message.
+ */
+export const AuditEntrySchema: GenMessage<AuditEntry> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 35);
+
+/**
+ * One field before and after. Values are text: numbers and times (unix
+ * milliseconds) as digits, flags as "true" or "false", enums as their number.
+ *
+ * @generated from message fuwa.v1.AuditChange
+ */
+export type AuditChange = Message<"fuwa.v1.AuditChange"> & {
+  /**
+   * @generated from field: string field = 1;
+   */
+  field: string;
+
+  /**
+   * @generated from field: string before = 2;
+   */
+  before: string;
+
+  /**
+   * @generated from field: string after = 3;
+   */
+  after: string;
+};
+
+/**
+ * Describes the message fuwa.v1.AuditChange.
+ * Use `create(AuditChangeSchema)` to create a new message.
+ */
+export const AuditChangeSchema: GenMessage<AuditChange> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 36);
+
+/**
+ * @generated from message fuwa.v1.TransferOwnershipRequest
+ */
+export type TransferOwnershipRequest = Message<"fuwa.v1.TransferOwnershipRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string user_id = 2;
+   */
+  userId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.TransferOwnershipRequest.
+ * Use `create(TransferOwnershipRequestSchema)` to create a new message.
+ */
+export const TransferOwnershipRequestSchema: GenMessage<TransferOwnershipRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 37);
+
+/**
+ * @generated from message fuwa.v1.TransferOwnershipResponse
+ */
+export type TransferOwnershipResponse = Message<"fuwa.v1.TransferOwnershipResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.Server server = 1;
+   */
+  server?: Server | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.TransferOwnershipResponse.
+ * Use `create(TransferOwnershipResponseSchema)` to create a new message.
+ */
+export const TransferOwnershipResponseSchema: GenMessage<TransferOwnershipResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 38);
+
+/**
+ * @generated from enum fuwa.v1.AuditAction
+ */
+export enum AuditAction {
+  /**
+   * @generated from enum value: AUDIT_ACTION_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_SERVER_UPDATE = 1;
+   */
+  SERVER_UPDATE = 1,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_CHANNEL_CREATE = 2;
+   */
+  CHANNEL_CREATE = 2,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_CHANNEL_UPDATE = 3;
+   */
+  CHANNEL_UPDATE = 3,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_CHANNEL_DELETE = 4;
+   */
+  CHANNEL_DELETE = 4,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_CHANNELS_REORDER = 5;
+   */
+  CHANNELS_REORDER = 5,
+
+  /**
+   * A nickname set by someone else, or a new role.
+   *
+   * @generated from enum value: AUDIT_ACTION_MEMBER_UPDATE = 6;
+   */
+  MEMBER_UPDATE = 6,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_MEMBER_TIME_OUT = 7;
+   */
+  MEMBER_TIME_OUT = 7,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_MEMBER_KICK = 8;
+   */
+  MEMBER_KICK = 8,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_MEMBER_BAN = 9;
+   */
+  MEMBER_BAN = 9,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_MEMBER_UNBAN = 10;
+   */
+  MEMBER_UNBAN = 10,
+
+  /**
+   * Someone else's message, deleted by an owner or admin.
+   *
+   * @generated from enum value: AUDIT_ACTION_MESSAGE_DELETE = 11;
+   */
+  MESSAGE_DELETE = 11,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_OWNERSHIP_TRANSFER = 12;
+   */
+  OWNERSHIP_TRANSFER = 12,
+}
+
+/**
+ * Describes the enum fuwa.v1.AuditAction.
+ */
+export const AuditActionSchema: GenEnum<AuditAction> = /*@__PURE__*/
+  enumDesc(file_fuwa_v1_server, 0);
 
 /**
  * Community servers on this instance.
@@ -527,8 +1098,9 @@ export const ServerService: GenService<{
     output: typeof ListMembersResponseSchema;
   },
   /**
-   * Changes a member's nickname. Anyone can change their own; owners and
-   * admins can change those of people ranked below them.
+   * Changes a member's nickname or role. Anyone can change their own
+   * nickname; owners and admins can change those of people ranked below
+   * them. Only the owner changes roles.
    *
    * @generated from rpc fuwa.v1.ServerService.UpdateMember
    */
@@ -546,6 +1118,72 @@ export const ServerService: GenService<{
     methodKind: "unary";
     input: typeof GetServerUsageRequestSchema;
     output: typeof GetServerUsageResponseSchema;
+  },
+  /**
+   * Stops a member sending messages for a while.
+   *
+   * @generated from rpc fuwa.v1.ServerService.TimeOutMember
+   */
+  timeOutMember: {
+    methodKind: "unary";
+    input: typeof TimeOutMemberRequestSchema;
+    output: typeof TimeOutMemberResponseSchema;
+  },
+  /**
+   * Removes a member. They can join again.
+   *
+   * @generated from rpc fuwa.v1.ServerService.KickMember
+   */
+  kickMember: {
+    methodKind: "unary";
+    input: typeof KickMemberRequestSchema;
+    output: typeof KickMemberResponseSchema;
+  },
+  /**
+   * Removes someone who is or was a member and keeps them out.
+   *
+   * @generated from rpc fuwa.v1.ServerService.BanMember
+   */
+  banMember: {
+    methodKind: "unary";
+    input: typeof BanMemberRequestSchema;
+    output: typeof BanMemberResponseSchema;
+  },
+  /**
+   * @generated from rpc fuwa.v1.ServerService.UnbanMember
+   */
+  unbanMember: {
+    methodKind: "unary";
+    input: typeof UnbanMemberRequestSchema;
+    output: typeof UnbanMemberResponseSchema;
+  },
+  /**
+   * @generated from rpc fuwa.v1.ServerService.ListBans
+   */
+  listBans: {
+    methodKind: "unary";
+    input: typeof ListBansRequestSchema;
+    output: typeof ListBansResponseSchema;
+  },
+  /**
+   * What owners and admins did in the server, newest first.
+   *
+   * @generated from rpc fuwa.v1.ServerService.ListAuditLog
+   */
+  listAuditLog: {
+    methodKind: "unary";
+    input: typeof ListAuditLogRequestSchema;
+    output: typeof ListAuditLogResponseSchema;
+  },
+  /**
+   * Hands the server to another member. Owner only; they become an admin.
+   *
+   * @generated from rpc fuwa.v1.ServerService.TransferOwnership
+   */
+  transferOwnership: {
+    methodKind: "unary";
+    input: typeof TransferOwnershipRequestSchema;
+    output: typeof TransferOwnershipResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_server, 0);

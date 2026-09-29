@@ -1,4 +1,4 @@
-import { ChevronLeftIcon, HashIcon, UsersIcon } from "lucide-react";
+import { ChevronLeftIcon, HashIcon, SnailIcon, UsersIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef } from "react";
 import { MemberRole, type Channel } from "@/gen/fuwa/v1/types_pb";
@@ -14,6 +14,7 @@ import { ConnDot, connectionLabel } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
 import { SPRING, SwapText } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
+import { formatDuration, shortDuration } from "@/lib/format";
 import { setTitle } from "@/lib/notify";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
@@ -76,6 +77,22 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
             </>
           )}
           <CopyId id={channel.id} what="channel ID" />
+          <AnimatePresence initial={false}>
+            {channel.slowmodeSeconds > 0 && (
+              <motion.span
+                key="slowmode"
+                initial={{ opacity: 0, scale: 0.6 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.6 }}
+                transition={SPRING}
+                title={`Slow mode: one message every ${formatDuration(channel.slowmodeSeconds)}${role >= MemberRole.ADMIN ? " (not for you)" : ""}`}
+                className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-muted-foreground tabular-nums"
+              >
+                <SnailIcon className="size-3.5" />
+                <span className="hidden sm:inline">{shortDuration(channel.slowmodeSeconds)}</span>
+              </motion.span>
+            )}
+          </AnimatePresence>
           <span className="flex-1" />
           <AnimatePresence>
             {connection !== "live" && (
@@ -110,7 +127,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
         <Composer
           instanceKey={instanceKey}
           serverId={serverId}
-          channelId={channel.id}
+          channel={channel}
           placeholder={`Message #${channel.name}`}
           onEditLast={() => list.current?.editLast()}
         />

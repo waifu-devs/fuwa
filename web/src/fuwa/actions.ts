@@ -2,7 +2,18 @@ import { Effect } from "effect";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import type { InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
-import { ChannelType, type NotificationSettings, type Server, type ServerLimits } from "@/gen/fuwa/v1/types_pb";
+import type { ChannelPlacement } from "@/gen/fuwa/v1/channel_pb";
+import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
+import {
+  ChannelType,
+  type Channel,
+  type Member,
+  type MemberRole,
+  type NotificationLevel,
+  type NotificationSettings,
+  type Server,
+  type ServerLimits,
+} from "@/gen/fuwa/v1/types_pb";
 import { makeApi } from "./client";
 import { call, toFuwaError, type FuwaError } from "./errors";
 import { normalizeUrl } from "./saved";
@@ -11,6 +22,7 @@ import {
   addServer,
   notificationKey,
   removeServer,
+  sortChannels,
   sortMembers,
   store,
   updateInstance,
@@ -220,20 +232,90 @@ export const deleteAccount = (key: string, confirm: { password?: string; code?: 
     return true;
   });
 
+/** Puts a member's new state in the store, ahead of its event. */
+function storeMember(key: string, serverId: string, member: Member | undefined) {
+  if (!member?.user) return;
+  const id = member.user.id;
+  updateInstance(key, (i) => ({
+    ...i,
+    members: { ...i.members, [serverId]: sortMembers([...(i.members[serverId] ?? []).filter((m) => m.user?.id !== id), member]) },
+  }));
+}
+
 /** Sets a nickname in a server: yours (no `userId`), or someone's ranked below you. */
 export const setNickname = (key: string, serverId: string, nickname: string, userId = "") =>
   Effect.gen(function* () {
     const { member } = yield* call((signal) =>
       api(key).servers.updateMember({ serverId, userId, nickname }, { signal }),
     );
-    if (member?.user) {
-      const id = member.user.id;
-      updateInstance(key, (i) => ({
-        ...i,
-        members: { ...i.members, [serverId]: sortMembers([...(i.members[serverId] ?? []).filter((m) => m.user?.id !== id), member]) },
-      }));
-    }
+    storeMember(key, serverId, member);
     return member!;
+  });
+
+// ───────────────────────── Moderation (owners and admins) ─────────────────────────
+
+/** Makes someone an admin or a member. Owner only. */
+export const setRole = (key: string, serverId: string, userId: string, role: MemberRole) =>
+  Effect.gen(function* () {
+    const { member } = yield* call((signal) => api(key).servers.updateMember({ serverId, userId, role }, { signal }));
+    storeMember(key, serverId, member);
+    return member!;
+  });
+
+/** Times someone out for `seconds`; 0 ends it. */
+export const timeOutMember = (key: string, serverId: string, userId: string, seconds: number, reason = "") =>
+  Effect.gen(function* () {
+    const { member } = yield* call((signal) =>
+      api(key).servers.timeOutMember({ serverId, userId, seconds: BigInt(seconds), reason }, { signal }),
+    );
+    storeMember(key, serverId, member);
+    return member!;
+  });
+
+const dropMember = (key: string, serverId: string, userId: string) =>
+  updateInstance(key, (i) => {
+    const list = i.members[serverId] ?? [];
+    if (!list.some((m) => m.user?.id === userId)) return i;
+    return {
+      ...i,
+      members: { ...i.members, [serverId]: list.filter((m) => m.user?.id !== userId) },
+      servers: i.servers.map((s) => (s.id === serverId ? { ...s, memberCount: s.memberCount - 1n } : s)),
+    };
+  });
+
+export const kickMember = (key: string, serverId: string, userId: string, reason = "") =>
+  Effect.gen(function* () {
+    yield* call((signal) => api(key).servers.kickMember({ serverId, userId, reason }, { signal }));
+    dropMember(key, serverId, userId);
+    return true;
+  });
+
+/** Bans someone, taking what they sent in the last `deleteSeconds` with them. Returns how many messages went. */
+export const banMember = (key: string, serverId: string, userId: string, reason: string, deleteSeconds: number) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) =>
+      api(key).servers.banMember({ serverId, userId, reason, deleteMessageSeconds: BigInt(deleteSeconds) }, { signal }),
+    );
+    dropMember(key, serverId, userId);
+    return Number(res.deletedMessages);
+  });
+
+export const unbanMember = (key: string, serverId: string, userId: string) =>
+  call((signal) => api(key).servers.unbanMember({ serverId, userId }, { signal })).pipe(Effect.as(true));
+
+export const listBans = (key: string, serverId: string) => call((signal) => api(key).servers.listBans({ serverId }, { signal }));
+
+export type AuditFilter = { actorId?: string; action?: AuditAction; beforeId?: string };
+
+export const listAuditLog = (key: string, serverId: string, filter: AuditFilter = {}) =>
+  call((signal) => api(key).servers.listAuditLog({ serverId, limit: 50, ...filter }, { signal }));
+
+/** Hands the server to another member; you stay on as an admin. */
+export const transferOwnership = (key: string, serverId: string, userId: string) =>
+  Effect.gen(function* () {
+    const { server } = yield* call((signal) => api(key).servers.transferOwnership({ serverId, userId }, { signal }));
+    if (server) updateInstance(key, (i) => addServer(i, server));
+    return server!;
   });
 
 // ───────────────────────── Servers ─────────────────────────
@@ -281,7 +363,14 @@ export const deleteServer = (key: string, serverId: string) =>
 export const updateServer = (
   key: string,
   serverId: string,
-  patch: { name?: string; description?: string; discoverable?: boolean },
+  patch: {
+    name?: string;
+    description?: string;
+    discoverable?: boolean;
+    defaultNotifications?: NotificationLevel;
+    /** Empty for no join messages. */
+    systemChannelId?: string;
+  },
 ) =>
   Effect.gen(function* () {
     const { server } = yield* call((signal) => api(key).servers.updateServer({ serverId, ...patch }, { signal }));
@@ -334,15 +423,44 @@ export const createChannel = (key: string, serverId: string, name: string, type:
     return channel!;
   });
 
+/** Puts channels in the store, ahead of their events. */
+function storeChannels(key: string, serverId: string, changed: Channel[]) {
+  const ids = new Set(changed.map((c) => c.id));
+  updateInstance(key, (i) => ({
+    ...i,
+    channels: { ...i.channels, [serverId]: sortChannels([...(i.channels[serverId] ?? []).filter((c) => !ids.has(c.id)), ...changed]) },
+  }));
+}
+
 export const updateChannel = (
   key: string,
   serverId: string,
   channelId: string,
-  patch: { name?: string; topic?: string },
-) => call((signal) => api(key).channels.updateChannel({ serverId, channelId, ...patch }, { signal }));
+  patch: { name?: string; topic?: string; parentId?: string; slowmodeSeconds?: number },
+) =>
+  Effect.gen(function* () {
+    const { channel } = yield* call((signal) => api(key).channels.updateChannel({ serverId, channelId, ...patch }, { signal }));
+    if (channel) storeChannels(key, serverId, [channel]);
+    return channel!;
+  });
+
+/** Every channel of a server in its new order, each in its category (or none). */
+export const reorderChannels = (key: string, serverId: string, channels: Pick<ChannelPlacement, "channelId" | "parentId">[]) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) => api(key).channels.reorderChannels({ serverId, channels }, { signal }));
+    storeChannels(key, serverId, res.channels);
+    return res.channels;
+  });
 
 export const deleteChannel = (key: string, serverId: string, channelId: string) =>
-  call((signal) => api(key).channels.deleteChannel({ serverId, channelId }, { signal }));
+  Effect.gen(function* () {
+    yield* call((signal) => api(key).channels.deleteChannel({ serverId, channelId }, { signal }));
+    updateInstance(key, (i) => ({
+      ...i,
+      channels: { ...i.channels, [serverId]: (i.channels[serverId] ?? []).filter((c) => c.id !== channelId) },
+    }));
+    return true;
+  });
 
 // ───────────────────────── Messages ─────────────────────────
 

@@ -10,7 +10,9 @@ service EventService {
   // they happen. A cursor with `after_sequence` set first replays everything
   // after it, so a client that reconnects with its last sequence misses nothing.
   // Once any replay is done the stream sends `ready`; after that come live
-  // events. A response with neither set is a heartbeat.
+  // events. A response with neither set is a heartbeat. A server that was
+  // deleted, or that the caller is no longer in, comes first as a
+  // ServerDeleted or MemberLeft event with sequence 0, and isn't followed.
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
 }

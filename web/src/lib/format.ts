@@ -92,3 +92,36 @@ export function shownStatus(user: User | undefined, now = Date.now()) {
 
 /** A 0xRRGGBB profile color as CSS. */
 export const colorCss = (color: number) => `#${color.toString(16).padStart(6, "0")}`;
+
+const UNITS = [
+  { seconds: 86_400, one: "day" },
+  { seconds: 3_600, one: "hour" },
+  { seconds: 60, one: "minute" },
+  { seconds: 1, one: "second" },
+] as const;
+
+/** A length of time in its largest whole unit: "30 seconds", "5 minutes", "1 hour", "7 days". */
+export function formatDuration(seconds: number) {
+  const unit = UNITS.find((u) => seconds >= u.seconds && seconds % u.seconds === 0) ?? UNITS[3];
+  const n = Math.round(seconds / unit.seconds);
+  return `${n} ${unit.one}${n === 1 ? "" : "s"}`;
+}
+
+/** The same, clipped for a chip: "30s", "5m", "1h", "7d". */
+export const shortDuration = (seconds: number) =>
+  formatDuration(seconds).replace(/ (second|minute|hour|day)s?$/, (_, unit: string) => unit[0]!);
+
+/** Time left, as a countdown: "0:42", "12:05", "3h 20m", "2d 4h". */
+export function formatLeft(ms: number) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  return `${Math.floor(s / 86_400)}d ${Math.floor((s % 86_400) / 3600)}h`;
+}
+
+/** When a member's time-out ends, if they're timed out now. */
+export function timedOutUntil(member: Member | undefined, now = Date.now()): Date | null {
+  if (!member?.timedOutUntil) return null;
+  const until = toDate(member.timedOutUntil);
+  return until.getTime() > now ? until : null;
+}

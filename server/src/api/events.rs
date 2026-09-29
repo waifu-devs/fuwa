@@ -11,6 +11,7 @@ use tonic::{Request, Response, Status};
 
 use super::{Api, respond};
 use crate::error::{Error, Result};
+use crate::id::{new_id, now_ms, timestamp};
 use crate::pb::{self, event_service_server::EventService};
 use crate::servers::Payload;
 
@@ -36,11 +37,31 @@ impl EventService for Api {
         }
 
         // Start listening before replaying, so nothing committed in between is missed.
+        // A server deleted, or left (or been removed from) while the client was
+        // away gets the event that says so, so the client lets it go.
         let mut followed = Vec::with_capacity(cursors.len());
+        let mut gone = Vec::new();
         for cursor in cursors {
-            let (sdb, _) = self.membership(&account, &cursor.server_id).await?;
-            let live = self.app.hub.subscribe(&sdb.id);
-            followed.push((sdb, cursor.after_sequence, live));
+            let payload = match self.membership(&account, &cursor.server_id).await {
+                Ok((sdb, _)) => {
+                    let live = self.app.hub.subscribe(&sdb.id);
+                    followed.push((sdb, cursor.after_sequence, live));
+                    continue;
+                }
+                Err(Error::NotFound(_)) => Payload::ServerDeleted(pb::ServerDeleted {}),
+                Err(Error::PermissionDenied(_)) => {
+                    Payload::MemberLeft(pb::MemberLeft { user_id: account.id.clone(), ..Default::default() })
+                }
+                Err(err) => return Err(err.into()),
+            };
+            gone.push(pb::Event {
+                id: new_id(),
+                server_id: cursor.server_id,
+                sequence: 0,
+                actor_id: String::new(),
+                created_at: Some(timestamp(now_ms())),
+                payload: Some(payload),
+            });
         }
 
         let (tx, rx) = mpsc::channel::<Result<pb::SubscribeResponse, Status>>(256);
@@ -50,6 +71,11 @@ impl EventService for Api {
         let account_id = account.id.clone();
         tokio::spawn(async move {
             let send = async |item| tx.send(item).await.is_ok();
+            for event in gone {
+                if !send(Ok(pb::SubscribeResponse { event: Some(event), ready: None })).await {
+                    return;
+                }
+            }
             let mut live = StreamMap::new();
             let mut last_sent: HashMap<String, i64> = HashMap::new();
 

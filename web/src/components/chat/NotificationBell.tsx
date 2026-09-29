@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { NotificationLevel, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { run, updateNotifications, type NotificationPatch } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
+import { useFuwa } from "@/fuwa/store";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,7 +47,10 @@ export function NotificationBell({ instanceKey, serverId, channel }: { instanceK
     run(updateNotifications(instanceKey, serverId, channel.id, patch)).catch((err: FuwaError) => toast(err.message));
 
   const level = settings?.level ?? NotificationLevel.UNSPECIFIED;
-  const serverLevel = LEVELS.find((l) => l.value === server?.level)?.label;
+  const serverDefault = useFuwa((s) => s.instances[instanceKey]?.servers.find((sv) => sv.id === serverId)?.defaultNotifications);
+  const serverLevel =
+    LEVELS.find((l) => l.value === server?.level)?.label ??
+    (serverDefault === NotificationLevel.MENTIONS ? "Only @mentions, the server's default" : undefined);
 
   return (
     <DropdownMenu>

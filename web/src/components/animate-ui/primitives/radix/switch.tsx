@@ -29,6 +29,8 @@ type SwitchProps = Omit<
   HTMLMotionProps<'button'>;
 
 function Switch(props: SwitchProps) {
+  // The button gets everything but the change handler, which isn't a DOM prop.
+  const { onCheckedChange: _, ...buttonProps } = props;
   const [isPressed, setIsPressed] = React.useState(false);
   const [isChecked, setIsChecked] = useControlledState({
     value: props.checked,
@@ -48,7 +50,7 @@ function Switch(props: SwitchProps) {
           onTapStart={() => setIsPressed(true)}
           onTapCancel={() => setIsPressed(false)}
           onTap={() => setIsPressed(false)}
-          {...props}
+          {...buttonProps}
         />
       </SwitchPrimitives.Root>
     </SwitchProvider>

@@ -10,7 +10,7 @@ import { Markdown } from "@/components/Markdown";
 import { Count, SPRING } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { ProfileCard } from "@/components/ProfileCard";
-import { Row, Segmented, Warn } from "@/components/settings/account/common";
+import { Chips, Row, Segmented, Warn } from "@/components/settings/account/common";
 import { SaveBar, WithPreview } from "@/components/settings/controls";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -303,39 +303,6 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
 }
 
 /** Small choices as chips; the chosen one fills in. */
-function Chips<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (value: T) => void }) {
-  return (
-    <div role="radiogroup" className="flex flex-wrap gap-1.5">
-      {options.map((o) => {
-        const active = o.value === value;
-        return (
-          <motion.button
-            key={o.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            whileTap={{ scale: 0.92 }}
-            onClick={() => onChange(o.value)}
-            className={cn(
-              "relative rounded-full border px-3 py-1 text-xs font-bold transition-colors",
-              active ? "border-primary bg-primary text-primary-foreground" : "text-muted-foreground hover:border-primary/40 hover:text-foreground",
-            )}
-          >
-            <AnimatePresence initial={false}>
-              {active && (
-                <motion.span initial={{ width: 0, opacity: 0 }} animate={{ width: "auto", opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={SPRING} className="inline-flex overflow-hidden align-middle">
-                  <CheckIcon className="mr-1 size-3" strokeWidth={3} />
-                </motion.span>
-              )}
-            </AnimatePresence>
-            {o.label}
-          </motion.button>
-        );
-      })}
-    </div>
-  );
-}
-
 /** A link to a picture, with the picture beside it once it loads. */
 function UrlField({ id, value, onChange, round = false, disabled }: { id: string; value: string; onChange: (value: string) => void; round?: boolean; disabled?: boolean }) {
   const [broken, setBroken] = useState(false);

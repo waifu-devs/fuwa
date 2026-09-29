@@ -31,12 +31,15 @@ export function CreateChannelDialog({
   instanceKey,
   serverId,
   parentId = "",
+  stay = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   instanceKey: string;
   serverId: string;
   parentId?: string;
+  /** Stay where you are, rather than opening the new channel (as from settings). */
+  stay?: boolean;
 }) {
   const navigate = useNavigate();
   const [type, setType] = useState<ChannelType>(ChannelType.TEXT);
@@ -58,7 +61,7 @@ export function CreateChannelDialog({
     const channel = await create.go(instanceKey, serverId, category ? name.trim() : slug(name), type, category ? "" : parentId);
     if (!channel) return;
     onOpenChange(false);
-    if (!category) navigate({ to: "/$instance/$server/$channel", params: { instance: instanceKey, server: serverId, channel: channel.id } });
+    if (!category && !stay) navigate({ to: "/$instance/$server/$channel", params: { instance: instanceKey, server: serverId, channel: channel.id } });
   }
 
   return (

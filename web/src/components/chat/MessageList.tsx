@@ -1,5 +1,6 @@
 import {
   ArrowDownIcon,
+  ArrowRightIcon,
   CheckIcon,
   CopyIcon,
   CrownIcon,
@@ -23,8 +24,9 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
-import { MemberRole, type Channel, type Member, type Message, type User } from "@/gen/fuwa/v1/types_pb";
+import { MemberRole, MessageKind, type Channel, type Member, type Message, type User } from "@/gen/fuwa/v1/types_pb";
 import { deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
 import { useInstance } from "@/fuwa/hooks";
 import type { PendingMessage } from "@/fuwa/store";
@@ -46,6 +48,7 @@ const EMPTY: never[] = [];
 type Row =
   | { kind: "day"; key: string; date: Date }
   | { kind: "message"; key: string; message: Message; first: boolean; date: Date }
+  | { kind: "join"; key: string; message: Message; date: Date }
   | { kind: "pending"; key: string; pending: PendingMessage; first: boolean };
 
 export type MessageListHandle = { editLast: () => void };
@@ -70,7 +73,7 @@ export const MessageList = forwardRef<
 
   useImperativeHandle(ref, () => ({
     editLast() {
-      const mine = [...items].reverse().find((m) => m.authorId === me?.id);
+      const mine = [...items].reverse().find((m) => m.authorId === me?.id && m.kind === MessageKind.UNSPECIFIED);
       if (mine) setEditing(mine.id);
     },
   }));
@@ -89,6 +92,12 @@ export const MessageList = forwardRef<
       if (!prev || !sameDay(prev.at, date)) {
         out.push({ kind: "day", key: `day-${date.toDateString()}`, date });
         prev = null;
+      }
+      if (message.kind === MessageKind.MEMBER_JOINED) {
+        out.push({ kind: "join", key: message.id, message, date });
+        // The next message starts a run of its own.
+        prev = { author: "", at: date };
+        continue;
       }
       const first = !prev || prev.author !== message.authorId || date.getTime() - prev.at.getTime() > GROUP_GAP_MS;
       out.push({ kind: "message", key: message.id, message, first, date });
@@ -192,6 +201,22 @@ export const MessageList = forwardRef<
                   />
                 );
               const author = memberById.get(row.message.authorId)?.user ?? users?.[row.message.authorId];
+              if (row.kind === "join")
+                return (
+                  <JoinRow
+                    key={row.key}
+                    message={row.message}
+                    date={row.date}
+                    author={author}
+                    member={memberById.get(row.message.authorId)}
+                    instanceKey={instanceKey}
+                    mine={row.message.authorId === me?.id}
+                    animate={!initial.current?.has(row.message.id)}
+                    canDelete={manager}
+                    onWave={() => run(sendMessage(instanceKey, serverId, channel.id, `👋 @${author?.username ?? ""}`))}
+                    onDelete={() => run(deleteMessage(instanceKey, serverId, channel.id, row.message.id))}
+                  />
+                );
               return (
                 <MessageRow
                   key={row.key}
@@ -532,6 +557,129 @@ function MessageRow({
                 </ToolButton>
               )}
             </>
+          )}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+/** Ways to say someone joined, picked by who they are so each join keeps its line. */
+const JOIN_LINES: ((name: ReactNode) => ReactNode)[] = [
+  (n) => <>{n} just landed.</>,
+  (n) => <>Welcome, {n}. Say hi!</>,
+  (n) => <>{n} joined the party.</>,
+  (n) => <>A wild {n} appeared.</>,
+  (n) => <>{n} hopped into the server.</>,
+  (n) => <>Everyone, welcome {n}!</>,
+  (n) => <>{n} is here. Glad you made it!</>,
+  (n) => <>Good to see you, {n}.</>,
+];
+
+export const joinLine = (userId: string, name: ReactNode) => JOIN_LINES[hueOf(userId) % JOIN_LINES.length]!(name);
+
+/** Waves already sent this session, so the button remembers. */
+const waved = new Set<string>();
+
+/** "Someone joined", with a button to wave at them. */
+function JoinRow({
+  message,
+  date,
+  author,
+  member,
+  instanceKey,
+  mine,
+  animate,
+  canDelete,
+  onWave,
+  onDelete,
+}: {
+  message: Message;
+  date: Date;
+  author: User | undefined;
+  member: Member | undefined;
+  instanceKey: string;
+  mine: boolean;
+  animate: boolean;
+  canDelete: boolean;
+  onWave: () => Promise<void>;
+  onDelete: () => Promise<void>;
+}) {
+  const [done, setDone] = useState(waved.has(message.id));
+  const [waving, setWaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const name = (
+    <ProfilePopover instanceKey={instanceKey} user={author} member={member}>
+      <button type="button" className="name-tint font-bold hover:underline" style={hue(message.authorId)}>
+        {member?.nickname || displayName(author)}
+      </button>
+    </ProfilePopover>
+  );
+  return (
+    <motion.div
+      layout="position"
+      {...(animate ? enter : {})}
+      exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
+      transition={{ type: "spring", stiffness: 500, damping: 34 }}
+      className="message-row join-row group relative flex items-center gap-3 px-4 py-1.5"
+    >
+      <span className="grid w-10 shrink-0 place-items-center">
+        <ArrowRightIcon className="size-4 text-emerald-500 transition-transform duration-300 group-hover:translate-x-1" />
+      </span>
+      <p className="min-w-0 flex-1 text-[0.94rem] text-muted-foreground">
+        {joinLine(message.authorId, name)}{" "}
+        <time className="text-xs whitespace-nowrap" dateTime={date.toISOString()} title={formatFull(date)}>
+          {formatStamp(date)}
+        </time>
+      </p>
+      {!mine && author && (
+        <motion.button
+          type="button"
+          disabled={done || waving}
+          whileTap={{ scale: 0.9 }}
+          onClick={async () => {
+            setWaving(true);
+            try {
+              await onWave();
+              waved.add(message.id);
+              setDone(true);
+            } finally {
+              setWaving(false);
+            }
+          }}
+          className={cn(
+            "group/wave flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold transition-colors",
+            done ? "border-transparent bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "hover:border-primary/40 hover:bg-primary/10 hover:text-primary",
+          )}
+        >
+          <motion.span
+            aria-hidden
+            animate={waving || done ? { rotate: [0, 22, -10, 22, -6, 0] } : { rotate: 0 }}
+            transition={{ duration: 0.8 }}
+            style={{ originX: 0.7, originY: 0.8 }}
+            className="inline-block group-hover/wave:animate-[wave_0.9s_ease-in-out]"
+          >
+            👋
+          </motion.span>
+          {done ? "Waved" : "Wave"}
+        </motion.button>
+      )}
+      {canDelete && (
+        <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
+          {confirming ? (
+            <span className="flex items-center gap-0.5">
+              <span className="px-2 text-xs font-bold text-destructive">Delete?</span>
+              <ToolButton label="Delete" danger onClick={() => onDelete().catch(() => setConfirming(false))}>
+                <CheckIcon />
+              </ToolButton>
+              <ToolButton label="Keep" onClick={() => setConfirming(false)}>
+                <XIcon />
+              </ToolButton>
+            </span>
+          ) : (
+            <ToolButton label="Delete" danger onClick={() => setConfirming(true)}>
+              <Trash2Icon />
+            </ToolButton>
           )}
         </div>
       )}

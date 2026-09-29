@@ -2,12 +2,12 @@ use prost::Message as _;
 use tonic::{Request, Response, Status};
 
 use super::channels::load_channel;
-use super::{Api, can_manage, respond, url};
-use crate::db::{query_all, query_one};
+use super::{Api, can_manage, respond, url, users};
+use crate::db::{is_unique_violation, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::pb::{self, message_service_server::MessageService};
-use crate::servers::{self as store, Payload, USER_COLUMNS, UsageChange};
+use crate::servers::{self as store, Audit, Payload, UsageChange};
 
 /// The longest a message can be, in characters.
 pub const MAX_MESSAGE_LENGTH: usize = 4000;
@@ -23,7 +23,7 @@ struct Extras {
     embeds: Vec<pb::Embed>,
 }
 
-const MESSAGE_COLUMNS: &str = "id, channel_id, author_id, content, extras, reply_to_id, created_at, edited_at";
+const MESSAGE_COLUMNS: &str = "id, channel_id, author_id, content, extras, reply_to_id, created_at, edited_at, kind";
 
 fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Message, Option<Vec<u8>>)> + '_ {
     move |r| {
@@ -39,6 +39,7 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 reply_to_id: r.get::<Option<String>>(5)?.unwrap_or_default(),
                 created_at: Some(timestamp(r.get(6)?)),
                 edited_at: r.get::<Option<i64>>(7)?.map(timestamp),
+                kind: r.get(8)?,
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -98,21 +99,108 @@ fn check_extras(attachments: &mut [pb::Attachment], embeds: &[pb::Embed]) -> Res
     Ok(())
 }
 
-async fn authors(conn: &turso::Connection, messages: &[pb::Message]) -> Result<Vec<pb::User>> {
-    let mut ids: Vec<&str> = messages.iter().map(|m| m.author_id.as_str()).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    if ids.is_empty() {
-        return Ok(vec![]);
+/// Refuses members who are timed out.
+fn check_not_timed_out(member: &pb::Member) -> Result<()> {
+    if let Some(until) = &member.timed_out_until {
+        let until = crate::id::millis(until);
+        if until > now_ms() {
+            return Err(Error::denied(format!("you're timed out for {}", wait(until - now_ms()))));
+        }
     }
-    let placeholders = (1..=ids.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
-    query_all(
+    Ok(())
+}
+
+/// "12 seconds", "5 minutes", "3 hours", "2 days": roughly how long, rounded up.
+fn wait(ms: i64) -> String {
+    let seconds = (ms + 999) / 1000;
+    let (n, unit) = match seconds {
+        ..60 => (seconds, "second"),
+        60..3600 => ((seconds + 59) / 60, "minute"),
+        3600..86400 => ((seconds + 3599) / 3600, "hour"),
+        _ => ((seconds + 86399) / 86400, "day"),
+    };
+    format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
+}
+
+/// Holds a member to a channel's slow mode, inside the write that sends their
+/// message: they wait the channel's time between messages. One row per member
+/// and channel, so two sent at once clash and the second is turned away.
+async fn check_slowmode(conn: &turso::Connection, channel: &pb::Channel, user_id: &str, now: i64) -> Result<()> {
+    if channel.slowmode_seconds <= 0 {
+        return Ok(());
+    }
+    let period = i64::from(channel.slowmode_seconds) * 1000;
+    let slowed = |sent_at: i64| {
+        Error::ResourceExhausted(format!("slow mode is on; you can send again in {}", wait(sent_at + period - now)))
+    };
+    let last = query_one(
         conn,
-        &format!("SELECT {USER_COLUMNS} FROM users WHERE id IN ({placeholders})"),
-        ids.iter().map(|id| turso::Value::from(*id)).collect::<Vec<_>>(),
-        store::user_row,
+        "SELECT sent_at FROM slowmode WHERE channel_id = ?1 AND user_id = ?2",
+        (channel.id.as_str(), user_id),
+        |r| r.get::<i64>(0),
     )
-    .await
+    .await?;
+    match last {
+        Some(sent_at) if now < sent_at + period => Err(slowed(sent_at)),
+        Some(_) => {
+            conn.execute(
+                "UPDATE slowmode SET sent_at = ?3 WHERE channel_id = ?1 AND user_id = ?2",
+                (channel.id.as_str(), user_id, now),
+            )
+            .await?;
+            Ok(())
+        }
+        None => match conn
+            .execute(
+                "INSERT INTO slowmode (channel_id, user_id, sent_at) VALUES (?1, ?2, ?3)",
+                (channel.id.as_str(), user_id, now),
+            )
+            .await
+            .map_err(Error::from)
+        {
+            Ok(_) => Ok(()),
+            Err(err) if is_unique_violation(&err) => Err(slowed(now)),
+            Err(err) => Err(err),
+        },
+    }
+}
+
+/// Posts "someone joined" in the server's system channel, if it has one,
+/// inside the write that adds them.
+pub(super) async fn post_join(
+    conn: &turso::Connection,
+    server: &pb::Server,
+    user_id: &str,
+    now: i64,
+    events: &mut Vec<Payload>,
+) -> Result<()> {
+    if server.system_channel_id.is_empty() {
+        return Ok(());
+    }
+    let Some(channel) = load_channel(conn, &server.id, &server.system_channel_id).await? else {
+        return Ok(());
+    };
+    let message = pb::Message {
+        id: new_id(),
+        server_id: server.id.clone(),
+        channel_id: channel.id,
+        author_id: user_id.to_string(),
+        created_at: Some(timestamp(now)),
+        kind: pb::MessageKind::MemberJoined as i32,
+        ..Default::default()
+    };
+    conn.execute(
+        "INSERT INTO messages (id, channel_id, author_id, content, size, kind, created_at) VALUES (?1, ?2, ?3, '', 0, ?4, ?5)",
+        (message.id.as_str(), message.channel_id.as_str(), user_id, message.kind as i64, now),
+    )
+    .await?;
+    store::add_usage(conn, UsageChange { messages: 1, messages_sent: 1, ..Default::default() }).await?;
+    events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message) }));
+    Ok(())
+}
+
+async fn authors(conn: &turso::Connection, messages: &[pb::Message]) -> Result<Vec<pb::User>> {
+    users(conn, &messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>()).await
 }
 
 #[tonic::async_trait]
@@ -124,7 +212,8 @@ impl MessageService for Api {
         respond(async {
             let account = self.account(request.metadata()).await?;
             let mut req = request.into_inner();
-            let (sdb, _) = self.membership(&account, &req.server_id).await?;
+            let (sdb, member) = self.membership(&account, &req.server_id).await?;
+            check_not_timed_out(&member)?;
             check_content(&req.content, !req.attachments.is_empty() || !req.embeds.is_empty())?;
             check_extras(&mut req.attachments, &req.embeds)?;
             let limits = sdb.limits(&self.app.settings().limits).await?;
@@ -149,6 +238,9 @@ impl MessageService for Api {
                         }
                     }
                     let now = now_ms();
+                    if !can_manage(&member) {
+                        check_slowmode(conn, &channel, &account.id, now).await?;
+                    }
                     let has_extras = !req.attachments.is_empty() || !req.embeds.is_empty();
                     let extras = has_extras.then(|| {
                         Extras { attachments: req.attachments.clone(), embeds: req.embeds.clone() }.encode_to_vec()
@@ -164,6 +256,7 @@ impl MessageService for Api {
                         reply_to_id: req.reply_to_id.clone(),
                         created_at: Some(timestamp(now)),
                         edited_at: None,
+                        kind: pb::MessageKind::Unspecified as i32,
                     };
                     let size = message.content.len() as i64;
                     let attachment_count = message.attachments.len() as i64;
@@ -258,13 +351,17 @@ impl MessageService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, _) = self.membership(&account, &req.server_id).await?;
+                let (sdb, member) = self.membership(&account, &req.server_id).await?;
+                check_not_timed_out(&member)?;
                 let message = sdb
                     .write(&account.id, async |conn, events| {
                         let mut message =
                             load_message(conn, &sdb.id, &req.message_id).await?.ok_or(Error::NotFound("message"))?;
                         if message.author_id != account.id {
                             return Err(Error::denied("you can only edit your own messages"));
+                        }
+                        if message.kind != pb::MessageKind::Unspecified as i32 {
+                            return Err(Error::invalid("system messages can't be edited"));
                         }
                         check_content(&req.content, !message.attachments.is_empty() || !message.embeds.is_empty())?;
                         let now = now_ms();
@@ -303,6 +400,16 @@ impl MessageService for Api {
                         return Err(Error::denied("you can only delete your own messages"));
                     }
                     conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
+                    if message.author_id != account.id {
+                        let channel =
+                            load_channel(conn, &sdb.id, &message.channel_id).await?.map(|c| c.name).unwrap_or_default();
+                        store::audit(
+                            conn,
+                            &account.id,
+                            Audit::new(pb::AuditAction::MessageDelete, &message.author_id).channel(channel),
+                        )
+                        .await?;
+                    }
                     store::add_usage(
                         conn,
                         UsageChange {

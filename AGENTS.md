@@ -16,7 +16,10 @@
   - `servers.rs`: community servers, one Turso file each under `servers/`, plus the
     in-memory index of servers and memberships. Every change goes through
     `ServerDb::write`, which appends events to the server's log in the same
-    transaction and publishes them to the `Hub` after commit.
+    transaction and publishes them to the `Hub` after commit. What owners and
+    admins do also goes in the server's `audit` table (`servers::Audit`),
+    kept apart from the event log so reasons for kicks and bans reach only
+    managers.
   - `db.rs`: Turso helpers: opening, `user_version` migrations, transactions.
     Every database runs in Turso's concurrent-writer mode (MVCC): writes are
     `BEGIN CONCURRENT` transactions that run side by side and are retried
@@ -55,6 +58,11 @@
     no sound, no notification and no unread badge.
   - `src/components/settings/account/`: the "Your account" pages (profile,
     server profiles, devices, two-step sign-in, server notifications, data).
+  - `src/components/settings/server/`: server settings pages beyond Overview
+    (channels, members, bans, audit log, ownership), shown by
+    `dialogs/ServerSettingsDialog.tsx`. `components/ModerateDialog.tsx` is the
+    one dialog for nicknames, time-outs, kicks and bans, from the Members page
+    and from profile cards.
   - `src/lib/keybinds.ts`: every keyboard action and its default; the key
     handler (`components/Shortcuts.tsx`), the shortcut sheet and the Keybinds
     page all read this one list.
@@ -73,6 +81,13 @@
 - Never write outside a transaction or with `BEGIN`/`BEGIN IMMEDIATE`: those
   lock out concurrent commits. Schema changes go in migrations, which run
   before anything else touches the file.
+- Moderation follows rank: owners outrank admins, admins outrank members, and
+  nobody acts on someone at or above their own rank (`outranks` on both the
+  server and the client). Every moderation or settings change by a manager
+  writes an audit entry in the same transaction.
+- Messages have a `kind`. Anything that isn't a plain message (join messages
+  today) has empty content, can't be edited, is left out of data exports, and
+  never plays a sound or shows a notification.
 - Timestamps are unix milliseconds in the database, `google.protobuf.Timestamp` on
   the wire. Ids are ULIDs (`id::new_id`).
 - Limits are unlimited unless configured. Never hardcode a usage cap.

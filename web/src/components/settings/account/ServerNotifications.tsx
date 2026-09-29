@@ -19,7 +19,13 @@ import { cn } from "@/lib/utils";
 
 const LEVEL_OPTIONS = [{ value: NotificationLevel.UNSPECIFIED, label: "Default" }, ...LEVELS.map((l) => ({ value: l.value, label: l.short }))];
 
-const levelLabel = (level: NotificationLevel | undefined) => LEVELS.find((l) => l.value === level)?.label ?? "Default";
+/** Your level for a server, or on Default, what the server's owners picked for everyone. */
+function levelLabel(level: NotificationLevel | undefined, serverDefault: NotificationLevel) {
+  const own = LEVELS.find((l) => l.value === level)?.label;
+  if (own) return own;
+  const set = LEVELS.find((l) => l.value === serverDefault)?.label;
+  return set ? `Default: ${set.toLowerCase()}` : "Default";
+}
 
 /** Saves a change and says so if it didn't go through. */
 function change(key: string, serverId: string, channelId: string, patch: NotificationPatch) {
@@ -126,7 +132,7 @@ function ServerCard({
               ) : (
                 <motion.span key={settings?.level ?? 0} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="flex items-center gap-1">
                   <BellIcon className="size-3.5" />
-                  {levelLabel(settings?.level)}
+                  {levelLabel(settings?.level, server.defaultNotifications)}
                 </motion.span>
               )}
             </AnimatePresence>
@@ -165,6 +171,18 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
           options={LEVEL_OPTIONS}
           className="w-full max-w-md"
         />
+        <AnimatePresence initial={false}>
+          {!settings?.level && server.defaultNotifications === NotificationLevel.MENTIONS && (
+            <motion.p
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden text-xs text-muted-foreground"
+            >
+              This server's owners set Default to only @mentions for everyone. Pick All messages to hear about the rest.
+            </motion.p>
+          )}
+        </AnimatePresence>
       </div>
       <Toggle
         label="Suppress @everyone and @here"

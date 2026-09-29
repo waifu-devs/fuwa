@@ -173,7 +173,10 @@ impl Api {
                             [now_ms()],
                         )
                         .await?;
-                        events.push(Payload::MemberLeft(pb::MemberLeft { user_id: account.id.clone() }));
+                        events.push(Payload::MemberLeft(pb::MemberLeft {
+                            user_id: account.id.clone(),
+                            reason: pb::LeaveReason::Left as i32,
+                        }));
                     }
                     store::upsert_user(conn, &gone).await?;
                     events.push(Payload::UserUpdated(pb::UserUpdated { user: Some(gone.clone()) }));
@@ -524,7 +527,7 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
                 &conn,
                 "SELECT m.id, m.channel_id, coalesce(c.name, ''), m.content, m.extras, m.reply_to_id, m.created_at, m.edited_at
                  FROM messages m LEFT JOIN channels c ON c.id = m.channel_id
-                 WHERE m.author_id = ?1 AND m.id > ?2 ORDER BY m.id LIMIT ?3",
+                 WHERE m.author_id = ?1 AND m.kind = 0 AND m.id > ?2 ORDER BY m.id LIMIT ?3",
                 (account.id.as_str(), after.as_str(), EXPORT_PAGE),
                 |r| {
                     Ok((

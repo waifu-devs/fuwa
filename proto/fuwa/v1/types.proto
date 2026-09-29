@@ -93,6 +93,9 @@ message Member {
   string nickname = 3;
   MemberRole role = 4;
   google.protobuf.Timestamp joined_at = 5;
+  // Timed out: can read but not send or edit messages until then. Unset, or
+  // in the past, when they aren't.
+  google.protobuf.Timestamp timed_out_until = 6;
 }
 
 // ============================================================================
@@ -111,6 +114,11 @@ message Server {
   int64 member_count = 7;
   google.protobuf.Timestamp created_at = 8;
   google.protobuf.Timestamp updated_at = 9;
+  // How members hear about messages until they choose for themselves: unset
+  // leaves it to each person, MENTIONS only for @mentions.
+  NotificationLevel default_notifications = 10;
+  // Where "someone joined" messages go. Empty for nowhere.
+  string system_channel_id = 11;
 }
 
 enum ChannelType {
@@ -133,6 +141,16 @@ message Channel {
   int32 position = 7;
   google.protobuf.Timestamp created_at = 8;
   google.protobuf.Timestamp updated_at = 9;
+  // Slow mode: how long each member waits between messages here. Owners and
+  // admins don't wait. Zero for off.
+  int32 slowmode_seconds = 10;
+}
+
+enum MessageKind {
+  // Written by someone.
+  MESSAGE_KIND_UNSPECIFIED = 0;
+  // The author joined the server. Posted in its system channel, with no text.
+  MESSAGE_KIND_MEMBER_JOINED = 1;
 }
 
 message Message {
@@ -147,6 +165,7 @@ message Message {
   google.protobuf.Timestamp created_at = 9;
   // Unset until the message is edited.
   google.protobuf.Timestamp edited_at = 10;
+  MessageKind kind = 11;
 }
 
 message Attachment {
@@ -303,8 +322,19 @@ message MemberUpdated {
   Member member = 1;
 }
 
+enum LeaveReason {
+  LEAVE_REASON_UNSPECIFIED = 0;
+  // They left, or deleted their account.
+  LEAVE_REASON_LEFT = 1;
+  // An owner or admin removed them; they can join again.
+  LEAVE_REASON_KICKED = 2;
+  // An owner or admin removed them and keeps them out.
+  LEAVE_REASON_BANNED = 3;
+}
+
 message MemberLeft {
   string user_id = 1;
+  LeaveReason reason = 2;
 }
 
 // Someone who was a member changed how they look, such as when their account

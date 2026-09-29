@@ -366,9 +366,9 @@ async fn a_community_end_to_end() {
         .await
         .unwrap();
 
-    // Usage follows along.
+    // Usage follows along, counting Mika's join message.
     let u = usage(&mut c, &juan, &sid).await;
-    assert_eq!((u.members, u.channels, u.messages, u.messages_sent), (2, 2, 6, 7));
+    assert_eq!((u.members, u.channels, u.messages, u.messages_sent), (2, 2, 7, 8));
     let expected_bytes: i64 = ["message zero", "message 2", "message 3", "message 4", "message 5", "message 6"]
         .iter()
         .map(|s| s.len() as i64)
@@ -442,7 +442,7 @@ async fn a_community_end_to_end() {
         .await
         .unwrap();
     let u = usage(&mut c, &juan, &sid).await;
-    assert_eq!((u.channels, u.messages, u.messages_sent, u.message_bytes), (1, 6, 8, expected_bytes));
+    assert_eq!((u.channels, u.messages, u.messages_sent, u.message_bytes), (1, 7, 9, expected_bytes));
 
     // Profiles propagate to the servers you're in.
     c.auth
@@ -929,10 +929,10 @@ async fn concurrent_writes_stay_ordered_and_counted() {
         .unwrap()
         .into_inner();
     // The stream says where the server stands before anything live arrives:
-    // the owner, #general, three joins and #doomed.
+    // the owner, #general, three joins with their join messages, and #doomed.
     let ready =
         tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap().ready.unwrap();
-    assert_eq!(ready.servers, [pb::ServerHead { server_id: server.id.clone(), sequence: 6 }]);
+    assert_eq!(ready.servers, [pb::ServerHead { server_id: server.id.clone(), sequence: 9 }]);
 
     // 300 messages from four people at once, half of them into a channel that
     // gets deleted halfway through: more than enough to fold usage changes.
@@ -979,7 +979,7 @@ async fn concurrent_writes_stay_ordered_and_counted() {
         }
     }
     assert!(sequences.windows(2).all(|pair| pair[1] == pair[0] + 1), "live events arrive in sequence: {sequences:?}");
-    assert_eq!((sequences[0], *sequences.last().unwrap()), (7, 6 + expected as i64));
+    assert_eq!((sequences[0], *sequences.last().unwrap()), (10, 9 + expected as i64));
 
     // Catching up from the start replays the same log, in the same order.
     let mut replay = c
@@ -987,7 +987,7 @@ async fn concurrent_writes_stay_ordered_and_counted() {
         .subscribe(authed(
             &owner,
             pb::SubscribeRequest {
-                servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: Some(6) }],
+                servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: Some(9) }],
             },
         ))
         .await
@@ -1022,9 +1022,9 @@ async fn concurrent_writes_stay_ordered_and_counted() {
     assert!(in_general.has_more);
     let u = usage(&mut c, &owner, &server.id).await;
     assert_eq!((u.members, u.channels), (4, 1));
-    assert_eq!(u.messages, 150, "only #general's messages are left");
-    assert_eq!(u.messages_sent, sent as i64);
-    assert_eq!(u.events, 6 + expected as i64);
+    assert_eq!(u.messages, 153, "only #general's messages are left, join messages included");
+    assert_eq!(u.messages_sent, sent as i64 + 3);
+    assert_eq!(u.events, 9 + expected as i64);
     drop(c);
     instance.stop().await;
 
@@ -1045,7 +1045,7 @@ async fn concurrent_writes_stay_ordered_and_counted() {
     let conn = db.connect().unwrap();
     let mut rows = conn.query("SELECT count(*), count(DISTINCT channel_id) FROM messages", ()).await.unwrap();
     let row = rows.next().await.unwrap().unwrap();
-    assert_eq!((row.get::<i64>(0).unwrap(), row.get::<i64>(1).unwrap()), (150, 1));
+    assert_eq!((row.get::<i64>(0).unwrap(), row.get::<i64>(1).unwrap()), (153, 1));
 }
 
 // Several worker threads, so transactions really overlap.
@@ -1416,6 +1416,7 @@ async fn profiles_nicknames_and_notification_settings() {
         server_id: server.id.clone(),
         user_id: user.into(),
         nickname: Some(nickname.into()),
+        role: None,
     };
     let own = c.servers.update_member(authed(&mika, nick("", "  Mika ✨ "))).await.unwrap().into_inner();
     assert_eq!(own.member.unwrap().nickname, "Mika ✨");
@@ -1616,7 +1617,7 @@ async fn data_export_and_account_deletion() {
         .await
         .unwrap()
         .into_inner();
-    assert_eq!(listed.messages.len(), 3);
+    assert_eq!(listed.messages.len(), 4, "three messages and the join message");
     assert_eq!(listed.authors[0].display_name, "Deleted account");
     let usage = usage(&mut c, &juan, &server.id).await;
     assert_eq!(usage.members, 1);
@@ -1634,6 +1635,520 @@ async fn data_export_and_account_deletion() {
         ))
         .await;
     assert_eq!(only_admin.unwrap_err().code(), Code::FailedPrecondition);
+
+    instance.stop().await;
+}
+
+async fn send(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    content: &str,
+) -> Result<pb::Message, tonic::Status> {
+    c.messages
+        .send_message(authed(
+            token,
+            pb::SendMessageRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                content: content.into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().message.unwrap())
+}
+
+async fn messages(c: &mut Clients, token: &str, server_id: &str, channel_id: &str) -> Vec<pb::Message> {
+    c.messages
+        .list_messages(authed(
+            token,
+            pb::ListMessagesRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .messages
+}
+
+async fn new_channel(c: &mut Clients, token: &str, server_id: &str, name: &str, kind: pb::ChannelType) -> pb::Channel {
+    c.channels
+        .create_channel(authed(
+            token,
+            pb::CreateChannelRequest {
+                server_id: server_id.into(),
+                name: name.into(),
+                r#type: kind as i32,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .channel
+        .unwrap()
+}
+
+async fn audit_log(c: &mut Clients, token: &str, request: pb::ListAuditLogRequest) -> pb::ListAuditLogResponse {
+    c.servers.list_audit_log(authed(token, request)).await.unwrap().into_inner()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn server_settings_and_moderation() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (aoi, aoi_user, _) = sign_up(&mut c, "aoi").await;
+    let server = create_server(&mut c, &juan, "Mods", true).await;
+    let sid = server.id.clone();
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .remove(0);
+    // New servers welcome people in #general, and leave notifications to each person.
+    assert_eq!(server.system_channel_id, general.id);
+    assert_eq!(server.default_notifications, pb::NotificationLevel::Unspecified as i32);
+
+    // Joining posts a join message, which nobody can edit.
+    for token in [&mika, &aoi] {
+        c.servers.join_server(authed(token, pb::JoinServerRequest { server_id: sid.clone() })).await.unwrap();
+    }
+    let welcomed = messages(&mut c, &juan, &sid, &general.id).await;
+    assert_eq!(
+        welcomed.iter().map(|m| (m.kind, m.author_id.as_str(), m.content.as_str())).collect::<Vec<_>>(),
+        [
+            (pb::MessageKind::MemberJoined as i32, mika_user.id.as_str(), ""),
+            (pb::MessageKind::MemberJoined as i32, aoi_user.id.as_str(), "")
+        ]
+    );
+    let edit = c
+        .messages
+        .update_message(authed(
+            &mika,
+            pb::UpdateMessageRequest {
+                server_id: sid.clone(),
+                message_id: welcomed[0].id.clone(),
+                content: "hi".into(),
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(edit.code(), Code::InvalidArgument);
+
+    // Server settings: default notifications and where join messages go.
+    let welcome = new_channel(&mut c, &juan, &sid, "welcome", pb::ChannelType::Text).await;
+    let lounge = new_channel(&mut c, &juan, &sid, "Lounge", pb::ChannelType::Category).await;
+    let update = |token: &str, level: Option<pb::NotificationLevel>, system: Option<&str>| {
+        authed(
+            token,
+            pb::UpdateServerRequest {
+                server_id: sid.clone(),
+                default_notifications: level.map(|l| l as i32),
+                system_channel_id: system.map(Into::into),
+                ..Default::default()
+            },
+        )
+    };
+    let not_admin = c.servers.update_server(update(&mika, Some(pb::NotificationLevel::Mentions), None)).await;
+    assert_eq!(not_admin.unwrap_err().code(), Code::PermissionDenied);
+    let nothing = c.servers.update_server(update(&juan, Some(pb::NotificationLevel::Nothing), None)).await;
+    assert_eq!(nothing.unwrap_err().code(), Code::InvalidArgument);
+    let category = c.servers.update_server(update(&juan, None, Some(&lounge.id))).await;
+    assert_eq!(category.unwrap_err().code(), Code::InvalidArgument);
+    let updated = c
+        .servers
+        .update_server(update(&juan, Some(pb::NotificationLevel::Mentions), Some(&welcome.id)))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert_eq!(
+        (updated.default_notifications, updated.system_channel_id.as_str()),
+        (pb::NotificationLevel::Mentions as i32, welcome.id.as_str())
+    );
+    let listed = c.servers.list_servers(authed(&mika, pb::ListServersRequest {})).await.unwrap().into_inner().servers;
+    assert_eq!(listed[0].system_channel_id, welcome.id, "the index keeps the new settings");
+
+    // Roles: only the owner hands them out.
+    let role = |token: &str, user: &str, role: pb::MemberRole| {
+        authed(
+            token,
+            pb::UpdateMemberRequest {
+                server_id: sid.clone(),
+                user_id: user.into(),
+                nickname: None,
+                role: Some(role as i32),
+            },
+        )
+    };
+    let promoted =
+        c.servers.update_member(role(&juan, &mika_user.id, pb::MemberRole::Admin)).await.unwrap().into_inner();
+    assert_eq!(promoted.member.unwrap().role, pb::MemberRole::Admin as i32);
+    let by_admin = c.servers.update_member(role(&mika, &aoi_user.id, pb::MemberRole::Admin)).await;
+    assert_eq!(by_admin.unwrap_err().code(), Code::PermissionDenied);
+    let to_owner = c.servers.update_member(role(&juan, &aoi_user.id, pb::MemberRole::Owner)).await;
+    assert_eq!(to_owner.unwrap_err().code(), Code::InvalidArgument);
+
+    // Time-outs stop someone sending, until they end.
+    let time_out = |token: &str, user: &str, seconds: i64| {
+        authed(
+            token,
+            pb::TimeOutMemberRequest {
+                server_id: sid.clone(),
+                user_id: user.into(),
+                seconds,
+                reason: "cool off".into(),
+            },
+        )
+    };
+    let owner_id = server.owner_id.clone();
+    let upward = c.servers.time_out_member(time_out(&mika, &owner_id, 60)).await;
+    assert_eq!(upward.unwrap_err().code(), Code::PermissionDenied);
+    let too_long = c.servers.time_out_member(time_out(&mika, &aoi_user.id, 29 * 24 * 60 * 60)).await;
+    assert_eq!(too_long.unwrap_err().code(), Code::InvalidArgument);
+    let timed_out =
+        c.servers.time_out_member(time_out(&mika, &aoi_user.id, 60)).await.unwrap().into_inner().member.unwrap();
+    assert!(timed_out.timed_out_until.is_some());
+    let quiet = send(&mut c, &aoi, &sid, &general.id, "let me talk").await.unwrap_err();
+    assert_eq!(quiet.code(), Code::PermissionDenied);
+    assert!(quiet.message().contains("timed out"), "{}", quiet.message());
+    let ended = c.servers.time_out_member(time_out(&mika, &aoi_user.id, 0)).await.unwrap().into_inner().member.unwrap();
+    assert!(ended.timed_out_until.is_none());
+    send(&mut c, &aoi, &sid, &general.id, "thanks").await.unwrap();
+
+    // Slow mode holds members, not admins.
+    let slow = |token: &str, channel: &str, seconds: i32| {
+        authed(
+            token,
+            pb::UpdateChannelRequest {
+                server_id: sid.clone(),
+                channel_id: channel.into(),
+                slowmode_seconds: Some(seconds),
+                ..Default::default()
+            },
+        )
+    };
+    let too_slow = c.channels.update_channel(slow(&juan, &general.id, 21601)).await;
+    assert_eq!(too_slow.unwrap_err().code(), Code::InvalidArgument);
+    let slowed = c.channels.update_channel(slow(&juan, &general.id, 30)).await.unwrap().into_inner().channel.unwrap();
+    assert_eq!(slowed.slowmode_seconds, 30);
+    send(&mut c, &aoi, &sid, &general.id, "one").await.unwrap();
+    let wait = send(&mut c, &aoi, &sid, &general.id, "two").await.unwrap_err();
+    assert_eq!(wait.code(), Code::ResourceExhausted);
+    assert!(wait.message().contains("30 seconds"), "{}", wait.message());
+    for text in ["admins", "don't wait"] {
+        send(&mut c, &mika, &sid, &general.id, text).await.unwrap();
+    }
+    // Two sent at once by the same person: one gets in.
+    c.channels.update_channel(slow(&juan, &welcome.id, 60)).await.unwrap();
+    let racing: Vec<_> = (0..6)
+        .map(|n| {
+            let mut messages = c.messages.clone();
+            let request = authed(
+                &aoi,
+                pb::SendMessageRequest {
+                    server_id: sid.clone(),
+                    channel_id: welcome.id.clone(),
+                    content: format!("race {n}"),
+                    ..Default::default()
+                },
+            );
+            tokio::spawn(async move { messages.send_message(request).await })
+        })
+        .collect();
+    let mut landed = 0;
+    for task in racing {
+        match task.await.unwrap() {
+            Ok(_) => landed += 1,
+            Err(status) => assert_eq!(status.code(), Code::ResourceExhausted, "{status:?}"),
+        }
+    }
+    assert_eq!(landed, 1);
+    // Turning it off lets them talk again.
+    c.channels.update_channel(slow(&juan, &general.id, 0)).await.unwrap();
+    send(&mut c, &aoi, &sid, &general.id, "free").await.unwrap();
+
+    // A moderator deleting someone's message is logged; deleting your own isn't.
+    let spam = send(&mut c, &aoi, &sid, &general.id, "spam").await.unwrap();
+    c.messages
+        .delete_message(authed(&mika, pb::DeleteMessageRequest { server_id: sid.clone(), message_id: spam.id }))
+        .await
+        .unwrap();
+    let mine = send(&mut c, &mika, &sid, &general.id, "oops").await.unwrap();
+    c.messages
+        .delete_message(authed(&mika, pb::DeleteMessageRequest { server_id: sid.clone(), message_id: mine.id }))
+        .await
+        .unwrap();
+
+    // Kicks end the person's stream and let them come back.
+    let mut aoi_stream = c
+        .events
+        .subscribe(authed(
+            &aoi,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(aoi_stream.next().await.unwrap().unwrap().ready.is_some());
+    let kick = |token: &str, user: &str| {
+        authed(token, pb::KickMemberRequest { server_id: sid.clone(), user_id: user.into(), reason: "rude".into() })
+    };
+    assert_eq!(c.servers.kick_member(kick(&aoi, &mika_user.id)).await.unwrap_err().code(), Code::PermissionDenied);
+    assert_eq!(c.servers.kick_member(kick(&mika, &mika_user.id)).await.unwrap_err().code(), Code::InvalidArgument);
+    c.servers.kick_member(kick(&mika, &aoi_user.id)).await.unwrap();
+    let mut left = None;
+    while let Some(item) = tokio::time::timeout(Duration::from_secs(5), aoi_stream.next()).await.unwrap() {
+        if let Some(Payload::MemberLeft(l)) = item.unwrap().event.and_then(|e| e.payload) {
+            left = Some(l);
+        }
+    }
+    let left = left.expect("aoi hears they were kicked, then the stream ends");
+    assert_eq!((left.user_id.as_str(), left.reason), (aoi_user.id.as_str(), pb::LeaveReason::Kicked as i32));
+    assert!(
+        !c.servers
+            .list_servers(authed(&aoi, pb::ListServersRequest {}))
+            .await
+            .unwrap()
+            .into_inner()
+            .servers
+            .iter()
+            .any(|s| s.id == sid)
+    );
+    // Coming back online afterwards, they hear they're out, rather than the stream failing.
+    let mut later = c
+        .events
+        .subscribe(authed(
+            &aoi,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: Some(0) }],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let out = later.next().await.unwrap().unwrap().event.unwrap();
+    assert!(matches!(out.payload, Some(Payload::MemberLeft(ref l)) if l.user_id == aoi_user.id));
+    assert!(later.next().await.unwrap().unwrap().ready.unwrap().servers.is_empty());
+    assert!(tokio::time::timeout(Duration::from_secs(5), later.next()).await.unwrap().is_none());
+    c.servers.join_server(authed(&aoi, pb::JoinServerRequest { server_id: sid.clone() })).await.unwrap();
+
+    // Bans keep them out, and can take their recent messages with them.
+    let before = usage(&mut c, &juan, &sid).await;
+    let recent = messages(&mut c, &juan, &sid, &general.id).await.iter().filter(|m| m.author_id == aoi_user.id).count();
+    let banned = c
+        .servers
+        .ban_member(authed(
+            &juan,
+            pb::BanMemberRequest {
+                server_id: sid.clone(),
+                user_id: aoi_user.id.clone(),
+                reason: "raiding".into(),
+                delete_message_seconds: 60 * 60,
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    // Everything they sent in #general and #welcome, their join messages included.
+    assert_eq!(banned.deleted_messages as usize, recent + 2);
+    assert_eq!(banned.ban.unwrap().user.unwrap().id, aoi_user.id);
+    let after = usage(&mut c, &juan, &sid).await;
+    assert_eq!((after.members, after.messages), (before.members - 1, before.messages - banned.deleted_messages));
+    assert!(messages(&mut c, &juan, &sid, &general.id).await.iter().all(|m| m.author_id != aoi_user.id));
+    let rejoin = c.servers.join_server(authed(&aoi, pb::JoinServerRequest { server_id: sid.clone() })).await;
+    assert_eq!(rejoin.unwrap_err().code(), Code::PermissionDenied);
+    let twice = c
+        .servers
+        .ban_member(authed(
+            &juan,
+            pb::BanMemberRequest { server_id: sid.clone(), user_id: aoi_user.id.clone(), ..Default::default() },
+        ))
+        .await;
+    assert_eq!(twice.unwrap_err().code(), Code::AlreadyExists);
+    let bans =
+        c.servers.list_bans(authed(&mika, pb::ListBansRequest { server_id: sid.clone() })).await.unwrap().into_inner();
+    assert_eq!(bans.bans.len(), 1);
+    assert_eq!((bans.bans[0].reason.as_str(), bans.bans[0].banned_by_id.as_str()), ("raiding", owner_id.as_str()));
+    assert_eq!(bans.moderators.iter().map(|u| u.username.as_str()).collect::<Vec<_>>(), ["juan"]);
+    c.servers
+        .unban_member(authed(&mika, pb::UnbanMemberRequest { server_id: sid.clone(), user_id: aoi_user.id.clone() }))
+        .await
+        .unwrap();
+    c.servers.join_server(authed(&aoi, pb::JoinServerRequest { server_id: sid.clone() })).await.unwrap();
+
+    // Reordering: every channel once, categories at the top level.
+    let place = |id: &str, parent: &str| pb::ChannelPlacement { channel_id: id.into(), parent_id: parent.into() };
+    let reorder = |channels: Vec<pb::ChannelPlacement>| {
+        authed(&juan, pb::ReorderChannelsRequest { server_id: sid.clone(), channels })
+    };
+    let missing = c.channels.reorder_channels(reorder(vec![place(&general.id, "")])).await;
+    assert_eq!(missing.unwrap_err().code(), Code::FailedPrecondition);
+    let nested = c
+        .channels
+        .reorder_channels(reorder(vec![place(&lounge.id, &lounge.id), place(&general.id, ""), place(&welcome.id, "")]))
+        .await;
+    assert_eq!(nested.unwrap_err().code(), Code::InvalidArgument);
+    let ordered = c
+        .channels
+        .reorder_channels(reorder(vec![place(&welcome.id, ""), place(&lounge.id, ""), place(&general.id, &lounge.id)]))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels;
+    assert_eq!(
+        ordered.iter().map(|ch| (ch.name.as_str(), ch.position, ch.parent_id.as_str())).collect::<Vec<_>>(),
+        [("welcome", 0, ""), ("Lounge", 1, ""), ("general", 2, lounge.id.as_str())]
+    );
+
+    // Deleting the system channel stops join messages.
+    c.channels
+        .delete_channel(authed(
+            &juan,
+            pb::DeleteChannelRequest { server_id: sid.clone(), channel_id: welcome.id.clone() },
+        ))
+        .await
+        .unwrap();
+    let server_now = c
+        .servers
+        .get_server(authed(&juan, pb::GetServerRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert_eq!(server_now.system_channel_id, "");
+
+    // The audit log: newest first, filtered by who and what, only for managers.
+    let log = audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    let actions: Vec<pb::AuditAction> = log.entries.iter().map(|e| e.action()).collect();
+    use pb::AuditAction as A;
+    assert_eq!(
+        actions,
+        [
+            A::ChannelDelete,
+            A::ChannelsReorder,
+            A::MemberUnban,
+            A::MemberBan,
+            A::MemberKick,
+            A::MessageDelete,
+            A::ChannelUpdate,
+            A::ChannelUpdate,
+            A::ChannelUpdate,
+            A::MemberTimeOut,
+            A::MemberTimeOut,
+            A::MemberUpdate,
+            A::ServerUpdate,
+            A::ChannelCreate,
+            A::ChannelCreate,
+        ]
+    );
+    let ban = &log.entries[3];
+    assert_eq!((ban.reason.as_str(), ban.target_id.as_str()), ("raiding", aoi_user.id.as_str()));
+    let deleted = &log.entries[5];
+    assert_eq!((deleted.target_id.as_str(), deleted.channel_name.as_str()), (aoi_user.id.as_str(), "general"));
+    let server_change = &log.entries[12];
+    assert_eq!(
+        server_change.changes.iter().map(|ch| ch.field.as_str()).collect::<Vec<_>>(),
+        ["default_notifications", "system_channel_id"]
+    );
+    assert_eq!(
+        (server_change.changes[1].before.as_str(), server_change.changes[1].after.as_str()),
+        (general.id.as_str(), welcome.id.as_str())
+    );
+    let mut names: Vec<_> = log.users.iter().map(|u| u.username.as_str()).collect();
+    names.sort();
+    assert_eq!(names, ["aoi", "juan", "mika"]);
+    let by_mika = audit_log(
+        &mut c,
+        &juan,
+        pb::ListAuditLogRequest { server_id: sid.clone(), actor_id: mika_user.id.clone(), ..Default::default() },
+    )
+    .await;
+    assert_eq!(
+        by_mika.entries.iter().map(|e| e.action()).collect::<Vec<_>>(),
+        [A::MemberUnban, A::MemberKick, A::MessageDelete, A::MemberTimeOut, A::MemberTimeOut]
+    );
+    let bans_only = audit_log(
+        &mut c,
+        &juan,
+        pb::ListAuditLogRequest { server_id: sid.clone(), action: A::MemberBan as i32, ..Default::default() },
+    )
+    .await;
+    assert_eq!(bans_only.entries.len(), 1);
+    let first_page =
+        audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), limit: 10, ..Default::default() })
+            .await;
+    assert!(first_page.has_more);
+    let second_page = audit_log(
+        &mut c,
+        &juan,
+        pb::ListAuditLogRequest {
+            server_id: sid.clone(),
+            limit: 10,
+            before_id: first_page.entries.last().unwrap().id.clone(),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(second_page.entries.len(), 5);
+    assert!(!second_page.has_more);
+    let hidden = c
+        .servers
+        .list_audit_log(authed(&aoi, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }))
+        .await;
+    assert_eq!(hidden.unwrap_err().code(), Code::PermissionDenied);
+
+    // Handing the server on: the new owner owns it, the old one stays as an admin.
+    let transfer = |token: &str, user: &str| {
+        authed(token, pb::TransferOwnershipRequest { server_id: sid.clone(), user_id: user.into() })
+    };
+    assert_eq!(
+        c.servers.transfer_ownership(transfer(&mika, &aoi_user.id)).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    let handed =
+        c.servers.transfer_ownership(transfer(&juan, &mika_user.id)).await.unwrap().into_inner().server.unwrap();
+    assert_eq!(handed.owner_id, mika_user.id);
+    let members = c
+        .servers
+        .list_members(authed(&juan, pb::ListMembersRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .members;
+    let role_of = |id: &str| members.iter().find(|m| m.user.as_ref().unwrap().id == id).unwrap().role;
+    assert_eq!(
+        (role_of(&mika_user.id), role_of(&owner_id)),
+        (pb::MemberRole::Owner as i32, pb::MemberRole::Admin as i32)
+    );
+    // The old owner no longer hands out roles, and can leave like anyone else.
+    let old_owner = c
+        .servers
+        .update_member(authed(
+            &juan,
+            pb::UpdateMemberRequest {
+                server_id: sid.clone(),
+                user_id: aoi_user.id.clone(),
+                nickname: None,
+                role: Some(pb::MemberRole::Admin as i32),
+            },
+        ))
+        .await;
+    assert_eq!(old_owner.unwrap_err().code(), Code::PermissionDenied);
+    c.servers.leave_server(authed(&juan, pb::LeaveServerRequest { server_id: sid.clone() })).await.unwrap();
 
     instance.stop().await;
 }

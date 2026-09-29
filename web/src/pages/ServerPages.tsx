@@ -53,6 +53,9 @@ export function ChannelPage({ instanceKey, serverId, channelId }: { instanceKey:
   if (!channel) {
     // Deleted while open, or not loaded yet.
     if (inst.synced[serverId]) return <Navigate to="/$instance/$server" params={{ instance: instanceKey, server: serverId }} replace />;
+    // You left, were kicked or banned, or the server was deleted.
+    if (inst.connection === "live" && !inst.servers.some((s) => s.id === serverId))
+      return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
     return <div className="shimmer m-4 h-10 rounded-xl opacity-40" />;
   }
   return <ChannelView instanceKey={instanceKey} serverId={serverId} channel={channel} />;

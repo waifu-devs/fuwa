@@ -1,12 +1,41 @@
 import { useNavigate } from "@tanstack/react-router";
-import { ChartColumnIcon, EyeOffIcon, GaugeIcon, LoaderCircleIcon, SettingsIcon, Trash2Icon, TriangleAlertIcon, UsersIcon } from "lucide-react";
+import {
+  AtSignIcon,
+  BellIcon,
+  ChartColumnIcon,
+  ChevronDownIcon,
+  CrownIcon,
+  EyeOffIcon,
+  GaugeIcon,
+  GavelIcon,
+  HashIcon,
+  LoaderCircleIcon,
+  ScrollTextIcon,
+  SettingsIcon,
+  Trash2Icon,
+  TriangleAlertIcon,
+  UsersIcon,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { GetServerUsageResponse } from "@/gen/fuwa/v1/server_pb";
-import type { Server, ServerLimits } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, MemberRole, NotificationLevel, type Server, type ServerLimits } from "@/gen/fuwa/v1/types_pb";
 import { deleteServer, nodeUsage, run, serverUsage, setServerLimits, updateServer } from "@/fuwa/actions";
-import { useAction } from "@/fuwa/hooks";
-import { ServerIcon } from "@/components/Icons";
+import { useAction, useInstance } from "@/fuwa/hooks";
+import { ServerIcon, UserAvatar } from "@/components/Icons";
+import { joinLine } from "@/components/chat/MessageList";
+import { AuditLog } from "@/components/settings/server/AuditLog";
+import { Bans } from "@/components/settings/server/Bans";
+import { Channels } from "@/components/settings/server/Channels";
+import { Members } from "@/components/settings/server/Members";
+import { Ownership } from "@/components/settings/server/Ownership";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { InlineMarkdown } from "@/components/Markdown";
 import { Count, CountUp, SPRING, SwapText } from "@/components/motion";
 import { Button } from "@/components/ui/button";
@@ -14,9 +43,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { formatBytes, initials } from "@/lib/format";
+import { displayName, formatBytes, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { Cap, SaveBar, WithPreview } from "@/components/settings/controls";
+import { Choice, Cap, SaveBar, WithPreview } from "@/components/settings/controls";
 import { SettingsScreen } from "@/components/settings/SettingsScreen";
 
 export function ServerSettingsDialog({
@@ -24,35 +53,55 @@ export function ServerSettingsDialog({
   onOpenChange,
   instanceKey,
   server,
-  isOwner,
+  role,
   instanceAdmin = false,
   tab: initialTab = "overview",
+  target = null,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   instanceKey: string;
   server: Server;
-  isOwner: boolean;
-  /** Instance admins also get the server's own caps. */
+  /** Your role in the server. Owners and admins manage it; only owners hand it on. */
+  role: MemberRole;
+  /** Instance admins also get the server's own caps, and can delete it. */
   instanceAdmin?: boolean;
   tab?: string;
+  /** What to open the section on, such as a channel. */
+  target?: string | null;
 }) {
   const [tab, setTab] = useState(initialTab);
   useEffect(() => {
     if (open) setTab(initialTab);
   }, [open, initialTab]);
+  const manager = role >= MemberRole.ADMIN;
+  const owner = role === MemberRole.OWNER;
   const sections = [
     {
       id: "overview",
       label: "Overview",
       icon: SettingsIcon,
-      description: "How the server looks and whether people can find it.",
+      description: "How the server looks, whether people can find it, and how it greets them.",
       settings: [
         { id: "name", label: "Server name" },
         { id: "description", label: "Description" },
         { id: "discoverable", label: "Show in Browse", keywords: "discoverable public hidden" },
+        { id: "join-messages", label: "Join messages", keywords: "system channel welcome greet" },
+        { id: "default-notifications", label: "Default notifications", keywords: "mentions ping" },
       ],
     },
+    ...(manager
+      ? [
+          {
+            id: "channels",
+            label: "Channels",
+            icon: HashIcon,
+            description: "Order, categories, topics and slow mode.",
+            keywords: "reorder drag category topic slowmode slow mode",
+            settings: [{ id: "slowmode", label: "Slow mode", keywords: "slowmode rate limit" }],
+          },
+        ]
+      : []),
     { id: "usage", label: "Usage", icon: ChartColumnIcon, description: "What the server holds, against its caps.", keywords: "storage members messages" },
     ...(instanceAdmin
       ? [
@@ -66,6 +115,22 @@ export function ServerSettingsDialog({
         ]
       : []),
   ];
+  const people = manager
+    ? [
+        {
+          label: "People",
+          sections: [
+            { id: "members", label: "Members", icon: UsersIcon, description: "Roles, nicknames, time-outs, kicks and bans.", keywords: "admin role kick ban timeout nickname" },
+            { id: "bans", label: "Bans", icon: GavelIcon, description: "Who's kept out, and why.", keywords: "unban banned" },
+            { id: "audit-log", label: "Audit log", icon: ScrollTextIcon, description: "What owners and admins did here.", keywords: "history log moderation" },
+          ],
+        },
+      ]
+    : [];
+  const danger = [
+    ...(owner ? [{ id: "ownership", label: "Transfer ownership", icon: CrownIcon, danger: true, keywords: "owner hand give" }] : []),
+    ...(owner || instanceAdmin ? [{ id: "danger", label: "Delete server", icon: Trash2Icon, danger: true, keywords: "remove" }] : []),
+  ];
   return (
     <SettingsScreen
       open={open}
@@ -75,30 +140,46 @@ export function ServerSettingsDialog({
       section={tab}
       onSectionChange={setTab}
       openToSection={initialTab !== "overview"}
-      groups={[
-        { label: server.name, sections },
-        ...(isOwner ? [{ sections: [{ id: "danger", label: "Delete server", icon: Trash2Icon, danger: true, keywords: "remove" }] }] : []),
-      ]}
+      groups={[{ label: server.name, sections }, ...people, ...(danger.length ? [{ sections: danger }] : [])]}
     >
       {tab === "overview" && <Overview instanceKey={instanceKey} server={server} />}
+      {tab === "channels" && manager && <Channels instanceKey={instanceKey} serverId={server.id} initial={target} />}
       {tab === "usage" && <Usage instanceKey={instanceKey} serverId={server.id} />}
       {tab === "limits" && instanceAdmin && <Limits instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "danger" && isOwner && <Danger instanceKey={instanceKey} server={server} onDeleted={() => onOpenChange(false)} />}
+      {tab === "members" && manager && <Members instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "bans" && manager && <Bans instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "audit-log" && manager && <AuditLog instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "ownership" && owner && <Ownership instanceKey={instanceKey} server={server} onDone={() => setTab("overview")} />}
+      {tab === "danger" && (owner || instanceAdmin) && <Danger instanceKey={instanceKey} server={server} onDeleted={() => onOpenChange(false)} />}
     </SettingsScreen>
   );
 }
 
+const onlyMentions = (level: NotificationLevel) => level === NotificationLevel.MENTIONS;
+
 function Overview({ instanceKey, server }: { instanceKey: string; server: Server }) {
+  const inst = useInstance(instanceKey);
+  const textChannels = (inst?.channels[server.id] ?? []).filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT);
   const [name, setName] = useState(server.name);
   const [description, setDescription] = useState(server.description);
   const [discoverable, setDiscoverable] = useState(server.discoverable);
+  const [systemChannel, setSystemChannel] = useState(server.systemChannelId);
+  const [mentionsOnly, setMentionsOnly] = useState(onlyMentions(server.defaultNotifications));
   const save = useAction(updateServer);
-  const changes = [name !== server.name, description !== server.description, discoverable !== server.discoverable].filter(Boolean).length;
+  const changes = [
+    name !== server.name,
+    description !== server.description,
+    discoverable !== server.discoverable,
+    systemChannel !== server.systemChannelId,
+    mentionsOnly !== onlyMentions(server.defaultNotifications),
+  ].filter(Boolean).length;
 
   function discard() {
     setName(server.name);
     setDescription(server.description);
     setDiscoverable(server.discoverable);
+    setSystemChannel(server.systemChannelId);
+    setMentionsOnly(onlyMentions(server.defaultNotifications));
     save.setError(null);
   }
 
@@ -109,13 +190,25 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
       ...(name !== server.name && { name: name.trim() }),
       ...(description !== server.description && { description: description.trim() }),
       ...(discoverable !== server.discoverable && { discoverable }),
+      ...(systemChannel !== server.systemChannelId && { systemChannelId: systemChannel }),
+      ...(mentionsOnly !== onlyMentions(server.defaultNotifications) && {
+        defaultNotifications: mentionsOnly ? NotificationLevel.MENTIONS : NotificationLevel.UNSPECIFIED,
+      }),
     });
   }
 
   const shown = { ...server, name: name || server.name, description, discoverable };
+  const greeting = textChannels.find((c) => c.id === systemChannel);
   return (
     <form onSubmit={submit}>
-      <WithPreview preview={<BrowseCard server={shown} />}>
+      <WithPreview
+        preview={
+          <div className="flex flex-col gap-4">
+            <BrowseCard server={shown} />
+            <JoinPreview channelName={greeting?.name ?? null} user={inst?.me ?? undefined} />
+          </div>
+        }
+      >
         <div className="flex flex-col">
           <div data-setting="name" className="flex items-center gap-4 border-b border-border/70 pb-5">
             <motion.span key={initials(shown.name)} initial={{ scale: 0.85, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 16 }}>
@@ -135,17 +228,80 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
             <Textarea id="settings-description" rows={4} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} className="rounded-xl" />
             <p className="text-sm text-muted-foreground">Shown in Browse. Markdown works.</p>
           </div>
-          <label data-setting="discoverable" className="flex cursor-pointer items-center justify-between gap-4 py-5">
+          <label data-setting="discoverable" className="flex cursor-pointer items-center justify-between gap-4 border-b border-border/70 py-5">
             <span>
               <span className="block font-extrabold">Show in Browse</span>
               <span className="block text-sm text-muted-foreground">Anyone on this fuwa server can find and join it.</span>
             </span>
             <Switch checked={discoverable} onCheckedChange={setDiscoverable} />
           </label>
+          <div data-setting="join-messages" className="flex flex-col gap-2 border-b border-border/70 py-5">
+            <span className="font-extrabold">Join messages</span>
+            <span className="text-sm text-muted-foreground">A hello in a channel whenever someone joins, so people can wave.</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="group flex h-11 items-center gap-2 rounded-xl border px-3 text-left text-sm transition hover:border-primary/40 data-[state=open]:border-primary/60"
+                >
+                  <HashIcon className="size-4 text-muted-foreground" />
+                  <span className="flex-1 truncate font-bold">{greeting?.name ?? "Don't post them"}</span>
+                  <ChevronDownIcon className="size-4 text-muted-foreground transition-transform duration-300 group-data-[state=open]:rotate-180" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-72 w-64 overflow-y-auto">
+                <DropdownMenuRadioGroup value={systemChannel} onValueChange={setSystemChannel}>
+                  <DropdownMenuRadioItem value="">Don't post them</DropdownMenuRadioItem>
+                  {textChannels.map((c) => (
+                    <DropdownMenuRadioItem key={c.id} value={c.id}>
+                      #{c.name}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <div data-setting="default-notifications" className="flex flex-col gap-3 py-5">
+            <span>
+              <span className="block font-extrabold">Default notifications</span>
+              <span className="block text-sm text-muted-foreground">What members hear about until they pick for themselves.</span>
+            </span>
+            <Choice
+              value={mentionsOnly ? "mentions" : "own"}
+              onChange={(v) => setMentionsOnly(v === "mentions")}
+              options={[
+                { value: "own", label: "Their own setting", hint: "Each device decides, as it does everywhere else.", icon: <BellIcon className="size-4" /> },
+                { value: "mentions", label: "Only @mentions", hint: "Quieter, for busy servers.", icon: <AtSignIcon className="size-4" /> },
+              ]}
+            />
+          </div>
         </div>
         <SaveBar count={changes} saving={save.pending} error={save.error} onSave={() => void submit()} onDiscard={discard} />
       </WithPreview>
     </form>
+  );
+}
+
+/** A join message as it will look, or a note that there won't be one. */
+function JoinPreview({ channelName, user }: { channelName: string | null; user: Parameters<typeof UserAvatar>[0]["user"] }) {
+  return (
+    <div className="overflow-hidden rounded-3xl border bg-card p-4 shadow-lg">
+      <p className="mb-2 flex items-center gap-1 text-xs font-bold text-muted-foreground">
+        <HashIcon className="size-3.5" />
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span key={channelName ?? "none"} initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }} transition={SPRING}>
+            {channelName ?? "no channel"}
+          </motion.span>
+        </AnimatePresence>
+      </p>
+      <motion.div animate={{ opacity: channelName ? 1 : 0.35, filter: channelName ? "blur(0px)" : "blur(2px)" }} className="flex items-center gap-2 text-sm">
+        <motion.span animate={channelName ? { x: [0, 4, 0] } : { x: 0 }} transition={{ duration: 1.6, repeat: Infinity }} className="text-emerald-500">
+          →
+        </motion.span>
+        <UserAvatar user={user} className="size-6" />
+        <span className="min-w-0 truncate">{joinLine(user?.id ?? "", displayName(user))}</span>
+      </motion.div>
+    </div>
   );
 }
 

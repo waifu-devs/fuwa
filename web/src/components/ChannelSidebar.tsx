@@ -124,7 +124,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   const groups = useMemo(() => groupChannels(channels ?? []), [channels]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [creating, setCreating] = useState<{ parentId: string } | null>(null);
-  const [settings, setSettings] = useState<string | null>(null);
+  const [settings, setSettings] = useState<{ tab: string; target?: string } | null>(null);
   const leave = useAction(leaveServer);
   const developer = usePrefs((p) => p.developerMode);
 
@@ -155,12 +155,12 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-60">
           {manager && (
-            <DropdownMenuItem onSelect={() => setSettings("overview")}>
+            <DropdownMenuItem onSelect={() => setSettings({ tab: "overview" })}>
               <SettingsIcon /> Server settings
             </DropdownMenuItem>
           )}
           {manager && (
-            <DropdownMenuItem onSelect={() => setSettings("usage")}>
+            <DropdownMenuItem onSelect={() => setSettings({ tab: "usage" })}>
               <ChartColumnIcon /> Usage
             </DropdownMenuItem>
           )}
@@ -242,7 +242,14 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                     >
                       <AnimatePresence mode="popLayout">
                         {group.channels.map((c, n) => (
-                          <ChannelRow key={c.id} index={n} instanceKey={instanceKey} channel={c} active={params.channel === c.id} />
+                          <ChannelRow
+                            key={c.id}
+                            index={n}
+                            instanceKey={instanceKey}
+                            channel={c}
+                            active={params.channel === c.id}
+                            onEdit={role >= MemberRole.ADMIN ? () => setSettings({ tab: "channels", target: c.id }) : undefined}
+                          />
                         ))}
                       </AnimatePresence>
                     </motion.ul>
@@ -268,9 +275,10 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
           onOpenChange={(open) => !open && setSettings(null)}
           instanceKey={instanceKey}
           server={server}
-          isOwner={owner || !!inst.admin}
+          role={role}
           instanceAdmin={!!inst.admin}
-          tab={settings ?? "overview"}
+          tab={settings?.tab ?? "overview"}
+          target={settings?.target}
         />
       )}
     </>
@@ -283,12 +291,15 @@ function ChannelRow({
   active,
   index,
   ref,
+  onEdit,
 }: {
   instanceKey: string;
   channel: Channel;
   active: boolean;
   index: number;
   ref?: Ref<HTMLLIElement>;
+  /** Owners and admins: opens the channel's settings. */
+  onEdit?: () => void;
 }) {
   const muted = useMuted(instanceKey, channel.serverId, channel.id);
   const unread = useFuwa((s) => (muted ? 0 : (s.instances[instanceKey]?.unread[channel.id] ?? 0)));
@@ -336,6 +347,26 @@ function ChannelRow({
           )}
         />
         <span className="truncate">{channel.name}</span>
+        {onEdit && (
+          <span
+            role="button"
+            tabIndex={-1}
+            aria-label={`Edit #${channel.name}`}
+            title="Edit channel"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onEdit();
+            }}
+            className={cn(
+              "ml-auto size-5 shrink-0 place-items-center rounded text-muted-foreground transition group-hover:grid hover:rotate-45 hover:text-foreground",
+              // Like Discord: always there on the channel you're in, on hover elsewhere.
+              active ? "grid" : "hidden",
+            )}
+          >
+            <SettingsIcon className="size-3.5" />
+          </span>
+        )}
         <AnimatePresence>
           {muted && (
             <motion.span

@@ -1,4 +1,4 @@
-import { EyeIcon, EyeOffIcon } from "lucide-react";
+import { CheckIcon, EyeIcon, EyeOffIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useId, type ReactNode } from "react";
 import { SPRING } from "@/components/motion";
@@ -115,4 +115,48 @@ export function Segmented<T extends string | number>({
 export function useShake() {
   const controls = useAnimationControls();
   return [controls, () => void controls.start({ x: [0, -8, 8, -5, 5, 0], transition: { duration: 0.4 } })] as const;
+}
+
+/** Small pill choices; the chosen one fills in with a check. */
+export function Chips<T extends string | number>({
+  value,
+  options,
+  onChange,
+  label,
+}: {
+  value: T;
+  options: readonly { value: T; label: string }[];
+  onChange: (value: T) => void;
+  label?: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1.5">
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <motion.button
+            key={String(o.value)}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            whileTap={{ scale: 0.92 }}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              "relative rounded-full border px-3 py-1 text-xs font-bold transition-colors",
+              active ? "border-primary bg-primary text-primary-foreground" : "text-muted-foreground hover:border-primary/40 hover:text-foreground",
+            )}
+          >
+            <AnimatePresence initial={false}>
+              {active && (
+                <motion.span initial={{ width: 0, opacity: 0 }} animate={{ width: "auto", opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={SPRING} className="inline-flex overflow-hidden align-middle">
+                  <CheckIcon className="mr-1 size-3" strokeWidth={3} />
+                </motion.span>
+              )}
+            </AnimatePresence>
+            {o.label}
+          </motion.button>
+        );
+      })}
+    </div>
+  );
 }

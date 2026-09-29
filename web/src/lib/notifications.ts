@@ -7,11 +7,11 @@ import type { Prefs } from "@/lib/prefs";
 /**
  * How a message reaches you: your settings for its channel, else for its
  * server (both kept on the instance, so they follow you to every device),
- * else this device's own Notifications settings.
+ * else the server's default, else this device's own Notifications settings.
  */
 
 export type Effective = {
-  /** Unset when neither the channel nor the server says, so the device decides. */
+  /** Unset when neither you nor the server's default says, so the device decides. */
   level: NotificationLevel;
   muted: boolean;
   suppressEveryone: boolean;
@@ -27,7 +27,11 @@ export function effectiveNotifications(inst: InstanceState, serverId: string, ch
   const server = inst.notifications[notificationKey(serverId)];
   const channel = inst.notifications[notificationKey(serverId, channelId)];
   return {
-    level: channel?.level || server?.level || NotificationLevel.UNSPECIFIED,
+    level:
+      channel?.level ||
+      server?.level ||
+      inst.servers.find((s) => s.id === serverId)?.defaultNotifications ||
+      NotificationLevel.UNSPECIFIED,
     muted: isMuted(server, now) || isMuted(channel, now),
     suppressEveryone: !!server?.suppressEveryone,
   };

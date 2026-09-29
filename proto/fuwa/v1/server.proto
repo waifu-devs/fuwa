@@ -3,6 +3,7 @@ syntax = "proto3";
 package fuwa.v1;
 
 import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
 
 // Community servers on this instance.
 service ServerService {
@@ -20,11 +21,27 @@ service ServerService {
   rpc JoinServer(JoinServerRequest) returns (JoinServerResponse);
   rpc LeaveServer(LeaveServerRequest) returns (LeaveServerResponse);
   rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
-  // Changes a member's nickname. Anyone can change their own; owners and
-  // admins can change those of people ranked below them.
+  // Changes a member's nickname or role. Anyone can change their own
+  // nickname; owners and admins can change those of people ranked below
+  // them. Only the owner changes roles.
   rpc UpdateMember(UpdateMemberRequest) returns (UpdateMemberResponse);
   // What the server uses and the caps on it. Owner or instance admin only.
   rpc GetServerUsage(GetServerUsageRequest) returns (GetServerUsageResponse);
+
+  // Moderation. Owners and admins act on people ranked below them.
+
+  // Stops a member sending messages for a while.
+  rpc TimeOutMember(TimeOutMemberRequest) returns (TimeOutMemberResponse);
+  // Removes a member. They can join again.
+  rpc KickMember(KickMemberRequest) returns (KickMemberResponse);
+  // Removes someone who is or was a member and keeps them out.
+  rpc BanMember(BanMemberRequest) returns (BanMemberResponse);
+  rpc UnbanMember(UnbanMemberRequest) returns (UnbanMemberResponse);
+  rpc ListBans(ListBansRequest) returns (ListBansResponse);
+  // What owners and admins did in the server, newest first.
+  rpc ListAuditLog(ListAuditLogRequest) returns (ListAuditLogResponse);
+  // Hands the server to another member. Owner only; they become an admin.
+  rpc TransferOwnership(TransferOwnershipRequest) returns (TransferOwnershipResponse);
 }
 
 message CreateServerRequest {
@@ -64,6 +81,10 @@ message UpdateServerRequest {
   optional string description = 3;
   optional string icon_url = 4;
   optional bool discoverable = 5;
+  // Unset, ALL or MENTIONS.
+  optional NotificationLevel default_notifications = 6;
+  // A text channel, or empty to post no system messages.
+  optional string system_channel_id = 7;
 }
 
 message UpdateServerResponse {
@@ -104,6 +125,8 @@ message UpdateMemberRequest {
   string user_id = 2;
   // Empty clears it.
   optional string nickname = 3;
+  // Member or admin. Owner only; ownership moves with TransferOwnership.
+  optional MemberRole role = 4;
 }
 
 message UpdateMemberResponse {
@@ -120,4 +143,136 @@ message GetServerUsageResponse {
   ServerLimits limits = 2;
   // The server's own caps; unset fields follow the instance defaults.
   ServerLimits own_limits = 3;
+}
+
+message TimeOutMemberRequest {
+  string server_id = 1;
+  string user_id = 2;
+  // Up to 28 days. Zero ends a time-out early.
+  int64 seconds = 3;
+  // Kept in the audit log.
+  string reason = 4;
+}
+
+message TimeOutMemberResponse {
+  Member member = 1;
+}
+
+message KickMemberRequest {
+  string server_id = 1;
+  string user_id = 2;
+  string reason = 3;
+}
+
+message KickMemberResponse {}
+
+message BanMemberRequest {
+  string server_id = 1;
+  string user_id = 2;
+  string reason = 3;
+  // Also deletes what they sent in this many seconds before the ban, up to
+  // seven days. Zero keeps their messages.
+  int64 delete_message_seconds = 4;
+}
+
+message BanMemberResponse {
+  Ban ban = 1;
+  // How many of their messages went with them.
+  int64 deleted_messages = 2;
+}
+
+message UnbanMemberRequest {
+  string server_id = 1;
+  string user_id = 2;
+}
+
+message UnbanMemberResponse {}
+
+message ListBansRequest {
+  string server_id = 1;
+}
+
+message ListBansResponse {
+  // Newest first.
+  repeated Ban bans = 1;
+  // Whoever banned them, for names.
+  repeated User moderators = 2;
+}
+
+message Ban {
+  User user = 1;
+  string reason = 2;
+  string banned_by_id = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message ListAuditLogRequest {
+  string server_id = 1;
+  // 1 to 100; defaults to 50.
+  int32 limit = 2;
+  // The page right before this entry. Empty for the newest.
+  string before_id = 3;
+  // Only what this person did.
+  string actor_id = 4;
+  // Only this kind of action.
+  AuditAction action = 5;
+}
+
+message ListAuditLogResponse {
+  // Newest first.
+  repeated AuditEntry entries = 1;
+  // Everyone the entries name, as actor or target, for names and faces.
+  repeated User users = 2;
+  bool has_more = 3;
+}
+
+enum AuditAction {
+  AUDIT_ACTION_UNSPECIFIED = 0;
+  AUDIT_ACTION_SERVER_UPDATE = 1;
+  AUDIT_ACTION_CHANNEL_CREATE = 2;
+  AUDIT_ACTION_CHANNEL_UPDATE = 3;
+  AUDIT_ACTION_CHANNEL_DELETE = 4;
+  AUDIT_ACTION_CHANNELS_REORDER = 5;
+  // A nickname set by someone else, or a new role.
+  AUDIT_ACTION_MEMBER_UPDATE = 6;
+  AUDIT_ACTION_MEMBER_TIME_OUT = 7;
+  AUDIT_ACTION_MEMBER_KICK = 8;
+  AUDIT_ACTION_MEMBER_BAN = 9;
+  AUDIT_ACTION_MEMBER_UNBAN = 10;
+  // Someone else's message, deleted by an owner or admin.
+  AUDIT_ACTION_MESSAGE_DELETE = 11;
+  AUDIT_ACTION_OWNERSHIP_TRANSFER = 12;
+}
+
+// One thing an owner or admin did.
+message AuditEntry {
+  string id = 1;
+  string actor_id = 2;
+  AuditAction action = 3;
+  // A user for member and message actions, a channel for channel actions,
+  // empty for the server itself.
+  string target_id = 4;
+  // The channel's name at the time, for channel actions and deleted messages.
+  string channel_name = 5;
+  string reason = 6;
+  // What changed, for updates.
+  repeated AuditChange changes = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+// One field before and after. Values are text: numbers and times (unix
+// milliseconds) as digits, flags as "true" or "false", enums as their number.
+message AuditChange {
+  string field = 1;
+  string before = 2;
+  string after = 3;
+}
+
+message TransferOwnershipRequest {
+  string server_id = 1;
+  string user_id = 2;
+}
+
+message TransferOwnershipResponse {
+  Server server = 1;
 }

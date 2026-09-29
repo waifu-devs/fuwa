@@ -1,4 +1,4 @@
-import { CrownIcon, ShieldIcon } from "lucide-react";
+import { CrownIcon, HourglassIcon, ShieldIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useMemo, type CSSProperties } from "react";
 import { MemberRole, type Member } from "@/gen/fuwa/v1/types_pb";
@@ -9,7 +9,7 @@ import { Count } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { InlineMarkdown } from "@/components/Markdown";
 import { ProfilePopover } from "@/components/ProfilePopover";
-import { displayName, hueOf, memberName, shownStatus } from "@/lib/format";
+import { displayName, formatStamp, hueOf, memberName, shownStatus, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 
 const EMPTY: Member[] = [];
@@ -60,6 +60,7 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
                             {memberName(m)}
                           </span>
                           {section.icon && <section.icon className={`size-3 shrink-0 ${section.tint}`} />}
+                          <TimedOutMark member={m} now={now} />
                         </span>
                         <MemberSubtitle member={m} me={m.user?.id === inst?.me?.id} now={now} />
                       </span>
@@ -77,6 +78,27 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
         </section>
       ))}
     </div>
+  );
+}
+
+/** An hourglass by the names of members who are timed out. */
+function TimedOutMark({ member, now }: { member: Member; now: number }) {
+  const until = timedOutUntil(member, now);
+  return (
+    <AnimatePresence>
+      {until && (
+        <motion.span
+          initial={{ scale: 0, rotate: -90 }}
+          animate={{ scale: 1, rotate: 0 }}
+          exit={{ scale: 0, rotate: 90 }}
+          transition={{ type: "spring", stiffness: 600, damping: 18 }}
+          title={`Timed out until ${formatStamp(until)}`}
+          className="shrink-0 text-amber-500"
+        >
+          <HourglassIcon className="size-3" aria-label="Timed out" />
+        </motion.span>
+      )}
+    </AnimatePresence>
   );
 }
 
