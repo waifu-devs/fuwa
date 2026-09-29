@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// Accounts on this instance. Signing up or in returns a session token, which
+// every other call sends as `authorization: Bearer <token>`.
+service AuthService {
+  // Creates a standalone account. The first account on an instance becomes its admin.
+  rpc SignUp(SignUpRequest) returns (SignUpResponse);
+  rpc SignIn(SignInRequest) returns (SignInResponse);
+  // Ends the session the call was made with.
+  rpc SignOut(SignOutRequest) returns (SignOutResponse);
+  rpc GetMe(GetMeRequest) returns (GetMeResponse);
+  rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+}
+
+message SignUpRequest {
+  string username = 1;
+  string password = 2;
+  // Defaults to the username.
+  string display_name = 3;
+}
+
+message SignUpResponse {
+  string token = 1;
+  User user = 2;
+  bool admin = 3;
+}
+
+message SignInRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message SignInResponse {
+  string token = 1;
+  User user = 2;
+  bool admin = 3;
+}
+
+message SignOutRequest {}
+
+message SignOutResponse {}
+
+message GetMeRequest {}
+
+message GetMeResponse {
+  User user = 1;
+  // Instance admins can moderate every server here and read its usage.
+  bool admin = 2;
+}
+
+message UpdateProfileRequest {
+  optional string display_name = 1;
+  optional string avatar_url = 2;
+}
+
+message UpdateProfileResponse {
+  User user = 1;
+}
+
+message ChangePasswordRequest {
+  string current_password = 1;
+  string new_password = 2;
+}
+
+message ChangePasswordResponse {}

@@ -1,26 +1,33 @@
-# AGENTS.md - Fuwa Development Guide
+# AGENTS.md: working on fuwa
 
-## Build/Test Commands
-- `make build-server` - Build server binary to bin/fuwa-server
-- `make build-client` - Build client binary to bin/fuwa-client  
-- `make run-server` - Run gRPC server (auto-generates proto)
-- `make run-client` - Run example client (auto-generates proto)
-- `make proto-gen` - Generate Go code from proto files
-- `go test ./...` - Run tests (from workspace root or module dirs)
-- `cd server && sqlc generate` - Regenerate database code after schema changes
+## Layout
 
-## Code Style & Conventions
-- **Go Workspace**: Always run commands from workspace root `/home/shixzie/code/waifu-devs/fuwa`
-- **Package Structure**: Clean separation - `server/` for core logic, `database/` for data access
-- **Imports**: Standard library first, third-party, then local packages  
-- **Database**: Use sqlc - never edit generated `.go` files in `database/`, only edit `queries/*.sql` and `migrations/*.sql`
-- **Config**: All environment variables use `FUWA_` prefix (e.g., `FUWA_PORT`, `FUWA_DATABASE_URL`)
-- **Migrations**: Timestamp format `YYYYMMDDHHMMSS_description.sql` with goose `-- +goose Up/Down`
-- **Generated Code**: Never manually edit proto-generated files, always use `make proto-gen`
-- **Error Handling**: Include detailed context in error messages for config validation
-- **Dependencies**: Install protoc-gen-go tools with `make install-deps`
+- `proto/fuwa/v1/`: the protocol (gRPC). `buf lint` must pass; the Rust code is
+  generated from it at build time (`server/build.rs`, protoc is vendored).
+- `server/`: the Rust server (`fuwa` binary, `fuwa_server` library).
+  - `app.rs`: shared state, the HTTP router (gRPC, gRPC-Web, CORS, health), serving.
+  - `api/`: one file per gRPC service, all implemented on `Api`.
+  - `node.rs`: the instance database (`node.db`): accounts, sessions, meta.
+  - `servers.rs`: community servers, one Turso file each under `servers/`, plus the
+    in-memory index of servers and memberships. Every change goes through
+    `ServerDb::write`, which appends events to the server's log in the same
+    transaction and publishes them to the `Hub` after commit.
+  - `db.rs`: Turso helpers: opening, `user_version` migrations, transactions.
+  - `config.rs`: `FUWA_*` environment variables.
+  - `telemetry.rs`: the anonymous usage signal (schema `fuwa.signal.v1`).
+  - `migrations/node`, `migrations/server`: SQL applied in order, tracked in
+    `PRAGMA user_version`. Never edit a migration that has shipped; add a new file
+    and list it in `MIGRATIONS`.
+  - `tests/api.rs`: end-to-end tests against a running instance.
 
-## Key Files
-- `go.work` - Workspace configuration (server + client modules)
-- `sqlc.yaml` - Database code generation config (SQLite, JSON tags)
-- `Makefile` - Primary build system with proto generation
+## Rules
+
+- Every change to a community server is a `ServerDb::write` that pushes at least
+  one event payload and keeps the `usage` counters in step.
+- Timestamps are unix milliseconds in the database, `google.protobuf.Timestamp` on
+  the wire. Ids are ULIDs (`id::new_id`).
+- Limits are unlimited unless configured. Never hardcode a usage cap.
+- The usage signal must stay anonymous: no content, names or ids of people or
+  servers. The end-to-end test checks this.
+- Before pushing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo test`, and `buf lint`.

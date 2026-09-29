@@ -1,4 +1,6 @@
-/target
+target
+.git
+.github
 *.db
 *.db-wal
 *.db-shm

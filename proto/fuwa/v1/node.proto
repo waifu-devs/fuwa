@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// What this instance is and what it lets clients do. Needs no account.
+service NodeService {
+  rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+}
+
+message GetNodeRequest {}
+
+message GetNodeResponse {
+  Node node = 1;
+}

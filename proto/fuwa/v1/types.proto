@@ -1,0 +1,261 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// Instance
+// ============================================================================
+
+// A fuwa instance: one running fuwa server. It hosts any number of community
+// servers, each in its own database, and keeps the accounts that use them.
+message Node {
+  string name = 1;
+  string version = 2;
+  // The URL clients reach this instance on.
+  string public_url = 3;
+  AuthMethods auth = 4;
+  ServerCreation server_creation = 5;
+  // Whether this instance sends the anonymous usage signal.
+  bool telemetry = 6;
+}
+
+// Which kinds of account this instance accepts. The operator switches each on or off.
+message AuthMethods {
+  // Standalone accounts: a username and password kept on this instance only.
+  bool local_sign_in = 1;
+  // Whether new standalone accounts can be created.
+  bool local_sign_up = 2;
+  // Linked accounts: signed in through a waifu.dev account.
+  bool linked_sign_in = 3;
+  // The issuer linked accounts come from.
+  string linked_issuer = 4;
+}
+
+// Who may create community servers on an instance.
+enum ServerCreation {
+  SERVER_CREATION_UNSPECIFIED = 0;
+  SERVER_CREATION_EVERYONE = 1;
+  SERVER_CREATION_ADMINS = 2;
+  SERVER_CREATION_DISABLED = 3;
+}
+
+// ============================================================================
+// People
+// ============================================================================
+
+enum AccountKind {
+  ACCOUNT_KIND_UNSPECIFIED = 0;
+  // Created on this instance, signs in with a password.
+  ACCOUNT_KIND_LOCAL = 1;
+  // Signs in through waifu.dev.
+  ACCOUNT_KIND_LINKED = 2;
+}
+
+// A person's public profile.
+message User {
+  string id = 1;
+  string username = 2;
+  string display_name = 3;
+  string avatar_url = 4;
+  AccountKind kind = 5;
+}
+
+enum MemberRole {
+  MEMBER_ROLE_UNSPECIFIED = 0;
+  MEMBER_ROLE_MEMBER = 1;
+  MEMBER_ROLE_ADMIN = 2;
+  MEMBER_ROLE_OWNER = 3;
+}
+
+message Member {
+  string server_id = 1;
+  User user = 2;
+  string nickname = 3;
+  MemberRole role = 4;
+  google.protobuf.Timestamp joined_at = 5;
+}
+
+// ============================================================================
+// Community servers
+// ============================================================================
+
+// A community server. Each one lives in its own database file on its instance.
+message Server {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string icon_url = 4;
+  string owner_id = 5;
+  // Listed for anyone on the instance to find and join.
+  bool discoverable = 6;
+  int64 member_count = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+enum ChannelType {
+  CHANNEL_TYPE_UNSPECIFIED = 0;
+  CHANNEL_TYPE_TEXT = 1;
+  CHANNEL_TYPE_VOICE = 2;
+  CHANNEL_TYPE_ANNOUNCEMENT = 3;
+  CHANNEL_TYPE_THREAD = 4;
+  CHANNEL_TYPE_CATEGORY = 5;
+}
+
+message Channel {
+  string id = 1;
+  string server_id = 2;
+  string name = 3;
+  ChannelType type = 4;
+  // The category or channel this one sits under, if any.
+  string parent_id = 5;
+  string topic = 6;
+  int32 position = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message Message {
+  string id = 1;
+  string server_id = 2;
+  string channel_id = 3;
+  string author_id = 4;
+  string content = 5;
+  repeated Attachment attachments = 6;
+  repeated Embed embeds = 7;
+  string reply_to_id = 8;
+  google.protobuf.Timestamp created_at = 9;
+  // Unset until the message is edited.
+  google.protobuf.Timestamp edited_at = 10;
+}
+
+message Attachment {
+  string id = 1;
+  string filename = 2;
+  string content_type = 3;
+  int64 size = 4;
+  string url = 5;
+}
+
+message Embed {
+  string title = 1;
+  string description = 2;
+  string url = 3;
+  int32 color = 4;
+  repeated EmbedField fields = 5;
+  string thumbnail_url = 6;
+  string image_url = 7;
+}
+
+message EmbedField {
+  string name = 1;
+  string value = 2;
+  bool inline = 3;
+}
+
+// ============================================================================
+// Usage and limits
+// ============================================================================
+
+// What a community server uses. Counts are current totals unless named as
+// lifetime counters, which only ever grow.
+message ServerUsage {
+  string server_id = 1;
+  int64 members = 2;
+  int64 channels = 3;
+  int64 messages = 4;
+  // Lifetime count of messages sent, including deleted ones.
+  int64 messages_sent = 5;
+  // Bytes of message text currently stored.
+  int64 message_bytes = 6;
+  int64 attachments = 7;
+  int64 attachment_bytes = 8;
+  // Lifetime count of events in the server's log.
+  int64 events = 9;
+  // Size of the server's database on disk, write-ahead log included.
+  int64 storage_bytes = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+// Caps on a community server. An unset field means unlimited.
+message ServerLimits {
+  optional int64 members = 1;
+  optional int64 channels = 2;
+  optional int64 storage_bytes = 3;
+  optional int64 attachment_bytes = 4;
+}
+
+// ============================================================================
+// Events
+// ============================================================================
+
+// Everything that changes in a community server is recorded as an event in its
+// log, in order. Clients follow the log to stay in sync.
+message Event {
+  string id = 1;
+  string server_id = 2;
+  // Position in the server's log. Strictly increasing within a server.
+  // Zero for events that aren't stored, like the server being deleted.
+  int64 sequence = 3;
+  string actor_id = 4;
+  google.protobuf.Timestamp created_at = 5;
+
+  oneof payload {
+    ServerUpdated server_updated = 10;
+    ServerDeleted server_deleted = 11;
+    ChannelCreated channel_created = 12;
+    ChannelUpdated channel_updated = 13;
+    ChannelDeleted channel_deleted = 14;
+    MessageCreated message_created = 15;
+    MessageUpdated message_updated = 16;
+    MessageDeleted message_deleted = 17;
+    MemberJoined member_joined = 18;
+    MemberUpdated member_updated = 19;
+    MemberLeft member_left = 20;
+  }
+}
+
+message ServerUpdated {
+  Server server = 1;
+}
+
+message ServerDeleted {}
+
+message ChannelCreated {
+  Channel channel = 1;
+}
+
+message ChannelUpdated {
+  Channel channel = 1;
+}
+
+message ChannelDeleted {
+  string channel_id = 1;
+}
+
+message MessageCreated {
+  Message message = 1;
+}
+
+message MessageUpdated {
+  Message message = 1;
+}
+
+message MessageDeleted {
+  string channel_id = 1;
+  string message_id = 2;
+}
+
+message MemberJoined {
+  Member member = 1;
+}
+
+message MemberUpdated {
+  Member member = 1;
+}
+
+message MemberLeft {
+  string user_id = 1;
+}
