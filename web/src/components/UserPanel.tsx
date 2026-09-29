@@ -17,7 +17,7 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
         onClick={() => setOpen(true)}
         className="group flex min-w-0 flex-1 items-center gap-2 rounded-xl p-1.5 text-left transition hover:bg-muted"
       >
-        <span className="relative">
+        <span className="relative shrink-0">
           <UserAvatar user={inst.me} className="size-9 transition group-hover:scale-105" />
           <ConnDot state={inst.connection} className="absolute -right-0.5 -bottom-0.5 ring-[3px] ring-card" />
         </span>

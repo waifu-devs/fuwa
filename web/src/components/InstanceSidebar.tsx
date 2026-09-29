@@ -2,11 +2,13 @@ import { Link } from "@tanstack/react-router";
 import { CompassIcon, HashIcon } from "lucide-react";
 import { useInstance } from "@/fuwa/hooks";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
+import { useLayout } from "@/components/Shell";
 import { UserPanel } from "@/components/UserPanel";
 
 /** The sidebar on an instance's home: what it is, and your servers there. */
 export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
   const inst = useInstance(instanceKey);
+  const { compact, setNavOpen } = useLayout();
   if (!inst) return null;
   return (
     <>
@@ -21,6 +23,7 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
           to="/$instance"
           params={{ instance: instanceKey }}
           activeOptions={{ exact: true }}
+          onClick={() => compact && setNavOpen(false)}
           className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm font-bold text-muted-foreground transition hover:bg-muted hover:text-foreground data-[status=active]:bg-primary/15 data-[status=active]:text-primary"
         >
           <CompassIcon className="size-4" /> Browse servers

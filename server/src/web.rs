@@ -30,7 +30,9 @@ mod embedded {
             }
             None => match Assets::get("index.html") {
                 Some(file) => ("index.html", file),
-                None => return (StatusCode::NOT_FOUND, "the web client wasn't built into this binary\n").into_response(),
+                None => {
+                    return (StatusCode::NOT_FOUND, "the web client wasn't built into this binary\n").into_response();
+                }
             },
         };
 

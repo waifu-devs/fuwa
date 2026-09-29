@@ -337,7 +337,7 @@ function MessageRow({
         {first ? (
           <UserAvatar user={author} className="mt-0.5" />
         ) : (
-          <time className="gutter-time block pt-1 text-right text-[0.65rem] text-muted-foreground tabular-nums" dateTime={date.toISOString()} title={formatFull(date)}>
+          <time className="gutter-time -ml-3 block pt-1 text-right text-[0.625rem] whitespace-nowrap text-muted-foreground tabular-nums" dateTime={date.toISOString()} title={formatFull(date)}>
             {formatTime(date)}
           </time>
         )}

@@ -164,7 +164,7 @@ function RailItem({
   const { setNavOpen, compact } = useLayout();
   const height = active ? 40 : hover ? 20 : unread ? 8 : 0;
   return (
-    <div className="relative flex w-full justify-center" onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
+    <div className="relative flex w-full justify-center" onPointerEnter={(e) => e.pointerType === "mouse" && setHover(true)} onPointerLeave={() => setHover(false)}>
       <motion.span
         aria-hidden
         className="absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r-full bg-foreground"

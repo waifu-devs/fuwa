@@ -701,7 +701,10 @@ async fn browsers_can_call_over_grpc_web() {
     assert!(trailers.contains("grpc-status:0"), "trailers: {trailers}");
 
     assert_eq!(http.get(format!("{base}/healthz")).send().await.unwrap().text().await.unwrap(), "ok");
-    assert_eq!(http.get(format!("{base}/nope")).send().await.unwrap().status(), 404);
+    if !fuwa_server::web::BUILT_IN {
+        // With the web client built in, unknown paths open the app instead (see tests/web.rs).
+        assert_eq!(http.get(format!("{base}/nope")).send().await.unwrap().status(), 404);
+    }
 
     // Live events stream to browsers too, over plain HTTP/1.1.
     let mut c = clients(&instance).await;
