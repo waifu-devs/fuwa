@@ -22,10 +22,12 @@ getrandom = "0.3"
 http = "1"
 prost = "0.14"
 prost-types = "0.14"
+mime_guess = { version = "2", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+rust-embed = { version = "8", optional = true }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -40,6 +42,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 turso = "0.7.2"
 ulid = "1"
+
+[features]
+# Embed the web client (web/dist, built with `pnpm build` in web/) and serve it on /.
+web = ["dep:rust-embed", "dep:mime_guess"]
 
 [build-dependencies]
 protoc-bin-vendored = "3"

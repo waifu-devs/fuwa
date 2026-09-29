@@ -96,19 +96,26 @@ impl App {
             // Only the gRPC routes: gRPC-Web answers anything else over HTTP/1.1 with a 400.
             .layer(tonic_web::GrpcWebLayer::new());
 
-        let info = self.node_info();
-        grpc.route("/healthz", get(|| async { "ok" }))
-            .route(
-                "/",
-                get(move || async move {
-                    format!(
-                        "{} is a fuwa instance (fuwa {}).\nConnect to it from a fuwa client with {}\n",
-                        info.name, info.version, info.public_url
+        let routes = grpc.route("/healthz", get(|| async { "ok" }));
+        let routes = match crate::web::fallback(self.config.web) {
+            // The web client answers every other GET, so its own addresses work on reload.
+            Some(web) => routes.fallback(web),
+            None => {
+                let info = self.node_info();
+                routes
+                    .route(
+                        "/",
+                        get(move || async move {
+                            format!(
+                                "{} is a fuwa instance (fuwa {}).\nConnect to it from a fuwa client with {}\n",
+                                info.name, info.version, info.public_url
+                            )
+                        }),
                     )
-                }),
-            )
-            .fallback(|| async { (http::StatusCode::NOT_FOUND, "not found\n") })
-            .layer(self.cors())
+                    .fallback(|| async { (http::StatusCode::NOT_FOUND, "not found\n") })
+            }
+        };
+        routes.layer(self.cors())
     }
 
     fn cors(&self) -> CorsLayer {

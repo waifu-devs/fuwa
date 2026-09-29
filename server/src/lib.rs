@@ -15,6 +15,7 @@ pub mod id;
 pub mod node;
 pub mod servers;
 pub mod telemetry;
+pub mod web;
 
 pub mod proto {
     pub mod fuwa {
