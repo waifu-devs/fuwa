@@ -31,6 +31,8 @@ jobs:
           # Turn on once fuwa.v1 has shipped, so changes can't break clients.
           breaking: false
           push: false
+          # Results show in the check itself; a PR comment needs write access.
+          pr_comment: false
 
   docker:
     name: Docker image
