@@ -2,14 +2,24 @@ import { SendHorizontalIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { run, sendMessage } from "@/fuwa/actions";
+import { comboLabel, isMac } from "@/lib/keybinds";
+import { usePrefs, type SendWith } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 
 const MAX = 4000;
 const drafts = new Map<string, string>();
 
+/** Whether a key press sends, by the Chat setting: Enter, or Ctrl+Enter (Cmd+Return on a Mac). */
+export function sendsMessage(e: KeyboardEvent<HTMLTextAreaElement>, sendWith: SendWith) {
+  if (e.key !== "Enter" || e.nativeEvent.isComposing) return false;
+  const mod = isMac ? e.metaKey : e.ctrlKey;
+  return sendWith === "enter" ? !e.shiftKey && !mod : mod;
+}
+
 /**
- * Where you type. Enter sends, Shift+Enter adds a line, Up in an empty box
- * edits your last message. Drafts survive switching channels.
+ * Where you type. Enter sends (or Ctrl+Enter, by the Chat setting), the other
+ * adds a line, Up in an empty box edits your last message. Drafts survive
+ * switching channels.
  */
 export function Composer({
   instanceKey,
@@ -27,6 +37,7 @@ export function Composer({
   const [text, setText] = useState(() => drafts.get(channelId) ?? "");
   const box = useRef<HTMLTextAreaElement>(null);
   const plane = useAnimationControls();
+  const sendWith = usePrefs((p) => p.sendWith);
 
   useEffect(() => {
     setText(drafts.get(channelId) ?? "");
@@ -65,7 +76,7 @@ export function Composer({
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing) return;
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (sendsMessage(e, sendWith)) {
       e.preventDefault();
       send();
     } else if (e.key === "ArrowUp" && !text) {
@@ -79,6 +90,7 @@ export function Composer({
       <div className="composer flex items-end gap-2 rounded-2xl border bg-card px-3 py-2">
         <textarea
           ref={box}
+          data-composer
           rows={1}
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -119,7 +131,8 @@ export function Composer({
         </motion.button>
       </div>
       <p className="mt-1 hidden px-1 text-[0.7rem] text-muted-foreground sm:block">
-        <b>Enter</b> to send · <b>Shift+Enter</b> for a new line · Markdown works
+        <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
+        <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
       </p>
     </div>
   );

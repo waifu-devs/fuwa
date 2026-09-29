@@ -1,21 +1,26 @@
-import { SettingsIcon } from "lucide-react";
-import { useState } from "react";
+import { SettingsIcon, TvMinimalPlayIcon } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useInstance } from "@/fuwa/hooks";
-import { ProfileDialog } from "@/components/dialogs/ProfileDialog";
 import { ConnDot, UserAvatar, connectionLabel } from "@/components/Icons";
-import { SwapText } from "@/components/motion";
+import { SPRING, SwapText } from "@/components/motion";
+import { Private } from "@/components/Private";
 import { displayName } from "@/lib/format";
+import { comboLabel, actionById, bindingOf } from "@/lib/keybinds";
+import { setPrefs, usePrefs } from "@/lib/prefs";
+import { openSettings } from "@/lib/ui";
+import { cn } from "@/lib/utils";
 
 /** You, on this instance, at the bottom of the sidebar. */
 export function UserPanel({ instanceKey }: { instanceKey: string }) {
   const inst = useInstance(instanceKey);
-  const [open, setOpen] = useState(false);
+  const streamer = usePrefs((p) => p.streamer);
+  const streamerKey = usePrefs((p) => bindingOf(actionById("toggleStreamer")!, p));
   if (!inst?.me) return null;
   return (
-    <div className="flex items-center gap-2 border-t bg-[color-mix(in_srgb,var(--background)_50%,transparent)] p-2">
+    <div className="flex items-center gap-1 border-t bg-[color-mix(in_srgb,var(--background)_50%,transparent)] p-2">
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => openSettings("profile")}
         className="group flex min-w-0 flex-1 items-center gap-2 rounded-xl p-1.5 text-left transition hover:bg-muted"
       >
         <span className="relative shrink-0">
@@ -27,21 +32,52 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
             <SwapText className="truncate align-bottom">{displayName(inst.me)}</SwapText>
           </span>
           <span className="block truncate text-xs text-muted-foreground">
-            <SwapText className="truncate align-bottom">
-              {inst.connection === "live" ? `@${inst.me.username}` : connectionLabel(inst.connection)}
-            </SwapText>
+            {inst.connection === "live" ? (
+              <>
+                @<Private text={inst.me.username} kind="name" />
+              </>
+            ) : (
+              <SwapText className="truncate align-bottom">{connectionLabel(inst.connection)}</SwapText>
+            )}
           </span>
         </span>
       </button>
       <button
         type="button"
-        onClick={() => setOpen(true)}
-        aria-label="Settings"
-        className="grid size-9 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground"
+        onClick={() => setPrefs({ streamer: !streamer })}
+        aria-pressed={streamer}
+        aria-label={streamer ? "Turn off streamer mode" : "Turn on streamer mode"}
+        title={`${streamer ? "Turn off" : "Turn on"} streamer mode${streamerKey ? ` (${comboLabel(streamerKey)})` : ""}`}
+        className={cn(
+          "group relative grid size-9 place-items-center rounded-xl transition hover:bg-muted active:scale-90",
+          streamer ? "text-primary" : "text-muted-foreground hover:text-foreground",
+        )}
       >
-        <SettingsIcon className="size-[18px] transition-transform duration-500 hover:rotate-180" />
+        <motion.span key={String(streamer)} initial={{ scale: 0.6, rotate: -15 }} animate={{ scale: 1, rotate: 0 }} transition={SPRING}>
+          <TvMinimalPlayIcon className="size-[18px]" />
+        </motion.span>
+        <AnimatePresence>
+          {streamer && (
+            <motion.span
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0 }}
+              transition={{ type: "spring", stiffness: 600, damping: 16 }}
+              className="absolute top-1.5 right-1.5 size-2 rounded-full bg-destructive ring-2 ring-card"
+            >
+              <span className="absolute inset-0 animate-ping rounded-full bg-destructive" />
+            </motion.span>
+          )}
+        </AnimatePresence>
       </button>
-      <ProfileDialog open={open} onOpenChange={setOpen} instanceKey={instanceKey} />
+      <button
+        type="button"
+        onClick={() => openSettings()}
+        aria-label="Settings"
+        className="group grid size-9 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground"
+      >
+        <SettingsIcon className="size-[18px] transition-transform duration-500 group-hover:rotate-180" />
+      </button>
     </div>
   );
 }

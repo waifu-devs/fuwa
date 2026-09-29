@@ -1,7 +1,7 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ArrowLeftIcon, ChevronRightIcon, XIcon, type LucideIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronRightIcon, CornerDownRightIcon, SearchIcon, SearchXIcon, XIcon, type LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { EASE_OUT, SPRING } from "@/components/motion";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,13 @@ export type SettingsSection = {
   /** A line under the section's heading. */
   description?: ReactNode;
   danger?: boolean;
+  /** More words search should find this section by. */
+  keywords?: string;
+  /** Single settings on this section that search can jump to; each matches a `Setting` with the same id. */
+  settings?: SettingEntry[];
 };
+
+export type SettingEntry = { id: string; label: string; keywords?: string };
 
 /** Sections under a heading. A group without one (such as signing out or deleting) sits apart at the end. */
 export type SettingsGroup = { label?: string; sections: SettingsSection[] };
@@ -75,6 +81,9 @@ export function SettingsScreen({
 }) {
   const wide = useMediaQuery("(min-width: 768px)");
   const [menu, setMenu] = useState(true);
+  const [query, setQuery] = useState("");
+  const [glow, setGlow] = useState<{ id: string; n: number } | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
   const [dirty, setDirtyState] = useState<Record<string, GuardScope>>({});
   const [nudge, setNudge] = useState(0);
 
@@ -82,8 +91,29 @@ export function SettingsScreen({
     if (open) {
       setMenu(!openToSection);
       setNudge(0);
+      setQuery("");
     }
   }, [open, openToSection]);
+
+  // A setting picked from search: once its section is on screen, scroll to it and let it glow.
+  useEffect(() => {
+    if (!glow) return;
+    let frame = 0;
+    const started = performance.now();
+    const find = () => {
+      const el = mainRef.current?.querySelector<HTMLElement>(`[data-setting="${CSS.escape(glow.id)}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.remove("found");
+        void el.offsetWidth;
+        el.classList.add("found");
+        return;
+      }
+      if (performance.now() - started < 1500) frame = requestAnimationFrame(find);
+    };
+    frame = requestAnimationFrame(find);
+    return () => cancelAnimationFrame(frame);
+  }, [glow]);
 
   // The app behind shrinks back while settings are open.
   useEffect(() => {
@@ -113,10 +143,11 @@ export function SettingsScreen({
     if (holdsScreen) hold();
     else onOpenChange(false);
   }
-  function choose(id: string) {
+  function choose(id: string, setting?: string) {
     if (id !== section && holdsSection) return hold();
     onSectionChange(id);
     setMenu(false);
+    if (setting) setGlow({ id: setting, n: Date.now() });
   }
 
   const all = groups.flatMap((g) => g.sections);
@@ -129,7 +160,18 @@ export function SettingsScreen({
       <AnimatePresence>
         {open && (
           <DialogPrimitive.Portal forceMount>
-            <DialogPrimitive.Content asChild forceMount aria-describedby={undefined}>
+            <DialogPrimitive.Content
+              asChild
+              forceMount
+              aria-describedby={undefined}
+              onEscapeKeyDown={(e) => {
+                // Escape clears a search before it closes settings.
+                if (query) {
+                  e.preventDefault();
+                  setQuery("");
+                }
+              }}
+            >
               <motion.div
                 initial={{ opacity: 0, scale: 1.04 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -147,10 +189,12 @@ export function SettingsScreen({
                       onChoose={choose}
                       onClose={attemptClose}
                       wide={wide}
+                      query={query}
+                      onQuery={setQuery}
                     />
                   )}
                   {showSection && current && (
-                    <main className="scroll-thin relative flex min-w-0 flex-[1_1_52rem] flex-col overflow-y-auto">
+                    <main ref={mainRef} className="scroll-thin relative flex min-w-0 flex-[1_1_52rem] flex-col overflow-y-auto">
                       {!wide && (
                         <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/85 px-2 backdrop-blur">
                           <button
@@ -215,16 +259,21 @@ function Menu({
   onChoose,
   onClose,
   wide,
+  query,
+  onQuery,
 }: {
   title: string;
   subtitle?: string;
   groups: SettingsGroup[];
   section: string | undefined;
-  onChoose: (id: string) => void;
+  onChoose: (id: string, setting?: string) => void;
   onClose: () => void;
   wide: boolean;
+  query: string;
+  onQuery: (query: string) => void;
 }) {
   const highlight = useId();
+  const results = useMemo(() => search(groups, query), [groups, query]);
   let n = 0;
   return (
     <aside
@@ -249,7 +298,18 @@ function Menu({
             {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
           </div>
         )}
-        {groups.map((group, g) => (
+        <SearchBox
+          query={query}
+          onQuery={onQuery}
+          onPick={() => {
+            const first = results?.[0];
+            if (first) onChoose(first.section.id, first.settings[0]?.id);
+          }}
+        />
+        {results ? (
+          <Results results={results} query={query} onChoose={onChoose} wide={wide} />
+        ) : (
+          groups.map((group, g) => (
           <div key={group.label ?? g} className={cn("flex flex-col gap-0.5", g > 0 && wide && "border-t border-border/70 pt-3")}>
             {group.label && <p className="mb-1 px-2 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">{group.label}</p>}
             {group.sections.map((s) => {
@@ -294,9 +354,147 @@ function Menu({
               );
             })}
           </div>
-        ))}
+          ))
+        )}
       </nav>
     </aside>
+  );
+}
+
+type Result = { section: SettingsSection; settings: SettingEntry[] };
+
+const text = (value: ReactNode) => (typeof value === "string" ? value : "");
+
+/** Sections and single settings whose words contain every word typed, or null with nothing typed. */
+function search(groups: SettingsGroup[], query: string): Result[] | null {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+  const hits = (haystack: string) => words.every((w) => haystack.toLowerCase().includes(w));
+  const out: Result[] = [];
+  for (const section of groups.flatMap((g) => g.sections)) {
+    const own = `${section.label} ${text(section.description)} ${section.keywords ?? ""}`;
+    const settings = (section.settings ?? []).filter((s) => hits(`${s.label} ${s.keywords ?? ""} ${section.label}`));
+    if (settings.length || hits(own)) out.push({ section, settings });
+  }
+  return out;
+}
+
+function SearchBox({ query, onQuery, onPick }: { query: string; onQuery: (q: string) => void; onPick: () => void }) {
+  return (
+    <label className="group relative block">
+      <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground transition group-focus-within:scale-110 group-focus-within:text-primary" />
+      <input
+        type="search"
+        value={query}
+        onChange={(e) => onQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onPick();
+          }
+        }}
+        placeholder="Search settings"
+        aria-label="Search settings"
+        className="h-9 w-full rounded-lg border border-transparent bg-muted/70 pr-8 pl-8 text-sm outline-none transition placeholder:text-muted-foreground focus:border-primary/50 focus:bg-background focus:ring-4 focus:ring-primary/10 [&::-webkit-search-cancel-button]:hidden"
+      />
+      <AnimatePresence>
+        {query && (
+          <motion.button
+            type="button"
+            aria-label="Clear search"
+            onClick={() => onQuery("")}
+            initial={{ opacity: 0, scale: 0.5, rotate: -90 }}
+            animate={{ opacity: 1, scale: 1, rotate: 0 }}
+            exit={{ opacity: 0, scale: 0.5, rotate: 90 }}
+            transition={SPRING}
+            className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <XIcon className="size-3.5" />
+          </motion.button>
+        )}
+      </AnimatePresence>
+    </label>
+  );
+}
+
+function Results({
+  results,
+  query,
+  onChoose,
+  wide,
+}: {
+  results: Result[];
+  query: string;
+  onChoose: (id: string, setting?: string) => void;
+  wide: boolean;
+}) {
+  if (results.length === 0)
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={SPRING}
+        className="flex flex-col items-center gap-2 px-2 py-6 text-center text-sm text-muted-foreground"
+      >
+        <motion.span animate={{ rotate: [0, -12, 10, -6, 0] }} transition={{ duration: 0.6, delay: 0.1 }}>
+          <SearchXIcon className="size-7" />
+        </motion.span>
+        Nothing matches “{query}”
+      </motion.div>
+    );
+  let n = 0;
+  return (
+    <div className="flex flex-col gap-0.5" aria-live="polite">
+      <AnimatePresence initial={false} mode="popLayout">
+        {results.map(({ section, settings }) => (
+          <motion.div key={section.id} layout="position" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={SPRING}>
+            <ResultRow delay={n++} onClick={() => onChoose(section.id)} wide={wide} danger={section.danger}>
+              <section.icon className={cn(ICON, "size-4")} />
+              <span className="truncate">{section.label}</span>
+            </ResultRow>
+            {settings.map((s) => (
+              <ResultRow key={s.id} delay={n++} onClick={() => onChoose(section.id, s.id)} wide={wide} nested>
+                <CornerDownRightIcon className="size-3.5 shrink-0 opacity-60" />
+                <span className="truncate">{s.label}</span>
+              </ResultRow>
+            ))}
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function ResultRow({
+  children,
+  onClick,
+  delay,
+  wide,
+  nested = false,
+  danger = false,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  delay: number;
+  wide: boolean;
+  nested?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      initial={{ opacity: 0, x: -8 }}
+      animate={{ opacity: 1, x: 0, transition: { ...SPRING, delay: Math.min(delay, 12) * 0.02 } }}
+      whileTap={{ scale: 0.97 }}
+      className={cn(
+        "group flex w-full items-center gap-2 rounded-lg text-left font-bold transition-colors hover:bg-muted/70",
+        wide ? "px-2.5 py-1.5 text-sm" : "px-3 py-2.5 text-base",
+        nested ? "pl-6 text-[0.8rem] font-normal text-muted-foreground hover:text-foreground" : danger ? "text-destructive/80" : "text-foreground",
+      )}
+    >
+      {children}
+    </motion.button>
   );
 }
 

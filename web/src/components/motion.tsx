@@ -1,6 +1,7 @@
 
 import { animate, AnimatePresence, motion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { reduceMotion } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 
 /** The app's springs and easing, so things move alike everywhere. */
@@ -8,8 +9,8 @@ export const SPRING = { type: "spring", stiffness: 520, damping: 34 } as const;
 export const SOFT_SPRING = { type: "spring", stiffness: 380, damping: 32 } as const;
 export const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 
-const reducedMotion = () =>
-  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** Whether to calm motion down: the Accessibility setting, which follows the system by default. */
+const reducedMotion = () => reduceMotion();
 
 /** Fades and slides its children in the first time they scroll into view. */
 export function Reveal({ children, className = "" }: { children: ReactNode; className?: string }) {

@@ -7,6 +7,7 @@ import { probe, run, signIn, signUp } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
 import { instanceKey } from "@/fuwa/saved";
 import { AutoHeight } from "@/components/animate-ui/primitives/effects/auto-height";
+import { Private, usePrivateField } from "@/components/Private";
 import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,6 +71,7 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
   const [shake, setShake] = useState(0);
   const lookup = useAction(probe);
   const home = useHomeInstance();
+  const privateField = usePrivateField();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -98,7 +100,7 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             aria-invalid={!!lookup.error}
-            className="h-11 rounded-xl pl-9 text-base"
+            className={cn("h-11 rounded-xl pl-9 text-base", privateField)}
           />
         </div>
         <AnimatePresence>
@@ -130,7 +132,7 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate font-bold">{home.node.name}</span>
-              <span className="block truncate text-xs text-muted-foreground">{instanceKey(home.url)} · this server</span>
+              <span className="block truncate text-xs text-muted-foreground"><Private text={instanceKey(home.url)} /> · this server</span>
             </span>
             <ArrowRightIcon className="size-4 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-primary" />
           </motion.button>
@@ -303,7 +305,7 @@ function Header({ url, node, onBack }: { url: string; node: Node; onBack: () => 
       <div className="min-w-0">
         <p className="truncate font-extrabold">{node.name}</p>
         <p className="truncate text-xs text-muted-foreground">
-          {instanceKey(url)} · fuwa {node.version}
+          <Private text={instanceKey(url)} /> · fuwa {node.version}
         </p>
       </div>
     </div>

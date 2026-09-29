@@ -5,6 +5,7 @@ import { ChannelSidebar } from "@/components/ChannelSidebar";
 import { InstanceSidebar } from "@/components/InstanceSidebar";
 import { EASE_OUT } from "@/components/motion";
 import { Rail } from "@/components/Rail";
+import { onCommand } from "@/lib/ui";
 import { useMediaQuery } from "@/lib/use-media-query";
 
 /**
@@ -53,6 +54,9 @@ export function Shell() {
     setNavOpen(!params.channel);
   }, [params.channel, params.server]);
   useEffect(() => setMembersOpen(wide), [wide]);
+  // The members shortcut works while a channel is open.
+  const inChannel = !!params.channel;
+  useEffect(() => (inChannel ? onCommand("toggleMembers", () => setMembersOpen((open) => !open)) : undefined), [inChannel]);
   useEffect(() => {
     try {
       localStorage.setItem(LAST_PATH, pathname);

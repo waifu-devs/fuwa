@@ -3,6 +3,7 @@ import {
   ChartColumnIcon,
   ChevronDownIcon,
   DoorOpenIcon,
+  FingerprintIcon,
   HashIcon,
   MegaphoneIcon,
   PlusIcon,
@@ -19,6 +20,7 @@ import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { ServerSettingsDialog } from "@/components/dialogs/ServerSettingsDialog";
 import { useLayout } from "@/components/Shell";
 import { Count, SPRING, SwapText } from "@/components/motion";
+import { Private } from "@/components/Private";
 import { UserPanel } from "@/components/UserPanel";
 import {
   DropdownMenu,
@@ -27,6 +29,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { usePrefs } from "@/lib/prefs";
+import { copy } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 export const CHANNEL_ICON: Partial<Record<ChannelType, typeof HashIcon>> = {
@@ -45,7 +49,13 @@ export function useMyRole(instanceKey: string, serverId: string): MemberRole {
 
 type Group = { category: Channel | null; channels: Channel[] };
 
-function groupChannels(channels: Channel[]): Group[] {
+/** Channels you can open, in the order the sidebar lists them. */
+export const openableChannels = (channels: Channel[]) =>
+  groupChannels(channels)
+    .flatMap((g) => g.channels)
+    .filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT);
+
+export function groupChannels(channels: Channel[]): Group[] {
   const categories = channels.filter((c) => c.type === ChannelType.CATEGORY);
   const known = new Set(categories.map((c) => c.id));
   const loose = channels.filter((c) => c.type !== ChannelType.CATEGORY && !known.has(c.parentId));
@@ -73,6 +83,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   const [creating, setCreating] = useState<{ parentId: string } | null>(null);
   const [settings, setSettings] = useState<string | null>(null);
   const leave = useAction(leaveServer);
+  const developer = usePrefs((p) => p.developerMode);
 
   if (!inst) return null;
   return (
@@ -93,7 +104,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                     <Count value={Number(server.memberCount)} /> {server.memberCount === 1n ? "member" : "members"} ·{" "}
                   </>
                 )}
-                {inst.node?.name ?? instanceKey}
+                {inst.node?.name ?? <Private text={instanceKey} />}
               </span>
             </span>
             <ChevronDownIcon className="size-4 transition-transform duration-300 group-data-[state=open]:rotate-180" />
@@ -115,7 +126,12 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
               <PlusIcon /> Create channel
             </DropdownMenuItem>
           )}
-          {manager && !owner && <DropdownMenuSeparator />}
+          {developer && (
+            <DropdownMenuItem onSelect={() => copy(serverId, "server ID")}>
+              <FingerprintIcon /> Copy server ID
+            </DropdownMenuItem>
+          )}
+          {(manager || developer) && !owner && <DropdownMenuSeparator />}
           {!owner && (
             <DropdownMenuItem
               variant="destructive"
@@ -251,7 +267,7 @@ function ChannelRow({
         params={{ instance: instanceKey, server: channel.serverId, channel: channel.id }}
         onClick={() => compact && setNavOpen(false)}
         className={cn(
-          "group relative flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[0.94rem] transition-colors",
+          "row-y group relative flex items-center gap-1.5 rounded-lg px-2 text-[0.94rem] transition-colors",
           active ? "font-bold text-primary" : unread ? "font-bold text-foreground" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
         )}
       >

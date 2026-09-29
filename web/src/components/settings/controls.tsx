@@ -16,6 +16,7 @@ export { SPRING };
  * Settings stack as flat rows with a rule between them, like Discord's.
  */
 export function Setting({
+  id,
   title,
   hint,
   changed,
@@ -24,7 +25,10 @@ export function Setting({
   resetting,
   children,
   delay = 0,
+  badge = true,
 }: {
+  /** Where settings search lands (see SettingsSection.settings). */
+  id?: string;
   title: string;
   hint?: ReactNode;
   /** Stored on the instance (overrides the default). */
@@ -35,9 +39,12 @@ export function Setting({
   resetting?: boolean;
   children: ReactNode;
   delay?: number;
+  /** Show whether it follows the default. */
+  badge?: boolean;
 }) {
   return (
     <motion.section
+      data-setting={id}
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ ...SPRING, delay }}
@@ -49,7 +56,7 @@ export function Setting({
           {hint && <p className="mt-0.5 text-sm text-muted-foreground">{hint}</p>}
         </div>
         <AnimatePresence initial={false} mode="popLayout">
-          {changed && onReset ? (
+          {!badge ? null : changed && onReset ? (
             <motion.div
               key="changed"
               initial={{ opacity: 0, scale: 0.8 }}

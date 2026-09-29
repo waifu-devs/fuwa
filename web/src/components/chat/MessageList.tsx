@@ -3,6 +3,7 @@ import {
   CheckIcon,
   CopyIcon,
   CrownIcon,
+  FingerprintIcon,
   PencilIcon,
   RotateCwIcon,
   ShieldIcon,
@@ -27,9 +28,13 @@ import { MemberRole, type Channel, type Member, type Message, type User } from "
 import { deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
 import { useInstance } from "@/fuwa/hooks";
 import type { PendingMessage } from "@/fuwa/store";
+import { sendsMessage } from "@/components/chat/Composer";
 import { Markdown } from "@/components/Markdown";
 import { UserAvatar } from "@/components/Icons";
-import { displayName, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
+import { displayName, formatDay, formatFull, formatStamp, formatTime, hueOf, mentions, sameDay, toDate } from "@/lib/format";
+import { comboLabel } from "@/lib/keybinds";
+import { usePrefs, type MessageDisplay } from "@/lib/prefs";
+import { copy } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 /** Messages from one person closer together than this share a header. */
@@ -55,6 +60,10 @@ export const MessageList = forwardRef<
   const users = inst?.users;
   const me = inst?.me;
   const [editing, setEditing] = useState<string | null>(null);
+  const display = usePrefs((p) => p.messageDisplay);
+  const developer = usePrefs((p) => p.developerMode);
+  // Times follow the clock setting; reading it here re-renders the rows when it changes.
+  usePrefs((p) => p.clock);
 
   useImperativeHandle(ref, () => ({
     editLast() {
@@ -169,6 +178,7 @@ export const MessageList = forwardRef<
                     key={row.key}
                     pending={row.pending}
                     first={row.first}
+                    display={display}
                     me={me ?? undefined}
                     member={memberById.get(me?.id ?? "")}
                     onRetry={() => {
@@ -184,6 +194,8 @@ export const MessageList = forwardRef<
                   key={row.key}
                   message={row.message}
                   first={row.first}
+                  display={display}
+                  developer={developer}
                   date={row.date}
                   author={author}
                   member={memberById.get(row.message.authorId)}
@@ -224,10 +236,6 @@ export const MessageList = forwardRef<
     </div>
   );
 });
-
-function mentions(content: string, username: string) {
-  return new RegExp(`(^|[^\\w@])@${username.replace(/[.]/g, "\\.")}\\b`, "i").test(content);
-}
 
 function DayDivider({ date }: { date: Date }) {
   return (
@@ -276,7 +284,7 @@ function Skeleton({ rows }: { rows: number }) {
 
 const hue = (id: string) => ({ "--h": hueOf(id) }) as CSSProperties;
 
-function AuthorName({ user, member }: { user: User | undefined; member: Member | undefined }) {
+export function AuthorName({ user, member }: { user: User | undefined; member: Member | undefined }) {
   const role = member?.role;
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
@@ -291,9 +299,86 @@ function AuthorName({ user, member }: { user: User | undefined; member: Member |
 
 const enter = { initial: { opacity: 0, y: 12, scale: 0.98 }, animate: { opacity: 1, y: 0, scale: 1 } };
 
+/**
+ * The parts of a message line every message shares: avatar or time, name and
+ * body. Cozy puts the avatar and a header over the first of a run; compact
+ * puts the time and name in front of every message, on one line.
+ */
+export function MessageLine({
+  display,
+  first,
+  author,
+  member,
+  date,
+  status,
+  children,
+}: {
+  display: MessageDisplay;
+  first: boolean;
+  author: User | undefined;
+  member: Member | undefined;
+  /** When it was sent; missing while it's still sending. */
+  date?: Date;
+  /** Shown instead of the time, like "sending…". */
+  status?: string;
+  children: React.ReactNode;
+}) {
+  if (display === "compact")
+    return (
+      <div className="chat-text min-w-0 flex-1 leading-relaxed">
+        {date ? (
+          <time className="mr-2 inline-block w-[4.6em] text-right text-[0.7em] text-muted-foreground tabular-nums" dateTime={date.toISOString()} title={formatFull(date)}>
+            {formatTime(date)}
+          </time>
+        ) : (
+          <span className="mr-2 inline-block w-[4.6em] text-right text-[0.7em] text-muted-foreground">{status}</span>
+        )}
+        <span className="mr-1.5 inline-flex max-w-[40%] align-bottom">
+          <AuthorName user={author} member={member} />
+        </span>
+        {children}
+      </div>
+    );
+  return (
+    <>
+      <div className="w-10 shrink-0">
+        {first ? (
+          <UserAvatar user={author} className="mt-0.5" />
+        ) : date ? (
+          <time className="gutter-time -ml-3 block pt-1 text-right text-[0.625rem] whitespace-nowrap text-muted-foreground tabular-nums" dateTime={date.toISOString()} title={formatFull(date)}>
+            {formatTime(date)}
+          </time>
+        ) : null}
+      </div>
+      <div className="min-w-0 flex-1">
+        {first && (
+          <div className="flex items-baseline gap-2">
+            <AuthorName user={author} member={member} />
+            {date ? (
+              <time className="shrink-0 text-xs text-muted-foreground" dateTime={date.toISOString()} title={formatFull(date)}>
+                {formatStamp(date)}
+              </time>
+            ) : (
+              <span className="text-xs text-muted-foreground">{status}</span>
+            )}
+          </div>
+        )}
+        <div className="chat-text leading-relaxed">{children}</div>
+      </div>
+    </>
+  );
+}
+
+/** A message's text; in compact display its first paragraph runs on after the name. */
+export function MessageBody({ content, display, className }: { content: string; display: MessageDisplay; className?: string }) {
+  return <Markdown className={cn("chat", display === "compact" && "inline-first", className)}>{content}</Markdown>;
+}
+
 function MessageRow({
   message,
   first,
+  display,
+  developer,
   date,
   author,
   member,
@@ -309,6 +394,8 @@ function MessageRow({
 }: {
   message: Message;
   first: boolean;
+  display: MessageDisplay;
+  developer: boolean;
   date: Date;
   author: User | undefined;
   member: Member | undefined;
@@ -333,43 +420,27 @@ function MessageRow({
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className={cn(
         "message-row group relative flex gap-3 px-4",
-        first ? "mt-3 pt-1 pb-0.5" : "py-0.5",
+        first && "first",
+        display === "compact" && "compact",
         mentionsMe && "mention-me",
         animate && mine && "landed",
       )}
     >
-      <div className="w-10 shrink-0">
-        {first ? (
-          <UserAvatar user={author} className="mt-0.5" />
-        ) : (
-          <time className="gutter-time -ml-3 block pt-1 text-right text-[0.625rem] whitespace-nowrap text-muted-foreground tabular-nums" dateTime={date.toISOString()} title={formatFull(date)}>
-            {formatTime(date)}
-          </time>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        {first && (
-          <div className="flex items-baseline gap-2">
-            <AuthorName user={author} member={member} />
-            <time className="shrink-0 text-xs text-muted-foreground" dateTime={date.toISOString()} title={formatFull(date)}>
-              {formatStamp(date)}
-            </time>
-          </div>
-        )}
+      <MessageLine display={display} first={first} author={author} member={member} date={date}>
         {editing ? (
           <EditBox initial={message.content} onCancel={onCancelEdit} onSave={onSave} />
         ) : (
-          <div className="text-[0.95rem] leading-relaxed">
-            <Markdown className="chat">{message.content}</Markdown>
+          <>
+            <MessageBody content={message.content} display={display} />
             {edited && (
               <span className="text-[0.7rem] text-muted-foreground" title={formatFull(toDate(message.editedAt))}>
                 {" "}
                 (edited)
               </span>
             )}
-          </div>
+          </>
         )}
-      </div>
+      </MessageLine>
       {!editing && (
         <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
           {confirming ? (
@@ -411,6 +482,11 @@ function MessageRow({
                   </motion.span>
                 </AnimatePresence>
               </ToolButton>
+              {developer && (
+                <ToolButton label="Copy message ID" onClick={() => copy(message.id, "message ID")}>
+                  <FingerprintIcon />
+                </ToolButton>
+              )}
               {mine && (
                 <ToolButton label="Edit" onClick={onEdit}>
                   <PencilIcon />
@@ -458,6 +534,7 @@ function ToolButton({
 
 function EditBox({ initial, onCancel, onSave }: { initial: string; onCancel: () => void; onSave: (c: string) => Promise<void> }) {
   const [text, setText] = useState(initial);
+  const sendWith = usePrefs((p) => p.sendWith);
   const [error, setError] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
@@ -483,7 +560,7 @@ function EditBox({ initial, onCancel, onSave }: { initial: string; onCancel: () 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing) return;
     if (e.key === "Escape") onCancel();
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (sendsMessage(e, sendWith)) {
       e.preventDefault();
       void save();
     }
@@ -499,7 +576,8 @@ function EditBox({ initial, onCancel, onSave }: { initial: string; onCancel: () 
       />
       <p className="text-xs text-muted-foreground">
         {error ? <span className="text-destructive">{error} · </span> : null}
-        Escape to <button type="button" className="font-bold text-primary hover:underline" onClick={onCancel}>cancel</button> · Enter to{" "}
+        Escape to <button type="button" className="font-bold text-primary hover:underline" onClick={onCancel}>cancel</button> ·{" "}
+        {sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")} to{" "}
         <button type="button" className="font-bold text-primary hover:underline" onClick={() => void save()}>save</button>
       </p>
     </div>
@@ -509,6 +587,7 @@ function EditBox({ initial, onCancel, onSave }: { initial: string; onCancel: () 
 function PendingRow({
   pending,
   first,
+  display,
   me,
   member,
   onRetry,
@@ -516,6 +595,7 @@ function PendingRow({
 }: {
   pending: PendingMessage;
   first: boolean;
+  display: MessageDisplay;
   me: User | undefined;
   member: Member | undefined;
   onRetry: () => void;
@@ -528,19 +608,10 @@ function PendingRow({
       animate={{ opacity: pending.failed ? 1 : 0.55, y: 0 }}
       exit={{ opacity: 0 }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
-      className={cn("flex gap-3 px-4", first ? "mt-3 pt-1 pb-0.5" : "py-0.5")}
+      className={cn("message-row flex gap-3 px-4", first && "first", display === "compact" && "compact")}
     >
-      <div className="w-10 shrink-0">{first && <UserAvatar user={me} className="mt-0.5" />}</div>
-      <div className="min-w-0 flex-1">
-        {first && (
-          <div className="flex items-baseline gap-2">
-            <AuthorName user={me} member={member} />
-            <span className="text-xs text-muted-foreground">sending…</span>
-          </div>
-        )}
-        <div className={cn("text-[0.95rem] leading-relaxed", pending.failed && "text-destructive")}>
-          <Markdown className="chat">{pending.content}</Markdown>
-        </div>
+      <MessageLine display={display} first={first} author={me} member={member} status="sending…">
+        <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive")} />
         {pending.failed && (
           <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
             <span className="text-destructive first-letter:uppercase">{pending.failed}.</span>
@@ -552,7 +623,7 @@ function PendingRow({
             </button>
           </p>
         )}
-      </div>
+      </MessageLine>
     </motion.div>
   );
 }

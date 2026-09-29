@@ -42,10 +42,28 @@ export function ServerSettingsDialog({
     if (open) setTab(initialTab);
   }, [open, initialTab]);
   const sections = [
-    { id: "overview", label: "Overview", icon: SettingsIcon, description: "How the server looks and whether people can find it." },
-    { id: "usage", label: "Usage", icon: ChartColumnIcon, description: "What the server holds, against its caps." },
+    {
+      id: "overview",
+      label: "Overview",
+      icon: SettingsIcon,
+      description: "How the server looks and whether people can find it.",
+      settings: [
+        { id: "name", label: "Server name" },
+        { id: "description", label: "Description" },
+        { id: "discoverable", label: "Show in Browse", keywords: "discoverable public hidden" },
+      ],
+    },
+    { id: "usage", label: "Usage", icon: ChartColumnIcon, description: "What the server holds, against its caps.", keywords: "storage members messages" },
     ...(instanceAdmin
-      ? [{ id: "limits", label: "Limits", icon: GaugeIcon, description: "Caps for this server only, over the instance's defaults." }]
+      ? [
+          {
+            id: "limits",
+            label: "Limits",
+            icon: GaugeIcon,
+            description: "Caps for this server only, over the instance's defaults.",
+            keywords: "caps members channels storage",
+          },
+        ]
       : []),
   ];
   return (
@@ -59,7 +77,7 @@ export function ServerSettingsDialog({
       openToSection={initialTab !== "overview"}
       groups={[
         { label: server.name, sections },
-        ...(isOwner ? [{ sections: [{ id: "danger", label: "Delete server", icon: Trash2Icon, danger: true }] }] : []),
+        ...(isOwner ? [{ sections: [{ id: "danger", label: "Delete server", icon: Trash2Icon, danger: true, keywords: "remove" }] }] : []),
       ]}
     >
       {tab === "overview" && <Overview instanceKey={instanceKey} server={server} />}
@@ -99,7 +117,7 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
     <form onSubmit={submit}>
       <WithPreview preview={<BrowseCard server={shown} />}>
         <div className="flex flex-col">
-          <div className="flex items-center gap-4 border-b border-border/70 pb-5">
+          <div data-setting="name" className="flex items-center gap-4 border-b border-border/70 pb-5">
             <motion.span key={initials(shown.name)} initial={{ scale: 0.85, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 16 }}>
               <ServerIcon server={shown} active className="size-20 text-2xl" />
             </motion.span>
@@ -110,14 +128,14 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
               <Input id="settings-name" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} className="h-11 rounded-xl" />
             </div>
           </div>
-          <div className="flex flex-col gap-2 border-b border-border/70 py-5">
+          <div data-setting="description" className="flex flex-col gap-2 border-b border-border/70 py-5">
             <Label htmlFor="settings-description" className="font-extrabold">
               Description
             </Label>
             <Textarea id="settings-description" rows={4} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} className="rounded-xl" />
             <p className="text-sm text-muted-foreground">Shown in Browse. Markdown works.</p>
           </div>
-          <label className="flex cursor-pointer items-center justify-between gap-4 py-5">
+          <label data-setting="discoverable" className="flex cursor-pointer items-center justify-between gap-4 py-5">
             <span>
               <span className="block font-extrabold">Show in Browse</span>
               <span className="block text-sm text-muted-foreground">Anyone on this fuwa server can find and join it.</span>
