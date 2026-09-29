@@ -1,14 +1,28 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 // In development the page is served by Vite, so gRPC-Web calls to this origin
 // are passed to a local fuwa server (FUWA_DEV_URL, default localhost:8080).
 const fuwa = process.env.FUWA_DEV_URL ?? "http://localhost:8080";
 
+// The app ships its own copy of the site's font (M PLUS Rounded 1c) so it works
+// offline on self-hosted instances. Every browser the app supports reads WOFF2,
+// so the older WOFF copies are left out of the build.
+function woff2Only(): Plugin {
+  return {
+    name: "fuwa:woff2-only",
+    enforce: "pre",
+    transform(code, id) {
+      if (!/@fontsource\/.+\.css$/.test(id)) return;
+      return code.replace(/,\s*url\([^)]+\.woff\) format\('woff'\)/g, "");
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [woff2Only(), react(), tailwindcss()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },

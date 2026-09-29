@@ -15,6 +15,7 @@
     "@connectrpc/connect": "^2.2.0",
     "@connectrpc/connect-web": "^2.2.0",
     "@floating-ui/react": "^0.27.20",
+    "@fontsource/m-plus-rounded-1c": "^5.3.0",
     "@radix-ui/react-avatar": "^1.2.6",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.24",

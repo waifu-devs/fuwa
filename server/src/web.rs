@@ -7,6 +7,8 @@ use std::sync::Arc;
 use axum::response::IntoResponse;
 use axum::routing::MethodRouter;
 use http::{HeaderMap, Method, StatusCode, Uri};
+use tower_http::compression::predicate::{NotForContentType, Predicate};
+use tower_http::compression::{CompressionLayer, DefaultPredicate};
 
 use crate::app::App;
 
@@ -74,8 +76,10 @@ mod embedded {
 
 /// The handler for every path the API doesn't answer: the web app when it's
 /// built in and switched on (checked per request, so admins can switch it
-/// live), otherwise a short note at `/` and 404 elsewhere.
+/// live), otherwise a short note at `/` and 404 elsewhere. Scripts and styles
+/// go out gzipped; fonts and images are compressed already.
 pub fn handler(app: Arc<App>) -> MethodRouter {
+    let compress = DefaultPredicate::new().and(NotForContentType::const_new("font/"));
     axum::routing::any(move |method: Method, uri: Uri, headers: HeaderMap| {
         let app = app.clone();
         async move {
@@ -98,6 +102,7 @@ pub fn handler(app: Arc<App>) -> MethodRouter {
             (StatusCode::NOT_FOUND, "not found\n").into_response()
         }
     })
+    .layer(CompressionLayer::new().compress_when(compress))
 }
 
 /// Whether this binary carries the web client.

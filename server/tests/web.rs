@@ -58,6 +58,17 @@ async fn the_app_opens_on_any_address() {
     assert!(asset.headers()["content-type"].to_str().unwrap().contains("javascript"));
     assert_eq!(http.get(format!("{base}/assets/missing.js")).send().await.unwrap().status(), 404);
 
+    // Scripts go out gzipped to browsers that ask; fonts, compressed already, don't.
+    let gzipped = http.get(format!("{base}{script}")).header("accept-encoding", "gzip").send().await.unwrap();
+    assert_eq!(gzipped.headers()["content-encoding"], "gzip");
+    let css = html.split(r#"href=""#).find(|s| s.contains(".css")).unwrap().split('"').next().unwrap();
+    let styles = http.get(format!("{base}{css}")).send().await.unwrap().text().await.unwrap();
+    let font = styles.split("url(").find(|s| s.contains(".woff2")).unwrap().split(')').next().unwrap();
+    let font = http.get(format!("{base}{font}")).header("accept-encoding", "gzip").send().await.unwrap();
+    assert_eq!(font.status(), 200);
+    assert_eq!(font.headers()["content-type"], "font/woff2");
+    assert!(font.headers().get("content-encoding").is_none());
+
     // Revalidation answers 304 with no body.
     let again = http.get(format!("{base}/")).header("if-none-match", etag).send().await.unwrap();
     assert_eq!(again.status(), 304);

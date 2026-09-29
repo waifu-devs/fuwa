@@ -5,6 +5,9 @@ import { createRoot } from "react-dom/client";
 import { restore } from "@/fuwa/sync";
 import { applyTheme, savedTheme } from "@/lib/themes";
 import { router } from "@/router";
+import "@fontsource/m-plus-rounded-1c/400.css";
+import "@fontsource/m-plus-rounded-1c/700.css";
+import "@fontsource/m-plus-rounded-1c/800.css";
 import "@/styles/app.css";
 
 applyTheme(savedTheme(), false);

@@ -37,7 +37,7 @@ tonic-health = "0.14"
 tonic-prost = "0.14"
 tonic-reflection = "0.14"
 tonic-web = "0.14"
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["compression-gzip", "cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 turso = "0.7.2"
