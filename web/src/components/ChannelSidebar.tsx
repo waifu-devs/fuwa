@@ -195,6 +195,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
           instanceKey={instanceKey}
           server={server}
           isOwner={owner || !!inst.admin}
+          instanceAdmin={!!inst.admin}
           tab={settings ?? "overview"}
         />
       )}

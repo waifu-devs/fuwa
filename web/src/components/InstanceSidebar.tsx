@@ -1,23 +1,40 @@
 import { Link } from "@tanstack/react-router";
-import { CompassIcon, HashIcon } from "lucide-react";
+import { CompassIcon, HashIcon, SettingsIcon } from "lucide-react";
+import { useState } from "react";
 import { useInstance } from "@/fuwa/hooks";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
 import { useLayout } from "@/components/Shell";
 import { UserPanel } from "@/components/UserPanel";
+import { InstanceSettingsDialog } from "@/components/settings/InstanceSettingsDialog";
 
 /** The sidebar on an instance's home: what it is, and your servers there. */
 export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
   const inst = useInstance(instanceKey);
   const { compact, setNavOpen } = useLayout();
+  const [settings, setSettings] = useState(false);
   if (!inst) return null;
   return (
     <>
-      <header className="flex h-14 shrink-0 flex-col justify-center border-b px-4">
-        <p className="truncate font-extrabold">{inst.node?.name ?? instanceKey}</p>
-        <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-          <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · {instanceKey}
-        </p>
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-extrabold">{inst.node?.name ?? instanceKey}</p>
+          <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+            <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · {instanceKey}
+          </p>
+        </div>
+        {inst.admin && (
+          <button
+            type="button"
+            onClick={() => setSettings(true)}
+            title="Instance settings"
+            className="group grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90"
+          >
+            <SettingsIcon className="size-4 transition-transform duration-500 ease-out group-hover:rotate-90" />
+            <span className="sr-only">Instance settings</span>
+          </button>
+        )}
       </header>
+      {inst.admin && <InstanceSettingsDialog open={settings} onOpenChange={setSettings} instanceKey={instanceKey} />}
       <div className="scroll-thin flex-1 overflow-y-auto p-2">
         <Link
           to="/$instance"

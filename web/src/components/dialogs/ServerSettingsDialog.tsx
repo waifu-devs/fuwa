@@ -3,8 +3,8 @@ import { LoaderCircleIcon, TriangleAlertIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { GetServerUsageResponse } from "@/gen/fuwa/v1/server_pb";
-import type { Server } from "@/gen/fuwa/v1/types_pb";
-import { deleteServer, run, serverUsage, updateServer } from "@/fuwa/actions";
+import type { Server, ServerLimits } from "@/gen/fuwa/v1/types_pb";
+import { deleteServer, nodeUsage, run, serverUsage, setServerLimits, updateServer } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
 import { SlidingNumber } from "@/components/animate-ui/primitives/texts/sliding-number";
 import { ServerIcon } from "@/components/Icons";
@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/format";
+import { Cap, SaveBar } from "@/components/settings/controls";
 
 export function ServerSettingsDialog({
   open,
@@ -23,6 +24,7 @@ export function ServerSettingsDialog({
   instanceKey,
   server,
   isOwner,
+  instanceAdmin = false,
   tab: initialTab = "overview",
 }: {
   open: boolean;
@@ -30,6 +32,8 @@ export function ServerSettingsDialog({
   instanceKey: string;
   server: Server;
   isOwner: boolean;
+  /** Instance admins also get the server's own caps. */
+  instanceAdmin?: boolean;
   tab?: string;
 }) {
   const [tab, setTab] = useState(initialTab);
@@ -44,6 +48,7 @@ export function ServerSettingsDialog({
           <TabsList className="w-full">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="usage">Usage</TabsTrigger>
+            {instanceAdmin && <TabsTrigger value="limits">Limits</TabsTrigger>}
             {isOwner && <TabsTrigger value="danger">Danger zone</TabsTrigger>}
           </TabsList>
           <TabsContents className="pt-4">
@@ -51,6 +56,9 @@ export function ServerSettingsDialog({
               <Overview instanceKey={instanceKey} server={server} onSaved={() => onOpenChange(false)} />
             </TabsContent>
             <TabsContent value="usage">{open && tab === "usage" && <Usage instanceKey={instanceKey} serverId={server.id} />}</TabsContent>
+            {instanceAdmin && (
+              <TabsContent value="limits">{open && tab === "limits" && <Limits instanceKey={instanceKey} serverId={server.id} />}</TabsContent>
+            )}
             {isOwner && (
               <TabsContent value="danger">
                 <Danger instanceKey={instanceKey} server={server} onDeleted={() => onOpenChange(false)} />
@@ -166,6 +174,75 @@ function Usage({ instanceKey, serverId }: { instanceKey: string; serverId: strin
         })}
       </div>
       <p className="text-xs text-muted-foreground">Limits are set by whoever runs this fuwa server. Self-hosted servers have none unless the operator adds them.</p>
+    </div>
+  );
+}
+
+type Caps = Omit<ServerLimits, "$typeName">;
+const CAP_FIELDS = ["members", "channels", "storageBytes", "attachmentBytes"] as const;
+const caps = (l: ServerLimits | undefined): Caps => ({
+  members: l?.members,
+  channels: l?.channels,
+  storageBytes: l?.storageBytes,
+  attachmentBytes: l?.attachmentBytes,
+});
+
+/** Instance admins: this server's own caps, over the instance defaults. */
+function Limits({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const [own, setOwn] = useState<Caps | null>(null);
+  const [draft, setDraft] = useState<Caps | null>(null);
+  const [defaults, setDefaults] = useState<Caps>({});
+  const [error, setError] = useState<string | null>(null);
+  const save = useAction(setServerLimits);
+
+  useEffect(() => {
+    Promise.all([run(serverUsage(instanceKey, serverId)), run(nodeUsage(instanceKey))]).then(
+      ([usage, node]) => {
+        setOwn(caps(usage.ownLimits));
+        setDraft(caps(usage.ownLimits));
+        setDefaults(caps(node.defaultLimits));
+      },
+      (e) => setError(e.message),
+    );
+  }, [instanceKey, serverId]);
+
+  if (error) return <p className="text-sm text-muted-foreground first-letter:uppercase">{error}</p>;
+  if (!own || !draft) return <div className="shimmer h-48 rounded-2xl" />;
+  const changed = CAP_FIELDS.filter((f) => draft[f] !== own[f]).length;
+  const fallback = (field: (typeof CAP_FIELDS)[number], bytes = false) => {
+    const d = defaults[field];
+    return `Instance default (${d === undefined ? "no limit" : bytes ? formatBytes(Number(d)) : Number(d).toLocaleString()})`;
+  };
+  const set = (field: (typeof CAP_FIELDS)[number]) => (value: bigint | undefined) => {
+    setDraft((d) => ({ ...d, [field]: value }));
+    save.setError(null);
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 rounded-2xl border bg-background/40 p-4">
+        <p className="text-xs text-muted-foreground">
+          Caps for this server only. A cap that's off follows the instance default, which you can change in the instance settings.
+        </p>
+        <Cap label="Members" value={draft.members} onChange={set("members")} placeholder={fallback("members")} />
+        <Cap label="Channels" value={draft.channels} onChange={set("channels")} placeholder={fallback("channels")} />
+        <Cap label="Storage" bytes value={draft.storageBytes} onChange={set("storageBytes")} placeholder={fallback("storageBytes", true)} />
+        <Cap label="Files" bytes value={draft.attachmentBytes} onChange={set("attachmentBytes")} placeholder={fallback("attachmentBytes", true)} />
+      </div>
+      <SaveBar
+        inset
+        count={changed}
+        saving={save.pending}
+        error={save.error}
+        nudge={0}
+        onDiscard={() => setDraft(own)}
+        onSave={async () => {
+          const next = await save.go(instanceKey, serverId, draft);
+          if (next) {
+            setOwn(draft);
+          }
+        }}
+      />
     </div>
   );
 }

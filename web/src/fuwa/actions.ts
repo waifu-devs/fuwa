@@ -1,5 +1,6 @@
 import { Effect } from "effect";
-import { ChannelType, type Server } from "@/gen/fuwa/v1/types_pb";
+import type { InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
+import { ChannelType, type Server, type ServerLimits } from "@/gen/fuwa/v1/types_pb";
 import { makeApi } from "./client";
 import { call, toFuwaError, type FuwaError } from "./errors";
 import { normalizeUrl } from "./saved";
@@ -121,6 +122,38 @@ export const updateServer = (
 
 export const serverUsage = (key: string, serverId: string) =>
   call((signal) => api(key).servers.getServerUsage({ serverId }, { signal }));
+
+// ───────────────────────── Instance settings (instance admins) ─────────────────────────
+
+/** The instance's settings, their defaults, which ones were changed, and how it was started. */
+export const getSettings = (key: string) =>
+  call((signal) => api(key).admin.getSettings({}, { signal })).pipe(Effect.map((r) => r.config!));
+
+/**
+ * Changes the settings named in `update` to their values in `settings`, and
+ * returns the ones in `reset` to their defaults. The instance's public details
+ * are read again, so its name and sign-up options update everywhere.
+ */
+export const updateSettings = (key: string, settings: InstanceSettings, update: string[], reset: string[]) =>
+  Effect.gen(function* () {
+    const { config } = yield* call((signal) =>
+      api(key).admin.updateSettings(
+        { settings, updateMask: { paths: update }, resetMask: { paths: reset } },
+        { signal },
+      ),
+    );
+    const { node } = yield* call((signal) => api(key).node.getNode({}, { signal }));
+    updateInstance(key, (i) => ({ ...i, node: node ?? i.node }));
+    return config!;
+  });
+
+export const nodeUsage = (key: string) => call((signal) => api(key).admin.getNodeUsage({}, { signal }));
+
+/** Replaces a server's own caps; unset ones follow the instance defaults. */
+export const setServerLimits = (key: string, serverId: string, limits: Omit<ServerLimits, "$typeName">) =>
+  call((signal) => api(key).admin.setServerLimits({ serverId, limits }, { signal })).pipe(
+    Effect.map((r) => r.limits!),
+  );
 
 // ───────────────────────── Channels ─────────────────────────
 

@@ -210,7 +210,18 @@ function Account({
           </TabsTrigger>
         </TabsList>
         <TabsContents>
-          <TabsContent value="sign-in" />
+          <TabsContent value="sign-in">
+            {!canSignUp && (
+              <motion.p
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, ease: EASE }}
+                className="pt-2 text-xs text-muted-foreground"
+              >
+                This server isn't taking new accounts right now. Ask its admin for one.
+              </motion.p>
+            )}
+          </TabsContent>
           <TabsContent value="sign-up">
             <div className="flex flex-col gap-2 pt-2">
               <Label htmlFor="display-name" className="font-bold">
