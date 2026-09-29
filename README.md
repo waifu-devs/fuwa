@@ -14,6 +14,9 @@ like, hosted or self-hosted, over the same protocol.
   messages and storage. Limits are off unless the operator sets them.
 - **Live by design.** Every change is an event in the server's log; clients
   follow the log live and catch up from their last sequence after a reconnect.
+- **One app for every instance.** Each instance serves the fuwa web app at its
+  own address. The app keeps a list of the instances you've added, hosted or
+  self-hosted, and shows all their servers side by side.
 
 ## Self-host
 
@@ -23,11 +26,17 @@ docker run -d --name fuwa -p 8080:8080 -v fuwa:/data \
   ghcr.io/waifu-devs/fuwa
 ```
 
-Or build and run the binary:
+Then open the address in a browser: the web app is served from the same port.
+
+Or build and run the binary. The web app is compiled in with the `web` feature,
+after building it once:
 
 ```sh
-cargo run --release --bin fuwa
+(cd web && pnpm install && pnpm build)
+cargo run --release --features web --bin fuwa
 ```
+
+Without `--features web` the binary serves only the API.
 
 The first account to sign up becomes the instance's admin. Put it behind a
 reverse proxy with TLS for anything public; the server speaks plain HTTP/1.1
@@ -46,6 +55,7 @@ directory also works; real environment variables win).
 | `FUWA_PUBLIC_URL` | `http://localhost:<port>` | The URL clients reach this instance on |
 | `FUWA_NODE_NAME` | `Fuwa` | The instance's display name |
 | `FUWA_ALLOWED_ORIGINS` | `*` | Browser origins allowed to call the API, comma-separated |
+| `FUWA_WEB` | `on` | Serve the web app at `/`; `off` leaves only the API |
 | `FUWA_LOCAL_ACCOUNTS` | `open` | Standalone accounts: `open` (anyone can sign up), `closed` (existing accounts only), `off` |
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |
@@ -126,5 +136,21 @@ cargo test                     # unit and end-to-end tests
 cargo clippy --all-targets     # lints
 npx @bufbuild/buf lint         # protocol lints
 ```
+
+The web app lives in [`web/`](web) (React, TanStack Router, Effect, shadcn/ui and
+Animate UI) and talks gRPC-Web to any fuwa instance. With a server running on
+port 8080:
+
+```sh
+cd web
+pnpm install
+pnpm dev                       # the app on http://localhost:5173
+pnpm generate                  # regenerate src/gen after changing proto/
+pnpm build                     # typecheck and build web/dist
+```
+
+In development Vite passes the app's own API calls to `FUWA_DEV_URL` (default
+`http://localhost:8080`), so the dev page works as an instance of its own.
+After `pnpm build`, `cargo test --features web` also tests the embedded app.
 
 See [AGENTS.md](AGENTS.md) for how the code is laid out.

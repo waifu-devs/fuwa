@@ -18,7 +18,21 @@
   - `migrations/node`, `migrations/server`: SQL applied in order, tracked in
     `PRAGMA user_version`. Never edit a migration that has shipped; add a new file
     and list it in `MIGRATIONS`.
-  - `tests/api.rs`: end-to-end tests against a running instance.
+  - `web.rs`: serves the embedded web app (feature `web`, from `web/dist`), with
+    `index.html` for any path the API doesn't answer so deep links work.
+  - `tests/api.rs`: end-to-end tests against a running instance; `tests/web.rs`
+    covers the embedded app.
+- `web/`: the web app (pnpm, Vite, React 19, TanStack Router, Tailwind 4,
+  shadcn/ui and Animate UI copied from the waifu.dev site, Effect).
+  - `src/gen/`: protobuf code from `pnpm generate`. Generated, committed, never
+    edited by hand.
+  - `src/fuwa/`: talking to instances. `sync.ts` runs one Effect fiber per
+    instance that subscribes, loads state after `ready`, applies events and
+    reconnects with the last sequences; `store.ts` holds the state and its
+    reducers (idempotent, since events can arrive twice); `actions.ts` are the
+    calls the UI makes; `saved.ts` is the instance list kept in localStorage.
+  - `src/components/`, `src/pages/`: the UI. Routes are
+    `/<instance>/<server>/<channel>`, where `<instance>` is the host.
 
 ## Rules
 
@@ -29,5 +43,8 @@
 - Limits are unlimited unless configured. Never hardcode a usage cap.
 - The usage signal must stay anonymous: no content, names or ids of people or
   servers. The end-to-end test checks this.
+- The web app talks only through the protocol; anything it needs from a server
+  goes in `proto/` first, then `pnpm generate`.
 - Before pushing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
-  `cargo test`, and `buf lint`.
+  `cargo test`, and `buf lint`; for `web/`, `pnpm build` then
+  `cargo test --features web`.

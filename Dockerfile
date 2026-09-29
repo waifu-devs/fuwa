@@ -1,6 +1,15 @@
 # The fuwa server. Self-host with:
 #   docker run -d -p 8080:8080 -v fuwa:/data ghcr.io/waifu-devs/fuwa
 
+# The web client, which the server carries inside its binary.
+FROM node:22-bookworm-slim AS web
+WORKDIR /src/web
+RUN npm install --global pnpm@10.33.0
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY web ./
+RUN pnpm run build
+
 FROM rust:1-bookworm AS build
 WORKDIR /src
 
@@ -11,12 +20,13 @@ COPY proto proto
 RUN mkdir -p server/src \
     && echo 'fn main() {}' > server/src/main.rs \
     && touch server/src/lib.rs \
-    && cargo build --release --locked --bin fuwa \
+    && cargo build --release --locked --features web --bin fuwa \
     && rm -rf server/src
 
 COPY server server
+COPY --from=web /src/web/dist web/dist
 RUN touch server/src/main.rs server/src/lib.rs \
-    && cargo build --release --locked --bin fuwa \
+    && cargo build --release --locked --features web --bin fuwa \
     && cp target/release/fuwa /fuwa
 
 FROM gcr.io/distroless/cc-debian12
