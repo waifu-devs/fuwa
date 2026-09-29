@@ -8,7 +8,7 @@ use crate::servers::{self as store, Payload};
 
 impl Api {
     async fn create_account(&self, req: pb::SignUpRequest) -> Result<pb::SignUpResponse> {
-        if !self.app.config.local_accounts.sign_up() {
+        if !self.app.settings().local_accounts.sign_up() {
             return Err(Error::FailedPrecondition("this instance isn't taking new sign-ups".into()));
         }
         let username = auth::validate_username(&req.username)?;
@@ -27,7 +27,7 @@ impl Api {
     }
 
     async fn start_session(&self, req: pb::SignInRequest) -> Result<pb::SignInResponse> {
-        if !self.app.config.local_accounts.sign_in() {
+        if !self.app.settings().local_accounts.sign_in() {
             return Err(Error::FailedPrecondition("this instance doesn't use standalone accounts".into()));
         }
         let username = req.username.trim().to_lowercase();

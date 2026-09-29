@@ -5,3 +5,6 @@ target
 *.db-wal
 *.db-shm
 .env
+web/node_modules
+web/dist
+*.tsbuildinfo

@@ -5,12 +5,13 @@ use std::path::Path;
 use tokio::sync::Mutex;
 use turso::{Connection, Database, Row};
 
-use crate::db::{self, EncryptionKey, query_one};
+use crate::db::{self, EncryptionKey, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms};
 use crate::pb;
 
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/node/0001_init.sql")];
+const MIGRATIONS: &[&str] =
+    &[include_str!("../migrations/node/0001_init.sql"), include_str!("../migrations/node/0002_settings.sql")];
 
 /// How long a session lasts after sign-in.
 pub const SESSION_TTL_MS: i64 = 60 * 24 * 60 * 60 * 1000;
@@ -59,7 +60,8 @@ fn account(row: &Row) -> turso::Result<Account> {
 
 pub struct NodeDb {
     db: Database,
-    writer: Mutex<Connection>,
+    /// Sign-ups one at a time, so only the very first account becomes admin.
+    sign_ups: Mutex<()>,
 }
 
 /// Account totals for the usage signal.
@@ -73,8 +75,7 @@ pub struct AccountCounts {
 impl NodeDb {
     pub async fn open(path: &Path, key: Option<&EncryptionKey>) -> Result<Self> {
         let db = db::open(path, key, MIGRATIONS).await?;
-        let writer = Mutex::new(db::connect(&db)?);
-        Ok(Self { db, writer })
+        Ok(Self { db, sign_ups: Mutex::new(()) })
     }
 
     fn read(&self) -> Result<Connection> {
@@ -83,8 +84,7 @@ impl NodeDb {
 
     /// This instance's random, anonymous id, made the first time it's asked for.
     pub async fn install_id(&self) -> Result<String> {
-        let conn = self.writer.lock().await;
-        db::transaction(&conn, async |conn| {
+        db::write(&self.db, async |conn| {
             if let Some(id) =
                 query_one(conn, "SELECT value FROM meta WHERE key = 'install_id'", (), |r| r.get::<String>(0)).await?
             {
@@ -104,8 +104,8 @@ impl NodeDb {
         display_name: &str,
         password_hash: &str,
     ) -> Result<Account> {
-        let conn = self.writer.lock().await;
-        let result = db::transaction(&conn, async |conn| {
+        let _one_at_a_time = self.sign_ups.lock().await;
+        let result = db::write(&self.db, async |conn| {
             let first = query_one(conn, "SELECT count(*) FROM accounts", (), |r| r.get::<i64>(0)).await? == Some(0);
             let now = now_ms();
             let id = new_id();
@@ -162,21 +162,22 @@ impl NodeDb {
         display_name: Option<&str>,
         avatar_url: Option<&str>,
     ) -> Result<Account> {
-        let conn = self.writer.lock().await;
-        conn.execute(
-            "UPDATE accounts SET display_name = coalesce(?2, display_name), avatar_url = coalesce(?3, avatar_url), updated_at = ?4
-             WHERE id = ?1",
-            (id, display_name, avatar_url, now_ms()),
-        )
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "UPDATE accounts SET display_name = coalesce(?2, display_name), avatar_url = coalesce(?3, avatar_url), updated_at = ?4
+                 WHERE id = ?1",
+                (id, display_name, avatar_url, now_ms()),
+            )
+            .await?;
+            Ok(())
+        })
         .await?;
-        drop(conn);
         self.account(id).await?.ok_or(Error::NotFound("account"))
     }
 
     /// Replaces the password and ends every other session.
     pub async fn set_password(&self, id: &str, password_hash: &str, keep_session: &str) -> Result<()> {
-        let conn = self.writer.lock().await;
-        db::transaction(&conn, async |conn| {
+        db::write(&self.db, async |conn| {
             conn.execute(
                 "UPDATE accounts SET password_hash = ?2, updated_at = ?3 WHERE id = ?1",
                 (id, password_hash, now_ms()),
@@ -189,14 +190,16 @@ impl NodeDb {
     }
 
     pub async fn create_session(&self, account_id: &str, token_hash: &str) -> Result<()> {
-        let conn = self.writer.lock().await;
-        let now = now_ms();
-        conn.execute(
-            "INSERT INTO sessions (token_hash, account_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
-            (token_hash, account_id, now, now + SESSION_TTL_MS),
-        )
-        .await?;
-        Ok(())
+        db::write(&self.db, async |conn| {
+            let now = now_ms();
+            conn.execute(
+                "INSERT INTO sessions (token_hash, account_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
+                (token_hash, account_id, now, now + SESSION_TTL_MS),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
     }
 
     /// The account a live session belongs to, marking the account as seen.
@@ -217,22 +220,61 @@ impl NodeDb {
         if let Some(account) = &found
             && now - account.last_seen_at > SEEN_RESOLUTION_MS
         {
-            let conn = self.writer.lock().await;
-            conn.execute("UPDATE accounts SET last_seen_at = ?2 WHERE id = ?1", (account.id.as_str(), now)).await?;
+            // Several requests at once may all try; one landing is enough.
+            let seen = db::write_once(&self.db, async |conn| {
+                conn.execute("UPDATE accounts SET last_seen_at = ?2 WHERE id = ?1", (account.id.as_str(), now)).await?;
+                Ok(())
+            })
+            .await;
+            if let Err(err) = seen
+                && !db::is_conflict(&err)
+            {
+                return Err(err);
+            }
         }
         Ok(found)
     }
 
     pub async fn delete_session(&self, token_hash: &str) -> Result<()> {
-        let conn = self.writer.lock().await;
-        conn.execute("DELETE FROM sessions WHERE token_hash = ?1", [token_hash]).await?;
-        Ok(())
+        db::write(&self.db, async |conn| {
+            conn.execute("DELETE FROM sessions WHERE token_hash = ?1", [token_hash]).await?;
+            Ok(())
+        })
+        .await
     }
 
     /// Drops sessions that have run out.
     pub async fn prune_sessions(&self) -> Result<u64> {
-        let conn = self.writer.lock().await;
-        Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now_ms()]).await?)
+        db::write(&self.db, async |conn| {
+            Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now_ms()]).await?)
+        })
+        .await
+    }
+
+    /// Settings changed from a client, by field path, as stored JSON.
+    pub async fn settings(&self) -> Result<Vec<(String, String)>> {
+        let conn = self.read()?;
+        query_all(&conn, "SELECT key, value FROM settings ORDER BY key", (), |r| Ok((r.get(0)?, r.get(1)?))).await
+    }
+
+    /// Stores changed settings and forgets reset ones, all at once.
+    pub async fn save_settings(&self, set: &[(String, String)], reset: &[String]) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            let now = now_ms();
+            for (key, value) in set {
+                conn.execute(
+                    "INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)
+                     ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                    (key.as_str(), value.as_str(), now),
+                )
+                .await?;
+            }
+            for key in reset {
+                conn.execute("DELETE FROM settings WHERE key = ?1", [key.as_str()]).await?;
+            }
+            Ok(())
+        })
+        .await
     }
 
     pub async fn account_counts(&self) -> Result<AccountCounts> {

@@ -1,0 +1,141 @@
+import { useNavigate } from "@tanstack/react-router";
+import { LoaderCircleIcon } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useState, type FormEvent } from "react";
+import { ServerCreation } from "@/gen/fuwa/v1/types_pb";
+import { createServer } from "@/fuwa/actions";
+import { useAction, useInstances } from "@/fuwa/hooks";
+import { ServerIcon } from "@/components/Icons";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+
+export function CreateServerDialog({
+  open,
+  onOpenChange,
+  defaultInstance,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  defaultInstance?: string;
+}) {
+  const navigate = useNavigate();
+  const instances = useInstances().filter((i) => i.me);
+  const [where, setWhere] = useState(defaultInstance ?? instances[0]?.key ?? "");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [discoverable, setDiscoverable] = useState(false);
+  const create = useAction(createServer);
+  const inst = instances.find((i) => i.key === where) ?? instances[0];
+  const policy = inst?.node?.serverCreation;
+  const blocked =
+    policy === ServerCreation.DISABLED || (policy === ServerCreation.ADMINS && !inst?.admin)
+      ? "This fuwa server's operator doesn't let members create servers."
+      : null;
+
+  useEffect(() => {
+    if (open) {
+      setName("");
+      setDescription("");
+      setDiscoverable(false);
+      create.setError(null);
+      if (defaultInstance && instances.some((i) => i.key === defaultInstance)) setWhere(defaultInstance);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!inst) return;
+    const server = await create.go(inst.key, name.trim(), description.trim(), discoverable);
+    if (!server) return;
+    onOpenChange(false);
+    navigate({ to: "/$instance/$server", params: { instance: inst.key, server: server.id } });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader title="Create a server" description="A home for your people. You can change all of this later." />
+        <form onSubmit={submit} className="flex flex-col gap-4">
+          <div className="flex items-center gap-4">
+            <motion.div key={name.trim().slice(0, 1) || "empty"} initial={{ scale: 0.8, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 15 }}>
+              <ServerIcon server={{ id: name || "new", name: name || "?", iconUrl: "" }} active className="size-16 text-xl" />
+            </motion.div>
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <Label htmlFor="server-name" className="font-bold">
+                Name
+              </Label>
+              <Input
+                id="server-name"
+                autoFocus
+                required
+                maxLength={100}
+                placeholder="Waifu Devs"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="h-11 rounded-xl"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="server-description" className="font-bold">
+              Description <span className="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+            <Textarea
+              id="server-description"
+              rows={2}
+              maxLength={1000}
+              placeholder="What's it about?"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="rounded-xl"
+            />
+          </div>
+          {instances.length > 1 && (
+            <div className="flex flex-col gap-2">
+              <Label className="font-bold">Lives on</Label>
+              <div className="flex flex-wrap gap-2">
+                {instances.map((i) => (
+                  <button
+                    key={i.key}
+                    type="button"
+                    onClick={() => setWhere(i.key)}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-sm font-bold transition",
+                      i.key === inst?.key ? "border-primary bg-primary/15 text-primary" : "hover:border-primary/50",
+                    )}
+                  >
+                    {i.node?.name ?? i.key}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <label className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl border p-3">
+            <span>
+              <span className="block text-sm font-bold">Show in Browse</span>
+              <span className="block text-xs text-muted-foreground">Anyone on {inst?.node?.name ?? "this fuwa server"} can find and join it.</span>
+            </span>
+            <Switch checked={discoverable} onCheckedChange={setDiscoverable} />
+          </label>
+          <AnimatePresence>
+            {(create.error || blocked) && (
+              <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="text-sm text-destructive first-letter:uppercase">
+                {blocked ?? create.error}
+              </motion.p>
+            )}
+          </AnimatePresence>
+          <Button type="submit" size="lg" disabled={create.pending || !name.trim() || !!blocked || !inst} className="btn h-11 rounded-xl font-bold">
+            {create.pending && <LoaderCircleIcon className="animate-spin" />}
+            Create server
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}

@@ -1,0 +1,460 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Styles shared with the waifu.dev site (tokens, motion, Markdown), then
+   fuwa's own below. Every theme (lib/themes.ts) is a full set of values for
+   these shadcn/ui variables; the defaults are Sakura, or Yoru on a dark
+   system, and main.tsx applies the chosen theme before first paint. */
+:root {
+  --radius: 1rem;
+  --background: #fff5f8;
+  --foreground: #3b2330;
+  --card: #ffffff;
+  --card-foreground: #3b2330;
+  --popover: #ffffff;
+  --popover-foreground: #3b2330;
+  --primary: #f06292;
+  --primary-foreground: #ffffff;
+  --secondary: #fdedf2;
+  --secondary-foreground: #3b2330;
+  --muted: #fbe5ec;
+  --muted-foreground: #8a6577;
+  --accent: #fde5ed;
+  --accent-foreground: #3b2330;
+  --destructive: #e5484d;
+  --border: #f8d3e0;
+  --input: #f8d3e0;
+  --ring: #f06292;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --radius: 0.75rem;
+    --background: #14111f;
+    --foreground: #ece6ff;
+    --card: #1f1a2e;
+    --card-foreground: #ece6ff;
+    --popover: #1f1a2e;
+    --popover-foreground: #ece6ff;
+    --primary: #b388ff;
+    --primary-foreground: #14111f;
+    --secondary: #2a2240;
+    --secondary-foreground: #ece6ff;
+    --muted: #241e36;
+    --muted-foreground: #9a90b8;
+    --accent: #2a2240;
+    --accent-foreground: #ece6ff;
+    --destructive: #e5484d;
+    --border: #342b4d;
+    --input: #342b4d;
+    --ring: #b388ff;
+  }
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: "M PLUS Rounded 1c", ui-rounded, ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+html,
+body {
+  overflow-x: clip;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+}
+
+.themed {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* A few drifting petals in the page background. Purely decorative. */
+.petals {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+.petals span {
+  position: absolute;
+  top: -2rem;
+  width: 0.8rem;
+  height: 0.6rem;
+  border-radius: 80% 0 80% 0;
+  background: var(--primary);
+  opacity: 0.18;
+  animation: fall linear infinite;
+}
+@keyframes fall {
+  to {
+    transform: translate(-4rem, 110vh) rotate(540deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .petals {
+    display: none;
+  }
+}
+
+/* ───────────────────────── Motion ─────────────────────────
+   Registered custom properties can be interpolated, so switching themes
+   morphs every token on the page instead of snapping. */
+@property --background { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --foreground { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --card { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --card-foreground { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --popover { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --popover-foreground { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --primary { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --primary-foreground { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --secondary { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --secondary-foreground { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --muted { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --muted-foreground { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --accent { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --accent-foreground { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --destructive { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --border { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --input { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --ring { syntax: "<color>"; inherits: true; initial-value: transparent; }
+
+:root,
+.themed {
+  transition:
+    --background 0.6s ease,
+    --foreground 0.6s ease,
+    --card 0.6s ease,
+    --card-foreground 0.6s ease,
+    --popover 0.6s ease,
+    --popover-foreground 0.6s ease,
+    --primary 0.6s ease,
+    --primary-foreground 0.6s ease,
+    --secondary 0.6s ease,
+    --secondary-foreground 0.6s ease,
+    --muted 0.6s ease,
+    --muted-foreground 0.6s ease,
+    --accent 0.6s ease,
+    --accent-foreground 0.6s ease,
+    --destructive 0.6s ease,
+    --border 0.6s ease,
+    --input 0.6s ease,
+    --ring 0.6s ease;
+}
+
+
+::selection {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+/* Entrance: children of .stagger rise in one after another. */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(18px) scale(0.98); filter: blur(4px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+.rise { animation: rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.stagger > * { animation: rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.stagger > *:nth-child(1) { animation-delay: 0.02s; }
+.stagger > *:nth-child(2) { animation-delay: 0.08s; }
+.stagger > *:nth-child(3) { animation-delay: 0.14s; }
+.stagger > *:nth-child(4) { animation-delay: 0.2s; }
+.stagger > *:nth-child(5) { animation-delay: 0.26s; }
+.stagger > *:nth-child(6) { animation-delay: 0.32s; }
+.stagger > *:nth-child(n + 7) { animation-delay: 0.38s; }
+
+/* Scroll reveal (toggled by <Reveal>). */
+.reveal { opacity: 0; transform: translateY(28px); transition: opacity 0.8s ease, transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.reveal.in { opacity: 1; transform: none; }
+
+/* Buttons squish when pressed and lift on hover. */
+.btn { transition: transform 0.18s cubic-bezier(0.3, 1.6, 0.5, 1), box-shadow 0.2s ease, filter 0.2s ease; }
+.btn:hover { transform: translateY(-2px); box-shadow: 0 8px 22px -8px var(--primary); }
+.btn:active { transform: translateY(0) scale(0.94); }
+
+/* Cards lift, and a soft glow follows the pointer (--mx/--my set by <Tilt>). */
+.card-pop { transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.3s ease, box-shadow 0.35s ease; }
+.card-pop:hover { border-color: var(--primary); box-shadow: 0 18px 40px -22px var(--primary); }
+.tilt { transform-style: preserve-3d; will-change: transform; position: relative; }
+.tilt::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--primary) 22%, transparent), transparent 70%);
+}
+.tilt:hover::after { opacity: 1; }
+
+/* Hero: gradient text and drifting blobs. */
+.gradient-text {
+  /* Static on purpose: animating background-position under background-clip:text can drop the glyphs in Chromium. */
+  background: linear-gradient(100deg, var(--primary), color-mix(in srgb, var(--primary) 45%, #a78bfa));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Sparkle trail and click bursts (spawned by <Sparkles>). */
+.sparkle {
+  position: fixed;
+  pointer-events: none;
+  z-index: 60;
+  color: var(--primary);
+  font-size: var(--size, 14px);
+  animation: sparkle 0.9s ease-out forwards;
+  translate: -50% -50%;
+}
+@keyframes sparkle {
+  from { opacity: 1; transform: translate(0, 0) scale(1) rotate(0); }
+  to { opacity: 0; transform: translate(var(--dx, 0), var(--dy, 20px)) scale(0.3) rotate(var(--rot, 90deg)); }
+}
+
+/* Underline that grows from the left on nav links. */
+.nav-link { position: relative; }
+.nav-link::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -4px;
+  height: 2px;
+  width: 100%;
+  background: var(--primary);
+  border-radius: 2px;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.nav-link:hover::after { transform: scaleX(1); }
+
+/* Color inputs pop when changed. */
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.25); } 100% { transform: scale(1); } }
+.pop { animation: pop 0.35s cubic-bezier(0.3, 1.6, 0.5, 1); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .reveal { opacity: 1; transform: none; }
+  .sparkle { display: none; }
+}
+
+/* Slowly spinning gradient ring around profile avatars. */
+.avatar-ring {
+  background: conic-gradient(from var(--ring-angle, 0deg), var(--primary), transparent 40%, var(--primary) 70%, transparent);
+  animation: ring 6s linear infinite;
+}
+@property --ring-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes ring { to { --ring-angle: 360deg; } }
+
+/* A soft "live" dot for profile statuses. */
+.status-dot { position: relative; display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 9999px; background: var(--primary); }
+.status-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--primary);
+  animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes ping { 75%, 100% { transform: scale(2.6); opacity: 0; } }
+
+/* ───────────────────────── Member Markdown ─────────────────────────
+   Rendered by components/Markdown.tsx; colors come from theme tokens. */
+.markdown { overflow-wrap: anywhere; }
+.markdown > * + * { margin-top: 0.75em; }
+.markdown :where(h3, h4) { font-weight: 800; line-height: 1.3; }
+.markdown h3 { font-size: 1.15em; }
+.markdown :where(ul, ol) { padding-left: 1.4em; }
+.markdown ul { list-style: disc; }
+.markdown ol { list-style: decimal; }
+.markdown li + li { margin-top: 0.25em; }
+.markdown li::marker { color: var(--primary); }
+.markdown li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.4em; }
+.markdown input[type="checkbox"] { accent-color: var(--primary); margin-right: 0.4em; vertical-align: -0.1em; }
+.markdown blockquote { border-left: 3px solid var(--primary); padding-left: 0.9em; color: var(--muted-foreground); }
+.markdown hr { border-color: var(--border); }
+.markdown pre {
+  overflow-x: auto;
+  padding: 0.75em 1em;
+  border-radius: calc(var(--radius) * 0.75);
+  background: var(--muted);
+  font-size: 0.875em;
+  line-height: 1.6;
+}
+.markdown pre code { padding: 0; background: none; font-size: inherit; }
+.markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 0.9em; }
+.markdown :where(th, td) { border: 1px solid var(--border); padding: 0.35em 0.7em; text-align: left; }
+.markdown th { background: var(--muted); font-weight: 700; }
+:where(.markdown, .markdown-inline) a {
+  color: var(--primary);
+  font-weight: 700;
+  text-decoration: underline 2px color-mix(in srgb, var(--primary) 35%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.2s ease;
+}
+:where(.markdown, .markdown-inline) a:hover { text-decoration-color: var(--primary); }
+:where(.markdown, .markdown-inline) code {
+  padding: 0.1em 0.35em;
+  border-radius: 0.35em;
+  background: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875em;
+}
+:where(.markdown, .markdown-inline) del { opacity: 0.7; }
+
+
+/* Refused uploads shake their message once. */
+@keyframes shake { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+.shake { animation: shake 0.4s ease; }
+
+/* ───────────────────────── fuwa ───────────────────────── */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Surfaces from back to front: the server rail, the channel sidebar, the chat. */
+.surface-rail { background: color-mix(in srgb, var(--primary) 9%, var(--muted)); }
+.dark .surface-rail { background: color-mix(in srgb, var(--background) 78%, black); }
+.surface-side { background: color-mix(in srgb, var(--card) 55%, var(--background)); }
+.surface-chat { background: var(--background); }
+
+/* Thin scrollbars that only show while hovering the area. */
+.scroll-thin { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.scroll-thin:hover { scrollbar-color: color-mix(in srgb, var(--muted-foreground) 45%, transparent) transparent; }
+.scroll-none { scrollbar-width: none; }
+.scroll-none::-webkit-scrollbar { display: none; }
+
+/* Server icons are circles that settle into rounded squares on hover or when open. */
+.server-icon {
+  border-radius: 50%;
+  transition:
+    border-radius 0.28s cubic-bezier(0.3, 1.4, 0.5, 1),
+    transform 0.2s cubic-bezier(0.3, 1.6, 0.5, 1),
+    scale 0.3s cubic-bezier(0.3, 1.6, 0.5, 1),
+    rotate 0.3s cubic-bezier(0.3, 1.6, 0.5, 1),
+    filter 0.2s ease;
+}
+.server-icon:hover,
+.server-icon[data-active="true"] { border-radius: 32%; }
+.server-icon:active { transform: scale(0.92); }
+
+/* The gradient behind a server's initials; --h is its hue. */
+.server-gradient {
+  background:
+    radial-gradient(circle at 30% 20%, hsl(var(--h) 90% 75% / 0.9), transparent 60%),
+    linear-gradient(135deg, hsl(var(--h) 70% 55%), hsl(calc(var(--h) + 40) 70% 45%));
+  color: white;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+}
+
+/* A name tinted by its owner's hue, readable on light and dark themes. */
+.name-tint { color: color-mix(in srgb, hsl(var(--h) 75% 55%) 70%, var(--foreground)); }
+
+/* Messages from the same person run together; the hover timestamp sits in the gutter. */
+.message-row { transition: background-color 0.15s ease; }
+.message-row:hover { background: color-mix(in srgb, var(--muted) 45%, transparent); }
+.message-row .gutter-time { opacity: 0; transition: opacity 0.15s ease; }
+.message-row:hover .gutter-time { opacity: 1; }
+.message-row .message-tools { opacity: 0; transform: translateY(4px) scale(0.96); transition: opacity 0.15s ease, transform 0.2s cubic-bezier(0.3, 1.6, 0.5, 1); pointer-events: none; }
+.message-row:hover .message-tools,
+.message-row:focus-within .message-tools { opacity: 1; transform: none; pointer-events: auto; }
+
+/* Chat Markdown is tighter than a profile bio. */
+.markdown.chat > * + * { margin-top: 0.3em; }
+.markdown.chat pre { margin-block: 0.4em; }
+
+/* A sent message glows once when the server confirms it. */
+@keyframes landed {
+  from { box-shadow: inset 3px 0 0 var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); }
+  to { box-shadow: inset 3px 0 0 transparent; background: transparent; }
+}
+.landed { animation: landed 1.4s ease-out; }
+
+/* Mentions of you. */
+.mention-me { background: color-mix(in srgb, var(--primary) 12%, transparent); box-shadow: inset 3px 0 0 var(--primary); }
+
+/* A connection dot per instance: green-ish live, amber while reconnecting, grey offline. */
+/* In the components layer so utilities like `absolute` can place it. */
+@layer components {
+  .conn-dot { width: 0.55rem; height: 0.55rem; border-radius: 9999px; display: inline-block; position: relative; }
+}
+.conn-dot[data-state="live"] { background: #3ecf8e; }
+.conn-dot[data-state="live"]::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: #3ecf8e; animation: ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite; }
+.conn-dot[data-state="connecting"],
+.conn-dot[data-state="reconnecting"] { background: #f5a524; animation: breathe 1.2s ease-in-out infinite; }
+.conn-dot[data-state="offline"] { background: var(--destructive); }
+.conn-dot[data-state="signed-out"] { background: var(--muted-foreground); }
+@keyframes breathe { 50% { opacity: 0.35; } }
+
+/* The composer's border lights up while focused. */
+.composer { transition: border-color 0.2s ease, box-shadow 0.25s ease; }
+.composer:focus-within { border-color: color-mix(in srgb, var(--primary) 60%, var(--border)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 14%, transparent), 0 12px 30px -18px var(--primary); }
+
+/* Loading shimmer for placeholders. */
+.shimmer {
+  background: linear-gradient(90deg, var(--muted) 0%, color-mix(in srgb, var(--muted) 50%, var(--card)) 50%, var(--muted) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+/* Dotted backdrop behind the welcome screen. */
+.dot-grid {
+  background-image: radial-gradient(color-mix(in srgb, var(--foreground) 12%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .server-icon, .message-row .message-tools { transition: none; }
+}
+
+/* Full-screen settings: the app behind shrinks back and softens while they open. */
+#root { transition: scale 0.35s cubic-bezier(0.22, 1, 0.36, 1), filter 0.35s ease, opacity 0.35s ease; }
+body[data-settings-open] #root { scale: 0.94; filter: blur(3px); opacity: 0.4; }

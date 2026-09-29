@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 
 use prost::Message as _;
@@ -20,7 +21,10 @@ use crate::hub::Hub;
 use crate::id::{new_id, now_ms, parse_id, timestamp};
 use crate::pb;
 
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/server/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/server/0001_init.sql"),
+    include_str!("../migrations/server/0002_concurrent_writes.sql"),
+];
 
 pub type Payload = pb::event::Payload;
 
@@ -29,8 +33,51 @@ pub struct ServerDb {
     pub id: String,
     path: PathBuf,
     db: Database,
-    writer: Mutex<Connection>,
+    /// Writes hold this shared, so they run side by side. The few that sweep
+    /// rows other writes may be adding to (deleting a channel and its
+    /// messages, deleting the server) hold it alone.
+    gate: tokio::sync::RwLock<()>,
+    /// The event log's last sequence, or `None` to read it again from the file.
+    /// Held from handing out a write's sequences until it has committed and
+    /// published them, so the log commits and goes out in sequence order.
+    head: Mutex<Option<i64>>,
+    /// Writes since the usage changes were last folded into the totals.
+    unfolded: AtomicU32,
+    folding: AtomicBool,
     hub: Arc<Hub>,
+}
+
+/// Usage changes are folded into the totals after this many writes.
+const FOLD_EVERY: u32 = 256;
+
+/// What a write changes about the message totals; negative takes away.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct UsageChange {
+    pub messages: i64,
+    pub messages_sent: i64,
+    pub message_bytes: i64,
+    pub attachments: i64,
+    pub attachment_bytes: i64,
+}
+
+/// Records a change to the message totals, as a row of its own so that writes
+/// running side by side never update the same row.
+pub async fn add_usage(conn: &Connection, change: UsageChange) -> Result<()> {
+    conn.execute(
+        "INSERT INTO usage_changes (id, messages, messages_sent, message_bytes, attachments, attachment_bytes, at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        (
+            new_id(),
+            change.messages,
+            change.messages_sent,
+            change.message_bytes,
+            change.attachments,
+            change.attachment_bytes,
+            now_ms(),
+        ),
+    )
+    .await?;
+    Ok(())
 }
 
 impl ServerDb {
@@ -39,67 +86,163 @@ impl ServerDb {
         db::connect(&self.db)
     }
 
-    /// Runs a change in one transaction. `f` makes its changes and pushes an
-    /// event payload for each; the events are appended to the server's log in the
-    /// same transaction and sent to subscribers once it commits. Writes to one
-    /// server run one at a time, so events go out in sequence order.
+    /// Runs a change in one concurrent transaction, alongside other writes to
+    /// this server. `f` makes its changes and pushes an event payload for each;
+    /// the events are appended to the server's log in the same transaction and
+    /// sent to subscribers once it commits. If it clashes with another write
+    /// over the same rows, `f` runs again (see [`db::transaction`]).
+    ///
+    /// Everything up to appending the events runs in parallel. Appending,
+    /// committing and publishing go one write at a time, so the log's sequence
+    /// is its commit order and subscribers see events in that order.
     pub async fn write<T>(
         &self,
         actor_id: &str,
-        f: impl AsyncFnOnce(&Connection, &mut Vec<Payload>) -> Result<T>,
+        f: impl AsyncFnOnce(&Connection, &mut Vec<Payload>) -> Result<T> + Clone,
     ) -> Result<T> {
-        let conn = self.writer.lock().await;
-        let mut events = Vec::new();
-        let recorded = &mut events;
-        let server_id = self.id.as_str();
-        let value = db::transaction(&conn, async move |conn| {
-            let mut payloads = Vec::new();
-            let value = f(conn, &mut payloads).await?;
-            let now = now_ms();
-            for payload in payloads {
-                let mut event = pb::Event {
-                    id: new_id(),
-                    server_id: server_id.to_string(),
-                    sequence: 0,
-                    actor_id: actor_id.to_string(),
-                    created_at: Some(timestamp(now)),
-                    payload: Some(payload),
-                };
-                event.sequence = query_one(
-                    conn,
-                    "INSERT INTO events (id, actor_id, created_at, payload) VALUES (?1, ?2, ?3, ?4) RETURNING sequence",
-                    (event.id.as_str(), actor_id, now, event.encode_to_vec()),
-                    |r| r.get::<i64>(0),
-                )
-                .await?
-                .ok_or_else(|| Error::internal("appending an event returned no sequence"))?;
-                recorded.push(event);
-            }
-            if !recorded.is_empty() {
-                conn.execute(
-                    "UPDATE usage SET events = events + ?1, updated_at = ?2 WHERE id = 1",
-                    (recorded.len() as i64, now),
-                )
-                .await?;
-            }
-            Ok(value)
-        })
-        .await?;
-        self.hub.publish(events);
-        Ok(value)
+        let shared = self.gate.read().await;
+        let value = self.run(actor_id, f).await;
+        drop(shared);
+        if value.is_ok() {
+            self.fold_now_and_then().await;
+        }
+        value
     }
 
-    /// Bytes this server takes on disk: its database and write-ahead log.
+    /// Like [`write`](Self::write), but with no other write to this server
+    /// running at the same time: for changes that sweep rows other writes may
+    /// be adding to, such as a channel's messages.
+    pub async fn write_alone<T>(
+        &self,
+        actor_id: &str,
+        f: impl AsyncFnOnce(&Connection, &mut Vec<Payload>) -> Result<T> + Clone,
+    ) -> Result<T> {
+        let _alone = self.gate.write().await;
+        self.run(actor_id, f).await
+    }
+
+    async fn run<T>(
+        &self,
+        actor_id: &str,
+        f: impl AsyncFnOnce(&Connection, &mut Vec<Payload>) -> Result<T> + Clone,
+    ) -> Result<T> {
+        let conn = db::connect(&self.db)?;
+        let mut attempt = 0;
+        loop {
+            db::begin(&conn).await?;
+            let mut payloads = Vec::new();
+            let result = match f.clone()(&conn, &mut payloads).await {
+                Ok(value) => self.append_and_commit(&conn, actor_id, payloads).await.map(|()| value),
+                Err(err) => Err(err),
+            };
+            match result {
+                Err(err) if db::is_conflict(&err) => {
+                    db::abort(&conn).await;
+                    db::retry_after(&err, &mut attempt).await?;
+                }
+                Err(err) => {
+                    db::abort(&conn).await;
+                    return Err(err);
+                }
+                Ok(value) => return Ok(value),
+            }
+        }
+    }
+
+    /// Appends the events under the next sequences, commits and publishes.
+    async fn append_and_commit(&self, conn: &Connection, actor_id: &str, payloads: Vec<Payload>) -> Result<()> {
+        let mut head = self.head.lock().await;
+        let last = match *head {
+            Some(last) => last,
+            None => self.stored_head().await?,
+        };
+        let now = now_ms();
+        let mut events = Vec::with_capacity(payloads.len());
+        for payload in payloads {
+            let event = pb::Event {
+                id: new_id(),
+                server_id: self.id.clone(),
+                sequence: last + 1 + events.len() as i64,
+                actor_id: actor_id.to_string(),
+                created_at: Some(timestamp(now)),
+                payload: Some(payload),
+            };
+            conn.execute(
+                "INSERT INTO events (sequence, id, actor_id, created_at, payload) VALUES (?1, ?2, ?3, ?4, ?5)",
+                (event.sequence, event.id.as_str(), actor_id, now, event.encode_to_vec()),
+            )
+            .await?;
+            events.push(event);
+        }
+        // Unknown until COMMIT returns: if this request is dropped mid-commit,
+        // the next write reads the head from the file instead of guessing.
+        *head = None;
+        conn.execute("COMMIT", ()).await.inspect_err(|_| *head = Some(last))?;
+        *head = Some(last + events.len() as i64);
+        self.hub.publish(events);
+        Ok(())
+    }
+
+    /// The last committed sequence, read from the file.
+    async fn stored_head(&self) -> Result<i64> {
+        let conn = self.read()?;
+        Ok(query_one(&conn, "SELECT coalesce(max(sequence), 0) FROM events", (), |r| r.get::<i64>(0))
+            .await?
+            .unwrap_or(0))
+    }
+
+    /// Folds the usage changes into the totals every [`FOLD_EVERY`] writes,
+    /// so reading them stays cheap. One fold at a time; a failed one is left
+    /// for the next.
+    async fn fold_now_and_then(&self) {
+        if self.unfolded.fetch_add(1, Ordering::Relaxed) + 1 < FOLD_EVERY || self.folding.swap(true, Ordering::Acquire)
+        {
+            return;
+        }
+        self.unfolded.store(0, Ordering::Relaxed);
+        if let Err(err) = self.fold_usage().await {
+            tracing::warn!(server = %self.id, error = %err, "couldn't fold usage changes into the totals");
+        }
+        self.folding.store(false, Ordering::Release);
+    }
+
+    /// Adds the usage changes recorded so far into `usage` and removes them.
+    /// Changes still being written aren't seen, so they're left for next time.
+    pub async fn fold_usage(&self) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            let Some((last, sums)) = query_one(
+                conn,
+                "SELECT max(id), coalesce(sum(messages), 0), coalesce(sum(messages_sent), 0), coalesce(sum(message_bytes), 0),
+                        coalesce(sum(attachments), 0), coalesce(sum(attachment_bytes), 0)
+                 FROM usage_changes",
+                (),
+                |r| Ok((r.get::<Option<String>>(0)?, [r.get::<i64>(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?])),
+            )
+            .await?
+            .and_then(|(last, sums)| last.map(|last| (last, sums))) else {
+                return Ok(());
+            };
+            conn.execute(
+                "UPDATE usage SET messages = messages + ?1, messages_sent = messages_sent + ?2, message_bytes = message_bytes + ?3,
+                 attachments = attachments + ?4, attachment_bytes = attachment_bytes + ?5, updated_at = ?6 WHERE id = 1",
+                (sums[0], sums[1], sums[2], sums[3], sums[4], now_ms()),
+            )
+            .await?;
+            conn.execute("DELETE FROM usage_changes WHERE id <= ?1", [last.as_str()]).await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Bytes this server takes on disk: its database, the log of commits not
+    /// yet folded into it, and the write-ahead log.
     pub fn storage_bytes(&self) -> i64 {
         storage_bytes(&self.path)
     }
 
     /// The sequence of the last event committed, or 0 for none.
     pub async fn head_sequence(&self) -> Result<i64> {
-        let conn = self.read()?;
-        Ok(query_one(&conn, "SELECT coalesce(max(sequence), 0) FROM events", (), |r| r.get::<i64>(0))
-            .await?
-            .unwrap_or(0))
+        self.stored_head().await
     }
 
     /// Events after `after`, oldest first.
@@ -126,11 +269,27 @@ impl ServerDb {
         load_server(&conn).await
     }
 
+    /// The totals: members and channels as kept, message totals with the
+    /// changes not yet folded in, and the event log's length.
     pub async fn usage(&self) -> Result<pb::ServerUsage> {
         let conn = self.read()?;
-        let mut usage = query_one(&conn, &format!("SELECT {USAGE_COLUMNS} FROM usage WHERE id = 1"), (), usage_row)
-            .await?
-            .ok_or_else(|| Error::internal("usage row missing"))?;
+        let mut usage = query_one(
+            &conn,
+            "SELECT u.members, u.channels, u.messages + c.messages, u.messages_sent + c.messages_sent,
+                    u.message_bytes + c.message_bytes, u.attachments + c.attachments,
+                    u.attachment_bytes + c.attachment_bytes, (SELECT coalesce(max(sequence), 0) FROM events),
+                    max(u.updated_at, c.at)
+             FROM usage u,
+                  (SELECT coalesce(sum(messages), 0) messages, coalesce(sum(messages_sent), 0) messages_sent,
+                          coalesce(sum(message_bytes), 0) message_bytes, coalesce(sum(attachments), 0) attachments,
+                          coalesce(sum(attachment_bytes), 0) attachment_bytes, coalesce(max(at), 0) at
+                   FROM usage_changes) c
+             WHERE u.id = 1",
+            (),
+            usage_row,
+        )
+        .await?
+        .ok_or_else(|| Error::internal("usage row missing"))?;
         usage.server_id = self.id.clone();
         usage.storage_bytes = self.storage_bytes();
         Ok(usage)
@@ -162,13 +321,15 @@ impl ServerDb {
     }
 
     pub async fn set_limits(&self, limits: &pb::ServerLimits) -> Result<()> {
-        let conn = self.writer.lock().await;
-        conn.execute(
-            "UPDATE limits SET members = ?1, channels = ?2, storage_bytes = ?3, attachment_bytes = ?4 WHERE id = 1",
-            (limits.members, limits.channels, limits.storage_bytes, limits.attachment_bytes),
-        )
-        .await?;
-        Ok(())
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "UPDATE limits SET members = ?1, channels = ?2, storage_bytes = ?3, attachment_bytes = ?4 WHERE id = 1",
+                (limits.members, limits.channels, limits.storage_bytes, limits.attachment_bytes),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
     }
 }
 
@@ -181,9 +342,13 @@ pub fn effective_limits(own: pb::ServerLimits, defaults: &config::Limits) -> pb:
     }
 }
 
+/// The files a server's database is made of: the database itself, the log of
+/// concurrent commits not yet folded into it, and the write-ahead log.
+const SIDECARS: [&str; 4] = ["", "-log", "-wal", "-shm"];
+
 fn storage_bytes(path: &Path) -> i64 {
     let size = |p: &Path| std::fs::metadata(p).map(|m| m.len() as i64).unwrap_or(0);
-    size(path) + size(&sidecar(path, "-wal"))
+    size(path) + size(&sidecar(path, "-log")) + size(&sidecar(path, "-wal"))
 }
 
 fn sidecar(path: &Path, suffix: &str) -> PathBuf {
@@ -191,9 +356,6 @@ fn sidecar(path: &Path, suffix: &str) -> PathBuf {
     name.push(suffix);
     PathBuf::from(name)
 }
-
-const USAGE_COLUMNS: &str =
-    "members, channels, messages, messages_sent, message_bytes, attachments, attachment_bytes, events, updated_at";
 
 fn usage_row(r: &Row) -> turso::Result<pb::ServerUsage> {
     Ok(pb::ServerUsage {
@@ -288,6 +450,7 @@ impl Servers {
 
     async fn load(&self, id: &str, path: &Path) -> Result<()> {
         let sdb = Arc::new(self.open_file(id, path).await?);
+        sdb.fold_usage().await?;
         let conn = sdb.read()?;
         let server = load_server(&conn).await?;
         if server.id != id {
@@ -307,8 +470,16 @@ impl Servers {
 
     async fn open_file(&self, id: &str, path: &Path) -> Result<ServerDb> {
         let db = db::open(path, self.key.as_ref(), MIGRATIONS).await?;
-        let writer = Mutex::new(db::connect(&db)?);
-        Ok(ServerDb { id: id.to_string(), path: path.to_path_buf(), db, writer, hub: self.hub.clone() })
+        Ok(ServerDb {
+            id: id.to_string(),
+            path: path.to_path_buf(),
+            db,
+            gate: tokio::sync::RwLock::new(()),
+            head: Mutex::new(None),
+            unfolded: AtomicU32::new(0),
+            folding: AtomicBool::new(false),
+            hub: self.hub.clone(),
+        })
     }
 
     fn path(&self, id: &str) -> PathBuf {
@@ -371,8 +542,8 @@ impl Servers {
             Ok(server) => server,
             Err(err) => {
                 drop(sdb);
-                for file in [path.clone(), sidecar(&path, "-wal"), sidecar(&path, "-shm")] {
-                    let _ = std::fs::remove_file(file);
+                for suffix in SIDECARS {
+                    let _ = std::fs::remove_file(sidecar(&path, suffix));
                 }
                 return Err(err);
             }
@@ -400,12 +571,12 @@ impl Servers {
         }
         self.open.lock().await.remove(&id);
         {
-            // Wait out any write in flight, then settle the log into the main file.
-            let conn = sdb.writer.lock().await;
-            let _ = db::pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").await;
+            // Wait out any write in flight, then settle the logs into the main file.
+            let _alone = sdb.gate.write().await;
+            let _ = db::pragma(&sdb.read()?, "PRAGMA wal_checkpoint(TRUNCATE)").await;
             std::fs::create_dir_all(&self.trash)?;
             let stamp = now_ms();
-            for suffix in ["", "-wal", "-shm"] {
+            for suffix in SIDECARS {
                 let from = sidecar(&sdb.path, suffix);
                 if from.exists() {
                     std::fs::rename(&from, self.trash.join(format!("{id}-{stamp}.db{suffix}")))?;
@@ -588,4 +759,65 @@ pub async fn usage_count(conn: &Connection, counter: &'static str) -> Result<i64
     query_one(conn, &format!("SELECT {counter} FROM usage WHERE id = 1"), (), |r| r.get::<i64>(0))
         .await?
         .ok_or_else(|| Error::internal("usage row missing"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A server file as fuwa made them before concurrent writes: WAL mode,
+    /// AUTOINCREMENT sequences, and a message its deleted channel left behind.
+    #[tokio::test]
+    async fn older_files_move_to_concurrent_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        {
+            let db = turso::Builder::new_local(path.to_str().unwrap()).build().await.unwrap();
+            let conn = db.connect().unwrap();
+            db::pragma(&conn, "PRAGMA journal_mode = wal").await.unwrap();
+            conn.execute_batch(MIGRATIONS[0]).await.unwrap();
+            conn.execute_batch(
+                "PRAGMA user_version = 1;
+                 INSERT INTO channels (id, name, type, created_at, updated_at) VALUES ('c1', 'general', 1, 0, 0);
+                 INSERT INTO messages (id, channel_id, author_id, content, size, created_at) VALUES ('m1', 'c1', 'u', 'hi', 2, 0);
+                 INSERT INTO messages (id, channel_id, author_id, content, size, created_at) VALUES ('m2', 'gone', 'u', 'lost', 4, 0);
+                 INSERT INTO events (id, actor_id, created_at, payload) VALUES ('e1', 'u', 0, x'');
+                 INSERT INTO events (id, actor_id, created_at, payload) VALUES ('e2', 'u', 0, x'');",
+            )
+            .await
+            .unwrap();
+        }
+
+        let db = db::open(&path, None, MIGRATIONS).await.unwrap();
+        let conn = db::connect(&db).unwrap();
+        let mode = query_one(&conn, "PRAGMA journal_mode", (), |r| r.get::<String>(0)).await.unwrap();
+        assert_eq!(mode.as_deref(), Some("mvcc"));
+        let events = query_all(&conn, "SELECT sequence, id FROM events ORDER BY sequence", (), |r| {
+            Ok((r.get::<i64>(0)?, r.get::<String>(1)?))
+        })
+        .await
+        .unwrap();
+        assert_eq!(events, [(1, "e1".to_string()), (2, "e2".to_string())]);
+        let messages = query_all(&conn, "SELECT id FROM messages", (), |r| r.get::<String>(0)).await.unwrap();
+        assert_eq!(messages, ["m1"]);
+
+        // The next write continues the log where it left off.
+        let sdb = ServerDb {
+            id: "s".into(),
+            path: path.clone(),
+            db,
+            gate: tokio::sync::RwLock::new(()),
+            head: Mutex::new(None),
+            unfolded: AtomicU32::new(0),
+            folding: AtomicBool::new(false),
+            hub: Arc::new(Hub::default()),
+        };
+        sdb.write("u", async |_, events| {
+            events.push(Payload::ChannelDeleted(pb::ChannelDeleted { channel_id: "c1".into() }));
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert_eq!(sdb.head_sequence().await.unwrap(), 3);
+    }
 }

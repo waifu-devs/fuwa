@@ -5,7 +5,7 @@ use crate::db::query_all;
 use crate::error::{Error, Result};
 use crate::id::now_ms;
 use crate::pb::{self, server_service_server::ServerService};
-use crate::servers::{self as store, MEMBER_COLUMNS, NewServer, Payload, member_row};
+use crate::servers::{self as store, MEMBER_COLUMNS, NewServer, Payload, effective_limits, member_row};
 
 #[tonic::async_trait]
 impl ServerService for Api {
@@ -16,7 +16,7 @@ impl ServerService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                match self.app.config.server_creation {
+                match self.app.settings().server_creation {
                     pb::ServerCreation::Disabled | pb::ServerCreation::Unspecified => {
                         return Err(Error::FailedPrecondition("this instance doesn't allow creating servers".into()));
                     }
@@ -25,7 +25,7 @@ impl ServerService for Api {
                     }
                     _ => {}
                 }
-                if let Some(limit) = self.app.config.limits.servers_per_account
+                if let Some(limit) = self.app.settings().limits.servers_per_account
                     && self.app.servers.owned_count(&account.id) >= limit
                 {
                     return Err(Error::ResourceExhausted(format!("an account can own at most {limit} servers here")));
@@ -158,7 +158,7 @@ impl ServerService for Api {
                 if !server.discoverable {
                     return Err(Error::NotFound("server"));
                 }
-                let limits = sdb.limits(&self.app.config.limits).await?;
+                let limits = sdb.limits(&self.app.settings().limits).await?;
                 let user = account.user();
                 let member = sdb
                     .write(&account.id, async |conn, events| {
@@ -194,7 +194,10 @@ impl ServerService for Api {
                     return Err(Error::FailedPrecondition("the owner can't leave; delete the server instead".into()));
                 }
                 sdb.write(&account.id, async |conn, events| {
-                    conn.execute("DELETE FROM members WHERE user_id = ?1", [account.id.as_str()]).await?;
+                    // Leaving twice at once: the second finds nothing to take away.
+                    if conn.execute("DELETE FROM members WHERE user_id = ?1", [account.id.as_str()]).await? == 0 {
+                        return Err(Error::NotFound("membership"));
+                    }
                     conn.execute("UPDATE usage SET members = members - 1, updated_at = ?1 WHERE id = 1", [now_ms()])
                         .await?;
                     events.push(Payload::MemberLeft(pb::MemberLeft { user_id: account.id.clone() }));
@@ -250,9 +253,11 @@ impl ServerService for Api {
                     }
                     sdb
                 };
+                let own = sdb.own_limits().await?;
                 Ok(pb::GetServerUsageResponse {
                     usage: Some(sdb.usage().await?),
-                    limits: Some(sdb.limits(&self.app.config.limits).await?),
+                    limits: Some(effective_limits(own, &self.app.settings().limits)),
+                    own_limits: Some(own),
                 })
             }
             .await,

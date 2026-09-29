@@ -20,6 +20,8 @@ pub enum Error {
     FailedPrecondition(String),
     #[error("{0}")]
     ResourceExhausted(String),
+    #[error("the server is busy; try again")]
+    Busy,
     #[error("database: {0}")]
     Database(#[from] turso::Error),
     #[error("io: {0}")]
@@ -58,6 +60,7 @@ impl From<Error> for Status {
             Error::PermissionDenied(_) => Code::PermissionDenied,
             Error::FailedPrecondition(_) => Code::FailedPrecondition,
             Error::ResourceExhausted(_) => Code::ResourceExhausted,
+            Error::Busy => Code::Unavailable,
             Error::Database(_) | Error::Io(_) | Error::Internal(_) => {
                 tracing::error!(error = %err, "request failed");
                 return Status::internal("something went wrong on the server");

@@ -90,6 +90,7 @@ pub async fn collect(app: &App) -> Result<Signal> {
         totals.storage_bytes += usage.storage_bytes;
     }
     let config = &app.config;
+    let settings = app.settings();
     Ok(Signal {
         schema: SCHEMA,
         install_id: app.node.install_id().await?,
@@ -100,30 +101,31 @@ pub async fn collect(app: &App) -> Result<Signal> {
         arch: std::env::consts::ARCH,
         uptime_seconds: app.started.elapsed().as_secs(),
         config: SignalConfig {
-            local_accounts: config.local_accounts.as_str(),
+            local_accounts: settings.local_accounts.as_str(),
             linked_accounts: false,
-            server_creation: match config.server_creation {
+            server_creation: match settings.server_creation {
                 crate::pb::ServerCreation::Everyone => "everyone",
                 crate::pb::ServerCreation::Admins => "admins",
                 _ => "off",
             },
             encryption: config.encryption_key.is_some(),
-            limits_configured: config.limits.any(),
+            limits_configured: settings.limits.any(),
         },
         totals,
     })
 }
 
-/// Sends the signal a few minutes after start and then daily, until shutdown.
+/// Sends the signal a few minutes after start and then daily, until shutdown,
+/// whenever it's on at that moment (admins can switch it from a client).
 pub fn spawn(app: Arc<App>) {
-    if !app.config.telemetry.enabled {
+    if app.settings().telemetry {
+        tracing::info!(
+            url = %app.config.telemetry.url,
+            "sending an anonymous usage signal daily (counts only; turn it off in the instance settings or with FUWA_TELEMETRY=off)"
+        );
+    } else {
         tracing::info!("anonymous usage signal is off");
-        return;
     }
-    tracing::info!(
-        url = %app.config.telemetry.url,
-        "sending an anonymous usage signal daily (counts only; set FUWA_TELEMETRY=off to stop it)"
-    );
     tokio::spawn(async move {
         let client = match reqwest::Client::builder()
             .user_agent(format!("fuwa/{}", crate::VERSION))
@@ -143,6 +145,9 @@ pub fn spawn(app: Arc<App>) {
                 _ = tokio::time::sleep(delay) => {}
             }
             delay = INTERVAL;
+            if !app.settings().telemetry {
+                continue;
+            }
             if let Err(err) = send(&app, &client).await {
                 tracing::debug!(error = %err, "usage signal not sent; trying again tomorrow");
             }

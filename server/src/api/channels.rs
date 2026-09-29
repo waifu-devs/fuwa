@@ -5,7 +5,7 @@ use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::pb::{self, channel_service_server::ChannelService};
-use crate::servers::{Payload, usage_count};
+use crate::servers::{self as store, Payload, UsageChange, usage_count};
 
 const CHANNEL_COLUMNS: &str = "id, name, type, parent_id, topic, position, created_at, updated_at";
 
@@ -87,7 +87,7 @@ impl ChannelService for Api {
                 };
                 let name = channel_name(&req.name, kind)?;
                 let topic = text("topic", &req.topic, 0, 1024)?;
-                let limits = sdb.limits(&self.app.config.limits).await?;
+                let limits = sdb.limits(&self.app.settings().limits).await?;
                 let channel = sdb
                     .write(&account.id, async |conn, events| {
                         if let Some(limit) = limits.channels
@@ -234,7 +234,8 @@ impl ChannelService for Api {
             let account = self.account(request.metadata()).await?;
             let req = request.into_inner();
             let (sdb, _) = self.manager(&account, &req.server_id).await?;
-            sdb.write(&account.id, async |conn, events| {
+            // Alone, so no message lands in the channel while it goes.
+            sdb.write_alone(&account.id, async |conn, events| {
                 load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
                 // Its messages go with it; take them off the usage totals first.
                 let (messages, bytes, attachments) = query_one(
@@ -245,6 +246,7 @@ impl ChannelService for Api {
                 )
                 .await?
                 .unwrap_or_default();
+                conn.execute("DELETE FROM messages WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 conn.execute("DELETE FROM channels WHERE id = ?1", [req.channel_id.as_str()]).await?;
                 // A deleted category's channels move to the top level.
                 let children = query_all(conn, "SELECT id FROM channels WHERE parent_id = ?1", [req.channel_id.as_str()], |r| {
@@ -253,10 +255,10 @@ impl ChannelService for Api {
                 .await?;
                 conn.execute("UPDATE channels SET parent_id = NULL, updated_at = ?2 WHERE parent_id = ?1", (req.channel_id.as_str(), now_ms()))
                     .await?;
-                conn.execute(
-                    "UPDATE usage SET channels = channels - 1, messages = messages - ?1, message_bytes = message_bytes - ?2,
-                     attachments = attachments - ?3, updated_at = ?4 WHERE id = 1",
-                    (messages, bytes, attachments, now_ms()),
+                conn.execute("UPDATE usage SET channels = channels - 1, updated_at = ?1 WHERE id = 1", [now_ms()]).await?;
+                store::add_usage(
+                    conn,
+                    UsageChange { messages: -messages, message_bytes: -bytes, attachments: -attachments, ..Default::default() },
                 )
                 .await?;
                 events.push(Payload::ChannelDeleted(pb::ChannelDeleted { channel_id: req.channel_id.clone() }));

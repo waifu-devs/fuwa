@@ -35,6 +35,9 @@ pub struct Config {
     /// FUWA_LIMIT_*: caps every server gets unless it has its own. Unlimited by default.
     pub limits: Limits,
     pub telemetry: Telemetry,
+    /// FUWA_WEB: on (default) | off. Serves the web client on / when the binary
+    /// was built with it (the Docker image and release builds are).
+    pub web: bool,
 }
 
 /// Whether standalone accounts (username and password, kept on this instance) are accepted.
@@ -67,7 +70,7 @@ impl LocalAccounts {
 }
 
 /// Instance-wide caps. `None` is unlimited.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Limits {
     /// FUWA_LIMIT_SERVERS_PER_ACCOUNT: servers one account may own.
     pub servers_per_account: Option<i64>,
@@ -206,6 +209,12 @@ impl Config {
             Some(other) => return Err(format!("FUWA_HOSTING must be self_hosted or hosted, got {other:?}")),
         };
 
+        let web = match get("FUWA_WEB").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_WEB must be on or off, got {other:?}")),
+        };
+
         Ok(Self {
             data_path,
             host: get("FUWA_HOST").unwrap_or_else(|| "0.0.0.0".into()),
@@ -223,6 +232,7 @@ impl Config {
                 url: get("FUWA_TELEMETRY_URL").unwrap_or_else(|| DEFAULT_TELEMETRY_URL.into()),
                 hosted,
             },
+            web,
         })
     }
 }

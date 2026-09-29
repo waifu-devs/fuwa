@@ -1,0 +1,4 @@
+# pnpm settings for the web app.
+# buf's install script isn't needed: pnpm installs its binary as a platform package.
+ignoredBuiltDependencies:
+  - "@bufbuild/buf"
