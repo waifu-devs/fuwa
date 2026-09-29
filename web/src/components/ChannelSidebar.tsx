@@ -1,10 +1,14 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import {
+  BellIcon,
+  BellOffIcon,
+  BellRingIcon,
   ChartColumnIcon,
   ChevronDownIcon,
   DoorOpenIcon,
   FingerprintIcon,
   HashIcon,
+  IdCardIcon,
   MegaphoneIcon,
   PlusIcon,
   SettingsIcon,
@@ -13,7 +17,8 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState, type Ref } from "react";
 import { ChannelType, MemberRole, type Channel } from "@/gen/fuwa/v1/types_pb";
-import { leaveServer } from "@/fuwa/actions";
+import { leaveServer, run, updateNotifications } from "@/fuwa/actions";
+import type { FuwaError } from "@/fuwa/errors";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
@@ -27,10 +32,14 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { isMuted, MUTE_FOR, mutedLabel, useMuted, useNotificationSettings, useNow } from "@/lib/notifications";
 import { usePrefs } from "@/lib/prefs";
-import { copy } from "@/lib/ui";
+import { copy, openSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 export const CHANNEL_ICON: Partial<Record<ChannelType, typeof HashIcon>> = {
@@ -66,6 +75,40 @@ export function groupChannels(channels: Channel[]): Group[] {
       channels: channels.filter((c) => c.parentId === category.id && c.type !== ChannelType.CATEGORY),
     })),
   ];
+}
+
+/** Mute a server from its menu, or open its notification settings. */
+function ServerNotificationItems({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const now = useNow();
+  const settings = useNotificationSettings(instanceKey, serverId);
+  const mute = (mutedUntil: Date | null | false) =>
+    run(updateNotifications(instanceKey, serverId, "", { mutedUntil })).catch((err: FuwaError) => toast(err.message));
+  return (
+    <>
+      {isMuted(settings, now) ? (
+        <DropdownMenuItem onSelect={() => void mute(false)}>
+          <BellIcon /> Unmute server
+          <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">{mutedLabel(settings, now).replace(/^Muted /, "")}</span>
+        </DropdownMenuItem>
+      ) : (
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <BellOffIcon /> Mute server
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-52">
+            {MUTE_FOR.map((m) => (
+              <DropdownMenuItem key={m.label} onSelect={() => void mute(m.ms === null ? null : new Date(Date.now() + m.ms))}>
+                {m.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      )}
+      <DropdownMenuItem onSelect={() => openSettings("server-notifications", serverId)}>
+        <BellRingIcon /> Notification settings
+      </DropdownMenuItem>
+    </>
+  );
 }
 
 export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
@@ -126,12 +169,18 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
               <PlusIcon /> Create channel
             </DropdownMenuItem>
           )}
+          {manager && <DropdownMenuSeparator />}
+          <ServerNotificationItems instanceKey={instanceKey} serverId={serverId} />
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => openSettings("server-profiles", serverId)}>
+            <IdCardIcon /> Edit server profile
+          </DropdownMenuItem>
           {developer && (
             <DropdownMenuItem onSelect={() => copy(serverId, "server ID")}>
               <FingerprintIcon /> Copy server ID
             </DropdownMenuItem>
           )}
-          {(manager || developer) && !owner && <DropdownMenuSeparator />}
+          {!owner && <DropdownMenuSeparator />}
           {!owner && (
             <DropdownMenuItem
               variant="destructive"
@@ -241,7 +290,8 @@ function ChannelRow({
   index: number;
   ref?: Ref<HTMLLIElement>;
 }) {
-  const unread = useFuwa((s) => s.instances[instanceKey]?.unread[channel.id] ?? 0);
+  const muted = useMuted(instanceKey, channel.serverId, channel.id);
+  const unread = useFuwa((s) => (muted ? 0 : (s.instances[instanceKey]?.unread[channel.id] ?? 0)));
   const { compact, setNavOpen } = useLayout();
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
   const dot = unread > 0 && !active;
@@ -269,6 +319,7 @@ function ChannelRow({
         className={cn(
           "row-y group relative flex items-center gap-1.5 rounded-lg px-2 text-[0.94rem] transition-colors",
           active ? "font-bold text-primary" : unread ? "font-bold text-foreground" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+          muted && !active && "opacity-55 hover:opacity-100",
         )}
       >
         <motion.span
@@ -285,6 +336,21 @@ function ChannelRow({
           )}
         />
         <span className="truncate">{channel.name}</span>
+        <AnimatePresence>
+          {muted && (
+            <motion.span
+              key="muted"
+              initial={{ scale: 0, rotate: -30 }}
+              animate={{ scale: 1, rotate: 0 }}
+              exit={{ scale: 0, rotate: 30 }}
+              transition={{ type: "spring", stiffness: 600, damping: 18 }}
+              className="ml-auto shrink-0"
+              aria-label="Muted"
+            >
+              <BellOffIcon className="size-3.5" />
+            </motion.span>
+          )}
+        </AnimatePresence>
         <AnimatePresence>
           {unread > 0 && !active && (
             <motion.span

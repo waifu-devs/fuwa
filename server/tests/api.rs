@@ -63,6 +63,7 @@ fn authed<T>(token: &str, message: T) -> Request<T> {
 
 struct Clients {
     auth: pb::auth_service_client::AuthServiceClient<Channel>,
+    account: pb::account_service_client::AccountServiceClient<Channel>,
     servers: pb::server_service_client::ServerServiceClient<Channel>,
     channels: pb::channel_service_client::ChannelServiceClient<Channel>,
     messages: pb::message_service_client::MessageServiceClient<Channel>,
@@ -75,6 +76,7 @@ async fn clients(instance: &Instance) -> Clients {
     let channel = instance.channel().await;
     Clients {
         auth: pb::auth_service_client::AuthServiceClient::new(channel.clone()),
+        account: pb::account_service_client::AccountServiceClient::new(channel.clone()),
         servers: pb::server_service_client::ServerServiceClient::new(channel.clone()),
         channels: pb::channel_service_client::ChannelServiceClient::new(channel.clone()),
         messages: pb::message_service_client::MessageServiceClient::new(channel.clone()),
@@ -1158,5 +1160,480 @@ async fn databases_can_be_encrypted_at_rest() {
     let mut c = clients(&instance).await;
     let servers = c.servers.list_servers(authed(&token, pb::ListServersRequest {})).await.unwrap().into_inner().servers;
     assert_eq!(servers[0].name, "Vault");
+    instance.stop().await;
+}
+
+async fn sign_in(c: &mut Clients, username: &str, password: &str) -> Result<pb::SignInResponse, tonic::Status> {
+    c.auth
+        .sign_in(pb::SignInRequest { username: username.into(), password: password.into() })
+        .await
+        .map(|r| r.into_inner())
+}
+
+async fn me(c: &mut Clients, token: &str) -> Result<pb::User, Code> {
+    c.auth.get_me(authed(token, pb::GetMeRequest {})).await.map(|r| r.into_inner().user.unwrap()).map_err(|e| e.code())
+}
+
+#[tokio::test]
+async fn devices_can_be_listed_and_signed_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+
+    let (first, _, _) = sign_up(&mut c, "juan").await;
+    let mut phone =
+        Request::new(pb::SignInRequest { username: "juan".into(), password: "correct horse battery".into() });
+    phone.metadata_mut().insert("user-agent", "Mozilla/5.0 (iPhone) fuwa-test".parse().unwrap());
+    let second = c.auth.sign_in(phone).await.unwrap().into_inner().token;
+    let third = sign_in(&mut c, "juan", "correct horse battery").await.unwrap().token;
+
+    let sessions =
+        c.account.list_sessions(authed(&first, pb::ListSessionsRequest {})).await.unwrap().into_inner().sessions;
+    assert_eq!(sessions.len(), 3);
+    assert!(sessions[0].current && sessions.iter().filter(|s| s.current).count() == 1);
+    assert!(sessions.iter().all(|s| !s.id.is_empty() && s.last_active_at.is_some()));
+    assert!(sessions.iter().any(|s| s.user_agent.contains("iPhone")));
+
+    // Signing out one device ends it at once.
+    let phone_id = sessions.iter().find(|s| s.user_agent.contains("iPhone")).unwrap().id.clone();
+    c.account.revoke_session(authed(&first, pb::RevokeSessionRequest { session_id: phone_id.clone() })).await.unwrap();
+    assert_eq!(me(&mut c, &second).await.unwrap_err(), Code::Unauthenticated);
+    let again = c.account.revoke_session(authed(&first, pb::RevokeSessionRequest { session_id: phone_id })).await;
+    assert_eq!(again.unwrap_err().code(), Code::NotFound);
+
+    // Nobody else's sessions can be named.
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let first_id = sessions[0].id.clone();
+    let theirs = c.account.revoke_session(authed(&mika, pb::RevokeSessionRequest { session_id: first_id })).await;
+    assert_eq!(theirs.unwrap_err().code(), Code::NotFound);
+    assert!(me(&mut c, &first).await.is_ok());
+
+    let revoked = c
+        .account
+        .revoke_other_sessions(authed(&first, pb::RevokeOtherSessionsRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .revoked;
+    assert_eq!(revoked, 1);
+    assert_eq!(me(&mut c, &third).await.unwrap_err(), Code::Unauthenticated);
+    assert!(me(&mut c, &first).await.is_ok());
+    assert!(me(&mut c, &mika).await.is_ok());
+
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn two_step_sign_in() {
+    use fuwa_server::twofactor;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_NODE_NAME", "Waifu Devs")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let password = "correct horse battery";
+
+    let wrong =
+        c.account.set_up_two_factor(authed(&juan, pb::SetUpTwoFactorRequest { password: "nope nope".into() })).await;
+    assert_eq!(wrong.unwrap_err().code(), Code::PermissionDenied);
+    let setup = c
+        .account
+        .set_up_two_factor(authed(&juan, pb::SetUpTwoFactorRequest { password: password.into() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(setup.uri.starts_with("otpauth://totp/Waifu%20Devs:juan?secret="));
+    // Nothing changes until a code confirms it.
+    assert!(sign_in(&mut c, "juan", password).await.unwrap().two_factor_ticket.is_empty());
+
+    let bad = c.account.enable_two_factor(authed(&juan, pb::EnableTwoFactorRequest { code: "000000".into() })).await;
+    // (A one-in-a-million chance the real code is 000000.)
+    if twofactor::code_for(&setup.secret, fuwa_server::id::now_ms()).unwrap() != "000000" {
+        assert_eq!(bad.unwrap_err().code(), Code::PermissionDenied);
+    }
+    let now = fuwa_server::id::now_ms();
+    let code = twofactor::code_for(&setup.secret, now).unwrap();
+    let backup = c
+        .account
+        .enable_two_factor(authed(&juan, pb::EnableTwoFactorRequest { code: code.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .backup_codes;
+    assert_eq!(backup.len(), 10);
+    let state = c.account.get_two_factor(authed(&juan, pb::GetTwoFactorRequest {})).await.unwrap().into_inner();
+    assert!(state.enabled);
+    assert_eq!(state.backup_codes_left, 10);
+
+    // Signing in now takes two steps.
+    let first = sign_in(&mut c, "juan", password).await.unwrap();
+    assert!(first.token.is_empty() && first.user.is_none() && !first.two_factor_ticket.is_empty());
+    let verify = |ticket: &str, code: &str| pb::VerifyTwoFactorRequest { ticket: ticket.into(), code: code.into() };
+    // The code that turned it on is used up.
+    let replay = c.auth.verify_two_factor(verify(&first.two_factor_ticket, &code)).await;
+    assert_eq!(replay.unwrap_err().code(), Code::PermissionDenied);
+    // The next step's code works once (clocks drift).
+    let next = twofactor::code_for(&setup.secret, now + 30_000).unwrap();
+    let signed_in = c.auth.verify_two_factor(verify(&first.two_factor_ticket, &next)).await.unwrap().into_inner();
+    assert_eq!(signed_in.user.unwrap().username, "juan");
+    assert!(me(&mut c, &signed_in.token).await.is_ok());
+    let used = c.auth.verify_two_factor(verify(&first.two_factor_ticket, &next)).await;
+    assert_eq!(used.unwrap_err().code(), Code::FailedPrecondition, "a ticket signs in once");
+
+    // Backup codes work once each, typed however.
+    let second = sign_in(&mut c, "juan", password).await.unwrap().two_factor_ticket;
+    let typed = format!(" {} ", backup[0].to_uppercase().replace('-', " "));
+    assert!(c.auth.verify_two_factor(verify(&second, &typed)).await.is_ok());
+    let third = sign_in(&mut c, "juan", password).await.unwrap().two_factor_ticket;
+    let reused = c.auth.verify_two_factor(verify(&third, &backup[0])).await;
+    assert_eq!(reused.unwrap_err().code(), Code::PermissionDenied);
+    let left = c.account.get_two_factor(authed(&juan, pb::GetTwoFactorRequest {})).await.unwrap().into_inner();
+    assert_eq!(left.backup_codes_left, 9);
+
+    // A sign-in gives up after a few wrong codes.
+    for _ in 0..4 {
+        let wrong = c.auth.verify_two_factor(verify(&third, "zzzz-zzzz")).await;
+        assert_eq!(wrong.unwrap_err().code(), Code::PermissionDenied);
+    }
+    let gone = c.auth.verify_two_factor(verify(&third, &backup[1])).await;
+    assert_eq!(gone.unwrap_err().code(), Code::FailedPrecondition);
+
+    // New backup codes replace the old ones.
+    let fresh = c
+        .account
+        .regenerate_backup_codes(authed(&juan, pb::RegenerateBackupCodesRequest { password: password.into() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .backup_codes;
+    let fourth = sign_in(&mut c, "juan", password).await.unwrap().two_factor_ticket;
+    let old = c.auth.verify_two_factor(verify(&fourth, &backup[2])).await;
+    assert_eq!(old.unwrap_err().code(), Code::PermissionDenied);
+
+    // Turning it off takes the password and a code.
+    let no_code = c
+        .account
+        .disable_two_factor(authed(
+            &juan,
+            pb::DisableTwoFactorRequest { password: password.into(), code: String::new() },
+        ))
+        .await;
+    assert_eq!(no_code.unwrap_err().code(), Code::PermissionDenied);
+    c.account
+        .disable_two_factor(authed(
+            &juan,
+            pb::DisableTwoFactorRequest { password: password.into(), code: fresh[0].clone() },
+        ))
+        .await
+        .unwrap();
+    assert!(!sign_in(&mut c, "juan", password).await.unwrap().token.is_empty());
+    let off = c
+        .account
+        .regenerate_backup_codes(authed(&juan, pb::RegenerateBackupCodesRequest { password: password.into() }))
+        .await;
+    assert_eq!(off.unwrap_err().code(), Code::FailedPrecondition);
+
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn profiles_nicknames_and_notification_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, juan_user, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+
+    let expires = prost_types::Timestamp { seconds: 4_000_000_000, nanos: 0 };
+    let updated = c
+        .auth
+        .update_profile(authed(
+            &juan,
+            pb::UpdateProfileRequest {
+                pronouns: Some("he/him".into()),
+                bio: Some("  Building **fuwa**.  ".into()),
+                accent_color: Some(0xff66aa),
+                status: Some("shipping wave 2".into()),
+                status_expires_at: Some(expires),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let profile = updated.profile.unwrap();
+    assert_eq!((profile.pronouns.as_str(), profile.bio.as_str()), ("he/him", "Building **fuwa**."));
+    assert_eq!(profile.accent_color, Some(0xff66aa));
+    assert_eq!(updated.user.unwrap().status, "shipping wave 2");
+    let bad_color = c
+        .auth
+        .update_profile(authed(&juan, pb::UpdateProfileRequest { accent_color: Some(0x1000000), ..Default::default() }))
+        .await;
+    assert_eq!(bad_color.unwrap_err().code(), Code::InvalidArgument);
+
+    // Profiles show to people who share a server.
+    let get = |id: &str| pb::GetProfileRequest { user_id: id.into() };
+    let hidden = c.auth.get_profile(authed(&mika, get(&juan_user.id))).await;
+    assert_eq!(hidden.unwrap_err().code(), Code::NotFound);
+    let server = create_server(&mut c, &juan, "Waifu Devs", true).await;
+    c.servers.join_server(authed(&mika, pb::JoinServerRequest { server_id: server.id.clone() })).await.unwrap();
+    let seen = c.auth.get_profile(authed(&mika, get(&juan_user.id))).await.unwrap().into_inner().profile.unwrap();
+    assert_eq!(seen.pronouns, "he/him");
+    let members = c
+        .servers
+        .list_members(authed(&mika, pb::ListMembersRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .members;
+    let juan_member = members.iter().find(|m| m.user.as_ref().unwrap().id == juan_user.id).unwrap();
+    assert_eq!(juan_member.user.as_ref().unwrap().status, "shipping wave 2");
+    assert_eq!(juan_member.user.as_ref().unwrap().status_expires_at, Some(expires));
+    // Clearing the status clears its expiry too.
+    let cleared = c
+        .auth
+        .update_profile(authed(&juan, pb::UpdateProfileRequest { status: Some(String::new()), ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .user
+        .unwrap();
+    assert!(cleared.status.is_empty() && cleared.status_expires_at.is_none());
+
+    // Nicknames: your own, or those of people ranked below you.
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &juan,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(stream.next().await.unwrap().unwrap().ready.is_some());
+    let nick = |user: &str, nickname: &str| pb::UpdateMemberRequest {
+        server_id: server.id.clone(),
+        user_id: user.into(),
+        nickname: Some(nickname.into()),
+    };
+    let own = c.servers.update_member(authed(&mika, nick("", "  Mika ✨ "))).await.unwrap().into_inner();
+    assert_eq!(own.member.unwrap().nickname, "Mika ✨");
+    let event = stream.next().await.unwrap().unwrap().event.unwrap();
+    let Some(Payload::MemberUpdated(update)) = event.payload else { panic!("expected a member update") };
+    assert_eq!(update.member.unwrap().nickname, "Mika ✨");
+    let upward = c.servers.update_member(authed(&mika, nick(&juan_user.id, "boss"))).await;
+    assert_eq!(upward.unwrap_err().code(), Code::PermissionDenied);
+    let downward = c.servers.update_member(authed(&juan, nick(&mika_user.id, ""))).await.unwrap().into_inner();
+    assert_eq!(downward.member.unwrap().nickname, "");
+    let long = c.servers.update_member(authed(&mika, nick("", &"a".repeat(33)))).await;
+    assert_eq!(long.unwrap_err().code(), Code::InvalidArgument);
+
+    // Notification settings, per server and channel.
+    let channel = c
+        .channels
+        .list_channels(authed(&mika, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .remove(0);
+    let change =
+        |channel_id: &str, settings: pb::NotificationSettings, paths: &[&str]| pb::UpdateNotificationSettingsRequest {
+            settings: Some(pb::NotificationSettings {
+                server_id: server.id.clone(),
+                channel_id: channel_id.into(),
+                ..settings
+            }),
+            update_mask: Some(prost_types::FieldMask { paths: paths.iter().map(|p| p.to_string()).collect() }),
+        };
+    let level = pb::NotificationSettings { level: pb::NotificationLevel::Mentions as i32, ..Default::default() };
+    let saved = c
+        .account
+        .update_notification_settings(authed(&mika, change("", level, &["level"])))
+        .await
+        .unwrap()
+        .into_inner()
+        .settings
+        .unwrap();
+    assert_eq!(saved.level, pb::NotificationLevel::Mentions as i32);
+    let mute = pb::NotificationSettings { muted: true, ..Default::default() };
+    c.account.update_notification_settings(authed(&mika, change(&channel.id, mute, &["muted"]))).await.unwrap();
+    let everyone = pb::NotificationSettings { suppress_everyone: true, ..Default::default() };
+    let per_channel = c
+        .account
+        .update_notification_settings(authed(&mika, change(&channel.id, everyone, &["suppress_everyone"])))
+        .await;
+    assert_eq!(per_channel.unwrap_err().code(), Code::InvalidArgument);
+    let over = pb::NotificationSettings {
+        muted: true,
+        muted_until: Some(prost_types::Timestamp { seconds: 1, nanos: 0 }),
+        ..Default::default()
+    };
+    let past = c
+        .account
+        .update_notification_settings(authed(&mika, change("", over, &["muted"])))
+        .await
+        .unwrap()
+        .into_inner()
+        .settings
+        .unwrap();
+    assert!(!past.muted, "a mute that already ran out is no mute");
+    let all = c
+        .account
+        .get_notification_settings(authed(&mika, pb::GetNotificationSettingsRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .settings;
+    assert_eq!(all.len(), 2);
+    assert!(all.iter().any(|s| s.channel_id == channel.id && s.muted && s.muted_until.is_none()));
+    // Back to following the server's default: forgotten.
+    c.account
+        .update_notification_settings(authed(&mika, change(&channel.id, Default::default(), &["muted"])))
+        .await
+        .unwrap();
+    let outsider =
+        c.account.update_notification_settings(authed(&juan, change("", Default::default(), &["bogus"]))).await;
+    assert_eq!(outsider.unwrap_err().code(), Code::InvalidArgument);
+    // Leaving forgets the rest.
+    c.servers.leave_server(authed(&mika, pb::LeaveServerRequest { server_id: server.id.clone() })).await.unwrap();
+    let left = c
+        .account
+        .get_notification_settings(authed(&mika, pb::GetNotificationSettingsRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .settings;
+    assert!(left.is_empty());
+
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn data_export_and_account_deletion() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let server = create_server(&mut c, &juan, "Waifu Devs", true).await;
+    c.servers.join_server(authed(&mika, pb::JoinServerRequest { server_id: server.id.clone() })).await.unwrap();
+    let channel = c
+        .channels
+        .list_channels(authed(&mika, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .remove(0);
+    for n in 0..3 {
+        c.messages
+            .send_message(authed(
+                &mika,
+                pb::SendMessageRequest {
+                    server_id: server.id.clone(),
+                    channel_id: channel.id.clone(),
+                    content: format!("hello \"{n}\""),
+                    ..Default::default()
+                },
+            ))
+            .await
+            .unwrap();
+    }
+
+    let mut chunks = c.account.export_data(authed(&mika, pb::ExportDataRequest {})).await.unwrap().into_inner();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = chunks.next().await {
+        bytes.extend(chunk.unwrap().chunk);
+    }
+    let export: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(export["format"], "fuwa.export.v1");
+    assert_eq!(export["account"]["username"], "mika");
+    assert_eq!(export["sessions"].as_array().unwrap().len(), 1);
+    let servers = export["servers"].as_array().unwrap();
+    assert_eq!(servers.len(), 1);
+    assert_eq!(servers[0]["role"], "member");
+    let messages = servers[0]["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[2]["content"], "hello \"2\"");
+    assert_eq!(messages[0]["channel"], "general");
+
+    // Owners hand their servers over or delete them first.
+    let owner = c
+        .account
+        .delete_account(authed(
+            &juan,
+            pb::DeleteAccountRequest { password: "correct horse battery".into(), ..Default::default() },
+        ))
+        .await;
+    assert_eq!(owner.unwrap_err().code(), Code::FailedPrecondition);
+    let wrong = c
+        .account
+        .delete_account(authed(
+            &mika,
+            pb::DeleteAccountRequest { password: "wrong password".into(), ..Default::default() },
+        ))
+        .await;
+    assert_eq!(wrong.unwrap_err().code(), Code::PermissionDenied);
+
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &juan,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(stream.next().await.unwrap().unwrap().ready.is_some());
+    c.account
+        .delete_account(authed(
+            &mika,
+            pb::DeleteAccountRequest { password: "correct horse battery".into(), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(me(&mut c, &mika).await.unwrap_err(), Code::Unauthenticated);
+    let event = stream.next().await.unwrap().unwrap().event.unwrap();
+    assert!(matches!(event.payload, Some(Payload::MemberLeft(ref left)) if left.user_id == mika_user.id));
+    let event = stream.next().await.unwrap().unwrap().event.unwrap();
+    let Some(Payload::UserUpdated(gone)) = event.payload else { panic!("expected the user to change") };
+    assert_eq!(gone.user.unwrap().display_name, "Deleted account");
+    // Their messages stay, from a deleted account.
+    let listed = c
+        .messages
+        .list_messages(authed(
+            &juan,
+            pb::ListMessagesRequest {
+                server_id: server.id.clone(),
+                channel_id: channel.id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(listed.messages.len(), 3);
+    assert_eq!(listed.authors[0].display_name, "Deleted account");
+    let usage = usage(&mut c, &juan, &server.id).await;
+    assert_eq!(usage.members, 1);
+    // The username is free again.
+    let (_, again, _) = sign_up(&mut c, "mika").await;
+    assert_ne!(again.id, mika_user.id);
+
+    // The only admin can't leave the instance without one.
+    c.servers.delete_server(authed(&juan, pb::DeleteServerRequest { server_id: server.id.clone() })).await.unwrap();
+    let only_admin = c
+        .account
+        .delete_account(authed(
+            &juan,
+            pb::DeleteAccountRequest { password: "correct horse battery".into(), ..Default::default() },
+        ))
+        .await;
+    assert_eq!(only_admin.unwrap_err().code(), Code::FailedPrecondition);
+
     instance.stop().await;
 }

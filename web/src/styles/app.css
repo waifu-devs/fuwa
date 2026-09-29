@@ -526,3 +526,9 @@ body[data-settings-open] #root { scale: 0.94; filter: blur(3px); opacity: 0.4; }
 /* Compact message display: the first paragraph runs on after the time and name. */
 .markdown.inline-first { display: inline; }
 .markdown.inline-first > :first-child { display: inline; }
+
+/* A QR code's modules pop in as a wave from the top left corner. */
+@keyframes qr-pop { from { opacity: 0; transform: scale(0.2); } to { opacity: 1; transform: scale(1); } }
+.qr-dot { transform-box: fill-box; transform-origin: center; animation: qr-pop 0.45s cubic-bezier(0.3, 1.6, 0.5, 1) both; }
+:root[data-reduce-motion] .qr-dot { animation-delay: 0s !important; }
+@media (prefers-reduced-motion: reduce) { .qr-dot { animation: none; } }

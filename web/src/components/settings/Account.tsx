@@ -1,116 +1,21 @@
-import { CheckIcon, EyeIcon, EyeOffIcon, KeyRoundIcon, LogOutIcon } from "lucide-react";
+import { CheckIcon, KeyRoundIcon, LogOutIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent } from "react";
 import { AccountKind, type User } from "@/gen/fuwa/v1/types_pb";
-import { changePassword, forget, signOut, updateProfile } from "@/fuwa/actions";
+import { changePassword, forget, signOut } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
-import { hue, UserAvatar } from "@/components/Icons";
 import { SPRING, SwapText } from "@/components/motion";
-import { Private } from "@/components/Private";
-import { SaveBar, WithPreview } from "@/components/settings/controls";
+import { PASSWORD_MAX, PasswordInput, Row, Warn } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 /** Accounts made on the instance sign in with a password; linked ones sign in through waifu.dev. */
 export const hasPassword = (user: User | undefined) => !!user && user.kind !== AccountKind.LINKED;
 
-export function Profile({ instanceKey }: { instanceKey: string }) {
-  const inst = useInstance(instanceKey);
-  const me = inst?.me;
-  const [name, setName] = useState(me?.displayName ?? "");
-  const [avatar, setAvatar] = useState(me?.avatarUrl ?? "");
-  const save = useAction(updateProfile);
-  if (!me) return null;
-  const preview = { ...me, displayName: name, avatarUrl: avatar };
-  const changes = [name !== me.displayName, avatar !== me.avatarUrl].filter(Boolean).length;
-
-  async function submit(e?: FormEvent) {
-    e?.preventDefault();
-    await save.go(instanceKey, name.trim(), avatar.trim());
-  }
-
-  return (
-    <form onSubmit={submit}>
-      <WithPreview preview={<ProfileCard user={preview} />}>
-        <div className="flex flex-col">
-          <Row id="display-name" label="Display name" htmlFor="profile-name" hint="What people see next to your messages.">
-            <Input id="profile-name" maxLength={64} value={name} placeholder={me.username} onChange={(e) => setName(e.target.value)} className="h-11 rounded-xl" />
-          </Row>
-          <Row id="avatar" label="Avatar" htmlFor="profile-avatar" hint="A link to a picture. Without one you get your initial on your own color.">
-            <Input id="profile-avatar" type="url" placeholder="https://…" value={avatar} onChange={(e) => setAvatar(e.target.value)} className="h-11 rounded-xl" />
-          </Row>
-          <Row id="username" label="Username" hint="Set when the account was made.">
-            <p className="text-sm font-bold">
-              @<Private text={me.username} kind="name" />
-            </p>
-          </Row>
-        </div>
-        <SaveBar
-          count={changes}
-          saving={save.pending}
-          error={save.error}
-          onSave={() => void submit()}
-          onDiscard={() => {
-            setName(me.displayName);
-            setAvatar(me.avatarUrl);
-            save.setError(null);
-          }}
-        />
-      </WithPreview>
-    </form>
-  );
-}
-
-/** One field of a form, as a flat row under a rule. */
-function Row({ id, label, htmlFor, hint, children }: { id?: string; label: string; htmlFor?: string; hint?: ReactNode; children: ReactNode }) {
-  return (
-    <div data-setting={id} className="flex flex-col gap-2 border-b border-border/70 py-5 first:pt-0 last:border-b-0">
-      <Label htmlFor={htmlFor} className="font-extrabold">
-        {label}
-      </Label>
-      {children}
-      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
-    </div>
-  );
-}
-
-/** How others see you: a card with your color, avatar and name, and one of your messages. */
-function ProfileCard({ user }: { user: User }) {
-  const shown = user.displayName || user.username;
-  return (
-    <div className="overflow-hidden rounded-3xl border bg-card shadow-lg">
-      <motion.div key={user.avatarUrl} style={hue(user.id)} className="server-gradient h-24" initial={{ opacity: 0.6 }} animate={{ opacity: 1 }} />
-      <div className="relative -mt-11 px-4 pb-4">
-        <span className="avatar-ring inline-block rounded-full p-[3px]">
-          <UserAvatar user={user} className="size-20 text-3xl ring-4 ring-card" />
-        </span>
-        <p className="mt-2 truncate text-xl font-extrabold">
-          <SwapText className="truncate align-bottom">{shown}</SwapText>
-        </p>
-        <p className="truncate text-sm text-muted-foreground">
-          @<Private text={user.username} kind="name" />
-        </p>
-        <div className="mt-4 flex gap-2.5 rounded-2xl bg-muted/60 p-3">
-          <UserAvatar user={user} className="size-8 text-xs" />
-          <div className="min-w-0">
-            <p className="truncate text-sm font-extrabold">
-              <SwapText className="truncate align-bottom">{shown}</SwapText>{" "}
-              <span className="text-xs font-normal text-muted-foreground">Today</span>
-            </p>
-            <p className="text-sm">This is how my messages look ✨</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ───────────────────────── Password ─────────────────────────
 
 const MIN = 8;
-const MAX = 256;
+const MAX = PASSWORD_MAX;
 
 /** A rough read of a password's strength, from 0 to 4, for the meter. */
 function strength(password: string) {
@@ -253,54 +158,6 @@ export function Password({ instanceKey }: { instanceKey: string }) {
         </motion.form>
       )}
     </AnimatePresence>
-  );
-}
-
-function Warn({ children }: { children: ReactNode }) {
-  return <span className="font-bold text-destructive">{children}</span>;
-}
-
-function PasswordInput({
-  id,
-  value,
-  onChange,
-  show,
-  onShow,
-  autoComplete,
-}: {
-  id: string;
-  value: string;
-  onChange: (value: string) => void;
-  show: boolean;
-  onShow: (show: boolean) => void;
-  autoComplete: string;
-}) {
-  return (
-    <div className="relative">
-      <Input
-        id={id}
-        type={show ? "text" : "password"}
-        autoComplete={autoComplete}
-        maxLength={MAX}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-11 rounded-xl pr-11"
-        spellCheck={false}
-      />
-      <button
-        type="button"
-        onClick={() => onShow(!show)}
-        aria-label={show ? "Hide passwords" : "Show passwords"}
-        aria-pressed={show}
-        className="absolute top-1/2 right-1.5 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90"
-      >
-        <AnimatePresence mode="popLayout" initial={false}>
-          <motion.span key={String(show)} initial={{ opacity: 0, rotate: -40, scale: 0.6 }} animate={{ opacity: 1, rotate: 0, scale: 1 }} exit={{ opacity: 0, rotate: 40, scale: 0.6 }} transition={SPRING}>
-            {show ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
-          </motion.span>
-        </AnimatePresence>
-      </button>
-    </div>
   );
 }
 

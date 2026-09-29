@@ -31,8 +31,10 @@ import type { PendingMessage } from "@/fuwa/store";
 import { sendsMessage } from "@/components/chat/Composer";
 import { Markdown } from "@/components/Markdown";
 import { UserAvatar } from "@/components/Icons";
+import { ProfilePopover } from "@/components/ProfilePopover";
 import { displayName, formatDay, formatFull, formatStamp, formatTime, hueOf, mentions, sameDay, toDate } from "@/lib/format";
 import { comboLabel } from "@/lib/keybinds";
+import { pingsEveryone, useNotificationSettings } from "@/lib/notifications";
 import { usePrefs, type MessageDisplay } from "@/lib/prefs";
 import { copy } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -62,6 +64,7 @@ export const MessageList = forwardRef<
   const [editing, setEditing] = useState<string | null>(null);
   const display = usePrefs((p) => p.messageDisplay);
   const developer = usePrefs((p) => p.developerMode);
+  const suppressEveryone = useNotificationSettings(instanceKey, serverId)?.suppressEveryone ?? false;
   // Times follow the clock setting; reading it here re-renders the rows when it changes.
   usePrefs((p) => p.clock);
 
@@ -200,7 +203,13 @@ export const MessageList = forwardRef<
                   author={author}
                   member={memberById.get(row.message.authorId)}
                   mine={row.message.authorId === me?.id}
-                  mentionsMe={!!me && row.message.authorId !== me.id && mentions(row.message.content, me.username)}
+                  mentionsMe={
+                    !!me &&
+                    row.message.authorId !== me.id &&
+                    (mentions(row.message.content, me.username) ||
+                      (!suppressEveryone && pingsEveryone(row.message.content, memberById.get(row.message.authorId)?.role)))
+                  }
+                  instanceKey={instanceKey}
                   canDelete={manager || row.message.authorId === me?.id}
                   animate={!initial.current?.has(row.message.id)}
                   editing={editing === row.message.id}
@@ -311,6 +320,7 @@ export function MessageLine({
   member,
   date,
   status,
+  instanceKey,
   children,
 }: {
   display: MessageDisplay;
@@ -321,8 +331,18 @@ export function MessageLine({
   date?: Date;
   /** Shown instead of the time, like "sending…". */
   status?: string;
+  /** Where the author's profile card loads from; without it, names don't open one. */
+  instanceKey?: string;
   children: React.ReactNode;
 }) {
+  const card = (child: React.ReactElement) =>
+    instanceKey && author ? (
+      <ProfilePopover instanceKey={instanceKey} user={author} member={member}>
+        {child}
+      </ProfilePopover>
+    ) : (
+      child
+    );
   if (display === "compact")
     return (
       <div className="chat-text min-w-0 flex-1 leading-relaxed">
@@ -334,7 +354,11 @@ export function MessageLine({
           <span className="mr-2 inline-block w-[4.6em] text-right text-[0.7em] text-muted-foreground">{status}</span>
         )}
         <span className="mr-1.5 inline-flex max-w-[40%] align-bottom">
-          <AuthorName user={author} member={member} />
+          {card(
+            <button type="button" className="min-w-0 text-left hover:underline">
+              <AuthorName user={author} member={member} />
+            </button>,
+          )}
         </span>
         {children}
       </div>
@@ -343,7 +367,11 @@ export function MessageLine({
     <>
       <div className="w-10 shrink-0">
         {first ? (
-          <UserAvatar user={author} className="mt-0.5" />
+          card(
+            <button type="button" aria-label="Open profile" className="mt-0.5 block rounded-full transition hover:brightness-110 active:scale-95">
+              <UserAvatar user={author} />
+            </button>,
+          )
         ) : date ? (
           <time className="gutter-time -ml-3 block pt-1 text-right text-[0.625rem] whitespace-nowrap text-muted-foreground tabular-nums" dateTime={date.toISOString()} title={formatFull(date)}>
             {formatTime(date)}
@@ -353,7 +381,11 @@ export function MessageLine({
       <div className="min-w-0 flex-1">
         {first && (
           <div className="flex items-baseline gap-2">
-            <AuthorName user={author} member={member} />
+            {card(
+              <button type="button" className="min-w-0 text-left hover:underline">
+                <AuthorName user={author} member={member} />
+              </button>,
+            )}
             {date ? (
               <time className="shrink-0 text-xs text-muted-foreground" dateTime={date.toISOString()} title={formatFull(date)}>
                 {formatStamp(date)}
@@ -384,6 +416,7 @@ function MessageRow({
   member,
   mine,
   mentionsMe,
+  instanceKey,
   canDelete,
   animate,
   editing,
@@ -401,6 +434,7 @@ function MessageRow({
   member: Member | undefined;
   mine: boolean;
   mentionsMe: boolean;
+  instanceKey: string;
   canDelete: boolean;
   animate: boolean;
   editing: boolean;
@@ -426,7 +460,7 @@ function MessageRow({
         animate && mine && "landed",
       )}
     >
-      <MessageLine display={display} first={first} author={author} member={member} date={date}>
+      <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey}>
         {editing ? (
           <EditBox initial={message.content} onCancel={onCancelEdit} onSave={onSave} />
         ) : (

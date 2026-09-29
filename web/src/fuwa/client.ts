@@ -1,5 +1,6 @@
 import { createClient, type Client, type Interceptor } from "@connectrpc/connect";
 import { createGrpcWebTransport } from "@connectrpc/connect-web";
+import { AccountService } from "@/gen/fuwa/v1/account_pb";
 import { AdminService } from "@/gen/fuwa/v1/admin_pb";
 import { AuthService } from "@/gen/fuwa/v1/auth_pb";
 import { ChannelService } from "@/gen/fuwa/v1/channel_pb";
@@ -12,6 +13,7 @@ import { ServerService } from "@/gen/fuwa/v1/server_pb";
 export type Api = {
   node: Client<typeof NodeService>;
   auth: Client<typeof AuthService>;
+  account: Client<typeof AccountService>;
   servers: Client<typeof ServerService>;
   channels: Client<typeof ChannelService>;
   messages: Client<typeof MessageService>;
@@ -34,6 +36,7 @@ export function makeApi(url: string, token: () => string | null): Api {
   return {
     node: createClient(NodeService, transport),
     auth: createClient(AuthService, transport),
+    account: createClient(AccountService, transport),
     servers: createClient(ServerService, transport),
     channels: createClient(ChannelService, transport),
     messages: createClient(MessageService, transport),

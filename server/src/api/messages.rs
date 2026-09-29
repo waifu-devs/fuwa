@@ -7,7 +7,7 @@ use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::pb::{self, message_service_server::MessageService};
-use crate::servers::{self as store, Payload, UsageChange};
+use crate::servers::{self as store, Payload, USER_COLUMNS, UsageChange};
 
 /// The longest a message can be, in characters.
 pub const MAX_MESSAGE_LENGTH: usize = 4000;
@@ -43,6 +43,12 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
             r.get::<Option<Vec<u8>>>(4)?,
         ))
     }
+}
+
+/// A message's attachments and embeds, as stored.
+pub(super) fn decode_extras(bytes: &[u8]) -> Result<(Vec<pb::Attachment>, Vec<pb::Embed>)> {
+    let extras = Extras::decode(bytes)?;
+    Ok((extras.attachments, extras.embeds))
 }
 
 fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<pb::Message> {
@@ -102,17 +108,9 @@ async fn authors(conn: &turso::Connection, messages: &[pb::Message]) -> Result<V
     let placeholders = (1..=ids.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
     query_all(
         conn,
-        &format!("SELECT id, username, display_name, avatar_url, kind FROM users WHERE id IN ({placeholders})"),
+        &format!("SELECT {USER_COLUMNS} FROM users WHERE id IN ({placeholders})"),
         ids.iter().map(|id| turso::Value::from(*id)).collect::<Vec<_>>(),
-        |r| {
-            Ok(pb::User {
-                id: r.get(0)?,
-                username: r.get(1)?,
-                display_name: r.get(2)?,
-                avatar_url: r.get(3)?,
-                kind: r.get(4)?,
-            })
-        },
+        store::user_row,
     )
     .await
 }

@@ -18,10 +18,10 @@ use crate::hub::Hub;
 use crate::node::NodeDb;
 use crate::pb;
 use crate::pb::{
-    admin_service_server::AdminServiceServer, auth_service_server::AuthServiceServer,
-    channel_service_server::ChannelServiceServer, event_service_server::EventServiceServer,
-    message_service_server::MessageServiceServer, node_service_server::NodeServiceServer,
-    server_service_server::ServerServiceServer,
+    account_service_server::AccountServiceServer, admin_service_server::AdminServiceServer,
+    auth_service_server::AuthServiceServer, channel_service_server::ChannelServiceServer,
+    event_service_server::EventServiceServer, message_service_server::MessageServiceServer,
+    node_service_server::NodeServiceServer, server_service_server::ServerServiceServer,
 };
 use crate::servers::Servers;
 use crate::settings::Settings;
@@ -100,6 +100,7 @@ impl App {
 
         let grpc = tonic::service::Routes::new(NodeServiceServer::new(api.clone()))
             .add_service(AuthServiceServer::new(api.clone()))
+            .add_service(AccountServiceServer::new(api.clone()))
             .add_service(ServerServiceServer::new(api.clone()))
             .add_service(ChannelServiceServer::new(api.clone()))
             .add_service(MessageServiceServer::new(api.clone()))

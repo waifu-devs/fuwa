@@ -18,12 +18,13 @@ use crate::config;
 use crate::db::{self, EncryptionKey, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::hub::Hub;
-use crate::id::{new_id, now_ms, parse_id, timestamp};
+use crate::id::{millis, new_id, now_ms, parse_id, timestamp};
 use crate::pb;
 
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0001_init.sql"),
     include_str!("../migrations/server/0002_concurrent_writes.sql"),
+    include_str!("../migrations/server/0003_status.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -694,27 +695,34 @@ pub async fn add_member(
 
 /// Stores the latest look of a user who is or was a member.
 pub async fn upsert_user(conn: &Connection, user: &pb::User) -> Result<()> {
+    let status_expires_at = user.status_expires_at.as_ref().map(millis);
     let updated = conn
         .execute(
-            "UPDATE users SET username = ?2, display_name = ?3, avatar_url = ?4, kind = ?5 WHERE id = ?1",
+            "UPDATE users SET username = ?2, display_name = ?3, avatar_url = ?4, kind = ?5, status = ?6, status_expires_at = ?7
+             WHERE id = ?1",
             (
                 user.id.as_str(),
                 user.username.as_str(),
                 user.display_name.as_str(),
                 user.avatar_url.as_str(),
                 user.kind as i64,
+                user.status.as_str(),
+                status_expires_at,
             ),
         )
         .await?;
     if updated == 0 {
         conn.execute(
-            "INSERT INTO users (id, username, display_name, avatar_url, kind) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO users (id, username, display_name, avatar_url, kind, status, status_expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             (
                 user.id.as_str(),
                 user.username.as_str(),
                 user.display_name.as_str(),
                 user.avatar_url.as_str(),
                 user.kind as i64,
+                user.status.as_str(),
+                status_expires_at,
             ),
         )
         .await?;
@@ -722,22 +730,37 @@ pub async fn upsert_user(conn: &Connection, user: &pb::User) -> Result<()> {
     Ok(())
 }
 
-pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, members.nickname, members.role, members.joined_at";
+/// The columns of `users` that make a `pb::User`, in the order [`user_row`] reads them.
+pub const USER_COLUMNS: &str =
+    "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at";
+
+pub fn user_row(r: &Row) -> turso::Result<pb::User> {
+    Ok(pb::User {
+        id: r.get(0)?,
+        username: r.get(1)?,
+        display_name: r.get(2)?,
+        avatar_url: r.get(3)?,
+        kind: r.get(4)?,
+        status: r.get(5)?,
+        status_expires_at: r.get::<Option<i64>>(6)?.map(timestamp),
+    })
+}
+
+/// A user as they looked, if they were ever a member here.
+pub async fn user(conn: &Connection, user_id: &str) -> Result<Option<pb::User>> {
+    query_one(conn, &format!("SELECT {USER_COLUMNS} FROM users WHERE users.id = ?1"), [user_id], user_row).await
+}
+
+pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, members.nickname, members.role, members.joined_at";
 
 pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member> + '_ {
     move |r| {
         Ok(pb::Member {
             server_id: server_id.to_string(),
-            user: Some(pb::User {
-                id: r.get(0)?,
-                username: r.get(1)?,
-                display_name: r.get(2)?,
-                avatar_url: r.get(3)?,
-                kind: r.get(4)?,
-            }),
-            nickname: r.get(5)?,
-            role: r.get(6)?,
-            joined_at: Some(timestamp(r.get(7)?)),
+            user: Some(user_row(r)?),
+            nickname: r.get(7)?,
+            role: r.get(8)?,
+            joined_at: Some(timestamp(r.get(9)?)),
         })
     }
 }

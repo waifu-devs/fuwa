@@ -4,8 +4,9 @@ import { useInstance } from "@/fuwa/hooks";
 import { ConnDot, UserAvatar, connectionLabel } from "@/components/Icons";
 import { SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
-import { displayName } from "@/lib/format";
+import { displayName, shownStatus } from "@/lib/format";
 import { comboLabel, actionById, bindingOf } from "@/lib/keybinds";
+import { useNow } from "@/lib/notifications";
 import { setPrefs, usePrefs } from "@/lib/prefs";
 import { openSettings } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,7 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
   const inst = useInstance(instanceKey);
   const streamer = usePrefs((p) => p.streamer);
   const streamerKey = usePrefs((p) => bindingOf(actionById("toggleStreamer")!, p));
+  const now = useNow(60_000);
   if (!inst?.me) return null;
   return (
     <div className="flex items-center gap-1 border-t bg-[color-mix(in_srgb,var(--background)_50%,transparent)] p-2">
@@ -33,9 +35,13 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
           </span>
           <span className="block truncate text-xs text-muted-foreground">
             {inst.connection === "live" ? (
-              <>
-                @<Private text={inst.me.username} kind="name" />
-              </>
+              shownStatus(inst.me, now) ? (
+                <SwapText className="truncate align-bottom">{shownStatus(inst.me, now)}</SwapText>
+              ) : (
+                <>
+                  @<Private text={inst.me.username} kind="name" />
+                </>
+              )
             ) : (
               <SwapText className="truncate align-bottom">{connectionLabel(inst.connection)}</SwapText>
             )}

@@ -11,6 +11,7 @@ import {
   applyEvent,
   applySnapshot,
   emptyInstance,
+  notificationKey,
   patchInstance,
   removeServer,
   store,
@@ -126,6 +127,12 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
 
     const me = yield* retrying(call((signal) => api.auth.getMe({}, { signal })));
     patchInstance(key, { me: me.user ?? null, admin: me.admin });
+    // Notification settings follow the account; an older instance without them just has none.
+    const notifications = yield* call((signal) => api.account.getNotificationSettings({}, { signal })).pipe(
+      Effect.map((r) => Object.fromEntries(r.settings.map((n) => [notificationKey(n.serverId, n.channelId), n]))),
+      Effect.catchAll((err) => (err.signedOut ? Effect.fail(err) : Effect.succeed({}))),
+    );
+    patchInstance(key, { notifications });
 
     const { servers } = yield* retrying(call((signal) => api.servers.listServers({}, { signal })));
     updateInstance(key, (i) => servers.reduce(addServer, i));

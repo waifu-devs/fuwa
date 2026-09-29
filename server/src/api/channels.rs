@@ -270,6 +270,7 @@ impl ChannelService for Api {
                 Ok(())
             })
             .await?;
+            self.forget_notifications(&sdb.id, Some(&req.channel_id), None).await;
             Ok(pb::DeleteChannelResponse {})
         }
         .await)

@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+
+// Your own account on this instance: where it's signed in, how it signs in,
+// how servers notify you, and your data.
+service AccountService {
+  // Every device signed in to the account, the caller's first.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  // Signs one device out. Its open streams end within a heartbeat.
+  rpc RevokeSession(RevokeSessionRequest) returns (RevokeSessionResponse);
+  // Signs out every device but the caller's.
+  rpc RevokeOtherSessions(RevokeOtherSessionsRequest) returns (RevokeOtherSessionsResponse);
+
+  // Whether two-step sign-in is on, for standalone accounts.
+  rpc GetTwoFactor(GetTwoFactorRequest) returns (GetTwoFactorResponse);
+  // Makes a new secret for an authenticator app. Nothing changes until
+  // EnableTwoFactor confirms it with a code.
+  rpc SetUpTwoFactor(SetUpTwoFactorRequest) returns (SetUpTwoFactorResponse);
+  // Turns two-step sign-in on and returns the backup codes, shown only now.
+  rpc EnableTwoFactor(EnableTwoFactorRequest) returns (EnableTwoFactorResponse);
+  rpc DisableTwoFactor(DisableTwoFactorRequest) returns (DisableTwoFactorResponse);
+  // Replaces every backup code with new ones.
+  rpc RegenerateBackupCodes(RegenerateBackupCodesRequest) returns (RegenerateBackupCodesResponse);
+
+  // Your notification settings for every server and channel that has any.
+  rpc GetNotificationSettings(GetNotificationSettingsRequest) returns (GetNotificationSettingsResponse);
+  // Changes one server's or channel's settings. Settings with nothing left
+  // to say are forgotten.
+  rpc UpdateNotificationSettings(UpdateNotificationSettingsRequest) returns (UpdateNotificationSettingsResponse);
+
+  // Everything this instance keeps about you, as one JSON document sent in
+  // pieces: your account, sessions, settings, servers and every message you
+  // wrote.
+  rpc ExportData(ExportDataRequest) returns (stream ExportDataResponse);
+  // Deletes the account. You leave every server; your messages stay, shown
+  // as from a deleted account. Refused while you own a server.
+  rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
+}
+
+// A device signed in to an account.
+message Session {
+  string id = 1;
+  // The User-Agent it signed in with, for telling devices apart.
+  string user_agent = 2;
+  google.protobuf.Timestamp created_at = 3;
+  // To within a few minutes.
+  google.protobuf.Timestamp last_active_at = 4;
+  google.protobuf.Timestamp expires_at = 5;
+  // The session this call was made with.
+  bool current = 6;
+}
+
+message ListSessionsRequest {}
+
+message ListSessionsResponse {
+  repeated Session sessions = 1;
+}
+
+message RevokeSessionRequest {
+  string session_id = 1;
+}
+
+message RevokeSessionResponse {}
+
+message RevokeOtherSessionsRequest {}
+
+message RevokeOtherSessionsResponse {
+  // How many devices were signed out.
+  int32 revoked = 1;
+}
+
+message GetTwoFactorRequest {}
+
+message GetTwoFactorResponse {
+  bool enabled = 1;
+  // Backup codes not used yet.
+  int32 backup_codes_left = 2;
+}
+
+message SetUpTwoFactorRequest {
+  string password = 1;
+}
+
+message SetUpTwoFactorResponse {
+  // Base32, for typing into an authenticator app.
+  string secret = 1;
+  // An otpauth:// address, for showing as a QR code.
+  string uri = 2;
+}
+
+message EnableTwoFactorRequest {
+  // A code from the authenticator app, set up with the latest secret.
+  string code = 1;
+}
+
+message EnableTwoFactorResponse {
+  repeated string backup_codes = 1;
+}
+
+message DisableTwoFactorRequest {
+  string password = 1;
+  // From the authenticator app, or a backup code.
+  string code = 2;
+}
+
+message DisableTwoFactorResponse {}
+
+message RegenerateBackupCodesRequest {
+  string password = 1;
+}
+
+message RegenerateBackupCodesResponse {
+  repeated string backup_codes = 1;
+}
+
+message GetNotificationSettingsRequest {}
+
+message GetNotificationSettingsResponse {
+  repeated NotificationSettings settings = 1;
+}
+
+message UpdateNotificationSettingsRequest {
+  // Which server (and channel) comes from here, and the new values of the
+  // fields named in update_mask: "level", "muted" (with "muted_until") and
+  // "suppress_everyone".
+  NotificationSettings settings = 1;
+  google.protobuf.FieldMask update_mask = 2;
+}
+
+message UpdateNotificationSettingsResponse {
+  NotificationSettings settings = 1;
+}
+
+message ExportDataRequest {}
+
+message ExportDataResponse {
+  // The next piece of the JSON document.
+  bytes chunk = 1;
+}
+
+message DeleteAccountRequest {
+  // Standalone accounts: the password, and a code if two-step sign-in is on.
+  string password = 1;
+  string code = 2;
+  // Linked accounts, which have no password: the username, typed out.
+  string username = 3;
+}
+
+message DeleteAccountResponse {}

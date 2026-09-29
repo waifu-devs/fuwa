@@ -20,6 +20,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { effectiveNotifications, useNow } from "@/lib/notifications";
 
 /**
  * The far-left column: every server you're in, grouped by the fuwa instance
@@ -146,11 +147,14 @@ function InstanceGroup({ inst, params }: { inst: InstanceState; params: { instan
 }
 
 function ServerButton({ inst, server, active }: { inst: InstanceState; server: Server; active: boolean }) {
+  const now = useNow();
   const unread = useFuwa((s) => {
     const i = s.instances[inst.key];
     if (!i) return 0;
     let n = 0;
-    for (const c of i.channels[server.id] ?? []) n += i.unread[c.id] ?? 0;
+    for (const c of i.channels[server.id] ?? []) {
+      if (i.unread[c.id] && !effectiveNotifications(i, server.id, c.id, now).muted) n += i.unread[c.id]!;
+    }
     return n;
   });
   return (

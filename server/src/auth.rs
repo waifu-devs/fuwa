@@ -25,10 +25,25 @@ pub enum Viewer {
     Operator,
 }
 
+/// A signed-in account and the session it called with.
+#[derive(Debug, Clone)]
+pub struct Caller {
+    pub account: Account,
+    pub token_hash: String,
+}
+
 impl Viewer {
     pub fn account(&self) -> Result<&Account> {
         match self {
             Self::Account { account, .. } => Ok(account),
+            Self::Operator => Err(Error::denied("the admin token can't act as an account; sign in instead")),
+        }
+    }
+
+    /// The account and session, for calls that act on the session itself.
+    pub fn caller(self) -> Result<Caller> {
+        match self {
+            Self::Account { account, token_hash } => Ok(Caller { account, token_hash }),
             Self::Operator => Err(Error::denied("the admin token can't act as an account; sign in instead")),
         }
     }
@@ -39,6 +54,11 @@ impl Viewer {
             Self::Operator => true,
         }
     }
+}
+
+/// The device a request comes from, as its User-Agent says.
+pub fn user_agent(metadata: &MetadataMap) -> String {
+    metadata.get("user-agent").and_then(|v| v.to_str().ok()).map(crate::node::clip_user_agent).unwrap_or_default()
 }
 
 /// The bearer token on a request, if any.

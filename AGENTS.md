@@ -7,7 +7,12 @@
 - `server/`: the Rust server (`fuwa` binary, `fuwa_server` library).
   - `app.rs`: shared state, the HTTP router (gRPC, gRPC-Web, CORS, health), serving.
   - `api/`: one file per gRPC service, all implemented on `Api`.
-  - `node.rs`: the instance database (`node.db`): accounts, sessions, meta.
+  - `node.rs`: the instance database (`node.db`): accounts and profiles,
+    sessions (devices), two-step sign-in (TOTP secrets, backup codes, sign-in
+    tickets), notification settings, meta. What belongs to a person but not to
+    one server lives here; a server file keeps only a copy of what its members
+    see (name, avatar, status) in its `users` table.
+  - `twofactor.rs`: TOTP codes (RFC 6238) and backup codes for two-step sign-in.
   - `servers.rs`: community servers, one Turso file each under `servers/`, plus the
     in-memory index of servers and memberships. Every change goes through
     `ServerDb::write`, which appends events to the server's log in the same
@@ -44,6 +49,12 @@
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
     an instance or a server live on that instance instead.
+  - `src/lib/notifications.ts`: how a message reaches you: your settings for
+    its channel, then its server (both stored on the instance, so they follow
+    you across devices), then this device's Notifications settings. Muted means
+    no sound, no notification and no unread badge.
+  - `src/components/settings/account/`: the "Your account" pages (profile,
+    server profiles, devices, two-step sign-in, server notifications, data).
   - `src/lib/keybinds.ts`: every keyboard action and its default; the key
     handler (`components/Shortcuts.tsx`), the shortcut sheet and the Keybinds
     page all read this one list.
@@ -74,7 +85,11 @@
   servers. The end-to-end test checks this.
 - Anything that can show an instance's address or your own username goes
   through `Private` or `usePrivateField` (`components/Private.tsx`), so
-  streamer mode hides it.
+  streamer mode hides it. Secrets (a two-step key, backup codes) blur whenever
+  streamer mode is on.
+- Anything that weakens an account (turning off two-step sign-in, new backup
+  codes, deleting it) asks for the password again, and a code when two-step
+  sign-in is on.
 - The web app talks only through the protocol; anything it needs from a server
   goes in `proto/` first, then `pnpm generate`.
 - Every screen ships with its motion: things enter and leave with a spring,

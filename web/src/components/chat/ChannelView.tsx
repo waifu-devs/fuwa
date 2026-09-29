@@ -8,6 +8,7 @@ import { CHANNEL_ICON, useMyRole } from "@/components/ChannelSidebar";
 import { Composer } from "@/components/chat/Composer";
 import { MemberList } from "@/components/chat/MemberList";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
+import { NotificationBell } from "@/components/chat/NotificationBell";
 import { CopyId } from "@/components/CopyId";
 import { ConnDot, connectionLabel } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
@@ -88,6 +89,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
               </motion.span>
             )}
           </AnimatePresence>
+          <NotificationBell instanceKey={instanceKey} serverId={serverId} channel={channel} />
           <motion.button
             type="button"
             aria-label={membersOpen ? "Hide members" : "Show members"}

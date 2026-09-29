@@ -20,6 +20,9 @@ service ServerService {
   rpc JoinServer(JoinServerRequest) returns (JoinServerResponse);
   rpc LeaveServer(LeaveServerRequest) returns (LeaveServerResponse);
   rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
+  // Changes a member's nickname. Anyone can change their own; owners and
+  // admins can change those of people ranked below them.
+  rpc UpdateMember(UpdateMemberRequest) returns (UpdateMemberResponse);
   // What the server uses and the caps on it. Owner or instance admin only.
   rpc GetServerUsage(GetServerUsageRequest) returns (GetServerUsageResponse);
 }
@@ -94,6 +97,17 @@ message ListMembersRequest {
 
 message ListMembersResponse {
   repeated Member members = 1;
+}
+
+message UpdateMemberRequest {
+  string server_id = 1;
+  string user_id = 2;
+  // Empty clears it.
+  optional string nickname = 3;
+}
+
+message UpdateMemberResponse {
+  Member member = 1;
 }
 
 message GetServerUsageRequest {

@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/server.proto.
  */
 export const file_fuwa_v1_server: GenFile = /*@__PURE__*/
-  fileDesc("ChRmdXdhL3YxL3NlcnZlci5wcm90bxIHZnV3YS52MSJgChNDcmVhdGVTZXJ2ZXJSZXF1ZXN0EgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSEAoIaWNvbl91cmwYAyABKAkSFAoMZGlzY292ZXJhYmxlGAQgASgIIjcKFENyZWF0ZVNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIiUKEEdldFNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjQKEUdldFNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIhQKEkxpc3RTZXJ2ZXJzUmVxdWVzdCI3ChNMaXN0U2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciIYChZEaXNjb3ZlclNlcnZlcnNSZXF1ZXN0IjsKF0Rpc2NvdmVyU2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciK+AQoTVXBkYXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEQoEbmFtZRgCIAEoCUgAiAEBEhgKC2Rlc2NyaXB0aW9uGAMgASgJSAGIAQESFQoIaWNvbl91cmwYBCABKAlIAogBARIZCgxkaXNjb3ZlcmFibGUYBSABKAhIA4gBAUIHCgVfbmFtZUIOCgxfZGVzY3JpcHRpb25CCwoJX2ljb25fdXJsQg8KDV9kaXNjb3ZlcmFibGUiNwoUVXBkYXRlU2VydmVyUmVzcG9uc2USHwoGc2VydmVyGAEgASgLMg8uZnV3YS52MS5TZXJ2ZXIiKAoTRGVsZXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiFgoURGVsZXRlU2VydmVyUmVzcG9uc2UiJgoRSm9pblNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIlYKEkpvaW5TZXJ2ZXJSZXNwb25zZRIfCgZzZXJ2ZXIYASABKAsyDy5mdXdhLnYxLlNlcnZlchIfCgZtZW1iZXIYAiABKAsyDy5mdXdhLnYxLk1lbWJlciInChJMZWF2ZVNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIhUKE0xlYXZlU2VydmVyUmVzcG9uc2UiJwoSTGlzdE1lbWJlcnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSI3ChNMaXN0TWVtYmVyc1Jlc3BvbnNlEiAKB21lbWJlcnMYASADKAsyDy5mdXdhLnYxLk1lbWJlciIqChVHZXRTZXJ2ZXJVc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIo8BChZHZXRTZXJ2ZXJVc2FnZVJlc3BvbnNlEiMKBXVzYWdlGAEgASgLMhQuZnV3YS52MS5TZXJ2ZXJVc2FnZRIlCgZsaW1pdHMYAiABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cxIpCgpvd25fbGltaXRzGAMgASgLMhUuZnV3YS52MS5TZXJ2ZXJMaW1pdHMyiAYKDVNlcnZlclNlcnZpY2USSwoMQ3JlYXRlU2VydmVyEhwuZnV3YS52MS5DcmVhdGVTZXJ2ZXJSZXF1ZXN0Gh0uZnV3YS52MS5DcmVhdGVTZXJ2ZXJSZXNwb25zZRJCCglHZXRTZXJ2ZXISGS5mdXdhLnYxLkdldFNlcnZlclJlcXVlc3QaGi5mdXdhLnYxLkdldFNlcnZlclJlc3BvbnNlEkgKC0xpc3RTZXJ2ZXJzEhsuZnV3YS52MS5MaXN0U2VydmVyc1JlcXVlc3QaHC5mdXdhLnYxLkxpc3RTZXJ2ZXJzUmVzcG9uc2USVAoPRGlzY292ZXJTZXJ2ZXJzEh8uZnV3YS52MS5EaXNjb3ZlclNlcnZlcnNSZXF1ZXN0GiAuZnV3YS52MS5EaXNjb3ZlclNlcnZlcnNSZXNwb25zZRJLCgxVcGRhdGVTZXJ2ZXISHC5mdXdhLnYxLlVwZGF0ZVNlcnZlclJlcXVlc3QaHS5mdXdhLnYxLlVwZGF0ZVNlcnZlclJlc3BvbnNlEksKDERlbGV0ZVNlcnZlchIcLmZ1d2EudjEuRGVsZXRlU2VydmVyUmVxdWVzdBodLmZ1d2EudjEuRGVsZXRlU2VydmVyUmVzcG9uc2USRQoKSm9pblNlcnZlchIaLmZ1d2EudjEuSm9pblNlcnZlclJlcXVlc3QaGy5mdXdhLnYxLkpvaW5TZXJ2ZXJSZXNwb25zZRJICgtMZWF2ZVNlcnZlchIbLmZ1d2EudjEuTGVhdmVTZXJ2ZXJSZXF1ZXN0GhwuZnV3YS52MS5MZWF2ZVNlcnZlclJlc3BvbnNlEkgKC0xpc3RNZW1iZXJzEhsuZnV3YS52MS5MaXN0TWVtYmVyc1JlcXVlc3QaHC5mdXdhLnYxLkxpc3RNZW1iZXJzUmVzcG9uc2USUQoOR2V0U2VydmVyVXNhZ2USHi5mdXdhLnYxLkdldFNlcnZlclVzYWdlUmVxdWVzdBofLmZ1d2EudjEuR2V0U2VydmVyVXNhZ2VSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types]);
+  fileDesc("ChRmdXdhL3YxL3NlcnZlci5wcm90bxIHZnV3YS52MSJgChNDcmVhdGVTZXJ2ZXJSZXF1ZXN0EgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSEAoIaWNvbl91cmwYAyABKAkSFAoMZGlzY292ZXJhYmxlGAQgASgIIjcKFENyZWF0ZVNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIiUKEEdldFNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjQKEUdldFNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIhQKEkxpc3RTZXJ2ZXJzUmVxdWVzdCI3ChNMaXN0U2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciIYChZEaXNjb3ZlclNlcnZlcnNSZXF1ZXN0IjsKF0Rpc2NvdmVyU2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciK+AQoTVXBkYXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEQoEbmFtZRgCIAEoCUgAiAEBEhgKC2Rlc2NyaXB0aW9uGAMgASgJSAGIAQESFQoIaWNvbl91cmwYBCABKAlIAogBARIZCgxkaXNjb3ZlcmFibGUYBSABKAhIA4gBAUIHCgVfbmFtZUIOCgxfZGVzY3JpcHRpb25CCwoJX2ljb25fdXJsQg8KDV9kaXNjb3ZlcmFibGUiNwoUVXBkYXRlU2VydmVyUmVzcG9uc2USHwoGc2VydmVyGAEgASgLMg8uZnV3YS52MS5TZXJ2ZXIiKAoTRGVsZXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiFgoURGVsZXRlU2VydmVyUmVzcG9uc2UiJgoRSm9pblNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIlYKEkpvaW5TZXJ2ZXJSZXNwb25zZRIfCgZzZXJ2ZXIYASABKAsyDy5mdXdhLnYxLlNlcnZlchIfCgZtZW1iZXIYAiABKAsyDy5mdXdhLnYxLk1lbWJlciInChJMZWF2ZVNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIhUKE0xlYXZlU2VydmVyUmVzcG9uc2UiJwoSTGlzdE1lbWJlcnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSI3ChNMaXN0TWVtYmVyc1Jlc3BvbnNlEiAKB21lbWJlcnMYASADKAsyDy5mdXdhLnYxLk1lbWJlciJdChNVcGRhdGVNZW1iZXJSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhUKCG5pY2tuYW1lGAMgASgJSACIAQFCCwoJX25pY2tuYW1lIjcKFFVwZGF0ZU1lbWJlclJlc3BvbnNlEh8KBm1lbWJlchgBIAEoCzIPLmZ1d2EudjEuTWVtYmVyIioKFUdldFNlcnZlclVzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkijwEKFkdldFNlcnZlclVzYWdlUmVzcG9uc2USIwoFdXNhZ2UYASABKAsyFC5mdXdhLnYxLlNlcnZlclVzYWdlEiUKBmxpbWl0cxgCIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzEikKCm93bl9saW1pdHMYAyABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0czLVBgoNU2VydmVyU2VydmljZRJLCgxDcmVhdGVTZXJ2ZXISHC5mdXdhLnYxLkNyZWF0ZVNlcnZlclJlcXVlc3QaHS5mdXdhLnYxLkNyZWF0ZVNlcnZlclJlc3BvbnNlEkIKCUdldFNlcnZlchIZLmZ1d2EudjEuR2V0U2VydmVyUmVxdWVzdBoaLmZ1d2EudjEuR2V0U2VydmVyUmVzcG9uc2USSAoLTGlzdFNlcnZlcnMSGy5mdXdhLnYxLkxpc3RTZXJ2ZXJzUmVxdWVzdBocLmZ1d2EudjEuTGlzdFNlcnZlcnNSZXNwb25zZRJUCg9EaXNjb3ZlclNlcnZlcnMSHy5mdXdhLnYxLkRpc2NvdmVyU2VydmVyc1JlcXVlc3QaIC5mdXdhLnYxLkRpc2NvdmVyU2VydmVyc1Jlc3BvbnNlEksKDFVwZGF0ZVNlcnZlchIcLmZ1d2EudjEuVXBkYXRlU2VydmVyUmVxdWVzdBodLmZ1d2EudjEuVXBkYXRlU2VydmVyUmVzcG9uc2USSwoMRGVsZXRlU2VydmVyEhwuZnV3YS52MS5EZWxldGVTZXJ2ZXJSZXF1ZXN0Gh0uZnV3YS52MS5EZWxldGVTZXJ2ZXJSZXNwb25zZRJFCgpKb2luU2VydmVyEhouZnV3YS52MS5Kb2luU2VydmVyUmVxdWVzdBobLmZ1d2EudjEuSm9pblNlcnZlclJlc3BvbnNlEkgKC0xlYXZlU2VydmVyEhsuZnV3YS52MS5MZWF2ZVNlcnZlclJlcXVlc3QaHC5mdXdhLnYxLkxlYXZlU2VydmVyUmVzcG9uc2USSAoLTGlzdE1lbWJlcnMSGy5mdXdhLnYxLkxpc3RNZW1iZXJzUmVxdWVzdBocLmZ1d2EudjEuTGlzdE1lbWJlcnNSZXNwb25zZRJLCgxVcGRhdGVNZW1iZXISHC5mdXdhLnYxLlVwZGF0ZU1lbWJlclJlcXVlc3QaHS5mdXdhLnYxLlVwZGF0ZU1lbWJlclJlc3BvbnNlElEKDkdldFNlcnZlclVzYWdlEh4uZnV3YS52MS5HZXRTZXJ2ZXJVc2FnZVJlcXVlc3QaHy5mdXdhLnYxLkdldFNlcnZlclVzYWdlUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
 
 /**
  * @generated from message fuwa.v1.CreateServerRequest
@@ -345,6 +345,52 @@ export const ListMembersResponseSchema: GenMessage<ListMembersResponse> = /*@__P
   messageDesc(file_fuwa_v1_server, 17);
 
 /**
+ * @generated from message fuwa.v1.UpdateMemberRequest
+ */
+export type UpdateMemberRequest = Message<"fuwa.v1.UpdateMemberRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string user_id = 2;
+   */
+  userId: string;
+
+  /**
+   * Empty clears it.
+   *
+   * @generated from field: optional string nickname = 3;
+   */
+  nickname?: string | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateMemberRequest.
+ * Use `create(UpdateMemberRequestSchema)` to create a new message.
+ */
+export const UpdateMemberRequestSchema: GenMessage<UpdateMemberRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 18);
+
+/**
+ * @generated from message fuwa.v1.UpdateMemberResponse
+ */
+export type UpdateMemberResponse = Message<"fuwa.v1.UpdateMemberResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.Member member = 1;
+   */
+  member?: Member | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateMemberResponse.
+ * Use `create(UpdateMemberResponseSchema)` to create a new message.
+ */
+export const UpdateMemberResponseSchema: GenMessage<UpdateMemberResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_server, 19);
+
+/**
  * @generated from message fuwa.v1.GetServerUsageRequest
  */
 export type GetServerUsageRequest = Message<"fuwa.v1.GetServerUsageRequest"> & {
@@ -359,7 +405,7 @@ export type GetServerUsageRequest = Message<"fuwa.v1.GetServerUsageRequest"> & {
  * Use `create(GetServerUsageRequestSchema)` to create a new message.
  */
 export const GetServerUsageRequestSchema: GenMessage<GetServerUsageRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_server, 18);
+  messageDesc(file_fuwa_v1_server, 20);
 
 /**
  * @generated from message fuwa.v1.GetServerUsageResponse
@@ -390,7 +436,7 @@ export type GetServerUsageResponse = Message<"fuwa.v1.GetServerUsageResponse"> &
  * Use `create(GetServerUsageResponseSchema)` to create a new message.
  */
 export const GetServerUsageResponseSchema: GenMessage<GetServerUsageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_server, 19);
+  messageDesc(file_fuwa_v1_server, 21);
 
 /**
  * Community servers on this instance.
@@ -479,6 +525,17 @@ export const ServerService: GenService<{
     methodKind: "unary";
     input: typeof ListMembersRequestSchema;
     output: typeof ListMembersResponseSchema;
+  },
+  /**
+   * Changes a member's nickname. Anyone can change their own; owners and
+   * admins can change those of people ranked below them.
+   *
+   * @generated from rpc fuwa.v1.ServerService.UpdateMember
+   */
+  updateMember: {
+    methodKind: "unary";
+    input: typeof UpdateMemberRequestSchema;
+    output: typeof UpdateMemberResponseSchema;
   },
   /**
    * What the server uses and the caps on it. Owner or instance admin only.

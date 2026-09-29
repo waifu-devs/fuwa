@@ -4,15 +4,17 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { User } from "./types_pb";
+import type { Profile, User } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file fuwa/v1/auth.proto.
  */
 export const file_fuwa_v1_auth: GenFile = /*@__PURE__*/
-  fileDesc("ChJmdXdhL3YxL2F1dGgucHJvdG8SB2Z1d2EudjEiSQoNU2lnblVwUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkiSwoOU2lnblVwUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCCIzCg1TaWduSW5SZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhAKCHBhc3N3b3JkGAIgASgJIksKDlNpZ25JblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEhsKBHVzZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISDQoFYWRtaW4YAyABKAgiEAoOU2lnbk91dFJlcXVlc3QiEQoPU2lnbk91dFJlc3BvbnNlIg4KDEdldE1lUmVxdWVzdCI7Cg1HZXRNZVJlc3BvbnNlEhsKBHVzZXIYASABKAsyDS5mdXdhLnYxLlVzZXISDQoFYWRtaW4YAiABKAgiagoUVXBkYXRlUHJvZmlsZVJlcXVlc3QSGQoMZGlzcGxheV9uYW1lGAEgASgJSACIAQESFwoKYXZhdGFyX3VybBgCIAEoCUgBiAEBQg8KDV9kaXNwbGF5X25hbWVCDQoLX2F2YXRhcl91cmwiNAoVVXBkYXRlUHJvZmlsZVJlc3BvbnNlEhsKBHVzZXIYASABKAsyDS5mdXdhLnYxLlVzZXIiRwoVQ2hhbmdlUGFzc3dvcmRSZXF1ZXN0EhgKEGN1cnJlbnRfcGFzc3dvcmQYASABKAkSFAoMbmV3X3Bhc3N3b3JkGAIgASgJIhgKFkNoYW5nZVBhc3N3b3JkUmVzcG9uc2UynAMKC0F1dGhTZXJ2aWNlEjkKBlNpZ25VcBIWLmZ1d2EudjEuU2lnblVwUmVxdWVzdBoXLmZ1d2EudjEuU2lnblVwUmVzcG9uc2USOQoGU2lnbkluEhYuZnV3YS52MS5TaWduSW5SZXF1ZXN0GhcuZnV3YS52MS5TaWduSW5SZXNwb25zZRI8CgdTaWduT3V0EhcuZnV3YS52MS5TaWduT3V0UmVxdWVzdBoYLmZ1d2EudjEuU2lnbk91dFJlc3BvbnNlEjYKBUdldE1lEhUuZnV3YS52MS5HZXRNZVJlcXVlc3QaFi5mdXdhLnYxLkdldE1lUmVzcG9uc2USTgoNVXBkYXRlUHJvZmlsZRIdLmZ1d2EudjEuVXBkYXRlUHJvZmlsZVJlcXVlc3QaHi5mdXdhLnYxLlVwZGF0ZVByb2ZpbGVSZXNwb25zZRJRCg5DaGFuZ2VQYXNzd29yZBIeLmZ1d2EudjEuQ2hhbmdlUGFzc3dvcmRSZXF1ZXN0Gh8uZnV3YS52MS5DaGFuZ2VQYXNzd29yZFJlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types]);
+  fileDesc("ChJmdXdhL3YxL2F1dGgucHJvdG8SB2Z1d2EudjEiSQoNU2lnblVwUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkiSwoOU2lnblVwUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCCIzCg1TaWduSW5SZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhAKCHBhc3N3b3JkGAIgASgJImYKDlNpZ25JblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEhsKBHVzZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISDQoFYWRtaW4YAyABKAgSGQoRdHdvX2ZhY3Rvcl90aWNrZXQYBCABKAkiNgoWVmVyaWZ5VHdvRmFjdG9yUmVxdWVzdBIOCgZ0aWNrZXQYASABKAkSDAoEY29kZRgCIAEoCSJUChdWZXJpZnlUd29GYWN0b3JSZXNwb25zZRINCgV0b2tlbhgBIAEoCRIbCgR1c2VyGAIgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAMgASgIIhAKDlNpZ25PdXRSZXF1ZXN0IhEKD1NpZ25PdXRSZXNwb25zZSIOCgxHZXRNZVJlcXVlc3QiOwoNR2V0TWVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAIgASgIItMCChRVcGRhdGVQcm9maWxlUmVxdWVzdBIZCgxkaXNwbGF5X25hbWUYASABKAlIAIgBARIXCgphdmF0YXJfdXJsGAIgASgJSAGIAQESFQoIcHJvbm91bnMYAyABKAlIAogBARIQCgNiaW8YBCABKAlIA4gBARIXCgpiYW5uZXJfdXJsGAUgASgJSASIAQESGQoMYWNjZW50X2NvbG9yGAYgASgFSAWIAQESEwoGc3RhdHVzGAcgASgJSAaIAQESNQoRc3RhdHVzX2V4cGlyZXNfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQg8KDV9kaXNwbGF5X25hbWVCDQoLX2F2YXRhcl91cmxCCwoJX3Byb25vdW5zQgYKBF9iaW9CDQoLX2Jhbm5lcl91cmxCDwoNX2FjY2VudF9jb2xvckIJCgdfc3RhdHVzIlcKFVVwZGF0ZVByb2ZpbGVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEiEKB3Byb2ZpbGUYAiABKAsyEC5mdXdhLnYxLlByb2ZpbGUiJAoRR2V0UHJvZmlsZVJlcXVlc3QSDwoHdXNlcl9pZBgBIAEoCSI3ChJHZXRQcm9maWxlUmVzcG9uc2USIQoHcHJvZmlsZRgBIAEoCzIQLmZ1d2EudjEuUHJvZmlsZSJHChVDaGFuZ2VQYXNzd29yZFJlcXVlc3QSGAoQY3VycmVudF9wYXNzd29yZBgBIAEoCRIUCgxuZXdfcGFzc3dvcmQYAiABKAkiGAoWQ2hhbmdlUGFzc3dvcmRSZXNwb25zZTK5BAoLQXV0aFNlcnZpY2USOQoGU2lnblVwEhYuZnV3YS52MS5TaWduVXBSZXF1ZXN0GhcuZnV3YS52MS5TaWduVXBSZXNwb25zZRI5CgZTaWduSW4SFi5mdXdhLnYxLlNpZ25JblJlcXVlc3QaFy5mdXdhLnYxLlNpZ25JblJlc3BvbnNlElQKD1ZlcmlmeVR3b0ZhY3RvchIfLmZ1d2EudjEuVmVyaWZ5VHdvRmFjdG9yUmVxdWVzdBogLmZ1d2EudjEuVmVyaWZ5VHdvRmFjdG9yUmVzcG9uc2USPAoHU2lnbk91dBIXLmZ1d2EudjEuU2lnbk91dFJlcXVlc3QaGC5mdXdhLnYxLlNpZ25PdXRSZXNwb25zZRI2CgVHZXRNZRIVLmZ1d2EudjEuR2V0TWVSZXF1ZXN0GhYuZnV3YS52MS5HZXRNZVJlc3BvbnNlEk4KDVVwZGF0ZVByb2ZpbGUSHS5mdXdhLnYxLlVwZGF0ZVByb2ZpbGVSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVQcm9maWxlUmVzcG9uc2USRQoKR2V0UHJvZmlsZRIaLmZ1d2EudjEuR2V0UHJvZmlsZVJlcXVlc3QaGy5mdXdhLnYxLkdldFByb2ZpbGVSZXNwb25zZRJRCg5DaGFuZ2VQYXNzd29yZBIeLmZ1d2EudjEuQ2hhbmdlUGFzc3dvcmRSZXF1ZXN0Gh8uZnV3YS52MS5DaGFuZ2VQYXNzd29yZFJlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.SignUpRequest
@@ -110,6 +112,14 @@ export type SignInResponse = Message<"fuwa.v1.SignInResponse"> & {
    * @generated from field: bool admin = 3;
    */
   admin: boolean;
+
+  /**
+   * Set, with nothing else, when the account needs a code from an
+   * authenticator app (or a backup code) too. Good for five minutes.
+   *
+   * @generated from field: string two_factor_ticket = 4;
+   */
+  twoFactorTicket: string;
 };
 
 /**
@@ -118,6 +128,57 @@ export type SignInResponse = Message<"fuwa.v1.SignInResponse"> & {
  */
 export const SignInResponseSchema: GenMessage<SignInResponse> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_auth, 3);
+
+/**
+ * @generated from message fuwa.v1.VerifyTwoFactorRequest
+ */
+export type VerifyTwoFactorRequest = Message<"fuwa.v1.VerifyTwoFactorRequest"> & {
+  /**
+   * @generated from field: string ticket = 1;
+   */
+  ticket: string;
+
+  /**
+   * Six digits from the authenticator app, or one of the backup codes.
+   *
+   * @generated from field: string code = 2;
+   */
+  code: string;
+};
+
+/**
+ * Describes the message fuwa.v1.VerifyTwoFactorRequest.
+ * Use `create(VerifyTwoFactorRequestSchema)` to create a new message.
+ */
+export const VerifyTwoFactorRequestSchema: GenMessage<VerifyTwoFactorRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 4);
+
+/**
+ * @generated from message fuwa.v1.VerifyTwoFactorResponse
+ */
+export type VerifyTwoFactorResponse = Message<"fuwa.v1.VerifyTwoFactorResponse"> & {
+  /**
+   * @generated from field: string token = 1;
+   */
+  token: string;
+
+  /**
+   * @generated from field: fuwa.v1.User user = 2;
+   */
+  user?: User | undefined;
+
+  /**
+   * @generated from field: bool admin = 3;
+   */
+  admin: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.VerifyTwoFactorResponse.
+ * Use `create(VerifyTwoFactorResponseSchema)` to create a new message.
+ */
+export const VerifyTwoFactorResponseSchema: GenMessage<VerifyTwoFactorResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 5);
 
 /**
  * @generated from message fuwa.v1.SignOutRequest
@@ -130,7 +191,7 @@ export type SignOutRequest = Message<"fuwa.v1.SignOutRequest"> & {
  * Use `create(SignOutRequestSchema)` to create a new message.
  */
 export const SignOutRequestSchema: GenMessage<SignOutRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_auth, 4);
+  messageDesc(file_fuwa_v1_auth, 6);
 
 /**
  * @generated from message fuwa.v1.SignOutResponse
@@ -143,7 +204,7 @@ export type SignOutResponse = Message<"fuwa.v1.SignOutResponse"> & {
  * Use `create(SignOutResponseSchema)` to create a new message.
  */
 export const SignOutResponseSchema: GenMessage<SignOutResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_auth, 5);
+  messageDesc(file_fuwa_v1_auth, 7);
 
 /**
  * @generated from message fuwa.v1.GetMeRequest
@@ -156,7 +217,7 @@ export type GetMeRequest = Message<"fuwa.v1.GetMeRequest"> & {
  * Use `create(GetMeRequestSchema)` to create a new message.
  */
 export const GetMeRequestSchema: GenMessage<GetMeRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_auth, 6);
+  messageDesc(file_fuwa_v1_auth, 8);
 
 /**
  * @generated from message fuwa.v1.GetMeResponse
@@ -180,7 +241,7 @@ export type GetMeResponse = Message<"fuwa.v1.GetMeResponse"> & {
  * Use `create(GetMeResponseSchema)` to create a new message.
  */
 export const GetMeResponseSchema: GenMessage<GetMeResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_auth, 7);
+  messageDesc(file_fuwa_v1_auth, 9);
 
 /**
  * @generated from message fuwa.v1.UpdateProfileRequest
@@ -195,6 +256,42 @@ export type UpdateProfileRequest = Message<"fuwa.v1.UpdateProfileRequest"> & {
    * @generated from field: optional string avatar_url = 2;
    */
   avatarUrl?: string | undefined;
+
+  /**
+   * @generated from field: optional string pronouns = 3;
+   */
+  pronouns?: string | undefined;
+
+  /**
+   * Markdown.
+   *
+   * @generated from field: optional string bio = 4;
+   */
+  bio?: string | undefined;
+
+  /**
+   * @generated from field: optional string banner_url = 5;
+   */
+  bannerUrl?: string | undefined;
+
+  /**
+   * 0xRRGGBB, or -1 to let clients pick.
+   *
+   * @generated from field: optional int32 accent_color = 6;
+   */
+  accentColor?: number | undefined;
+
+  /**
+   * Setting the status replaces its expiry too: unset keeps it until changed.
+   *
+   * @generated from field: optional string status = 7;
+   */
+  status?: string | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp status_expires_at = 8;
+   */
+  statusExpiresAt?: Timestamp | undefined;
 };
 
 /**
@@ -202,7 +299,7 @@ export type UpdateProfileRequest = Message<"fuwa.v1.UpdateProfileRequest"> & {
  * Use `create(UpdateProfileRequestSchema)` to create a new message.
  */
 export const UpdateProfileRequestSchema: GenMessage<UpdateProfileRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_auth, 8);
+  messageDesc(file_fuwa_v1_auth, 10);
 
 /**
  * @generated from message fuwa.v1.UpdateProfileResponse
@@ -212,6 +309,11 @@ export type UpdateProfileResponse = Message<"fuwa.v1.UpdateProfileResponse"> & {
    * @generated from field: fuwa.v1.User user = 1;
    */
   user?: User | undefined;
+
+  /**
+   * @generated from field: fuwa.v1.Profile profile = 2;
+   */
+  profile?: Profile | undefined;
 };
 
 /**
@@ -219,7 +321,41 @@ export type UpdateProfileResponse = Message<"fuwa.v1.UpdateProfileResponse"> & {
  * Use `create(UpdateProfileResponseSchema)` to create a new message.
  */
 export const UpdateProfileResponseSchema: GenMessage<UpdateProfileResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_auth, 9);
+  messageDesc(file_fuwa_v1_auth, 11);
+
+/**
+ * @generated from message fuwa.v1.GetProfileRequest
+ */
+export type GetProfileRequest = Message<"fuwa.v1.GetProfileRequest"> & {
+  /**
+   * @generated from field: string user_id = 1;
+   */
+  userId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.GetProfileRequest.
+ * Use `create(GetProfileRequestSchema)` to create a new message.
+ */
+export const GetProfileRequestSchema: GenMessage<GetProfileRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 12);
+
+/**
+ * @generated from message fuwa.v1.GetProfileResponse
+ */
+export type GetProfileResponse = Message<"fuwa.v1.GetProfileResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.Profile profile = 1;
+   */
+  profile?: Profile | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.GetProfileResponse.
+ * Use `create(GetProfileResponseSchema)` to create a new message.
+ */
+export const GetProfileResponseSchema: GenMessage<GetProfileResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 13);
 
 /**
  * @generated from message fuwa.v1.ChangePasswordRequest
@@ -241,7 +377,7 @@ export type ChangePasswordRequest = Message<"fuwa.v1.ChangePasswordRequest"> & {
  * Use `create(ChangePasswordRequestSchema)` to create a new message.
  */
 export const ChangePasswordRequestSchema: GenMessage<ChangePasswordRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_auth, 10);
+  messageDesc(file_fuwa_v1_auth, 14);
 
 /**
  * @generated from message fuwa.v1.ChangePasswordResponse
@@ -254,7 +390,7 @@ export type ChangePasswordResponse = Message<"fuwa.v1.ChangePasswordResponse"> &
  * Use `create(ChangePasswordResponseSchema)` to create a new message.
  */
 export const ChangePasswordResponseSchema: GenMessage<ChangePasswordResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_auth, 11);
+  messageDesc(file_fuwa_v1_auth, 15);
 
 /**
  * Accounts on this instance. Signing up or in returns a session token, which
@@ -274,12 +410,24 @@ export const AuthService: GenService<{
     output: typeof SignUpResponseSchema;
   },
   /**
+   * Signs in with a username and password. For an account with two-step
+   * sign-in on, the answer carries a ticket instead of a token: send it to
+   * VerifyTwoFactor with a code to finish.
+   *
    * @generated from rpc fuwa.v1.AuthService.SignIn
    */
   signIn: {
     methodKind: "unary";
     input: typeof SignInRequestSchema;
     output: typeof SignInResponseSchema;
+  },
+  /**
+   * @generated from rpc fuwa.v1.AuthService.VerifyTwoFactor
+   */
+  verifyTwoFactor: {
+    methodKind: "unary";
+    input: typeof VerifyTwoFactorRequestSchema;
+    output: typeof VerifyTwoFactorResponseSchema;
   },
   /**
    * Ends the session the call was made with.
@@ -306,6 +454,17 @@ export const AuthService: GenService<{
     methodKind: "unary";
     input: typeof UpdateProfileRequestSchema;
     output: typeof UpdateProfileResponseSchema;
+  },
+  /**
+   * Someone's profile: your own, anyone who shares a server with you, or
+   * anyone for instance admins.
+   *
+   * @generated from rpc fuwa.v1.AuthService.GetProfile
+   */
+  getProfile: {
+    methodKind: "unary";
+    input: typeof GetProfileRequestSchema;
+    output: typeof GetProfileResponseSchema;
   },
   /**
    * @generated from rpc fuwa.v1.AuthService.ChangePassword

@@ -60,6 +60,24 @@ message User {
   string display_name = 3;
   string avatar_url = 4;
   AccountKind kind = 5;
+  // A custom status the person set, such as "at the gym". Clients stop
+  // showing it once status_expires_at has passed.
+  string status = 6;
+  google.protobuf.Timestamp status_expires_at = 7;
+}
+
+// Everything a person shows about themselves on an instance, beyond what
+// travels with every message.
+message Profile {
+  User user = 1;
+  string pronouns = 2;
+  // Markdown.
+  string bio = 3;
+  string banner_url = 4;
+  // The profile's color, as 0xRRGGBB. Unset lets clients pick one.
+  optional int32 accent_color = 5;
+  // When the account was made on this instance.
+  google.protobuf.Timestamp created_at = 6;
 }
 
 enum MemberRole {
@@ -156,6 +174,34 @@ message EmbedField {
 }
 
 // ============================================================================
+// Notifications
+// ============================================================================
+
+enum NotificationLevel {
+  // Follow what's above: a channel follows its server, a server follows the
+  // person's device settings.
+  NOTIFICATION_LEVEL_UNSPECIFIED = 0;
+  NOTIFICATION_LEVEL_ALL = 1;
+  NOTIFICATION_LEVEL_MENTIONS = 2;
+  NOTIFICATION_LEVEL_NOTHING = 3;
+}
+
+// How one server, or one channel in it, reaches a person. Kept on the
+// instance, so it follows them to every device.
+message NotificationSettings {
+  string server_id = 1;
+  // Empty for the server as a whole.
+  string channel_id = 2;
+  NotificationLevel level = 3;
+  // Muted: no sounds, notifications or unread counts. With muted_until set,
+  // only until then.
+  bool muted = 4;
+  google.protobuf.Timestamp muted_until = 5;
+  // Server only: @everyone doesn't count as a mention.
+  bool suppress_everyone = 6;
+}
+
+// ============================================================================
 // Usage and limits
 // ============================================================================
 
@@ -214,6 +260,7 @@ message Event {
     MemberJoined member_joined = 18;
     MemberUpdated member_updated = 19;
     MemberLeft member_left = 20;
+    UserUpdated user_updated = 21;
   }
 }
 
@@ -258,4 +305,10 @@ message MemberUpdated {
 
 message MemberLeft {
   string user_id = 1;
+}
+
+// Someone who was a member changed how they look, such as when their account
+// is deleted. Current members change through MemberUpdated instead.
+message UserUpdated {
+  User user = 1;
 }

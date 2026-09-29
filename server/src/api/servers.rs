@@ -139,6 +139,7 @@ impl ServerService for Api {
                     return Err(Error::denied("only the server's owner can delete it"));
                 }
                 self.app.servers.delete(&sdb.id, &actor).await?;
+                self.forget_notifications(&sdb.id, None, None).await;
                 tracing::info!(server = %sdb.id, by = %actor, "server deleted");
                 Ok(pb::DeleteServerResponse {})
             }
@@ -205,6 +206,7 @@ impl ServerService for Api {
                 })
                 .await?;
                 self.app.servers.index_leave(&account.id, &sdb.id);
+                self.forget_notifications(&sdb.id, None, Some(&account.id)).await;
                 Ok(pb::LeaveServerResponse {})
             }
             .await,
@@ -231,6 +233,43 @@ impl ServerService for Api {
                 )
                 .await?;
                 Ok(pb::ListMembersResponse { members })
+            }
+            .await,
+        )
+    }
+
+    async fn update_member(
+        &self,
+        request: Request<pb::UpdateMemberRequest>,
+    ) -> Result<Response<pb::UpdateMemberResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let req = request.into_inner();
+                let (sdb, me) = self.membership(&account, &req.server_id).await?;
+                let target_id = if req.user_id.is_empty() { account.id.clone() } else { req.user_id.clone() };
+                let nickname = req.nickname.as_deref().map(|v| text("nickname", v, 0, 32)).transpose()?;
+                let member = sdb
+                    .write(&account.id, async |conn, events| {
+                        let target =
+                            store::member(conn, &sdb.id, &target_id).await?.ok_or(Error::NotFound("member"))?;
+                        if target_id != account.id && !(can_manage(&me) && me.role > target.role) {
+                            return Err(Error::denied("you can only change people ranked below you"));
+                        }
+                        if let Some(nickname) = &nickname {
+                            conn.execute(
+                                "UPDATE members SET nickname = ?2 WHERE user_id = ?1",
+                                (target_id.as_str(), nickname.as_str()),
+                            )
+                            .await?;
+                        }
+                        let member =
+                            store::member(conn, &sdb.id, &target_id).await?.ok_or(Error::NotFound("member"))?;
+                        events.push(Payload::MemberUpdated(pb::MemberUpdated { member: Some(member.clone()) }));
+                        Ok(member)
+                    })
+                    .await?;
+                Ok(pb::UpdateMemberResponse { member: Some(member) })
             }
             .await,
         )

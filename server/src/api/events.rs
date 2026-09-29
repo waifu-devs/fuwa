@@ -28,7 +28,8 @@ impl EventService for Api {
     type SubscribeStream = EventStream;
 
     async fn subscribe(&self, request: Request<pb::SubscribeRequest>) -> Result<Response<EventStream>, Status> {
-        let account = self.account(request.metadata()).await?;
+        let caller = self.caller(request.metadata()).await?;
+        let account = caller.account;
         let cursors = request.into_inner().servers;
         if cursors.is_empty() || cursors.len() > MAX_SERVERS {
             return Err(Error::invalid(format!("follow 1 to {MAX_SERVERS} servers per stream")).into());
@@ -44,6 +45,8 @@ impl EventService for Api {
 
         let (tx, rx) = mpsc::channel::<Result<pb::SubscribeResponse, Status>>(256);
         let shutdown = self.app.shutdown.clone();
+        let app = self.app.clone();
+        let token_hash = caller.token_hash;
         let account_id = account.id.clone();
         tokio::spawn(async move {
             let send = async |item| tx.send(item).await.is_ok();
@@ -98,6 +101,11 @@ impl EventService for Api {
                     _ = shutdown.cancelled() => return,
                     _ = tx.closed() => return,
                     _ = heartbeat.tick() => {
+                        // A session signed out from another device ends its streams too.
+                        if matches!(app.node.session_live(&token_hash).await, Ok(false)) {
+                            send(Err(Status::unauthenticated("this device was signed out"))).await;
+                            return;
+                        }
                         if !send(Ok(pb::SubscribeResponse { event: None, ready: None })).await {
                             return;
                         }

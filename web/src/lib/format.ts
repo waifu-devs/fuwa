@@ -82,3 +82,13 @@ export function hueOf(id: string) {
 export function mentions(content: string, username: string) {
   return new RegExp(`(^|[^\\w@])@${username.replace(/[.]/g, "\\.")}\\b`, "i").test(content);
 }
+
+/** Someone's custom status, unless it has run out. */
+export function shownStatus(user: User | undefined, now = Date.now()) {
+  if (!user?.status) return "";
+  if (user.statusExpiresAt && toDate(user.statusExpiresAt).getTime() <= now) return "";
+  return user.status;
+}
+
+/** A 0xRRGGBB profile color as CSS. */
+export const colorCss = (color: number) => `#${color.toString(16).padStart(6, "0")}`;
