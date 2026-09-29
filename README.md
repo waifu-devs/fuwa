@@ -6,7 +6,8 @@ like, hosted or self-hosted, over the same protocol.
 
 - **One database per community server.** Every server lives in its own
   [Turso](https://github.com/tursodatabase/turso) (SQLite-compatible) file, so a
-  server can be backed up, moved or inspected by copying one file.
+  server can be backed up or moved by copying one file. Writes use Turso's
+  concurrent writes, so messages to the same server land in parallel.
 - **Accounts your way.** Standalone accounts (a username and password kept on the
   instance) work with no dependency on anyone. Linked accounts, signed in through
   waifu.dev, are coming next. The operator switches each kind on or off.
@@ -87,8 +88,16 @@ server its own caps from that server's settings in the app (or
 <FUWA_DATA_PATH>/
   node.db              accounts, sessions, the install id
   servers/<id>.db      one file per community server
+  *.db-log             recent commits not yet folded into the file beside it
   deleted/             deleted servers, parked here instead of erased
 ```
+
+Every file runs in Turso's concurrent-writer mode (MVCC), which keeps recent
+commits in the `.db-log` beside it until they're folded in; keep the two
+together. Other SQLite tools can't open a file in that mode: stop fuwa and run
+`fuwa to-sqlite <file>` to switch it back to plain SQLite first. fuwa switches
+it back to concurrent writes the next time it starts. (An encrypted file opens
+only in Turso either way.)
 
 To back up, copy the directory (or stop the server and copy single files). To
 bring back a deleted server, move its file from `deleted/` into `servers/` as

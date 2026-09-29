@@ -7,7 +7,7 @@ use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::pb::{self, message_service_server::MessageService};
-use crate::servers::Payload;
+use crate::servers::{self as store, Payload, UsageChange};
 
 /// The longest a message can be, in characters.
 pub const MAX_MESSAGE_LENGTH: usize = 4000;
@@ -185,10 +185,9 @@ impl MessageService for Api {
                         ),
                     )
                     .await?;
-                    conn.execute(
-                        "UPDATE usage SET messages = messages + 1, messages_sent = messages_sent + 1,
-                         message_bytes = message_bytes + ?1, attachments = attachments + ?2, updated_at = ?3 WHERE id = 1",
-                        (size, attachment_count, now),
+                    store::add_usage(
+                        conn,
+                        UsageChange { messages: 1, messages_sent: 1, message_bytes: size, attachments: attachment_count, ..Default::default() },
                     )
                     .await?;
                     events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
@@ -277,11 +276,7 @@ impl MessageService for Api {
                             (message.id.as_str(), req.content.as_str(), req.content.len() as i64, now),
                         )
                         .await?;
-                        conn.execute(
-                            "UPDATE usage SET message_bytes = message_bytes + ?1, updated_at = ?2 WHERE id = 1",
-                            (growth, now),
-                        )
-                        .await?;
+                        store::add_usage(conn, UsageChange { message_bytes: growth, ..Default::default() }).await?;
                         message.content = req.content.clone();
                         message.edited_at = Some(timestamp(now));
                         events.push(Payload::MessageUpdated(pb::MessageUpdated { message: Some(message.clone()) }));
@@ -310,10 +305,14 @@ impl MessageService for Api {
                         return Err(Error::denied("you can only delete your own messages"));
                     }
                     conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
-                    conn.execute(
-                        "UPDATE usage SET messages = messages - 1, message_bytes = message_bytes - ?1,
-                     attachments = attachments - ?2, updated_at = ?3 WHERE id = 1",
-                        (message.content.len() as i64, message.attachments.len() as i64, now_ms()),
+                    store::add_usage(
+                        conn,
+                        UsageChange {
+                            messages: -1,
+                            message_bytes: -(message.content.len() as i64),
+                            attachments: -(message.attachments.len() as i64),
+                            ..Default::default()
+                        },
                     )
                     .await?;
                     events.push(Payload::MessageDeleted(pb::MessageDeleted {

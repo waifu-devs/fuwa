@@ -194,7 +194,10 @@ impl ServerService for Api {
                     return Err(Error::FailedPrecondition("the owner can't leave; delete the server instead".into()));
                 }
                 sdb.write(&account.id, async |conn, events| {
-                    conn.execute("DELETE FROM members WHERE user_id = ?1", [account.id.as_str()]).await?;
+                    // Leaving twice at once: the second finds nothing to take away.
+                    if conn.execute("DELETE FROM members WHERE user_id = ?1", [account.id.as_str()]).await? == 0 {
+                        return Err(Error::NotFound("membership"));
+                    }
                     conn.execute("UPDATE usage SET members = members - 1, updated_at = ?1 WHERE id = 1", [now_ms()])
                         .await?;
                     events.push(Payload::MemberLeft(pb::MemberLeft { user_id: account.id.clone() }));

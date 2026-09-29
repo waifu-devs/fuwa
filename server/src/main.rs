@@ -6,8 +6,11 @@ use fuwa_server::config::Config;
 const HELP: &str = "\
 fuwa: a self-hostable, Discord-like chat server
 
-Usage: fuwa [serve]    run the server
-       fuwa health     exit 0 if the server on FUWA_PORT answers (for health checks)
+Usage: fuwa [serve]           run the server
+       fuwa health            exit 0 if the server on FUWA_PORT answers (for health checks)
+       fuwa to-sqlite FILE…   switch database files back to plain SQLite so other
+                              SQLite tools can open them (stop fuwa first; it
+                              switches them back to concurrent writes on start)
 
 Everything is configured with FUWA_* environment variables (or a .env file);
 see https://github.com/waifu-devs/fuwa#configuration. The most common:
@@ -28,6 +31,7 @@ async fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Some("health") => return health().await,
+        Some("to-sqlite") => return to_sqlite(std::env::args().skip(2).collect()).await,
         Some("-h" | "--help" | "help") => {
             print!("{HELP}");
             return ExitCode::SUCCESS;
@@ -78,4 +82,31 @@ async fn health() -> ExitCode {
         Ok(Ok(true)) => ExitCode::SUCCESS,
         _ => ExitCode::FAILURE,
     }
+}
+
+/// Switches database files from Turso's concurrent-writer mode back to plain
+/// SQLite (WAL), for tools that don't read the former.
+async fn to_sqlite(files: Vec<String>) -> ExitCode {
+    if files.is_empty() {
+        eprintln!("fuwa: name the database files, e.g. fuwa to-sqlite ~/.fuwa/servers/*.db");
+        return ExitCode::from(2);
+    }
+    let key = match Config::load() {
+        Ok(config) => config.encryption_key,
+        Err(err) => {
+            eprintln!("fuwa: {err}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut failed = false;
+    for file in &files {
+        match fuwa_server::db::to_sqlite(std::path::Path::new(file), key.as_ref()).await {
+            Ok(()) => println!("{file}: plain SQLite{}", if key.is_some() { " (still encrypted)" } else { "" }),
+            Err(err) => {
+                eprintln!("{file}: {err}");
+                failed = true;
+            }
+        }
+    }
+    if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }

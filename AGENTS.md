@@ -13,6 +13,9 @@
     `ServerDb::write`, which appends events to the server's log in the same
     transaction and publishes them to the `Hub` after commit.
   - `db.rs`: Turso helpers: opening, `user_version` migrations, transactions.
+    Every database runs in Turso's concurrent-writer mode (MVCC): writes are
+    `BEGIN CONCURRENT` transactions that run side by side and are retried
+    when two touch the same row.
   - `config.rs`: `FUWA_*` environment variables: how the process starts, and
     the defaults for settings.
   - `settings.rs`: settings admins change from a client (`AdminService`), stored
@@ -41,7 +44,17 @@
 ## Rules
 
 - Every change to a community server is a `ServerDb::write` that pushes at least
-  one event payload and keeps the `usage` counters in step.
+  one event payload and keeps the usage totals in step: members and channels in
+  the `usage` row, message totals through `servers::add_usage`.
+- Writes can run more than once (after a clash), so the closure given to
+  `ServerDb::write` or `db::write` does nothing outside its transaction. Reads
+  inside a write aren't checked for clashes, only rows written: a check that
+  must hold under racing writes (a cap, "first account") needs every such write
+  to update the same row, or one lock. A change that sweeps rows other writes
+  may be adding to (a channel's messages) uses `ServerDb::write_alone`.
+- Never write outside a transaction or with `BEGIN`/`BEGIN IMMEDIATE`: those
+  lock out concurrent commits. Schema changes go in migrations, which run
+  before anything else touches the file.
 - Timestamps are unix milliseconds in the database, `google.protobuf.Timestamp` on
   the wire. Ids are ULIDs (`id::new_id`).
 - Limits are unlimited unless configured. Never hardcode a usage cap.
