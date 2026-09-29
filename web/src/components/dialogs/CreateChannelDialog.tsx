@@ -1,8 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
 import { FolderIcon, HashIcon, LoaderCircleIcon, MegaphoneIcon } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import { ChannelType, createChannel } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
+import { SPRING, SwapText } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -64,31 +66,63 @@ export function CreateChannelDialog({
       <DialogContent>
         <DialogHeader title="Create a channel" />
         <form onSubmit={submit} className="flex flex-col gap-4">
-          <div className="grid gap-2">
-            {TYPES.map((t) => (
-              <button
-                key={t.type}
-                type="button"
-                onClick={() => setType(t.type)}
-                className={cn(
-                  "flex items-center gap-3 rounded-2xl border p-3 text-left transition",
-                  type === t.type ? "border-primary bg-primary/10" : "hover:border-primary/40",
-                )}
-              >
-                <t.icon className={cn("size-5 transition", type === t.type ? "scale-110 text-primary" : "text-muted-foreground")} />
-                <span>
-                  <span className="block text-sm font-bold">{t.label}</span>
-                  <span className="block text-xs text-muted-foreground">{t.hint}</span>
-                </span>
-              </button>
-            ))}
+          <div role="radiogroup" aria-label="Channel type" className="grid gap-2">
+            {TYPES.map((t) => {
+              const active = type === t.type;
+              return (
+                <motion.button
+                  key={t.type}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setType(t.type)}
+                  whileHover={{ x: 2 }}
+                  whileTap={{ scale: 0.98 }}
+                  transition={SPRING}
+                  className={cn(
+                    "relative flex items-center gap-3 rounded-2xl border p-3 text-left transition-colors",
+                    active ? "border-primary/60" : "hover:border-primary/40",
+                  )}
+                >
+                  {active && (
+                    <motion.span layoutId="channel-type" transition={SPRING} className="absolute inset-0 rounded-2xl bg-primary/10 ring-2 ring-primary/40" />
+                  )}
+                  <span
+                    className={cn(
+                      "relative grid size-9 shrink-0 place-items-center rounded-xl transition-colors",
+                      active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    <motion.span key={String(active)} initial={active ? { scale: 0.4, rotate: -30 } : false} animate={{ scale: 1, rotate: 0 }} transition={SPRING}>
+                      <t.icon className="size-[18px]" />
+                    </motion.span>
+                  </span>
+                  <span className="relative">
+                    <span className="block text-sm font-bold">{t.label}</span>
+                    <span className="block text-xs text-muted-foreground">{t.hint}</span>
+                  </span>
+                </motion.button>
+              );
+            })}
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="channel-name" className="font-bold">
               Name
             </Label>
             <div className="relative">
-              {!category && <HashIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />}
+              <AnimatePresence initial={false}>
+                {!category && (
+                  <motion.span
+                    initial={{ opacity: 0, scale: 0.4, rotate: -30 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.4 }}
+                    transition={SPRING}
+                    className="pointer-events-none absolute top-3.5 left-3 text-muted-foreground"
+                  >
+                    <HashIcon className="size-4" />
+                  </motion.span>
+                )}
+              </AnimatePresence>
               <Input
                 id="channel-name"
                 autoFocus
@@ -97,14 +131,16 @@ export function CreateChannelDialog({
                 placeholder={category ? "Hangout" : "new-channel"}
                 value={category ? name : slug(name)}
                 onChange={(e) => setName(e.target.value)}
-                className={cn("h-11 rounded-xl", !category && "pl-9")}
+                className={cn("h-11 rounded-xl transition-[padding]", !category && "pl-9")}
               />
             </div>
           </div>
           {create.error && <p className="text-sm text-destructive first-letter:uppercase">{create.error}</p>}
           <Button type="submit" size="lg" disabled={create.pending || !name.trim()} className="btn h-11 rounded-xl font-bold">
             {create.pending && <LoaderCircleIcon className="animate-spin" />}
-            Create {category ? "category" : "channel"}
+            <span>
+              Create <SwapText>{category ? "category" : "channel"}</SwapText>
+            </span>
           </Button>
         </form>
       </DialogContent>

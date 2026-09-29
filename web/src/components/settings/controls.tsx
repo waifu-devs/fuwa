@@ -4,9 +4,10 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { SPRING } from "@/components/motion";
 import { cn } from "@/lib/utils";
 
-export const SPRING = { type: "spring", stiffness: 520, damping: 34 } as const;
+export { SPRING };
 
 /**
  * One setting: a title, what it does, and whether it still follows the

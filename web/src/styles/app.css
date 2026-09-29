@@ -373,7 +373,12 @@ body {
 /* Server icons are circles that settle into rounded squares on hover or when open. */
 .server-icon {
   border-radius: 50%;
-  transition: border-radius 0.28s cubic-bezier(0.3, 1.4, 0.5, 1), transform 0.2s cubic-bezier(0.3, 1.6, 0.5, 1), filter 0.2s ease;
+  transition:
+    border-radius 0.28s cubic-bezier(0.3, 1.4, 0.5, 1),
+    transform 0.2s cubic-bezier(0.3, 1.6, 0.5, 1),
+    scale 0.3s cubic-bezier(0.3, 1.6, 0.5, 1),
+    rotate 0.3s cubic-bezier(0.3, 1.6, 0.5, 1),
+    filter 0.2s ease;
 }
 .server-icon:hover,
 .server-icon[data-active="true"] { border-radius: 32%; }

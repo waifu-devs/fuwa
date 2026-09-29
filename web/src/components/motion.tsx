@@ -1,5 +1,12 @@
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { animate, AnimatePresence, motion } from "motion/react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
+
+/** The app's springs and easing, so things move alike everywhere. */
+export const SPRING = { type: "spring", stiffness: 520, damping: 34 } as const;
+export const SOFT_SPRING = { type: "spring", stiffness: 380, damping: 32 } as const;
+export const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 
 const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -107,4 +114,105 @@ export function Sparkles() {
     };
   }, []);
   return null;
+}
+
+/** Text that slides and fades to its new value when it changes, like a renamed server. */
+export function SwapText({ children, className }: { children: string; className?: string }) {
+  return (
+    <AnimatePresence mode="popLayout" initial={false}>
+      <motion.span
+        key={children}
+        initial={{ opacity: 0, y: "0.6em" }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: "-0.6em" }}
+        transition={SPRING}
+        className={cn("inline-block max-w-full", className)}
+      >
+        {children}
+      </motion.span>
+    </AnimatePresence>
+  );
+}
+
+/**
+ * A small count, like an unread badge, that rolls to its new value: up when
+ * it grows, down when it shrinks. Past `max` it reads "max+".
+ */
+export function Count({ value, max }: { value: number; max?: number }) {
+  const text = max !== undefined && value > max ? `${max}+` : value.toLocaleString();
+  const previous = useRef(value);
+  const up = value >= previous.current;
+  useEffect(() => {
+    previous.current = value;
+  }, [value]);
+  return (
+    <span className="relative inline-flex overflow-hidden align-bottom tabular-nums">
+      <AnimatePresence mode="popLayout" initial={false} custom={up}>
+        <motion.span
+          key={text}
+          custom={up}
+          variants={ROLL}
+          initial="enter"
+          animate="center"
+          exit="exit"
+          transition={SPRING}
+          className="inline-block"
+        >
+          {text}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
+const ROLL = {
+  enter: (up: boolean) => ({ y: up ? "100%" : "-100%", opacity: 0 }),
+  center: { y: 0, opacity: 1 },
+  exit: (up: boolean) => ({ y: up ? "-100%" : "100%", opacity: 0 }),
+};
+
+/**
+ * A number that counts up to its value, then glides to each new one.
+ * `format` turns it into text, for sizes and the like.
+ */
+export function CountUp({
+  value,
+  format = (n) => Math.round(n).toLocaleString(),
+  delay = 0,
+}: {
+  value: number;
+  format?: (n: number) => string;
+  delay?: number;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const shown = useRef(0);
+  const formatRef = useRef(format);
+  formatRef.current = format;
+
+  // React never owns the text, so re-renders can't cut the count short.
+  useLayoutEffect(() => {
+    if (ref.current) ref.current.textContent = formatRef.current(shown.current);
+  }, []);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (reducedMotion()) {
+      shown.current = value;
+      el.textContent = formatRef.current(value);
+      return;
+    }
+    const controls = animate(shown.current, value, {
+      duration: 0.9,
+      delay,
+      ease: EASE_OUT,
+      onUpdate: (n) => {
+        shown.current = n;
+        el.textContent = formatRef.current(n);
+      },
+    });
+    return () => controls.stop();
+  }, [value, delay]);
+
+  return <span ref={ref} className="tabular-nums" />;
 }

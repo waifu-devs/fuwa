@@ -4,6 +4,7 @@ import { useMemo, type CSSProperties } from "react";
 import { MemberRole, type Member } from "@/gen/fuwa/v1/types_pb";
 import { useInstance } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
+import { Count } from "@/components/motion";
 import { displayName, hueOf, memberName } from "@/lib/format";
 
 const EMPTY: Member[] = [];
@@ -30,7 +31,7 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
       {sections.map((section) => (
         <section key={section.role} className="mb-4">
           <h3 className="mb-1 px-2 text-xs font-bold tracking-wide text-muted-foreground uppercase">
-            {section.label} — {section.members.length}
+            {section.label} — <Count value={section.members.length} />
           </h3>
           <ul>
             <AnimatePresence initial={false}>

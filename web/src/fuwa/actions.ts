@@ -68,6 +68,7 @@ export const updateProfile = (key: string, displayName: string, avatarUrl: strin
   Effect.gen(function* () {
     const { user } = yield* call((signal) => api(key).auth.updateProfile({ displayName, avatarUrl }, { signal }));
     updateInstance(key, (i) => ({ ...i, me: user ?? i.me, users: withUsers(i.users, [user]) }));
+    return true;
   });
 
 // ───────────────────────── Servers ─────────────────────────
@@ -102,12 +103,14 @@ export const leaveServer = (key: string, serverId: string) =>
   Effect.gen(function* () {
     yield* call((signal) => api(key).servers.leaveServer({ serverId }, { signal }));
     updateInstance(key, (i) => removeServer(i, serverId));
+    return true;
   });
 
 export const deleteServer = (key: string, serverId: string) =>
   Effect.gen(function* () {
     yield* call((signal) => api(key).servers.deleteServer({ serverId }, { signal }));
     updateInstance(key, (i) => removeServer(i, serverId));
+    return true;
   });
 
 export const updateServer = (
@@ -118,6 +121,7 @@ export const updateServer = (
   Effect.gen(function* () {
     const { server } = yield* call((signal) => api(key).servers.updateServer({ serverId, ...patch }, { signal }));
     if (server) updateInstance(key, (i) => addServer(i, server));
+    return true;
   });
 
 export const serverUsage = (key: string, serverId: string) =>

@@ -6,8 +6,8 @@ import type { GetServerUsageResponse } from "@/gen/fuwa/v1/server_pb";
 import type { Server, ServerLimits } from "@/gen/fuwa/v1/types_pb";
 import { deleteServer, nodeUsage, run, serverUsage, setServerLimits, updateServer } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
-import { SlidingNumber } from "@/components/animate-ui/primitives/texts/sliding-number";
 import { ServerIcon } from "@/components/Icons";
+import { CountUp } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, initials } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { Cap, SaveBar } from "@/components/settings/controls";
 
 export function ServerSettingsDialog({
@@ -91,7 +92,9 @@ function Overview({ instanceKey, server, onSaved }: { instanceKey: string; serve
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <div className="flex items-center gap-4">
-        <ServerIcon server={{ ...server, name: name || server.name }} active className="size-16 text-xl" />
+        <motion.span key={initials(name || server.name)} initial={{ scale: 0.85, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 16 }}>
+          <ServerIcon server={{ ...server, name: name || server.name }} active className="size-16 text-xl" />
+        </motion.span>
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <Label htmlFor="settings-name" className="font-bold">
             Name
@@ -156,7 +159,7 @@ function Usage({ instanceKey, serverId }: { instanceKey: string; serverId: strin
             >
               <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">{r.label}</p>
               <p className="mt-1 text-2xl font-extrabold tabular-nums">
-                {r.bytes ? formatBytes(r.value) : <SlidingNumber number={r.value} />}
+                <CountUp value={r.value} delay={0.1 + n * 0.05} format={r.bytes ? (v) => formatBytes(Math.round(v)) : undefined} />
               </p>
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                 <motion.div
@@ -251,10 +254,11 @@ function Danger({ instanceKey, server, onDeleted }: { instanceKey: string; serve
   const navigate = useNavigate();
   const [confirm, setConfirm] = useState("");
   const remove = useAction(deleteServer);
+  const armed = confirm === server.name;
   async function submit(e: FormEvent) {
     e.preventDefault();
     const ok = await remove.go(instanceKey, server.id);
-    if (ok === undefined && remove.error) return;
+    if (ok === undefined) return;
     onDeleted();
     navigate({ to: "/$instance", params: { instance: instanceKey } });
   }
@@ -269,12 +273,25 @@ function Danger({ instanceKey, server, onDeleted }: { instanceKey: string; serve
       <Label htmlFor="confirm-delete" className="text-sm">
         Type <b>{server.name}</b> to confirm
       </Label>
-      <Input id="confirm-delete" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="h-10 rounded-xl" autoComplete="off" />
+      <Input
+        id="confirm-delete"
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+        className={cn("h-10 rounded-xl transition-colors", armed && "border-destructive ring-2 ring-destructive/20")}
+        autoComplete="off"
+      />
       {remove.error && <p className="text-sm text-destructive first-letter:uppercase">{remove.error}</p>}
-      <Button type="submit" variant="destructive" disabled={confirm !== server.name || remove.pending} className="self-end rounded-xl font-bold">
-        {remove.pending && <LoaderCircleIcon className="animate-spin" />}
-        Delete server
-      </Button>
+      <motion.div
+        className="self-end"
+        initial={false}
+        animate={armed ? { scale: [1, 1.08, 1], rotate: [0, -2, 2, 0] } : { scale: 1, rotate: 0 }}
+        transition={{ duration: 0.4 }}
+      >
+        <Button type="submit" variant="destructive" disabled={!armed || remove.pending} className="rounded-xl font-bold">
+          {remove.pending && <LoaderCircleIcon className="animate-spin" />}
+          Delete server
+        </Button>
+      </motion.div>
     </form>
   );
 }

@@ -105,6 +105,9 @@ export function Composer({
           disabled={!content || tooLong}
           aria-label="Send"
           whileTap={{ scale: 0.85 }}
+          initial={false}
+          animate={{ scale: content && !tooLong ? 1 : 0.9 }}
+          transition={{ type: "spring", stiffness: 600, damping: 20 }}
           className={cn(
             "mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl transition-colors",
             content && !tooLong ? "bg-primary text-primary-foreground shadow-[0_6px_18px_-8px_var(--primary)]" : "text-muted-foreground",

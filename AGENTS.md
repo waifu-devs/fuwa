@@ -54,6 +54,11 @@
   servers. The end-to-end test checks this.
 - The web app talks only through the protocol; anything it needs from a server
   goes in `proto/` first, then `pnpm generate`.
+- Every screen ships with its motion: things enter and leave with a spring,
+  selections glide (`layoutId`), counts roll, renamed things swap, and presses
+  and hovers answer. Use the springs and helpers in
+  `web/src/components/motion.tsx` (`SwapText`, `Count`, `CountUp`) so the app
+  moves alike everywhere, and keep it working with reduced motion.
 - Before pushing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test`, and `buf lint`; for `web/`, `pnpm build` then
   `cargo test --features web`.

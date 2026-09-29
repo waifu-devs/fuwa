@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChannelSidebar } from "@/components/ChannelSidebar";
 import { InstanceSidebar } from "@/components/InstanceSidebar";
+import { EASE_OUT } from "@/components/motion";
 import { Rail } from "@/components/Rail";
 import { useMediaQuery } from "@/lib/use-media-query";
 
@@ -82,7 +83,7 @@ export function Shell() {
           <>
             <Nav side={side} />
             <main className="surface-chat relative flex min-w-0 flex-1 flex-col">
-              <Outlet />
+              <Page />
             </main>
           </>
         )}
@@ -113,6 +114,22 @@ function Nav({ side }: { side: ReactNode }) {
   );
 }
 
+/** The page, rising in softly when you go to another server or instance. */
+function Page() {
+  const params = useParams({ strict: false }) as { instance?: string; server?: string };
+  return (
+    <motion.div
+      key={`${params.instance}/${params.server ?? ""}`}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: EASE_OUT }}
+      className="relative flex min-h-0 flex-1 flex-col"
+    >
+      <Outlet />
+    </motion.div>
+  );
+}
+
 /** Phones: the list is underneath, the chat slides in over it from the right. */
 function CompactFrame({ navOpen, nav }: { navOpen: boolean; nav: ReactNode }) {
   return (
@@ -126,7 +143,7 @@ function CompactFrame({ navOpen, nav }: { navOpen: boolean; nav: ReactNode }) {
         aria-hidden={navOpen}
         inert={navOpen}
       >
-        <Outlet />
+        <Page />
       </motion.main>
     </div>
   );

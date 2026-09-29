@@ -1,3 +1,4 @@
+import { motion } from "motion/react";
 import type { CSSProperties } from "react";
 import type { Server, User } from "@/gen/fuwa/v1/types_pb";
 import type { Connection } from "@/fuwa/store";
@@ -62,9 +63,14 @@ const CONNECTION_LABEL: Record<Connection, string> = {
   "signed-out": "Signed out",
 };
 
+/** Pops each time the connection changes, so a drop or a reconnect catches the eye. */
 export function ConnDot({ state, className }: { state: Connection; className?: string }) {
   return (
-    <span
+    <motion.span
+      key={state}
+      initial={{ scale: 0.2 }}
+      animate={{ scale: 1 }}
+      transition={{ type: "spring", stiffness: 600, damping: 14 }}
       role="img"
       aria-label={CONNECTION_LABEL[state]}
       title={CONNECTION_LABEL[state]}

@@ -9,7 +9,7 @@ import { Connect } from "@/components/Connect";
 import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
-import { Tilt } from "@/components/motion";
+import { Count, SwapText, Tilt } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,7 +87,7 @@ function Browse({ instanceKey }: { instanceKey: string }) {
               <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · {instanceKey} · fuwa {inst.node?.version}
             </p>
             <h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">
-              Welcome to <span className="gradient-text">{inst.node?.name ?? instanceKey}</span>
+              Welcome to <SwapText className="gradient-text">{inst.node?.name ?? instanceKey}</SwapText>
             </h1>
             <p className="mt-2 max-w-xl text-muted-foreground">
               Find a community to join, or start your own. Everything here lives on this fuwa server.
@@ -163,7 +163,7 @@ function ServerCard({ instanceKey, server, joined }: { instanceKey: string; serv
           <div className="min-w-0">
             <p className="truncate text-lg font-extrabold">{server.name}</p>
             <p className="flex items-center gap-1 text-xs text-muted-foreground">
-              <UsersIcon className="size-3.5" /> {Number(server.memberCount).toLocaleString()} {server.memberCount === 1n ? "member" : "members"}
+              <UsersIcon className="size-3.5" /> <Count value={Number(server.memberCount)} /> {server.memberCount === 1n ? "member" : "members"}
             </p>
           </div>
         </div>

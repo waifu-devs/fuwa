@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useInstance } from "@/fuwa/hooks";
 import { ProfileDialog } from "@/components/dialogs/ProfileDialog";
 import { ConnDot, UserAvatar, connectionLabel } from "@/components/Icons";
+import { SwapText } from "@/components/motion";
 import { displayName } from "@/lib/format";
 
 /** You, on this instance, at the bottom of the sidebar. */
@@ -18,13 +19,17 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
         className="group flex min-w-0 flex-1 items-center gap-2 rounded-xl p-1.5 text-left transition hover:bg-muted"
       >
         <span className="relative shrink-0">
-          <UserAvatar user={inst.me} className="size-9 transition group-hover:scale-105" />
+          <UserAvatar user={inst.me} className="size-9 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:-rotate-6 group-hover:scale-110" />
           <ConnDot state={inst.connection} className="absolute -right-0.5 -bottom-0.5 ring-[3px] ring-card" />
         </span>
         <span className="min-w-0">
-          <span className="block truncate text-sm font-bold">{displayName(inst.me)}</span>
+          <span className="block truncate text-sm font-bold">
+            <SwapText className="truncate align-bottom">{displayName(inst.me)}</SwapText>
+          </span>
           <span className="block truncate text-xs text-muted-foreground">
-            {inst.connection === "live" ? `@${inst.me.username}` : connectionLabel(inst.connection)}
+            <SwapText className="truncate align-bottom">
+              {inst.connection === "live" ? `@${inst.me.username}` : connectionLabel(inst.connection)}
+            </SwapText>
           </span>
         </span>
       </button>

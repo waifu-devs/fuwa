@@ -150,7 +150,12 @@ export const MessageList = forwardRef<
   return (
     <div className="relative min-h-0 flex-1">
       <div ref={scroller} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">
-        <div className="flex min-h-full flex-col justify-end pb-3">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="flex min-h-full flex-col justify-end pb-3"
+        >
           {state?.loading && items.length > 0 && <Skeleton rows={2} />}
           {beginning && <Beginning channel={channel} />}
           {!state && <Skeleton rows={6} />}
@@ -198,7 +203,7 @@ export const MessageList = forwardRef<
               );
             })}
           </AnimatePresence>
-        </div>
+        </motion.div>
       </div>
       <AnimatePresence>
         {(showJump || missed > 0) && (
@@ -368,15 +373,21 @@ function MessageRow({
       {!editing && (
         <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
           {confirming ? (
-            <>
-              <span className="px-2 text-xs font-bold">Delete?</span>
+            <motion.span
+              key="confirm"
+              initial={{ opacity: 0, x: 8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ type: "spring", stiffness: 600, damping: 32 }}
+              className="flex items-center gap-0.5"
+            >
+              <span className="px-2 text-xs font-bold text-destructive">Delete?</span>
               <ToolButton label="Delete" danger onClick={() => onDelete().catch(() => setConfirming(false))}>
                 <CheckIcon />
               </ToolButton>
               <ToolButton label="Keep" onClick={() => setConfirming(false)}>
                 <XIcon />
               </ToolButton>
-            </>
+            </motion.span>
           ) : (
             <>
               <ToolButton
@@ -387,7 +398,18 @@ function MessageRow({
                   setTimeout(() => setCopied(false), 1200);
                 }}
               >
-                {copied ? <CheckIcon className="text-primary" /> : <CopyIcon />}
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.span
+                    key={copied ? "copied" : "copy"}
+                    initial={{ scale: 0.3, rotate: copied ? -45 : 0, opacity: 0 }}
+                    animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                    exit={{ scale: 0.3, opacity: 0 }}
+                    transition={{ type: "spring", stiffness: 700, damping: 22 }}
+                    className="grid place-items-center"
+                  >
+                    {copied ? <CheckIcon className="text-primary" /> : <CopyIcon />}
+                  </motion.span>
+                </AnimatePresence>
               </ToolButton>
               {mine && (
                 <ToolButton label="Edit" onClick={onEdit}>

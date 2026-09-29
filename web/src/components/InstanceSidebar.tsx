@@ -1,9 +1,12 @@
 import { Link } from "@tanstack/react-router";
 import { CompassIcon, HashIcon, SettingsIcon } from "lucide-react";
-import { useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useState, type Ref } from "react";
+import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { useInstance } from "@/fuwa/hooks";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
 import { useLayout } from "@/components/Shell";
+import { SPRING, SwapText } from "@/components/motion";
 import { UserPanel } from "@/components/UserPanel";
 import { InstanceSettingsDialog } from "@/components/settings/InstanceSettingsDialog";
 
@@ -17,7 +20,9 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
     <>
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
         <div className="min-w-0 flex-1">
-          <p className="truncate font-extrabold">{inst.node?.name ?? instanceKey}</p>
+          <p className="truncate font-extrabold">
+            <SwapText className="truncate align-bottom">{inst.node?.name ?? instanceKey}</SwapText>
+          </p>
           <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
             <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · {instanceKey}
           </p>
@@ -45,23 +50,58 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
         >
           <CompassIcon className="size-4" /> Browse servers
         </Link>
-        {inst.servers.length > 0 && (
-          <p className="mt-4 mb-1 px-2 text-xs font-bold tracking-wide text-muted-foreground uppercase">Your servers</p>
-        )}
-        {inst.servers.map((s) => (
-          <Link
-            key={s.id}
-            to="/$instance/$server"
-            params={{ instance: instanceKey, server: s.id }}
-            className="group flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition hover:bg-muted"
-          >
-            <ServerIcon server={s} className="size-7 text-[0.65rem]" />
-            <span className="truncate font-bold">{s.name}</span>
-            <HashIcon className="ml-auto size-3.5 text-muted-foreground opacity-0 transition group-hover:opacity-100" />
-          </Link>
-        ))}
+        <AnimatePresence initial={false}>
+          {inst.servers.length > 0 && (
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="mt-4 mb-1 px-2 text-xs font-bold tracking-wide text-muted-foreground uppercase"
+            >
+              Your servers
+            </motion.p>
+          )}
+        </AnimatePresence>
+        <AnimatePresence mode="popLayout">
+          {inst.servers.map((s, n) => (
+            <ServerLink key={s.id} instanceKey={instanceKey} server={s} index={n} />
+          ))}
+        </AnimatePresence>
       </div>
       <UserPanel instanceKey={instanceKey} />
     </>
+  );
+}
+
+function ServerLink({
+  instanceKey,
+  server,
+  index,
+  ref,
+}: {
+  instanceKey: string;
+  server: Server;
+  index: number;
+  ref?: Ref<HTMLDivElement>;
+}) {
+  return (
+    <motion.div
+      ref={ref}
+      layout="position"
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0, transition: { ...SPRING, delay: Math.min(index, 12) * 0.03 } }}
+      exit={{ opacity: 0, x: -10, transition: { duration: 0.15 } }}
+      transition={SPRING}
+    >
+      <Link
+        to="/$instance/$server"
+        params={{ instance: instanceKey, server: server.id }}
+        className="group flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition hover:bg-muted"
+      >
+        <ServerIcon server={server} className="size-7 text-[0.65rem] group-hover:-rotate-6 group-hover:scale-110" />
+        <span className="truncate font-bold transition-transform duration-300 group-hover:translate-x-0.5">{server.name}</span>
+        <HashIcon className="ml-auto size-3.5 -translate-x-1 text-muted-foreground opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100" />
+      </Link>
+    </motion.div>
   );
 }

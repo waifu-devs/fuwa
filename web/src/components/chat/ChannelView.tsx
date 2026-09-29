@@ -10,6 +10,7 @@ import { MemberList } from "@/components/chat/MemberList";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
 import { ConnDot, connectionLabel } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
+import { SPRING, SwapText } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
@@ -48,8 +49,21 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
               <ChevronLeftIcon className="size-5" />
             </button>
           )}
-          <Icon className="size-5 shrink-0 text-muted-foreground" />
-          <h1 className="shrink-0 truncate font-extrabold">{channel.name}</h1>
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span
+              key={channel.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={SPRING}
+              className="flex min-w-0 shrink items-center gap-2"
+            >
+              <Icon className="size-5 shrink-0 text-muted-foreground" />
+              <h1 className="truncate font-extrabold">
+                <SwapText className="truncate align-bottom">{channel.name}</SwapText>
+              </h1>
+            </motion.span>
+          </AnimatePresence>
           {channel.topic && (
             <>
               <span className="hidden h-5 w-px bg-border sm:block" />
@@ -69,18 +83,21 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
               </motion.span>
             )}
           </AnimatePresence>
-          <button
+          <motion.button
             type="button"
             aria-label={membersOpen ? "Hide members" : "Show members"}
             aria-pressed={membersOpen}
             onClick={() => setMembersOpen(!membersOpen)}
+            whileTap={{ scale: 0.85 }}
             className={cn(
-              "grid size-9 place-items-center rounded-full transition hover:bg-muted",
-              membersOpen ? "text-primary" : "text-muted-foreground",
+              "grid size-9 place-items-center rounded-full transition-colors hover:bg-muted",
+              membersOpen ? "bg-primary/10 text-primary" : "text-muted-foreground",
             )}
           >
-            <UsersIcon className="size-5" />
-          </button>
+            <motion.span initial={false} animate={{ rotate: membersOpen ? 0 : -12, scale: membersOpen ? 1.08 : 1 }} transition={SPRING}>
+              <UsersIcon className="size-5" />
+            </motion.span>
+          </motion.button>
         </header>
         <MessageList key={channel.id} ref={list} instanceKey={instanceKey} serverId={serverId} channel={channel} manager={manager} />
         <Composer

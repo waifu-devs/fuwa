@@ -1,13 +1,14 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { CompassIcon, GlobeIcon, PlusIcon } from "lucide-react";
-import { motion } from "motion/react";
-import { useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { useState, type ReactNode, type Ref } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa, type InstanceState } from "@/fuwa/store";
 import { useInstances } from "@/fuwa/hooks";
 import { AddInstanceDialog } from "@/components/dialogs/AddInstanceDialog";
 import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, FuwaMark, ServerIcon } from "@/components/Icons";
+import { Count, SPRING } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
 import {
   DropdownMenu,
@@ -42,10 +43,15 @@ export function Rail() {
         </span>
       </RailItem>
 
-      {instances.map((inst) => (
-        <InstanceGroup key={inst.key} inst={inst} params={params} />
-      ))}
+      <AnimatePresence initial={false} mode="popLayout">
+        {instances.map((inst) => (
+          <Pop key={inst.key}>
+            <InstanceGroup inst={inst} params={params} />
+          </Pop>
+        ))}
+      </AnimatePresence>
 
+      <motion.div layout="position" transition={SPRING} className="flex flex-col items-center gap-2">
       <Divider />
       <DropdownMenu>
         <Tooltip>
@@ -79,6 +85,7 @@ export function Rail() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      </motion.div>
 
       <CreateServerDialog open={creating} onOpenChange={setCreating} defaultInstance={params.instance} />
       <AddInstanceDialog open={connecting} onOpenChange={setConnecting} />
@@ -88,6 +95,23 @@ export function Rail() {
 
 function Divider() {
   return <span aria-hidden className="my-1 h-0.5 w-8 shrink-0 rounded-full bg-border" />;
+}
+
+/** Rail entries pop in when you join or add something, and shrink away when you leave. */
+function Pop({ children, className, ref }: { children: ReactNode; className?: string; ref?: Ref<HTMLDivElement> }) {
+  return (
+    <motion.div
+      ref={ref}
+      layout="position"
+      initial={{ opacity: 0, scale: 0.3 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.3 }}
+      transition={SPRING}
+      className={cn("flex w-full flex-col items-center gap-2", className)}
+    >
+      {children}
+    </motion.div>
+  );
 }
 
 function InstanceGroup({ inst, params }: { inst: InstanceState; params: { instance?: string; server?: string } }) {
@@ -108,9 +132,13 @@ function InstanceGroup({ inst, params }: { inst: InstanceState; params: { instan
           <ConnDot state={inst.connection} className="absolute -right-0.5 -bottom-0.5 ring-2 ring-[color-mix(in_srgb,var(--background)_75%,black)]" />
         </span>
       </RailItem>
-      {inst.servers.map((server) => (
-        <ServerButton key={server.id} inst={inst} server={server} active={here && params.server === server.id} />
-      ))}
+      <AnimatePresence initial={false} mode="popLayout">
+        {inst.servers.map((server) => (
+          <Pop key={server.id}>
+            <ServerButton inst={inst} server={server} active={here && params.server === server.id} />
+          </Pop>
+        ))}
+      </AnimatePresence>
     </>
   );
 }
@@ -127,16 +155,19 @@ function ServerButton({ inst, server, active }: { inst: InstanceState; server: S
     <RailItem label={server.name} active={active} unread={unread > 0} to="/$instance/$server" params={{ instance: inst.key, server: server.id }}>
       <span className="relative">
         <ServerIcon server={server} active={active} />
-        {unread > 0 && !active && (
-          <motion.span
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: "spring", stiffness: 600, damping: 18 }}
-            className="absolute -right-1 -bottom-1 grid h-5 min-w-5 place-items-center rounded-full bg-destructive px-1 text-[0.65rem] font-extrabold text-white ring-[3px] ring-[color-mix(in_srgb,var(--background)_75%,black)]"
-          >
-            {unread > 99 ? "99+" : unread}
-          </motion.span>
-        )}
+        <AnimatePresence>
+          {unread > 0 && !active && (
+            <motion.span
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0 }}
+              transition={{ type: "spring", stiffness: 600, damping: 18 }}
+              className="absolute -right-1 -bottom-1 grid h-5 min-w-5 place-items-center rounded-full bg-destructive px-1 text-[0.65rem] font-extrabold text-white ring-[3px] ring-[color-mix(in_srgb,var(--background)_75%,black)]"
+            >
+              <Count value={unread} max={99} />
+            </motion.span>
+          )}
+        </AnimatePresence>
       </span>
     </RailItem>
   );

@@ -10,7 +10,7 @@ import {
   Volume2Icon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type Ref } from "react";
 import { ChannelType, MemberRole, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { leaveServer } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
@@ -18,6 +18,7 @@ import { useFuwa } from "@/fuwa/store";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { ServerSettingsDialog } from "@/components/dialogs/ServerSettingsDialog";
 import { useLayout } from "@/components/Shell";
+import { Count, SPRING, SwapText } from "@/components/motion";
 import { UserPanel } from "@/components/UserPanel";
 import {
   DropdownMenu,
@@ -83,9 +84,15 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
             className="group flex h-14 shrink-0 items-center gap-2 border-b px-4 text-left transition hover:bg-muted/60 data-[state=open]:bg-muted/60"
           >
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-extrabold">{server?.name ?? "…"}</span>
+              <span className="block truncate font-extrabold">
+                <SwapText className="truncate align-bottom">{server?.name ?? "…"}</SwapText>
+              </span>
               <span className="block truncate text-xs text-muted-foreground">
-                {server ? `${Number(server.memberCount)} ${server.memberCount === 1n ? "member" : "members"} · ` : ""}
+                {server && (
+                  <>
+                    <Count value={Number(server.memberCount)} /> {server.memberCount === 1n ? "member" : "members"} ·{" "}
+                  </>
+                )}
                 {inst.node?.name ?? instanceKey}
               </span>
             </span>
@@ -168,9 +175,11 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                       transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
                       className="flex flex-col gap-0.5 overflow-hidden"
                     >
-                      {group.channels.map((c) => (
-                        <ChannelRow key={c.id} instanceKey={instanceKey} channel={c} active={params.channel === c.id} />
-                      ))}
+                      <AnimatePresence mode="popLayout">
+                        {group.channels.map((c, n) => (
+                          <ChannelRow key={c.id} index={n} instanceKey={instanceKey} channel={c} active={params.channel === c.id} />
+                        ))}
+                      </AnimatePresence>
                     </motion.ul>
                   )}
                 </AnimatePresence>
@@ -203,12 +212,33 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   );
 }
 
-function ChannelRow({ instanceKey, channel, active }: { instanceKey: string; channel: Channel; active: boolean }) {
+function ChannelRow({
+  instanceKey,
+  channel,
+  active,
+  index,
+  ref,
+}: {
+  instanceKey: string;
+  channel: Channel;
+  active: boolean;
+  index: number;
+  ref?: Ref<HTMLLIElement>;
+}) {
   const unread = useFuwa((s) => s.instances[instanceKey]?.unread[channel.id] ?? 0);
   const { compact, setNavOpen } = useLayout();
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
+  const dot = unread > 0 && !active;
   return (
-    <li className="relative">
+    <motion.li
+      ref={ref}
+      layout="position"
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0, transition: { ...SPRING, delay: Math.min(index, 12) * 0.025 } }}
+      exit={{ opacity: 0, x: -10, transition: { duration: 0.15 } }}
+      transition={SPRING}
+      className="relative"
+    >
       {active && (
         <motion.span
           layoutId={`channel-active-${instanceKey}`}
@@ -225,8 +255,19 @@ function ChannelRow({ instanceKey, channel, active }: { instanceKey: string; cha
           active ? "font-bold text-primary" : unread ? "font-bold text-foreground" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
         )}
       >
-        {unread > 0 && !active && <span className="absolute top-1/2 -left-2 h-2 w-1 -translate-y-1/2 rounded-r-full bg-foreground" />}
-        <Icon className={cn("size-[18px] shrink-0 opacity-70 transition group-hover:opacity-100", active && "opacity-100")} />
+        <motion.span
+          aria-hidden
+          initial={false}
+          animate={{ height: dot ? 8 : 0, opacity: dot ? 1 : 0 }}
+          transition={SPRING}
+          className="absolute top-1/2 -left-2 w-1 -translate-y-1/2 rounded-r-full bg-foreground"
+        />
+        <Icon
+          className={cn(
+            "size-[18px] shrink-0 opacity-70 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:-rotate-12 group-hover:scale-110 group-hover:opacity-100",
+            active && "opacity-100",
+          )}
+        />
         <span className="truncate">{channel.name}</span>
         <AnimatePresence>
           {unread > 0 && !active && (
@@ -237,11 +278,11 @@ function ChannelRow({ instanceKey, channel, active }: { instanceKey: string; cha
               transition={{ type: "spring", stiffness: 600, damping: 20 }}
               className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[0.7rem] font-extrabold text-white"
             >
-              {unread > 99 ? "99+" : unread}
+              <Count value={unread} max={99} />
             </motion.span>
           )}
         </AnimatePresence>
       </Link>
-    </li>
+    </motion.li>
   );
 }
