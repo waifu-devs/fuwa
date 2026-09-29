@@ -4,17 +4,17 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { ServerCreation, ServerLimits, ServerUsage } from "./types_pb";
+import type { Announcement, Server, ServerCreation, ServerLimits, ServerUsage, User } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
-import type { FieldMask } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_field_mask } from "@bufbuild/protobuf/wkt";
+import type { FieldMask, Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_field_mask, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file fuwa/v1/admin.proto.
  */
 export const file_fuwa_v1_admin: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL2FkbWluLnByb3RvEgdmdXdhLnYxIrgCChBJbnN0YW5jZVNldHRpbmdzEgwKBG5hbWUYASABKAkSEgoKcHVibGljX3VybBgCIAEoCRIXCg9hbGxvd2VkX29yaWdpbnMYAyADKAkSLgoObG9jYWxfYWNjb3VudHMYBCABKA4yFi5mdXdhLnYxLkxvY2FsQWNjb3VudHMSMAoPc2VydmVyX2NyZWF0aW9uGAUgASgOMhcuZnV3YS52MS5TZXJ2ZXJDcmVhdGlvbhIgChNzZXJ2ZXJzX3Blcl9hY2NvdW50GAYgASgDSACIAQESLQoOZGVmYXVsdF9saW1pdHMYByABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cxIRCgl0ZWxlbWV0cnkYCCABKAgSCwoDd2ViGAkgASgIQhYKFF9zZXJ2ZXJzX3Blcl9hY2NvdW50IpYBCg9TdGFydHVwU2V0dGluZ3MSDAoEcG9ydBgBIAEoBRISCgplbmNyeXB0aW9uGAIgASgIEhMKC2FkbWluX3Rva2VuGAMgASgIEhQKDHdlYl9idWlsdF9pbhgEIAEoCBIVCg10ZWxlbWV0cnlfdXJsGAUgASgJEg4KBmhvc3RlZBgGIAEoCBIPCgd2ZXJzaW9uGAcgASgJIqkBCg5JbnN0YW5jZUNvbmZpZxIrCghzZXR0aW5ncxgBIAEoCzIZLmZ1d2EudjEuSW5zdGFuY2VTZXR0aW5ncxIrCghkZWZhdWx0cxgCIAEoCzIZLmZ1d2EudjEuSW5zdGFuY2VTZXR0aW5ncxISCgpvdmVycmlkZGVuGAMgAygJEikKB3N0YXJ0dXAYBCABKAsyGC5mdXdhLnYxLlN0YXJ0dXBTZXR0aW5ncyIUChJHZXRTZXR0aW5nc1JlcXVlc3QiPgoTR2V0U2V0dGluZ3NSZXNwb25zZRInCgZjb25maWcYASABKAsyFy5mdXdhLnYxLkluc3RhbmNlQ29uZmlnIqUBChVVcGRhdGVTZXR0aW5nc1JlcXVlc3QSKwoIc2V0dGluZ3MYASABKAsyGS5mdXdhLnYxLkluc3RhbmNlU2V0dGluZ3MSLwoLdXBkYXRlX21hc2sYAiABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrEi4KCnJlc2V0X21hc2sYAyABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrIkEKFlVwZGF0ZVNldHRpbmdzUmVzcG9uc2USJwoGY29uZmlnGAEgASgLMhcuZnV3YS52MS5JbnN0YW5jZUNvbmZpZyIVChNHZXROb2RlVXNhZ2VSZXF1ZXN0IpQBChRHZXROb2RlVXNhZ2VSZXNwb25zZRIQCghhY2NvdW50cxgBIAEoAxIPCgdzZXJ2ZXJzGAIgASgDEioKDHNlcnZlcl91c2FnZRgDIAMoCzIULmZ1d2EudjEuU2VydmVyVXNhZ2USLQoOZGVmYXVsdF9saW1pdHMYBCABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cyJSChZTZXRTZXJ2ZXJMaW1pdHNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIlCgZsaW1pdHMYAiABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cyJAChdTZXRTZXJ2ZXJMaW1pdHNSZXNwb25zZRIlCgZsaW1pdHMYASABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cyp7Cg1Mb2NhbEFjY291bnRzEh4KGkxPQ0FMX0FDQ09VTlRTX1VOU1BFQ0lGSUVEEAASFwoTTE9DQUxfQUNDT1VOVFNfT1BFThABEhkKFUxPQ0FMX0FDQ09VTlRTX0NMT1NFRBACEhYKEkxPQ0FMX0FDQ09VTlRTX09GRhADMs4CCgxBZG1pblNlcnZpY2USSAoLR2V0U2V0dGluZ3MSGy5mdXdhLnYxLkdldFNldHRpbmdzUmVxdWVzdBocLmZ1d2EudjEuR2V0U2V0dGluZ3NSZXNwb25zZRJRCg5VcGRhdGVTZXR0aW5ncxIeLmZ1d2EudjEuVXBkYXRlU2V0dGluZ3NSZXF1ZXN0Gh8uZnV3YS52MS5VcGRhdGVTZXR0aW5nc1Jlc3BvbnNlEksKDEdldE5vZGVVc2FnZRIcLmZ1d2EudjEuR2V0Tm9kZVVzYWdlUmVxdWVzdBodLmZ1d2EudjEuR2V0Tm9kZVVzYWdlUmVzcG9uc2USVAoPU2V0U2VydmVyTGltaXRzEh8uZnV3YS52MS5TZXRTZXJ2ZXJMaW1pdHNSZXF1ZXN0GiAuZnV3YS52MS5TZXRTZXJ2ZXJMaW1pdHNSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_field_mask]);
+  fileDesc("ChNmdXdhL3YxL2FkbWluLnByb3RvEgdmdXdhLnYxIrgCChBJbnN0YW5jZVNldHRpbmdzEgwKBG5hbWUYASABKAkSEgoKcHVibGljX3VybBgCIAEoCRIXCg9hbGxvd2VkX29yaWdpbnMYAyADKAkSLgoObG9jYWxfYWNjb3VudHMYBCABKA4yFi5mdXdhLnYxLkxvY2FsQWNjb3VudHMSMAoPc2VydmVyX2NyZWF0aW9uGAUgASgOMhcuZnV3YS52MS5TZXJ2ZXJDcmVhdGlvbhIgChNzZXJ2ZXJzX3Blcl9hY2NvdW50GAYgASgDSACIAQESLQoOZGVmYXVsdF9saW1pdHMYByABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cxIRCgl0ZWxlbWV0cnkYCCABKAgSCwoDd2ViGAkgASgIQhYKFF9zZXJ2ZXJzX3Blcl9hY2NvdW50IpYBCg9TdGFydHVwU2V0dGluZ3MSDAoEcG9ydBgBIAEoBRISCgplbmNyeXB0aW9uGAIgASgIEhMKC2FkbWluX3Rva2VuGAMgASgIEhQKDHdlYl9idWlsdF9pbhgEIAEoCBIVCg10ZWxlbWV0cnlfdXJsGAUgASgJEg4KBmhvc3RlZBgGIAEoCBIPCgd2ZXJzaW9uGAcgASgJIqkBCg5JbnN0YW5jZUNvbmZpZxIrCghzZXR0aW5ncxgBIAEoCzIZLmZ1d2EudjEuSW5zdGFuY2VTZXR0aW5ncxIrCghkZWZhdWx0cxgCIAEoCzIZLmZ1d2EudjEuSW5zdGFuY2VTZXR0aW5ncxISCgpvdmVycmlkZGVuGAMgAygJEikKB3N0YXJ0dXAYBCABKAsyGC5mdXdhLnYxLlN0YXJ0dXBTZXR0aW5ncyIUChJHZXRTZXR0aW5nc1JlcXVlc3QiPgoTR2V0U2V0dGluZ3NSZXNwb25zZRInCgZjb25maWcYASABKAsyFy5mdXdhLnYxLkluc3RhbmNlQ29uZmlnIqUBChVVcGRhdGVTZXR0aW5nc1JlcXVlc3QSKwoIc2V0dGluZ3MYASABKAsyGS5mdXdhLnYxLkluc3RhbmNlU2V0dGluZ3MSLwoLdXBkYXRlX21hc2sYAiABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrEi4KCnJlc2V0X21hc2sYAyABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrIkEKFlVwZGF0ZVNldHRpbmdzUmVzcG9uc2USJwoGY29uZmlnGAEgASgLMhcuZnV3YS52MS5JbnN0YW5jZUNvbmZpZyIVChNHZXROb2RlVXNhZ2VSZXF1ZXN0IpQBChRHZXROb2RlVXNhZ2VSZXNwb25zZRIQCghhY2NvdW50cxgBIAEoAxIPCgdzZXJ2ZXJzGAIgASgDEioKDHNlcnZlcl91c2FnZRgDIAMoCzIULmZ1d2EudjEuU2VydmVyVXNhZ2USLQoOZGVmYXVsdF9saW1pdHMYBCABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cyJSChZTZXRTZXJ2ZXJMaW1pdHNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIlCgZsaW1pdHMYAiABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cyJAChdTZXRTZXJ2ZXJMaW1pdHNSZXNwb25zZRIlCgZsaW1pdHMYASABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cyLIAgoOQWNjb3VudFN1bW1hcnkSGwoEdXNlchgBIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgCIAEoCBIQCghkaXNhYmxlZBgDIAEoCBIXCg9kaXNhYmxlZF9yZWFzb24YBCABKAkSLwoLZGlzYWJsZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCnR3b19mYWN0b3IYBiABKAgSLgoKY3JlYXRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoMbGFzdF9zZWVuX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIQCghzZXNzaW9ucxgJIAEoBRIPCgdzZXJ2ZXJzGAogASgFEhUKDXNlcnZlcnNfb3duZWQYCyABKAUibgoTTGlzdEFjY291bnRzUmVxdWVzdBINCgVxdWVyeRgBIAEoCRImCgZmaWx0ZXIYAiABKA4yFi5mdXdhLnYxLkFjY291bnRGaWx0ZXISEQoJYmVmb3JlX2lkGAMgASgJEg0KBWxpbWl0GAQgASgFInsKFExpc3RBY2NvdW50c1Jlc3BvbnNlEikKCGFjY291bnRzGAEgAygLMhcuZnV3YS52MS5BY2NvdW50U3VtbWFyeRIQCghoYXNfbW9yZRgCIAEoCBImCgZ0b3RhbHMYAyABKAsyFi5mdXdhLnYxLkFjY291bnRUb3RhbHMiPgoNQWNjb3VudFRvdGFscxILCgNhbGwYASABKAMSDgoGYWRtaW5zGAIgASgDEhAKCGRpc2FibGVkGAMgASgDInwKFFVwZGF0ZUFjY291bnRSZXF1ZXN0EhIKCmFjY291bnRfaWQYASABKAkSEgoFYWRtaW4YAiABKAhIAIgBARIVCghkaXNhYmxlZBgDIAEoCEgBiAEBEg4KBnJlYXNvbhgEIAEoCUIICgZfYWRtaW5CCwoJX2Rpc2FibGVkIkEKFVVwZGF0ZUFjY291bnRSZXNwb25zZRIoCgdhY2NvdW50GAEgASgLMhcuZnV3YS52MS5BY2NvdW50U3VtbWFyeSJOChtSZXNldEFjY291bnRQYXNzd29yZFJlcXVlc3QSEgoKYWNjb3VudF9pZBgBIAEoCRIbChN0dXJuX29mZl90d29fZmFjdG9yGAIgASgIIjAKHFJlc2V0QWNjb3VudFBhc3N3b3JkUmVzcG9uc2USEAoIcGFzc3dvcmQYASABKAkiqwEKDkluc3RhbmNlU2VydmVyEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyEhwKBW93bmVyGAIgASgLMg0uZnV3YS52MS5Vc2VyEiMKBXVzYWdlGAMgASgLMhQuZnV3YS52MS5TZXJ2ZXJVc2FnZRIlCgZsaW1pdHMYBCABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cxIOCgZtZW1iZXIYBSABKAgiHAoaTGlzdEluc3RhbmNlU2VydmVyc1JlcXVlc3QiRwobTGlzdEluc3RhbmNlU2VydmVyc1Jlc3BvbnNlEigKB3NlcnZlcnMYASADKAsyFy5mdXdhLnYxLkluc3RhbmNlU2VydmVyIigKE0V4cG9ydFNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIkUKFEV4cG9ydFNlcnZlclJlc3BvbnNlEg0KBWNodW5rGAEgASgMEgwKBHNpemUYAiABKAMSEAoIZmlsZW5hbWUYAyABKAkiRQoWU2V0QW5ub3VuY2VtZW50UmVxdWVzdBIrCgxhbm5vdW5jZW1lbnQYASABKAsyFS5mdXdhLnYxLkFubm91bmNlbWVudCJGChdTZXRBbm5vdW5jZW1lbnRSZXNwb25zZRIrCgxhbm5vdW5jZW1lbnQYASABKAsyFS5mdXdhLnYxLkFubm91bmNlbWVudCp7Cg1Mb2NhbEFjY291bnRzEh4KGkxPQ0FMX0FDQ09VTlRTX1VOU1BFQ0lGSUVEEAASFwoTTE9DQUxfQUNDT1VOVFNfT1BFThABEhkKFUxPQ0FMX0FDQ09VTlRTX0NMT1NFRBACEhYKEkxPQ0FMX0FDQ09VTlRTX09GRhADKmcKDUFjY291bnRGaWx0ZXISHgoaQUNDT1VOVF9GSUxURVJfVU5TUEVDSUZJRUQQABIZChVBQ0NPVU5UX0ZJTFRFUl9BRE1JTlMQARIbChdBQ0NPVU5UX0ZJTFRFUl9ESVNBQkxFRBACMtcGCgxBZG1pblNlcnZpY2USSAoLR2V0U2V0dGluZ3MSGy5mdXdhLnYxLkdldFNldHRpbmdzUmVxdWVzdBocLmZ1d2EudjEuR2V0U2V0dGluZ3NSZXNwb25zZRJRCg5VcGRhdGVTZXR0aW5ncxIeLmZ1d2EudjEuVXBkYXRlU2V0dGluZ3NSZXF1ZXN0Gh8uZnV3YS52MS5VcGRhdGVTZXR0aW5nc1Jlc3BvbnNlEksKDEdldE5vZGVVc2FnZRIcLmZ1d2EudjEuR2V0Tm9kZVVzYWdlUmVxdWVzdBodLmZ1d2EudjEuR2V0Tm9kZVVzYWdlUmVzcG9uc2USVAoPU2V0U2VydmVyTGltaXRzEh8uZnV3YS52MS5TZXRTZXJ2ZXJMaW1pdHNSZXF1ZXN0GiAuZnV3YS52MS5TZXRTZXJ2ZXJMaW1pdHNSZXNwb25zZRJLCgxMaXN0QWNjb3VudHMSHC5mdXdhLnYxLkxpc3RBY2NvdW50c1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RBY2NvdW50c1Jlc3BvbnNlEk4KDVVwZGF0ZUFjY291bnQSHS5mdXdhLnYxLlVwZGF0ZUFjY291bnRSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVBY2NvdW50UmVzcG9uc2USYwoUUmVzZXRBY2NvdW50UGFzc3dvcmQSJC5mdXdhLnYxLlJlc2V0QWNjb3VudFBhc3N3b3JkUmVxdWVzdBolLmZ1d2EudjEuUmVzZXRBY2NvdW50UGFzc3dvcmRSZXNwb25zZRJgChNMaXN0SW5zdGFuY2VTZXJ2ZXJzEiMuZnV3YS52MS5MaXN0SW5zdGFuY2VTZXJ2ZXJzUmVxdWVzdBokLmZ1d2EudjEuTGlzdEluc3RhbmNlU2VydmVyc1Jlc3BvbnNlEk0KDEV4cG9ydFNlcnZlchIcLmZ1d2EudjEuRXhwb3J0U2VydmVyUmVxdWVzdBodLmZ1d2EudjEuRXhwb3J0U2VydmVyUmVzcG9uc2UwARJUCg9TZXRBbm5vdW5jZW1lbnQSHy5mdXdhLnYxLlNldEFubm91bmNlbWVudFJlcXVlc3QaIC5mdXdhLnYxLlNldEFubm91bmNlbWVudFJlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types, file_google_protobuf_field_mask, file_google_protobuf_timestamp]);
 
 /**
  * Everything about an instance an admin can change while it runs. Each setting
@@ -368,6 +368,431 @@ export const SetServerLimitsResponseSchema: GenMessage<SetServerLimitsResponse> 
   messageDesc(file_fuwa_v1_admin, 10);
 
 /**
+ * An account as instance admins see it.
+ *
+ * @generated from message fuwa.v1.AccountSummary
+ */
+export type AccountSummary = Message<"fuwa.v1.AccountSummary"> & {
+  /**
+   * @generated from field: fuwa.v1.User user = 1;
+   */
+  user?: User | undefined;
+
+  /**
+   * @generated from field: bool admin = 2;
+   */
+  admin: boolean;
+
+  /**
+   * Turned off by an admin: it can't sign in.
+   *
+   * @generated from field: bool disabled = 3;
+   */
+  disabled: boolean;
+
+  /**
+   * Why, as the admin put it. Only admins see it.
+   *
+   * @generated from field: string disabled_reason = 4;
+   */
+  disabledReason: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp disabled_at = 5;
+   */
+  disabledAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: bool two_factor = 6;
+   */
+  twoFactor: boolean;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 7;
+   */
+  createdAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp last_seen_at = 8;
+   */
+  lastSeenAt?: Timestamp | undefined;
+
+  /**
+   * Devices signed in right now.
+   *
+   * @generated from field: int32 sessions = 9;
+   */
+  sessions: number;
+
+  /**
+   * Servers it's a member of, and how many of those it owns.
+   *
+   * @generated from field: int32 servers = 10;
+   */
+  servers: number;
+
+  /**
+   * @generated from field: int32 servers_owned = 11;
+   */
+  serversOwned: number;
+};
+
+/**
+ * Describes the message fuwa.v1.AccountSummary.
+ * Use `create(AccountSummarySchema)` to create a new message.
+ */
+export const AccountSummarySchema: GenMessage<AccountSummary> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 11);
+
+/**
+ * @generated from message fuwa.v1.ListAccountsRequest
+ */
+export type ListAccountsRequest = Message<"fuwa.v1.ListAccountsRequest"> & {
+  /**
+   * Matches usernames and display names.
+   *
+   * @generated from field: string query = 1;
+   */
+  query: string;
+
+  /**
+   * @generated from field: fuwa.v1.AccountFilter filter = 2;
+   */
+  filter: AccountFilter;
+
+  /**
+   * For the next page: the id of the last account on the page before.
+   *
+   * @generated from field: string before_id = 3;
+   */
+  beforeId: string;
+
+  /**
+   * At most this many; 50 when unset, and never more than 200.
+   *
+   * @generated from field: int32 limit = 4;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message fuwa.v1.ListAccountsRequest.
+ * Use `create(ListAccountsRequestSchema)` to create a new message.
+ */
+export const ListAccountsRequestSchema: GenMessage<ListAccountsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 12);
+
+/**
+ * @generated from message fuwa.v1.ListAccountsResponse
+ */
+export type ListAccountsResponse = Message<"fuwa.v1.ListAccountsResponse"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.AccountSummary accounts = 1;
+   */
+  accounts: AccountSummary[];
+
+  /**
+   * @generated from field: bool has_more = 2;
+   */
+  hasMore: boolean;
+
+  /**
+   * Across the whole instance, whatever the query and filter.
+   *
+   * @generated from field: fuwa.v1.AccountTotals totals = 3;
+   */
+  totals?: AccountTotals | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.ListAccountsResponse.
+ * Use `create(ListAccountsResponseSchema)` to create a new message.
+ */
+export const ListAccountsResponseSchema: GenMessage<ListAccountsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 13);
+
+/**
+ * @generated from message fuwa.v1.AccountTotals
+ */
+export type AccountTotals = Message<"fuwa.v1.AccountTotals"> & {
+  /**
+   * @generated from field: int64 all = 1;
+   */
+  all: bigint;
+
+  /**
+   * @generated from field: int64 admins = 2;
+   */
+  admins: bigint;
+
+  /**
+   * @generated from field: int64 disabled = 3;
+   */
+  disabled: bigint;
+};
+
+/**
+ * Describes the message fuwa.v1.AccountTotals.
+ * Use `create(AccountTotalsSchema)` to create a new message.
+ */
+export const AccountTotalsSchema: GenMessage<AccountTotals> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 14);
+
+/**
+ * @generated from message fuwa.v1.UpdateAccountRequest
+ */
+export type UpdateAccountRequest = Message<"fuwa.v1.UpdateAccountRequest"> & {
+  /**
+   * @generated from field: string account_id = 1;
+   */
+  accountId: string;
+
+  /**
+   * @generated from field: optional bool admin = 2;
+   */
+  admin?: boolean | undefined;
+
+  /**
+   * @generated from field: optional bool disabled = 3;
+   */
+  disabled?: boolean | undefined;
+
+  /**
+   * Why it's being turned off, up to 512 characters. Only admins see it.
+   *
+   * @generated from field: string reason = 4;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateAccountRequest.
+ * Use `create(UpdateAccountRequestSchema)` to create a new message.
+ */
+export const UpdateAccountRequestSchema: GenMessage<UpdateAccountRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 15);
+
+/**
+ * @generated from message fuwa.v1.UpdateAccountResponse
+ */
+export type UpdateAccountResponse = Message<"fuwa.v1.UpdateAccountResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.AccountSummary account = 1;
+   */
+  account?: AccountSummary | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateAccountResponse.
+ * Use `create(UpdateAccountResponseSchema)` to create a new message.
+ */
+export const UpdateAccountResponseSchema: GenMessage<UpdateAccountResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 16);
+
+/**
+ * @generated from message fuwa.v1.ResetAccountPasswordRequest
+ */
+export type ResetAccountPasswordRequest = Message<"fuwa.v1.ResetAccountPasswordRequest"> & {
+  /**
+   * @generated from field: string account_id = 1;
+   */
+  accountId: string;
+
+  /**
+   * @generated from field: bool turn_off_two_factor = 2;
+   */
+  turnOffTwoFactor: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.ResetAccountPasswordRequest.
+ * Use `create(ResetAccountPasswordRequestSchema)` to create a new message.
+ */
+export const ResetAccountPasswordRequestSchema: GenMessage<ResetAccountPasswordRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 17);
+
+/**
+ * @generated from message fuwa.v1.ResetAccountPasswordResponse
+ */
+export type ResetAccountPasswordResponse = Message<"fuwa.v1.ResetAccountPasswordResponse"> & {
+  /**
+   * The new password. It isn't kept anywhere readable, so this is the only
+   * time it can be shown.
+   *
+   * @generated from field: string password = 1;
+   */
+  password: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ResetAccountPasswordResponse.
+ * Use `create(ResetAccountPasswordResponseSchema)` to create a new message.
+ */
+export const ResetAccountPasswordResponseSchema: GenMessage<ResetAccountPasswordResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 18);
+
+/**
+ * A community server as instance admins see it.
+ *
+ * @generated from message fuwa.v1.InstanceServer
+ */
+export type InstanceServer = Message<"fuwa.v1.InstanceServer"> & {
+  /**
+   * @generated from field: fuwa.v1.Server server = 1;
+   */
+  server?: Server | undefined;
+
+  /**
+   * @generated from field: fuwa.v1.User owner = 2;
+   */
+  owner?: User | undefined;
+
+  /**
+   * @generated from field: fuwa.v1.ServerUsage usage = 3;
+   */
+  usage?: ServerUsage | undefined;
+
+  /**
+   * The caps in force, the server's own or the instance defaults.
+   *
+   * @generated from field: fuwa.v1.ServerLimits limits = 4;
+   */
+  limits?: ServerLimits | undefined;
+
+  /**
+   * Whether the caller is a member, and can open its own settings.
+   *
+   * @generated from field: bool member = 5;
+   */
+  member: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.InstanceServer.
+ * Use `create(InstanceServerSchema)` to create a new message.
+ */
+export const InstanceServerSchema: GenMessage<InstanceServer> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 19);
+
+/**
+ * @generated from message fuwa.v1.ListInstanceServersRequest
+ */
+export type ListInstanceServersRequest = Message<"fuwa.v1.ListInstanceServersRequest"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.ListInstanceServersRequest.
+ * Use `create(ListInstanceServersRequestSchema)` to create a new message.
+ */
+export const ListInstanceServersRequestSchema: GenMessage<ListInstanceServersRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 20);
+
+/**
+ * @generated from message fuwa.v1.ListInstanceServersResponse
+ */
+export type ListInstanceServersResponse = Message<"fuwa.v1.ListInstanceServersResponse"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.InstanceServer servers = 1;
+   */
+  servers: InstanceServer[];
+};
+
+/**
+ * Describes the message fuwa.v1.ListInstanceServersResponse.
+ * Use `create(ListInstanceServersResponseSchema)` to create a new message.
+ */
+export const ListInstanceServersResponseSchema: GenMessage<ListInstanceServersResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 21);
+
+/**
+ * @generated from message fuwa.v1.ExportServerRequest
+ */
+export type ExportServerRequest = Message<"fuwa.v1.ExportServerRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ExportServerRequest.
+ * Use `create(ExportServerRequestSchema)` to create a new message.
+ */
+export const ExportServerRequestSchema: GenMessage<ExportServerRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 22);
+
+/**
+ * One piece of an exported file. The first also says what the whole is.
+ *
+ * @generated from message fuwa.v1.ExportServerResponse
+ */
+export type ExportServerResponse = Message<"fuwa.v1.ExportServerResponse"> & {
+  /**
+   * @generated from field: bytes chunk = 1;
+   */
+  chunk: Uint8Array;
+
+  /**
+   * The whole file's size in bytes. First piece only.
+   *
+   * @generated from field: int64 size = 2;
+   */
+  size: bigint;
+
+  /**
+   * A name to save it under. First piece only.
+   *
+   * @generated from field: string filename = 3;
+   */
+  filename: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ExportServerResponse.
+ * Use `create(ExportServerResponseSchema)` to create a new message.
+ */
+export const ExportServerResponseSchema: GenMessage<ExportServerResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 23);
+
+/**
+ * @generated from message fuwa.v1.SetAnnouncementRequest
+ */
+export type SetAnnouncementRequest = Message<"fuwa.v1.SetAnnouncementRequest"> & {
+  /**
+   * Empty text takes the banner down.
+   *
+   * @generated from field: fuwa.v1.Announcement announcement = 1;
+   */
+  announcement?: Announcement | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.SetAnnouncementRequest.
+ * Use `create(SetAnnouncementRequestSchema)` to create a new message.
+ */
+export const SetAnnouncementRequestSchema: GenMessage<SetAnnouncementRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 24);
+
+/**
+ * @generated from message fuwa.v1.SetAnnouncementResponse
+ */
+export type SetAnnouncementResponse = Message<"fuwa.v1.SetAnnouncementResponse"> & {
+  /**
+   * What clients now show, if anything.
+   *
+   * @generated from field: fuwa.v1.Announcement announcement = 1;
+   */
+  announcement?: Announcement | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.SetAnnouncementResponse.
+ * Use `create(SetAnnouncementResponseSchema)` to create a new message.
+ */
+export const SetAnnouncementResponseSchema: GenMessage<SetAnnouncementResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 25);
+
+/**
  * Whether standalone accounts (a username and password kept on the instance) work.
  *
  * @generated from enum fuwa.v1.LocalAccounts
@@ -407,9 +832,38 @@ export const LocalAccountsSchema: GenEnum<LocalAccounts> = /*@__PURE__*/
   enumDesc(file_fuwa_v1_admin, 0);
 
 /**
- * Instance administration: settings, usage across every server and the caps on
- * them. Callable by instance admins, or with the operator's FUWA_ADMIN_TOKEN
- * (for a control plane such as the one behind the hosted tiers).
+ * @generated from enum fuwa.v1.AccountFilter
+ */
+export enum AccountFilter {
+  /**
+   * Every account.
+   *
+   * @generated from enum value: ACCOUNT_FILTER_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ACCOUNT_FILTER_ADMINS = 1;
+   */
+  ADMINS = 1,
+
+  /**
+   * @generated from enum value: ACCOUNT_FILTER_DISABLED = 2;
+   */
+  DISABLED = 2,
+}
+
+/**
+ * Describes the enum fuwa.v1.AccountFilter.
+ */
+export const AccountFilterSchema: GenEnum<AccountFilter> = /*@__PURE__*/
+  enumDesc(file_fuwa_v1_admin, 1);
+
+/**
+ * Instance administration: settings, accounts, every server with its usage and
+ * caps, and the announcement banner. Callable by instance admins, or with the
+ * operator's FUWA_ADMIN_TOKEN (for a control plane such as the one behind the
+ * hosted tiers).
  *
  * @generated from service fuwa.v1.AdminService
  */
@@ -452,6 +906,74 @@ export const AdminService: GenService<{
     methodKind: "unary";
     input: typeof SetServerLimitsRequestSchema;
     output: typeof SetServerLimitsResponseSchema;
+  },
+  /**
+   * Accounts on this instance, newest first, a page at a time.
+   *
+   * @generated from rpc fuwa.v1.AdminService.ListAccounts
+   */
+  listAccounts: {
+    methodKind: "unary";
+    input: typeof ListAccountsRequestSchema;
+    output: typeof ListAccountsResponseSchema;
+  },
+  /**
+   * Makes an account an instance admin or takes that away, or turns the
+   * account off or back on. A turned-off account can't sign in and its devices
+   * are signed out. Admins can't change their own account here, and the last
+   * admin stays one.
+   *
+   * @generated from rpc fuwa.v1.AdminService.UpdateAccount
+   */
+  updateAccount: {
+    methodKind: "unary";
+    input: typeof UpdateAccountRequestSchema;
+    output: typeof UpdateAccountResponseSchema;
+  },
+  /**
+   * Gives a standalone account a new random password, shown once, and signs
+   * out its devices. Optionally turns off its two-step sign-in too, for
+   * someone who lost their authenticator.
+   *
+   * @generated from rpc fuwa.v1.AdminService.ResetAccountPassword
+   */
+  resetAccountPassword: {
+    methodKind: "unary";
+    input: typeof ResetAccountPasswordRequestSchema;
+    output: typeof ResetAccountPasswordResponseSchema;
+  },
+  /**
+   * Every community server on the instance, with its owner, usage and caps,
+   * members or not.
+   *
+   * @generated from rpc fuwa.v1.AdminService.ListInstanceServers
+   */
+  listInstanceServers: {
+    methodKind: "unary";
+    input: typeof ListInstanceServersRequestSchema;
+    output: typeof ListInstanceServersResponseSchema;
+  },
+  /**
+   * A copy of a server's database as a plain SQLite file any SQLite tool can
+   * open, sent in pieces. It is never encrypted, even when the instance
+   * encrypts its files.
+   *
+   * @generated from rpc fuwa.v1.AdminService.ExportServer
+   */
+  exportServer: {
+    methodKind: "server_streaming";
+    input: typeof ExportServerRequestSchema;
+    output: typeof ExportServerResponseSchema;
+  },
+  /**
+   * Puts a banner on every client of this instance, or takes it down.
+   *
+   * @generated from rpc fuwa.v1.AdminService.SetAnnouncement
+   */
+  setAnnouncement: {
+    methodKind: "unary";
+    input: typeof SetAnnouncementRequestSchema;
+    output: typeof SetAnnouncementResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_admin, 0);

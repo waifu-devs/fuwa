@@ -2,6 +2,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { MotionConfig } from "motion/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { refreshOnFocus } from "@/fuwa/actions";
 import { restore } from "@/fuwa/sync";
 import { watchUnread } from "@/lib/notify";
 import { applyPrefs, usePrefs, watchSystem } from "@/lib/prefs";
@@ -15,6 +16,7 @@ applyPrefs();
 watchSystem();
 restore();
 watchUnread();
+refreshOnFocus();
 
 function App() {
   // Springs and slides calm down to fades when the system asks for less motion, or the Motion setting says so.

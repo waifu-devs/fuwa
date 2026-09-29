@@ -10,7 +10,10 @@ import {
   UsersIcon,
   BanIcon,
   GaugeIcon,
+  MegaphoneIcon,
+  ServerIcon,
   SlidersHorizontalIcon,
+  UserPlusIcon,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -30,6 +33,9 @@ import { formatBytes } from "@/lib/format";
 import { HIDDEN_ADDRESS } from "@/lib/streamer";
 import { cn } from "@/lib/utils";
 import { Cap, Choice, SaveBar, Setting, SPRING, Toggle } from "./controls";
+import { Accounts } from "./instance/Accounts";
+import { Announcement } from "./instance/Announcement";
+import { Servers } from "./instance/Servers";
 import { SettingsScreen } from "./SettingsScreen";
 
 /** Every setting, as the API names it, and how to read it for comparing. */
@@ -154,9 +160,9 @@ export function InstanceSettingsDialog({
               ],
             },
             {
-              id: "accounts",
-              label: "Accounts",
-              icon: UsersIcon,
+              id: "sign-ups",
+              label: "Sign-ups",
+              icon: UserPlusIcon,
               description: "Who can join this instance and what they can make.",
               settings: [
                 { id: "local-accounts", label: "Standalone accounts", keywords: "sign up password" },
@@ -180,6 +186,37 @@ export function InstanceSettingsDialog({
             },
           ],
         },
+        {
+          label: "Manage",
+          sections: [
+            {
+              id: "accounts",
+              label: "Accounts",
+              icon: UsersIcon,
+              description: "Everyone with an account here. Make admins, reset passwords, or turn an account off.",
+              keywords: "users people disable ban reset password admin",
+            },
+            {
+              id: "servers",
+              label: "Servers",
+              icon: ServerIcon,
+              description: "Every server on this instance, whether you're in it or not.",
+              keywords: "communities export backup delete caps usage storage",
+            },
+            {
+              id: "announcement",
+              label: "Announcement",
+              icon: MegaphoneIcon,
+              description: "A banner at the top of the app for everyone on this instance.",
+              keywords: "banner maintenance notice news",
+              settings: [
+                { id: "announcement-text", label: "Announcement message" },
+                { id: "announcement-tone", label: "Announcement tone", keywords: "urgent warning info" },
+                { id: "announcement-ends", label: "When the announcement comes down", keywords: "expire end" },
+              ],
+            },
+          ],
+        },
       ]}
       footer={
         <SaveBar
@@ -195,7 +232,13 @@ export function InstanceSettingsDialog({
         />
       }
     >
-      {loadError ? (
+      {tab === "accounts" ? (
+        <Accounts instanceKey={instanceKey} />
+      ) : tab === "servers" ? (
+        <Servers instanceKey={instanceKey} onLeave={() => onOpenChange(false)} />
+      ) : tab === "announcement" ? (
+        <Announcement instanceKey={instanceKey} />
+      ) : loadError ? (
         <p className="text-sm text-muted-foreground first-letter:uppercase">{loadError}</p>
       ) : loading ? (
         <div className="flex flex-col gap-3">
@@ -250,7 +293,7 @@ export function InstanceSettingsDialog({
               <Startup config={config} />
             </>
           )}
-          {tab === "accounts" && (
+          {tab === "sign-ups" && (
             <>
               <Setting
                 id="local-accounts"

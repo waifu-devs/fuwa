@@ -18,12 +18,14 @@ use crate::config;
 use crate::db::{self, EncryptionKey, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::hub::Hub;
-use crate::id::{new_id, now_ms, parse_id, timestamp};
+use crate::id::{millis, new_id, now_ms, parse_id, timestamp};
 use crate::pb;
 
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0001_init.sql"),
     include_str!("../migrations/server/0002_concurrent_writes.sql"),
+    include_str!("../migrations/server/0003_status.sql"),
+    include_str!("../migrations/server/0004_moderation.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -78,6 +80,77 @@ pub async fn add_usage(conn: &Connection, change: UsageChange) -> Result<()> {
     )
     .await?;
     Ok(())
+}
+
+/// What's stored in an audit entry's `changes` column.
+#[derive(Clone, PartialEq, prost::Message)]
+struct AuditChanges {
+    #[prost(message, repeated, tag = "1")]
+    changes: Vec<pb::AuditChange>,
+}
+
+/// One thing an owner or admin did, as [`audit`] records it.
+#[derive(Debug, Default, Clone)]
+pub struct Audit {
+    pub action: pb::AuditAction,
+    pub target_id: String,
+    pub channel_name: String,
+    pub reason: String,
+    pub changes: Vec<pb::AuditChange>,
+}
+
+impl Audit {
+    pub fn new(action: pb::AuditAction, target_id: impl Into<String>) -> Self {
+        Self { action, target_id: target_id.into(), ..Default::default() }
+    }
+
+    pub fn channel(mut self, name: impl Into<String>) -> Self {
+        self.channel_name = name.into();
+        self
+    }
+
+    pub fn reason(mut self, reason: impl Into<String>) -> Self {
+        self.reason = reason.into();
+        self
+    }
+
+    /// Notes a field's change, if it changed.
+    pub fn change(mut self, field: &str, before: impl ToString, after: impl ToString) -> Self {
+        let (before, after) = (before.to_string(), after.to_string());
+        if before != after {
+            self.changes.push(pb::AuditChange { field: field.into(), before, after });
+        }
+        self
+    }
+}
+
+/// Adds an entry to the audit log, in the write that did it.
+pub async fn audit(conn: &Connection, actor_id: &str, entry: Audit) -> Result<()> {
+    let changes = (!entry.changes.is_empty()).then(|| AuditChanges { changes: entry.changes }.encode_to_vec());
+    conn.execute(
+        "INSERT INTO audit (id, actor_id, action, target_id, channel_name, reason, changes, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        (
+            new_id(),
+            actor_id,
+            entry.action as i64,
+            entry.target_id.as_str(),
+            entry.channel_name.as_str(),
+            entry.reason.as_str(),
+            changes,
+            now_ms(),
+        ),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Reads an audit entry's `changes` column.
+pub fn audit_changes(bytes: Option<Vec<u8>>) -> Result<Vec<pb::AuditChange>> {
+    Ok(match bytes {
+        Some(bytes) => AuditChanges::decode(bytes.as_slice())?.changes,
+        None => vec![],
+    })
 }
 
 impl ServerDb {
@@ -264,6 +337,29 @@ impl ServerDb {
             .collect()
     }
 
+    /// Writes a copy of this server's database to `dest` as a plain SQLite
+    /// file: not encrypted, and not in concurrent-writer mode, so any SQLite
+    /// tool opens it. Writes to the server wait while it's copied, so the copy
+    /// is one moment.
+    pub async fn export_to(&self, dest: &Path) -> Result<()> {
+        let path = dest
+            .to_str()
+            .filter(|p| !p.contains('\''))
+            .ok_or_else(|| Error::internal(format!("can't export to {}", dest.display())))?;
+        {
+            let _alone = self.gate.write().await;
+            let conn = self.read()?;
+            conn.execute(&format!("VACUUM INTO '{path}'"), ()).await?;
+        }
+        db::to_sqlite(dest, None).await?;
+        for suffix in ["-wal", "-log"] {
+            let mut side = dest.as_os_str().to_owned();
+            side.push(suffix);
+            let _ = std::fs::remove_file(side);
+        }
+        Ok(())
+    }
+
     pub async fn server(&self) -> Result<pb::Server> {
         let conn = self.read()?;
         load_server(&conn).await
@@ -376,7 +472,8 @@ fn usage_row(r: &Row) -> turso::Result<pb::ServerUsage> {
 pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
     query_one(
         conn,
-        "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members
+        "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
+                default_notifications, system_channel_id
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -390,6 +487,8 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 created_at: Some(timestamp(r.get(6)?)),
                 updated_at: Some(timestamp(r.get(7)?)),
                 member_count: r.get(8)?,
+                default_notifications: r.get(9)?,
+                system_channel_id: r.get::<Option<String>>(10)?.unwrap_or_default(),
             })
         },
     )
@@ -509,16 +608,17 @@ impl Servers {
         let created = sdb
             .write(&owner.id, async |conn, events| {
                 let now = now_ms();
+                let general = new_id();
                 conn.execute(
-                    "INSERT INTO server (id, name, description, icon_url, owner_id, discoverable, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
-                    (id.as_str(), new.name.as_str(), new.description.as_str(), new.icon_url.as_str(), owner.id.as_str(), new.discoverable, now),
+                    "INSERT INTO server (id, name, description, icon_url, owner_id, discoverable, system_channel_id, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+                    (id.as_str(), new.name.as_str(), new.description.as_str(), new.icon_url.as_str(), owner.id.as_str(), new.discoverable, general.as_str(), now),
                 )
                 .await?;
                 let member = add_member(conn, owner, pb::MemberRole::Owner, &id, now).await?;
                 events.push(Payload::MemberJoined(pb::MemberJoined { member: Some(member) }));
                 let channel = pb::Channel {
-                    id: new_id(),
+                    id: general.clone(),
                     server_id: id.clone(),
                     name: "general".into(),
                     r#type: pb::ChannelType::Text as i32,
@@ -527,6 +627,7 @@ impl Servers {
                     position: 0,
                     created_at: Some(timestamp(now)),
                     updated_at: Some(timestamp(now)),
+                    slowmode_seconds: 0,
                 };
                 conn.execute(
                     "INSERT INTO channels (id, name, type, position, created_at, updated_at) VALUES (?1, ?2, ?3, 0, ?4, ?4)",
@@ -689,32 +790,40 @@ pub async fn add_member(
         nickname: String::new(),
         role: role as i32,
         joined_at: Some(timestamp(now)),
+        timed_out_until: None,
     })
 }
 
 /// Stores the latest look of a user who is or was a member.
 pub async fn upsert_user(conn: &Connection, user: &pb::User) -> Result<()> {
+    let status_expires_at = user.status_expires_at.as_ref().map(millis);
     let updated = conn
         .execute(
-            "UPDATE users SET username = ?2, display_name = ?3, avatar_url = ?4, kind = ?5 WHERE id = ?1",
+            "UPDATE users SET username = ?2, display_name = ?3, avatar_url = ?4, kind = ?5, status = ?6, status_expires_at = ?7
+             WHERE id = ?1",
             (
                 user.id.as_str(),
                 user.username.as_str(),
                 user.display_name.as_str(),
                 user.avatar_url.as_str(),
                 user.kind as i64,
+                user.status.as_str(),
+                status_expires_at,
             ),
         )
         .await?;
     if updated == 0 {
         conn.execute(
-            "INSERT INTO users (id, username, display_name, avatar_url, kind) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO users (id, username, display_name, avatar_url, kind, status, status_expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             (
                 user.id.as_str(),
                 user.username.as_str(),
                 user.display_name.as_str(),
                 user.avatar_url.as_str(),
                 user.kind as i64,
+                user.status.as_str(),
+                status_expires_at,
             ),
         )
         .await?;
@@ -722,22 +831,38 @@ pub async fn upsert_user(conn: &Connection, user: &pb::User) -> Result<()> {
     Ok(())
 }
 
-pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, members.nickname, members.role, members.joined_at";
+/// The columns of `users` that make a `pb::User`, in the order [`user_row`] reads them.
+pub const USER_COLUMNS: &str =
+    "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at";
+
+pub fn user_row(r: &Row) -> turso::Result<pb::User> {
+    Ok(pb::User {
+        id: r.get(0)?,
+        username: r.get(1)?,
+        display_name: r.get(2)?,
+        avatar_url: r.get(3)?,
+        kind: r.get(4)?,
+        status: r.get(5)?,
+        status_expires_at: r.get::<Option<i64>>(6)?.map(timestamp),
+    })
+}
+
+/// A user as they looked, if they were ever a member here.
+pub async fn user(conn: &Connection, user_id: &str) -> Result<Option<pb::User>> {
+    query_one(conn, &format!("SELECT {USER_COLUMNS} FROM users WHERE users.id = ?1"), [user_id], user_row).await
+}
+
+pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, members.nickname, members.role, members.joined_at, members.timed_out_until";
 
 pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member> + '_ {
     move |r| {
         Ok(pb::Member {
             server_id: server_id.to_string(),
-            user: Some(pb::User {
-                id: r.get(0)?,
-                username: r.get(1)?,
-                display_name: r.get(2)?,
-                avatar_url: r.get(3)?,
-                kind: r.get(4)?,
-            }),
-            nickname: r.get(5)?,
-            role: r.get(6)?,
-            joined_at: Some(timestamp(r.get(7)?)),
+            user: Some(user_row(r)?),
+            nickname: r.get(7)?,
+            role: r.get(8)?,
+            joined_at: Some(timestamp(r.get(9)?)),
+            timed_out_until: r.get::<Option<i64>>(10)?.map(timestamp),
         })
     }
 }

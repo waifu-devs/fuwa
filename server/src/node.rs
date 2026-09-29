@@ -7,17 +7,33 @@ use turso::{Connection, Database, Row};
 
 use crate::db::{self, EncryptionKey, query_all, query_one};
 use crate::error::{Error, Result};
-use crate::id::{new_id, now_ms};
+use crate::id::{new_id, now_ms, timestamp};
 use crate::pb;
 
-const MIGRATIONS: &[&str] =
-    &[include_str!("../migrations/node/0001_init.sql"), include_str!("../migrations/node/0002_settings.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/node/0001_init.sql"),
+    include_str!("../migrations/node/0002_settings.sql"),
+    include_str!("../migrations/node/0003_accounts.sql"),
+    include_str!("../migrations/node/0004_admin.sql"),
+];
 
 /// How long a session lasts after sign-in.
 pub const SESSION_TTL_MS: i64 = 60 * 24 * 60 * 60 * 1000;
 
 /// How often an account's last-seen time is written, at most.
 const SEEN_RESOLUTION_MS: i64 = 60 * 60 * 1000;
+
+/// How often a session's last-active time is written, at most.
+pub const ACTIVE_RESOLUTION_MS: i64 = 5 * 60 * 1000;
+
+/// How long a sign-in waits for its two-step code.
+pub const TICKET_TTL_MS: i64 = 5 * 60 * 1000;
+
+/// Wrong two-step codes one sign-in may try before it has to start over.
+pub const TICKET_ATTEMPTS: i64 = 5;
+
+/// The longest a User-Agent is kept.
+const MAX_USER_AGENT: usize = 512;
 
 #[derive(Debug, Clone)]
 pub struct Account {
@@ -29,6 +45,12 @@ pub struct Account {
     pub admin: bool,
     pub created_at: i64,
     pub last_seen_at: i64,
+    pub status: String,
+    pub status_expires_at: Option<i64>,
+    /// Signing in takes a code from an authenticator app too.
+    pub two_factor: bool,
+    /// Turned off by an instance admin.
+    pub disabled: bool,
 }
 
 impl Account {
@@ -39,11 +61,24 @@ impl Account {
             display_name: self.display_name.clone(),
             avatar_url: self.avatar_url.clone(),
             kind: self.kind as i32,
+            status: self.status.clone(),
+            status_expires_at: self.status_expires_at.map(timestamp),
         }
+    }
+
+    pub fn has_password(&self) -> bool {
+        self.kind == pb::AccountKind::Local
     }
 }
 
-const ACCOUNT_COLUMNS: &str = "id, kind, username, display_name, avatar_url, admin, created_at, last_seen_at";
+const ACCOUNT_COLUMNS: &str = "id, kind, username, display_name, avatar_url, admin, created_at, last_seen_at, status, status_expires_at, totp_secret IS NOT NULL, disabled_at IS NOT NULL";
+
+/// [`ACCOUNT_COLUMNS`] for a query that joins accounts to another table.
+fn account_columns_of(table: &str) -> String {
+    ACCOUNT_COLUMNS.split(", ").map(|c| format!("{table}.{c}")).collect::<Vec<_>>().join(", ")
+}
+
+const ACCOUNT_COLUMN_COUNT: usize = 12;
 
 fn account(row: &Row) -> turso::Result<Account> {
     Ok(Account {
@@ -55,13 +90,92 @@ fn account(row: &Row) -> turso::Result<Account> {
         admin: row.get(5)?,
         created_at: row.get(6)?,
         last_seen_at: row.get(7)?,
+        status: row.get(8)?,
+        status_expires_at: row.get(9)?,
+        two_factor: row.get(10)?,
+        disabled: row.get(11)?,
     })
+}
+
+/// What a profile change sets; `None` leaves a field as it is.
+#[derive(Debug, Default, Clone)]
+pub struct ProfileChange {
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub pronouns: Option<String>,
+    pub bio: Option<String>,
+    pub banner_url: Option<String>,
+    /// `Some(None)` clears it.
+    pub accent_color: Option<Option<i32>>,
+    /// The status and when it runs out, set together.
+    pub status: Option<(String, Option<i64>)>,
+}
+
+/// A device signed in to an account.
+#[derive(Debug, Clone)]
+pub struct Session {
+    pub id: String,
+    pub user_agent: String,
+    pub created_at: i64,
+    pub last_active_at: i64,
+    pub expires_at: i64,
+    pub current: bool,
+}
+
+/// Two-step sign-in, as stored.
+#[derive(Debug, Default, Clone)]
+pub struct TotpState {
+    pub secret: Option<String>,
+    pub pending: Option<String>,
+    pub last_step: i64,
+}
+
+/// Cuts a User-Agent down to what's kept.
+pub fn clip_user_agent(user_agent: &str) -> String {
+    user_agent.trim().chars().take(MAX_USER_AGENT).collect()
 }
 
 pub struct NodeDb {
     db: Database,
     /// Sign-ups one at a time, so only the very first account becomes admin.
     sign_ups: Mutex<()>,
+    /// Changes to who is an admin one at a time, so the last one stays.
+    admin_changes: Mutex<()>,
+}
+
+/// An account as instance admins see it.
+#[derive(Debug, Clone)]
+pub struct AccountSummary {
+    pub account: Account,
+    pub disabled_at: Option<i64>,
+    pub disabled_reason: String,
+    /// Devices signed in now.
+    pub sessions: i64,
+}
+
+/// Which accounts an admin lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountFilter {
+    All,
+    Admins,
+    Disabled,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AccountTotals {
+    pub all: i64,
+    pub admins: i64,
+    pub disabled: i64,
+}
+
+/// The instance's announcement banner, as kept in `meta`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct StoredAnnouncement {
+    id: String,
+    text: String,
+    tone: i32,
+    created_at: i64,
+    ends_at: Option<i64>,
 }
 
 /// Account totals for the usage signal.
@@ -75,7 +189,7 @@ pub struct AccountCounts {
 impl NodeDb {
     pub async fn open(path: &Path, key: Option<&EncryptionKey>) -> Result<Self> {
         let db = db::open(path, key, MIGRATIONS).await?;
-        Ok(Self { db, sign_ups: Mutex::new(()) })
+        Ok(Self { db, sign_ups: Mutex::new(()), admin_changes: Mutex::new(()) })
     }
 
     fn read(&self) -> Result<Connection> {
@@ -124,6 +238,10 @@ impl NodeDb {
                 admin: first,
                 created_at: now,
                 last_seen_at: now,
+                status: String::new(),
+                status_expires_at: None,
+                two_factor: false,
+                disabled: false,
             })
         })
         .await;
@@ -139,7 +257,7 @@ impl NodeDb {
             &conn,
             &format!("SELECT {ACCOUNT_COLUMNS}, password_hash FROM accounts WHERE username = ?1 AND kind = ?2"),
             (username, pb::AccountKind::Local as i64),
-            |row| Ok((account(row)?, row.get::<Option<String>>(8)?.unwrap_or_default())),
+            |row| Ok((account(row)?, row.get::<Option<String>>(ACCOUNT_COLUMN_COUNT)?.unwrap_or_default())),
         )
         .await
     }
@@ -156,23 +274,61 @@ impl NodeDb {
             .flatten())
     }
 
-    pub async fn update_profile(
-        &self,
-        id: &str,
-        display_name: Option<&str>,
-        avatar_url: Option<&str>,
-    ) -> Result<Account> {
+    pub async fn update_profile(&self, id: &str, change: &ProfileChange) -> Result<Account> {
+        let accent = change.accent_color.map(|color| color.unwrap_or(-1));
+        let (status, status_expires_at) = match &change.status {
+            Some((status, expires)) => (Some(status.as_str()), *expires),
+            None => (None, None),
+        };
         db::write(&self.db, async |conn| {
             conn.execute(
-                "UPDATE accounts SET display_name = coalesce(?2, display_name), avatar_url = coalesce(?3, avatar_url), updated_at = ?4
+                "UPDATE accounts SET display_name = coalesce(?2, display_name), avatar_url = coalesce(?3, avatar_url),
+                   pronouns = coalesce(?4, pronouns), bio = coalesce(?5, bio), banner_url = coalesce(?6, banner_url),
+                   accent_color = CASE WHEN ?7 IS NULL THEN accent_color WHEN ?7 < 0 THEN NULL ELSE ?7 END,
+                   status = coalesce(?8, status),
+                   status_expires_at = CASE WHEN ?8 IS NULL THEN status_expires_at ELSE ?9 END,
+                   updated_at = ?10
                  WHERE id = ?1",
-                (id, display_name, avatar_url, now_ms()),
+                (
+                    id,
+                    change.display_name.as_deref(),
+                    change.avatar_url.as_deref(),
+                    change.pronouns.as_deref(),
+                    change.bio.as_deref(),
+                    change.banner_url.as_deref(),
+                    accent,
+                    status,
+                    status_expires_at,
+                    now_ms(),
+                ),
             )
             .await?;
             Ok(())
         })
         .await?;
         self.account(id).await?.ok_or(Error::NotFound("account"))
+    }
+
+    /// Everything someone shows about themselves.
+    pub async fn profile(&self, id: &str) -> Result<Option<pb::Profile>> {
+        let conn = self.read()?;
+        query_one(
+            &conn,
+            &format!("SELECT {ACCOUNT_COLUMNS}, pronouns, bio, banner_url, accent_color FROM accounts WHERE id = ?1"),
+            [id],
+            |row| {
+                let account = account(row)?;
+                Ok(pb::Profile {
+                    user: Some(account.user()),
+                    pronouns: row.get(ACCOUNT_COLUMN_COUNT)?,
+                    bio: row.get(ACCOUNT_COLUMN_COUNT + 1)?,
+                    banner_url: row.get(ACCOUNT_COLUMN_COUNT + 2)?,
+                    accent_color: row.get(ACCOUNT_COLUMN_COUNT + 3)?,
+                    created_at: Some(timestamp(account.created_at)),
+                })
+            },
+        )
+        .await
     }
 
     /// Replaces the password and ends every other session.
@@ -189,12 +345,14 @@ impl NodeDb {
         .await
     }
 
-    pub async fn create_session(&self, account_id: &str, token_hash: &str) -> Result<()> {
+    pub async fn create_session(&self, account_id: &str, token_hash: &str, user_agent: &str) -> Result<()> {
+        let user_agent = clip_user_agent(user_agent);
         db::write(&self.db, async |conn| {
             let now = now_ms();
             conn.execute(
-                "INSERT INTO sessions (token_hash, account_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
-                (token_hash, account_id, now, now + SESSION_TTL_MS),
+                "INSERT INTO sessions (token_hash, id, account_id, user_agent, created_at, last_active_at, expires_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)",
+                (token_hash, new_id(), account_id, user_agent.as_str(), now, now + SESSION_TTL_MS),
             )
             .await?;
             Ok(())
@@ -202,37 +360,97 @@ impl NodeDb {
         .await
     }
 
-    /// The account a live session belongs to, marking the account as seen.
+    /// The account a live session belongs to, marking the session as active
+    /// and the account as seen.
     pub async fn session_account(&self, token_hash: &str) -> Result<Option<Account>> {
         let conn = self.read()?;
         let now = now_ms();
         let found = query_one(
             &conn,
             &format!(
-                "SELECT {} FROM sessions JOIN accounts ON accounts.id = sessions.account_id
-                 WHERE sessions.token_hash = ?1 AND sessions.expires_at > ?2",
-                ACCOUNT_COLUMNS.split(", ").map(|c| format!("accounts.{c}")).collect::<Vec<_>>().join(", ")
+                "SELECT {}, sessions.last_active_at FROM sessions JOIN accounts ON accounts.id = sessions.account_id
+                 WHERE sessions.token_hash = ?1 AND sessions.expires_at > ?2 AND accounts.disabled_at IS NULL",
+                account_columns_of("accounts")
             ),
             (token_hash, now),
-            account,
+            |row| Ok((account(row)?, row.get::<i64>(ACCOUNT_COLUMN_COUNT)?)),
         )
         .await?;
-        if let Some(account) = &found
-            && now - account.last_seen_at > SEEN_RESOLUTION_MS
-        {
+        let Some((account, last_active)) = found else { return Ok(None) };
+        let seen = now - account.last_seen_at > SEEN_RESOLUTION_MS;
+        if seen || now - last_active > ACTIVE_RESOLUTION_MS {
             // Several requests at once may all try; one landing is enough.
-            let seen = db::write_once(&self.db, async |conn| {
-                conn.execute("UPDATE accounts SET last_seen_at = ?2 WHERE id = ?1", (account.id.as_str(), now)).await?;
+            let marked = db::write_once(&self.db, async |conn| {
+                conn.execute("UPDATE sessions SET last_active_at = ?2 WHERE token_hash = ?1", (token_hash, now))
+                    .await?;
+                if seen {
+                    conn.execute("UPDATE accounts SET last_seen_at = ?2 WHERE id = ?1", (account.id.as_str(), now))
+                        .await?;
+                }
                 Ok(())
             })
             .await;
-            if let Err(err) = seen
+            if let Err(err) = marked
                 && !db::is_conflict(&err)
             {
                 return Err(err);
             }
         }
-        Ok(found)
+        Ok(Some(account))
+    }
+
+    /// Whether a session is still signed in, for streams that outlive a request.
+    pub async fn session_live(&self, token_hash: &str) -> Result<bool> {
+        let conn = self.read()?;
+        Ok(query_one(
+            &conn,
+            "SELECT 1 FROM sessions WHERE token_hash = ?1 AND expires_at > ?2",
+            (token_hash, now_ms()),
+            |r| r.get::<i64>(0),
+        )
+        .await?
+        .is_some())
+    }
+
+    /// An account's live sessions, the one with `current_hash` first, then by last use.
+    pub async fn sessions(&self, account_id: &str, current_hash: &str) -> Result<Vec<Session>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            "SELECT id, user_agent, created_at, last_active_at, expires_at, token_hash = ?2 FROM sessions
+             WHERE account_id = ?1 AND expires_at > ?3
+             ORDER BY token_hash = ?2 DESC, last_active_at DESC, created_at DESC",
+            (account_id, current_hash, now_ms()),
+            |r| {
+                Ok(Session {
+                    id: r.get::<Option<String>>(0)?.unwrap_or_default(),
+                    user_agent: r.get(1)?,
+                    created_at: r.get(2)?,
+                    last_active_at: r.get(3)?,
+                    expires_at: r.get(4)?,
+                    current: r.get(5)?,
+                })
+            },
+        )
+        .await
+    }
+
+    /// Ends one of an account's sessions. Whether there was one to end.
+    pub async fn delete_session_by_id(&self, account_id: &str, id: &str) -> Result<bool> {
+        db::write(&self.db, async |conn| {
+            Ok(conn.execute("DELETE FROM sessions WHERE account_id = ?1 AND id = ?2", (account_id, id)).await? > 0)
+        })
+        .await
+    }
+
+    /// Ends every session of an account but one. How many ended.
+    pub async fn delete_other_sessions(&self, account_id: &str, keep_hash: &str) -> Result<u64> {
+        db::write(&self.db, async |conn| {
+            Ok(conn
+                .execute("DELETE FROM sessions WHERE account_id = ?1 AND token_hash != ?2", (account_id, keep_hash))
+                .await?)
+        })
+        .await
     }
 
     pub async fn delete_session(&self, token_hash: &str) -> Result<()> {
@@ -243,10 +461,471 @@ impl NodeDb {
         .await
     }
 
-    /// Drops sessions that have run out.
+    /// Drops sessions and sign-ins waiting on a code that have run out.
     pub async fn prune_sessions(&self) -> Result<u64> {
         db::write(&self.db, async |conn| {
-            Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now_ms()]).await?)
+            let now = now_ms();
+            conn.execute("DELETE FROM sign_in_tickets WHERE expires_at <= ?1", [now]).await?;
+            Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now]).await?)
+        })
+        .await
+    }
+
+    // ───────────────────────── Two-step sign-in ─────────────────────────
+
+    pub async fn totp_state(&self, account_id: &str) -> Result<TotpState> {
+        let conn = self.read()?;
+        Ok(query_one(
+            &conn,
+            "SELECT totp_secret, totp_pending, totp_last_step FROM accounts WHERE id = ?1",
+            [account_id],
+            |r| Ok(TotpState { secret: r.get(0)?, pending: r.get(1)?, last_step: r.get(2)? }),
+        )
+        .await?
+        .unwrap_or_default())
+    }
+
+    /// Keeps a secret being set up until a code confirms it.
+    pub async fn set_totp_pending(&self, account_id: &str, secret: &str) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("UPDATE accounts SET totp_pending = ?2 WHERE id = ?1", (account_id, secret)).await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Turns two-step sign-in on with the secret being set up, if it's still
+    /// `secret`, and replaces the backup codes. `step` is the code's time step,
+    /// used up by confirming. Whether it was turned on.
+    pub async fn enable_totp(&self, account_id: &str, secret: &str, step: i64, code_hashes: &[String]) -> Result<bool> {
+        db::write(&self.db, async |conn| {
+            let changed = conn
+                .execute(
+                    "UPDATE accounts SET totp_secret = totp_pending, totp_pending = NULL, totp_last_step = ?3, updated_at = ?4
+                     WHERE id = ?1 AND totp_pending = ?2",
+                    (account_id, secret, step, now_ms()),
+                )
+                .await?;
+            if changed == 0 {
+                return Ok(false);
+            }
+            replace_backup_codes(conn, account_id, code_hashes).await?;
+            Ok(true)
+        })
+        .await
+    }
+
+    pub async fn disable_totp(&self, account_id: &str) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "UPDATE accounts SET totp_secret = NULL, totp_pending = NULL, updated_at = ?2 WHERE id = ?1",
+                (account_id, now_ms()),
+            )
+            .await?;
+            conn.execute("DELETE FROM backup_codes WHERE account_id = ?1", [account_id]).await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Uses up an authenticator code's time step, so the same code can't sign
+    /// in twice. False if it (or a later one) was already used.
+    pub async fn use_totp_step(&self, account_id: &str, step: i64) -> Result<bool> {
+        db::write(&self.db, async |conn| {
+            // Every use writes this row, so two at once clash and the second sees the first.
+            let last =
+                query_one(conn, "SELECT totp_last_step FROM accounts WHERE id = ?1", [account_id], |r| r.get::<i64>(0))
+                    .await?
+                    .unwrap_or(i64::MAX);
+            if step <= last {
+                return Ok(false);
+            }
+            conn.execute("UPDATE accounts SET totp_last_step = ?2 WHERE id = ?1", (account_id, step)).await?;
+            Ok(true)
+        })
+        .await
+    }
+
+    /// Uses up a backup code. False if it's unknown or used.
+    pub async fn use_backup_code(&self, account_id: &str, code_hash: &str) -> Result<bool> {
+        db::write(&self.db, async |conn| {
+            Ok(conn
+                .execute(
+                    "UPDATE backup_codes SET used_at = ?3 WHERE account_id = ?1 AND code_hash = ?2 AND used_at IS NULL",
+                    (account_id, code_hash, now_ms()),
+                )
+                .await?
+                > 0)
+        })
+        .await
+    }
+
+    pub async fn set_backup_codes(&self, account_id: &str, code_hashes: &[String]) -> Result<()> {
+        db::write(&self.db, async |conn| replace_backup_codes(conn, account_id, code_hashes).await).await
+    }
+
+    pub async fn backup_codes_left(&self, account_id: &str) -> Result<i64> {
+        let conn = self.read()?;
+        Ok(query_one(
+            &conn,
+            "SELECT count(*) FROM backup_codes WHERE account_id = ?1 AND used_at IS NULL",
+            [account_id],
+            |r| r.get::<i64>(0),
+        )
+        .await?
+        .unwrap_or(0))
+    }
+
+    /// Holds a sign-in whose password was right until its two-step code comes.
+    pub async fn create_ticket(&self, ticket_hash: &str, account_id: &str) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "INSERT INTO sign_in_tickets (ticket_hash, account_id, expires_at) VALUES (?1, ?2, ?3)",
+                (ticket_hash, account_id, now_ms() + TICKET_TTL_MS),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// The account a sign-in waiting on a code is for, if it hasn't run out.
+    pub async fn ticket_account(&self, ticket_hash: &str) -> Result<Option<String>> {
+        let conn = self.read()?;
+        query_one(
+            &conn,
+            "SELECT account_id FROM sign_in_tickets WHERE ticket_hash = ?1 AND expires_at > ?2 AND attempts < ?3",
+            (ticket_hash, now_ms(), TICKET_ATTEMPTS),
+            |r| r.get::<String>(0),
+        )
+        .await
+    }
+
+    /// Counts a wrong code against a sign-in.
+    pub async fn ticket_failed(&self, ticket_hash: &str) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("UPDATE sign_in_tickets SET attempts = attempts + 1 WHERE ticket_hash = ?1", [ticket_hash])
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Finishes a sign-in waiting on a code. False if another request already did.
+    pub async fn take_ticket(&self, ticket_hash: &str) -> Result<bool> {
+        db::write(&self.db, async |conn| {
+            Ok(conn.execute("DELETE FROM sign_in_tickets WHERE ticket_hash = ?1", [ticket_hash]).await? > 0)
+        })
+        .await
+    }
+
+    // ───────────────────────── Notification settings ─────────────────────────
+
+    pub async fn notification_settings(&self, account_id: &str) -> Result<Vec<pb::NotificationSettings>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            "SELECT server_id, channel_id, level, muted, muted_until, suppress_everyone FROM notification_settings
+             WHERE account_id = ?1 ORDER BY server_id, channel_id",
+            [account_id],
+            notification_row,
+        )
+        .await
+    }
+
+    /// Changes one server's or channel's settings: `change` gets the stored
+    /// settings (or empty ones) and changes them. Settings left saying nothing
+    /// are forgotten.
+    pub async fn update_notification_settings(
+        &self,
+        account_id: &str,
+        server_id: &str,
+        channel_id: &str,
+        change: impl Fn(&mut pb::NotificationSettings) + Clone,
+    ) -> Result<pb::NotificationSettings> {
+        db::write(&self.db, async |conn| {
+            let mut settings = query_one(
+                conn,
+                "SELECT server_id, channel_id, level, muted, muted_until, suppress_everyone FROM notification_settings
+                 WHERE account_id = ?1 AND server_id = ?2 AND channel_id = ?3",
+                (account_id, server_id, channel_id),
+                notification_row,
+            )
+            .await?
+            .unwrap_or_else(|| pb::NotificationSettings {
+                server_id: server_id.to_string(),
+                channel_id: channel_id.to_string(),
+                ..Default::default()
+            });
+            change(&mut settings);
+            if !settings.muted {
+                settings.muted_until = None;
+            }
+            let says_nothing = settings.level == pb::NotificationLevel::Unspecified as i32
+                && !settings.muted
+                && !settings.suppress_everyone;
+            if says_nothing {
+                conn.execute(
+                    "DELETE FROM notification_settings WHERE account_id = ?1 AND server_id = ?2 AND channel_id = ?3",
+                    (account_id, server_id, channel_id),
+                )
+                .await?;
+            } else {
+                conn.execute(
+                    "INSERT INTO notification_settings
+                       (account_id, server_id, channel_id, level, muted, muted_until, suppress_everyone, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     ON CONFLICT (account_id, server_id, channel_id) DO UPDATE SET
+                       level = excluded.level, muted = excluded.muted, muted_until = excluded.muted_until,
+                       suppress_everyone = excluded.suppress_everyone, updated_at = excluded.updated_at",
+                    (
+                        account_id,
+                        server_id,
+                        channel_id,
+                        settings.level as i64,
+                        settings.muted,
+                        settings.muted_until.as_ref().map(crate::id::millis),
+                        settings.suppress_everyone,
+                        now_ms(),
+                    ),
+                )
+                .await?;
+            }
+            Ok(settings)
+        })
+        .await
+    }
+
+    /// Forgets notification settings nobody can use any more: someone's for a
+    /// server they left (`account_id`), or everyone's for a deleted server or
+    /// channel.
+    pub async fn forget_notification_settings(
+        &self,
+        server_id: &str,
+        channel_id: Option<&str>,
+        account_id: Option<&str>,
+    ) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "DELETE FROM notification_settings
+                 WHERE server_id = ?1 AND (?2 IS NULL OR channel_id = ?2) AND (?3 IS NULL OR account_id = ?3)",
+                (server_id, channel_id, account_id),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    // ───────────────────────── Instance admins ─────────────────────────
+
+    /// Accounts newest first (ids are ULIDs), matching `query` in the username
+    /// or display name, a page of `limit` after `before_id`. Also says whether
+    /// there are more.
+    pub async fn list_accounts(
+        &self,
+        query: &str,
+        filter: AccountFilter,
+        before_id: &str,
+        limit: i64,
+    ) -> Result<(Vec<AccountSummary>, bool)> {
+        let conn = self.read()?;
+        let query = query.trim().to_lowercase();
+        let filter_sql = match filter {
+            AccountFilter::All => "",
+            AccountFilter::Admins => " AND admin",
+            AccountFilter::Disabled => " AND disabled_at IS NOT NULL",
+        };
+        let mut found = query_all(
+            &conn,
+            &format!(
+                "SELECT {ACCOUNT_COLUMNS}, disabled_at, disabled_reason,
+                        (SELECT count(*) FROM sessions WHERE sessions.account_id = accounts.id AND sessions.expires_at > ?4)
+                 FROM accounts
+                 WHERE (?1 = '' OR instr(username, ?1) > 0 OR instr(lower(display_name), ?1) > 0)
+                   AND (?2 = '' OR id < ?2){filter_sql}
+                 ORDER BY id DESC LIMIT ?3"
+            ),
+            (query.as_str(), before_id, limit + 1, now_ms()),
+            summary_row,
+        )
+        .await?;
+        let more = found.len() as i64 > limit;
+        found.truncate(limit as usize);
+        Ok((found, more))
+    }
+
+    pub async fn account_summary(&self, id: &str) -> Result<Option<AccountSummary>> {
+        let conn = self.read()?;
+        query_one(
+            &conn,
+            &format!(
+                "SELECT {ACCOUNT_COLUMNS}, disabled_at, disabled_reason,
+                        (SELECT count(*) FROM sessions WHERE sessions.account_id = accounts.id AND sessions.expires_at > ?2)
+                 FROM accounts WHERE id = ?1"
+            ),
+            (id, now_ms()),
+            summary_row,
+        )
+        .await
+    }
+
+    pub async fn account_totals(&self) -> Result<AccountTotals> {
+        let conn = self.read()?;
+        Ok(query_one(
+            &conn,
+            "SELECT count(*), coalesce(sum(admin), 0), coalesce(sum(CASE WHEN disabled_at IS NULL THEN 0 ELSE 1 END), 0)
+             FROM accounts",
+            (),
+            |r| Ok(AccountTotals { all: r.get(0)?, admins: r.get(1)?, disabled: r.get(2)? }),
+        )
+        .await?
+        .unwrap_or_default())
+    }
+
+    /// Makes an account an instance admin, or takes that away. The last admin
+    /// can't stop being one, and a turned-off account can't become one.
+    pub async fn set_admin(&self, id: &str, admin: bool) -> Result<()> {
+        let _one_at_a_time = self.admin_changes.lock().await;
+        let account = self.account(id).await?.ok_or(Error::NotFound("account"))?;
+        if account.admin == admin {
+            return Ok(());
+        }
+        if admin && account.disabled {
+            return Err(Error::FailedPrecondition("turn the account back on first".into()));
+        }
+        if !admin && self.admin_count().await? <= 1 {
+            return Err(Error::FailedPrecondition("an instance needs at least one admin".into()));
+        }
+        db::write(&self.db, async |conn| {
+            conn.execute("UPDATE accounts SET admin = ?2, updated_at = ?3 WHERE id = ?1", (id, admin, now_ms()))
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Turns an account off, signing out its devices and any sign-in half done,
+    /// or back on. Admins have to stop being admins first.
+    pub async fn set_disabled(&self, id: &str, disabled: bool, reason: &str) -> Result<()> {
+        let _one_at_a_time = self.admin_changes.lock().await;
+        let account = self.account(id).await?.ok_or(Error::NotFound("account"))?;
+        if disabled && account.admin {
+            return Err(Error::FailedPrecondition("take away their admin rights first".into()));
+        }
+        db::write(&self.db, async |conn| {
+            let now = now_ms();
+            if disabled {
+                conn.execute(
+                    "UPDATE accounts SET disabled_at = coalesce(disabled_at, ?2), disabled_reason = ?3, updated_at = ?2
+                     WHERE id = ?1",
+                    (id, now, reason),
+                )
+                .await?;
+                conn.execute("DELETE FROM sessions WHERE account_id = ?1", [id]).await?;
+                conn.execute("DELETE FROM sign_in_tickets WHERE account_id = ?1", [id]).await?;
+            } else {
+                conn.execute(
+                    "UPDATE accounts SET disabled_at = NULL, disabled_reason = '', updated_at = ?2 WHERE id = ?1",
+                    (id, now),
+                )
+                .await?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// Replaces a standalone account's password, signs out every device and
+    /// sign-in in progress, and optionally turns off two-step sign-in.
+    pub async fn reset_password(&self, id: &str, password_hash: &str, turn_off_two_factor: bool) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            let now = now_ms();
+            conn.execute(
+                "UPDATE accounts SET password_hash = ?2, updated_at = ?3 WHERE id = ?1",
+                (id, password_hash, now),
+            )
+            .await?;
+            if turn_off_two_factor {
+                conn.execute("UPDATE accounts SET totp_secret = NULL, totp_pending = NULL WHERE id = ?1", [id]).await?;
+                conn.execute("DELETE FROM backup_codes WHERE account_id = ?1", [id]).await?;
+            }
+            conn.execute("DELETE FROM sessions WHERE account_id = ?1", [id]).await?;
+            conn.execute("DELETE FROM sign_in_tickets WHERE account_id = ?1", [id]).await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// The announcement banner as last set, even if it has run out.
+    pub async fn announcement(&self) -> Result<Option<pb::Announcement>> {
+        let conn = self.read()?;
+        let Some(json) =
+            query_one(&conn, "SELECT value FROM meta WHERE key = 'announcement'", (), |r| r.get::<String>(0)).await?
+        else {
+            return Ok(None);
+        };
+        let stored: StoredAnnouncement = serde_json::from_str(&json)
+            .map_err(|err| Error::internal(format!("the stored announcement doesn't read: {err}")))?;
+        Ok(Some(pb::Announcement {
+            id: stored.id,
+            text: stored.text,
+            tone: stored.tone,
+            created_at: Some(timestamp(stored.created_at)),
+            ends_at: stored.ends_at.map(timestamp),
+        }))
+    }
+
+    /// Stores the announcement banner, or forgets it.
+    pub async fn set_announcement(&self, announcement: Option<&pb::Announcement>) -> Result<()> {
+        let json = match announcement {
+            Some(a) => Some(
+                serde_json::to_string(&StoredAnnouncement {
+                    id: a.id.clone(),
+                    text: a.text.clone(),
+                    tone: a.tone,
+                    created_at: a.created_at.as_ref().map(crate::id::millis).unwrap_or_else(now_ms),
+                    ends_at: a.ends_at.as_ref().map(crate::id::millis),
+                })
+                .map_err(|err| Error::internal(err.to_string()))?,
+            ),
+            None => None,
+        };
+        db::write(&self.db, async |conn| {
+            match &json {
+                Some(json) => {
+                    conn.execute(
+                        "INSERT INTO meta (key, value) VALUES ('announcement', ?1)
+                         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                        [json.as_str()],
+                    )
+                    .await?;
+                }
+                None => {
+                    conn.execute("DELETE FROM meta WHERE key = 'announcement'", ()).await?;
+                }
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    // ───────────────────────── Deleting ─────────────────────────
+
+    /// How many instance admins there are.
+    pub async fn admin_count(&self) -> Result<i64> {
+        let conn = self.read()?;
+        Ok(query_one(&conn, "SELECT count(*) FROM accounts WHERE admin", (), |r| r.get::<i64>(0)).await?.unwrap_or(0))
+    }
+
+    /// Deletes an account and everything node.db keeps about it.
+    pub async fn delete_account(&self, account_id: &str) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            for table in ["sessions", "backup_codes", "sign_in_tickets", "notification_settings"] {
+                conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
+            }
+            conn.execute("DELETE FROM accounts WHERE id = ?1", [account_id]).await?;
+            Ok(())
         })
         .await
     }
@@ -292,5 +971,74 @@ impl NodeDb {
         )
         .await?
         .unwrap_or_default())
+    }
+}
+
+fn summary_row(row: &Row) -> turso::Result<AccountSummary> {
+    Ok(AccountSummary {
+        account: account(row)?,
+        disabled_at: row.get(ACCOUNT_COLUMN_COUNT)?,
+        disabled_reason: row.get(ACCOUNT_COLUMN_COUNT + 1)?,
+        sessions: row.get(ACCOUNT_COLUMN_COUNT + 2)?,
+    })
+}
+
+async fn replace_backup_codes(conn: &Connection, account_id: &str, code_hashes: &[String]) -> Result<()> {
+    conn.execute("DELETE FROM backup_codes WHERE account_id = ?1", [account_id]).await?;
+    for hash in code_hashes {
+        conn.execute("INSERT INTO backup_codes (account_id, code_hash) VALUES (?1, ?2)", (account_id, hash.as_str()))
+            .await?;
+    }
+    Ok(())
+}
+
+fn notification_row(r: &Row) -> turso::Result<pb::NotificationSettings> {
+    Ok(pb::NotificationSettings {
+        server_id: r.get(0)?,
+        channel_id: r.get(1)?,
+        level: r.get(2)?,
+        muted: r.get(3)?,
+        muted_until: r.get::<Option<i64>>(4)?.map(timestamp),
+        suppress_everyone: r.get(5)?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A node.db from before devices were listed: its sessions get ids and a
+    /// last-active time, and still sign in.
+    #[tokio::test]
+    async fn older_sessions_get_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("node.db");
+        {
+            let db = db::open(&path, None, &MIGRATIONS[..2]).await.unwrap();
+            let conn = db::connect(&db).unwrap();
+            conn.execute_batch(
+                "BEGIN CONCURRENT;
+                 INSERT INTO accounts (id, kind, username, display_name, admin, created_at, updated_at, last_seen_at)
+                   VALUES ('a1', 1, 'juan', 'Juan', 1, 5, 5, 5);
+                 INSERT INTO sessions (token_hash, account_id, created_at, expires_at) VALUES ('t1', 'a1', 7, 9999999999999);
+                 INSERT INTO sessions (token_hash, account_id, created_at, expires_at) VALUES ('t2', 'a1', 8, 9999999999999);
+                 COMMIT;",
+            )
+            .await
+            .unwrap();
+        }
+
+        let node = NodeDb::open(&path, None).await.unwrap();
+        let sessions = node.sessions("a1", "t1").await.unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions[0].current && !sessions[1].current);
+        assert_eq!((sessions[0].last_active_at, sessions[1].last_active_at), (7, 8));
+        assert!(sessions.iter().all(|s| s.id.len() == 32));
+        assert_ne!(sessions[0].id, sessions[1].id);
+        let account = node.session_account("t2").await.unwrap().unwrap();
+        assert_eq!(account.username, "juan");
+        assert!(!account.two_factor);
+        assert!(node.delete_session_by_id("a1", &sessions[1].id).await.unwrap());
+        assert!(node.session_account("t2").await.unwrap().is_none());
     }
 }

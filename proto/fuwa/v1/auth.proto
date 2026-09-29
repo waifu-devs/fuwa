@@ -3,17 +3,25 @@ syntax = "proto3";
 package fuwa.v1;
 
 import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
 
 // Accounts on this instance. Signing up or in returns a session token, which
 // every other call sends as `authorization: Bearer <token>`.
 service AuthService {
   // Creates a standalone account. The first account on an instance becomes its admin.
   rpc SignUp(SignUpRequest) returns (SignUpResponse);
+  // Signs in with a username and password. For an account with two-step
+  // sign-in on, the answer carries a ticket instead of a token: send it to
+  // VerifyTwoFactor with a code to finish.
   rpc SignIn(SignInRequest) returns (SignInResponse);
+  rpc VerifyTwoFactor(VerifyTwoFactorRequest) returns (VerifyTwoFactorResponse);
   // Ends the session the call was made with.
   rpc SignOut(SignOutRequest) returns (SignOutResponse);
   rpc GetMe(GetMeRequest) returns (GetMeResponse);
   rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+  // Someone's profile: your own, anyone who shares a server with you, or
+  // anyone for instance admins.
+  rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
 }
 
@@ -39,6 +47,21 @@ message SignInResponse {
   string token = 1;
   User user = 2;
   bool admin = 3;
+  // Set, with nothing else, when the account needs a code from an
+  // authenticator app (or a backup code) too. Good for five minutes.
+  string two_factor_ticket = 4;
+}
+
+message VerifyTwoFactorRequest {
+  string ticket = 1;
+  // Six digits from the authenticator app, or one of the backup codes.
+  string code = 2;
+}
+
+message VerifyTwoFactorResponse {
+  string token = 1;
+  User user = 2;
+  bool admin = 3;
 }
 
 message SignOutRequest {}
@@ -56,10 +79,28 @@ message GetMeResponse {
 message UpdateProfileRequest {
   optional string display_name = 1;
   optional string avatar_url = 2;
+  optional string pronouns = 3;
+  // Markdown.
+  optional string bio = 4;
+  optional string banner_url = 5;
+  // 0xRRGGBB, or -1 to let clients pick.
+  optional int32 accent_color = 6;
+  // Setting the status replaces its expiry too: unset keeps it until changed.
+  optional string status = 7;
+  google.protobuf.Timestamp status_expires_at = 8;
 }
 
 message UpdateProfileResponse {
   User user = 1;
+  Profile profile = 2;
+}
+
+message GetProfileRequest {
+  string user_id = 1;
+}
+
+message GetProfileResponse {
+  Profile profile = 1;
 }
 
 message ChangePasswordRequest {

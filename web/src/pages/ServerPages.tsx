@@ -15,7 +15,8 @@ export function ServerIndex({ instanceKey, serverId }: { instanceKey: string; se
   const role = useMyRole(instanceKey, serverId);
   const [creating, setCreating] = useState(false);
   const { compact, setNavOpen } = useLayout();
-  if (!inst) return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
+  // Signed out (the session ended, or an admin turned the account off): the instance's page asks to sign in.
+  if (!inst || inst.connection === "signed-out") return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
   const server = inst.servers.find((s) => s.id === serverId);
   if (!server && inst.connection === "live") return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
   const first = inst.channels[serverId]?.find((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT);
@@ -49,10 +50,13 @@ export function ServerIndex({ instanceKey, serverId }: { instanceKey: string; se
 export function ChannelPage({ instanceKey, serverId, channelId }: { instanceKey: string; serverId: string; channelId: string }) {
   const inst = useInstance(instanceKey);
   const channel = inst?.channels[serverId]?.find((c) => c.id === channelId);
-  if (!inst) return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
+  if (!inst || inst.connection === "signed-out") return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
   if (!channel) {
     // Deleted while open, or not loaded yet.
     if (inst.synced[serverId]) return <Navigate to="/$instance/$server" params={{ instance: instanceKey, server: serverId }} replace />;
+    // You left, were kicked or banned, or the server was deleted.
+    if (inst.connection === "live" && !inst.servers.some((s) => s.id === serverId))
+      return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
     return <div className="shimmer m-4 h-10 rounded-xl opacity-40" />;
   }
   return <ChannelView instanceKey={instanceKey} serverId={serverId} channel={channel} />;

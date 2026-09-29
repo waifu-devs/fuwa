@@ -79,8 +79,27 @@ the log filter are read only from the environment.
 | `FUWA_LOG` | `info,turso_core=warn` | Log filter ([syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)) |
 
 The `FUWA_LIMIT_*` values are instance-wide defaults. An admin can give a single
-server its own caps from that server's settings in the app (or
-`AdminService.SetServerLimits`); a server's own caps win over the defaults.
+server its own caps from that server's settings or the Servers page of the
+instance settings (or `AdminService.SetServerLimits`); a server's own caps win
+over the defaults.
+
+### Looking after an instance
+
+Besides the settings above, instance admins get three pages in the app's
+instance settings:
+
+- **Accounts**: search every account, make or remove instance admins, give
+  someone a new random password (shown once; it signs them out everywhere and
+  can also turn off their two-step sign-in), or turn an account off with a
+  reason. A turned-off account is signed out and can't sign in until an admin
+  turns it back on; its messages and servers stay.
+- **Servers**: every server with its owner, usage and caps, whether or not
+  you're in it. Save a server's whole database as a plain SQLite file, or
+  delete it. The saved file is never encrypted, even on an instance with
+  `FUWA_ENCRYPTION_KEY`, so keep it somewhere safe.
+- **Announcement**: a banner across the top of every client on the instance,
+  for news or maintenance. Info and heads-up banners can be closed; urgent ones
+  can't. It can come down by itself after a while.
 
 ### Data
 
@@ -90,6 +109,7 @@ server its own caps from that server's settings in the app (or
   servers/<id>.db      one file per community server
   *.db-log             recent commits not yet folded into the file beside it
   deleted/             deleted servers, parked here instead of erased
+  exports/             servers being saved as SQLite files; emptied on start
 ```
 
 Every file runs in Turso's concurrent-writer mode (MVCC), which keeps recent

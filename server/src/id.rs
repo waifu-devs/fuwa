@@ -32,6 +32,11 @@ pub fn timestamp(ms: i64) -> prost_types::Timestamp {
     prost_types::Timestamp { seconds: ms.div_euclid(1000), nanos: (ms.rem_euclid(1000) * 1_000_000) as i32 }
 }
 
+/// A timestamp from the wire, as milliseconds since the Unix epoch.
+pub fn millis(t: &prost_types::Timestamp) -> i64 {
+    t.seconds.saturating_mul(1000).saturating_add(i64::from(t.nanos) / 1_000_000)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

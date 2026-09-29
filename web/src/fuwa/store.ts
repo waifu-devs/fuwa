@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { Channel, Event, Member, Message, Node, Server, User } from "@/gen/fuwa/v1/types_pb";
+import type { Channel, Event, Member, Message, Node, NotificationSettings, Profile, Server, User } from "@/gen/fuwa/v1/types_pb";
 import { ChannelType } from "@/gen/fuwa/v1/types_pb";
 
 /**
@@ -44,7 +44,14 @@ export type InstanceState = {
   unread: Record<string, number>;
   /** Servers whose channels and members are loaded. */
   synced: Record<string, boolean>;
+  /** Your notification settings, by `notificationKey`. Only servers and channels that have some. */
+  notifications: Record<string, NotificationSettings>;
+  /** Profiles looked at, by user id. */
+  profiles: Record<string, Profile>;
 };
+
+/** Where a server's (channel "") or a channel's notification settings are kept. */
+export const notificationKey = (serverId: string, channelId = "") => `${serverId}/${channelId}`;
 
 export type FuwaState = {
   instances: Record<string, InstanceState>;
@@ -93,6 +100,8 @@ export function emptyInstance(key: string, url: string): InstanceState {
     pending: {},
     unread: {},
     synced: {},
+    notifications: {},
+    profiles: {},
   };
 }
 
@@ -140,6 +149,23 @@ export function upsertMessage(items: Message[], message: Message): Message[] {
   if (at === -1) return [...items, message];
   if (items[at]!.id === message.id) return items.map((m, i) => (i === at ? message : m));
   return [...items.slice(0, at), message, ...items.slice(at)];
+}
+
+/** Puts a user's new look everywhere it shows: the user list, their memberships and their profile. */
+export function withUpdatedUser(i: InstanceState, user: User): InstanceState {
+  let members = i.members;
+  for (const [serverId, list] of Object.entries(i.members)) {
+    if (!list.some((m) => m.user?.id === user.id)) continue;
+    members = { ...members, [serverId]: list.map((m) => (m.user?.id === user.id ? { ...m, user } : m)) };
+  }
+  const profile = i.profiles[user.id];
+  return {
+    ...i,
+    users: withUsers(i.users, [user]),
+    members,
+    me: i.me?.id === user.id ? user : i.me,
+    profiles: profile ? { ...i.profiles, [user.id]: { ...profile, user } } : i.profiles,
+  };
 }
 
 function withUser(users: Record<string, User>, user: User | undefined): Record<string, User> {
@@ -252,6 +278,10 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
         ? i
         : { ...i, messages: { ...i.messages, [p.value.channelId]: { ...loaded, items } } };
     }
+    case "userUpdated": {
+      const user = p.value.user;
+      return user ? withUpdatedUser(i, user) : i;
+    }
     case "memberJoined":
     case "memberUpdated": {
       const member = p.value.member;
@@ -259,11 +289,13 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
       const list = i.members[sid] ?? [];
       const isNew = !list.some((m) => m.user?.id === member.user!.id);
       const members = sortMembers([...list.filter((m) => m.user?.id !== member.user!.id), member]);
+      const profile = i.profiles[member.user.id];
       return {
         ...i,
         members: { ...i.members, [sid]: members },
         users: withUsers(i.users, [member.user]),
         me: i.me?.id === member.user.id ? member.user : i.me,
+        profiles: profile ? { ...i.profiles, [member.user.id]: { ...profile, user: member.user } } : i.profiles,
         servers:
           isNew && p.case === "memberJoined"
             ? i.servers.map((s) => (s.id === sid ? { ...s, memberCount: s.memberCount + 1n } : s))

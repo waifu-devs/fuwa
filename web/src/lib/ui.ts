@@ -10,6 +10,8 @@ export type Toast = { id: number; text: string };
 type Ui = {
   /** The section settings are open at, or null when closed. */
   settings: string | null;
+  /** What the section opened for, such as a server's id on the notifications page. */
+  settingsTarget: string | null;
   shortcuts: boolean;
   switcher: boolean;
   /** Streamer mode's banner, hidden for this visit. */
@@ -17,7 +19,7 @@ type Ui = {
   toasts: Toast[];
 };
 
-let ui: Ui = { settings: null, shortcuts: false, switcher: false, streamerBannerHidden: false, toasts: [] };
+let ui: Ui = { settings: null, settingsTarget: null, shortcuts: false, switcher: false, streamerBannerHidden: false, toasts: [] };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<Ui>) {
@@ -39,10 +41,10 @@ export const getUi = () => ui;
 
 let lastSection = "appearance";
 
-/** Opens settings at a section, or where they were last. */
-export function openSettings(section?: string) {
+/** Opens settings at a section (for one thing on it, like a server), or where they were last. */
+export function openSettings(section?: string, target: string | null = null) {
   if (section) lastSection = section;
-  set({ settings: section ?? lastSection, shortcuts: false, switcher: false });
+  set({ settings: section ?? lastSection, settingsTarget: target, shortcuts: false, switcher: false });
 }
 
 export function setSettingsSection(section: string) {

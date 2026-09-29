@@ -7,11 +7,21 @@
 - `server/`: the Rust server (`fuwa` binary, `fuwa_server` library).
   - `app.rs`: shared state, the HTTP router (gRPC, gRPC-Web, CORS, health), serving.
   - `api/`: one file per gRPC service, all implemented on `Api`.
-  - `node.rs`: the instance database (`node.db`): accounts, sessions, meta.
+  - `node.rs`: the instance database (`node.db`): accounts and profiles,
+    sessions (devices), two-step sign-in (TOTP secrets, backup codes, sign-in
+    tickets), notification settings, meta (the install id, the announcement).
+    Admins can turn an account off (`disabled_at`): it loses its sessions and
+    can't sign in until it's turned back on. What belongs to a person but not to
+    one server lives here; a server file keeps only a copy of what its members
+    see (name, avatar, status) in its `users` table.
+  - `twofactor.rs`: TOTP codes (RFC 6238) and backup codes for two-step sign-in.
   - `servers.rs`: community servers, one Turso file each under `servers/`, plus the
     in-memory index of servers and memberships. Every change goes through
     `ServerDb::write`, which appends events to the server's log in the same
-    transaction and publishes them to the `Hub` after commit.
+    transaction and publishes them to the `Hub` after commit. What owners and
+    admins do also goes in the server's `audit` table (`servers::Audit`),
+    kept apart from the event log so reasons for kicks and bans reach only
+    managers.
   - `db.rs`: Turso helpers: opening, `user_version` migrations, transactions.
     Every database runs in Turso's concurrent-writer mode (MVCC): writes are
     `BEGIN CONCURRENT` transactions that run side by side and are retried
@@ -35,7 +45,9 @@
     edited by hand.
   - `src/fuwa/`: talking to instances. `sync.ts` runs one Effect fiber per
     instance that subscribes, loads state after `ready`, applies events and
-    reconnects with the last sequences; `store.ts` holds the state and its
+    reconnects with the last sequences, and reads the instance's public
+    details (name, sign-ups, announcement) again every minute, since those
+    change without an event; `store.ts` holds the state and its
     reducers (idempotent, since events can arrive twice); `actions.ts` are the
     calls the UI makes; `saved.ts` is the instance list kept in localStorage.
   - `src/components/`, `src/pages/`: the UI. Routes are
@@ -44,6 +56,21 @@
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
     an instance or a server live on that instance instead.
+  - `src/lib/notifications.ts`: how a message reaches you: your settings for
+    its channel, then its server (both stored on the instance, so they follow
+    you across devices), then this device's Notifications settings. Muted means
+    no sound, no notification and no unread badge.
+  - `src/components/settings/account/`: the "Your account" pages (profile,
+    server profiles, devices, two-step sign-in, server notifications, data).
+  - `src/components/settings/server/`: server settings pages beyond Overview
+    (channels, members, bans, audit log, ownership), shown by
+    `dialogs/ServerSettingsDialog.tsx`. `components/ModerateDialog.tsx` is the
+    one dialog for nicknames, time-outs, kicks and bans, from the Members page
+    and from profile cards.
+  - `src/components/settings/instance/`: the instance admin pages beyond
+    settings (accounts, servers, announcement), shown by
+    `settings/InstanceSettingsDialog.tsx`. The announcement itself is drawn by
+    `components/AnnouncementBanner.tsx`, above the app for the instance you're on.
   - `src/lib/keybinds.ts`: every keyboard action and its default; the key
     handler (`components/Shortcuts.tsx`), the shortcut sheet and the Keybinds
     page all read this one list.
@@ -62,6 +89,13 @@
 - Never write outside a transaction or with `BEGIN`/`BEGIN IMMEDIATE`: those
   lock out concurrent commits. Schema changes go in migrations, which run
   before anything else touches the file.
+- Moderation follows rank: owners outrank admins, admins outrank members, and
+  nobody acts on someone at or above their own rank (`outranks` on both the
+  server and the client). Every moderation or settings change by a manager
+  writes an audit entry in the same transaction.
+- Messages have a `kind`. Anything that isn't a plain message (join messages
+  today) has empty content, can't be edited, is left out of data exports, and
+  never plays a sound or shows a notification.
 - Timestamps are unix milliseconds in the database, `google.protobuf.Timestamp` on
   the wire. Ids are ULIDs (`id::new_id`).
 - Limits are unlimited unless configured. Never hardcode a usage cap.
@@ -74,7 +108,15 @@
   servers. The end-to-end test checks this.
 - Anything that can show an instance's address or your own username goes
   through `Private` or `usePrivateField` (`components/Private.tsx`), so
-  streamer mode hides it.
+  streamer mode hides it. Secrets (a two-step key, backup codes) blur whenever
+  streamer mode is on.
+- Anything that weakens an account (turning off two-step sign-in, new backup
+  codes, deleting it) asks for the password again, and a code when two-step
+  sign-in is on.
+- Instance admins act on other accounts, never their own (no turning yourself
+  off, resetting your own password or removing your own admin), and an
+  instance always keeps at least one admin. Admins are demoted before they're
+  turned off.
 - The web app talks only through the protocol; anything it needs from a server
   goes in `proto/` first, then `pnpm generate`.
 - Every screen ships with its motion: things enter and leave with a spring,

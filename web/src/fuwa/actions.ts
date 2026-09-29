@@ -1,11 +1,37 @@
 import { Effect } from "effect";
-import type { InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
-import { ChannelType, type Server, type ServerLimits } from "@/gen/fuwa/v1/types_pb";
+import { timestampFromDate } from "@bufbuild/protobuf/wkt";
+import type { AccountFilter, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
+import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
+import type { ChannelPlacement } from "@/gen/fuwa/v1/channel_pb";
+import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
+import {
+  ChannelType,
+  type AnnouncementTone,
+  type Channel,
+  type Member,
+  type MemberRole,
+  type NotificationLevel,
+  type NotificationSettings,
+  type Server,
+  type ServerLimits,
+} from "@/gen/fuwa/v1/types_pb";
 import { makeApi } from "./client";
 import { call, toFuwaError, type FuwaError } from "./errors";
 import { normalizeUrl } from "./saved";
 import { addInstance, engine, follow, removeInstance } from "./sync";
-import { addServer, removeServer, store, updateInstance, upsertMessage, withUsers, type PendingMessage } from "./store";
+import {
+  addServer,
+  notificationKey,
+  removeServer,
+  sortChannels,
+  sortMembers,
+  store,
+  updateInstance,
+  upsertMessage,
+  withUpdatedUser,
+  withUsers,
+  type PendingMessage,
+} from "./store";
 
 /**
  * What people do in the client, as Effects. Each one talks to its instance
@@ -37,9 +63,20 @@ export const probe = (input: string) =>
     return { url, node: node! };
   });
 
+/**
+ * Signs in with a password. Accounts with two-step sign-in answer with a
+ * ticket instead, which `verifyTwoFactor` turns into a session with a code.
+ */
 export const signIn = (url: string, username: string, password: string) =>
   Effect.gen(function* () {
     const res = yield* call((signal) => makeApi(url, () => null).auth.signIn({ username, password }, { signal }));
+    if (res.twoFactorTicket) return { ticket: res.twoFactorTicket } as const;
+    return { key: addInstance(url, res.token) } as const;
+  });
+
+export const verifyTwoFactor = (url: string, ticket: string, code: string) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) => makeApi(url, () => null).auth.verifyTwoFactor({ ticket, code }, { signal }));
     return addInstance(url, res.token);
   });
 
@@ -64,16 +101,229 @@ export const forget = (key: string) =>
     removeInstance(key);
   });
 
-export const updateProfile = (key: string, displayName: string, avatarUrl: string) =>
+export type ProfilePatch = Partial<
+  Pick<UpdateProfileRequest, "displayName" | "avatarUrl" | "pronouns" | "bio" | "bannerUrl" | "accentColor" | "status">
+> & { statusExpiresAt?: Date | null };
+
+/** Changes your profile; only the fields given change. */
+export const updateProfile = (key: string, patch: ProfilePatch) =>
   Effect.gen(function* () {
-    const { user } = yield* call((signal) => api(key).auth.updateProfile({ displayName, avatarUrl }, { signal }));
-    updateInstance(key, (i) => ({ ...i, me: user ?? i.me, users: withUsers(i.users, [user]) }));
+    const { statusExpiresAt, ...rest } = patch;
+    const request = { ...rest, statusExpiresAt: statusExpiresAt ? timestampFromDate(statusExpiresAt) : undefined };
+    const { user, profile } = yield* call((signal) => api(key).auth.updateProfile(request, { signal }));
+    updateInstance(key, (i) => {
+      const next = user ? withUpdatedUser(i, user) : i;
+      return profile && user ? { ...next, profiles: { ...next.profiles, [user.id]: profile } } : next;
+    });
     return true;
+  });
+
+/** Someone's full profile: pronouns, bio, banner. Kept so it shows at once next time. */
+export const loadProfile = (key: string, userId: string) =>
+  Effect.gen(function* () {
+    const { profile } = yield* call((signal) => api(key).auth.getProfile({ userId }, { signal }));
+    if (profile) updateInstance(key, (i) => ({ ...i, profiles: { ...i.profiles, [userId]: profile } }));
+    return profile!;
   });
 
 /** Changes a standalone account's password. The server signs out every other session. */
 export const changePassword = (key: string, currentPassword: string, newPassword: string) =>
   call((signal) => api(key).auth.changePassword({ currentPassword, newPassword }, { signal })).pipe(Effect.as(true));
+
+// ───────────────────────── Your account ─────────────────────────
+
+export const listSessions = (key: string) =>
+  call((signal) => api(key).account.listSessions({}, { signal })).pipe(Effect.map((r) => r.sessions));
+
+export const revokeSession = (key: string, sessionId: string) =>
+  call((signal) => api(key).account.revokeSession({ sessionId }, { signal })).pipe(Effect.as(true));
+
+export const revokeOtherSessions = (key: string) =>
+  call((signal) => api(key).account.revokeOtherSessions({}, { signal })).pipe(Effect.map((r) => r.revoked));
+
+export const getTwoFactor = (key: string) => call((signal) => api(key).account.getTwoFactor({}, { signal }));
+
+export const setUpTwoFactor = (key: string, password: string) =>
+  call((signal) => api(key).account.setUpTwoFactor({ password }, { signal }));
+
+export const enableTwoFactor = (key: string, code: string) =>
+  call((signal) => api(key).account.enableTwoFactor({ code }, { signal })).pipe(Effect.map((r) => r.backupCodes));
+
+export const disableTwoFactor = (key: string, password: string, code: string) =>
+  call((signal) => api(key).account.disableTwoFactor({ password, code }, { signal })).pipe(Effect.as(true));
+
+export const regenerateBackupCodes = (key: string, password: string) =>
+  call((signal) => api(key).account.regenerateBackupCodes({ password }, { signal })).pipe(
+    Effect.map((r) => r.backupCodes),
+  );
+
+export type NotificationPatch = Partial<Pick<NotificationSettings, "level" | "suppressEveryone">> & {
+  /** Muted until then; `null` mutes until turned back on, `false` unmutes. */
+  mutedUntil?: Date | null | false;
+};
+
+/** Changes how a server (or one of its channels) notifies you, on every device. */
+export const updateNotifications = (key: string, serverId: string, channelId: string, patch: NotificationPatch) =>
+  Effect.gen(function* () {
+    const paths: string[] = [];
+    if (patch.level !== undefined) paths.push("level");
+    if (patch.suppressEveryone !== undefined) paths.push("suppress_everyone");
+    if (patch.mutedUntil !== undefined) paths.push("muted");
+    const settings = {
+      serverId,
+      channelId,
+      level: patch.level,
+      suppressEveryone: patch.suppressEveryone,
+      muted: patch.mutedUntil !== undefined && patch.mutedUntil !== false,
+      mutedUntil: patch.mutedUntil ? timestampFromDate(patch.mutedUntil) : undefined,
+    };
+    const res = yield* call((signal) =>
+      api(key).account.updateNotificationSettings({ settings, updateMask: { paths } }, { signal }),
+    );
+    const saved = res.settings;
+    updateInstance(key, (i) => {
+      const { [notificationKey(serverId, channelId)]: _, ...rest } = i.notifications;
+      const says = saved && (saved.level || saved.muted || saved.suppressEveryone);
+      return { ...i, notifications: says ? { ...rest, [notificationKey(serverId, channelId)]: saved } : rest };
+    });
+    return saved!;
+  });
+
+/** Reads your notification settings again, for changes made on another device. */
+export const refreshNotifications = (key: string) =>
+  Effect.gen(function* () {
+    const { settings } = yield* call((signal) => api(key).account.getNotificationSettings({}, { signal }));
+    const notifications = Object.fromEntries(settings.map((n) => [notificationKey(n.serverId, n.channelId), n]));
+    updateInstance(key, (i) => ({ ...i, notifications }));
+  });
+
+/**
+ * Picks up what changed without an event while you were away: notification
+ * settings from another device, and the instance's details and announcement.
+ */
+export function refreshOnFocus() {
+  let last = Date.now();
+  window.addEventListener("focus", () => {
+    if (Date.now() - last < 60_000) return;
+    last = Date.now();
+    for (const [key, i] of Object.entries(store.get().instances)) {
+      if (i.me && i.connection === "live") {
+        run(refreshNotifications(key)).catch(() => {});
+        run(refreshNode(key)).catch(() => {});
+      }
+    }
+  });
+}
+
+/** Everything the instance keeps about you, as one JSON file. `progress` hears the bytes so far. */
+export const exportData = (key: string, progress: (bytes: number) => void) =>
+  Effect.tryPromise({
+    try: async (signal) => {
+      const parts: Uint8Array<ArrayBuffer>[] = [];
+      let bytes = 0;
+      for await (const res of api(key).account.exportData({}, { signal })) {
+        parts.push(new Uint8Array(res.chunk));
+        bytes += res.chunk.length;
+        progress(bytes);
+      }
+      return new Blob(parts, { type: "application/json" });
+    },
+    catch: toFuwaError,
+  });
+
+/** Deletes your account on an instance, then forgets the instance here. */
+export const deleteAccount = (key: string, confirm: { password?: string; code?: string; username?: string }) =>
+  Effect.gen(function* () {
+    yield* call((signal) => api(key).account.deleteAccount(confirm, { signal }));
+    removeInstance(key);
+    return true;
+  });
+
+/** Puts a member's new state in the store, ahead of its event. */
+function storeMember(key: string, serverId: string, member: Member | undefined) {
+  if (!member?.user) return;
+  const id = member.user.id;
+  updateInstance(key, (i) => ({
+    ...i,
+    members: { ...i.members, [serverId]: sortMembers([...(i.members[serverId] ?? []).filter((m) => m.user?.id !== id), member]) },
+  }));
+}
+
+/** Sets a nickname in a server: yours (no `userId`), or someone's ranked below you. */
+export const setNickname = (key: string, serverId: string, nickname: string, userId = "") =>
+  Effect.gen(function* () {
+    const { member } = yield* call((signal) =>
+      api(key).servers.updateMember({ serverId, userId, nickname }, { signal }),
+    );
+    storeMember(key, serverId, member);
+    return member!;
+  });
+
+// ───────────────────────── Moderation (owners and admins) ─────────────────────────
+
+/** Makes someone an admin or a member. Owner only. */
+export const setRole = (key: string, serverId: string, userId: string, role: MemberRole) =>
+  Effect.gen(function* () {
+    const { member } = yield* call((signal) => api(key).servers.updateMember({ serverId, userId, role }, { signal }));
+    storeMember(key, serverId, member);
+    return member!;
+  });
+
+/** Times someone out for `seconds`; 0 ends it. */
+export const timeOutMember = (key: string, serverId: string, userId: string, seconds: number, reason = "") =>
+  Effect.gen(function* () {
+    const { member } = yield* call((signal) =>
+      api(key).servers.timeOutMember({ serverId, userId, seconds: BigInt(seconds), reason }, { signal }),
+    );
+    storeMember(key, serverId, member);
+    return member!;
+  });
+
+const dropMember = (key: string, serverId: string, userId: string) =>
+  updateInstance(key, (i) => {
+    const list = i.members[serverId] ?? [];
+    if (!list.some((m) => m.user?.id === userId)) return i;
+    return {
+      ...i,
+      members: { ...i.members, [serverId]: list.filter((m) => m.user?.id !== userId) },
+      servers: i.servers.map((s) => (s.id === serverId ? { ...s, memberCount: s.memberCount - 1n } : s)),
+    };
+  });
+
+export const kickMember = (key: string, serverId: string, userId: string, reason = "") =>
+  Effect.gen(function* () {
+    yield* call((signal) => api(key).servers.kickMember({ serverId, userId, reason }, { signal }));
+    dropMember(key, serverId, userId);
+    return true;
+  });
+
+/** Bans someone, taking what they sent in the last `deleteSeconds` with them. Returns how many messages went. */
+export const banMember = (key: string, serverId: string, userId: string, reason: string, deleteSeconds: number) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) =>
+      api(key).servers.banMember({ serverId, userId, reason, deleteMessageSeconds: BigInt(deleteSeconds) }, { signal }),
+    );
+    dropMember(key, serverId, userId);
+    return Number(res.deletedMessages);
+  });
+
+export const unbanMember = (key: string, serverId: string, userId: string) =>
+  call((signal) => api(key).servers.unbanMember({ serverId, userId }, { signal })).pipe(Effect.as(true));
+
+export const listBans = (key: string, serverId: string) => call((signal) => api(key).servers.listBans({ serverId }, { signal }));
+
+export type AuditFilter = { actorId?: string; action?: AuditAction; beforeId?: string };
+
+export const listAuditLog = (key: string, serverId: string, filter: AuditFilter = {}) =>
+  call((signal) => api(key).servers.listAuditLog({ serverId, limit: 50, ...filter }, { signal }));
+
+/** Hands the server to another member; you stay on as an admin. */
+export const transferOwnership = (key: string, serverId: string, userId: string) =>
+  Effect.gen(function* () {
+    const { server } = yield* call((signal) => api(key).servers.transferOwnership({ serverId, userId }, { signal }));
+    if (server) updateInstance(key, (i) => addServer(i, server));
+    return server!;
+  });
 
 // ───────────────────────── Servers ─────────────────────────
 
@@ -120,7 +370,14 @@ export const deleteServer = (key: string, serverId: string) =>
 export const updateServer = (
   key: string,
   serverId: string,
-  patch: { name?: string; description?: string; discoverable?: boolean },
+  patch: {
+    name?: string;
+    description?: string;
+    discoverable?: boolean;
+    defaultNotifications?: NotificationLevel;
+    /** Empty for no join messages. */
+    systemChannelId?: string;
+  },
 ) =>
   Effect.gen(function* () {
     const { server } = yield* call((signal) => api(key).servers.updateServer({ serverId, ...patch }, { signal }));
@@ -163,6 +420,84 @@ export const setServerLimits = (key: string, serverId: string, limits: Omit<Serv
     Effect.map((r) => r.limits!),
   );
 
+/** Accounts on the instance, newest first, with what admins need to look after them. */
+export const listAccounts = (
+  key: string,
+  query: { query?: string; filter?: AccountFilter; beforeId?: string; limit?: number } = {},
+) => call((signal) => api(key).admin.listAccounts(query, { signal }));
+
+/** Makes an account an admin or not, and turns it off (with a reason) or back on. */
+export const updateAccount = (
+  key: string,
+  accountId: string,
+  change: { admin?: boolean; disabled?: boolean; reason?: string },
+) =>
+  call((signal) => api(key).admin.updateAccount({ accountId, ...change }, { signal })).pipe(
+    Effect.map((r) => r.account!),
+  );
+
+/** Gives an account a new random password, shown this once. Signs it out everywhere. */
+export const resetAccountPassword = (key: string, accountId: string, turnOffTwoFactor: boolean) =>
+  call((signal) => api(key).admin.resetAccountPassword({ accountId, turnOffTwoFactor }, { signal })).pipe(
+    Effect.map((r) => r.password),
+  );
+
+/** Every server on the instance, with its owner, usage and caps. */
+export const listInstanceServers = (key: string) =>
+  call((signal) => api(key).admin.listInstanceServers({}, { signal })).pipe(Effect.map((r) => r.servers));
+
+/**
+ * A server's whole database as one SQLite file. `progress` hears the bytes so
+ * far and the total once the first piece says it.
+ */
+export const exportServer = (key: string, serverId: string, progress: (bytes: number, total: number) => void) =>
+  Effect.tryPromise({
+    try: async (signal) => {
+      const parts: Uint8Array<ArrayBuffer>[] = [];
+      let bytes = 0;
+      let total = 0;
+      let filename = "server.db";
+      for await (const res of api(key).admin.exportServer({ serverId }, { signal })) {
+        if (res.filename) filename = res.filename;
+        if (res.size) total = Number(res.size);
+        parts.push(new Uint8Array(res.chunk));
+        bytes += res.chunk.length;
+        progress(bytes, total);
+      }
+      return { blob: new Blob(parts, { type: "application/vnd.sqlite3" }), filename };
+    },
+    catch: toFuwaError,
+  });
+
+/** Puts up the banner every client of this instance shows, or takes it down with empty text. */
+export const setAnnouncement = (
+  key: string,
+  announcement: { text: string; tone: AnnouncementTone; endsAt?: Date },
+) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) =>
+      api(key).admin.setAnnouncement(
+        {
+          announcement: {
+            text: announcement.text,
+            tone: announcement.tone,
+            endsAt: announcement.endsAt ? timestampFromDate(announcement.endsAt) : undefined,
+          },
+        },
+        { signal },
+      ),
+    );
+    updateInstance(key, (i) => (i.node ? { ...i, node: { ...i.node, announcement: res.announcement } } : i));
+    return res.announcement;
+  });
+
+/** Reads the instance's public details again: its name, sign-up options and announcement. */
+export const refreshNode = (key: string) =>
+  Effect.gen(function* () {
+    const { node } = yield* call((signal) => api(key).node.getNode({}, { signal }));
+    if (node) updateInstance(key, (i) => ({ ...i, node }));
+  });
+
 // ───────────────────────── Channels ─────────────────────────
 
 export const createChannel = (key: string, serverId: string, name: string, type: ChannelType, parentId = "") =>
@@ -173,15 +508,44 @@ export const createChannel = (key: string, serverId: string, name: string, type:
     return channel!;
   });
 
+/** Puts channels in the store, ahead of their events. */
+function storeChannels(key: string, serverId: string, changed: Channel[]) {
+  const ids = new Set(changed.map((c) => c.id));
+  updateInstance(key, (i) => ({
+    ...i,
+    channels: { ...i.channels, [serverId]: sortChannels([...(i.channels[serverId] ?? []).filter((c) => !ids.has(c.id)), ...changed]) },
+  }));
+}
+
 export const updateChannel = (
   key: string,
   serverId: string,
   channelId: string,
-  patch: { name?: string; topic?: string },
-) => call((signal) => api(key).channels.updateChannel({ serverId, channelId, ...patch }, { signal }));
+  patch: { name?: string; topic?: string; parentId?: string; slowmodeSeconds?: number },
+) =>
+  Effect.gen(function* () {
+    const { channel } = yield* call((signal) => api(key).channels.updateChannel({ serverId, channelId, ...patch }, { signal }));
+    if (channel) storeChannels(key, serverId, [channel]);
+    return channel!;
+  });
+
+/** Every channel of a server in its new order, each in its category (or none). */
+export const reorderChannels = (key: string, serverId: string, channels: Pick<ChannelPlacement, "channelId" | "parentId">[]) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) => api(key).channels.reorderChannels({ serverId, channels }, { signal }));
+    storeChannels(key, serverId, res.channels);
+    return res.channels;
+  });
 
 export const deleteChannel = (key: string, serverId: string, channelId: string) =>
-  call((signal) => api(key).channels.deleteChannel({ serverId, channelId }, { signal }));
+  Effect.gen(function* () {
+    yield* call((signal) => api(key).channels.deleteChannel({ serverId, channelId }, { signal }));
+    updateInstance(key, (i) => ({
+      ...i,
+      channels: { ...i.channels, [serverId]: (i.channels[serverId] ?? []).filter((c) => c.id !== channelId) },
+    }));
+    return true;
+  });
 
 // ───────────────────────── Messages ─────────────────────────
 

@@ -1,12 +1,21 @@
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeftIcon, ArrowRightIcon, LoaderCircleIcon, ServerIcon as ServerGlyph, SparklesIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  KeyRoundIcon,
+  LoaderCircleIcon,
+  ServerIcon as ServerGlyph,
+  ShieldCheckIcon,
+  SparklesIcon,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { Node } from "@/gen/fuwa/v1/types_pb";
-import { probe, run, signIn, signUp } from "@/fuwa/actions";
+import { probe, run, signIn, signUp, verifyTwoFactor } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
 import { instanceKey } from "@/fuwa/saved";
 import { AutoHeight } from "@/components/animate-ui/primitives/effects/auto-height";
+import { CodeInput } from "@/components/CodeInput";
 import { Private, usePrivateField } from "@/components/Private";
 import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -170,22 +179,44 @@ function Account({
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [shake, setShake] = useState(0);
+  const [ticket, setTicket] = useState<string | null>(null);
   const inAction = useAction(signIn);
   const upAction = useAction(signUp);
   const action = tab === "sign-in" ? inAction : upAction;
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    const key =
-      tab === "sign-in"
-        ? await inAction.go(url, username.trim().toLowerCase(), password)
-        : await upAction.go(url, username.trim().toLowerCase(), password, displayName.trim());
-    if (!key) {
-      setShake((n) => n + 1);
-      return;
-    }
+  function finish(key: string) {
     if (onDone) onDone(key);
     else navigate({ to: "/$instance", params: { instance: key } });
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (tab === "sign-in") {
+      const res = await inAction.go(url, username.trim().toLowerCase(), password);
+      if (!res) return setShake((n) => n + 1);
+      if (res.ticket) {
+        setPassword("");
+        return setTicket(res.ticket);
+      }
+      return finish(res.key!);
+    }
+    const key = await upAction.go(url, username.trim().toLowerCase(), password, displayName.trim());
+    if (!key) return setShake((n) => n + 1);
+    finish(key);
+  }
+
+  if (ticket) {
+    return (
+      <TwoFactorStep
+        url={url}
+        ticket={ticket}
+        onBack={(problem) => {
+          setTicket(null);
+          inAction.setError(problem ?? null);
+        }}
+        onDone={finish}
+      />
+    );
   }
 
   if (!canSignIn && !canSignUp) {
@@ -288,6 +319,138 @@ function Account({
         {tab === "sign-in" ? "Sign in" : "Create account"}
       </Button>
     </form>
+  );
+}
+
+/**
+ * The second step of signing in to an account with two-step sign-in: six
+ * digits from the authenticator app, or one of the backup codes.
+ */
+function TwoFactorStep({
+  url,
+  ticket,
+  onBack,
+  onDone,
+}: {
+  url: string;
+  ticket: string;
+  onBack: (problem?: string) => void;
+  onDone: (key: string) => void;
+}) {
+  const [backup, setBackup] = useState(false);
+  const [code, setCode] = useState("");
+  const [shake, setShake] = useState(0);
+  const verify = useAction(verifyTwoFactor);
+
+  async function send(value: string) {
+    const key = await verify.go(url, ticket, value);
+    if (key) return onDone(key);
+    setShake((n) => n + 1);
+  }
+
+  useEffect(() => {
+    // A sign-in that ran out goes back to the password.
+    if (verify.error && /ran out/.test(verify.error)) onBack(verify.error);
+  }, [verify.error, onBack]);
+
+  return (
+    <motion.form
+      initial={{ opacity: 0, x: 24 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.3, ease: EASE }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (code.trim()) void send(code);
+      }}
+      className="flex flex-col gap-4"
+    >
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => onBack()}
+          className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted hover:text-foreground"
+          aria-label="Back to the password"
+        >
+          <ArrowLeftIcon className="size-4" />
+        </button>
+        <motion.span
+          initial={{ scale: 0, rotate: -30 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: "spring", stiffness: 500, damping: 16, delay: 0.1 }}
+          className="grid size-10 place-items-center rounded-2xl bg-primary/15 text-primary"
+        >
+          <ShieldCheckIcon className="size-5" />
+        </motion.span>
+        <div className="min-w-0">
+          <p className="font-extrabold">Two-step sign-in</p>
+          <p className="text-xs text-muted-foreground">
+            {backup ? "Type one of the backup codes you saved." : "Open your authenticator app and type the code it shows."}
+          </p>
+        </div>
+      </div>
+      <AnimatePresence mode="wait" initial={false}>
+        {backup ? (
+          <motion.div key="backup" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2, ease: EASE }}>
+            <div key={shake} className={cn("flex flex-col gap-2", shake > 0 && "shake")}>
+              <Label htmlFor="backup-code" className="font-bold">
+                Backup code
+              </Label>
+              <Input
+                id="backup-code"
+                autoFocus
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder="abcd-efgh"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                className="h-11 rounded-xl font-mono tracking-widest"
+              />
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="app"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: EASE }}
+            className="flex justify-center"
+          >
+            <CodeInput id="sign-in-code" onComplete={(value) => void send(value)} disabled={verify.pending} shake={shake} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {verify.error && (
+          <motion.p
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="text-center text-sm text-destructive first-letter:uppercase"
+          >
+            {verify.error}
+          </motion.p>
+        )}
+      </AnimatePresence>
+      {backup && (
+        <Button type="submit" size="lg" disabled={verify.pending || !code.trim()} className="btn h-11 rounded-xl font-bold">
+          {verify.pending ? <LoaderCircleIcon className="animate-spin" /> : <KeyRoundIcon />}
+          Sign in
+        </Button>
+      )}
+      <button
+        type="button"
+        onClick={() => {
+          setBackup((b) => !b);
+          setCode("");
+          verify.setError(null);
+        }}
+        className="self-center text-sm font-bold text-primary hover:underline"
+      >
+        {backup ? "Use the authenticator app instead" : "Lost your phone? Use a backup code"}
+      </button>
+    </motion.form>
   );
 }
 

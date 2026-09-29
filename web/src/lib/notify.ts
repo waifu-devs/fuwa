@@ -1,9 +1,11 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import type { Event } from "@/gen/fuwa/v1/types_pb";
+import { LeaveReason, MessageKind, type Event } from "@/gen/fuwa/v1/types_pb";
 import { store, type InstanceState } from "@/fuwa/store";
 import { displayName, memberName, mentions } from "@/lib/format";
+import { effectiveNotifications, mentionsEveryone, shouldAlert } from "@/lib/notifications";
 import { getPrefs, subscribePrefs } from "@/lib/prefs";
 import { play } from "@/lib/sounds";
+import { toast } from "@/lib/ui";
 
 /**
  * What this device does when something happens while you're elsewhere:
@@ -41,19 +43,28 @@ export function onLiveEvent(key: string, event: Event) {
   const p = event.payload;
   if (p.case === "messageCreated") {
     const message = p.value.message;
-    if (!message || message.authorId === me.id) return;
+    // Join messages chime through memberJoined instead.
+    if (!message || message.authorId === me.id || message.kind !== MessageKind.UNSPECIFIED) return;
     const looking = !document.hidden && s.focus?.instance === key && s.focus.channel === message.channelId;
-    const mention = mentions(message.content, me.username);
-    if (!looking) playSome(mention ? "mention" : "message", mention ? 600 : 1500);
-    const prefs = getPrefs();
-    if (prefs.notifyFor === "mentions" && !mention) return;
-    if (!document.hidden && document.hasFocus()) return;
+    const settings = effectiveNotifications(inst, event.serverId, message.channelId);
+    const mention =
+      mentions(message.content, me.username) ||
+      (!settings.suppressEveryone && mentionsEveryone(inst, event.serverId, message.authorId, message.content));
+    const alert = shouldAlert(settings, mention, getPrefs());
+    if (alert.sound && !looking) playSome(mention ? "mention" : "message", mention ? 600 : 1500);
+    if (!alert.notify || (!document.hidden && document.hasFocus())) return;
     notify(inst, event.serverId, message.channelId, message.authorId, message.content, mention);
   } else if (p.case === "memberJoined") {
     const user = p.value.member?.user;
     const viewing = s.focus?.instance === key && (inst.channels[event.serverId] ?? []).some((c) => c.id === s.focus!.channel);
     if (user && user.id !== me.id && viewing) playSome("join", 800);
   }
+}
+
+/** Tells you when an owner or admin took you out of a server. Called with its name, which is gone from the store by then. */
+export function onRemoved(serverName: string, reason: LeaveReason) {
+  if (reason === LeaveReason.KICKED) toast(`You were removed from ${serverName}`);
+  else if (reason === LeaveReason.BANNED) toast(`You were banned from ${serverName}`);
 }
 
 function notify(inst: InstanceState, serverId: string, channelId: string, authorId: string, content: string, mention: boolean) {
@@ -105,7 +116,15 @@ export function setTitle(title: string) {
 function unreadTotal(): number {
   if (!getPrefs().unreadBadge) return 0;
   let total = 0;
-  for (const inst of Object.values(store.get().instances)) for (const n of Object.values(inst.unread)) total += n;
+  const now = Date.now();
+  for (const inst of Object.values(store.get().instances)) {
+    for (const [serverId, channels] of Object.entries(inst.channels)) {
+      for (const channel of channels) {
+        const n = inst.unread[channel.id];
+        if (n && !effectiveNotifications(inst, serverId, channel.id, now).muted) total += n;
+      }
+    }
+  }
   return total;
 }
 
@@ -157,5 +176,7 @@ export function watchUnread() {
   };
   store.subscribe(update);
   subscribePrefs(update);
+  // Timed mutes run out on their own.
+  setInterval(update, 30_000);
   update();
 }

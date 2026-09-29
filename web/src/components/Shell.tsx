@@ -1,10 +1,12 @@
 import { Outlet, useParams, useRouterState } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "motion/react";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { ChannelSidebar } from "@/components/ChannelSidebar";
 import { InstanceSidebar } from "@/components/InstanceSidebar";
 import { EASE_OUT } from "@/components/motion";
 import { Rail } from "@/components/Rail";
+import { useInstance } from "@/fuwa/hooks";
 import { onCommand } from "@/lib/ui";
 import { useMediaQuery } from "@/lib/use-media-query";
 
@@ -49,10 +51,12 @@ export function Shell() {
   const [navOpen, setNavOpen] = useState(!params.channel);
   const [membersOpen, setMembersOpen] = useState(wide);
 
-  // Opening a channel on a phone shows the chat; leaving one shows the list.
+  // Opening a channel on a phone shows the chat; leaving one shows the list. Signed out (the session
+  // ended, or an admin turned the account off), it shows the page asking to sign in.
+  const signedOut = useInstance(params.instance)?.connection === "signed-out";
   useEffect(() => {
-    setNavOpen(!params.channel);
-  }, [params.channel, params.server]);
+    setNavOpen(!params.channel && !signedOut);
+  }, [params.channel, params.server, signedOut]);
   useEffect(() => setMembersOpen(wide), [wide]);
   // The members shortcut works while a channel is open.
   const inChannel = !!params.channel;
@@ -80,17 +84,20 @@ export function Shell() {
 
   return (
     <LayoutContext.Provider value={layout}>
-      <div className="flex h-full overflow-hidden">
-        {compact ? (
-          <CompactFrame navOpen={navOpen} nav={<Nav side={side} />} />
-        ) : (
-          <>
-            <Nav side={side} />
-            <main className="surface-chat relative flex min-w-0 flex-1 flex-col">
-              <Page />
-            </main>
-          </>
-        )}
+      <div className="flex h-full flex-col">
+        <AnnouncementBanner instanceKey={params.instance} />
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          {compact ? (
+            <CompactFrame navOpen={navOpen} nav={<Nav side={side} />} />
+          ) : (
+            <>
+              <Nav side={side} />
+              <main className="surface-chat relative flex min-w-0 flex-1 flex-col">
+                <Page />
+              </main>
+            </>
+          )}
+        </div>
       </div>
     </LayoutContext.Provider>
   );

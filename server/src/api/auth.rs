@@ -3,11 +3,17 @@ use tonic::{Request, Response, Status};
 use super::{Api, respond, text, url};
 use crate::auth::{self, Viewer};
 use crate::error::{Error, Result};
+use crate::id::millis;
+use crate::node::{Account, ProfileChange};
 use crate::pb::{self, auth_service_server::AuthService};
 use crate::servers::{self as store, Payload};
+use crate::twofactor;
+
+/// What someone whose account was turned off hears when they sign in.
+const DISABLED: &str = "this account was turned off by the instance's admins";
 
 impl Api {
-    async fn create_account(&self, req: pb::SignUpRequest) -> Result<pb::SignUpResponse> {
+    async fn create_account(&self, req: pb::SignUpRequest, user_agent: &str) -> Result<pb::SignUpResponse> {
         if !self.app.settings().local_accounts.sign_up() {
             return Err(Error::FailedPrecondition("this instance isn't taking new sign-ups".into()));
         }
@@ -21,12 +27,12 @@ impl Api {
         let hash = auth::hash_password(req.password).await?;
         let account = self.app.node.create_local_account(&username, &display_name, &hash).await?;
         let token = auth::new_token();
-        self.app.node.create_session(&account.id, &auth::hash_token(&token)).await?;
+        self.app.node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
         tracing::info!(account = %account.id, admin = account.admin, "account created");
         Ok(pb::SignUpResponse { token, user: Some(account.user()), admin: account.admin })
     }
 
-    async fn start_session(&self, req: pb::SignInRequest) -> Result<pb::SignInResponse> {
+    async fn start_session(&self, req: pb::SignInRequest, user_agent: &str) -> Result<pb::SignInResponse> {
         if !self.app.settings().local_accounts.sign_in() {
             return Err(Error::FailedPrecondition("this instance doesn't use standalone accounts".into()));
         }
@@ -43,16 +49,84 @@ impl Api {
             return Err(Error::Unauthenticated);
         };
         self.app.limiter.succeeded(&username);
+        if account.disabled {
+            return Err(Error::denied(DISABLED));
+        }
+        if account.two_factor {
+            let ticket = auth::new_token();
+            self.app.node.create_ticket(&auth::hash_token(&ticket), &account.id).await?;
+            return Ok(pb::SignInResponse { two_factor_ticket: ticket, ..Default::default() });
+        }
         let token = auth::new_token();
-        self.app.node.create_session(&account.id, &auth::hash_token(&token)).await?;
-        Ok(pb::SignInResponse { token, user: Some(account.user()), admin: account.admin })
+        self.app.node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
+        Ok(pb::SignInResponse {
+            token,
+            user: Some(account.user()),
+            admin: account.admin,
+            two_factor_ticket: String::new(),
+        })
     }
 
-    async fn apply_profile(&self, account: &crate::node::Account, req: pb::UpdateProfileRequest) -> Result<pb::User> {
-        let display_name = req.display_name.as_deref().map(|name| text("display_name", name, 1, 64)).transpose()?;
-        let avatar_url = req.avatar_url.as_deref().map(|value| url("avatar_url", value)).transpose()?;
-        let account = self.app.node.update_profile(&account.id, display_name.as_deref(), avatar_url.as_deref()).await?;
+    /// The second step of signing in: a code for a sign-in whose password was right.
+    async fn finish_two_factor(
+        &self,
+        req: pb::VerifyTwoFactorRequest,
+        user_agent: &str,
+    ) -> Result<pb::VerifyTwoFactorResponse> {
+        let ticket_hash = auth::hash_token(req.ticket.trim());
+        let Some(account_id) = self.app.node.ticket_account(&ticket_hash).await? else {
+            return Err(Error::FailedPrecondition("this sign-in ran out; enter your password again".into()));
+        };
+        let guesses = format!("two-factor:{account_id}");
+        self.app.limiter.check(&guesses)?;
+        if !twofactor::check(&self.app.node, &account_id, &req.code).await? {
+            self.app.limiter.failed(&guesses);
+            self.app.node.ticket_failed(&ticket_hash).await?;
+            return Err(Error::denied("that code didn't work"));
+        }
+        self.app.limiter.succeeded(&guesses);
+        if !self.app.node.take_ticket(&ticket_hash).await? {
+            return Err(Error::FailedPrecondition("this sign-in ran out; enter your password again".into()));
+        }
+        let account = self.app.node.account(&account_id).await?.ok_or(Error::Unauthenticated)?;
+        if account.disabled {
+            return Err(Error::denied(DISABLED));
+        }
+        let token = auth::new_token();
+        self.app.node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
+        Ok(pb::VerifyTwoFactorResponse { token, user: Some(account.user()), admin: account.admin })
+    }
+
+    async fn apply_profile(&self, account: &Account, req: pb::UpdateProfileRequest) -> Result<(pb::User, pb::Profile)> {
+        let status = match req.status.as_deref() {
+            Some(status) => {
+                let status = text("status", status, 0, 128)?;
+                let expires = if status.is_empty() { None } else { req.status_expires_at.as_ref().map(millis) };
+                Some((status, expires))
+            }
+            None => None,
+        };
+        let change = ProfileChange {
+            display_name: req.display_name.as_deref().map(|name| text("display_name", name, 1, 64)).transpose()?,
+            avatar_url: req.avatar_url.as_deref().map(|value| url("avatar_url", value)).transpose()?,
+            pronouns: req.pronouns.as_deref().map(|value| text("pronouns", value, 0, 40)).transpose()?,
+            bio: req.bio.as_deref().map(|value| text("bio", value, 0, 2000)).transpose()?,
+            banner_url: req.banner_url.as_deref().map(|value| url("banner_url", value)).transpose()?,
+            accent_color: match req.accent_color {
+                None => None,
+                Some(color) if color < 0 => Some(None),
+                Some(color) if color <= 0xFF_FFFF => Some(Some(color)),
+                Some(_) => return Err(Error::invalid("accent_color is a 0xRRGGBB color")),
+            },
+            status,
+        };
+        let shows_everywhere = change.display_name.is_some() || change.avatar_url.is_some() || change.status.is_some();
+        let account = self.app.node.update_profile(&account.id, &change).await?;
         let user = account.user();
+        let profile = self.app.node.profile(&account.id).await?.ok_or(Error::NotFound("account"))?;
+        if !shows_everywhere {
+            return Ok((user, profile));
+        }
         // Every server the account belongs to keeps its own copy of the profile.
         for server_id in self.app.servers.joined_ids(&account.id) {
             let Ok(sdb) = self.app.servers.get(&server_id).await else { continue };
@@ -69,18 +143,36 @@ impl Api {
                 tracing::warn!(server = %server_id, error = %err, "couldn't update a member's profile");
             }
         }
-        Ok(user)
+        Ok((user, profile))
+    }
+
+    /// Whether `viewer` may see `user_id`'s profile: their own, someone they
+    /// share a server with, or anyone for an instance admin.
+    fn can_see_profile(&self, viewer: &Account, user_id: &str) -> bool {
+        viewer.id == user_id
+            || viewer.admin
+            || self.app.servers.joined_ids(&viewer.id).iter().any(|server| self.app.servers.is_member(user_id, server))
     }
 }
 
 #[tonic::async_trait]
 impl AuthService for Api {
     async fn sign_up(&self, request: Request<pb::SignUpRequest>) -> Result<Response<pb::SignUpResponse>, Status> {
-        respond(self.create_account(request.into_inner()).await)
+        let user_agent = auth::user_agent(request.metadata());
+        respond(self.create_account(request.into_inner(), &user_agent).await)
     }
 
     async fn sign_in(&self, request: Request<pb::SignInRequest>) -> Result<Response<pb::SignInResponse>, Status> {
-        respond(self.start_session(request.into_inner()).await)
+        let user_agent = auth::user_agent(request.metadata());
+        respond(self.start_session(request.into_inner(), &user_agent).await)
+    }
+
+    async fn verify_two_factor(
+        &self,
+        request: Request<pb::VerifyTwoFactorRequest>,
+    ) -> Result<Response<pb::VerifyTwoFactorResponse>, Status> {
+        let user_agent = auth::user_agent(request.metadata());
+        respond(self.finish_two_factor(request.into_inner(), &user_agent).await)
     }
 
     async fn sign_out(&self, request: Request<pb::SignOutRequest>) -> Result<Response<pb::SignOutResponse>, Status> {
@@ -112,8 +204,26 @@ impl AuthService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let user = self.apply_profile(&account, request.into_inner()).await?;
-                Ok(pb::UpdateProfileResponse { user: Some(user) })
+                let (user, profile) = self.apply_profile(&account, request.into_inner()).await?;
+                Ok(pb::UpdateProfileResponse { user: Some(user), profile: Some(profile) })
+            }
+            .await,
+        )
+    }
+
+    async fn get_profile(
+        &self,
+        request: Request<pb::GetProfileRequest>,
+    ) -> Result<Response<pb::GetProfileResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let user_id = &request.get_ref().user_id;
+                if !self.can_see_profile(&account, user_id) {
+                    return Err(Error::NotFound("profile"));
+                }
+                let profile = self.app.node.profile(user_id).await?.ok_or(Error::NotFound("profile"))?;
+                Ok(pb::GetProfileResponse { profile: Some(profile) })
             }
             .await,
         )

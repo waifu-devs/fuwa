@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/channel.proto.
  */
 export const file_fuwa_v1_channel: GenFile = /*@__PURE__*/
-  fileDesc("ChVmdXdhL3YxL2NoYW5uZWwucHJvdG8SB2Z1d2EudjEifQoUQ3JlYXRlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSIgoEdHlwZRgDIAEoDjIULmZ1d2EudjEuQ2hhbm5lbFR5cGUSEQoJcGFyZW50X2lkGAQgASgJEg0KBXRvcGljGAUgASgJIjoKFUNyZWF0ZUNoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIjoKEUdldENoYW5uZWxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJIjcKEkdldENoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIigKE0xpc3RDaGFubmVsc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjoKFExpc3RDaGFubmVsc1Jlc3BvbnNlEiIKCGNoYW5uZWxzGAEgAygLMhAuZnV3YS52MS5DaGFubmVsIsEBChRVcGRhdGVDaGFubmVsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIRCgRuYW1lGAMgASgJSACIAQESEgoFdG9waWMYBCABKAlIAYgBARIVCghwb3NpdGlvbhgFIAEoBUgCiAEBEhYKCXBhcmVudF9pZBgGIAEoCUgDiAEBQgcKBV9uYW1lQggKBl90b3BpY0ILCglfcG9zaXRpb25CDAoKX3BhcmVudF9pZCI6ChVVcGRhdGVDaGFubmVsUmVzcG9uc2USIQoHY2hhbm5lbBgBIAEoCzIQLmZ1d2EudjEuQ2hhbm5lbCI9ChREZWxldGVDaGFubmVsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCSIXChVEZWxldGVDaGFubmVsUmVzcG9uc2UylAMKDkNoYW5uZWxTZXJ2aWNlEk4KDUNyZWF0ZUNoYW5uZWwSHS5mdXdhLnYxLkNyZWF0ZUNoYW5uZWxSZXF1ZXN0Gh4uZnV3YS52MS5DcmVhdGVDaGFubmVsUmVzcG9uc2USRQoKR2V0Q2hhbm5lbBIaLmZ1d2EudjEuR2V0Q2hhbm5lbFJlcXVlc3QaGy5mdXdhLnYxLkdldENoYW5uZWxSZXNwb25zZRJLCgxMaXN0Q2hhbm5lbHMSHC5mdXdhLnYxLkxpc3RDaGFubmVsc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RDaGFubmVsc1Jlc3BvbnNlEk4KDVVwZGF0ZUNoYW5uZWwSHS5mdXdhLnYxLlVwZGF0ZUNoYW5uZWxSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVDaGFubmVsUmVzcG9uc2USTgoNRGVsZXRlQ2hhbm5lbBIdLmZ1d2EudjEuRGVsZXRlQ2hhbm5lbFJlcXVlc3QaHi5mdXdhLnYxLkRlbGV0ZUNoYW5uZWxSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types]);
+  fileDesc("ChVmdXdhL3YxL2NoYW5uZWwucHJvdG8SB2Z1d2EudjEifQoUQ3JlYXRlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSIgoEdHlwZRgDIAEoDjIULmZ1d2EudjEuQ2hhbm5lbFR5cGUSEQoJcGFyZW50X2lkGAQgASgJEg0KBXRvcGljGAUgASgJIjoKFUNyZWF0ZUNoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIjoKEUdldENoYW5uZWxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJIjcKEkdldENoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIigKE0xpc3RDaGFubmVsc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjoKFExpc3RDaGFubmVsc1Jlc3BvbnNlEiIKCGNoYW5uZWxzGAEgAygLMhAuZnV3YS52MS5DaGFubmVsIvUBChRVcGRhdGVDaGFubmVsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIRCgRuYW1lGAMgASgJSACIAQESEgoFdG9waWMYBCABKAlIAYgBARIVCghwb3NpdGlvbhgFIAEoBUgCiAEBEhYKCXBhcmVudF9pZBgGIAEoCUgDiAEBEh0KEHNsb3dtb2RlX3NlY29uZHMYByABKAVIBIgBAUIHCgVfbmFtZUIICgZfdG9waWNCCwoJX3Bvc2l0aW9uQgwKCl9wYXJlbnRfaWRCEwoRX3Nsb3dtb2RlX3NlY29uZHMiOgoVVXBkYXRlQ2hhbm5lbFJlc3BvbnNlEiEKB2NoYW5uZWwYASABKAsyEC5mdXdhLnYxLkNoYW5uZWwiPQoURGVsZXRlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkiFwoVRGVsZXRlQ2hhbm5lbFJlc3BvbnNlIlgKFlJlb3JkZXJDaGFubmVsc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEisKCGNoYW5uZWxzGAIgAygLMhkuZnV3YS52MS5DaGFubmVsUGxhY2VtZW50IjkKEENoYW5uZWxQbGFjZW1lbnQSEgoKY2hhbm5lbF9pZBgBIAEoCRIRCglwYXJlbnRfaWQYAiABKAkiPQoXUmVvcmRlckNoYW5uZWxzUmVzcG9uc2USIgoIY2hhbm5lbHMYASADKAsyEC5mdXdhLnYxLkNoYW5uZWwy6gMKDkNoYW5uZWxTZXJ2aWNlEk4KDUNyZWF0ZUNoYW5uZWwSHS5mdXdhLnYxLkNyZWF0ZUNoYW5uZWxSZXF1ZXN0Gh4uZnV3YS52MS5DcmVhdGVDaGFubmVsUmVzcG9uc2USRQoKR2V0Q2hhbm5lbBIaLmZ1d2EudjEuR2V0Q2hhbm5lbFJlcXVlc3QaGy5mdXdhLnYxLkdldENoYW5uZWxSZXNwb25zZRJLCgxMaXN0Q2hhbm5lbHMSHC5mdXdhLnYxLkxpc3RDaGFubmVsc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RDaGFubmVsc1Jlc3BvbnNlEk4KDVVwZGF0ZUNoYW5uZWwSHS5mdXdhLnYxLlVwZGF0ZUNoYW5uZWxSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVDaGFubmVsUmVzcG9uc2USTgoNRGVsZXRlQ2hhbm5lbBIdLmZ1d2EudjEuRGVsZXRlQ2hhbm5lbFJlcXVlc3QaHi5mdXdhLnYxLkRlbGV0ZUNoYW5uZWxSZXNwb25zZRJUCg9SZW9yZGVyQ2hhbm5lbHMSHy5mdXdhLnYxLlJlb3JkZXJDaGFubmVsc1JlcXVlc3QaIC5mdXdhLnYxLlJlb3JkZXJDaGFubmVsc1Jlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types]);
 
 /**
  * @generated from message fuwa.v1.CreateChannelRequest
@@ -178,6 +178,13 @@ export type UpdateChannelRequest = Message<"fuwa.v1.UpdateChannelRequest"> & {
    * @generated from field: optional string parent_id = 6;
    */
   parentId?: string | undefined;
+
+  /**
+   * 0 to 21600 (six hours); 0 turns slow mode off.
+   *
+   * @generated from field: optional int32 slowmode_seconds = 7;
+   */
+  slowmodeSeconds?: number | undefined;
 };
 
 /**
@@ -240,6 +247,74 @@ export const DeleteChannelResponseSchema: GenMessage<DeleteChannelResponse> = /*
   messageDesc(file_fuwa_v1_channel, 9);
 
 /**
+ * @generated from message fuwa.v1.ReorderChannelsRequest
+ */
+export type ReorderChannelsRequest = Message<"fuwa.v1.ReorderChannelsRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * Every channel in the server, once each, in display order. Categories
+   * can't sit inside anything; other channels can sit inside a category.
+   *
+   * @generated from field: repeated fuwa.v1.ChannelPlacement channels = 2;
+   */
+  channels: ChannelPlacement[];
+};
+
+/**
+ * Describes the message fuwa.v1.ReorderChannelsRequest.
+ * Use `create(ReorderChannelsRequestSchema)` to create a new message.
+ */
+export const ReorderChannelsRequestSchema: GenMessage<ReorderChannelsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 10);
+
+/**
+ * @generated from message fuwa.v1.ChannelPlacement
+ */
+export type ChannelPlacement = Message<"fuwa.v1.ChannelPlacement"> & {
+  /**
+   * @generated from field: string channel_id = 1;
+   */
+  channelId: string;
+
+  /**
+   * The category it sits in, or empty for none.
+   *
+   * @generated from field: string parent_id = 2;
+   */
+  parentId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ChannelPlacement.
+ * Use `create(ChannelPlacementSchema)` to create a new message.
+ */
+export const ChannelPlacementSchema: GenMessage<ChannelPlacement> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 11);
+
+/**
+ * @generated from message fuwa.v1.ReorderChannelsResponse
+ */
+export type ReorderChannelsResponse = Message<"fuwa.v1.ReorderChannelsResponse"> & {
+  /**
+   * In display order.
+   *
+   * @generated from field: repeated fuwa.v1.Channel channels = 1;
+   */
+  channels: Channel[];
+};
+
+/**
+ * Describes the message fuwa.v1.ReorderChannelsResponse.
+ * Use `create(ReorderChannelsResponseSchema)` to create a new message.
+ */
+export const ReorderChannelsResponseSchema: GenMessage<ReorderChannelsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 12);
+
+/**
  * Channels in a community server. Members can read them; owners and admins manage them.
  *
  * @generated from service fuwa.v1.ChannelService
@@ -284,6 +359,16 @@ export const ChannelService: GenService<{
     methodKind: "unary";
     input: typeof DeleteChannelRequestSchema;
     output: typeof DeleteChannelResponseSchema;
+  },
+  /**
+   * Puts every channel in a new order, and in or out of categories, at once.
+   *
+   * @generated from rpc fuwa.v1.ChannelService.ReorderChannels
+   */
+  reorderChannels: {
+    methodKind: "unary";
+    input: typeof ReorderChannelsRequestSchema;
+    output: typeof ReorderChannelsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_channel, 0);

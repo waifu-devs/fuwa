@@ -12,7 +12,7 @@ import type { Message as Message$1 } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/types.proto.
  */
 export const file_fuwa_v1_types: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL3R5cGVzLnByb3RvEgdmdXdhLnYxIqIBCgROb2RlEgwKBG5hbWUYASABKAkSDwoHdmVyc2lvbhgCIAEoCRISCgpwdWJsaWNfdXJsGAMgASgJEiIKBGF1dGgYBCABKAsyFC5mdXdhLnYxLkF1dGhNZXRob2RzEjAKD3NlcnZlcl9jcmVhdGlvbhgFIAEoDjIXLmZ1d2EudjEuU2VydmVyQ3JlYXRpb24SEQoJdGVsZW1ldHJ5GAYgASgIImoKC0F1dGhNZXRob2RzEhUKDWxvY2FsX3NpZ25faW4YASABKAgSFQoNbG9jYWxfc2lnbl91cBgCIAEoCBIWCg5saW5rZWRfc2lnbl9pbhgDIAEoCBIVCg1saW5rZWRfaXNzdWVyGAQgASgJInIKBFVzZXISCgoCaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJEhIKCmF2YXRhcl91cmwYBCABKAkSIgoEa2luZBgFIAEoDjIULmZ1d2EudjEuQWNjb3VudEtpbmQinAEKBk1lbWJlchIRCglzZXJ2ZXJfaWQYASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchIQCghuaWNrbmFtZRgDIAEoCRIhCgRyb2xlGAQgASgOMhMuZnV3YS52MS5NZW1iZXJSb2xlEi0KCWpvaW5lZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAi5wEKBlNlcnZlchIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEhAKCGljb25fdXJsGAQgASgJEhAKCG93bmVyX2lkGAUgASgJEhQKDGRpc2NvdmVyYWJsZRgGIAEoCBIUCgxtZW1iZXJfY291bnQYByABKAMSLgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKdXBkYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAi7gEKB0NoYW5uZWwSCgoCaWQYASABKAkSEQoJc2VydmVyX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSIgoEdHlwZRgEIAEoDjIULmZ1d2EudjEuQ2hhbm5lbFR5cGUSEQoJcGFyZW50X2lkGAUgASgJEg0KBXRvcGljGAYgASgJEhAKCHBvc2l0aW9uGAcgASgFEi4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIp4CCgdNZXNzYWdlEgoKAmlkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRISCgpjaGFubmVsX2lkGAMgASgJEhEKCWF1dGhvcl9pZBgEIAEoCRIPCgdjb250ZW50GAUgASgJEigKC2F0dGFjaG1lbnRzGAYgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgHIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYCCABKAkSLgoKY3JlYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLQoJZWRpdGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJbCgpBdHRhY2htZW50EgoKAmlkGAEgASgJEhAKCGZpbGVuYW1lGAIgASgJEhQKDGNvbnRlbnRfdHlwZRgDIAEoCRIMCgRzaXplGAQgASgDEgsKA3VybBgFIAEoCSKWAQoFRW1iZWQSDQoFdGl0bGUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSCwoDdXJsGAMgASgJEg0KBWNvbG9yGAQgASgFEiMKBmZpZWxkcxgFIAMoCzITLmZ1d2EudjEuRW1iZWRGaWVsZBIVCg10aHVtYm5haWxfdXJsGAYgASgJEhEKCWltYWdlX3VybBgHIAEoCSI5CgpFbWJlZEZpZWxkEgwKBG5hbWUYASABKAkSDQoFdmFsdWUYAiABKAkSDgoGaW5saW5lGAMgASgIIokCCgtTZXJ2ZXJVc2FnZRIRCglzZXJ2ZXJfaWQYASABKAkSDwoHbWVtYmVycxgCIAEoAxIQCghjaGFubmVscxgDIAEoAxIQCghtZXNzYWdlcxgEIAEoAxIVCg1tZXNzYWdlc19zZW50GAUgASgDEhUKDW1lc3NhZ2VfYnl0ZXMYBiABKAMSEwoLYXR0YWNobWVudHMYByABKAMSGAoQYXR0YWNobWVudF9ieXRlcxgIIAEoAxIOCgZldmVudHMYCSABKAMSFQoNc3RvcmFnZV9ieXRlcxgKIAEoAxIuCgp1cGRhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCK2AQoMU2VydmVyTGltaXRzEhQKB21lbWJlcnMYASABKANIAIgBARIVCghjaGFubmVscxgCIAEoA0gBiAEBEhoKDXN0b3JhZ2VfYnl0ZXMYAyABKANIAogBARIdChBhdHRhY2htZW50X2J5dGVzGAQgASgDSAOIAQFCCgoIX21lbWJlcnNCCwoJX2NoYW5uZWxzQhAKDl9zdG9yYWdlX2J5dGVzQhMKEV9hdHRhY2htZW50X2J5dGVzIq8FCgVFdmVudBIKCgJpZBgBIAEoCRIRCglzZXJ2ZXJfaWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAMSEAoIYWN0b3JfaWQYBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoOc2VydmVyX3VwZGF0ZWQYCiABKAsyFi5mdXdhLnYxLlNlcnZlclVwZGF0ZWRIABIwCg5zZXJ2ZXJfZGVsZXRlZBgLIAEoCzIWLmZ1d2EudjEuU2VydmVyRGVsZXRlZEgAEjIKD2NoYW5uZWxfY3JlYXRlZBgMIAEoCzIXLmZ1d2EudjEuQ2hhbm5lbENyZWF0ZWRIABIyCg9jaGFubmVsX3VwZGF0ZWQYDSABKAsyFy5mdXdhLnYxLkNoYW5uZWxVcGRhdGVkSAASMgoPY2hhbm5lbF9kZWxldGVkGA4gASgLMhcuZnV3YS52MS5DaGFubmVsRGVsZXRlZEgAEjIKD21lc3NhZ2VfY3JlYXRlZBgPIAEoCzIXLmZ1d2EudjEuTWVzc2FnZUNyZWF0ZWRIABIyCg9tZXNzYWdlX3VwZGF0ZWQYECABKAsyFy5mdXdhLnYxLk1lc3NhZ2VVcGRhdGVkSAASMgoPbWVzc2FnZV9kZWxldGVkGBEgASgLMhcuZnV3YS52MS5NZXNzYWdlRGVsZXRlZEgAEi4KDW1lbWJlcl9qb2luZWQYEiABKAsyFS5mdXdhLnYxLk1lbWJlckpvaW5lZEgAEjAKDm1lbWJlcl91cGRhdGVkGBMgASgLMhYuZnV3YS52MS5NZW1iZXJVcGRhdGVkSAASKgoLbWVtYmVyX2xlZnQYFCABKAsyEy5mdXdhLnYxLk1lbWJlckxlZnRIAEIJCgdwYXlsb2FkIjAKDVNlcnZlclVwZGF0ZWQSHwoGc2VydmVyGAEgASgLMg8uZnV3YS52MS5TZXJ2ZXIiDwoNU2VydmVyRGVsZXRlZCIzCg5DaGFubmVsQ3JlYXRlZBIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIjMKDkNoYW5uZWxVcGRhdGVkEiEKB2NoYW5uZWwYASABKAsyEC5mdXdhLnYxLkNoYW5uZWwiJAoOQ2hhbm5lbERlbGV0ZWQSEgoKY2hhbm5lbF9pZBgBIAEoCSIzCg5NZXNzYWdlQ3JlYXRlZBIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIjMKDk1lc3NhZ2VVcGRhdGVkEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiOAoOTWVzc2FnZURlbGV0ZWQSEgoKY2hhbm5lbF9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJIi8KDE1lbWJlckpvaW5lZBIfCgZtZW1iZXIYASABKAsyDy5mdXdhLnYxLk1lbWJlciIwCg1NZW1iZXJVcGRhdGVkEh8KBm1lbWJlchgBIAEoCzIPLmZ1d2EudjEuTWVtYmVyIh0KCk1lbWJlckxlZnQSDwoHdXNlcl9pZBgBIAEoCSqJAQoOU2VydmVyQ3JlYXRpb24SHwobU0VSVkVSX0NSRUFUSU9OX1VOU1BFQ0lGSUVEEAASHAoYU0VSVkVSX0NSRUFUSU9OX0VWRVJZT05FEAESGgoWU0VSVkVSX0NSRUFUSU9OX0FETUlOUxACEhwKGFNFUlZFUl9DUkVBVElPTl9ESVNBQkxFRBADKlwKC0FjY291bnRLaW5kEhwKGEFDQ09VTlRfS0lORF9VTlNQRUNJRklFRBAAEhYKEkFDQ09VTlRfS0lORF9MT0NBTBABEhcKE0FDQ09VTlRfS0lORF9MSU5LRUQQAipvCgpNZW1iZXJSb2xlEhsKF01FTUJFUl9ST0xFX1VOU1BFQ0lGSUVEEAASFgoSTUVNQkVSX1JPTEVfTUVNQkVSEAESFQoRTUVNQkVSX1JPTEVfQURNSU4QAhIVChFNRU1CRVJfUk9MRV9PV05FUhADKq0BCgtDaGFubmVsVHlwZRIcChhDSEFOTkVMX1RZUEVfVU5TUEVDSUZJRUQQABIVChFDSEFOTkVMX1RZUEVfVEVYVBABEhYKEkNIQU5ORUxfVFlQRV9WT0lDRRACEh0KGUNIQU5ORUxfVFlQRV9BTk5PVU5DRU1FTlQQAxIXChNDSEFOTkVMX1RZUEVfVEhSRUFEEAQSGQoVQ0hBTk5FTF9UWVBFX0NBVEVHT1JZEAViBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("ChNmdXdhL3YxL3R5cGVzLnByb3RvEgdmdXdhLnYxIs8BCgROb2RlEgwKBG5hbWUYASABKAkSDwoHdmVyc2lvbhgCIAEoCRISCgpwdWJsaWNfdXJsGAMgASgJEiIKBGF1dGgYBCABKAsyFC5mdXdhLnYxLkF1dGhNZXRob2RzEjAKD3NlcnZlcl9jcmVhdGlvbhgFIAEoDjIXLmZ1d2EudjEuU2VydmVyQ3JlYXRpb24SEQoJdGVsZW1ldHJ5GAYgASgIEisKDGFubm91bmNlbWVudBgHIAEoCzIVLmZ1d2EudjEuQW5ub3VuY2VtZW50Iq4BCgxBbm5vdW5jZW1lbnQSCgoCaWQYASABKAkSDAoEdGV4dBgCIAEoCRInCgR0b25lGAMgASgOMhkuZnV3YS52MS5Bbm5vdW5jZW1lbnRUb25lEi4KCmNyZWF0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEisKB2VuZHNfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wImoKC0F1dGhNZXRob2RzEhUKDWxvY2FsX3NpZ25faW4YASABKAgSFQoNbG9jYWxfc2lnbl91cBgCIAEoCBIWCg5saW5rZWRfc2lnbl9pbhgDIAEoCBIVCg1saW5rZWRfaXNzdWVyGAQgASgJIrkBCgRVc2VyEgoKAmlkGAEgASgJEhAKCHVzZXJuYW1lGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRISCgphdmF0YXJfdXJsGAQgASgJEiIKBGtpbmQYBSABKA4yFC5mdXdhLnYxLkFjY291bnRLaW5kEg4KBnN0YXR1cxgGIAEoCRI1ChFzdGF0dXNfZXhwaXJlc19hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAitQEKB1Byb2ZpbGUSGwoEdXNlchgBIAEoCzINLmZ1d2EudjEuVXNlchIQCghwcm9ub3VucxgCIAEoCRILCgNiaW8YAyABKAkSEgoKYmFubmVyX3VybBgEIAEoCRIZCgxhY2NlbnRfY29sb3IYBSABKAVIAIgBARIuCgpjcmVhdGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIPCg1fYWNjZW50X2NvbG9yItEBCgZNZW1iZXISEQoJc2VydmVyX2lkGAEgASgJEhsKBHVzZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISEAoIbmlja25hbWUYAyABKAkSIQoEcm9sZRgEIAEoDjITLmZ1d2EudjEuTWVtYmVyUm9sZRItCglqb2luZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjMKD3RpbWVkX291dF91bnRpbBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAivQIKBlNlcnZlchIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEhAKCGljb25fdXJsGAQgASgJEhAKCG93bmVyX2lkGAUgASgJEhQKDGRpc2NvdmVyYWJsZRgGIAEoCBIUCgxtZW1iZXJfY291bnQYByABKAMSLgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKdXBkYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASOQoVZGVmYXVsdF9ub3RpZmljYXRpb25zGAogASgOMhouZnV3YS52MS5Ob3RpZmljYXRpb25MZXZlbBIZChFzeXN0ZW1fY2hhbm5lbF9pZBgLIAEoCSKIAgoHQ2hhbm5lbBIKCgJpZBgBIAEoCRIRCglzZXJ2ZXJfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIiCgR0eXBlGAQgASgOMhQuZnV3YS52MS5DaGFubmVsVHlwZRIRCglwYXJlbnRfaWQYBSABKAkSDQoFdG9waWMYBiABKAkSEAoIcG9zaXRpb24YByABKAUSLgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKdXBkYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASGAoQc2xvd21vZGVfc2Vjb25kcxgKIAEoBSLCAgoHTWVzc2FnZRIKCgJpZBgBIAEoCRIRCglzZXJ2ZXJfaWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCRIRCglhdXRob3JfaWQYBCABKAkSDwoHY29udGVudBgFIAEoCRIoCgthdHRhY2htZW50cxgGIAMoCzITLmZ1d2EudjEuQXR0YWNobWVudBIeCgZlbWJlZHMYByADKAsyDi5mdXdhLnYxLkVtYmVkEhMKC3JlcGx5X3RvX2lkGAggASgJEi4KCmNyZWF0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KCWVkaXRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASIgoEa2luZBgLIAEoDjIULmZ1d2EudjEuTWVzc2FnZUtpbmQiWwoKQXR0YWNobWVudBIKCgJpZBgBIAEoCRIQCghmaWxlbmFtZRgCIAEoCRIUCgxjb250ZW50X3R5cGUYAyABKAkSDAoEc2l6ZRgEIAEoAxILCgN1cmwYBSABKAkilgEKBUVtYmVkEg0KBXRpdGxlGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJEgsKA3VybBgDIAEoCRINCgVjb2xvchgEIAEoBRIjCgZmaWVsZHMYBSADKAsyEy5mdXdhLnYxLkVtYmVkRmllbGQSFQoNdGh1bWJuYWlsX3VybBgGIAEoCRIRCglpbWFnZV91cmwYByABKAkiOQoKRW1iZWRGaWVsZBIMCgRuYW1lGAEgASgJEg0KBXZhbHVlGAIgASgJEg4KBmlubGluZRgDIAEoCCLDAQoUTm90aWZpY2F0aW9uU2V0dGluZ3MSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSKQoFbGV2ZWwYAyABKA4yGi5mdXdhLnYxLk5vdGlmaWNhdGlvbkxldmVsEg0KBW11dGVkGAQgASgIEi8KC211dGVkX3VudGlsGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIZChFzdXBwcmVzc19ldmVyeW9uZRgGIAEoCCKJAgoLU2VydmVyVXNhZ2USEQoJc2VydmVyX2lkGAEgASgJEg8KB21lbWJlcnMYAiABKAMSEAoIY2hhbm5lbHMYAyABKAMSEAoIbWVzc2FnZXMYBCABKAMSFQoNbWVzc2FnZXNfc2VudBgFIAEoAxIVCg1tZXNzYWdlX2J5dGVzGAYgASgDEhMKC2F0dGFjaG1lbnRzGAcgASgDEhgKEGF0dGFjaG1lbnRfYnl0ZXMYCCABKAMSDgoGZXZlbnRzGAkgASgDEhUKDXN0b3JhZ2VfYnl0ZXMYCiABKAMSLgoKdXBkYXRlZF9hdBgLIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAitgEKDFNlcnZlckxpbWl0cxIUCgdtZW1iZXJzGAEgASgDSACIAQESFQoIY2hhbm5lbHMYAiABKANIAYgBARIaCg1zdG9yYWdlX2J5dGVzGAMgASgDSAKIAQESHQoQYXR0YWNobWVudF9ieXRlcxgEIAEoA0gDiAEBQgoKCF9tZW1iZXJzQgsKCV9jaGFubmVsc0IQCg5fc3RvcmFnZV9ieXRlc0ITChFfYXR0YWNobWVudF9ieXRlcyLdBQoFRXZlbnQSCgoCaWQYASABKAkSEQoJc2VydmVyX2lkGAIgASgJEhAKCHNlcXVlbmNlGAMgASgDEhAKCGFjdG9yX2lkGAQgASgJEi4KCmNyZWF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDnNlcnZlcl91cGRhdGVkGAogASgLMhYuZnV3YS52MS5TZXJ2ZXJVcGRhdGVkSAASMAoOc2VydmVyX2RlbGV0ZWQYCyABKAsyFi5mdXdhLnYxLlNlcnZlckRlbGV0ZWRIABIyCg9jaGFubmVsX2NyZWF0ZWQYDCABKAsyFy5mdXdhLnYxLkNoYW5uZWxDcmVhdGVkSAASMgoPY2hhbm5lbF91cGRhdGVkGA0gASgLMhcuZnV3YS52MS5DaGFubmVsVXBkYXRlZEgAEjIKD2NoYW5uZWxfZGVsZXRlZBgOIAEoCzIXLmZ1d2EudjEuQ2hhbm5lbERlbGV0ZWRIABIyCg9tZXNzYWdlX2NyZWF0ZWQYDyABKAsyFy5mdXdhLnYxLk1lc3NhZ2VDcmVhdGVkSAASMgoPbWVzc2FnZV91cGRhdGVkGBAgASgLMhcuZnV3YS52MS5NZXNzYWdlVXBkYXRlZEgAEjIKD21lc3NhZ2VfZGVsZXRlZBgRIAEoCzIXLmZ1d2EudjEuTWVzc2FnZURlbGV0ZWRIABIuCg1tZW1iZXJfam9pbmVkGBIgASgLMhUuZnV3YS52MS5NZW1iZXJKb2luZWRIABIwCg5tZW1iZXJfdXBkYXRlZBgTIAEoCzIWLmZ1d2EudjEuTWVtYmVyVXBkYXRlZEgAEioKC21lbWJlcl9sZWZ0GBQgASgLMhMuZnV3YS52MS5NZW1iZXJMZWZ0SAASLAoMdXNlcl91cGRhdGVkGBUgASgLMhQuZnV3YS52MS5Vc2VyVXBkYXRlZEgAQgkKB3BheWxvYWQiMAoNU2VydmVyVXBkYXRlZBIfCgZzZXJ2ZXIYASABKAsyDy5mdXdhLnYxLlNlcnZlciIPCg1TZXJ2ZXJEZWxldGVkIjMKDkNoYW5uZWxDcmVhdGVkEiEKB2NoYW5uZWwYASABKAsyEC5mdXdhLnYxLkNoYW5uZWwiMwoOQ2hhbm5lbFVwZGF0ZWQSIQoHY2hhbm5lbBgBIAEoCzIQLmZ1d2EudjEuQ2hhbm5lbCIkCg5DaGFubmVsRGVsZXRlZBISCgpjaGFubmVsX2lkGAEgASgJIjMKDk1lc3NhZ2VDcmVhdGVkEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiMwoOTWVzc2FnZVVwZGF0ZWQSIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZSI4Cg5NZXNzYWdlRGVsZXRlZBISCgpjaGFubmVsX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkiLwoMTWVtYmVySm9pbmVkEh8KBm1lbWJlchgBIAEoCzIPLmZ1d2EudjEuTWVtYmVyIjAKDU1lbWJlclVwZGF0ZWQSHwoGbWVtYmVyGAEgASgLMg8uZnV3YS52MS5NZW1iZXIiQwoKTWVtYmVyTGVmdBIPCgd1c2VyX2lkGAEgASgJEiQKBnJlYXNvbhgCIAEoDjIULmZ1d2EudjEuTGVhdmVSZWFzb24iKgoLVXNlclVwZGF0ZWQSGwoEdXNlchgBIAEoCzINLmZ1d2EudjEuVXNlciqQAQoQQW5ub3VuY2VtZW50VG9uZRIhCh1BTk5PVU5DRU1FTlRfVE9ORV9VTlNQRUNJRklFRBAAEhoKFkFOTk9VTkNFTUVOVF9UT05FX0lORk8QARIdChlBTk5PVU5DRU1FTlRfVE9ORV9XQVJOSU5HEAISHgoaQU5OT1VOQ0VNRU5UX1RPTkVfQ1JJVElDQUwQAyqJAQoOU2VydmVyQ3JlYXRpb24SHwobU0VSVkVSX0NSRUFUSU9OX1VOU1BFQ0lGSUVEEAASHAoYU0VSVkVSX0NSRUFUSU9OX0VWRVJZT05FEAESGgoWU0VSVkVSX0NSRUFUSU9OX0FETUlOUxACEhwKGFNFUlZFUl9DUkVBVElPTl9ESVNBQkxFRBADKlwKC0FjY291bnRLaW5kEhwKGEFDQ09VTlRfS0lORF9VTlNQRUNJRklFRBAAEhYKEkFDQ09VTlRfS0lORF9MT0NBTBABEhcKE0FDQ09VTlRfS0lORF9MSU5LRUQQAipvCgpNZW1iZXJSb2xlEhsKF01FTUJFUl9ST0xFX1VOU1BFQ0lGSUVEEAASFgoSTUVNQkVSX1JPTEVfTUVNQkVSEAESFQoRTUVNQkVSX1JPTEVfQURNSU4QAhIVChFNRU1CRVJfUk9MRV9PV05FUhADKq0BCgtDaGFubmVsVHlwZRIcChhDSEFOTkVMX1RZUEVfVU5TUEVDSUZJRUQQABIVChFDSEFOTkVMX1RZUEVfVEVYVBABEhYKEkNIQU5ORUxfVFlQRV9WT0lDRRACEh0KGUNIQU5ORUxfVFlQRV9BTk5PVU5DRU1FTlQQAxIXChNDSEFOTkVMX1RZUEVfVEhSRUFEEAQSGQoVQ0hBTk5FTF9UWVBFX0NBVEVHT1JZEAUqSwoLTWVzc2FnZUtpbmQSHAoYTUVTU0FHRV9LSU5EX1VOU1BFQ0lGSUVEEAASHgoaTUVTU0FHRV9LSU5EX01FTUJFUl9KT0lORUQQASqUAQoRTm90aWZpY2F0aW9uTGV2ZWwSIgoeTk9USUZJQ0FUSU9OX0xFVkVMX1VOU1BFQ0lGSUVEEAASGgoWTk9USUZJQ0FUSU9OX0xFVkVMX0FMTBABEh8KG05PVElGSUNBVElPTl9MRVZFTF9NRU5USU9OUxACEh4KGk5PVElGSUNBVElPTl9MRVZFTF9OT1RISU5HEAMqdAoLTGVhdmVSZWFzb24SHAoYTEVBVkVfUkVBU09OX1VOU1BFQ0lGSUVEEAASFQoRTEVBVkVfUkVBU09OX0xFRlQQARIXChNMRUFWRV9SRUFTT05fS0lDS0VEEAISFwoTTEVBVkVfUkVBU09OX0JBTk5FRBADYgZwcm90bzM", [file_google_protobuf_timestamp]);
 
 /**
  * A fuwa instance: one running fuwa server. It hosts any number of community
@@ -54,6 +54,13 @@ export type Node = Message$1<"fuwa.v1.Node"> & {
    * @generated from field: bool telemetry = 6;
    */
   telemetry: boolean;
+
+  /**
+   * A banner the instance's admins put up for everyone, while it runs.
+   *
+   * @generated from field: fuwa.v1.Announcement announcement = 7;
+   */
+  announcement?: Announcement | undefined;
 };
 
 /**
@@ -62,6 +69,51 @@ export type Node = Message$1<"fuwa.v1.Node"> & {
  */
 export const NodeSchema: GenMessage<Node> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_types, 0);
+
+/**
+ * A notice from an instance's admins, shown on every client, signed in or not.
+ *
+ * @generated from message fuwa.v1.Announcement
+ */
+export type Announcement = Message$1<"fuwa.v1.Announcement"> & {
+  /**
+   * Changes with the text, so a banner someone closed comes back for a new one.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * Inline Markdown, up to 300 characters.
+   *
+   * @generated from field: string text = 2;
+   */
+  text: string;
+
+  /**
+   * @generated from field: fuwa.v1.AnnouncementTone tone = 3;
+   */
+  tone: AnnouncementTone;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 4;
+   */
+  createdAt?: Timestamp | undefined;
+
+  /**
+   * When it comes down by itself. Unset: it stays until an admin takes it down.
+   *
+   * @generated from field: google.protobuf.Timestamp ends_at = 5;
+   */
+  endsAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.Announcement.
+ * Use `create(AnnouncementSchema)` to create a new message.
+ */
+export const AnnouncementSchema: GenMessage<Announcement> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_types, 1);
 
 /**
  * Which kinds of account this instance accepts. The operator switches each on or off.
@@ -103,7 +155,7 @@ export type AuthMethods = Message$1<"fuwa.v1.AuthMethods"> & {
  * Use `create(AuthMethodsSchema)` to create a new message.
  */
 export const AuthMethodsSchema: GenMessage<AuthMethods> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 1);
+  messageDesc(file_fuwa_v1_types, 2);
 
 /**
  * A person's public profile.
@@ -135,6 +187,19 @@ export type User = Message$1<"fuwa.v1.User"> & {
    * @generated from field: fuwa.v1.AccountKind kind = 5;
    */
   kind: AccountKind;
+
+  /**
+   * A custom status the person set, such as "at the gym". Clients stop
+   * showing it once status_expires_at has passed.
+   *
+   * @generated from field: string status = 6;
+   */
+  status: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp status_expires_at = 7;
+   */
+  statusExpiresAt?: Timestamp | undefined;
 };
 
 /**
@@ -142,7 +207,58 @@ export type User = Message$1<"fuwa.v1.User"> & {
  * Use `create(UserSchema)` to create a new message.
  */
 export const UserSchema: GenMessage<User> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 2);
+  messageDesc(file_fuwa_v1_types, 3);
+
+/**
+ * Everything a person shows about themselves on an instance, beyond what
+ * travels with every message.
+ *
+ * @generated from message fuwa.v1.Profile
+ */
+export type Profile = Message$1<"fuwa.v1.Profile"> & {
+  /**
+   * @generated from field: fuwa.v1.User user = 1;
+   */
+  user?: User | undefined;
+
+  /**
+   * @generated from field: string pronouns = 2;
+   */
+  pronouns: string;
+
+  /**
+   * Markdown.
+   *
+   * @generated from field: string bio = 3;
+   */
+  bio: string;
+
+  /**
+   * @generated from field: string banner_url = 4;
+   */
+  bannerUrl: string;
+
+  /**
+   * The profile's color, as 0xRRGGBB. Unset lets clients pick one.
+   *
+   * @generated from field: optional int32 accent_color = 5;
+   */
+  accentColor?: number | undefined;
+
+  /**
+   * When the account was made on this instance.
+   *
+   * @generated from field: google.protobuf.Timestamp created_at = 6;
+   */
+  createdAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.Profile.
+ * Use `create(ProfileSchema)` to create a new message.
+ */
+export const ProfileSchema: GenMessage<Profile> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_types, 4);
 
 /**
  * @generated from message fuwa.v1.Member
@@ -172,6 +288,14 @@ export type Member = Message$1<"fuwa.v1.Member"> & {
    * @generated from field: google.protobuf.Timestamp joined_at = 5;
    */
   joinedAt?: Timestamp | undefined;
+
+  /**
+   * Timed out: can read but not send or edit messages until then. Unset, or
+   * in the past, when they aren't.
+   *
+   * @generated from field: google.protobuf.Timestamp timed_out_until = 6;
+   */
+  timedOutUntil?: Timestamp | undefined;
 };
 
 /**
@@ -179,7 +303,7 @@ export type Member = Message$1<"fuwa.v1.Member"> & {
  * Use `create(MemberSchema)` to create a new message.
  */
 export const MemberSchema: GenMessage<Member> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 3);
+  messageDesc(file_fuwa_v1_types, 5);
 
 /**
  * A community server. Each one lives in its own database file on its instance.
@@ -233,6 +357,21 @@ export type Server = Message$1<"fuwa.v1.Server"> & {
    * @generated from field: google.protobuf.Timestamp updated_at = 9;
    */
   updatedAt?: Timestamp | undefined;
+
+  /**
+   * How members hear about messages until they choose for themselves: unset
+   * leaves it to each person, MENTIONS only for @mentions.
+   *
+   * @generated from field: fuwa.v1.NotificationLevel default_notifications = 10;
+   */
+  defaultNotifications: NotificationLevel;
+
+  /**
+   * Where "someone joined" messages go. Empty for nowhere.
+   *
+   * @generated from field: string system_channel_id = 11;
+   */
+  systemChannelId: string;
 };
 
 /**
@@ -240,7 +379,7 @@ export type Server = Message$1<"fuwa.v1.Server"> & {
  * Use `create(ServerSchema)` to create a new message.
  */
 export const ServerSchema: GenMessage<Server> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 4);
+  messageDesc(file_fuwa_v1_types, 6);
 
 /**
  * @generated from message fuwa.v1.Channel
@@ -292,6 +431,14 @@ export type Channel = Message$1<"fuwa.v1.Channel"> & {
    * @generated from field: google.protobuf.Timestamp updated_at = 9;
    */
   updatedAt?: Timestamp | undefined;
+
+  /**
+   * Slow mode: how long each member waits between messages here. Owners and
+   * admins don't wait. Zero for off.
+   *
+   * @generated from field: int32 slowmode_seconds = 10;
+   */
+  slowmodeSeconds: number;
 };
 
 /**
@@ -299,7 +446,7 @@ export type Channel = Message$1<"fuwa.v1.Channel"> & {
  * Use `create(ChannelSchema)` to create a new message.
  */
 export const ChannelSchema: GenMessage<Channel> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 5);
+  messageDesc(file_fuwa_v1_types, 7);
 
 /**
  * @generated from message fuwa.v1.Message
@@ -356,6 +503,11 @@ export type Message = Message$1<"fuwa.v1.Message"> & {
    * @generated from field: google.protobuf.Timestamp edited_at = 10;
    */
   editedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: fuwa.v1.MessageKind kind = 11;
+   */
+  kind: MessageKind;
 };
 
 /**
@@ -363,7 +515,7 @@ export type Message = Message$1<"fuwa.v1.Message"> & {
  * Use `create(MessageSchema)` to create a new message.
  */
 export const MessageSchema: GenMessage<Message> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 6);
+  messageDesc(file_fuwa_v1_types, 8);
 
 /**
  * @generated from message fuwa.v1.Attachment
@@ -400,7 +552,7 @@ export type Attachment = Message$1<"fuwa.v1.Attachment"> & {
  * Use `create(AttachmentSchema)` to create a new message.
  */
 export const AttachmentSchema: GenMessage<Attachment> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 7);
+  messageDesc(file_fuwa_v1_types, 9);
 
 /**
  * @generated from message fuwa.v1.Embed
@@ -447,7 +599,7 @@ export type Embed = Message$1<"fuwa.v1.Embed"> & {
  * Use `create(EmbedSchema)` to create a new message.
  */
 export const EmbedSchema: GenMessage<Embed> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 8);
+  messageDesc(file_fuwa_v1_types, 10);
 
 /**
  * @generated from message fuwa.v1.EmbedField
@@ -474,7 +626,59 @@ export type EmbedField = Message$1<"fuwa.v1.EmbedField"> & {
  * Use `create(EmbedFieldSchema)` to create a new message.
  */
 export const EmbedFieldSchema: GenMessage<EmbedField> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 9);
+  messageDesc(file_fuwa_v1_types, 11);
+
+/**
+ * How one server, or one channel in it, reaches a person. Kept on the
+ * instance, so it follows them to every device.
+ *
+ * @generated from message fuwa.v1.NotificationSettings
+ */
+export type NotificationSettings = Message$1<"fuwa.v1.NotificationSettings"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * Empty for the server as a whole.
+   *
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * @generated from field: fuwa.v1.NotificationLevel level = 3;
+   */
+  level: NotificationLevel;
+
+  /**
+   * Muted: no sounds, notifications or unread counts. With muted_until set,
+   * only until then.
+   *
+   * @generated from field: bool muted = 4;
+   */
+  muted: boolean;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp muted_until = 5;
+   */
+  mutedUntil?: Timestamp | undefined;
+
+  /**
+   * Server only: @everyone doesn't count as a mention.
+   *
+   * @generated from field: bool suppress_everyone = 6;
+   */
+  suppressEveryone: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.NotificationSettings.
+ * Use `create(NotificationSettingsSchema)` to create a new message.
+ */
+export const NotificationSettingsSchema: GenMessage<NotificationSettings> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_types, 12);
 
 /**
  * What a community server uses. Counts are current totals unless named as
@@ -552,7 +756,7 @@ export type ServerUsage = Message$1<"fuwa.v1.ServerUsage"> & {
  * Use `create(ServerUsageSchema)` to create a new message.
  */
 export const ServerUsageSchema: GenMessage<ServerUsage> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 10);
+  messageDesc(file_fuwa_v1_types, 13);
 
 /**
  * Caps on a community server. An unset field means unlimited.
@@ -586,7 +790,7 @@ export type ServerLimits = Message$1<"fuwa.v1.ServerLimits"> & {
  * Use `create(ServerLimitsSchema)` to create a new message.
  */
 export const ServerLimitsSchema: GenMessage<ServerLimits> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 11);
+  messageDesc(file_fuwa_v1_types, 14);
 
 /**
  * Everything that changes in a community server is recorded as an event in its
@@ -692,6 +896,12 @@ export type Event = Message$1<"fuwa.v1.Event"> & {
      */
     value: MemberLeft;
     case: "memberLeft";
+  } | {
+    /**
+     * @generated from field: fuwa.v1.UserUpdated user_updated = 21;
+     */
+    value: UserUpdated;
+    case: "userUpdated";
   } | { case: undefined; value?: undefined };
 };
 
@@ -700,7 +910,7 @@ export type Event = Message$1<"fuwa.v1.Event"> & {
  * Use `create(EventSchema)` to create a new message.
  */
 export const EventSchema: GenMessage<Event> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 12);
+  messageDesc(file_fuwa_v1_types, 15);
 
 /**
  * @generated from message fuwa.v1.ServerUpdated
@@ -717,7 +927,7 @@ export type ServerUpdated = Message$1<"fuwa.v1.ServerUpdated"> & {
  * Use `create(ServerUpdatedSchema)` to create a new message.
  */
 export const ServerUpdatedSchema: GenMessage<ServerUpdated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 13);
+  messageDesc(file_fuwa_v1_types, 16);
 
 /**
  * @generated from message fuwa.v1.ServerDeleted
@@ -730,7 +940,7 @@ export type ServerDeleted = Message$1<"fuwa.v1.ServerDeleted"> & {
  * Use `create(ServerDeletedSchema)` to create a new message.
  */
 export const ServerDeletedSchema: GenMessage<ServerDeleted> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 14);
+  messageDesc(file_fuwa_v1_types, 17);
 
 /**
  * @generated from message fuwa.v1.ChannelCreated
@@ -747,7 +957,7 @@ export type ChannelCreated = Message$1<"fuwa.v1.ChannelCreated"> & {
  * Use `create(ChannelCreatedSchema)` to create a new message.
  */
 export const ChannelCreatedSchema: GenMessage<ChannelCreated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 15);
+  messageDesc(file_fuwa_v1_types, 18);
 
 /**
  * @generated from message fuwa.v1.ChannelUpdated
@@ -764,7 +974,7 @@ export type ChannelUpdated = Message$1<"fuwa.v1.ChannelUpdated"> & {
  * Use `create(ChannelUpdatedSchema)` to create a new message.
  */
 export const ChannelUpdatedSchema: GenMessage<ChannelUpdated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 16);
+  messageDesc(file_fuwa_v1_types, 19);
 
 /**
  * @generated from message fuwa.v1.ChannelDeleted
@@ -781,7 +991,7 @@ export type ChannelDeleted = Message$1<"fuwa.v1.ChannelDeleted"> & {
  * Use `create(ChannelDeletedSchema)` to create a new message.
  */
 export const ChannelDeletedSchema: GenMessage<ChannelDeleted> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 17);
+  messageDesc(file_fuwa_v1_types, 20);
 
 /**
  * @generated from message fuwa.v1.MessageCreated
@@ -798,7 +1008,7 @@ export type MessageCreated = Message$1<"fuwa.v1.MessageCreated"> & {
  * Use `create(MessageCreatedSchema)` to create a new message.
  */
 export const MessageCreatedSchema: GenMessage<MessageCreated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 18);
+  messageDesc(file_fuwa_v1_types, 21);
 
 /**
  * @generated from message fuwa.v1.MessageUpdated
@@ -815,7 +1025,7 @@ export type MessageUpdated = Message$1<"fuwa.v1.MessageUpdated"> & {
  * Use `create(MessageUpdatedSchema)` to create a new message.
  */
 export const MessageUpdatedSchema: GenMessage<MessageUpdated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 19);
+  messageDesc(file_fuwa_v1_types, 22);
 
 /**
  * @generated from message fuwa.v1.MessageDeleted
@@ -837,7 +1047,7 @@ export type MessageDeleted = Message$1<"fuwa.v1.MessageDeleted"> & {
  * Use `create(MessageDeletedSchema)` to create a new message.
  */
 export const MessageDeletedSchema: GenMessage<MessageDeleted> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 20);
+  messageDesc(file_fuwa_v1_types, 23);
 
 /**
  * @generated from message fuwa.v1.MemberJoined
@@ -854,7 +1064,7 @@ export type MemberJoined = Message$1<"fuwa.v1.MemberJoined"> & {
  * Use `create(MemberJoinedSchema)` to create a new message.
  */
 export const MemberJoinedSchema: GenMessage<MemberJoined> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 21);
+  messageDesc(file_fuwa_v1_types, 24);
 
 /**
  * @generated from message fuwa.v1.MemberUpdated
@@ -871,7 +1081,7 @@ export type MemberUpdated = Message$1<"fuwa.v1.MemberUpdated"> & {
  * Use `create(MemberUpdatedSchema)` to create a new message.
  */
 export const MemberUpdatedSchema: GenMessage<MemberUpdated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 22);
+  messageDesc(file_fuwa_v1_types, 25);
 
 /**
  * @generated from message fuwa.v1.MemberLeft
@@ -881,6 +1091,11 @@ export type MemberLeft = Message$1<"fuwa.v1.MemberLeft"> & {
    * @generated from field: string user_id = 1;
    */
   userId: string;
+
+  /**
+   * @generated from field: fuwa.v1.LeaveReason reason = 2;
+   */
+  reason: LeaveReason;
 };
 
 /**
@@ -888,7 +1103,64 @@ export type MemberLeft = Message$1<"fuwa.v1.MemberLeft"> & {
  * Use `create(MemberLeftSchema)` to create a new message.
  */
 export const MemberLeftSchema: GenMessage<MemberLeft> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 23);
+  messageDesc(file_fuwa_v1_types, 26);
+
+/**
+ * Someone who was a member changed how they look, such as when their account
+ * is deleted. Current members change through MemberUpdated instead.
+ *
+ * @generated from message fuwa.v1.UserUpdated
+ */
+export type UserUpdated = Message$1<"fuwa.v1.UserUpdated"> & {
+  /**
+   * @generated from field: fuwa.v1.User user = 1;
+   */
+  user?: User | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.UserUpdated.
+ * Use `create(UserUpdatedSchema)` to create a new message.
+ */
+export const UserUpdatedSchema: GenMessage<UserUpdated> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_types, 27);
+
+/**
+ * @generated from enum fuwa.v1.AnnouncementTone
+ */
+export enum AnnouncementTone {
+  /**
+   * Same as INFO.
+   *
+   * @generated from enum value: ANNOUNCEMENT_TONE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ANNOUNCEMENT_TONE_INFO = 1;
+   */
+  INFO = 1,
+
+  /**
+   * Something is about to change, such as planned maintenance.
+   *
+   * @generated from enum value: ANNOUNCEMENT_TONE_WARNING = 2;
+   */
+  WARNING = 2,
+
+  /**
+   * Something is wrong now. Clients don't let people close it.
+   *
+   * @generated from enum value: ANNOUNCEMENT_TONE_CRITICAL = 3;
+   */
+  CRITICAL = 3,
+}
+
+/**
+ * Describes the enum fuwa.v1.AnnouncementTone.
+ */
+export const AnnouncementToneSchema: GenEnum<AnnouncementTone> = /*@__PURE__*/
+  enumDesc(file_fuwa_v1_types, 0);
 
 /**
  * Who may create community servers on an instance.
@@ -921,7 +1193,7 @@ export enum ServerCreation {
  * Describes the enum fuwa.v1.ServerCreation.
  */
 export const ServerCreationSchema: GenEnum<ServerCreation> = /*@__PURE__*/
-  enumDesc(file_fuwa_v1_types, 0);
+  enumDesc(file_fuwa_v1_types, 1);
 
 /**
  * @generated from enum fuwa.v1.AccountKind
@@ -951,7 +1223,7 @@ export enum AccountKind {
  * Describes the enum fuwa.v1.AccountKind.
  */
 export const AccountKindSchema: GenEnum<AccountKind> = /*@__PURE__*/
-  enumDesc(file_fuwa_v1_types, 1);
+  enumDesc(file_fuwa_v1_types, 2);
 
 /**
  * @generated from enum fuwa.v1.MemberRole
@@ -982,7 +1254,7 @@ export enum MemberRole {
  * Describes the enum fuwa.v1.MemberRole.
  */
 export const MemberRoleSchema: GenEnum<MemberRole> = /*@__PURE__*/
-  enumDesc(file_fuwa_v1_types, 2);
+  enumDesc(file_fuwa_v1_types, 3);
 
 /**
  * @generated from enum fuwa.v1.ChannelType
@@ -1023,5 +1295,101 @@ export enum ChannelType {
  * Describes the enum fuwa.v1.ChannelType.
  */
 export const ChannelTypeSchema: GenEnum<ChannelType> = /*@__PURE__*/
-  enumDesc(file_fuwa_v1_types, 3);
+  enumDesc(file_fuwa_v1_types, 4);
+
+/**
+ * @generated from enum fuwa.v1.MessageKind
+ */
+export enum MessageKind {
+  /**
+   * Written by someone.
+   *
+   * @generated from enum value: MESSAGE_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The author joined the server. Posted in its system channel, with no text.
+   *
+   * @generated from enum value: MESSAGE_KIND_MEMBER_JOINED = 1;
+   */
+  MEMBER_JOINED = 1,
+}
+
+/**
+ * Describes the enum fuwa.v1.MessageKind.
+ */
+export const MessageKindSchema: GenEnum<MessageKind> = /*@__PURE__*/
+  enumDesc(file_fuwa_v1_types, 5);
+
+/**
+ * @generated from enum fuwa.v1.NotificationLevel
+ */
+export enum NotificationLevel {
+  /**
+   * Follow what's above: a channel follows its server, a server follows the
+   * person's device settings.
+   *
+   * @generated from enum value: NOTIFICATION_LEVEL_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: NOTIFICATION_LEVEL_ALL = 1;
+   */
+  ALL = 1,
+
+  /**
+   * @generated from enum value: NOTIFICATION_LEVEL_MENTIONS = 2;
+   */
+  MENTIONS = 2,
+
+  /**
+   * @generated from enum value: NOTIFICATION_LEVEL_NOTHING = 3;
+   */
+  NOTHING = 3,
+}
+
+/**
+ * Describes the enum fuwa.v1.NotificationLevel.
+ */
+export const NotificationLevelSchema: GenEnum<NotificationLevel> = /*@__PURE__*/
+  enumDesc(file_fuwa_v1_types, 6);
+
+/**
+ * @generated from enum fuwa.v1.LeaveReason
+ */
+export enum LeaveReason {
+  /**
+   * @generated from enum value: LEAVE_REASON_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * They left, or deleted their account.
+   *
+   * @generated from enum value: LEAVE_REASON_LEFT = 1;
+   */
+  LEFT = 1,
+
+  /**
+   * An owner or admin removed them; they can join again.
+   *
+   * @generated from enum value: LEAVE_REASON_KICKED = 2;
+   */
+  KICKED = 2,
+
+  /**
+   * An owner or admin removed them and keeps them out.
+   *
+   * @generated from enum value: LEAVE_REASON_BANNED = 3;
+   */
+  BANNED = 3,
+}
+
+/**
+ * Describes the enum fuwa.v1.LeaveReason.
+ */
+export const LeaveReasonSchema: GenEnum<LeaveReason> = /*@__PURE__*/
+  enumDesc(file_fuwa_v1_types, 7);
 

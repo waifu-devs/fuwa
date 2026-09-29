@@ -2,7 +2,7 @@ import { Code } from "@connectrpc/connect";
 import { Effect, Fiber, FiberSet, Schedule, Stream, SubscriptionRef } from "effect";
 import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
 import type { Event } from "@/gen/fuwa/v1/types_pb";
-import { onLiveEvent } from "@/lib/notify";
+import { onLiveEvent, onRemoved } from "@/lib/notify";
 import { makeApi, type Api } from "./client";
 import { FuwaError, call, toFuwaError } from "./errors";
 import { instanceKey, loadSaved, storeSaved, type SavedInstance } from "./saved";
@@ -11,6 +11,7 @@ import {
   applyEvent,
   applySnapshot,
   emptyInstance,
+  notificationKey,
   patchInstance,
   removeServer,
   store,
@@ -23,6 +24,9 @@ import {
  * stream, and reconnects with backoff, resuming from the last event seen so
  * nothing is missed or applied twice.
  */
+
+/** How often the instance's public details (and its announcement) are read again. */
+const NODE_REFRESH = "60 seconds";
 
 /** Retry quickly at first, then every 20 seconds at most. */
 const backoff = Schedule.exponential("400 millis", 2).pipe(
@@ -126,6 +130,12 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
 
     const me = yield* retrying(call((signal) => api.auth.getMe({}, { signal })));
     patchInstance(key, { me: me.user ?? null, admin: me.admin });
+    // Notification settings follow the account; an older instance without them just has none.
+    const notifications = yield* call((signal) => api.account.getNotificationSettings({}, { signal })).pipe(
+      Effect.map((r) => Object.fromEntries(r.settings.map((n) => [notificationKey(n.serverId, n.channelId), n]))),
+      Effect.catchAll((err) => (err.signedOut ? Effect.fail(err) : Effect.succeed({}))),
+    );
+    patchInstance(key, { notifications });
 
     const { servers } = yield* retrying(call((signal) => api.servers.listServers({}, { signal })));
     updateInstance(key, (i) => servers.reduce(addServer, i));
@@ -134,6 +144,15 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
       servers.map((s) => s.id),
     );
     patchInstance(key, { connection: servers.length ? "connecting" : "live" });
+
+    // The instance's name, sign-up options and announcement change without an event.
+    yield* call((signal) => api.node.getNode({}, { signal })).pipe(
+      Effect.tap(({ node }) => Effect.sync(() => node && patchInstance(key, { node }))),
+      Effect.ignore,
+      Effect.repeat(Schedule.spaced(NODE_REFRESH)),
+      Effect.delay(NODE_REFRESH),
+      Effect.forkScoped,
+    );
 
     yield* followEvents(key, api, e.followed);
   }).pipe(
@@ -226,6 +245,11 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           cursors.set(sid, event.sequence);
         }
         const buffer = held.get(sid);
+        const me = store.get().instances[key]?.me?.id;
+        const removed =
+          event.payload.case === "memberLeft" && event.payload.value.userId === me
+            ? { name: store.get().instances[key]?.servers.find((s) => s.id === sid)?.name, reason: event.payload.value.reason }
+            : null;
         if (buffer) buffer.push(event);
         else {
           store.update((s) => {
@@ -236,7 +260,7 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           });
           onLiveEvent(key, event);
         }
-        const me = store.get().instances[key]?.me?.id;
+        if (removed?.name) onRemoved(removed.name, removed.reason);
         const gone =
           event.payload.case === "serverDeleted" ||
           (event.payload.case === "memberLeft" && event.payload.value.userId === me);

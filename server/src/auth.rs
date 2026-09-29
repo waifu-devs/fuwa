@@ -25,10 +25,25 @@ pub enum Viewer {
     Operator,
 }
 
+/// A signed-in account and the session it called with.
+#[derive(Debug, Clone)]
+pub struct Caller {
+    pub account: Account,
+    pub token_hash: String,
+}
+
 impl Viewer {
     pub fn account(&self) -> Result<&Account> {
         match self {
             Self::Account { account, .. } => Ok(account),
+            Self::Operator => Err(Error::denied("the admin token can't act as an account; sign in instead")),
+        }
+    }
+
+    /// The account and session, for calls that act on the session itself.
+    pub fn caller(self) -> Result<Caller> {
+        match self {
+            Self::Account { account, token_hash } => Ok(Caller { account, token_hash }),
             Self::Operator => Err(Error::denied("the admin token can't act as an account; sign in instead")),
         }
     }
@@ -39,6 +54,11 @@ impl Viewer {
             Self::Operator => true,
         }
     }
+}
+
+/// The device a request comes from, as its User-Agent says.
+pub fn user_agent(metadata: &MetadataMap) -> String {
+    metadata.get("user-agent").and_then(|v| v.to_str().ok()).map(crate::node::clip_user_agent).unwrap_or_default()
 }
 
 /// The bearer token on a request, if any.
@@ -65,6 +85,16 @@ pub fn new_token() -> String {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).expect("the OS random number generator failed");
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// A password an admin hands someone to sign in with: four groups of four
+/// letters and digits that can't be misread (no 0/O, 1/l/I).
+pub fn temporary_password() -> String {
+    const ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).expect("the OS random number generator failed");
+    let chars: Vec<char> = bytes.iter().map(|b| ALPHABET[usize::from(*b) % ALPHABET.len()] as char).collect();
+    chars.chunks(4).map(|group| group.iter().collect::<String>()).collect::<Vec<_>>().join("-")
 }
 
 /// What's stored for a token: its SHA-256, so a leaked database leaks no sessions.

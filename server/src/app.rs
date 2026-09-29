@@ -18,10 +18,10 @@ use crate::hub::Hub;
 use crate::node::NodeDb;
 use crate::pb;
 use crate::pb::{
-    admin_service_server::AdminServiceServer, auth_service_server::AuthServiceServer,
-    channel_service_server::ChannelServiceServer, event_service_server::EventServiceServer,
-    message_service_server::MessageServiceServer, node_service_server::NodeServiceServer,
-    server_service_server::ServerServiceServer,
+    account_service_server::AccountServiceServer, admin_service_server::AdminServiceServer,
+    auth_service_server::AuthServiceServer, channel_service_server::ChannelServiceServer,
+    event_service_server::EventServiceServer, message_service_server::MessageServiceServer,
+    node_service_server::NodeServiceServer, server_service_server::ServerServiceServer,
 };
 use crate::servers::Servers;
 use crate::settings::Settings;
@@ -30,6 +30,8 @@ pub struct App {
     /// How the process was started. Settings admins can change live in `settings`.
     pub config: Config,
     settings: RwLock<Arc<Settings>>,
+    /// The banner admins put up, as last set; see [`App::announcement`].
+    announcement: RwLock<Option<pb::Announcement>>,
     pub node: NodeDb,
     pub servers: Servers,
     pub hub: Arc<Hub>,
@@ -49,9 +51,13 @@ impl App {
         let hub = Arc::new(Hub::default());
         let servers = Servers::open(&config.data_path, key, hub.clone()).await?;
         let settings = Settings::load(&config, &node.settings().await?);
+        let announcement = node.announcement().await?;
+        // Exports are written here and streamed; one left by a crash is stale.
+        let _ = std::fs::remove_dir_all(config.data_path.join("exports"));
         Ok(Arc::new(Self {
             config,
             settings: RwLock::new(Arc::new(settings)),
+            announcement: RwLock::new(announcement),
             node,
             servers,
             hub,
@@ -71,6 +77,16 @@ impl App {
         *self.settings.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::new(settings);
     }
 
+    /// The banner clients should show now: the last one set, unless it ran out.
+    pub fn announcement(&self) -> Option<pb::Announcement> {
+        let current = self.announcement.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        current.filter(|a| a.ends_at.as_ref().is_none_or(|end| crate::id::millis(end) > crate::id::now_ms()))
+    }
+
+    pub fn replace_announcement(&self, announcement: Option<pb::Announcement>) {
+        *self.announcement.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = announcement;
+    }
+
     pub fn node_info(&self) -> pb::Node {
         let settings = self.settings();
         pb::Node {
@@ -85,6 +101,7 @@ impl App {
             }),
             server_creation: settings.server_creation as i32,
             telemetry: settings.telemetry,
+            announcement: self.announcement(),
         }
     }
 
@@ -100,6 +117,7 @@ impl App {
 
         let grpc = tonic::service::Routes::new(NodeServiceServer::new(api.clone()))
             .add_service(AuthServiceServer::new(api.clone()))
+            .add_service(AccountServiceServer::new(api.clone()))
             .add_service(ServerServiceServer::new(api.clone()))
             .add_service(ChannelServiceServer::new(api.clone()))
             .add_service(MessageServiceServer::new(api.clone()))

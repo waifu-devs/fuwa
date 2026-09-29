@@ -2,12 +2,17 @@ import { useParams } from "@tanstack/react-router";
 import {
   AccessibilityIcon,
   BellIcon,
+  BellRingIcon,
   CodeXmlIcon,
+  DatabaseIcon,
+  IdCardIcon,
   KeyboardIcon,
   KeyRoundIcon,
   LogOutIcon,
   MessageSquareTextIcon,
+  MonitorSmartphoneIcon,
   PaletteIcon,
+  ShieldCheckIcon,
   TvMinimalPlayIcon,
   UserRoundIcon,
 } from "lucide-react";
@@ -20,7 +25,13 @@ import { Chat } from "@/components/settings/app/Chat";
 import { KEYBIND_SETTINGS, Keybinds } from "@/components/settings/app/Keybinds";
 import { Notifications } from "@/components/settings/app/Notifications";
 import { Streamer } from "@/components/settings/app/Streamer";
-import { hasPassword, Password, Profile, Session } from "@/components/settings/Account";
+import { hasPassword, Password, Session } from "@/components/settings/Account";
+import { Devices } from "@/components/settings/account/Devices";
+import { Privacy } from "@/components/settings/account/Privacy";
+import { Profile } from "@/components/settings/account/Profile";
+import { Security } from "@/components/settings/account/Security";
+import { ServerNotifications } from "@/components/settings/account/ServerNotifications";
+import { ServerProfiles } from "@/components/settings/account/ServerProfiles";
 import { SettingsScreen, type SettingsGroup, type SettingsSection } from "@/components/settings/SettingsScreen";
 import { closeSettings, setSettingsSection, useUi } from "@/lib/ui";
 
@@ -104,7 +115,7 @@ const APP: SettingsSection[] = [
   },
 ];
 
-const ACCOUNT = new Set(["profile", "password", "session"]);
+const ACCOUNT = new Set(["profile", "server-profiles", "devices", "security", "password", "server-notifications", "privacy", "session"]);
 
 /**
  * Settings, opened from anywhere (the user panel, a shortcut, a link): App
@@ -136,11 +147,42 @@ export function UserSettings() {
           keywords: "name avatar picture",
           settings: [
             { id: "display-name", label: "Display name" },
+            { id: "pronouns", label: "Pronouns" },
+            { id: "status", label: "Custom status", keywords: "away busy" },
+            { id: "about-me", label: "About me", keywords: "bio description" },
             { id: "avatar", label: "Avatar", keywords: "picture photo" },
+            { id: "banner", label: "Banner", keywords: "header picture" },
+            { id: "profile-color", label: "Profile color", keywords: "accent" },
           ],
+        },
+        {
+          id: "server-profiles",
+          label: "Server profiles",
+          icon: IdCardIcon,
+          description: "A different name in each server.",
+          keywords: "per server identity",
+          settings: [{ id: "nickname", label: "Nickname", keywords: "server name" }],
+        },
+        {
+          id: "devices",
+          label: "Devices",
+          icon: MonitorSmartphoneIcon,
+          description: `Everywhere you're signed in to ${where}.`,
+          keywords: "sessions sign out log out phone browser",
         },
         ...(hasPassword(me)
           ? [
+              {
+                id: "security",
+                label: "Two-step sign-in",
+                icon: ShieldCheckIcon,
+                description: "A code from your phone after your password.",
+                keywords: "2fa mfa totp authenticator backup codes security",
+                settings: [
+                  { id: "two-step", label: "Two-step sign-in", keywords: "2fa authenticator" },
+                  { id: "backup-codes", label: "Backup codes", keywords: "recovery" },
+                ],
+              },
               {
                 id: "password",
                 label: "Password",
@@ -150,6 +192,24 @@ export function UserSettings() {
               },
             ]
           : []),
+        {
+          id: "server-notifications",
+          label: "Server notifications",
+          icon: BellRingIcon,
+          description: "How each server and channel notifies you, on every device.",
+          keywords: "mute mentions everyone here alerts",
+        },
+        {
+          id: "privacy",
+          label: "Data and privacy",
+          icon: DatabaseIcon,
+          description: `What ${where} keeps about you.`,
+          keywords: "export download delete account gdpr",
+          settings: [
+            { id: "export", label: "Download your data", keywords: "export json" },
+            { id: "delete-account", label: "Delete your account", keywords: "remove close" },
+          ],
+        },
       ],
     });
     groups.push({ sections: [{ id: "session", label: "Sign out", icon: LogOutIcon, danger: true, keywords: "log out remove" }] });
@@ -176,7 +236,12 @@ export function UserSettings() {
       {section === "streamer" && <Streamer instanceKey={key} />}
       {section === "advanced" && <Advanced />}
       {key && section === "profile" && <Profile instanceKey={key} />}
+      {key && section === "server-profiles" && <ServerProfiles instanceKey={key} />}
+      {key && section === "devices" && <Devices instanceKey={key} />}
+      {key && section === "security" && <Security instanceKey={key} />}
       {key && section === "password" && <Password instanceKey={key} />}
+      {key && section === "server-notifications" && <ServerNotifications instanceKey={key} />}
+      {key && section === "privacy" && <Privacy instanceKey={key} />}
       {key && section === "session" && <Session instanceKey={key} />}
     </SettingsScreen>
   );

@@ -1,7 +1,11 @@
-import { SendHorizontalIcon } from "lucide-react";
+import { HourglassIcon, SendHorizontalIcon, SnailIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { MemberRole, MessageKind, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { run, sendMessage } from "@/fuwa/actions";
+import { useFuwa } from "@/fuwa/store";
+import { SPRING } from "@/components/motion";
+import { formatDuration, formatLeft, timedOutUntil, toDate } from "@/lib/format";
 import { comboLabel, isMac } from "@/lib/keybinds";
 import { usePrefs, type SendWith } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
@@ -17,27 +21,81 @@ export function sendsMessage(e: KeyboardEvent<HTMLTextAreaElement>, sendWith: Se
 }
 
 /**
+ * What keeps you from sending here right now: a time-out, or the wait slow
+ * mode puts between your messages. Owners and admins skip slow mode, as on
+ * the server. Ticks only while something is counting down.
+ */
+function useSendGate(instanceKey: string, serverId: string, channel: Channel) {
+  const member = useFuwa((s) => {
+    const i = s.instances[instanceKey];
+    return i?.members[serverId]?.find((m) => m.user?.id === i.me?.id);
+  });
+  // When you last sent here: your newest message, or one still on its way.
+  const lastSent = useFuwa((s) => {
+    const i = s.instances[instanceKey];
+    const me = i?.me?.id;
+    const items = i?.messages[channel.id]?.items ?? [];
+    let last = 0;
+    for (let n = items.length - 1; n >= 0; n--) {
+      const m = items[n]!;
+      if (m.authorId === me && m.kind === MessageKind.UNSPECIFIED) {
+        last = toDate(m.createdAt).getTime();
+        break;
+      }
+    }
+    for (const p of i?.pending[channel.id] ?? []) if (!p.failed) last = Math.max(last, p.createdAt);
+    return last;
+  });
+  const [, tick] = useState(0);
+  const now = Date.now();
+  const exempt = (member?.role ?? MemberRole.MEMBER) >= MemberRole.ADMIN;
+  const slowmode = exempt ? 0 : channel.slowmodeSeconds;
+  const until = timedOutUntil(member, now)?.getTime() ?? 0;
+  const ready = slowmode && lastSent ? lastSent + slowmode * 1000 : 0;
+  const counting = until > now || ready > now;
+  useEffect(() => {
+    if (!counting) return;
+    const id = setInterval(() => tick((n) => n + 1), 250);
+    return () => clearInterval(id);
+  }, [counting]);
+  return {
+    now,
+    slowmode,
+    /** Slow mode is on here, but it doesn't hold you back. */
+    exempt: exempt && channel.slowmodeSeconds > 0,
+    timedOutUntil: until > now ? until : 0,
+    cooldownUntil: ready > now ? ready : 0,
+  };
+}
+
+/**
  * Where you type. Enter sends (or Ctrl+Enter, by the Chat setting), the other
  * adds a line, Up in an empty box edits your last message. Drafts survive
- * switching channels.
+ * switching channels. A time-out swaps the box for a countdown; slow mode
+ * winds the send button down until you can send again.
  */
 export function Composer({
   instanceKey,
   serverId,
-  channelId,
+  channel,
   placeholder,
   onEditLast,
 }: {
   instanceKey: string;
   serverId: string;
-  channelId: string;
+  channel: Channel;
   placeholder: string;
   onEditLast: () => void;
 }) {
+  const channelId = channel.id;
   const [text, setText] = useState(() => drafts.get(channelId) ?? "");
   const box = useRef<HTMLTextAreaElement>(null);
   const plane = useAnimationControls();
+  const nudge = useAnimationControls();
   const sendWith = usePrefs((p) => p.sendWith);
+  const gate = useSendGate(instanceKey, serverId, channel);
+  const cooling = gate.cooldownUntil > 0;
+  const timedOut = gate.timedOutUntil > 0;
 
   useEffect(() => {
     setText(drafts.get(channelId) ?? "");
@@ -59,7 +117,11 @@ export function Composer({
   const tooLong = text.length > MAX;
 
   function send() {
-    if (!content || tooLong) return;
+    if (!content || tooLong || timedOut) return;
+    if (cooling) {
+      void nudge.start({ x: [0, -5, 5, -3, 3, 0], transition: { duration: 0.4 } });
+      return;
+    }
     setText("");
     drafts.delete(channelId);
     void plane.start({
@@ -85,9 +147,22 @@ export function Composer({
     }
   }
 
+  const ready = !!content && !tooLong && !cooling;
+
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-      <div className="composer flex items-end gap-2 rounded-2xl border bg-card px-3 py-2">
+      <AnimatePresence mode="popLayout" initial={false}>
+        {timedOut ? (
+          <TimedOut key="timed-out" left={gate.timedOutUntil - gate.now} />
+        ) : (
+          <motion.div
+            key="composer"
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.98 }}
+            transition={SPRING}
+          >
+      <motion.div animate={nudge} className="composer flex items-end gap-2 rounded-2xl border bg-card px-3 py-2">
         <textarea
           ref={box}
           data-composer
@@ -114,26 +189,133 @@ export function Composer({
         <motion.button
           type="button"
           onClick={send}
-          disabled={!content || tooLong}
-          aria-label="Send"
+          disabled={!ready}
+          aria-label={cooling ? `Slow mode: send again in ${formatLeft(gate.cooldownUntil - gate.now)}` : "Send"}
           whileTap={{ scale: 0.85 }}
           initial={false}
-          animate={{ scale: content && !tooLong ? 1 : 0.9 }}
+          animate={{ scale: ready || cooling ? 1 : 0.9 }}
           transition={{ type: "spring", stiffness: 600, damping: 20 }}
           className={cn(
-            "mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl transition-colors",
-            content && !tooLong ? "bg-primary text-primary-foreground shadow-[0_6px_18px_-8px_var(--primary)]" : "text-muted-foreground",
+            "relative mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl transition-colors",
+            ready ? "bg-primary text-primary-foreground shadow-[0_6px_18px_-8px_var(--primary)]" : "text-muted-foreground",
           )}
         >
-          <motion.span animate={plane}>
-            <SendHorizontalIcon className="size-[18px]" />
-          </motion.span>
+          <AnimatePresence mode="popLayout" initial={false}>
+            {cooling ? (
+              <Cooldown key="cooldown" left={gate.cooldownUntil - gate.now} total={gate.slowmode * 1000} />
+            ) : (
+              <motion.span
+                key="plane"
+                initial={{ scale: 0.4, rotate: -45, opacity: 0 }}
+                animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                exit={{ scale: 0.4, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 600, damping: 18 }}
+              >
+                <motion.span animate={plane} className="block">
+                  <SendHorizontalIcon className="size-[18px]" />
+                </motion.span>
+              </motion.span>
+            )}
+          </AnimatePresence>
         </motion.button>
+      </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div className="mt-1 flex items-center gap-3 px-1 text-[0.7rem] text-muted-foreground">
+        <p className="hidden min-w-0 flex-1 truncate sm:block">
+          <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
+          <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
+        </p>
+        <AnimatePresence initial={false}>
+          {(gate.slowmode > 0 || gate.exempt) && !timedOut && (
+            <motion.p
+              initial={{ opacity: 0, x: 8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 8 }}
+              transition={SPRING}
+              className={cn("ml-auto flex shrink-0 items-center gap-1 font-bold tabular-nums", cooling && "text-amber-600 dark:text-amber-400")}
+              title={gate.exempt ? "Owners and admins aren't held to slow mode" : undefined}
+            >
+              <SnailIcon className={cn("size-3.5", cooling && "animate-[crawl_1.6s_ease-in-out_infinite]")} />
+              {gate.exempt
+                ? `Slow mode is on for others: ${formatDuration(channel.slowmodeSeconds)}`
+                : cooling
+                  ? `Slow mode · send again in ${formatLeft(gate.cooldownUntil - gate.now)}`
+                  : `Slow mode · one message every ${formatDuration(gate.slowmode)}`}
+            </motion.p>
+          )}
+        </AnimatePresence>
       </div>
-      <p className="mt-1 hidden px-1 text-[0.7rem] text-muted-foreground sm:block">
-        <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
-        <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
-      </p>
     </div>
+  );
+}
+
+/** A ring that winds down to the moment slow mode lets you send again. */
+function Cooldown({ left, total }: { left: number; total: number }) {
+  const r = 15;
+  const length = 2 * Math.PI * r;
+  const share = total > 0 ? Math.min(1, left / total) : 0;
+  const seconds = Math.ceil(left / 1000);
+  return (
+    <motion.span
+      initial={{ scale: 0.4, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      exit={{ scale: 1.4, opacity: 0 }}
+      transition={{ type: "spring", stiffness: 600, damping: 20 }}
+      className="relative grid size-9 place-items-center text-amber-600 dark:text-amber-400"
+    >
+      <svg viewBox="0 0 36 36" className="absolute inset-0 -rotate-90" aria-hidden>
+        <circle cx="18" cy="18" r={r} fill="none" strokeWidth="2.5" className="stroke-amber-500/15" />
+        <circle
+          cx="18"
+          cy="18"
+          r={r}
+          fill="none"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeDasharray={length}
+          strokeDashoffset={length * (1 - share)}
+          className="stroke-amber-500 transition-[stroke-dashoffset] duration-300 ease-linear"
+        />
+      </svg>
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={seconds > 99 ? "long" : seconds}
+          initial={{ y: 8, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: -8, opacity: 0 }}
+          transition={{ duration: 0.18 }}
+          className="relative text-[0.65rem] font-extrabold tabular-nums"
+        >
+          {seconds > 99 ? <SnailIcon className="size-4" /> : seconds}
+        </motion.span>
+      </AnimatePresence>
+    </motion.span>
+  );
+}
+
+/** In place of the box while you're timed out: how long until you can talk again. */
+function TimedOut({ left }: { left: number }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.98 }}
+      transition={SPRING}
+      role="status"
+      className="flex items-center gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5"
+    >
+      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
+        <HourglassIcon className="size-[18px] animate-[flip_3s_ease-in-out_infinite]" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-bold">You're timed out</p>
+        <p className="text-xs text-muted-foreground">You can still read along. Messages and edits open up again when it ends.</p>
+      </div>
+      <span className="shrink-0 rounded-full bg-amber-500/15 px-2.5 py-1 text-sm font-extrabold text-amber-600 tabular-nums dark:text-amber-400">
+        {formatLeft(left)}
+      </span>
+    </motion.div>
   );
 }
