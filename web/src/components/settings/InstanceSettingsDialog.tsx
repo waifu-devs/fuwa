@@ -9,6 +9,8 @@ import {
   ShieldCheckIcon,
   UsersIcon,
   BanIcon,
+  GaugeIcon,
+  SlidersHorizontalIcon,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -21,13 +23,12 @@ import {
 import { ServerCreation, ServerLimitsSchema } from "@/gen/fuwa/v1/types_pb";
 import { getSettings, run, updateSettings } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
-import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Cap, Choice, SaveBar, Setting, SPRING, Toggle } from "./controls";
+import { SettingsScreen } from "./SettingsScreen";
 
 /** Every setting, as the API names it, and how to read it for comparing. */
 const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
@@ -70,7 +71,6 @@ export function InstanceSettingsDialog({
   const [draft, setDraft] = useState<InstanceSettings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState("general");
-  const [nudge, setNudge] = useState(0);
   const save = useAction(updateSettings);
 
   useEffect(() => {
@@ -78,7 +78,6 @@ export function InstanceSettingsDialog({
     setConfig(null);
     setLoadError(null);
     setTab("general");
-    setNudge(0);
     run(getSettings(instanceKey)).then(
       (c) => {
         setConfig(c);
@@ -124,202 +123,207 @@ export function InstanceSettingsDialog({
     resetting: save.pending,
   });
 
-  function close(next: boolean) {
-    if (!next && changed.length) {
-      setNudge((n) => n + 1);
-      return;
-    }
-    onOpenChange(next);
-  }
+  const name = inst?.node?.name ?? instanceKey;
+  const loading = !config || !draft || !defaults;
 
   return (
-    <Dialog open={open} onOpenChange={close}>
-      <DialogContent wide className="sm:max-w-3xl">
-        <DialogHeader
-          title="Instance settings"
-          description={`What everyone on ${inst?.node?.name ?? instanceKey} gets. Changes apply right away.`}
-        />
-        {loadError ? (
-          <p className="text-sm text-muted-foreground first-letter:uppercase">{loadError}</p>
-        ) : !config || !draft || !defaults ? (
-          <div className="flex flex-col gap-3 pt-2">
-            {[0, 1, 2].map((n) => (
-              <div key={n} className="shimmer h-28 rounded-2xl" />
-            ))}
-          </div>
-        ) : (
-          <Tabs value={tab} onValueChange={setTab}>
-            <TabsList className="w-full">
-              <TabsTrigger value="general">General</TabsTrigger>
-              <TabsTrigger value="accounts">Accounts</TabsTrigger>
-              <TabsTrigger value="limits">Limits</TabsTrigger>
-              <TabsTrigger value="privacy">Privacy</TabsTrigger>
-            </TabsList>
-            <TabsContents className="pt-4">
-              <TabsContent value="general" className="flex flex-col gap-3">
-                <Setting title="Name" hint="Shown in the app and when people add this instance." defaultLabel={defaults.name} {...resetter("name")}>
-                  <Input value={draft.name} maxLength={64} onChange={(e) => patch((d) => (d.name = e.target.value))} className="h-10 rounded-xl" />
-                </Setting>
-                <Setting
-                  title="Public address"
-                  hint="The URL people use to reach this instance."
-                  defaultLabel={defaults.publicUrl}
-                  delay={0.04}
-                  {...resetter("public_url")}
-                >
-                  <div className="relative">
-                    <LinkIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      value={draft.publicUrl}
-                      type="url"
-                      onChange={(e) => patch((d) => (d.publicUrl = e.target.value))}
-                      className="h-10 rounded-xl pl-9"
-                    />
-                  </div>
-                </Setting>
-                <Setting title="Web app" delay={0.08} defaultLabel={defaults.web ? "on" : "off"} {...resetter("web")}>
-                  <Toggle
-                    checked={draft.web}
-                    disabled={!config.startup?.webBuiltIn}
-                    onChange={(web) => patch((d) => (d.web = web))}
-                    label="Open the app at this address"
-                    hint={
-                      config.startup?.webBuiltIn
-                        ? "Turned off, people can still use this instance from the app on another fuwa instance."
-                        : "This build of fuwa doesn't include the web app."
-                    }
-                  />
-                </Setting>
-                <Origins
-                  draft={draft}
-                  patch={patch}
-                  defaultLabel={defaults.allowedOrigins.join(", ")}
-                  reset={resetter("allowed_origins")}
-                />
-                <Startup config={config} />
-              </TabsContent>
-
-              <TabsContent value="accounts" className="flex flex-col gap-3">
-                <Setting
-                  title="Standalone accounts"
-                  hint="A username and password kept on this instance only."
-                  defaultLabel={LOCAL_LABEL[defaults.localAccounts]}
-                  {...resetter("local_accounts")}
-                >
-                  <Choice
-                    value={draft.localAccounts}
-                    onChange={(v) => patch((d) => (d.localAccounts = v))}
-                    options={[
-                      { value: LocalAccounts.OPEN, label: "Open", hint: "Anyone can sign up.", icon: <DoorOpenIcon className="size-4" /> },
-                      { value: LocalAccounts.CLOSED, label: "Closed", hint: "Existing accounts only.", icon: <DoorClosedIcon className="size-4" /> },
-                      {
-                        value: LocalAccounts.OFF,
-                        label: "Off",
-                        hint: "No standalone accounts.",
-                        icon: <LockIcon className="size-4" />,
-                        disabled: draft.localAccounts === LocalAccounts.OFF ? undefined : "Needs another way to sign in first.",
-                      },
-                    ]}
-                  />
-                </Setting>
-                <Setting
-                  title="Who can create servers"
-                  defaultLabel={CREATION_LABEL[defaults.serverCreation]}
-                  delay={0.04}
-                  {...resetter("server_creation")}
-                >
-                  <Choice
-                    value={draft.serverCreation}
-                    onChange={(v) => patch((d) => (d.serverCreation = v))}
-                    options={[
-                      { value: ServerCreation.EVERYONE, label: "Everyone", hint: "Any signed-in account.", icon: <UsersIcon className="size-4" /> },
-                      { value: ServerCreation.ADMINS, label: "Admins", hint: "Instance admins only.", icon: <CrownIcon className="size-4" /> },
-                      { value: ServerCreation.DISABLED, label: "Nobody", hint: "No new servers.", icon: <BanIcon className="size-4" /> },
-                    ]}
-                  />
-                </Setting>
-                <Setting
-                  title="Servers per account"
-                  hint="How many servers one account may own."
-                  defaultLabel={count(defaults.serversPerAccount)}
-                  delay={0.08}
-                  {...resetter("servers_per_account")}
-                >
-                  <Cap label="Up to" value={draft.serversPerAccount} onChange={(v) => patch((d) => (d.serversPerAccount = v))} />
-                </Setting>
-              </TabsContent>
-
-              <TabsContent value="limits" className="flex flex-col gap-3">
-                <Setting
-                  title="Default caps for every server"
-                  hint="A server can get its own caps from its settings. With a cap off, it's unlimited."
-                  defaultLabel={[
-                    `${count(defaults.defaultLimits?.members)} members`,
-                    `${count(defaults.defaultLimits?.channels)} channels`,
-                    `${size(defaults.defaultLimits?.storageBytes)} storage`,
-                    `${size(defaults.defaultLimits?.attachmentBytes)} files`,
-                  ].join(", ")}
-                  {...resetter("default_limits.members", "default_limits.channels", "default_limits.storage_bytes", "default_limits.attachment_bytes")}
-                >
-                  <div className="flex flex-col gap-3">
-                    <Cap label="Members" value={draft.defaultLimits?.members} onChange={(v) => patch((d) => (d.defaultLimits!.members = v))} />
-                    <Cap label="Channels" value={draft.defaultLimits?.channels} onChange={(v) => patch((d) => (d.defaultLimits!.channels = v))} />
-                    <Cap label="Storage" bytes value={draft.defaultLimits?.storageBytes} onChange={(v) => patch((d) => (d.defaultLimits!.storageBytes = v))} />
-                    <Cap label="Files" bytes value={draft.defaultLimits?.attachmentBytes} onChange={(v) => patch((d) => (d.defaultLimits!.attachmentBytes = v))} />
-                  </div>
-                </Setting>
-              </TabsContent>
-
-              <TabsContent value="privacy" className="flex flex-col gap-3">
-                <Setting title="Anonymous usage signal" defaultLabel={defaults.telemetry ? "on" : "off"} {...resetter("telemetry")}>
-                  <Toggle
-                    checked={draft.telemetry}
-                    onChange={(telemetry) => patch((d) => (d.telemetry = telemetry))}
-                    label="Send it once a day"
-                    hint="Helps Waifu Devs see how fuwa is used. Counts only: no names, messages, ids or addresses."
-                  />
-                  <ul className="grid gap-1.5 text-xs text-muted-foreground sm:grid-cols-2">
-                    {["How many accounts, servers, channels and messages", "Storage used, in bytes", "Which account and server options are on", "fuwa version, OS and a random install id"].map(
-                      (line, n) => (
-                        <motion.li
-                          key={line}
-                          initial={{ opacity: 0, x: -8 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ ...SPRING, delay: 0.1 + n * 0.05 }}
-                          className="flex items-center gap-2"
-                        >
-                          <ShieldCheckIcon className="size-3.5 shrink-0 text-primary" /> {line}
-                        </motion.li>
-                      ),
-                    )}
-                  </ul>
-                  <a
-                    href="https://github.com/waifu-devs/fuwa#the-anonymous-usage-signal"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs font-bold text-primary underline-offset-4 hover:underline"
-                  >
-                    Every field it sends
-                  </a>
-                </Setting>
-              </TabsContent>
-            </TabsContents>
-          </Tabs>
-        )}
+    <SettingsScreen
+      open={open}
+      onOpenChange={onOpenChange}
+      title={name}
+      subtitle="Instance settings"
+      section={tab}
+      onSectionChange={setTab}
+      groups={[
+        {
+          label: "Instance",
+          sections: [
+            { id: "general", label: "General", icon: SlidersHorizontalIcon, description: `What everyone on ${name} gets. Changes apply right away.` },
+            { id: "accounts", label: "Accounts", icon: UsersIcon, description: "Who can join this instance and what they can make." },
+            { id: "limits", label: "Limits", icon: GaugeIcon, description: "Caps every server starts with." },
+            { id: "privacy", label: "Privacy", icon: ShieldCheckIcon, description: "What this instance tells Waifu Devs." },
+          ],
+        },
+      ]}
+      footer={
         <SaveBar
+          scope="screen"
           count={changed.length}
           saving={save.pending}
           error={save.error}
-          nudge={nudge}
           onSave={() => commit(changed, [])}
           onDiscard={() => {
             if (saved) setDraft(clone(InstanceSettingsSchema, saved));
             save.setError(null);
-            setNudge(0);
           }}
         />
-      </DialogContent>
-    </Dialog>
+      }
+    >
+      {loadError ? (
+        <p className="text-sm text-muted-foreground first-letter:uppercase">{loadError}</p>
+      ) : loading ? (
+        <div className="flex flex-col gap-3">
+          {[0, 1, 2].map((n) => (
+            <div key={n} className="shimmer h-28 rounded-2xl" />
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {tab === "general" && (
+            <>
+              <Setting title="Name" hint="Shown in the app and when people add this instance." defaultLabel={defaults.name} {...resetter("name")}>
+                <Input value={draft.name} maxLength={64} onChange={(e) => patch((d) => (d.name = e.target.value))} className="h-10 rounded-xl" />
+              </Setting>
+              <Setting
+                title="Public address"
+                hint="The URL people use to reach this instance."
+                defaultLabel={defaults.publicUrl}
+                delay={0.04}
+                {...resetter("public_url")}
+              >
+                <div className="relative">
+                  <LinkIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={draft.publicUrl}
+                    type="url"
+                    onChange={(e) => patch((d) => (d.publicUrl = e.target.value))}
+                    className="h-10 rounded-xl pl-9"
+                  />
+                </div>
+              </Setting>
+              <Setting title="Web app" delay={0.08} defaultLabel={defaults.web ? "on" : "off"} {...resetter("web")}>
+                <Toggle
+                  checked={draft.web}
+                  disabled={!config.startup?.webBuiltIn}
+                  onChange={(web) => patch((d) => (d.web = web))}
+                  label="Open the app at this address"
+                  hint={
+                    config.startup?.webBuiltIn
+                      ? "Turned off, people can still use this instance from the app on another fuwa instance."
+                      : "This build of fuwa doesn't include the web app."
+                  }
+                />
+              </Setting>
+              <Origins
+                draft={draft}
+                patch={patch}
+                defaultLabel={defaults.allowedOrigins.join(", ")}
+                reset={resetter("allowed_origins")}
+              />
+              <Startup config={config} />
+            </>
+          )}
+          {tab === "accounts" && (
+            <>
+              <Setting
+                title="Standalone accounts"
+                hint="A username and password kept on this instance only."
+                defaultLabel={LOCAL_LABEL[defaults.localAccounts]}
+                {...resetter("local_accounts")}
+              >
+                <Choice
+                  value={draft.localAccounts}
+                  onChange={(v) => patch((d) => (d.localAccounts = v))}
+                  options={[
+                    { value: LocalAccounts.OPEN, label: "Open", hint: "Anyone can sign up.", icon: <DoorOpenIcon className="size-4" /> },
+                    { value: LocalAccounts.CLOSED, label: "Closed", hint: "Existing accounts only.", icon: <DoorClosedIcon className="size-4" /> },
+                    {
+                      value: LocalAccounts.OFF,
+                      label: "Off",
+                      hint: "No standalone accounts.",
+                      icon: <LockIcon className="size-4" />,
+                      disabled: draft.localAccounts === LocalAccounts.OFF ? undefined : "Needs another way to sign in first.",
+                    },
+                  ]}
+                />
+              </Setting>
+              <Setting
+                title="Who can create servers"
+                defaultLabel={CREATION_LABEL[defaults.serverCreation]}
+                delay={0.04}
+                {...resetter("server_creation")}
+              >
+                <Choice
+                  value={draft.serverCreation}
+                  onChange={(v) => patch((d) => (d.serverCreation = v))}
+                  options={[
+                    { value: ServerCreation.EVERYONE, label: "Everyone", hint: "Any signed-in account.", icon: <UsersIcon className="size-4" /> },
+                    { value: ServerCreation.ADMINS, label: "Admins", hint: "Instance admins only.", icon: <CrownIcon className="size-4" /> },
+                    { value: ServerCreation.DISABLED, label: "Nobody", hint: "No new servers.", icon: <BanIcon className="size-4" /> },
+                  ]}
+                />
+              </Setting>
+              <Setting
+                title="Servers per account"
+                hint="How many servers one account may own."
+                defaultLabel={count(defaults.serversPerAccount)}
+                delay={0.08}
+                {...resetter("servers_per_account")}
+              >
+                <Cap label="Up to" value={draft.serversPerAccount} onChange={(v) => patch((d) => (d.serversPerAccount = v))} />
+              </Setting>
+            </>
+          )}
+          {tab === "limits" && (
+            <>
+              <Setting
+                title="Default caps for every server"
+                hint="A server can get its own caps from its settings. With a cap off, it's unlimited."
+                defaultLabel={[
+                  `${count(defaults.defaultLimits?.members)} members`,
+                  `${count(defaults.defaultLimits?.channels)} channels`,
+                  `${size(defaults.defaultLimits?.storageBytes)} storage`,
+                  `${size(defaults.defaultLimits?.attachmentBytes)} files`,
+                ].join(", ")}
+                {...resetter("default_limits.members", "default_limits.channels", "default_limits.storage_bytes", "default_limits.attachment_bytes")}
+              >
+                <div className="flex flex-col gap-3">
+                  <Cap label="Members" value={draft.defaultLimits?.members} onChange={(v) => patch((d) => (d.defaultLimits!.members = v))} />
+                  <Cap label="Channels" value={draft.defaultLimits?.channels} onChange={(v) => patch((d) => (d.defaultLimits!.channels = v))} />
+                  <Cap label="Storage" bytes value={draft.defaultLimits?.storageBytes} onChange={(v) => patch((d) => (d.defaultLimits!.storageBytes = v))} />
+                  <Cap label="Files" bytes value={draft.defaultLimits?.attachmentBytes} onChange={(v) => patch((d) => (d.defaultLimits!.attachmentBytes = v))} />
+                </div>
+              </Setting>
+            </>
+          )}
+          {tab === "privacy" && (
+            <>
+              <Setting title="Anonymous usage signal" defaultLabel={defaults.telemetry ? "on" : "off"} {...resetter("telemetry")}>
+                <Toggle
+                  checked={draft.telemetry}
+                  onChange={(telemetry) => patch((d) => (d.telemetry = telemetry))}
+                  label="Send it once a day"
+                  hint="Helps Waifu Devs see how fuwa is used. Counts only: no names, messages, ids or addresses."
+                />
+                <ul className="grid gap-1.5 text-xs text-muted-foreground sm:grid-cols-2">
+                  {["How many accounts, servers, channels and messages", "Storage used, in bytes", "Which account and server options are on", "fuwa version, OS and a random install id"].map(
+                    (line, n) => (
+                      <motion.li
+                        key={line}
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ ...SPRING, delay: 0.1 + n * 0.05 }}
+                        className="flex items-center gap-2"
+                      >
+                        <ShieldCheckIcon className="size-3.5 shrink-0 text-primary" /> {line}
+                      </motion.li>
+                    ),
+                  )}
+                </ul>
+                <a
+                  href="https://github.com/waifu-devs/fuwa#the-anonymous-usage-signal"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs font-bold text-primary underline-offset-4 hover:underline"
+                >
+                  Every field it sends
+                </a>
+              </Setting>
+            </>
+          )}
+        </div>
+      )}
+    </SettingsScreen>
   );
 }
 

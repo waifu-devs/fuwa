@@ -4,7 +4,8 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { SPRING } from "@/components/motion";
+import { Count, SPRING } from "@/components/motion";
+import { useUnsavedGuard, type GuardScope } from "./SettingsScreen";
 import { cn } from "@/lib/utils";
 
 export { SPRING };
@@ -297,31 +298,38 @@ export function Cap({
 }
 
 /**
- * The bar that slides up while there are unsaved changes. `nudge` changes
- * when someone tries to leave without saving, which shakes it.
+ * The bar that slides up while there are unsaved changes. Inside a settings
+ * screen it holds the screen open (or, with `scope="section"`, the section)
+ * and shakes when someone tries to leave.
  */
 export function SaveBar({
   count,
   saving,
   error,
-  nudge,
+  nudge = 0,
   onSave,
   onDiscard,
-  inset = false,
+  scope = "section",
 }: {
   count: number;
   saving: boolean;
   error: string | null;
-  nudge: number;
+  /** Changes when someone tries to leave outside a settings screen. */
+  nudge?: number;
   onSave: () => void;
   onDiscard: () => void;
-  /** Inside a panel that clips (such as tabs): no bleed, a softer shadow. */
-  inset?: boolean;
+  scope?: GuardScope;
 }) {
+  const held = useUnsavedGuard(count > 0, scope) + nudge;
   const shake = useAnimationControls();
+  const [alarm, setAlarm] = useState(false);
   useEffect(() => {
-    if (nudge) void shake.start({ x: [0, -10, 10, -8, 8, -4, 4, 0], transition: { duration: 0.5 } });
-  }, [nudge, shake]);
+    if (!held) return;
+    setAlarm(true);
+    void shake.start({ x: [0, -10, 10, -8, 8, -4, 4, 0], transition: { duration: 0.5 } });
+    const t = setTimeout(() => setAlarm(false), 1800);
+    return () => clearTimeout(t);
+  }, [held, shake]);
   return (
     <AnimatePresence>
       {count > 0 && (
@@ -330,24 +338,25 @@ export function SaveBar({
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 80, opacity: 0 }}
           transition={SPRING}
-          className={cn("sticky bottom-0 z-10 mt-4", inset ? "pb-3" : "-mx-2 pb-1")}
+          className="sticky bottom-0 z-10 mt-6 pb-2"
         >
           <motion.div
             animate={shake}
             className={cn(
-              "flex flex-wrap items-center gap-3 rounded-2xl border bg-popover/95 p-3 pl-4 backdrop-blur transition-colors",
-              inset ? "shadow-md" : "shadow-xl",
-              nudge && "border-destructive/60",
+              "flex flex-wrap items-center gap-3 rounded-2xl border bg-popover/95 p-3 pl-4 shadow-xl backdrop-blur transition-colors duration-300",
+              alarm && "border-destructive/70 bg-destructive/10",
             )}
           >
             <p className="min-w-0 flex-1 text-sm">
               {error ? (
                 <span className="text-destructive first-letter:uppercase">{error}</span>
+              ) : alarm ? (
+                <span className="font-bold text-destructive">Careful, you have unsaved changes</span>
               ) : (
                 <>
                   <span className="font-bold">Unsaved changes</span>{" "}
                   <span className="text-muted-foreground">
-                    ({count} {count === 1 ? "setting" : "settings"})
+                    (<Count value={count} /> {count === 1 ? "setting" : "settings"})
                   </span>
                 </>
               )}

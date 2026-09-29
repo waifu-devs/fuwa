@@ -454,3 +454,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .server-icon, .message-row .message-tools { transition: none; }
 }
+
+/* Full-screen settings: the app behind shrinks back and softens while they open. */
+#root { transition: scale 0.35s cubic-bezier(0.22, 1, 0.36, 1), filter 0.35s ease, opacity 0.35s ease; }
+body[data-settings-open] #root { scale: 0.94; filter: blur(3px); opacity: 0.4; }

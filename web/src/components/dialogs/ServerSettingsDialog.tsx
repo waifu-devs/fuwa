@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { LoaderCircleIcon, TriangleAlertIcon } from "lucide-react";
+import { ChartColumnIcon, GaugeIcon, LoaderCircleIcon, SettingsIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { GetServerUsageResponse } from "@/gen/fuwa/v1/server_pb";
@@ -9,15 +9,14 @@ import { useAction } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
 import { CountUp } from "@/components/motion";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Cap, SaveBar } from "@/components/settings/controls";
+import { SettingsScreen } from "@/components/settings/SettingsScreen";
 
 export function ServerSettingsDialog({
   open,
@@ -41,59 +40,64 @@ export function ServerSettingsDialog({
   useEffect(() => {
     if (open) setTab(initialTab);
   }, [open, initialTab]);
+  const sections = [
+    { id: "overview", label: "Overview", icon: SettingsIcon, description: "How the server looks and whether people can find it." },
+    { id: "usage", label: "Usage", icon: ChartColumnIcon, description: "What the server holds, against its caps." },
+    ...(instanceAdmin
+      ? [{ id: "limits", label: "Limits", icon: GaugeIcon, description: "Caps for this server only, over the instance's defaults." }]
+      : []),
+  ];
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent wide>
-        <DialogHeader title={`${server.name} settings`} />
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="w-full">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="usage">Usage</TabsTrigger>
-            {instanceAdmin && <TabsTrigger value="limits">Limits</TabsTrigger>}
-            {isOwner && <TabsTrigger value="danger">Danger zone</TabsTrigger>}
-          </TabsList>
-          <TabsContents className="pt-4">
-            <TabsContent value="overview">
-              <Overview instanceKey={instanceKey} server={server} onSaved={() => onOpenChange(false)} />
-            </TabsContent>
-            <TabsContent value="usage">{open && tab === "usage" && <Usage instanceKey={instanceKey} serverId={server.id} />}</TabsContent>
-            {instanceAdmin && (
-              <TabsContent value="limits">{open && tab === "limits" && <Limits instanceKey={instanceKey} serverId={server.id} />}</TabsContent>
-            )}
-            {isOwner && (
-              <TabsContent value="danger">
-                <Danger instanceKey={instanceKey} server={server} onDeleted={() => onOpenChange(false)} />
-              </TabsContent>
-            )}
-          </TabsContents>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
+    <SettingsScreen
+      open={open}
+      onOpenChange={onOpenChange}
+      title={server.name}
+      subtitle="Server settings"
+      section={tab}
+      onSectionChange={setTab}
+      openToSection={initialTab !== "overview"}
+      groups={[
+        { label: server.name, sections },
+        ...(isOwner ? [{ label: "Danger zone", sections: [{ id: "danger", label: "Delete server", icon: Trash2Icon, danger: true }] }] : []),
+      ]}
+    >
+      {tab === "overview" && <Overview instanceKey={instanceKey} server={server} />}
+      {tab === "usage" && <Usage instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "limits" && instanceAdmin && <Limits instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "danger" && isOwner && <Danger instanceKey={instanceKey} server={server} onDeleted={() => onOpenChange(false)} />}
+    </SettingsScreen>
   );
 }
 
-function Overview({ instanceKey, server, onSaved }: { instanceKey: string; server: Server; onSaved: () => void }) {
+function Overview({ instanceKey, server }: { instanceKey: string; server: Server }) {
   const [name, setName] = useState(server.name);
   const [description, setDescription] = useState(server.description);
   const [discoverable, setDiscoverable] = useState(server.discoverable);
   const save = useAction(updateServer);
-  const changed = name !== server.name || description !== server.description || discoverable !== server.discoverable;
+  const changes = [name !== server.name, description !== server.description, discoverable !== server.discoverable].filter(Boolean).length;
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    const ok = await save.go(instanceKey, server.id, {
+  function discard() {
+    setName(server.name);
+    setDescription(server.description);
+    setDiscoverable(server.discoverable);
+    save.setError(null);
+  }
+
+  async function submit(e?: FormEvent) {
+    e?.preventDefault();
+    if (!name.trim()) return save.setError("a server needs a name");
+    await save.go(instanceKey, server.id, {
       ...(name !== server.name && { name: name.trim() }),
       ...(description !== server.description && { description: description.trim() }),
       ...(discoverable !== server.discoverable && { discoverable }),
     });
-    if (ok !== undefined) onSaved();
   }
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <div className="flex items-center gap-4">
         <motion.span key={initials(name || server.name)} initial={{ scale: 0.85, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 16 }}>
-          <ServerIcon server={{ ...server, name: name || server.name }} active className="size-16 text-xl" />
+          <ServerIcon server={{ ...server, name: name || server.name }} active className="size-20 text-2xl" />
         </motion.span>
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <Label htmlFor="settings-name" className="font-bold">
@@ -106,20 +110,17 @@ function Overview({ instanceKey, server, onSaved }: { instanceKey: string; serve
         <Label htmlFor="settings-description" className="font-bold">
           Description
         </Label>
-        <Textarea id="settings-description" rows={3} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} className="rounded-xl" />
+        <Textarea id="settings-description" rows={4} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} className="rounded-xl" />
+        <p className="text-xs text-muted-foreground">Shown in Browse. Markdown works.</p>
       </div>
-      <label className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl border p-3">
+      <label className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl border p-4">
         <span>
           <span className="block text-sm font-bold">Show in Browse</span>
           <span className="block text-xs text-muted-foreground">Anyone on this fuwa server can find and join it.</span>
         </span>
         <Switch checked={discoverable} onCheckedChange={setDiscoverable} />
       </label>
-      {save.error && <p className="text-sm text-destructive first-letter:uppercase">{save.error}</p>}
-      <Button type="submit" disabled={!changed || save.pending || !name.trim()} className="btn h-11 self-end rounded-xl px-6 font-bold">
-        {save.pending && <LoaderCircleIcon className="animate-spin" />}
-        Save changes
-      </Button>
+      <SaveBar count={changes} saving={save.pending} error={save.error} onSave={() => void submit()} onDiscard={discard} />
     </form>
   );
 }
@@ -233,7 +234,6 @@ function Limits({ instanceKey, serverId }: { instanceKey: string; serverId: stri
         <Cap label="Files" bytes value={draft.attachmentBytes} onChange={set("attachmentBytes")} placeholder={fallback("attachmentBytes", true)} />
       </div>
       <SaveBar
-        inset
         count={changed}
         saving={save.pending}
         error={save.error}

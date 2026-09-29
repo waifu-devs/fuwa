@@ -1,14 +1,15 @@
-import { CheckIcon, LoaderCircleIcon, LogOutIcon } from "lucide-react";
+import { CheckIcon, LogOutIcon, PaletteIcon, UserRoundIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import { forget, signOut, updateProfile } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
+import { SwapText } from "@/components/motion";
+import { SaveBar } from "@/components/settings/controls";
+import { SettingsScreen } from "@/components/settings/SettingsScreen";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { applyTheme, BUILTIN_THEMES, savedTheme, type Theme } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 
@@ -22,82 +23,117 @@ export function ProfileDialog({
   instanceKey: string;
 }) {
   const inst = useInstance(instanceKey);
+  const [section, setSection] = useState("profile");
+  useEffect(() => {
+    if (open) setSection("profile");
+  }, [open]);
+  const where = inst?.node?.name ?? instanceKey;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent wide>
-        <DialogHeader title="Settings" description={inst?.node ? `Your account on ${inst.node.name} (${instanceKey})` : undefined} />
-        <Tabs defaultValue="profile">
-          <TabsList className="w-full">
-            <TabsTrigger value="profile">Profile</TabsTrigger>
-            <TabsTrigger value="look">Appearance</TabsTrigger>
-          </TabsList>
-          <TabsContents className="pt-4">
-            <TabsContent value="profile">{open && <Profile instanceKey={instanceKey} onDone={() => onOpenChange(false)} />}</TabsContent>
-            <TabsContent value="look">
-              <Themes />
-            </TabsContent>
-          </TabsContents>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
+    <SettingsScreen
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Settings"
+      subtitle={`Your account on ${where}`}
+      section={section}
+      onSectionChange={setSection}
+      groups={[
+        {
+          label: "Your account",
+          sections: [
+            { id: "profile", label: "Profile", icon: UserRoundIcon, description: `How people see you on ${where} (${instanceKey}).` },
+            { id: "look", label: "Appearance", icon: PaletteIcon, description: "The theme for this app, on every fuwa server you use here." },
+          ],
+        },
+        { label: "Session", sections: [{ id: "session", label: "Sign out", icon: LogOutIcon, danger: true }] },
+      ]}
+    >
+      {section === "profile" && <Profile instanceKey={instanceKey} />}
+      {section === "look" && <Themes />}
+      {section === "session" && <Session instanceKey={instanceKey} />}
+    </SettingsScreen>
   );
 }
 
-function Profile({ instanceKey, onDone }: { instanceKey: string; onDone: () => void }) {
+function Profile({ instanceKey }: { instanceKey: string }) {
   const inst = useInstance(instanceKey);
   const me = inst?.me;
   const [name, setName] = useState(me?.displayName ?? "");
   const [avatar, setAvatar] = useState(me?.avatarUrl ?? "");
   const save = useAction(updateProfile);
-  const leave = useAction(signOut);
-  const drop = useAction(forget);
   if (!me) return null;
   const preview = { ...me, displayName: name, avatarUrl: avatar };
+  const changes = [name !== me.displayName, avatar !== me.avatarUrl].filter(Boolean).length;
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    const ok = await save.go(instanceKey, name.trim(), avatar.trim());
-    if (ok !== undefined) onDone();
+  async function submit(e?: FormEvent) {
+    e?.preventDefault();
+    await save.go(instanceKey, name.trim(), avatar.trim());
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <form onSubmit={submit} className="flex flex-col gap-4">
-        <div className="flex items-center gap-4 rounded-3xl border bg-background/50 p-4">
-          <span className="avatar-ring rounded-full p-[3px]">
-            <UserAvatar user={preview} className="size-16 text-2xl ring-4 ring-card" />
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-lg font-extrabold">{name || me.username}</p>
-            <p className="truncate text-sm text-muted-foreground">@{me.username}</p>
-          </div>
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      <div className="flex items-center gap-4 rounded-3xl border bg-card/60 p-5">
+        <span className="avatar-ring rounded-full p-[3px]">
+          <UserAvatar user={preview} className="size-20 text-3xl ring-4 ring-card" />
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-xl font-extrabold">
+            <SwapText className="truncate align-bottom">{name || me.username}</SwapText>
+          </p>
+          <p className="truncate text-sm text-muted-foreground">@{me.username}</p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="profile-name" className="font-bold">
-              Display name
-            </Label>
-            <Input id="profile-name" maxLength={64} value={name} onChange={(e) => setName(e.target.value)} className="h-11 rounded-xl" />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="profile-avatar" className="font-bold">
-              Avatar URL
-            </Label>
-            <Input id="profile-avatar" type="url" placeholder="https://…" value={avatar} onChange={(e) => setAvatar(e.target.value)} className="h-11 rounded-xl" />
-          </div>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="profile-name" className="font-bold">
+            Display name
+          </Label>
+          <Input id="profile-name" maxLength={64} value={name} onChange={(e) => setName(e.target.value)} className="h-11 rounded-xl" />
         </div>
-        {save.error && <p className="text-sm text-destructive first-letter:uppercase">{save.error}</p>}
-        <Button type="submit" disabled={save.pending} className="btn h-11 self-end rounded-xl px-6 font-bold">
-          {save.pending && <LoaderCircleIcon className="animate-spin" />}
-          Save profile
-        </Button>
-      </form>
-      <div className="flex flex-wrap gap-2 border-t pt-4">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="profile-avatar" className="font-bold">
+            Avatar URL
+          </Label>
+          <Input id="profile-avatar" type="url" placeholder="https://…" value={avatar} onChange={(e) => setAvatar(e.target.value)} className="h-11 rounded-xl" />
+        </div>
+      </div>
+      <SaveBar
+        count={changes}
+        saving={save.pending}
+        error={save.error}
+        onSave={() => void submit()}
+        onDiscard={() => {
+          setName(me.displayName);
+          setAvatar(me.avatarUrl);
+          save.setError(null);
+        }}
+      />
+    </form>
+  );
+}
+
+function Session({ instanceKey }: { instanceKey: string }) {
+  const inst = useInstance(instanceKey);
+  const leave = useAction(signOut);
+  const drop = useAction(forget);
+  const where = inst?.node?.name ?? instanceKey;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold">Sign out of {where}</p>
+          <p className="text-xs text-muted-foreground">It stays in your list, so signing back in is one step.</p>
+        </div>
         <Button variant="outline" className="rounded-xl" disabled={leave.pending} onClick={() => leave.go(instanceKey)}>
-          <LogOutIcon /> Sign out of {inst?.node?.name ?? instanceKey}
+          <LogOutIcon /> Sign out
         </Button>
-        <Button variant="ghost" className="rounded-xl text-destructive hover:text-destructive" disabled={drop.pending} onClick={() => drop.go(instanceKey)}>
-          Remove from this browser
+      </div>
+      <div className="flex flex-col gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-destructive">Remove from this browser</p>
+          <p className="text-xs text-muted-foreground">Signs out and takes {where} off your server list here. Your account stays on the instance.</p>
+        </div>
+        <Button variant="destructive" className="rounded-xl" disabled={drop.pending} onClick={() => drop.go(instanceKey)}>
+          Remove
         </Button>
       </div>
     </div>
