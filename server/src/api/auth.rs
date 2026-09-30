@@ -1,5 +1,6 @@
 use tonic::{Request, Response, Status};
 
+use super::media::PictureOwner;
 use super::{Api, respond, text, url};
 use crate::auth::{self, Viewer};
 use crate::error::{Error, Result};
@@ -106,12 +107,26 @@ impl Api {
             }
             None => None,
         };
+        let avatar_url = req.avatar_url.as_deref().map(|value| url("avatar_url", value)).transpose()?;
+        let banner_url = req.banner_url.as_deref().map(|value| url("banner_url", value)).transpose()?;
+        let old_banner = match &banner_url {
+            Some(_) => self.app.node.profile(&account.id).await?.map(|profile| profile.banner_url).unwrap_or_default(),
+            None => String::new(),
+        };
+        let new_avatar = match avatar_url.as_deref().filter(|url| *url != account.avatar_url) {
+            Some(url) => self.check_picture(account, pb::MediaPurpose::Avatar, url).await?,
+            None => None,
+        };
+        let new_banner = match banner_url.as_deref().filter(|url| *url != old_banner) {
+            Some(url) => self.check_picture(account, pb::MediaPurpose::Banner, url).await?,
+            None => None,
+        };
         let change = ProfileChange {
             display_name: req.display_name.as_deref().map(|name| text("display_name", name, 1, 64)).transpose()?,
-            avatar_url: req.avatar_url.as_deref().map(|value| url("avatar_url", value)).transpose()?,
+            avatar_url: avatar_url.clone(),
             pronouns: req.pronouns.as_deref().map(|value| text("pronouns", value, 0, 40)).transpose()?,
             bio: req.bio.as_deref().map(|value| text("bio", value, 0, 2000)).transpose()?,
-            banner_url: req.banner_url.as_deref().map(|value| url("banner_url", value)).transpose()?,
+            banner_url: banner_url.clone(),
             accent_color: match req.accent_color {
                 None => None,
                 Some(color) if color < 0 => Some(None),
@@ -121,7 +136,16 @@ impl Api {
             status,
         };
         let shows_everywhere = change.display_name.is_some() || change.avatar_url.is_some() || change.status.is_some();
+        let old_avatar = account.avatar_url.clone();
+        self.keep_picture(new_avatar.as_deref(), None).await;
+        self.keep_picture(new_banner.as_deref(), None).await;
         let account = self.app.node.update_profile(&account.id, &change).await?;
+        if let Some(avatar) = &avatar_url {
+            self.drop_picture(&old_avatar, avatar, PictureOwner::Account(&account.id, pb::MediaPurpose::Avatar)).await;
+        }
+        if let Some(banner) = &banner_url {
+            self.drop_picture(&old_banner, banner, PictureOwner::Account(&account.id, pb::MediaPurpose::Banner)).await;
+        }
         let user = account.user();
         let profile = self.app.node.profile(&account.id).await?.ok_or(Error::NotFound("account"))?;
         if !shows_everywhere {

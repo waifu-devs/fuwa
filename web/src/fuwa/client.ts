@@ -5,6 +5,7 @@ import { AdminService } from "@/gen/fuwa/v1/admin_pb";
 import { AuthService } from "@/gen/fuwa/v1/auth_pb";
 import { ChannelService } from "@/gen/fuwa/v1/channel_pb";
 import { EventService } from "@/gen/fuwa/v1/event_pb";
+import { MediaService } from "@/gen/fuwa/v1/media_pb";
 import { MessageService } from "@/gen/fuwa/v1/message_pb";
 import { NodeService } from "@/gen/fuwa/v1/node_pb";
 import { ServerService } from "@/gen/fuwa/v1/server_pb";
@@ -19,6 +20,7 @@ export type Api = {
   messages: Client<typeof MessageService>;
   events: Client<typeof EventService>;
   admin: Client<typeof AdminService>;
+  media: Client<typeof MediaService>;
 };
 
 /**
@@ -42,5 +44,6 @@ export function makeApi(url: string, token: () => string | null): Api {
     messages: createClient(MessageService, transport),
     events: createClient(EventService, transport),
     admin: createClient(AdminService, transport),
+    media: createClient(MediaService, transport),
   };
 }

@@ -32,6 +32,12 @@
     in node.db's `settings` table over the environment's defaults. Read them
     through `app.settings()`, never from `config`, so changes apply at once.
   - `telemetry.rs`: the anonymous usage signal (schema `fuwa.signal.v1`).
+  - `media.rs`: uploaded pictures (avatars, banners, server icons), one file
+    each under `media/`, with a row in node.db's `media` table. The HTTP side
+    lives here: `PUT /media/upload/<token>` takes the file for an upload
+    reserved with `MediaService.CreateUpload` (`api/media.rs`) and checks its
+    bytes really are the picture type it claims; `GET /media/<id>` serves it.
+    Pictures nothing uses are swept hourly and at startup.
   - `migrations/node`, `migrations/server`: SQL applied in order, tracked in
     `PRAGMA user_version`. Never edit a migration that has shipped; add a new file
     and list it in `MIGRATIONS`.
@@ -71,6 +77,9 @@
     settings (accounts, servers, announcement), shown by
     `settings/InstanceSettingsDialog.tsx`. The announcement itself is drawn by
     `components/AnnouncementBanner.tsx`, above the app for the instance you're on.
+  - `src/components/PictureField.tsx`: the one field for uploading an avatar,
+    banner or server icon (drop or pick, crop in `PictureCropper.tsx`, upload
+    with progress, or a link). `src/lib/pictures.ts` holds the crop math.
   - `src/lib/keybinds.ts`: every keyboard action and its default; the key
     handler (`components/Shortcuts.tsx`), the shortcut sheet and the Keybinds
     page all read this one list.
@@ -118,7 +127,12 @@
   instance always keeps at least one admin. Admins are demoted before they're
   turned off.
 - The web app talks only through the protocol; anything it needs from a server
-  goes in `proto/` first, then `pnpm generate`.
+  goes in `proto/` first, then `pnpm generate`. The one exception is sending an
+  upload's bytes, a plain `PUT` to the link `CreateUpload` hands out.
+- A picture link that points at one of the instance's own uploads is checked
+  before it's saved (`Api::check_picture`: yours, the right kind, finished),
+  marked used after (`keep_picture`), and the picture it replaced is deleted
+  (`drop_picture`). Any new field that takes a picture does the same.
 - Every screen ships with its motion: things enter and leave with a spring,
   selections glide (`layoutId`), counts roll, renamed things swap, and presses
   and hovers answer. Use the springs and helpers in

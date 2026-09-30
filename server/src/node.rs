@@ -1,5 +1,6 @@
 //! The instance's own database: accounts, sessions and settings.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use tokio::sync::Mutex;
@@ -8,6 +9,7 @@ use turso::{Connection, Database, Row};
 use crate::db::{self, EncryptionKey, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
+use crate::media::MediaRow;
 use crate::pb;
 
 const MIGRATIONS: &[&str] = &[
@@ -15,6 +17,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0002_settings.sql"),
     include_str!("../migrations/node/0003_accounts.sql"),
     include_str!("../migrations/node/0004_admin.sql"),
+    include_str!("../migrations/node/0005_media.sql"),
 ];
 
 /// How long a session lasts after sign-in.
@@ -910,6 +913,147 @@ impl NodeDb {
         .await
     }
 
+    // ───────────────────────── Uploaded pictures ─────────────────────────
+
+    /// Reserves an upload, unless the account has too many going already.
+    pub async fn reserve_media(&self, row: &MediaRow, upload_hash: &str, expires_at: i64) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            let now = now_ms();
+            let pending = query_one(
+                conn,
+                "SELECT count(*) FROM media WHERE account_id = ?1 AND stored_at IS NULL AND expires_at > ?2",
+                (row.account_id.as_str(), now),
+                |r| r.get::<i64>(0),
+            )
+            .await?
+            .unwrap_or(0);
+            if pending >= crate::media::MAX_PENDING_UPLOADS {
+                return Err(Error::ResourceExhausted("finish the uploads you started first".into()));
+            }
+            conn.execute(
+                "INSERT INTO media (id, account_id, purpose, content_type, size, upload_hash, created_at, expires_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                (
+                    row.id.as_str(),
+                    row.account_id.as_str(),
+                    row.purpose as i64,
+                    row.content_type.as_str(),
+                    row.size,
+                    upload_hash,
+                    now,
+                    expires_at,
+                ),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Uses up an upload link: the reserved upload it's for, if it still
+    /// works. It then has until `receive_by` to arrive.
+    pub async fn start_upload(&self, upload_hash: &str, now: i64, receive_by: i64) -> Result<Option<MediaRow>> {
+        db::write(&self.db, async |conn| {
+            let Some(id) = query_one(
+                conn,
+                "SELECT id FROM media WHERE upload_hash = ?1 AND stored_at IS NULL AND expires_at > ?2",
+                (upload_hash, now),
+                |r| r.get::<String>(0),
+            )
+            .await?
+            else {
+                return Ok(None);
+            };
+            conn.execute(
+                "UPDATE media SET upload_hash = NULL, expires_at = ?2 WHERE id = ?1",
+                (id.as_str(), receive_by),
+            )
+            .await?;
+            media_by_id(conn, &id).await
+        })
+        .await
+    }
+
+    /// Records that an upload's bytes arrived, and what they turned out to be.
+    pub async fn finish_upload(&self, id: &str, content_type: &str, now: i64) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("UPDATE media SET stored_at = ?2, content_type = ?3 WHERE id = ?1", (id, now, content_type))
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn media(&self, id: &str) -> Result<Option<MediaRow>> {
+        media_by_id(&self.read()?, id).await
+    }
+
+    /// Marks a picture as in use, so it isn't swept; server icons also note
+    /// their server.
+    pub async fn use_media(&self, id: &str, server_id: Option<&str>) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "UPDATE media SET used_at = coalesce(used_at, ?2), server_id = coalesce(?3, server_id) WHERE id = ?1",
+                (id, now_ms(), server_id),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn delete_media(&self, ids: &[String]) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            for id in ids {
+                conn.execute("DELETE FROM media WHERE id = ?1", [id.as_str()]).await?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// Uploads to sweep at `now`: ones whose bytes never came, and ones
+    /// stored more than a day ago that nothing uses.
+    pub async fn sweepable_media(&self, now: i64) -> Result<Vec<String>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            "SELECT id FROM media WHERE (stored_at IS NULL AND expires_at <= ?1)
+                                     OR (stored_at IS NOT NULL AND used_at IS NULL AND stored_at <= ?2)",
+            (now, now - crate::media::UNUSED_TTL_MS),
+            |r| r.get::<String>(0),
+        )
+        .await
+    }
+
+    /// Everything an account uploaded that goes with it when it's deleted:
+    /// all but the server icons in use, which belong to their servers.
+    pub async fn account_media(&self, account_id: &str) -> Result<Vec<String>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            "SELECT id FROM media WHERE account_id = ?1 AND NOT (purpose = ?2 AND used_at IS NOT NULL)",
+            (account_id, pb::MediaPurpose::ServerIcon as i64),
+            |r| r.get::<String>(0),
+        )
+        .await
+    }
+
+    pub async fn media_ids(&self) -> Result<HashSet<String>> {
+        let conn = self.read()?;
+        Ok(query_all(&conn, "SELECT id FROM media", (), |r| r.get::<String>(0)).await?.into_iter().collect())
+    }
+
+    /// How many pictures are in use, and their bytes.
+    pub async fn picture_totals(&self) -> Result<(i64, i64)> {
+        let conn = self.read()?;
+        Ok(query_one(&conn, "SELECT count(*), coalesce(sum(size), 0) FROM media WHERE used_at IS NOT NULL", (), |r| {
+            Ok((r.get::<i64>(0)?, r.get::<i64>(1)?))
+        })
+        .await?
+        .unwrap_or_default())
+    }
+
     // ───────────────────────── Deleting ─────────────────────────
 
     /// How many instance admins there are.
@@ -972,6 +1116,28 @@ impl NodeDb {
         .await?
         .unwrap_or_default())
     }
+}
+
+async fn media_by_id(conn: &Connection, id: &str) -> Result<Option<MediaRow>> {
+    query_one(
+        conn,
+        "SELECT id, account_id, purpose, content_type, size, stored_at IS NOT NULL, used_at IS NOT NULL, server_id
+         FROM media WHERE id = ?1",
+        [id],
+        |r| {
+            Ok(MediaRow {
+                id: r.get(0)?,
+                account_id: r.get(1)?,
+                purpose: pb::MediaPurpose::try_from(r.get::<i32>(2)?).unwrap_or(pb::MediaPurpose::Unspecified),
+                content_type: r.get(3)?,
+                size: r.get(4)?,
+                stored: r.get(5)?,
+                used: r.get(6)?,
+                server_id: r.get(7)?,
+            })
+        },
+    )
+    .await
 }
 
 fn summary_row(row: &Row) -> turso::Result<AccountSummary> {

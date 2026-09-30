@@ -20,6 +20,7 @@ pub const FIELDS: &[&str] = &[
     "default_limits.channels",
     "default_limits.storage_bytes",
     "default_limits.attachment_bytes",
+    "picture_upload_bytes",
     "telemetry",
     "web",
 ];
@@ -94,6 +95,7 @@ impl Settings {
             }),
             telemetry: self.telemetry,
             web: self.web,
+            picture_upload_bytes: limits.picture_upload_bytes,
         }
     }
 
@@ -125,6 +127,7 @@ impl Settings {
             "default_limits.channels" => Value::from(limits.channels),
             "default_limits.storage_bytes" => Value::from(limits.storage_bytes),
             "default_limits.attachment_bytes" => Value::from(limits.attachment_bytes),
+            "picture_upload_bytes" => Value::from(from.picture_upload_bytes),
             "telemetry" => Value::from(from.telemetry),
             "web" => Value::from(from.web),
             other => return Err(unknown(other)),
@@ -150,6 +153,7 @@ impl Settings {
             "default_limits.channels" => Value::from(limits.channels),
             "default_limits.storage_bytes" => Value::from(limits.storage_bytes),
             "default_limits.attachment_bytes" => Value::from(limits.attachment_bytes),
+            "picture_upload_bytes" => Value::from(limits.picture_upload_bytes),
             "telemetry" => Value::from(self.telemetry),
             "web" => Value::from(self.web),
             other => return Err(unknown(other)),
@@ -183,6 +187,7 @@ impl Settings {
             "default_limits.channels" => self.limits.channels = cap(field, value)?,
             "default_limits.storage_bytes" => self.limits.storage_bytes = cap(field, value)?,
             "default_limits.attachment_bytes" => self.limits.attachment_bytes = cap(field, value)?,
+            "picture_upload_bytes" => self.limits.picture_upload_bytes = cap(field, value)?,
             "telemetry" => self.telemetry = flag(field, value)?,
             "web" => self.web = flag(field, value)?,
             other => return Err(unknown(other)),

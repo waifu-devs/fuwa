@@ -23,6 +23,7 @@ import { ChannelType, MemberRole, NotificationLevel, type Server, type ServerLim
 import { deleteServer, nodeUsage, run, serverUsage, setServerLimits, updateServer } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { ServerIcon, UserAvatar } from "@/components/Icons";
+import { PictureField } from "@/components/PictureField";
 import { joinLine } from "@/components/chat/MessageList";
 import { AuditLog } from "@/components/settings/server/AuditLog";
 import { Bans } from "@/components/settings/server/Bans";
@@ -84,6 +85,7 @@ export function ServerSettingsDialog({
       description: "How the server looks, whether people can find it, and how it greets them.",
       settings: [
         { id: "name", label: "Server name" },
+        { id: "icon", label: "Server icon", keywords: "picture image upload logo avatar" },
         { id: "description", label: "Description" },
         { id: "discoverable", label: "Show in Browse", keywords: "discoverable public hidden" },
         { id: "join-messages", label: "Join messages", keywords: "system channel welcome greet" },
@@ -161,6 +163,7 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
   const inst = useInstance(instanceKey);
   const textChannels = (inst?.channels[server.id] ?? []).filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT);
   const [name, setName] = useState(server.name);
+  const [iconUrl, setIconUrl] = useState(server.iconUrl);
   const [description, setDescription] = useState(server.description);
   const [discoverable, setDiscoverable] = useState(server.discoverable);
   const [systemChannel, setSystemChannel] = useState(server.systemChannelId);
@@ -168,6 +171,7 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
   const save = useAction(updateServer);
   const changes = [
     name !== server.name,
+    iconUrl !== server.iconUrl,
     description !== server.description,
     discoverable !== server.discoverable,
     systemChannel !== server.systemChannelId,
@@ -176,6 +180,7 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
 
   function discard() {
     setName(server.name);
+    setIconUrl(server.iconUrl);
     setDescription(server.description);
     setDiscoverable(server.discoverable);
     setSystemChannel(server.systemChannelId);
@@ -186,8 +191,10 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
   async function submit(e?: FormEvent) {
     e?.preventDefault();
     if (!name.trim()) return save.setError("a server needs a name");
+    if (iconUrl.trim() && !/^https?:\/\/\S+$/i.test(iconUrl.trim())) return save.setError("icon links start with https://");
     await save.go(instanceKey, server.id, {
       ...(name !== server.name && { name: name.trim() }),
+      ...(iconUrl !== server.iconUrl && { iconUrl: iconUrl.trim() }),
       ...(description !== server.description && { description: description.trim() }),
       ...(discoverable !== server.discoverable && { discoverable }),
       ...(systemChannel !== server.systemChannelId && { systemChannelId: systemChannel }),
@@ -197,7 +204,7 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
     });
   }
 
-  const shown = { ...server, name: name || server.name, description, discoverable };
+  const shown = { ...server, name: name || server.name, iconUrl: /^https?:\/\//i.test(iconUrl.trim()) ? iconUrl.trim() : "", description, discoverable };
   const greeting = textChannels.find((c) => c.id === systemChannel);
   return (
     <form onSubmit={submit}>
@@ -210,16 +217,26 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
         }
       >
         <div className="flex flex-col">
-          <div data-setting="name" className="flex items-center gap-4 border-b border-border/70 pb-5">
-            <motion.span key={initials(shown.name)} initial={{ scale: 0.85, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 16 }}>
-              <ServerIcon server={shown} active className="size-20 text-2xl" />
-            </motion.span>
-            <div className="flex min-w-0 flex-1 flex-col gap-2">
-              <Label htmlFor="settings-name" className="font-extrabold">
-                Name
-              </Label>
-              <Input id="settings-name" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} className="h-11 rounded-xl" />
-            </div>
+          <div data-setting="name" className="flex flex-col gap-2 border-b border-border/70 pb-5">
+            <Label htmlFor="settings-name" className="font-extrabold">
+              Name
+            </Label>
+            <Input id="settings-name" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} className="h-11 rounded-xl" />
+          </div>
+          <div data-setting="icon" className="flex flex-col gap-2 border-b border-border/70 py-5">
+            <span className="font-extrabold">Icon</span>
+            <span className="text-sm text-muted-foreground">Square pictures work best. GIFs keep moving. Without one it's the server's initials.</span>
+            <PictureField
+              instanceKey={instanceKey}
+              kind="icon"
+              value={iconUrl}
+              onChange={setIconUrl}
+              fallback={
+                <motion.span key={initials(shown.name)} initial={{ scale: 0.85, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 16 }} className="block size-full">
+                  <ServerIcon server={{ ...shown, iconUrl: "" }} active className="size-full text-2xl" />
+                </motion.span>
+              }
+            />
           </div>
           <div data-setting="description" className="flex flex-col gap-2 border-b border-border/70 py-5">
             <Label htmlFor="settings-description" className="font-extrabold">

@@ -6,6 +6,7 @@ import { ServerCreation } from "@/gen/fuwa/v1/types_pb";
 import { createServer } from "@/fuwa/actions";
 import { useAction, useInstances } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
+import { PictureField } from "@/components/PictureField";
 import { Private } from "@/components/Private";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
@@ -30,6 +31,7 @@ export function CreateServerDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [discoverable, setDiscoverable] = useState(false);
+  const [iconUrl, setIconUrl] = useState("");
   const create = useAction(createServer);
   const inst = instances.find((i) => i.key === where) ?? instances[0];
   const policy = inst?.node?.serverCreation;
@@ -43,16 +45,20 @@ export function CreateServerDialog({
       setName("");
       setDescription("");
       setDiscoverable(false);
+      setIconUrl("");
       create.setError(null);
       if (defaultInstance && instances.some((i) => i.key === defaultInstance)) setWhere(defaultInstance);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // An uploaded icon lives on the fuwa server it went to.
+  useEffect(() => setIconUrl(""), [inst?.key]);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!inst) return;
-    const server = await create.go(inst.key, name.trim(), description.trim(), discoverable);
+    const server = await create.go(inst.key, name.trim(), description.trim(), discoverable, iconUrl);
     if (!server) return;
     onOpenChange(false);
     navigate({ to: "/$instance/$server", params: { instance: inst.key, server: server.id } });
@@ -64,9 +70,22 @@ export function CreateServerDialog({
         <DialogHeader title="Create a server" description="A home for your people. You can change all of this later." />
         <form onSubmit={submit} className="flex flex-col gap-4">
           <div className="flex items-center gap-4">
-            <motion.div key={name.trim().slice(0, 1) || "empty"} initial={{ scale: 0.8, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 15 }}>
-              <ServerIcon server={{ id: name || "new", name: name || "?", iconUrl: "" }} active className="size-16 text-xl" />
-            </motion.div>
+            {inst && (
+              <PictureField
+                compact
+                id="server-icon"
+                instanceKey={inst.key}
+                kind="icon"
+                value={iconUrl}
+                onChange={setIconUrl}
+                disabled={!!blocked}
+                fallback={
+                  <motion.span key={name.trim().slice(0, 1) || "empty"} initial={{ scale: 0.8, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 15 }} className="block size-full">
+                    <ServerIcon server={{ id: name || "new", name: name || "?", iconUrl: "" }} active className="size-full text-xl" />
+                  </motion.span>
+                }
+              />
+            )}
             <div className="flex min-w-0 flex-1 flex-col gap-2">
               <Label htmlFor="server-name" className="font-bold">
                 Name

@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import type { Server, User } from "@/gen/fuwa/v1/types_pb";
 import type { Connection } from "@/fuwa/store";
 import { displayName, hueOf, initials } from "@/lib/format";
@@ -7,6 +7,16 @@ import { cn } from "@/lib/utils";
 
 /** Sets `--h` to the hue that belongs to an id, for `.server-gradient`. */
 export const hue = (id: string) => ({ "--h": hueOf(id) }) as CSSProperties;
+
+/**
+ * A picture that gives way to `fallback` when it can't load: a link that
+ * broke, or an upload replaced since and deleted.
+ */
+function Picture({ src, fallback }: { src: string; fallback: ReactNode }) {
+  const [broken, setBroken] = useState<string | null>(null);
+  if (!src || broken === src) return fallback;
+  return <img src={src} alt="" onError={() => setBroken(src)} className="size-full object-cover" draggable={false} />;
+}
 
 /** A server's picture, or its initials on a gradient of its own hue. */
 export function ServerIcon({
@@ -27,11 +37,7 @@ export function ServerIcon({
         className,
       )}
     >
-      {server.iconUrl ? (
-        <img src={server.iconUrl} alt="" className="size-full object-cover" draggable={false} />
-      ) : (
-        initials(server.name)
-      )}
+      <Picture src={server.iconUrl} fallback={initials(server.name)} />
     </span>
   );
 }
@@ -47,11 +53,7 @@ export function UserAvatar({ user, className }: { user: User | undefined; classN
         className,
       )}
     >
-      {user?.avatarUrl ? (
-        <img src={user.avatarUrl} alt="" className="size-full object-cover" draggable={false} />
-      ) : (
-        initials(name).slice(0, 1)
-      )}
+      <Picture src={user?.avatarUrl ?? ""} fallback={initials(name).slice(0, 1)} />
     </span>
   );
 }

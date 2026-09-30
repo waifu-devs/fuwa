@@ -1,6 +1,7 @@
 use tonic::{Request, Response, Status};
 
 use super::channels::load_channel;
+use super::media::PictureOwner;
 use super::messages::post_join;
 use super::{Api, can_manage, respond, text, url, users};
 use crate::db::{query_all, query_one};
@@ -83,7 +84,9 @@ impl ServerService for Api {
                     icon_url: url("icon_url", &req.icon_url)?,
                     discoverable: req.discoverable,
                 };
+                let icon = self.check_picture(&account, pb::MediaPurpose::ServerIcon, &new.icon_url).await?;
                 let server = self.app.servers.create(&account.user(), new).await?;
+                self.keep_picture(icon.as_deref(), Some(&server.id)).await;
                 tracing::info!(server = %server.id, owner = %account.id, "server created");
                 Ok(pb::CreateServerResponse { server: Some(server) })
             }
@@ -147,6 +150,12 @@ impl ServerService for Api {
                 let name = req.name.as_deref().map(|v| text("name", v, 1, 100)).transpose()?;
                 let description = req.description.as_deref().map(|v| text("description", v, 0, 1000)).transpose()?;
                 let icon_url = req.icon_url.as_deref().map(|v| url("icon_url", v)).transpose()?;
+                let old_icon = sdb.server().await?.icon_url;
+                let new_icon = match icon_url.as_deref().filter(|url| *url != old_icon) {
+                    Some(url) => self.check_picture(&account, pb::MediaPurpose::ServerIcon, url).await?,
+                    None => None,
+                };
+                self.keep_picture(new_icon.as_deref(), Some(&sdb.id)).await;
                 if let Some(level) = req.default_notifications
                     && !matches!(
                         pb::NotificationLevel::try_from(level),
@@ -202,6 +211,7 @@ impl ServerService for Api {
                     })
                     .await?;
                 self.app.servers.index_server(server.clone());
+                self.drop_picture(&old_icon, &server.icon_url, PictureOwner::Server(&server.id)).await;
                 Ok(pb::UpdateServerResponse { server: Some(server) })
             }
             .await,

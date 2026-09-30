@@ -60,7 +60,7 @@ the log filter are read only from the environment.
 | `FUWA_DATA_PATH` | `~/.fuwa` (`/data` in Docker) | Where the databases live |
 | `FUWA_HOST` | `0.0.0.0` | Address to listen on |
 | `FUWA_PORT` | `PORT`, else `8080` | Port to listen on |
-| `FUWA_PUBLIC_URL` | `http://localhost:<port>` | The URL clients reach this instance on |
+| `FUWA_PUBLIC_URL` | `http://localhost:<port>` | The URL clients reach this instance on; uploaded pictures are linked through it |
 | `FUWA_NODE_NAME` | `Fuwa` | The instance's display name |
 | `FUWA_ALLOWED_ORIGINS` | `*` | Browser origins allowed to call the API, comma-separated |
 | `FUWA_WEB` | `on` | Serve the web app at `/`; `off` leaves only the API |
@@ -73,6 +73,7 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_CHANNELS` | unlimited | Channels per server |
 | `FUWA_LIMIT_STORAGE` | unlimited | Database size per server, like `500MB` or `2GiB` |
 | `FUWA_LIMIT_ATTACHMENT_STORAGE` | unlimited | Uploaded files per server |
+| `FUWA_LIMIT_PICTURE_UPLOAD` | unlimited | Largest avatar, banner or server icon one upload may be, like `8MB` |
 | `FUWA_TELEMETRY` | `on` | The anonymous usage signal; `off` turns it off (so does `DO_NOT_TRACK=1`) |
 | `FUWA_TELEMETRY_URL` | `https://analytics.waifu.dev/v1/fuwa/signals` | Where the signal goes |
 | `FUWA_HOSTING` | `self_hosted` | `hosted` only on Waifu Devs' own instance; reported in the signal |
@@ -82,6 +83,22 @@ The `FUWA_LIMIT_*` values are instance-wide defaults. An admin can give a single
 server its own caps from that server's settings or the Servers page of the
 instance settings (or `AdminService.SetServerLimits`); a server's own caps win
 over the defaults.
+
+### Pictures
+
+Avatars, banners and server icons can be uploaded to the instance itself. The
+app crops them in the browser and saves them as small WebP files (GIFs go up as
+they are, so they keep moving). The file is checked to really be a PNG, JPEG,
+GIF, WebP or AVIF picture, then served at `<FUWA_PUBLIC_URL>/media/<id>` to
+anyone with the link, so set `FUWA_PUBLIC_URL` to the address people use before
+anyone uploads. Pictures aren't encrypted by `FUWA_ENCRYPTION_KEY`, since
+they're public at their links. A picture that gets replaced, or that nothing
+uses a day after it was uploaded, is deleted, and so are an account's pictures
+when the account is deleted.
+
+To upload one yourself, call `MediaService.CreateUpload` with the picture's type
+and size, then `PUT` the file to the `upload_url` it returns (within ten
+minutes, once) and set the returned `media.url` as the avatar, banner or icon.
 
 ### Looking after an instance
 
@@ -110,6 +127,7 @@ instance settings:
   *.db-log             recent commits not yet folded into the file beside it
   deleted/             deleted servers, parked here instead of erased
   exports/             servers being saved as SQLite files; emptied on start
+  media/               uploaded pictures, one file per picture (not encrypted)
 ```
 
 Every file runs in Turso's concurrent-writer mode (MVCC), which keeps recent

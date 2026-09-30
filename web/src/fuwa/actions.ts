@@ -1,8 +1,10 @@
 import { Effect } from "effect";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
+import { Code } from "@connectrpc/connect";
 import type { AccountFilter, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
 import type { ChannelPlacement } from "@/gen/fuwa/v1/channel_pb";
+import type { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
   ChannelType,
@@ -16,7 +18,7 @@ import {
   type ServerLimits,
 } from "@/gen/fuwa/v1/types_pb";
 import { makeApi } from "./client";
-import { call, toFuwaError, type FuwaError } from "./errors";
+import { call, FuwaError, toFuwaError } from "./errors";
 import { normalizeUrl } from "./saved";
 import { addInstance, engine, follow, removeInstance } from "./sync";
 import {
@@ -116,6 +118,48 @@ export const updateProfile = (key: string, patch: ProfilePatch) =>
       return profile && user ? { ...next, profiles: { ...next.profiles, [user.id]: profile } } : next;
     });
     return true;
+  });
+
+// ───────────────────────── Pictures ─────────────────────────
+
+/** How an upload failed, from the status of the PUT and the words the server sent back. */
+const PUT_FAILURES: Record<number, Code> = {
+  400: Code.InvalidArgument,
+  404: Code.FailedPrecondition,
+  408: Code.DeadlineExceeded,
+  413: Code.ResourceExhausted,
+  415: Code.InvalidArgument,
+};
+
+/**
+ * Uploads a picture (an avatar, a banner or a server icon) and resolves to
+ * its link, ready to set. `progress` hears how much has gone, from 0 to 1.
+ * The bytes go to the instance's own address, whatever name it gave the link.
+ */
+export const uploadPicture = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent: number) => void) =>
+  Effect.gen(function* () {
+    const { uploadUrl, media } = yield* call((signal) =>
+      api(key).media.createUpload({ purpose, contentType: file.type, size: BigInt(file.size) }, { signal }),
+    );
+    const token = uploadUrl.slice(uploadUrl.lastIndexOf("/") + 1);
+    const target = `${engine(key).url.replace(/\/+$/, "")}/media/upload/${token}`;
+    yield* Effect.async<void, FuwaError>((resume) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", target);
+      xhr.upload.onprogress = (e) => e.lengthComputable && progress?.(e.loaded / e.total);
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          progress?.(1);
+          return resume(Effect.void);
+        }
+        const message = xhr.responseText.trim() || "the upload didn't go through";
+        resume(Effect.fail(new FuwaError({ code: PUT_FAILURES[xhr.status] ?? Code.Unavailable, message })));
+      };
+      xhr.onerror = () => resume(Effect.fail(new FuwaError({ code: Code.Unavailable, message: "can't reach this server right now" })));
+      xhr.send(file);
+      return Effect.sync(() => xhr.abort());
+    });
+    return media!.url;
   });
 
 /** Someone's full profile: pronouns, bio, banner. Kept so it shows at once next time. */
@@ -334,10 +378,10 @@ const joined = (key: string, server: Server | undefined) =>
     yield* follow(key, server.id);
   });
 
-export const createServer = (key: string, name: string, description: string, discoverable: boolean) =>
+export const createServer = (key: string, name: string, description: string, discoverable: boolean, iconUrl = "") =>
   Effect.gen(function* () {
     const { server } = yield* call((signal) =>
-      api(key).servers.createServer({ name, description, discoverable }, { signal }),
+      api(key).servers.createServer({ name, description, discoverable, iconUrl }, { signal }),
     );
     yield* joined(key, server);
     return server!;
@@ -373,6 +417,8 @@ export const updateServer = (
   patch: {
     name?: string;
     description?: string;
+    /** Empty for no icon. */
+    iconUrl?: string;
     discoverable?: boolean;
     defaultNotifications?: NotificationLevel;
     /** Empty for no join messages. */

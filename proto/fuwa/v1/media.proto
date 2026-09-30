@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Pictures people upload to this instance: profile pictures, profile banners
+// and server icons.
+//
+// An upload takes two steps. CreateUpload checks the file and reserves a
+// place for it; then an HTTP PUT of the file's bytes to `upload_url` stores
+// it (no other headers needed, and browsers can follow its progress). The
+// picture is then served at `media.url` to anyone with the link. Setting that
+// URL as an avatar, banner or server icon keeps it; replacing or clearing it
+// deletes the old one. Uploads nothing uses are deleted after a day.
+service MediaService {
+  rpc CreateUpload(CreateUploadRequest) returns (CreateUploadResponse);
+}
+
+// What an upload is for. A picture can only be used for what it was uploaded
+// for, and only by the account that uploaded it.
+enum MediaPurpose {
+  MEDIA_PURPOSE_UNSPECIFIED = 0;
+  MEDIA_PURPOSE_AVATAR = 1;
+  MEDIA_PURPOSE_BANNER = 2;
+  MEDIA_PURPOSE_SERVER_ICON = 3;
+}
+
+// A stored file.
+message Media {
+  string id = 1;
+  // Where it's served. Stays the same for as long as the file exists.
+  string url = 2;
+  string content_type = 3;
+  int64 size = 4;
+}
+
+message CreateUploadRequest {
+  MediaPurpose purpose = 1;
+  // image/png, image/jpeg, image/gif, image/webp or image/avif. The bytes are
+  // checked when they arrive.
+  string content_type = 2;
+  // The file's exact size in bytes, at most the instance's
+  // `picture_upload_bytes` when that's set.
+  int64 size = 3;
+}
+
+message CreateUploadResponse {
+  // Where to PUT the file's bytes. Works once, until `expires_at`.
+  string upload_url = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  // Where the file will be once it's stored.
+  Media media = 3;
+}

@@ -7,6 +7,7 @@ import {
   EyeOffIcon,
   GlobeIcon,
   HardDriveIcon,
+  ImageIcon,
   LoaderCircleIcon,
   SearchIcon,
   ServerIcon as ServersIcon,
@@ -56,9 +57,14 @@ export function Servers({ instanceKey, onLeave }: { instanceKey: string; onLeave
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("storage");
   const [open, setOpen] = useState<string | null>(null);
+  const [pictures, setPictures] = useState({ count: 0, bytes: 0 });
 
   useEffect(() => {
     run(listInstanceServers(instanceKey)).then(setServers, (e: FuwaError) => setError(e.message));
+    run(nodeUsage(instanceKey)).then(
+      (u) => setPictures({ count: Number(u.pictures), bytes: Number(u.pictureBytes) }),
+      () => {},
+    );
   }, [instanceKey]);
 
   const shown = useMemo(() => {
@@ -79,14 +85,15 @@ export function Servers({ instanceKey, onLeave }: { instanceKey: string; onLeave
     { label: "Servers", value: servers?.length ?? 0, icon: ServersIcon },
     { label: "Memberships", value: (servers ?? []).reduce((n, s) => n + membersOf(s), 0), icon: UsersIcon },
     { label: "Storage", value: (servers ?? []).reduce((n, s) => n + storageOf(s), 0), icon: HardDriveIcon, bytes: true },
+    { label: "Pictures", value: pictures.bytes, icon: ImageIcon, bytes: true, sub: `${pictures.count.toLocaleString()} avatars, banners and icons` },
   ];
 
   if (error) return <p className="text-sm text-muted-foreground first-letter:uppercase">{error}</p>;
   if (!servers) {
     return (
       <div className="flex flex-col gap-3">
-        <div className="grid grid-cols-3 gap-2">
-          {[0, 1, 2].map((n) => (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {[0, 1, 2, 3].map((n) => (
             <div key={n} className="shimmer h-20 rounded-2xl" />
           ))}
         </div>
@@ -99,13 +106,14 @@ export function Servers({ instanceKey, onLeave }: { instanceKey: string; onLeave
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {totals.map((t, n) => (
           <motion.div
             key={t.label}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ ...SPRING, delay: n * 0.05 }}
+            title={t.sub}
             className="rounded-2xl border bg-background/50 p-3"
           >
             <p className="flex items-center gap-1.5 text-[0.65rem] font-bold tracking-wide text-muted-foreground uppercase">

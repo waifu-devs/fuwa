@@ -5,9 +5,10 @@ import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode
 import { loadProfile, run, updateProfile, type ProfilePatch } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
-import { hue } from "@/components/Icons";
+import { hue, UserAvatar } from "@/components/Icons";
 import { Markdown } from "@/components/Markdown";
 import { Count, SPRING } from "@/components/motion";
+import { PictureField } from "@/components/PictureField";
 import { Private } from "@/components/Private";
 import { ProfileCard } from "@/components/ProfileCard";
 import { Chips, Row, Segmented, Warn } from "@/components/settings/account/common";
@@ -177,6 +178,35 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
               className="h-11 max-w-xs rounded-xl"
             />
           </Row>
+          <Row id="avatar" label="Avatar" hint={isUrl(draft.avatarUrl) ? "Drop a picture on it or pick one. GIFs keep moving. Without one you get your initial on your own color." : <Warn>Links start with https://</Warn>}>
+            <PictureField
+              id="profile-avatar"
+              instanceKey={instanceKey}
+              kind="avatar"
+              value={draft.avatarUrl}
+              onChange={(avatarUrl) => set({ avatarUrl })}
+              fallback={<UserAvatar user={{ ...me, avatarUrl: "" }} className="size-full text-3xl" />}
+            />
+          </Row>
+          <Row id="banner" label="Banner" hint={isUrl(draft.bannerUrl) ? "A wide picture for the top of your card. Without one it's your profile color." : <Warn>Links start with https://</Warn>}>
+            <PictureField
+              id="profile-banner"
+              instanceKey={instanceKey}
+              kind="banner"
+              value={draft.bannerUrl}
+              disabled={!ready}
+              onChange={(bannerUrl) => set({ bannerUrl })}
+              fallback={
+                <span
+                  style={draft.accent < 0 ? hue(me.id) : { backgroundColor: colorCss(draft.accent) }}
+                  className={cn("block size-full transition-colors duration-500", draft.accent < 0 && "server-gradient")}
+                />
+              }
+            />
+          </Row>
+          <Row id="profile-color" label="Profile color" hint="Colors your card's banner when there's no picture.">
+            <ColorPicker value={draft.accent} userId={me.id} disabled={!ready} onChange={(accent) => set({ accent })} />
+          </Row>
           <Row id="status" label="Custom status" htmlFor="profile-status" hint="Under your name in member lists, on every server here.">
             <div className="relative">
               <Input
@@ -272,15 +302,6 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
               )}
             </AnimatePresence>
           </Row>
-          <Row id="avatar" label="Avatar" htmlFor="profile-avatar" hint={isUrl(draft.avatarUrl) ? "A link to a picture. Without one you get your initial on your own color." : <Warn>Links start with https://</Warn>}>
-            <UrlField id="profile-avatar" value={draft.avatarUrl} onChange={(avatarUrl) => set({ avatarUrl })} round />
-          </Row>
-          <Row id="banner" label="Banner" htmlFor="profile-banner" hint={isUrl(draft.bannerUrl) ? "A link to a wide picture for the top of your card. Without one it's your profile color." : <Warn>Links start with https://</Warn>}>
-            <UrlField id="profile-banner" value={draft.bannerUrl} disabled={!ready} onChange={(bannerUrl) => set({ bannerUrl })} />
-          </Row>
-          <Row id="profile-color" label="Profile color" hint="Colors your card's banner when there's no picture.">
-            <ColorPicker value={draft.accent} userId={me.id} disabled={!ready} onChange={(accent) => set({ accent })} />
-          </Row>
           <Row id="username" label="Username" hint="Set when the account was made.">
             <p className="text-sm font-bold">
               @<Private text={me.username} kind="name" />
@@ -299,65 +320,6 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
         />
       </WithPreview>
     </form>
-  );
-}
-
-/** Small choices as chips; the chosen one fills in. */
-/** A link to a picture, with the picture beside it once it loads. */
-function UrlField({ id, value, onChange, round = false, disabled }: { id: string; value: string; onChange: (value: string) => void; round?: boolean; disabled?: boolean }) {
-  const [broken, setBroken] = useState(false);
-  const url = value.trim();
-  const shows = !!url && isUrl(url) && !broken;
-  useEffect(() => setBroken(false), [url]);
-  return (
-    <div className="flex items-center gap-3">
-      <div className="relative min-w-0 flex-1">
-        <Input
-          id={id}
-          type="url"
-          inputMode="url"
-          placeholder="https://…"
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-          aria-invalid={!isUrl(value) || undefined}
-          className="h-11 rounded-xl pr-11"
-        />
-        <AnimatePresence>
-          {value && (
-            <motion.button
-              type="button"
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0, opacity: 0 }}
-              transition={SPRING}
-              onClick={() => onChange("")}
-              aria-label="Remove picture"
-              className="absolute top-1/2 right-1.5 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              <XIcon className="size-4" />
-            </motion.button>
-          )}
-        </AnimatePresence>
-      </div>
-      <div className={cn("relative shrink-0 overflow-hidden border bg-muted", round ? "size-11 rounded-full" : "h-11 w-20 rounded-xl")}>
-        <AnimatePresence>
-          {shows && (
-            <motion.img
-              key={url}
-              src={url}
-              alt=""
-              onError={() => setBroken(true)}
-              initial={{ opacity: 0, scale: 1.2 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-              className="absolute inset-0 size-full object-cover"
-            />
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
   );
 }
 
