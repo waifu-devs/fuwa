@@ -187,7 +187,11 @@ impl Api {
                 self.app.servers.index_leave(&account.id, &sdb.id);
             }
         }
+        let uploads = self.app.node.account_media(&account.id).await?;
         self.app.node.delete_account(&account.id).await?;
+        if let Err(err) = self.app.delete_media(&uploads).await {
+            tracing::warn!(account = %account.id, error = %err, "couldn't delete a deleted account's pictures");
+        }
         tracing::info!(account = %account.id, "account deleted");
         Ok(())
     }

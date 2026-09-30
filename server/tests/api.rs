@@ -70,6 +70,7 @@ struct Clients {
     events: pb::event_service_client::EventServiceClient<Channel>,
     admin: pb::admin_service_client::AdminServiceClient<Channel>,
     node: pb::node_service_client::NodeServiceClient<Channel>,
+    media: pb::media_service_client::MediaServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -82,7 +83,8 @@ async fn clients(instance: &Instance) -> Clients {
         messages: pb::message_service_client::MessageServiceClient::new(channel.clone()),
         events: pb::event_service_client::EventServiceClient::new(channel.clone()),
         admin: pb::admin_service_client::AdminServiceClient::new(channel.clone()),
-        node: pb::node_service_client::NodeServiceClient::new(channel),
+        node: pb::node_service_client::NodeServiceClient::new(channel.clone()),
+        media: pb::media_service_client::MediaServiceClient::new(channel),
     }
 }
 
@@ -2427,5 +2429,252 @@ async fn instance_admins_manage_accounts_servers_and_announcements() {
     assert_eq!(node_announcement(&mut c).await.unwrap().text, "Stays up");
     let down = announce(&mut c, &juan, pb::Announcement::default()).await.unwrap();
     assert!(down.is_none() && node_announcement(&mut c).await.is_none());
+    instance.stop().await;
+}
+
+/// A file that starts like a PNG, `size` bytes long.
+fn png(size: usize, fill: u8) -> Vec<u8> {
+    let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+    bytes.resize(size, fill);
+    bytes
+}
+
+/// The same address on the test instance: links are made with the public
+/// URL, which the test doesn't know before the port is picked.
+fn on(instance: &Instance, url: &str) -> String {
+    let url = reqwest::Url::parse(url).unwrap();
+    format!("http://{}{}", instance.addr, url.path())
+}
+
+async fn create_upload(
+    c: &mut Clients,
+    token: &str,
+    purpose: pb::MediaPurpose,
+    content_type: &str,
+    size: usize,
+) -> Result<pb::CreateUploadResponse, tonic::Status> {
+    c.media
+        .create_upload(authed(
+            token,
+            pb::CreateUploadRequest { purpose: purpose as i32, content_type: content_type.into(), size: size as i64 },
+        ))
+        .await
+        .map(|r| r.into_inner())
+}
+
+async fn put(instance: &Instance, upload_url: &str, bytes: Vec<u8>) -> reqwest::StatusCode {
+    reqwest::Client::new().put(on(instance, upload_url)).body(bytes).send().await.unwrap().status()
+}
+
+async fn upload(
+    c: &mut Clients,
+    instance: &Instance,
+    token: &str,
+    purpose: pb::MediaPurpose,
+    bytes: Vec<u8>,
+) -> String {
+    let reserved = create_upload(c, token, purpose, "image/png", bytes.len()).await.unwrap();
+    assert_eq!(put(instance, &reserved.upload_url, bytes).await, reqwest::StatusCode::NO_CONTENT);
+    reserved.media.unwrap().url
+}
+
+async fn fetch(instance: &Instance, url: &str) -> (reqwest::StatusCode, reqwest::header::HeaderMap, Vec<u8>) {
+    let response = reqwest::get(on(instance, url)).await.unwrap();
+    let (status, headers) = (response.status(), response.headers().clone());
+    (status, headers, response.bytes().await.unwrap().to_vec())
+}
+
+#[tokio::test]
+async fn pictures_upload_serve_and_clean_up() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance =
+        start(dir.path(), &[("FUWA_LIMIT_PICTURE_UPLOAD", "4KB"), ("FUWA_PUBLIC_URL", "https://chat.example.com")])
+            .await;
+    let mut c = clients(&instance).await;
+    let (juan, juan_user, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let avatar = pb::MediaPurpose::Avatar;
+
+    // What an upload may be is checked up front.
+    let not_an_upload = create_upload(&mut c, &juan, pb::MediaPurpose::Unspecified, "image/png", 10).await;
+    assert_eq!(not_an_upload.unwrap_err().code(), Code::InvalidArgument);
+    let svg = create_upload(&mut c, &juan, avatar, "image/svg+xml", 10).await;
+    assert_eq!(svg.unwrap_err().code(), Code::InvalidArgument);
+    let too_big = create_upload(&mut c, &juan, avatar, "image/png", 4001).await.unwrap_err();
+    assert_eq!(too_big.code(), Code::ResourceExhausted);
+    assert!(too_big.message().contains("4 KB"), "{}", too_big.message());
+    let anonymous = c
+        .media
+        .create_upload(pb::CreateUploadRequest { purpose: avatar as i32, content_type: "image/png".into(), size: 10 })
+        .await;
+    assert_eq!(anonymous.unwrap_err().code(), Code::Unauthenticated);
+
+    // An upload: reserve, PUT the bytes, then it's served at its link.
+    let reserved = create_upload(&mut c, &juan, avatar, "image/png", 300).await.unwrap();
+    assert!(reserved.upload_url.starts_with("https://chat.example.com/media/upload/"));
+    let media = reserved.media.clone().unwrap();
+    assert_eq!(media.url, format!("https://chat.example.com/media/{}", media.id));
+    let (status, _, _) = fetch(&instance, &media.url).await;
+    assert_eq!(status, reqwest::StatusCode::NOT_FOUND, "not served before its bytes arrive");
+    assert_eq!(put(&instance, &reserved.upload_url, png(300, 1)).await, reqwest::StatusCode::NO_CONTENT);
+    let (status, headers, body) = fetch(&instance, &media.url).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(body, png(300, 1));
+    assert_eq!(headers["content-type"], "image/png");
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    assert_eq!(headers["cross-origin-resource-policy"], "cross-origin");
+    assert!(headers["cache-control"].to_str().unwrap().contains("immutable"));
+    let cached = reqwest::Client::new()
+        .get(on(&instance, &media.url))
+        .header("if-none-match", headers["etag"].clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cached.status(), reqwest::StatusCode::NOT_MODIFIED);
+    let first_avatar = media.url;
+
+    // Browsers on other sites (any fuwa client) may send the bytes.
+    let preflight = reqwest::Client::new()
+        .request(reqwest::Method::OPTIONS, on(&instance, &reserved.upload_url))
+        .header("origin", "https://app.example")
+        .header("access-control-request-method", "PUT")
+        .header("access-control-request-headers", "content-type")
+        .send()
+        .await
+        .unwrap();
+    assert!(preflight.headers()["access-control-allow-methods"].to_str().unwrap().contains("PUT"));
+
+    // A link works once, and the bytes must be the picture they said they were.
+    assert_eq!(put(&instance, &reserved.upload_url, png(300, 1)).await, reqwest::StatusCode::NOT_FOUND);
+    let lie = create_upload(&mut c, &juan, avatar, "image/png", 64).await.unwrap();
+    let mut script = b"<svg xmlns='http://www.w3.org/2000/svg'><script>".to_vec();
+    script.resize(64, b' ');
+    assert_eq!(put(&instance, &lie.upload_url, script).await, reqwest::StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(fetch(&instance, &lie.media.unwrap().url).await.0, reqwest::StatusCode::NOT_FOUND);
+    let long = create_upload(&mut c, &juan, avatar, "image/png", 64).await.unwrap();
+    assert_eq!(put(&instance, &long.upload_url, png(65, 0)).await, reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+    let short = create_upload(&mut c, &juan, avatar, "image/png", 64).await.unwrap();
+    assert_eq!(put(&instance, &short.upload_url, png(63, 0)).await, reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(put(&instance, &short.upload_url, png(64, 0)).await, reqwest::StatusCode::NOT_FOUND);
+
+    // Setting it as your avatar keeps it. Only its uploader can use it, and
+    // only for what it was uploaded for.
+    let set_avatar = |url: &str| pb::UpdateProfileRequest { avatar_url: Some(url.into()), ..Default::default() };
+    let set_banner = |url: &str| pb::UpdateProfileRequest { banner_url: Some(url.into()), ..Default::default() };
+    c.auth.update_profile(authed(&juan, set_avatar(&first_avatar))).await.unwrap();
+    assert_eq!(me(&mut c, &juan).await.unwrap().avatar_url, first_avatar);
+    let stolen = c.auth.update_profile(authed(&mika, set_avatar(&first_avatar))).await;
+    assert_eq!(stolen.unwrap_err().code(), Code::PermissionDenied);
+    let wrong_use = c.auth.update_profile(authed(&juan, set_banner(&first_avatar))).await;
+    assert_eq!(wrong_use.unwrap_err().code(), Code::PermissionDenied);
+    let unfinished = create_upload(&mut c, &juan, avatar, "image/png", 10).await.unwrap().media.unwrap();
+    let early = c.auth.update_profile(authed(&juan, set_avatar(&unfinished.url))).await;
+    assert_eq!(early.unwrap_err().code(), Code::FailedPrecondition);
+    // Links elsewhere still work as before.
+    c.auth.update_profile(authed(&mika, set_avatar("https://example.com/mika.png"))).await.unwrap();
+
+    // A new avatar replaces the old one, which is deleted.
+    let second_avatar = upload(&mut c, &instance, &juan, avatar, png(200, 2)).await;
+    c.auth.update_profile(authed(&juan, set_avatar(&second_avatar))).await.unwrap();
+    assert_eq!(fetch(&instance, &first_avatar).await.0, reqwest::StatusCode::NOT_FOUND);
+    let first_id = first_avatar.rsplit('/').next().unwrap();
+    assert!(!dir.path().join("media").join(first_id).exists());
+    assert_eq!(fetch(&instance, &second_avatar).await.2, png(200, 2));
+    let banner = upload(&mut c, &instance, &juan, pb::MediaPurpose::Banner, png(500, 3)).await;
+    c.auth.update_profile(authed(&juan, set_banner(&banner))).await.unwrap();
+    let profile = c.auth.get_profile(authed(&juan, pb::GetProfileRequest { user_id: juan_user.id.clone() })).await;
+    assert_eq!(profile.unwrap().into_inner().profile.unwrap().banner_url, banner);
+
+    // Server icons: set when the server is made, replaced later.
+    let icon = upload(&mut c, &instance, &juan, pb::MediaPurpose::ServerIcon, png(100, 4)).await;
+    let server = c
+        .servers
+        .create_server(authed(
+            &juan,
+            pb::CreateServerRequest { name: "Pictures".into(), icon_url: icon.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert_eq!(server.icon_url, icon);
+    let avatar_as_icon = c
+        .servers
+        .update_server(authed(
+            &juan,
+            pb::UpdateServerRequest {
+                server_id: server.id.clone(),
+                icon_url: Some(second_avatar.clone()),
+                ..Default::default()
+            },
+        ))
+        .await;
+    assert_eq!(avatar_as_icon.unwrap_err().code(), Code::PermissionDenied);
+    let new_icon = upload(&mut c, &instance, &juan, pb::MediaPurpose::ServerIcon, png(120, 5)).await;
+    let updated = c
+        .servers
+        .update_server(authed(
+            &juan,
+            pb::UpdateServerRequest {
+                server_id: server.id.clone(),
+                icon_url: Some(new_icon.clone()),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert_eq!(updated.icon_url, new_icon);
+    assert_eq!(fetch(&instance, &icon).await.0, reqwest::StatusCode::NOT_FOUND);
+
+    // Admins see how much pictures take.
+    let usage = c.admin.get_node_usage(authed(ADMIN_TOKEN, pb::GetNodeUsageRequest {})).await.unwrap().into_inner();
+    assert_eq!((usage.pictures, usage.picture_bytes), (3, 200 + 500 + 120));
+
+    // An account can't hold many unfinished uploads at once.
+    for _ in 0..fuwa_server::media::MAX_PENDING_UPLOADS {
+        create_upload(&mut c, &mika, avatar, "image/png", 10).await.unwrap();
+    }
+    let crowded = create_upload(&mut c, &mika, avatar, "image/png", 10).await;
+    assert_eq!(crowded.unwrap_err().code(), Code::ResourceExhausted);
+
+    // Uploads nothing uses are swept: unsent ones when their link runs out,
+    // stored ones after a day.
+    let unused = upload(&mut c, &instance, &juan, pb::MediaPurpose::Banner, png(50, 6)).await;
+    let now = fuwa_server::id::now_ms();
+    instance.app.sweep_media(now).await.unwrap();
+    assert_eq!(fetch(&instance, &unused).await.0, reqwest::StatusCode::OK, "a fresh upload waits to be used");
+    let swept = instance.app.sweep_media(now + fuwa_server::media::UPLOAD_TTL_MS + 1).await.unwrap();
+    assert_eq!(swept, 11, "mika's unsent uploads and juan's unfinished one");
+    assert!(create_upload(&mut c, &mika, avatar, "image/png", 10).await.is_ok());
+    instance.app.sweep_media(now + fuwa_server::media::UNUSED_TTL_MS + 1).await.unwrap();
+    assert_eq!(fetch(&instance, &unused).await.0, reqwest::StatusCode::NOT_FOUND);
+    for used in [&second_avatar, &banner, &new_icon] {
+        assert_eq!(fetch(&instance, used).await.0, reqwest::StatusCode::OK, "{used} is in use");
+    }
+
+    // Deleting an account deletes its pictures, but not the icons of servers.
+    let (rin, _, _) = sign_up(&mut c, "rin").await;
+    let rin_avatar = upload(&mut c, &instance, &rin, avatar, png(90, 7)).await;
+    c.auth.update_profile(authed(&rin, set_avatar(&rin_avatar))).await.unwrap();
+    c.account
+        .delete_account(authed(
+            &rin,
+            pb::DeleteAccountRequest { password: "correct horse battery".into(), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(fetch(&instance, &rin_avatar).await.0, reqwest::StatusCode::NOT_FOUND);
+
+    // A file no row points to (a crash between the two) is cleared on start.
+    let stray = fuwa_server::media::new_id();
+    std::fs::write(dir.path().join("media").join(&stray), b"left behind").unwrap();
+    instance.stop().await;
+    let instance = start(dir.path(), &[("FUWA_PUBLIC_URL", "https://chat.example.com")]).await;
+    assert!(!dir.path().join("media").join(&stray).exists());
+    assert_eq!(fetch(&instance, &second_avatar).await.2, png(200, 2));
     instance.stop().await;
 }

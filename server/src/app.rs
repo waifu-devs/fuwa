@@ -20,8 +20,9 @@ use crate::pb;
 use crate::pb::{
     account_service_server::AccountServiceServer, admin_service_server::AdminServiceServer,
     auth_service_server::AuthServiceServer, channel_service_server::ChannelServiceServer,
-    event_service_server::EventServiceServer, message_service_server::MessageServiceServer,
-    node_service_server::NodeServiceServer, server_service_server::ServerServiceServer,
+    event_service_server::EventServiceServer, media_service_server::MediaServiceServer,
+    message_service_server::MessageServiceServer, node_service_server::NodeServiceServer,
+    server_service_server::ServerServiceServer,
 };
 use crate::servers::Servers;
 use crate::settings::Settings;
@@ -33,6 +34,8 @@ pub struct App {
     /// The banner admins put up, as last set; see [`App::announcement`].
     announcement: RwLock<Option<pb::Announcement>>,
     pub node: NodeDb,
+    /// Uploaded pictures, under `<data>/media/`.
+    pub media: crate::media::Store,
     pub servers: Servers,
     pub hub: Arc<Hub>,
     pub limiter: SignInLimiter,
@@ -54,17 +57,41 @@ impl App {
         let announcement = node.announcement().await?;
         // Exports are written here and streamed; one left by a crash is stale.
         let _ = std::fs::remove_dir_all(config.data_path.join("exports"));
-        Ok(Arc::new(Self {
+        let media = crate::media::Store::open(&config.data_path)?;
+        media.remove_strays(&node.media_ids().await?)?;
+        let app = Arc::new(Self {
             config,
             settings: RwLock::new(Arc::new(settings)),
             announcement: RwLock::new(announcement),
             node,
+            media,
             servers,
             hub,
             limiter: SignInLimiter::default(),
             started: Instant::now(),
             shutdown: CancellationToken::new(),
-        }))
+        });
+        app.sweep_media(crate::id::now_ms()).await?;
+        Ok(app)
+    }
+
+    /// Deletes uploads that never arrived and pictures nothing used, as of `now`.
+    pub async fn sweep_media(&self, now: i64) -> Result<usize> {
+        let ids = self.node.sweepable_media(now).await?;
+        self.delete_media(&ids).await?;
+        Ok(ids.len())
+    }
+
+    /// Deletes uploaded files and their rows.
+    pub async fn delete_media(&self, ids: &[String]) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.node.delete_media(ids).await?;
+        for id in ids {
+            self.media.remove(id);
+        }
+        Ok(())
     }
 
     /// The settings in force right now.
@@ -122,6 +149,7 @@ impl App {
             .add_service(ChannelServiceServer::new(api.clone()))
             .add_service(MessageServiceServer::new(api.clone()))
             .add_service(EventServiceServer::new(api.clone()))
+            .add_service(MediaServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
             .add_service(reflection)
@@ -130,6 +158,7 @@ impl App {
             .layer(tonic_web::GrpcWebLayer::new());
 
         grpc.route("/healthz", get(|| async { "ok" }))
+            .merge(crate::media::routes(self.clone()))
             // The web app (when it's on) answers every other GET, so its own addresses work on reload.
             .fallback(crate::web::handler(self.clone()))
             .layer(self.cors())
@@ -145,7 +174,7 @@ impl App {
             |names: &[&'static str]| names.iter().map(|name| HeaderName::from_static(name)).collect::<Vec<_>>();
         CorsLayer::new()
             .allow_origin(allow_origin)
-            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+            .allow_methods([Method::GET, Method::POST, Method::PUT, Method::OPTIONS])
             .allow_headers(headers(&[
                 "authorization",
                 "content-type",
@@ -185,7 +214,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     );
 
     crate::telemetry::spawn(app.clone());
-    spawn_session_pruning(app.clone());
+    spawn_housekeeping(app.clone());
 
     let shutdown = app.shutdown.clone();
     tokio::spawn(async move {
@@ -201,7 +230,8 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         .map_err(|err| format!("server error: {err}"))
 }
 
-fn spawn_session_pruning(app: Arc<App>) {
+/// Hourly: drops expired sessions and sweeps uploads nothing uses.
+fn spawn_housekeeping(app: Arc<App>) {
     tokio::spawn(async move {
         let mut every = tokio::time::interval(Duration::from_secs(60 * 60));
         loop {
@@ -210,6 +240,9 @@ fn spawn_session_pruning(app: Arc<App>) {
                 _ = every.tick() => {
                     if let Err(err) = app.node.prune_sessions().await {
                         tracing::warn!(error = %err, "couldn't prune expired sessions");
+                    }
+                    if let Err(err) = app.sweep_media(crate::id::now_ms()).await {
+                        tracing::warn!(error = %err, "couldn't sweep unused uploads");
                     }
                 }
             }

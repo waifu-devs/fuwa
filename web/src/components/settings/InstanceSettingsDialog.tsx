@@ -50,6 +50,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "default_limits.channels", get: (s) => s.defaultLimits?.channels },
   { path: "default_limits.storage_bytes", get: (s) => s.defaultLimits?.storageBytes },
   { path: "default_limits.attachment_bytes", get: (s) => s.defaultLimits?.attachmentBytes },
+  { path: "picture_upload_bytes", get: (s) => s.pictureUploadBytes },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
 ];
@@ -175,7 +176,10 @@ export function InstanceSettingsDialog({
               label: "Limits",
               icon: GaugeIcon,
               description: "Caps every server starts with.",
-              settings: [{ id: "default-limits", label: "Default caps for every server", keywords: "members channels storage attachments" }],
+              settings: [
+                { id: "default-limits", label: "Default caps for every server", keywords: "members channels storage attachments" },
+                { id: "picture-uploads", label: "Largest picture upload", keywords: "avatar banner icon image size" },
+              ],
             },
             {
               id: "privacy",
@@ -256,7 +260,7 @@ export function InstanceSettingsDialog({
               <Setting
                 id="public-url"
                 title="Public address"
-                hint="The URL people use to reach this instance."
+                hint="The URL people use to reach this instance. Uploaded pictures are linked through it, so set it before people upload."
                 defaultLabel={privateField ? HIDDEN_ADDRESS : defaults.publicUrl}
                 delay={0.04}
                 {...resetter("public_url")}
@@ -368,6 +372,16 @@ export function InstanceSettingsDialog({
                   <Cap label="Files" bytes value={draft.defaultLimits?.attachmentBytes} onChange={(v) => patch((d) => (d.defaultLimits!.attachmentBytes = v))} />
                 </div>
               </Setting>
+              <Setting
+                id="picture-uploads"
+                title="Largest picture upload"
+                hint="Avatars, banners and server icons. The app crops pictures and saves them small, so only GIFs, which go up as they are, get near a few megabytes."
+                defaultLabel={size(defaults.pictureUploadBytes)}
+                delay={0.04}
+                {...resetter("picture_upload_bytes")}
+              >
+                <Cap label="Up to" bytes value={draft.pictureUploadBytes} onChange={(v) => patch((d) => (d.pictureUploadBytes = v))} />
+              </Setting>
             </>
           )}
           {tab === "privacy" && (
@@ -450,6 +464,9 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "web":
         into.web = from.web;
+        break;
+      case "picture_upload_bytes":
+        into.pictureUploadBytes = from.pictureUploadBytes;
         break;
       default: {
         const key = path.replace("default_limits.", "") as "members" | "channels" | "storage_bytes" | "attachment_bytes";

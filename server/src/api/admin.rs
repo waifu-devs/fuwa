@@ -161,11 +161,14 @@ impl AdminService for Api {
                     server_usage.push(sdb.usage().await?);
                 }
                 let defaults = &self.app.settings().limits;
+                let (pictures, picture_bytes) = self.app.node.picture_totals().await?;
                 Ok(pb::GetNodeUsageResponse {
                     accounts: self.app.node.account_counts().await?.total,
                     servers: server_usage.len() as i64,
                     server_usage,
                     default_limits: Some(effective_limits(pb::ServerLimits::default(), defaults)),
+                    pictures,
+                    picture_bytes,
                 })
             }
             .await,

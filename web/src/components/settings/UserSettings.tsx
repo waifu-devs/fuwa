@@ -148,11 +148,11 @@ export function UserSettings() {
           settings: [
             { id: "display-name", label: "Display name" },
             { id: "pronouns", label: "Pronouns" },
+            { id: "avatar", label: "Avatar", keywords: "picture photo upload image gif" },
+            { id: "banner", label: "Banner", keywords: "header picture upload image" },
+            { id: "profile-color", label: "Profile color", keywords: "accent" },
             { id: "status", label: "Custom status", keywords: "away busy" },
             { id: "about-me", label: "About me", keywords: "bio description" },
-            { id: "avatar", label: "Avatar", keywords: "picture photo" },
-            { id: "banner", label: "Banner", keywords: "header picture" },
-            { id: "profile-color", label: "Profile color", keywords: "accent" },
           ],
         },
         {

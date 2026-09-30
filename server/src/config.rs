@@ -82,6 +82,9 @@ pub struct Limits {
     pub storage_bytes: Option<i64>,
     /// FUWA_LIMIT_ATTACHMENT_STORAGE: uploaded files per server, e.g. `10GB`.
     pub attachment_bytes: Option<i64>,
+    /// FUWA_LIMIT_PICTURE_UPLOAD: the largest avatar, banner or server icon one
+    /// upload may be, e.g. `8MiB`.
+    pub picture_upload_bytes: Option<i64>,
 }
 
 impl Limits {
@@ -91,6 +94,7 @@ impl Limits {
             || self.channels.is_some()
             || self.storage_bytes.is_some()
             || self.attachment_bytes.is_some()
+            || self.picture_upload_bytes.is_some()
     }
 }
 
@@ -194,6 +198,7 @@ impl Config {
             channels: count("FUWA_LIMIT_CHANNELS")?,
             storage_bytes: bytes("FUWA_LIMIT_STORAGE")?,
             attachment_bytes: bytes("FUWA_LIMIT_ATTACHMENT_STORAGE")?,
+            picture_upload_bytes: bytes("FUWA_LIMIT_PICTURE_UPLOAD")?,
         };
 
         let do_not_track = get("DO_NOT_TRACK").is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"));
@@ -300,11 +305,13 @@ mod tests {
             ("FUWA_LIMIT_MEMBERS", "100"),
             ("FUWA_LIMIT_STORAGE", "500MB"),
             ("FUWA_LIMIT_ATTACHMENT_STORAGE", "2GiB"),
+            ("FUWA_LIMIT_PICTURE_UPLOAD", "8MiB"),
         ])
         .unwrap();
         assert_eq!(config.limits.members, Some(100));
         assert_eq!(config.limits.storage_bytes, Some(500_000_000));
         assert_eq!(config.limits.attachment_bytes, Some(2 * 1024 * 1024 * 1024));
+        assert_eq!(config.limits.picture_upload_bytes, Some(8 * 1024 * 1024));
         assert!(config.limits.any());
     }
 

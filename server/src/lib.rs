@@ -12,6 +12,7 @@ pub mod db;
 pub mod error;
 pub mod hub;
 pub mod id;
+pub mod media;
 pub mod node;
 pub mod servers;
 pub mod settings;
