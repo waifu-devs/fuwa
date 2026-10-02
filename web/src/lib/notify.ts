@@ -1,8 +1,8 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { LeaveReason, MessageKind, type Event } from "@/gen/fuwa/v1/types_pb";
 import { store, type InstanceState } from "@/fuwa/store";
-import { displayName, memberName, mentions } from "@/lib/format";
-import { effectiveNotifications, mentionsEveryone, shouldAlert } from "@/lib/notifications";
+import { displayName, memberName } from "@/lib/format";
+import { effectiveNotifications, pingsMe, shouldAlert } from "@/lib/notifications";
 import { getPrefs, subscribePrefs } from "@/lib/prefs";
 import { play } from "@/lib/sounds";
 import { toast } from "@/lib/ui";
@@ -47,9 +47,7 @@ export function onLiveEvent(key: string, event: Event) {
     if (!message || message.authorId === me.id || message.kind !== MessageKind.UNSPECIFIED) return;
     const looking = !document.hidden && s.focus?.instance === key && s.focus.channel === message.channelId;
     const settings = effectiveNotifications(inst, event.serverId, message.channelId);
-    const mention =
-      mentions(message.content, me.username) ||
-      (!settings.suppressEveryone && mentionsEveryone(inst, event.serverId, message.authorId, message.content));
+    const mention = pingsMe(inst, event.serverId, message, settings.suppressEveryone);
     const alert = shouldAlert(settings, mention, getPrefs());
     if (alert.sound && !looking) playSome(mention ? "mention" : "message", mention ? 600 : 1500);
     if (!alert.notify || (!document.hidden && document.hasFocus())) return;

@@ -1,16 +1,16 @@
 use tonic::{Request, Response, Status};
 
-use super::channels::load_channel;
 use super::media::PictureOwner;
 use super::messages::post_join;
-use super::{Api, can_manage, respond, text, url, users};
+use super::{Api, Seat, respond, text, url, users};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{millis, now_ms, timestamp};
-use crate::pb::{self, server_service_server::ServerService};
+use crate::pb::{self, Permission, server_service_server::ServerService};
+use crate::permissions::{self, Access};
 use crate::servers::{
     self as store, Audit, MEMBER_COLUMNS, NewServer, Payload, USER_COLUMNS, UsageChange, audit_changes,
-    effective_limits, member_row,
+    effective_limits, load_channel, member_row,
 };
 
 /// The longest time-out, as Discord has it: 28 days.
@@ -18,15 +18,20 @@ const MAX_TIME_OUT_SECONDS: i64 = 28 * 24 * 60 * 60;
 /// How far back a ban can take someone's messages with them: seven days.
 const MAX_DELETE_MESSAGE_SECONDS: i64 = 7 * 24 * 60 * 60;
 
-/// Checks `me` can moderate `target`: an owner or admin, ranked above them.
-fn outranks(me: &pb::Member, target: &pb::Member) -> Result<()> {
-    if target.user.as_ref().is_some_and(|u| Some(u) == me.user.as_ref()) {
+/// Checks someone can act on another member: someone else, ranked below them.
+fn outranks(my_id: &str, me: &Access, target_id: &str, target: &Access) -> Result<()> {
+    if my_id == target_id {
         return Err(Error::invalid("you can't do that to yourself"));
     }
-    if !can_manage(me) || me.role <= target.role {
+    if !me.outranks(target) {
         return Err(Error::denied("you can only moderate people ranked below you"));
     }
     Ok(())
+}
+
+/// A member and what they can do, inside a write.
+async fn target(conn: &turso::Connection, server_id: &str, user_id: &str) -> Result<(pb::Member, Access)> {
+    store::member_access(conn, server_id, user_id).await?.ok_or(Error::NotFound("member"))
 }
 
 /// A reason kept in the audit log.
@@ -42,14 +47,14 @@ fn audit_time(t: Option<&prost_types::Timestamp>) -> String {
 /// Takes a member out of the server, inside a write, for leaving, kicks and bans.
 async fn remove_member(
     conn: &turso::Connection,
+    server_id: &str,
     user_id: &str,
     reason: pb::LeaveReason,
     events: &mut Vec<Payload>,
 ) -> Result<bool> {
-    if conn.execute("DELETE FROM members WHERE user_id = ?1", [user_id]).await? == 0 {
+    if !store::remove_member(conn, server_id, user_id, events).await? {
         return Ok(false);
     }
-    conn.execute("UPDATE usage SET members = members - 1, updated_at = ?1 WHERE id = 1", [now_ms()]).await?;
     events.push(Payload::MemberLeft(pb::MemberLeft { user_id: user_id.to_string(), reason: reason as i32 }));
     Ok(true)
 }
@@ -149,7 +154,7 @@ impl ServerService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, _) = self.manager(&account, &req.server_id).await?;
+                let sdb = self.with(&account, &req.server_id, Permission::ManageServer).await?.sdb;
                 let name = req.name.as_deref().map(|v| text("name", v, 1, 100)).transpose()?;
                 let description = req.description.as_deref().map(|v| text("description", v, 0, 1000)).transpose()?;
                 let icon_url = req.icon_url.as_deref().map(|v| url("icon_url", v)).transpose()?;
@@ -280,7 +285,7 @@ impl ServerService for Api {
                             return Err(Error::ResourceExhausted(format!("this server is full ({limit} members)")));
                         }
                         let now = now_ms();
-                        let member = store::add_member(conn, &user, pb::MemberRole::Member, &sdb.id, now).await?;
+                        let member = store::add_member(conn, &user, &sdb.id, now).await?;
                         events.push(Payload::MemberJoined(pb::MemberJoined { member: Some(member.clone()) }));
                         post_join(conn, &store::load_server(conn).await?, &user.id, now, events).await?;
                         Ok(member)
@@ -300,13 +305,14 @@ impl ServerService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let (sdb, member) = self.membership(&account, &request.get_ref().server_id).await?;
-                if member.role == pb::MemberRole::Owner as i32 {
+                let seat = self.membership(&account, &request.get_ref().server_id).await?;
+                if seat.access.owner {
                     return Err(Error::FailedPrecondition("the owner can't leave; delete the server instead".into()));
                 }
+                let sdb = seat.sdb;
                 sdb.write(&account.id, async |conn, events| {
                     // Leaving twice at once: the second finds nothing to take away.
-                    if !remove_member(conn, &account.id, pb::LeaveReason::Left, events).await? {
+                    if !remove_member(conn, &sdb.id, &account.id, pb::LeaveReason::Left, events).await? {
                         return Err(Error::NotFound("membership"));
                     }
                     Ok(())
@@ -327,18 +333,24 @@ impl ServerService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let (sdb, _) = self.membership(&account, &request.get_ref().server_id).await?;
+                let sdb = self.membership(&account, &request.get_ref().server_id).await?.sdb;
                 let conn = sdb.read()?;
-                let members = query_all(
+                let mut members = query_all(
                     &conn,
                     &format!(
                         "SELECT {MEMBER_COLUMNS} FROM members JOIN users ON users.id = members.user_id
-                     ORDER BY members.role DESC, users.display_name"
+                         ORDER BY users.display_name, users.id"
                     ),
                     (),
                     member_row(&sdb.id),
                 )
                 .await?;
+                permissions::attach_roles(&conn, &mut members).await?;
+                let rules = permissions::load(&conn, &sdb.id).await?;
+                members.sort_by_cached_key(|m| {
+                    let id = m.user.as_ref().map(|u| u.id.as_str()).unwrap_or_default();
+                    std::cmp::Reverse(rules.access(id, &m.role_ids).rank)
+                });
                 Ok(pb::ListMembersResponse { members })
             }
             .await,
@@ -353,38 +365,35 @@ impl ServerService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, me) = self.membership(&account, &req.server_id).await?;
+                let Seat { sdb, access: me, .. } = self.membership(&account, &req.server_id).await?;
                 let target_id = if req.user_id.is_empty() { account.id.clone() } else { req.user_id.clone() };
                 let nickname = req.nickname.as_deref().map(|v| text("nickname", v, 0, 32)).transpose()?;
-                if let Some(role) = req.role {
-                    if me.role != pb::MemberRole::Owner as i32 {
-                        return Err(Error::denied("only the server's owner can change roles"));
-                    }
-                    if target_id == account.id {
-                        return Err(Error::invalid("hand the server to someone else to stop being its owner"));
-                    }
-                    if !matches!(pb::MemberRole::try_from(role), Ok(pb::MemberRole::Member | pb::MemberRole::Admin)) {
-                        return Err(Error::invalid("members can be made admins or members; ownership moves on its own"));
-                    }
+                if nickname.is_some() {
+                    me.require(if target_id == account.id {
+                        Permission::ChangeNickname
+                    } else {
+                        Permission::ManageNicknames
+                    })?;
                 }
                 let member = sdb
                     .write(&account.id, async |conn, events| {
-                        let target =
-                            store::member(conn, &sdb.id, &target_id).await?.ok_or(Error::NotFound("member"))?;
-                        if target_id != account.id && !(can_manage(&me) && me.role > target.role) {
+                        let (target, theirs) = target(conn, &sdb.id, &target_id).await?;
+                        if target_id != account.id && !me.outranks(&theirs) {
                             return Err(Error::denied("you can only change people ranked below you"));
                         }
                         conn.execute(
-                            "UPDATE members SET nickname = coalesce(?2, nickname), role = coalesce(?3, role) WHERE user_id = ?1",
-                            (target_id.as_str(), nickname.as_deref(), req.role),
+                            "UPDATE members SET nickname = coalesce(?2, nickname) WHERE user_id = ?1",
+                            (target_id.as_str(), nickname.as_deref()),
                         )
                         .await?;
                         let member =
                             store::member(conn, &sdb.id, &target_id).await?.ok_or(Error::NotFound("member"))?;
                         if target_id != account.id {
-                            let entry = Audit::new(pb::AuditAction::MemberUpdate, &target_id)
-                                .change("nickname", &target.nickname, &member.nickname)
-                                .change("role", target.role, member.role);
+                            let entry = Audit::new(pb::AuditAction::MemberUpdate, &target_id).change(
+                                "nickname",
+                                &target.nickname,
+                                &member.nickname,
+                            );
                             if !entry.changes.is_empty() {
                                 store::audit(conn, &account.id, entry).await?;
                             }
@@ -410,11 +419,7 @@ impl ServerService for Api {
                 let sdb = if viewer.is_instance_admin() {
                     self.app.servers.get(server_id).await?
                 } else {
-                    let (sdb, member) = self.membership(viewer.account()?, server_id).await?;
-                    if !can_manage(&member) {
-                        return Err(Error::denied("only the server's owner and admins can see its usage"));
-                    }
-                    sdb
+                    self.with(viewer.account()?, server_id, Permission::ManageServer).await?.sdb
                 };
                 let own = sdb.own_limits().await?;
                 Ok(pb::GetServerUsageResponse {
@@ -435,16 +440,16 @@ impl ServerService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, me) = self.manager(&account, &req.server_id).await?;
+                let Seat { sdb, access: me, .. } =
+                    self.with(&account, &req.server_id, Permission::TimeOutMembers).await?;
                 if !(0..=MAX_TIME_OUT_SECONDS).contains(&req.seconds) {
                     return Err(Error::invalid("a time-out can last up to 28 days"));
                 }
                 let reason = reason(&req.reason)?;
                 let member = sdb
                     .write(&account.id, async |conn, events| {
-                        let target =
-                            store::member(conn, &sdb.id, &req.user_id).await?.ok_or(Error::NotFound("member"))?;
-                        outranks(&me, &target)?;
+                        let (target, theirs) = target(conn, &sdb.id, &req.user_id).await?;
+                        outranks(&account.id, &me, &req.user_id, &theirs)?;
                         let until = (req.seconds > 0).then(|| now_ms() + req.seconds * 1000);
                         conn.execute(
                             "UPDATE members SET timed_out_until = ?2 WHERE user_id = ?1",
@@ -477,12 +482,12 @@ impl ServerService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, me) = self.manager(&account, &req.server_id).await?;
+                let Seat { sdb, access: me, .. } = self.with(&account, &req.server_id, Permission::KickMembers).await?;
                 let reason = reason(&req.reason)?;
                 sdb.write(&account.id, async |conn, events| {
-                    let target = store::member(conn, &sdb.id, &req.user_id).await?.ok_or(Error::NotFound("member"))?;
-                    outranks(&me, &target)?;
-                    remove_member(conn, &req.user_id, pb::LeaveReason::Kicked, events).await?;
+                    let (_, theirs) = target(conn, &sdb.id, &req.user_id).await?;
+                    outranks(&account.id, &me, &req.user_id, &theirs)?;
+                    remove_member(conn, &sdb.id, &req.user_id, pb::LeaveReason::Kicked, events).await?;
                     store::audit(
                         conn,
                         &account.id,
@@ -509,18 +514,19 @@ impl ServerService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, me) = self.manager(&account, &req.server_id).await?;
+                let Seat { sdb, access: me, .. } = self.with(&account, &req.server_id, Permission::BanMembers).await?;
                 if !(0..=MAX_DELETE_MESSAGE_SECONDS).contains(&req.delete_message_seconds) {
                     return Err(Error::invalid("a ban can take up to seven days of messages with it"));
                 }
                 let reason = reason(&req.reason)?;
                 let ban = async |conn: &turso::Connection, events: &mut Vec<Payload>| {
                     let user = store::user(conn, &req.user_id).await?.ok_or(Error::NotFound("member"))?;
-                    let target = store::member(conn, &sdb.id, &req.user_id).await?;
-                    if let Some(target) = &target {
-                        outranks(&me, target)?;
-                    } else if req.user_id == account.id {
-                        return Err(Error::invalid("you can't do that to yourself"));
+                    match store::member_access(conn, &sdb.id, &req.user_id).await? {
+                        Some((_, theirs)) => outranks(&account.id, &me, &req.user_id, &theirs)?,
+                        None if req.user_id == account.id => {
+                            return Err(Error::invalid("you can't do that to yourself"));
+                        }
+                        None => {}
                     }
                     let now = now_ms();
                     match conn
@@ -536,7 +542,7 @@ impl ServerService for Api {
                         }
                         other => other?,
                     };
-                    let was_member = remove_member(conn, &req.user_id, pb::LeaveReason::Banned, events).await?;
+                    let was_member = remove_member(conn, &sdb.id, &req.user_id, pb::LeaveReason::Banned, events).await?;
                     let mut deleted = 0;
                     if req.delete_message_seconds > 0 {
                         let messages = query_all(
@@ -596,7 +602,7 @@ impl ServerService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, _) = self.manager(&account, &req.server_id).await?;
+                let sdb = self.with(&account, &req.server_id, Permission::BanMembers).await?.sdb;
                 sdb.write(&account.id, async |conn, _| {
                     if conn.execute("DELETE FROM bans WHERE user_id = ?1", [req.user_id.as_str()]).await? == 0 {
                         return Err(Error::NotFound("ban"));
@@ -614,7 +620,7 @@ impl ServerService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let (sdb, _) = self.manager(&account, &request.get_ref().server_id).await?;
+                let sdb = self.with(&account, &request.get_ref().server_id, Permission::BanMembers).await?.sdb;
                 let conn = sdb.read()?;
                 let bans = query_all(
                     &conn,
@@ -649,12 +655,12 @@ impl ServerService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, _) = self.manager(&account, &req.server_id).await?;
+                let sdb = self.with(&account, &req.server_id, Permission::ViewAuditLog).await?.sdb;
                 let conn = sdb.read()?;
                 let limit = if req.limit <= 0 { 50 } else { req.limit.min(100) } as i64;
                 let rows = query_all(
                     &conn,
-                    "SELECT id, actor_id, action, target_id, channel_name, reason, changes, created_at FROM audit
+                    "SELECT id, actor_id, action, target_id, channel_name, reason, changes, created_at, role_name FROM audit
                      WHERE (?1 = '' OR id < ?1) AND (?2 = '' OR actor_id = ?2) AND (?3 = 0 OR action = ?3)
                      ORDER BY id DESC LIMIT ?4",
                     (req.before_id.as_str(), req.actor_id.as_str(), req.action as i64, limit + 1),
@@ -669,6 +675,7 @@ impl ServerService for Api {
                                 reason: r.get(5)?,
                                 changes: vec![],
                                 created_at: Some(timestamp(r.get(7)?)),
+                                role_name: r.get(8)?,
                             },
                             r.get::<Option<Vec<u8>>>(6)?,
                         ))
@@ -700,10 +707,11 @@ impl ServerService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, me) = self.membership(&account, &req.server_id).await?;
-                if me.role != pb::MemberRole::Owner as i32 {
+                let seat = self.membership(&account, &req.server_id).await?;
+                if !seat.access.owner {
                     return Err(Error::denied("only the server's owner can hand it on"));
                 }
+                let sdb = seat.sdb;
                 if req.user_id == account.id {
                     return Err(Error::invalid("you already own it"));
                 }
@@ -723,16 +731,6 @@ impl ServerService for Api {
                             (req.user_id.as_str(), now, account.id.as_str()),
                         )
                         .await?;
-                        conn.execute(
-                            "UPDATE members SET role = ?2 WHERE user_id = ?1",
-                            (req.user_id.as_str(), pb::MemberRole::Owner as i64),
-                        )
-                        .await?;
-                        conn.execute(
-                            "UPDATE members SET role = ?2 WHERE user_id = ?1",
-                            (account.id.as_str(), pb::MemberRole::Admin as i64),
-                        )
-                        .await?;
                         let entry = Audit::new(pb::AuditAction::OwnershipTransfer, &req.user_id).change(
                             "owner_id",
                             &account.id,
@@ -741,10 +739,6 @@ impl ServerService for Api {
                         store::audit(conn, &account.id, entry).await?;
                         let server = store::load_server(conn).await?;
                         events.push(Payload::ServerUpdated(pb::ServerUpdated { server: Some(server.clone()) }));
-                        for id in [&req.user_id, &account.id] {
-                            let member = store::member(conn, &sdb.id, id).await?;
-                            events.push(Payload::MemberUpdated(pb::MemberUpdated { member }));
-                        }
                         Ok(server)
                     })
                     .await?;

@@ -25,7 +25,6 @@ use crate::config::Config;
 use crate::cpb::{self, shard_service_server::ShardService};
 use crate::db::query_one;
 use crate::error::{Error, Result};
-use crate::id::now_ms;
 use crate::pb;
 use crate::servers::{self as store, NewServer, Payload, Servers};
 use crate::settings::Settings;
@@ -251,10 +250,8 @@ pub async fn forget_account(servers: &Servers, account_id: &str, placeholder: &p
         }
         let left = sdb
             .write(account_id, async |conn, events| {
-                let left = conn.execute("DELETE FROM members WHERE user_id = ?1", [account_id]).await? > 0;
+                let left = store::remove_member(conn, &sdb.id, account_id, events).await?;
                 if left {
-                    conn.execute("UPDATE usage SET members = members - 1, updated_at = ?1 WHERE id = 1", [now_ms()])
-                        .await?;
                     events.push(Payload::MemberLeft(pb::MemberLeft {
                         user_id: account_id.to_string(),
                         reason: pb::LeaveReason::Left as i32,

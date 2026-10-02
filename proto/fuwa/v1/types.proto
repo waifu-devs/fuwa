@@ -119,22 +119,101 @@ message Profile {
   google.protobuf.Timestamp created_at = 6;
 }
 
-enum MemberRole {
-  MEMBER_ROLE_UNSPECIFIED = 0;
-  MEMBER_ROLE_MEMBER = 1;
-  MEMBER_ROLE_ADMIN = 2;
-  MEMBER_ROLE_OWNER = 3;
-}
-
 message Member {
   string server_id = 1;
   User user = 2;
   string nickname = 3;
-  MemberRole role = 4;
+  reserved 4;
+  reserved "role";
   google.protobuf.Timestamp joined_at = 5;
   // Timed out: can read but not send or edit messages until then. Unset, or
   // in the past, when they aren't.
   google.protobuf.Timestamp timed_out_until = 6;
+  // The roles they have, besides @everyone, which every member has.
+  repeated string role_ids = 7;
+}
+
+// ============================================================================
+// Roles and permissions
+// ============================================================================
+
+// What a role lets its members do. The server's owner can do everything;
+// everyone else can do what their roles allow, as each channel's
+// permission overwrites change it.
+enum Permission {
+  PERMISSION_UNSPECIFIED = 0;
+
+  // Server-wide only.
+
+  // Every permission in every channel, whatever the channel says. Still
+  // only over roles and people ranked below.
+  PERMISSION_ADMINISTRATOR = 1;
+  // The server's name, icon, description, system messages and usage.
+  PERMISSION_MANAGE_SERVER = 2;
+  // Roles ranked below their own: create, edit, hand out. In a channel, its
+  // permission overwrites.
+  PERMISSION_MANAGE_ROLES = 3;
+  PERMISSION_VIEW_AUDIT_LOG = 4;
+  PERMISSION_CHANGE_NICKNAME = 5;
+  // Other people's nicknames.
+  PERMISSION_MANAGE_NICKNAMES = 6;
+  PERMISSION_KICK_MEMBERS = 7;
+  PERMISSION_BAN_MEMBERS = 8;
+  PERMISSION_TIME_OUT_MEMBERS = 9;
+
+  // Server-wide, and per channel through overwrites.
+
+  // Create, edit, move and delete channels. Also skips slow mode.
+  PERMISSION_MANAGE_CHANNELS = 10;
+  // See a channel and read its messages.
+  PERMISSION_VIEW_CHANNELS = 11;
+  PERMISSION_SEND_MESSAGES = 12;
+  PERMISSION_EMBED_LINKS = 13;
+  PERMISSION_ATTACH_FILES = 14;
+  // Ping everyone with @everyone or @here, and every role, mentionable or not.
+  PERMISSION_MENTION_EVERYONE = 15;
+  // Delete other people's messages. Also skips slow mode.
+  PERMISSION_MANAGE_MESSAGES = 16;
+}
+
+// A named set of permissions handed to members. Every server has @everyone,
+// whose id is the server's id: every member has it, it sits at position 0,
+// and only its permissions can change.
+message Role {
+  string id = 1;
+  string server_id = 2;
+  string name = 3;
+  // 0xRRGGBB. Unset for none: names keep their usual color.
+  optional int32 color = 4;
+  // Rank: higher is above. A member ranks as their highest role, and acts
+  // only on roles and people ranked below them.
+  int32 position = 5;
+  repeated Permission permissions = 6;
+  // Its members are listed under it in the member list.
+  bool hoist = 7;
+  // Anyone can @mention it. People who can mention everyone can mention any role.
+  bool mentionable = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+enum OverwriteTarget {
+  OVERWRITE_TARGET_UNSPECIFIED = 0;
+  // A role; @everyone's id is the server's.
+  OVERWRITE_TARGET_ROLE = 1;
+  OVERWRITE_TARGET_MEMBER = 2;
+}
+
+// How one channel changes a role's or member's permissions. A channel in a
+// category takes the category's overwrites first, then its own. Within each,
+// @everyone's apply first, then every role's the member has, then the
+// member's own; a deny takes a permission away and an allow gives it back.
+message PermissionOverwrite {
+  // A role id, or a member's user id.
+  string target_id = 1;
+  OverwriteTarget target = 2;
+  repeated Permission allow = 3;
+  repeated Permission deny = 4;
 }
 
 // ============================================================================
@@ -180,9 +259,10 @@ message Channel {
   int32 position = 7;
   google.protobuf.Timestamp created_at = 8;
   google.protobuf.Timestamp updated_at = 9;
-  // Slow mode: how long each member waits between messages here. Owners and
-  // admins don't wait. Zero for off.
+  // Slow mode: how long each member waits between messages here. People who
+  // can manage messages or channels here don't wait. Zero for off.
   int32 slowmode_seconds = 10;
+  repeated PermissionOverwrite permission_overwrites = 11;
 }
 
 enum MessageKind {
@@ -205,6 +285,12 @@ message Message {
   // Unset until the message is edited.
   google.protobuf.Timestamp edited_at = 10;
   MessageKind kind = 11;
+  // It pings everyone: it says @everyone or @here and its author could
+  // mention everyone in its channel.
+  bool mentions_everyone = 12;
+  // The roles it pings: written as <@&role id>, and mentionable or written
+  // by someone who can mention everyone.
+  repeated string mention_role_ids = 13;
 }
 
 message Attachment {
@@ -301,7 +387,9 @@ message Event {
   string id = 1;
   string server_id = 2;
   // Position in the server's log. Strictly increasing within a server.
-  // Zero for events that aren't stored, like the server being deleted.
+  // Zero for events that aren't stored, like the server being deleted, or a
+  // channel appearing (ChannelCreated) or going (ChannelDeleted) for one
+  // member as their permissions change.
   int64 sequence = 3;
   string actor_id = 4;
   google.protobuf.Timestamp created_at = 5;
@@ -319,6 +407,9 @@ message Event {
     MemberUpdated member_updated = 19;
     MemberLeft member_left = 20;
     UserUpdated user_updated = 21;
+    RoleCreated role_created = 22;
+    RoleUpdated role_updated = 23;
+    RoleDeleted role_deleted = 24;
   }
 }
 
@@ -380,4 +471,18 @@ message MemberLeft {
 // is deleted. Current members change through MemberUpdated instead.
 message UserUpdated {
   User user = 1;
+}
+
+message RoleCreated {
+  Role role = 1;
+}
+
+message RoleUpdated {
+  Role role = 1;
+}
+
+// Members who had it and channel overwrites that named it lose it too,
+// without events of their own.
+message RoleDeleted {
+  string role_id = 1;
 }

@@ -9,9 +9,13 @@ import {
   HashIcon,
   HourglassIcon,
   LoaderCircleIcon,
+  LockIcon,
   MessageSquareXIcon,
   ScrollTextIcon,
   SettingsIcon,
+  ShieldIcon,
+  ShieldPlusIcon,
+  ShieldXIcon,
   Trash2Icon,
   UndoIcon,
   UserCogIcon,
@@ -20,10 +24,10 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AuditAction, type AuditChange, type AuditEntry } from "@/gen/fuwa/v1/server_pb";
-import { ChannelType, MemberRole, NotificationLevel, type Channel, type User } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, NotificationLevel, type Channel, type Permission, type Role, type User } from "@/gen/fuwa/v1/types_pb";
 import { listAuditLog, run, type AuditFilter } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
-import { useInstance } from "@/fuwa/hooks";
+import { useInstance, useRoles } from "@/fuwa/hooks";
 import { UserAvatar } from "@/components/Icons";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
@@ -35,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { displayName, formatDuration, formatStamp, toDate } from "@/lib/format";
+import { cssColor, permissionLabel } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 type Kind = { label: string; icon: LucideIcon; tint: string };
@@ -46,7 +51,13 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.CHANNEL_UPDATE]: { label: "Channel changes", icon: HashIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.CHANNEL_DELETE]: { label: "Deleted channels", icon: Trash2Icon, tint: "bg-destructive/15 text-destructive" },
   [AuditAction.CHANNELS_REORDER]: { label: "Channel order", icon: ArrowDownUpIcon, tint: "bg-sky-500/15 text-sky-500" },
-  [AuditAction.MEMBER_UPDATE]: { label: "Roles and nicknames", icon: UserCogIcon, tint: "bg-violet-500/15 text-violet-500" },
+  [AuditAction.CHANNEL_PERMISSIONS_UPDATE]: { label: "Channel permissions", icon: LockIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.ROLE_CREATE]: { label: "New roles", icon: ShieldPlusIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.ROLE_UPDATE]: { label: "Role changes", icon: ShieldIcon, tint: "bg-violet-500/15 text-violet-500" },
+  [AuditAction.ROLE_DELETE]: { label: "Deleted roles", icon: ShieldXIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.ROLES_REORDER]: { label: "Role order", icon: ArrowDownUpIcon, tint: "bg-violet-500/15 text-violet-500" },
+  [AuditAction.MEMBER_ROLES_UPDATE]: { label: "Roles given and taken", icon: UserCogIcon, tint: "bg-violet-500/15 text-violet-500" },
+  [AuditAction.MEMBER_UPDATE]: { label: "Nicknames", icon: UserCogIcon, tint: "bg-violet-500/15 text-violet-500" },
   [AuditAction.MEMBER_TIME_OUT]: { label: "Time-outs", icon: HourglassIcon, tint: "bg-amber-500/15 text-amber-500" },
   [AuditAction.MEMBER_KICK]: { label: "Kicks", icon: DoorOpenIcon, tint: "bg-orange-500/15 text-orange-500" },
   [AuditAction.MEMBER_BAN]: { label: "Bans", icon: GavelIcon, tint: "bg-destructive/15 text-destructive" },
@@ -70,14 +81,20 @@ const FIELD: Record<string, string> = {
   role: "Role",
   timed_out_until: "Timed out until",
   owner_id: "Owner",
+  color: "Color",
+  permissions: "Permissions",
+  hoist: "Shown apart",
+  mentionable: "Anyone can mention it",
 };
 
-const ROLE: Record<string, string> = { [MemberRole.MEMBER]: "Member", [MemberRole.ADMIN]: "Admin", [MemberRole.OWNER]: "Owner" };
+/** Ranks from before roles, as entries from back then keep them. */
+const OLD_RANK: Record<string, string> = { "1": "Member", "2": "Admin", "3": "Owner" };
 
-/** Everything owners and admins did, newest first, with who and what to filter by. */
+/** Everything people did with their permissions, newest first, with who and what to filter by. */
 export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
   const inst = useInstance(instanceKey);
   const channels = inst?.channels[serverId];
+  const roles = useRoles(instanceKey, serverId);
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [users, setUsers] = useState<Record<string, User>>({});
   const [more, setMore] = useState(false);
@@ -108,13 +125,14 @@ export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serve
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceKey, serverId, actor, action]);
 
-  // The people who can show up as actors: the server's owner and admins, and anyone already seen doing something.
+  // The people who can show up as actors: the server's owner, anyone with a role, and anyone already seen doing something.
+  const ownerId = inst?.servers.find((s) => s.id === serverId)?.ownerId;
   const actors = useMemo(() => {
-    const managers = (inst?.members[serverId] ?? []).filter((m) => m.role >= MemberRole.ADMIN).map((m) => m.user!);
+    const managers = (inst?.members[serverId] ?? []).filter((m) => m.roleIds.length || m.user?.id === ownerId).map((m) => m.user!);
     const seen = new Map(managers.map((u) => [u.id, u]));
     for (const e of entries ?? []) if (users[e.actorId]) seen.set(e.actorId, users[e.actorId]!);
     return [...seen.values()];
-  }, [inst?.members, serverId, entries, users]);
+  }, [inst?.members, serverId, entries, users, ownerId]);
 
   const actorLabel = actor ? displayName(users[actor] ?? actors.find((u) => u.id === actor)) : "Anyone";
 
@@ -163,6 +181,7 @@ export function AuditLog({ instanceKey, serverId }: { instanceKey: string; serve
                 index={n}
                 users={users}
                 channels={channels ?? []}
+                roles={roles}
                 open={open === entry.id}
                 onToggle={() => setOpen(open === entry.id ? null : entry.id)}
               />
@@ -210,6 +229,7 @@ function Entry({
   index,
   users,
   channels,
+  roles,
   open,
   onToggle,
 }: {
@@ -217,6 +237,7 @@ function Entry({
   index: number;
   users: Record<string, User>;
   channels: Channel[];
+  roles: Role[];
   open: boolean;
   onToggle: () => void;
 }) {
@@ -239,7 +260,7 @@ function Entry({
           <UserAvatar user={actor} className="absolute -right-1.5 -bottom-1.5 size-5 ring-2 ring-background" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm break-words">{sentence(entry, users, channels)}</span>
+          <span className="block text-sm break-words">{sentence(entry, users, channels, roles)}</span>
           <span className="block text-xs text-muted-foreground" title={formatStamp(at)}>
             {formatStamp(at)}
           </span>
@@ -293,7 +314,16 @@ function Entry({
 /** A value from the log, in words. */
 function value(field: string, raw: string, users: Record<string, User>, channels: Channel[], entry: AuditEntry): string {
   if (field === "discoverable") return raw === "true" ? "Yes" : "No";
-  if (field === "role") return ROLE[raw] ?? raw;
+  if (field === "role") return OLD_RANK[raw] ?? (raw ? entry.roleName : "None");
+  if (field === "hoist" || field === "mentionable") return raw === "true" ? "Yes" : "No";
+  if (field === "color") return raw || "None";
+  if (field === "permissions") {
+    const names = raw
+      .split(",")
+      .filter(Boolean)
+      .map((n) => permissionLabel(Number(n) as Permission));
+    return names.length ? names.join(", ") : "None";
+  }
   if (field === "default_notifications")
     return Number(raw) === NotificationLevel.MENTIONS ? "Only @mentions" : Number(raw) === NotificationLevel.ALL ? "All messages" : "Each person's own";
   if (field === "system_channel_id" || field === "parent_id") {
@@ -311,12 +341,18 @@ function value(field: string, raw: string, users: Record<string, User>, channels
   return raw || "Nothing";
 }
 
-function sentence(entry: AuditEntry, users: Record<string, User>, channels: Channel[]): ReactNode {
+function sentence(entry: AuditEntry, users: Record<string, User>, channels: Channel[], roles: Role[]): ReactNode {
   const actor = <b>{displayName(users[entry.actorId])}</b>;
+  const change = (field: string) => entry.changes.find((c: AuditChange) => c.field === field);
+  // Roles go by their name now, like channels, and the one they had once they're gone.
+  const given = change("role");
+  const roleId = entry.action === AuditAction.MEMBER_ROLES_UPDATE ? given?.after || given?.before : entry.targetId;
+  const current = roles.find((r) => r.id === roleId);
+  const tint = current?.color !== undefined ? { color: cssColor(current.color) } : undefined;
+  const role = <b style={tint}>{current?.name ?? (entry.roleName || "a role")}</b>;
   const target = <b>{displayName(users[entry.targetId])}</b>;
   const known = channels.find((c) => c.id === entry.targetId);
   const channel = <b>{known ? (known.type === ChannelType.CATEGORY ? known.name : `#${known.name}`) : `#${entry.channelName}`}</b>;
-  const change = (field: string) => entry.changes.find((c: AuditChange) => c.field === field);
   switch (entry.action) {
     case AuditAction.SERVER_UPDATE:
       return <>{actor} changed the server's settings</>;
@@ -333,11 +369,40 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
     case AuditAction.CHANNELS_REORDER:
       return <>{actor} rearranged the channels</>;
     case AuditAction.MEMBER_UPDATE: {
-      const role = change("role");
-      if (role && entry.changes.length === 1)
-        return Number(role.after) === MemberRole.ADMIN ? <>{actor} made {target} an admin</> : <>{actor} made {target} a member again</>;
+      const rank = change("role");
+      if (rank && entry.changes.length === 1)
+        return rank.after === "2" ? <>{actor} made {target} an admin</> : <>{actor} made {target} a member again</>;
       return <>{actor} changed {target}'s nickname</>;
     }
+    case AuditAction.MEMBER_ROLES_UPDATE:
+      return given?.after ? (
+        <>
+          {actor} gave {target} {role}
+        </>
+      ) : (
+        <>
+          {actor} took {role} from {target}
+        </>
+      );
+    case AuditAction.ROLE_CREATE:
+      return <>{actor} created the role {role}</>;
+    case AuditAction.ROLE_UPDATE: {
+      const renamed = change("name");
+      if (renamed && entry.changes.length === 1)
+        return (
+          <>
+            {actor} renamed <b style={tint}>{renamed.before}</b> to <b style={tint}>{renamed.after}</b>
+          </>
+        );
+      if (change("permissions") && entry.changes.length === 1) return <>{actor} changed what {role} can do</>;
+      return <>{actor} changed {role}</>;
+    }
+    case AuditAction.ROLE_DELETE:
+      return <>{actor} deleted the role {role}</>;
+    case AuditAction.ROLES_REORDER:
+      return <>{actor} rearranged the roles</>;
+    case AuditAction.CHANNEL_PERMISSIONS_UPDATE:
+      return <>{actor} changed who can do what in {channel}</>;
     case AuditAction.MEMBER_TIME_OUT: {
       const until = change("timed_out_until");
       if (!until?.after) return <>{actor} ended {target}'s time-out</>;

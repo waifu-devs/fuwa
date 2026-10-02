@@ -1,11 +1,14 @@
-import { HourglassIcon, SendHorizontalIcon, SnailIcon } from "lucide-react";
+import { HourglassIcon, LockIcon, SendHorizontalIcon, SnailIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { MemberRole, MessageKind, type Channel } from "@/gen/fuwa/v1/types_pb";
+import { MessageKind, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { run, sendMessage } from "@/fuwa/actions";
+import { useAccess } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
+import { MentionPicker, useMentionPicker } from "@/components/chat/MentionPicker";
 import { SPRING } from "@/components/motion";
 import { formatDuration, formatLeft, timedOutUntil, toDate } from "@/lib/format";
+import { hasIn } from "@/lib/permissions";
 import { comboLabel, isMac } from "@/lib/keybinds";
 import { usePrefs, type SendWith } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
@@ -22,8 +25,9 @@ export function sendsMessage(e: KeyboardEvent<HTMLTextAreaElement>, sendWith: Se
 
 /**
  * What keeps you from sending here right now: a time-out, or the wait slow
- * mode puts between your messages. Owners and admins skip slow mode, as on
- * the server. Ticks only while something is counting down.
+ * mode puts between your messages. People who manage messages or channels
+ * here skip slow mode, as on the server. Ticks only while something is
+ * counting down.
  */
 function useSendGate(instanceKey: string, serverId: string, channel: Channel) {
   const member = useFuwa((s) => {
@@ -46,9 +50,10 @@ function useSendGate(instanceKey: string, serverId: string, channel: Channel) {
     for (const p of i?.pending[channel.id] ?? []) if (!p.failed) last = Math.max(last, p.createdAt);
     return last;
   });
+  const access = useAccess(instanceKey, serverId);
   const [, tick] = useState(0);
   const now = Date.now();
-  const exempt = (member?.role ?? MemberRole.MEMBER) >= MemberRole.ADMIN;
+  const exempt = hasIn(access, channel.id, Permission.MANAGE_MESSAGES) || hasIn(access, channel.id, Permission.MANAGE_CHANNELS);
   const slowmode = exempt ? 0 : channel.slowmodeSeconds;
   const until = timedOutUntil(member, now)?.getTime() ?? 0;
   const ready = slowmode && lastSent ? lastSent + slowmode * 1000 : 0;
@@ -60,6 +65,8 @@ function useSendGate(instanceKey: string, serverId: string, channel: Channel) {
   }, [counting]);
   return {
     now,
+    /** Synced and allowed to write here. */
+    canSend: !member || hasIn(access, channel.id, Permission.SEND_MESSAGES),
     slowmode,
     /** Slow mode is on here, but it doesn't hold you back. */
     exempt: exempt && channel.slowmodeSeconds > 0,
@@ -96,6 +103,7 @@ export function Composer({
   const gate = useSendGate(instanceKey, serverId, channel);
   const cooling = gate.cooldownUntil > 0;
   const timedOut = gate.timedOutUntil > 0;
+  const picker = useMentionPicker(instanceKey, serverId, channel, box, text, setText);
 
   useEffect(() => {
     setText(drafts.get(channelId) ?? "");
@@ -131,13 +139,14 @@ export function Composer({
       rotate: [0, -20, 0, 0],
       transition: { duration: 0.55, times: [0, 0.45, 0.5, 1], ease: "easeOut" },
     });
-    run(sendMessage(instanceKey, serverId, channelId, content)).catch(() => {
+    run(sendMessage(instanceKey, serverId, channelId, picker.encode(content))).catch(() => {
       // The message stays in the list, marked as failed, with a retry.
     });
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing) return;
+    if (picker.onKeyDown(e)) return;
     if (sendsMessage(e, sendWith)) {
       e.preventDefault();
       send();
@@ -154,6 +163,8 @@ export function Composer({
       <AnimatePresence mode="popLayout" initial={false}>
         {timedOut ? (
           <TimedOut key="timed-out" left={gate.timedOutUntil - gate.now} />
+        ) : !gate.canSend ? (
+          <ReadOnly key="read-only" name={channel.name} />
         ) : (
           <motion.div
             key="composer"
@@ -162,13 +173,15 @@ export function Composer({
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
             transition={SPRING}
           >
-      <motion.div animate={nudge} className="composer flex items-end gap-2 rounded-2xl border bg-card px-3 py-2">
+      <motion.div animate={nudge} className="composer relative flex items-end gap-2 rounded-2xl border bg-card px-3 py-2">
+        <MentionPicker picker={picker} />
         <textarea
           ref={box}
           data-composer
           rows={1}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onSelect={picker.onSelect}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           aria-label={placeholder}
@@ -228,14 +241,14 @@ export function Composer({
           <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
         </p>
         <AnimatePresence initial={false}>
-          {(gate.slowmode > 0 || gate.exempt) && !timedOut && (
+          {(gate.slowmode > 0 || gate.exempt) && !timedOut && gate.canSend && (
             <motion.p
               initial={{ opacity: 0, x: 8 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 8 }}
               transition={SPRING}
               className={cn("ml-auto flex shrink-0 items-center gap-1 font-bold tabular-nums", cooling && "text-amber-600 dark:text-amber-400")}
-              title={gate.exempt ? "Owners and admins aren't held to slow mode" : undefined}
+              title={gate.exempt ? "You can manage messages here, so slow mode doesn't hold you back" : undefined}
             >
               <SnailIcon className={cn("size-3.5", cooling && "animate-[crawl_1.6s_ease-in-out_infinite]")} />
               {gate.exempt
@@ -292,6 +305,33 @@ function Cooldown({ left, total }: { left: number; total: number }) {
         </motion.span>
       </AnimatePresence>
     </motion.span>
+  );
+}
+
+/** In place of the box where your roles don't let you write. */
+function ReadOnly({ name }: { name: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.98 }}
+      transition={SPRING}
+      role="status"
+      className="flex items-center gap-3 rounded-2xl border border-dashed bg-muted/40 px-3 py-2.5"
+    >
+      <motion.span
+        initial={{ rotate: -20, scale: 0.6 }}
+        animate={{ rotate: [0, -10, 8, 0], scale: 1 }}
+        transition={{ ...SPRING, rotate: { duration: 0.6, delay: 0.1 } }}
+        className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"
+      >
+        <LockIcon className="size-[18px]" />
+      </motion.span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-bold">You can't send messages in #{name}</p>
+        <p className="text-xs text-muted-foreground">Your roles let you read along here, not write.</p>
+      </div>
+    </motion.div>
   );
 }
 

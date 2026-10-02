@@ -1,18 +1,20 @@
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
-use super::channels::load_channel;
-use super::{Api, can_manage, respond, url, users};
+use super::{Api, Seat, respond, url, users};
 use crate::db::{is_unique_violation, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
-use crate::pb::{self, message_service_server::MessageService};
-use crate::servers::{self as store, Audit, Payload, UsageChange};
+use crate::pb::{self, Permission, message_service_server::MessageService};
+use crate::permissions::{self, Access};
+use crate::servers::{self as store, Audit, Payload, UsageChange, load_channel};
 
 /// The longest a message can be, in characters.
 pub const MAX_MESSAGE_LENGTH: usize = 4000;
 const MAX_ATTACHMENTS: usize = 10;
 const MAX_EMBEDS: usize = 10;
+/// Most roles one message pings.
+const MAX_ROLE_MENTIONS: usize = 50;
 
 /// What's stored in a message's `extras` column.
 #[derive(Clone, PartialEq, prost::Message)]
@@ -21,6 +23,85 @@ struct Extras {
     attachments: Vec<pb::Attachment>,
     #[prost(message, repeated, tag = "2")]
     embeds: Vec<pb::Embed>,
+    #[prost(bool, tag = "3")]
+    mentions_everyone: bool,
+    #[prost(string, repeated, tag = "4")]
+    mention_role_ids: Vec<String>,
+}
+
+impl Extras {
+    fn of(message: &pb::Message) -> Option<Vec<u8>> {
+        let extras = Extras {
+            attachments: message.attachments.clone(),
+            embeds: message.embeds.clone(),
+            mentions_everyone: message.mentions_everyone,
+            mention_role_ids: message.mention_role_ids.clone(),
+        };
+        (extras != Extras::default()).then(|| extras.encode_to_vec())
+    }
+}
+
+/// Whether `content` says @everyone or @here as a word of its own.
+fn says_everyone(content: &str) -> bool {
+    let bytes = content.as_bytes();
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    content.match_indices('@').any(|(at, _)| {
+        if at > 0 && (word(bytes[at - 1]) || bytes[at - 1] == b'@') {
+            return false;
+        }
+        let rest = &bytes[at + 1..];
+        ["everyone", "here"].iter().any(|name| {
+            rest.len() >= name.len()
+                && rest[..name.len()].eq_ignore_ascii_case(name.as_bytes())
+                && rest.get(name.len()).is_none_or(|&b| !word(b))
+        })
+    })
+}
+
+/// The ids written as `<@&id>` in `content`, once each, in order.
+fn role_tokens(content: &str) -> Vec<&str> {
+    let mut ids = Vec::new();
+    for (start, _) in content.match_indices("<@&") {
+        let rest = &content[start + 3..];
+        if let Some(end) = rest.find('>')
+            && end > 0
+            && end <= 32
+            && rest[..end].bytes().all(|b| b.is_ascii_alphanumeric())
+            && !ids.contains(&&rest[..end])
+        {
+            ids.push(&rest[..end]);
+        }
+    }
+    ids
+}
+
+/// Who a message pings, given what its author can do in its channel: everyone
+/// if they may, and the roles it names that are mentionable or that they may
+/// mention anyway.
+async fn mentions(
+    conn: &turso::Connection,
+    server_id: &str,
+    access: &Access,
+    channel_id: &str,
+    content: &str,
+) -> Result<(bool, Vec<String>)> {
+    let anyone = access.has_in(channel_id, Permission::MentionEveryone);
+    let everyone = anyone && says_everyone(content);
+    let named = role_tokens(content);
+    if named.is_empty() {
+        return Ok((everyone, vec![]));
+    }
+    let roles = permissions::roles(conn, server_id).await?;
+    let mut ids = Vec::new();
+    for id in named {
+        if let Some(role) = roles.iter().find(|r| r.id.eq_ignore_ascii_case(id) && r.id != server_id)
+            && (role.mentionable || anyone)
+            && ids.len() < MAX_ROLE_MENTIONS
+        {
+            ids.push(role.id.clone());
+        }
+    }
+    Ok((everyone, ids))
 }
 
 const MESSAGE_COLUMNS: &str = "id, channel_id, author_id, content, extras, reply_to_id, created_at, edited_at, kind";
@@ -40,6 +121,8 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 created_at: Some(timestamp(r.get(6)?)),
                 edited_at: r.get::<Option<i64>>(7)?.map(timestamp),
                 kind: r.get(8)?,
+                mentions_everyone: false,
+                mention_role_ids: vec![],
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -57,6 +140,8 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
         let extras = Extras::decode(bytes.as_slice())?;
         message.attachments = extras.attachments;
         message.embeds = extras.embeds;
+        message.mentions_everyone = extras.mentions_everyone;
+        message.mention_role_ids = extras.mention_role_ids;
     }
     Ok(message)
 }
@@ -212,8 +297,15 @@ impl MessageService for Api {
         respond(async {
             let account = self.account(request.metadata()).await?;
             let mut req = request.into_inner();
-            let (sdb, member) = self.membership(&account, &req.server_id).await?;
+            let Seat { sdb, member, access } = self.membership(&account, &req.server_id).await?;
             check_not_timed_out(&member)?;
+            access.require_in(&req.channel_id, Permission::SendMessages)?;
+            if !req.attachments.is_empty() {
+                access.require_in(&req.channel_id, Permission::AttachFiles)?;
+            }
+            if !req.embeds.is_empty() {
+                access.require_in(&req.channel_id, Permission::EmbedLinks)?;
+            }
             check_content(&req.content, !req.attachments.is_empty() || !req.embeds.is_empty())?;
             check_extras(&mut req.attachments, &req.embeds)?;
             let limits = sdb.limits(&self.app.settings().limits).await?;
@@ -238,13 +330,13 @@ impl MessageService for Api {
                         }
                     }
                     let now = now_ms();
-                    if !can_manage(&member) {
+                    let exempt = access.has_in(&channel.id, Permission::ManageMessages)
+                        || access.has_in(&channel.id, Permission::ManageChannels);
+                    if !exempt {
                         check_slowmode(conn, &channel, &account.id, now).await?;
                     }
-                    let has_extras = !req.attachments.is_empty() || !req.embeds.is_empty();
-                    let extras = has_extras.then(|| {
-                        Extras { attachments: req.attachments.clone(), embeds: req.embeds.clone() }.encode_to_vec()
-                    });
+                    let (mentions_everyone, mention_role_ids) =
+                        mentions(conn, &sdb.id, &access, &channel.id, &req.content).await?;
                     let message = pb::Message {
                         id: new_id(),
                         server_id: sdb.id.clone(),
@@ -257,7 +349,10 @@ impl MessageService for Api {
                         created_at: Some(timestamp(now)),
                         edited_at: None,
                         kind: pb::MessageKind::Unspecified as i32,
+                        mentions_everyone,
+                        mention_role_ids,
                     };
+                    let extras = Extras::of(&message);
                     let size = message.content.len() as i64;
                     let attachment_count = message.attachments.len() as i64;
                     conn.execute(
@@ -298,9 +393,12 @@ impl MessageService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, _) = self.membership(&account, &req.server_id).await?;
+                let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
                 let conn = sdb.read()?;
-                let message = load_message(&conn, &sdb.id, &req.message_id).await?.ok_or(Error::NotFound("message"))?;
+                let message = load_message(&conn, &sdb.id, &req.message_id)
+                    .await?
+                    .filter(|m| access.can_see(&m.channel_id))
+                    .ok_or(Error::NotFound("message"))?;
                 let author = authors(&conn, std::slice::from_ref(&message)).await?.into_iter().next();
                 Ok(pb::GetMessageResponse { message: Some(message), author })
             }
@@ -315,7 +413,8 @@ impl MessageService for Api {
         respond(async {
             let account = self.account(request.metadata()).await?;
             let req = request.into_inner();
-            let (sdb, _) = self.membership(&account, &req.server_id).await?;
+            let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
+            access.require_in(&req.channel_id, Permission::ViewChannels)?;
             let conn = sdb.read()?;
             load_channel(&conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
             let limit = if req.limit <= 0 { 50 } else { req.limit.min(100) } as i64;
@@ -351,12 +450,14 @@ impl MessageService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, member) = self.membership(&account, &req.server_id).await?;
+                let Seat { sdb, member, access } = self.membership(&account, &req.server_id).await?;
                 check_not_timed_out(&member)?;
                 let message = sdb
                     .write(&account.id, async |conn, events| {
-                        let mut message =
-                            load_message(conn, &sdb.id, &req.message_id).await?.ok_or(Error::NotFound("message"))?;
+                        let mut message = load_message(conn, &sdb.id, &req.message_id)
+                            .await?
+                            .filter(|m| access.can_see(&m.channel_id))
+                            .ok_or(Error::NotFound("message"))?;
                         if message.author_id != account.id {
                             return Err(Error::denied("you can only edit your own messages"));
                         }
@@ -366,14 +467,22 @@ impl MessageService for Api {
                         check_content(&req.content, !message.attachments.is_empty() || !message.embeds.is_empty())?;
                         let now = now_ms();
                         let growth = req.content.len() as i64 - message.content.len() as i64;
+                        (message.mentions_everyone, message.mention_role_ids) =
+                            mentions(conn, &sdb.id, &access, &message.channel_id, &req.content).await?;
+                        message.content = req.content.clone();
+                        message.edited_at = Some(timestamp(now));
                         conn.execute(
-                            "UPDATE messages SET content = ?2, size = ?3, edited_at = ?4 WHERE id = ?1",
-                            (message.id.as_str(), req.content.as_str(), req.content.len() as i64, now),
+                            "UPDATE messages SET content = ?2, size = ?3, edited_at = ?4, extras = ?5 WHERE id = ?1",
+                            (
+                                message.id.as_str(),
+                                req.content.as_str(),
+                                req.content.len() as i64,
+                                now,
+                                Extras::of(&message),
+                            ),
                         )
                         .await?;
                         store::add_usage(conn, UsageChange { message_bytes: growth, ..Default::default() }).await?;
-                        message.content = req.content.clone();
-                        message.edited_at = Some(timestamp(now));
                         events.push(Payload::MessageUpdated(pb::MessageUpdated { message: Some(message.clone()) }));
                         Ok(message)
                     })
@@ -392,11 +501,15 @@ impl MessageService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, member) = self.membership(&account, &req.server_id).await?;
+                let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
                 sdb.write(&account.id, async |conn, events| {
-                    let message =
-                        load_message(conn, &sdb.id, &req.message_id).await?.ok_or(Error::NotFound("message"))?;
-                    if message.author_id != account.id && !can_manage(&member) {
+                    let message = load_message(conn, &sdb.id, &req.message_id)
+                        .await?
+                        .filter(|m| access.can_see(&m.channel_id))
+                        .ok_or(Error::NotFound("message"))?;
+                    if message.author_id != account.id
+                        && !access.has_in(&message.channel_id, Permission::ManageMessages)
+                    {
                         return Err(Error::denied("you can only delete your own messages"));
                     }
                     conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
@@ -431,5 +544,20 @@ impl MessageService for Api {
             }
             .await,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_everyone_and_roles() {
+        assert!(says_everyone("@everyone look"));
+        assert!(says_everyone("hey @Here!"));
+        assert!(!says_everyone("mail@everyone.com"));
+        assert!(!says_everyone("@everyoneelse"));
+        assert!(!says_everyone("@@here"));
+        assert_eq!(role_tokens("<@&ABC> and <@&ABC>, <@&> <@&D-E> <@&FG>"), ["ABC", "FG"]);
     }
 }

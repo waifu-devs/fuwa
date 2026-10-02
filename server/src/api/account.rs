@@ -401,14 +401,6 @@ fn level_name(level: i32) -> &'static str {
     }
 }
 
-fn role_name(role: i32) -> &'static str {
-    match pb::MemberRole::try_from(role) {
-        Ok(pb::MemberRole::Owner) => "owner",
-        Ok(pb::MemberRole::Admin) => "admin",
-        _ => "member",
-    }
-}
-
 type ExportSender = mpsc::Sender<Result<pb::ExportDataResponse, Status>>;
 
 /// Sends the next piece of an export. False once the client has gone.
@@ -503,11 +495,16 @@ pub(crate) async fn export_server(sdb: &ServerDb, account_id: &str, tx: &ExportP
     }
     let server = sdb.server().await?;
     let member = store::member(&conn, &sdb.id, account_id).await?;
+    let roles = crate::permissions::roles(&conn, &sdb.id).await?;
+    let role_names: Vec<&str> = member
+        .as_ref()
+        .map_or(vec![], |m| roles.iter().filter(|r| m.role_ids.contains(&r.id)).map(|r| r.name.as_str()).collect());
     let about = json!({
         "id": server.id,
         "name": server.name,
         "member": member.is_some(),
-        "role": member.as_ref().map(|m| role_name(m.role)),
+        "owner": server.owner_id == account_id,
+        "roles": role_names,
         "nickname": member.as_ref().map(|m| m.nickname.clone()).filter(|n| !n.is_empty()),
         "joined_at": member.as_ref().map_or(Value::Null, |m| wire_time(&m.joined_at)),
     });

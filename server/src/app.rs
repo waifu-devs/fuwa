@@ -25,7 +25,7 @@ use crate::pb::{
     auth_service_server::AuthServiceServer, channel_service_server::ChannelServiceServer,
     event_service_server::EventServiceServer, media_service_server::MediaServiceServer,
     message_service_server::MessageServiceServer, node_service_server::NodeServiceServer,
-    server_service_server::ServerServiceServer,
+    role_service_server::RoleServiceServer, server_service_server::ServerServiceServer,
 };
 use crate::servers::Servers;
 use crate::settings::Settings;
@@ -218,6 +218,7 @@ impl App {
             .add_service(ServerServiceServer::new(api.clone()))
             .add_service(ChannelServiceServer::new(api.clone()))
             .add_service(MessageServiceServer::new(api.clone()))
+            .add_service(RoleServiceServer::new(api.clone()))
             .add_service(EventServiceServer::new(api.clone()))
             .add_service(MediaServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))

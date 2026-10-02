@@ -67,7 +67,9 @@ fn route(path: &str) -> Target {
         "fuwa.v1.ServerService" if matches!(method, "CreateServer" | "ListServers" | "DiscoverServers") => {
             Target::Directory
         }
-        "fuwa.v1.ServerService" | "fuwa.v1.ChannelService" | "fuwa.v1.MessageService" => Target::Shard,
+        "fuwa.v1.ServerService" | "fuwa.v1.ChannelService" | "fuwa.v1.MessageService" | "fuwa.v1.RoleService" => {
+            Target::Shard
+        }
         _ => Target::Unknown,
     }
 }

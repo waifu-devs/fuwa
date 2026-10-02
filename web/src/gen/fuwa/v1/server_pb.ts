@@ -4,7 +4,7 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Member, MemberRole, NotificationLevel, Server, ServerLimits, ServerUsage, User } from "./types_pb";
+import type { Member, NotificationLevel, Server, ServerLimits, ServerUsage, User } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/server.proto.
  */
 export const file_fuwa_v1_server: GenFile = /*@__PURE__*/
-  fileDesc("ChRmdXdhL3YxL3NlcnZlci5wcm90bxIHZnV3YS52MSJgChNDcmVhdGVTZXJ2ZXJSZXF1ZXN0EgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSEAoIaWNvbl91cmwYAyABKAkSFAoMZGlzY292ZXJhYmxlGAQgASgIIjcKFENyZWF0ZVNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIiUKEEdldFNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjQKEUdldFNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIhQKEkxpc3RTZXJ2ZXJzUmVxdWVzdCI3ChNMaXN0U2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciIYChZEaXNjb3ZlclNlcnZlcnNSZXF1ZXN0IjsKF0Rpc2NvdmVyU2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciLOAgoTVXBkYXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEQoEbmFtZRgCIAEoCUgAiAEBEhgKC2Rlc2NyaXB0aW9uGAMgASgJSAGIAQESFQoIaWNvbl91cmwYBCABKAlIAogBARIZCgxkaXNjb3ZlcmFibGUYBSABKAhIA4gBARI+ChVkZWZhdWx0X25vdGlmaWNhdGlvbnMYBiABKA4yGi5mdXdhLnYxLk5vdGlmaWNhdGlvbkxldmVsSASIAQESHgoRc3lzdGVtX2NoYW5uZWxfaWQYByABKAlIBYgBAUIHCgVfbmFtZUIOCgxfZGVzY3JpcHRpb25CCwoJX2ljb25fdXJsQg8KDV9kaXNjb3ZlcmFibGVCGAoWX2RlZmF1bHRfbm90aWZpY2F0aW9uc0IUChJfc3lzdGVtX2NoYW5uZWxfaWQiNwoUVXBkYXRlU2VydmVyUmVzcG9uc2USHwoGc2VydmVyGAEgASgLMg8uZnV3YS52MS5TZXJ2ZXIiKAoTRGVsZXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiFgoURGVsZXRlU2VydmVyUmVzcG9uc2UiJgoRSm9pblNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIlYKEkpvaW5TZXJ2ZXJSZXNwb25zZRIfCgZzZXJ2ZXIYASABKAsyDy5mdXdhLnYxLlNlcnZlchIfCgZtZW1iZXIYAiABKAsyDy5mdXdhLnYxLk1lbWJlciInChJMZWF2ZVNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIhUKE0xlYXZlU2VydmVyUmVzcG9uc2UiJwoSTGlzdE1lbWJlcnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSI3ChNMaXN0TWVtYmVyc1Jlc3BvbnNlEiAKB21lbWJlcnMYASADKAsyDy5mdXdhLnYxLk1lbWJlciKOAQoTVXBkYXRlTWVtYmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIVCghuaWNrbmFtZRgDIAEoCUgAiAEBEiYKBHJvbGUYBCABKA4yEy5mdXdhLnYxLk1lbWJlclJvbGVIAYgBAUILCglfbmlja25hbWVCBwoFX3JvbGUiNwoUVXBkYXRlTWVtYmVyUmVzcG9uc2USHwoGbWVtYmVyGAEgASgLMg8uZnV3YS52MS5NZW1iZXIiKgoVR2V0U2VydmVyVXNhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSKPAQoWR2V0U2VydmVyVXNhZ2VSZXNwb25zZRIjCgV1c2FnZRgBIAEoCzIULmZ1d2EudjEuU2VydmVyVXNhZ2USJQoGbGltaXRzGAIgASgLMhUuZnV3YS52MS5TZXJ2ZXJMaW1pdHMSKQoKb3duX2xpbWl0cxgDIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzIlsKFFRpbWVPdXRNZW1iZXJSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEg8KB3NlY29uZHMYAyABKAMSDgoGcmVhc29uGAQgASgJIjgKFVRpbWVPdXRNZW1iZXJSZXNwb25zZRIfCgZtZW1iZXIYASABKAsyDy5mdXdhLnYxLk1lbWJlciJHChFLaWNrTWVtYmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIOCgZyZWFzb24YAyABKAkiFAoSS2lja01lbWJlclJlc3BvbnNlImYKEEJhbk1lbWJlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAkSDgoGcmVhc29uGAMgASgJEh4KFmRlbGV0ZV9tZXNzYWdlX3NlY29uZHMYBCABKAMiSAoRQmFuTWVtYmVyUmVzcG9uc2USGQoDYmFuGAEgASgLMgwuZnV3YS52MS5CYW4SGAoQZGVsZXRlZF9tZXNzYWdlcxgCIAEoAyI4ChJVbmJhbk1lbWJlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAkiFQoTVW5iYW5NZW1iZXJSZXNwb25zZSIkCg9MaXN0QmFuc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIlEKEExpc3RCYW5zUmVzcG9uc2USGgoEYmFucxgBIAMoCzIMLmZ1d2EudjEuQmFuEiEKCm1vZGVyYXRvcnMYAiADKAsyDS5mdXdhLnYxLlVzZXIieAoDQmFuEhsKBHVzZXIYASABKAsyDS5mdXdhLnYxLlVzZXISDgoGcmVhc29uGAIgASgJEhQKDGJhbm5lZF9ieV9pZBgDIAEoCRIuCgpjcmVhdGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKCAQoTTGlzdEF1ZGl0TG9nUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDQoFbGltaXQYAiABKAUSEQoJYmVmb3JlX2lkGAMgASgJEhAKCGFjdG9yX2lkGAQgASgJEiQKBmFjdGlvbhgFIAEoDjIULmZ1d2EudjEuQXVkaXRBY3Rpb24ibAoUTGlzdEF1ZGl0TG9nUmVzcG9uc2USJAoHZW50cmllcxgBIAMoCzITLmZ1d2EudjEuQXVkaXRFbnRyeRIcCgV1c2VycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCCLgAQoKQXVkaXRFbnRyeRIKCgJpZBgBIAEoCRIQCghhY3Rvcl9pZBgCIAEoCRIkCgZhY3Rpb24YAyABKA4yFC5mdXdhLnYxLkF1ZGl0QWN0aW9uEhEKCXRhcmdldF9pZBgEIAEoCRIUCgxjaGFubmVsX25hbWUYBSABKAkSDgoGcmVhc29uGAYgASgJEiUKB2NoYW5nZXMYByADKAsyFC5mdXdhLnYxLkF1ZGl0Q2hhbmdlEi4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIjsKC0F1ZGl0Q2hhbmdlEg0KBWZpZWxkGAEgASgJEg4KBmJlZm9yZRgCIAEoCRINCgVhZnRlchgDIAEoCSI+ChhUcmFuc2Zlck93bmVyc2hpcFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAkiPAoZVHJhbnNmZXJPd25lcnNoaXBSZXNwb25zZRIfCgZzZXJ2ZXIYASABKAsyDy5mdXdhLnYxLlNlcnZlciqzAwoLQXVkaXRBY3Rpb24SHAoYQVVESVRfQUNUSU9OX1VOU1BFQ0lGSUVEEAASHgoaQVVESVRfQUNUSU9OX1NFUlZFUl9VUERBVEUQARIfChtBVURJVF9BQ1RJT05fQ0hBTk5FTF9DUkVBVEUQAhIfChtBVURJVF9BQ1RJT05fQ0hBTk5FTF9VUERBVEUQAxIfChtBVURJVF9BQ1RJT05fQ0hBTk5FTF9ERUxFVEUQBBIhCh1BVURJVF9BQ1RJT05fQ0hBTk5FTFNfUkVPUkRFUhAFEh4KGkFVRElUX0FDVElPTl9NRU1CRVJfVVBEQVRFEAYSIAocQVVESVRfQUNUSU9OX01FTUJFUl9USU1FX09VVBAHEhwKGEFVRElUX0FDVElPTl9NRU1CRVJfS0lDSxAIEhsKF0FVRElUX0FDVElPTl9NRU1CRVJfQkFOEAkSHQoZQVVESVRfQUNUSU9OX01FTUJFUl9VTkJBThAKEh8KG0FVRElUX0FDVElPTl9NRVNTQUdFX0RFTEVURRALEiMKH0FVRElUX0FDVElPTl9PV05FUlNISVBfVFJBTlNGRVIQDDLkCgoNU2VydmVyU2VydmljZRJLCgxDcmVhdGVTZXJ2ZXISHC5mdXdhLnYxLkNyZWF0ZVNlcnZlclJlcXVlc3QaHS5mdXdhLnYxLkNyZWF0ZVNlcnZlclJlc3BvbnNlEkIKCUdldFNlcnZlchIZLmZ1d2EudjEuR2V0U2VydmVyUmVxdWVzdBoaLmZ1d2EudjEuR2V0U2VydmVyUmVzcG9uc2USSAoLTGlzdFNlcnZlcnMSGy5mdXdhLnYxLkxpc3RTZXJ2ZXJzUmVxdWVzdBocLmZ1d2EudjEuTGlzdFNlcnZlcnNSZXNwb25zZRJUCg9EaXNjb3ZlclNlcnZlcnMSHy5mdXdhLnYxLkRpc2NvdmVyU2VydmVyc1JlcXVlc3QaIC5mdXdhLnYxLkRpc2NvdmVyU2VydmVyc1Jlc3BvbnNlEksKDFVwZGF0ZVNlcnZlchIcLmZ1d2EudjEuVXBkYXRlU2VydmVyUmVxdWVzdBodLmZ1d2EudjEuVXBkYXRlU2VydmVyUmVzcG9uc2USSwoMRGVsZXRlU2VydmVyEhwuZnV3YS52MS5EZWxldGVTZXJ2ZXJSZXF1ZXN0Gh0uZnV3YS52MS5EZWxldGVTZXJ2ZXJSZXNwb25zZRJFCgpKb2luU2VydmVyEhouZnV3YS52MS5Kb2luU2VydmVyUmVxdWVzdBobLmZ1d2EudjEuSm9pblNlcnZlclJlc3BvbnNlEkgKC0xlYXZlU2VydmVyEhsuZnV3YS52MS5MZWF2ZVNlcnZlclJlcXVlc3QaHC5mdXdhLnYxLkxlYXZlU2VydmVyUmVzcG9uc2USSAoLTGlzdE1lbWJlcnMSGy5mdXdhLnYxLkxpc3RNZW1iZXJzUmVxdWVzdBocLmZ1d2EudjEuTGlzdE1lbWJlcnNSZXNwb25zZRJLCgxVcGRhdGVNZW1iZXISHC5mdXdhLnYxLlVwZGF0ZU1lbWJlclJlcXVlc3QaHS5mdXdhLnYxLlVwZGF0ZU1lbWJlclJlc3BvbnNlElEKDkdldFNlcnZlclVzYWdlEh4uZnV3YS52MS5HZXRTZXJ2ZXJVc2FnZVJlcXVlc3QaHy5mdXdhLnYxLkdldFNlcnZlclVzYWdlUmVzcG9uc2USTgoNVGltZU91dE1lbWJlchIdLmZ1d2EudjEuVGltZU91dE1lbWJlclJlcXVlc3QaHi5mdXdhLnYxLlRpbWVPdXRNZW1iZXJSZXNwb25zZRJFCgpLaWNrTWVtYmVyEhouZnV3YS52MS5LaWNrTWVtYmVyUmVxdWVzdBobLmZ1d2EudjEuS2lja01lbWJlclJlc3BvbnNlEkIKCUJhbk1lbWJlchIZLmZ1d2EudjEuQmFuTWVtYmVyUmVxdWVzdBoaLmZ1d2EudjEuQmFuTWVtYmVyUmVzcG9uc2USSAoLVW5iYW5NZW1iZXISGy5mdXdhLnYxLlVuYmFuTWVtYmVyUmVxdWVzdBocLmZ1d2EudjEuVW5iYW5NZW1iZXJSZXNwb25zZRI/CghMaXN0QmFucxIYLmZ1d2EudjEuTGlzdEJhbnNSZXF1ZXN0GhkuZnV3YS52MS5MaXN0QmFuc1Jlc3BvbnNlEksKDExpc3RBdWRpdExvZxIcLmZ1d2EudjEuTGlzdEF1ZGl0TG9nUmVxdWVzdBodLmZ1d2EudjEuTGlzdEF1ZGl0TG9nUmVzcG9uc2USWgoRVHJhbnNmZXJPd25lcnNoaXASIS5mdXdhLnYxLlRyYW5zZmVyT3duZXJzaGlwUmVxdWVzdBoiLmZ1d2EudjEuVHJhbnNmZXJPd25lcnNoaXBSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChRmdXdhL3YxL3NlcnZlci5wcm90bxIHZnV3YS52MSJgChNDcmVhdGVTZXJ2ZXJSZXF1ZXN0EgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSEAoIaWNvbl91cmwYAyABKAkSFAoMZGlzY292ZXJhYmxlGAQgASgIIjcKFENyZWF0ZVNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIiUKEEdldFNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjQKEUdldFNlcnZlclJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIhQKEkxpc3RTZXJ2ZXJzUmVxdWVzdCI3ChNMaXN0U2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciIYChZEaXNjb3ZlclNlcnZlcnNSZXF1ZXN0IjsKF0Rpc2NvdmVyU2VydmVyc1Jlc3BvbnNlEiAKB3NlcnZlcnMYASADKAsyDy5mdXdhLnYxLlNlcnZlciLOAgoTVXBkYXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEQoEbmFtZRgCIAEoCUgAiAEBEhgKC2Rlc2NyaXB0aW9uGAMgASgJSAGIAQESFQoIaWNvbl91cmwYBCABKAlIAogBARIZCgxkaXNjb3ZlcmFibGUYBSABKAhIA4gBARI+ChVkZWZhdWx0X25vdGlmaWNhdGlvbnMYBiABKA4yGi5mdXdhLnYxLk5vdGlmaWNhdGlvbkxldmVsSASIAQESHgoRc3lzdGVtX2NoYW5uZWxfaWQYByABKAlIBYgBAUIHCgVfbmFtZUIOCgxfZGVzY3JpcHRpb25CCwoJX2ljb25fdXJsQg8KDV9kaXNjb3ZlcmFibGVCGAoWX2RlZmF1bHRfbm90aWZpY2F0aW9uc0IUChJfc3lzdGVtX2NoYW5uZWxfaWQiNwoUVXBkYXRlU2VydmVyUmVzcG9uc2USHwoGc2VydmVyGAEgASgLMg8uZnV3YS52MS5TZXJ2ZXIiKAoTRGVsZXRlU2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiFgoURGVsZXRlU2VydmVyUmVzcG9uc2UiJgoRSm9pblNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIlYKEkpvaW5TZXJ2ZXJSZXNwb25zZRIfCgZzZXJ2ZXIYASABKAsyDy5mdXdhLnYxLlNlcnZlchIfCgZtZW1iZXIYAiABKAsyDy5mdXdhLnYxLk1lbWJlciInChJMZWF2ZVNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIhUKE0xlYXZlU2VydmVyUmVzcG9uc2UiJwoSTGlzdE1lbWJlcnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSI3ChNMaXN0TWVtYmVyc1Jlc3BvbnNlEiAKB21lbWJlcnMYASADKAsyDy5mdXdhLnYxLk1lbWJlciJpChNVcGRhdGVNZW1iZXJSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhUKCG5pY2tuYW1lGAMgASgJSACIAQFCCwoJX25pY2tuYW1lSgQIBBAFUgRyb2xlIjcKFFVwZGF0ZU1lbWJlclJlc3BvbnNlEh8KBm1lbWJlchgBIAEoCzIPLmZ1d2EudjEuTWVtYmVyIioKFUdldFNlcnZlclVzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkijwEKFkdldFNlcnZlclVzYWdlUmVzcG9uc2USIwoFdXNhZ2UYASABKAsyFC5mdXdhLnYxLlNlcnZlclVzYWdlEiUKBmxpbWl0cxgCIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzEikKCm93bl9saW1pdHMYAyABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cyJbChRUaW1lT3V0TWVtYmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIPCgdzZWNvbmRzGAMgASgDEg4KBnJlYXNvbhgEIAEoCSI4ChVUaW1lT3V0TWVtYmVyUmVzcG9uc2USHwoGbWVtYmVyGAEgASgLMg8uZnV3YS52MS5NZW1iZXIiRwoRS2lja01lbWJlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAkSDgoGcmVhc29uGAMgASgJIhQKEktpY2tNZW1iZXJSZXNwb25zZSJmChBCYW5NZW1iZXJSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEg4KBnJlYXNvbhgDIAEoCRIeChZkZWxldGVfbWVzc2FnZV9zZWNvbmRzGAQgASgDIkgKEUJhbk1lbWJlclJlc3BvbnNlEhkKA2JhbhgBIAEoCzIMLmZ1d2EudjEuQmFuEhgKEGRlbGV0ZWRfbWVzc2FnZXMYAiABKAMiOAoSVW5iYW5NZW1iZXJSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJIhUKE1VuYmFuTWVtYmVyUmVzcG9uc2UiJAoPTGlzdEJhbnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSJRChBMaXN0QmFuc1Jlc3BvbnNlEhoKBGJhbnMYASADKAsyDC5mdXdhLnYxLkJhbhIhCgptb2RlcmF0b3JzGAIgAygLMg0uZnV3YS52MS5Vc2VyIngKA0JhbhIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEg4KBnJlYXNvbhgCIAEoCRIUCgxiYW5uZWRfYnlfaWQYAyABKAkSLgoKY3JlYXRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiggEKE0xpc3RBdWRpdExvZ1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg0KBWxpbWl0GAIgASgFEhEKCWJlZm9yZV9pZBgDIAEoCRIQCghhY3Rvcl9pZBgEIAEoCRIkCgZhY3Rpb24YBSABKA4yFC5mdXdhLnYxLkF1ZGl0QWN0aW9uImwKFExpc3RBdWRpdExvZ1Jlc3BvbnNlEiQKB2VudHJpZXMYASADKAsyEy5mdXdhLnYxLkF1ZGl0RW50cnkSHAoFdXNlcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAyABKAgi8wEKCkF1ZGl0RW50cnkSCgoCaWQYASABKAkSEAoIYWN0b3JfaWQYAiABKAkSJAoGYWN0aW9uGAMgASgOMhQuZnV3YS52MS5BdWRpdEFjdGlvbhIRCgl0YXJnZXRfaWQYBCABKAkSFAoMY2hhbm5lbF9uYW1lGAUgASgJEg4KBnJlYXNvbhgGIAEoCRIlCgdjaGFuZ2VzGAcgAygLMhQuZnV3YS52MS5BdWRpdENoYW5nZRIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIRCglyb2xlX25hbWUYCSABKAkiOwoLQXVkaXRDaGFuZ2USDQoFZmllbGQYASABKAkSDgoGYmVmb3JlGAIgASgJEg0KBWFmdGVyGAMgASgJIj4KGFRyYW5zZmVyT3duZXJzaGlwUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCSI8ChlUcmFuc2Zlck93bmVyc2hpcFJlc3BvbnNlEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyKoAFCgtBdWRpdEFjdGlvbhIcChhBVURJVF9BQ1RJT05fVU5TUEVDSUZJRUQQABIeChpBVURJVF9BQ1RJT05fU0VSVkVSX1VQREFURRABEh8KG0FVRElUX0FDVElPTl9DSEFOTkVMX0NSRUFURRACEh8KG0FVRElUX0FDVElPTl9DSEFOTkVMX1VQREFURRADEh8KG0FVRElUX0FDVElPTl9DSEFOTkVMX0RFTEVURRAEEiEKHUFVRElUX0FDVElPTl9DSEFOTkVMU19SRU9SREVSEAUSHgoaQVVESVRfQUNUSU9OX01FTUJFUl9VUERBVEUQBhIgChxBVURJVF9BQ1RJT05fTUVNQkVSX1RJTUVfT1VUEAcSHAoYQVVESVRfQUNUSU9OX01FTUJFUl9LSUNLEAgSGwoXQVVESVRfQUNUSU9OX01FTUJFUl9CQU4QCRIdChlBVURJVF9BQ1RJT05fTUVNQkVSX1VOQkFOEAoSHwobQVVESVRfQUNUSU9OX01FU1NBR0VfREVMRVRFEAsSIwofQVVESVRfQUNUSU9OX09XTkVSU0hJUF9UUkFOU0ZFUhAMEhwKGEFVRElUX0FDVElPTl9ST0xFX0NSRUFURRANEhwKGEFVRElUX0FDVElPTl9ST0xFX1VQREFURRAOEhwKGEFVRElUX0FDVElPTl9ST0xFX0RFTEVURRAPEh4KGkFVRElUX0FDVElPTl9ST0xFU19SRU9SREVSEBASJAogQVVESVRfQUNUSU9OX01FTUJFUl9ST0xFU19VUERBVEUQERIrCidBVURJVF9BQ1RJT05fQ0hBTk5FTF9QRVJNSVNTSU9OU19VUERBVEUQEjLkCgoNU2VydmVyU2VydmljZRJLCgxDcmVhdGVTZXJ2ZXISHC5mdXdhLnYxLkNyZWF0ZVNlcnZlclJlcXVlc3QaHS5mdXdhLnYxLkNyZWF0ZVNlcnZlclJlc3BvbnNlEkIKCUdldFNlcnZlchIZLmZ1d2EudjEuR2V0U2VydmVyUmVxdWVzdBoaLmZ1d2EudjEuR2V0U2VydmVyUmVzcG9uc2USSAoLTGlzdFNlcnZlcnMSGy5mdXdhLnYxLkxpc3RTZXJ2ZXJzUmVxdWVzdBocLmZ1d2EudjEuTGlzdFNlcnZlcnNSZXNwb25zZRJUCg9EaXNjb3ZlclNlcnZlcnMSHy5mdXdhLnYxLkRpc2NvdmVyU2VydmVyc1JlcXVlc3QaIC5mdXdhLnYxLkRpc2NvdmVyU2VydmVyc1Jlc3BvbnNlEksKDFVwZGF0ZVNlcnZlchIcLmZ1d2EudjEuVXBkYXRlU2VydmVyUmVxdWVzdBodLmZ1d2EudjEuVXBkYXRlU2VydmVyUmVzcG9uc2USSwoMRGVsZXRlU2VydmVyEhwuZnV3YS52MS5EZWxldGVTZXJ2ZXJSZXF1ZXN0Gh0uZnV3YS52MS5EZWxldGVTZXJ2ZXJSZXNwb25zZRJFCgpKb2luU2VydmVyEhouZnV3YS52MS5Kb2luU2VydmVyUmVxdWVzdBobLmZ1d2EudjEuSm9pblNlcnZlclJlc3BvbnNlEkgKC0xlYXZlU2VydmVyEhsuZnV3YS52MS5MZWF2ZVNlcnZlclJlcXVlc3QaHC5mdXdhLnYxLkxlYXZlU2VydmVyUmVzcG9uc2USSAoLTGlzdE1lbWJlcnMSGy5mdXdhLnYxLkxpc3RNZW1iZXJzUmVxdWVzdBocLmZ1d2EudjEuTGlzdE1lbWJlcnNSZXNwb25zZRJLCgxVcGRhdGVNZW1iZXISHC5mdXdhLnYxLlVwZGF0ZU1lbWJlclJlcXVlc3QaHS5mdXdhLnYxLlVwZGF0ZU1lbWJlclJlc3BvbnNlElEKDkdldFNlcnZlclVzYWdlEh4uZnV3YS52MS5HZXRTZXJ2ZXJVc2FnZVJlcXVlc3QaHy5mdXdhLnYxLkdldFNlcnZlclVzYWdlUmVzcG9uc2USTgoNVGltZU91dE1lbWJlchIdLmZ1d2EudjEuVGltZU91dE1lbWJlclJlcXVlc3QaHi5mdXdhLnYxLlRpbWVPdXRNZW1iZXJSZXNwb25zZRJFCgpLaWNrTWVtYmVyEhouZnV3YS52MS5LaWNrTWVtYmVyUmVxdWVzdBobLmZ1d2EudjEuS2lja01lbWJlclJlc3BvbnNlEkIKCUJhbk1lbWJlchIZLmZ1d2EudjEuQmFuTWVtYmVyUmVxdWVzdBoaLmZ1d2EudjEuQmFuTWVtYmVyUmVzcG9uc2USSAoLVW5iYW5NZW1iZXISGy5mdXdhLnYxLlVuYmFuTWVtYmVyUmVxdWVzdBocLmZ1d2EudjEuVW5iYW5NZW1iZXJSZXNwb25zZRI/CghMaXN0QmFucxIYLmZ1d2EudjEuTGlzdEJhbnNSZXF1ZXN0GhkuZnV3YS52MS5MaXN0QmFuc1Jlc3BvbnNlEksKDExpc3RBdWRpdExvZxIcLmZ1d2EudjEuTGlzdEF1ZGl0TG9nUmVxdWVzdBodLmZ1d2EudjEuTGlzdEF1ZGl0TG9nUmVzcG9uc2USWgoRVHJhbnNmZXJPd25lcnNoaXASIS5mdXdhLnYxLlRyYW5zZmVyT3duZXJzaGlwUmVxdWVzdBoiLmZ1d2EudjEuVHJhbnNmZXJPd25lcnNoaXBSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.CreateServerRequest
@@ -348,6 +348,8 @@ export const ListMembersRequestSchema: GenMessage<ListMembersRequest> = /*@__PUR
  */
 export type ListMembersResponse = Message<"fuwa.v1.ListMembersResponse"> & {
   /**
+   * Highest ranked first.
+   *
    * @generated from field: repeated fuwa.v1.Member members = 1;
    */
   members: Member[];
@@ -380,13 +382,6 @@ export type UpdateMemberRequest = Message<"fuwa.v1.UpdateMemberRequest"> & {
    * @generated from field: optional string nickname = 3;
    */
   nickname?: string | undefined;
-
-  /**
-   * Member or admin. Owner only; ownership moves with TransferOwnership.
-   *
-   * @generated from field: optional fuwa.v1.MemberRole role = 4;
-   */
-  role?: MemberRole | undefined;
 };
 
 /**
@@ -800,7 +795,7 @@ export const ListAuditLogResponseSchema: GenMessage<ListAuditLogResponse> = /*@_
   messageDesc(file_fuwa_v1_server, 34);
 
 /**
- * One thing an owner or admin did.
+ * One thing someone did with a moderator's or manager's permission.
  *
  * @generated from message fuwa.v1.AuditEntry
  */
@@ -822,7 +817,7 @@ export type AuditEntry = Message<"fuwa.v1.AuditEntry"> & {
 
   /**
    * A user for member and message actions, a channel for channel actions,
-   * empty for the server itself.
+   * a role for role actions, empty for the server itself.
    *
    * @generated from field: string target_id = 4;
    */
@@ -851,6 +846,13 @@ export type AuditEntry = Message<"fuwa.v1.AuditEntry"> & {
    * @generated from field: google.protobuf.Timestamp created_at = 8;
    */
   createdAt?: Timestamp | undefined;
+
+  /**
+   * The role's name at the time, for role actions and roles handed out.
+   *
+   * @generated from field: string role_name = 9;
+   */
+  roleName: string;
 };
 
 /**
@@ -964,7 +966,7 @@ export enum AuditAction {
   CHANNELS_REORDER = 5,
 
   /**
-   * A nickname set by someone else, or a new role.
+   * A nickname set by someone else.
    *
    * @generated from enum value: AUDIT_ACTION_MEMBER_UPDATE = 6;
    */
@@ -991,7 +993,7 @@ export enum AuditAction {
   MEMBER_UNBAN = 10,
 
   /**
-   * Someone else's message, deleted by an owner or admin.
+   * Someone else's message, deleted by a moderator.
    *
    * @generated from enum value: AUDIT_ACTION_MESSAGE_DELETE = 11;
    */
@@ -1001,6 +1003,40 @@ export enum AuditAction {
    * @generated from enum value: AUDIT_ACTION_OWNERSHIP_TRANSFER = 12;
    */
   OWNERSHIP_TRANSFER = 12,
+
+  /**
+   * Role actions name the role as their target.
+   *
+   * @generated from enum value: AUDIT_ACTION_ROLE_CREATE = 13;
+   */
+  ROLE_CREATE = 13,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_ROLE_UPDATE = 14;
+   */
+  ROLE_UPDATE = 14,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_ROLE_DELETE = 15;
+   */
+  ROLE_DELETE = 15,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_ROLES_REORDER = 16;
+   */
+  ROLES_REORDER = 16,
+
+  /**
+   * A role handed to or taken from a member; the change names the role.
+   *
+   * @generated from enum value: AUDIT_ACTION_MEMBER_ROLES_UPDATE = 17;
+   */
+  MEMBER_ROLES_UPDATE = 17,
+
+  /**
+   * @generated from enum value: AUDIT_ACTION_CHANNEL_PERMISSIONS_UPDATE = 18;
+   */
+  CHANNEL_PERMISSIONS_UPDATE = 18,
 }
 
 /**
@@ -1098,9 +1134,8 @@ export const ServerService: GenService<{
     output: typeof ListMembersResponseSchema;
   },
   /**
-   * Changes a member's nickname or role. Anyone can change their own
-   * nickname; owners and admins can change those of people ranked below
-   * them. Only the owner changes roles.
+   * Changes a member's nickname: your own with CHANGE_NICKNAME, someone
+   * ranked below you with MANAGE_NICKNAMES. Roles change through RoleService.
    *
    * @generated from rpc fuwa.v1.ServerService.UpdateMember
    */
@@ -1110,7 +1145,7 @@ export const ServerService: GenService<{
     output: typeof UpdateMemberResponseSchema;
   },
   /**
-   * What the server uses and the caps on it. Owner or instance admin only.
+   * What the server uses and the caps on it. MANAGE_SERVER or instance admins.
    *
    * @generated from rpc fuwa.v1.ServerService.GetServerUsage
    */
@@ -1166,7 +1201,7 @@ export const ServerService: GenService<{
     output: typeof ListBansResponseSchema;
   },
   /**
-   * What owners and admins did in the server, newest first.
+   * Who changed what in the server, newest first. VIEW_AUDIT_LOG.
    *
    * @generated from rpc fuwa.v1.ServerService.ListAuditLog
    */
@@ -1176,7 +1211,7 @@ export const ServerService: GenService<{
     output: typeof ListAuditLogResponseSchema;
   },
   /**
-   * Hands the server to another member. Owner only; they become an admin.
+   * Hands the server to another member. Owner only; they keep their roles.
    *
    * @generated from rpc fuwa.v1.ServerService.TransferOwnership
    */

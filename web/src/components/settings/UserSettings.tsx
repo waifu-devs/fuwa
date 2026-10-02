@@ -59,6 +59,7 @@ const APP: SettingsSection[] = [
     settings: [
       { id: "reduce-motion", label: "Reduce motion", keywords: "animation" },
       { id: "saturation", label: "Saturation", keywords: "color grey" },
+      { id: "role-colors", label: "Role colors", keywords: "names colour tint dot" },
       { id: "underline-links", label: "Underline links" },
     ],
   },

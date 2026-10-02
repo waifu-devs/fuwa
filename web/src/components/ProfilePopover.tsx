@@ -5,7 +5,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { Member, User } from "@/gen/fuwa/v1/types_pb";
 import { loadProfile, run } from "@/fuwa/actions";
 import { useFuwa } from "@/fuwa/store";
-import { ModerateDialog, outranks, type ModAction } from "@/components/ModerateDialog";
+import { MemberRoles } from "@/components/MemberRoles";
+import { ModerateDialog, useModeration, type ModAction } from "@/components/ModerateDialog";
 import { ProfileCard } from "@/components/ProfileCard";
 import { timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
@@ -38,11 +39,9 @@ export function ProfilePopover({
   const profile = useFuwa((s) => (user ? s.instances[instanceKey]?.profiles[user.id] : undefined));
   const me = useFuwa((s) => s.instances[instanceKey]?.me?.id === user?.id);
   const [failed, setFailed] = useState(false);
-  const mine = useFuwa((s) => {
-    const i = s.instances[instanceKey];
-    return member ? i?.members[member.serverId]?.find((m) => m.user?.id === i.me?.id) : undefined;
-  });
-  const canModerate = outranks(mine, member);
+  const allowed = useModeration(instanceKey, member?.serverId ?? "", member);
+  const canModerate = allowed.timeout || allowed.kick || allowed.ban;
+  const owner = useFuwa((s) => !!member && s.instances[instanceKey]?.servers.find((x) => x.id === member.serverId)?.ownerId === user?.id);
   const [moderating, setModerating] = useState<ModAction | null>(null);
   const now = useNow();
 
@@ -73,6 +72,8 @@ export function ProfilePopover({
                   user={user}
                   profile={profile}
                   member={member}
+                  owner={owner}
+                  roles={member && <MemberRoles instanceKey={instanceKey} member={member} />}
                   me={me}
                   loading={!profile && !failed}
                   className="w-[19rem] max-w-[calc(100vw-1.5rem)]"
@@ -84,7 +85,7 @@ export function ProfilePopover({
                     transition={{ type: "spring", stiffness: 520, damping: 32, delay: 0.08 }}
                     className="mt-2 flex gap-1.5 rounded-2xl border bg-popover p-1.5 shadow-lg"
                   >
-                    {MOD_ACTIONS.map(({ action, label, icon: Icon, hover }) => (
+                    {MOD_ACTIONS.filter(({ action }) => allowed[action]).map(({ action, label, icon: Icon, hover }) => (
                       <button
                         key={action}
                         type="button"

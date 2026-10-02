@@ -9,6 +9,7 @@ import {
   FingerprintIcon,
   HashIcon,
   IdCardIcon,
+  LockIcon,
   MegaphoneIcon,
   PlusIcon,
   SettingsIcon,
@@ -16,13 +17,13 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState, type Ref } from "react";
-import { ChannelType, MemberRole, type Channel } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { leaveServer, run, updateNotifications } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
-import { useAction, useInstance } from "@/fuwa/hooks";
+import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
-import { ServerSettingsDialog } from "@/components/dialogs/ServerSettingsDialog";
+import { ServerSettingsDialog, useServerSettingsTabs } from "@/components/dialogs/ServerSettingsDialog";
 import { useLayout } from "@/components/Shell";
 import { Count, SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
@@ -38,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { isMuted, MUTE_FOR, mutedLabel, useMuted, useNotificationSettings, useNow } from "@/lib/notifications";
+import { has, hasIn, isPrivate } from "@/lib/permissions";
 import { usePrefs } from "@/lib/prefs";
 import { copy, openSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -46,15 +48,6 @@ export const CHANNEL_ICON: Partial<Record<ChannelType, typeof HashIcon>> = {
   [ChannelType.ANNOUNCEMENT]: MegaphoneIcon,
   [ChannelType.VOICE]: Volume2Icon,
 };
-
-/** The role you have in a server, from its member list. */
-export function useMyRole(instanceKey: string, serverId: string): MemberRole {
-  return useFuwa((s) => {
-    const i = s.instances[instanceKey];
-    const me = i?.me?.id;
-    return i?.members[serverId]?.find((m) => m.user?.id === me)?.role ?? MemberRole.MEMBER;
-  });
-}
 
 type Group = { category: Channel | null; channels: Channel[] };
 
@@ -118,9 +111,11 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   const server = inst?.servers.find((s) => s.id === serverId);
   const channels = inst?.channels[serverId];
   const synced = inst?.synced[serverId];
-  const role = useMyRole(instanceKey, serverId);
-  const manager = role >= MemberRole.ADMIN || !!inst?.admin;
-  const owner = role === MemberRole.OWNER;
+  const access = useAccess(instanceKey, serverId);
+  const owner = access.owner;
+  const settingsTabs = useServerSettingsTabs(instanceKey, serverId);
+  const canCreate = has(access, Permission.MANAGE_CHANNELS);
+  const usage = settingsTabs.includes("usage");
   const groups = useMemo(() => groupChannels(channels ?? []), [channels]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [creating, setCreating] = useState<{ parentId: string } | null>(null);
@@ -154,22 +149,22 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-60">
-          {manager && (
-            <DropdownMenuItem onSelect={() => setSettings({ tab: "overview" })}>
+          {settingsTabs.length > 0 && (
+            <DropdownMenuItem onSelect={() => setSettings({ tab: settingsTabs[0]! })}>
               <SettingsIcon /> Server settings
             </DropdownMenuItem>
           )}
-          {manager && (
+          {usage && (
             <DropdownMenuItem onSelect={() => setSettings({ tab: "usage" })}>
               <ChartColumnIcon /> Usage
             </DropdownMenuItem>
           )}
-          {manager && (
+          {canCreate && (
             <DropdownMenuItem onSelect={() => setCreating({ parentId: "" })}>
               <PlusIcon /> Create channel
             </DropdownMenuItem>
           )}
-          {manager && <DropdownMenuSeparator />}
+          {(settingsTabs.length > 0 || canCreate) && <DropdownMenuSeparator />}
           <ServerNotificationItems instanceKey={instanceKey} serverId={serverId} />
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => openSettings("server-profiles", serverId)}>
@@ -219,7 +214,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                       <ChevronDownIcon className={cn("size-3 transition-transform duration-200", closed && "-rotate-90")} />
                       <span className="truncate">{group.category.name}</span>
                     </button>
-                    {manager && (
+                    {hasIn(access, id, Permission.MANAGE_CHANNELS) && (
                       <button
                         type="button"
                         aria-label={`Create a channel in ${group.category.name}`}
@@ -248,7 +243,11 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                             instanceKey={instanceKey}
                             channel={c}
                             active={params.channel === c.id}
-                            onEdit={role >= MemberRole.ADMIN ? () => setSettings({ tab: "channels", target: c.id }) : undefined}
+                            onEdit={
+                              hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)
+                                ? () => setSettings({ tab: "channels", target: c.id })
+                                : undefined
+                            }
                           />
                         ))}
                       </AnimatePresence>
@@ -275,8 +274,6 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
           onOpenChange={(open) => !open && setSettings(null)}
           instanceKey={instanceKey}
           server={server}
-          role={role}
-          instanceAdmin={!!inst.admin}
           tab={settings?.tab ?? "overview"}
           target={settings?.target}
         />
@@ -298,7 +295,7 @@ function ChannelRow({
   active: boolean;
   index: number;
   ref?: Ref<HTMLLIElement>;
-  /** Owners and admins: opens the channel's settings. */
+  /** With Manage Channels or Manage Roles there: opens the channel's settings. */
   onEdit?: () => void;
 }) {
   const muted = useMuted(instanceKey, channel.serverId, channel.id);
@@ -306,6 +303,7 @@ function ChannelRow({
   const { compact, setNavOpen } = useLayout();
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
   const dot = unread > 0 && !active;
+  const locked = isPrivate(channel, channel.serverId);
   return (
     <motion.li
       ref={ref}
@@ -340,12 +338,27 @@ function ChannelRow({
           transition={SPRING}
           className="absolute top-1/2 -left-2 w-1 -translate-y-1/2 rounded-r-full bg-foreground"
         />
-        <Icon
-          className={cn(
-            "size-[18px] shrink-0 opacity-70 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:-rotate-12 group-hover:scale-110 group-hover:opacity-100",
-            active && "opacity-100",
-          )}
-        />
+        <span className="relative shrink-0" title={locked ? "Private channel" : undefined}>
+          <Icon
+            className={cn(
+              "size-[18px] opacity-70 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:-rotate-12 group-hover:scale-110 group-hover:opacity-100",
+              active && "opacity-100",
+            )}
+          />
+          <AnimatePresence initial={false}>
+            {locked && (
+              <motion.span
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                exit={{ scale: 0 }}
+                transition={{ type: "spring", stiffness: 600, damping: 18 }}
+                className="absolute -right-1 -bottom-0.5 grid size-2.5 place-items-center rounded-full bg-background"
+              >
+                <LockIcon className="size-2" strokeWidth={3} />
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </span>
         <span className="truncate">{channel.name}</span>
         {onEdit && (
           <span

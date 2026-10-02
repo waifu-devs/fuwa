@@ -21,12 +21,14 @@ use crate::error::{Error, Result};
 use crate::hub::Hub;
 use crate::id::{millis, new_id, now_ms, parse_id, timestamp};
 use crate::pb;
+use crate::permissions;
 
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0001_init.sql"),
     include_str!("../migrations/server/0002_concurrent_writes.sql"),
     include_str!("../migrations/server/0003_status.sql"),
     include_str!("../migrations/server/0004_moderation.sql"),
+    include_str!("../migrations/server/0005_roles.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -96,6 +98,7 @@ pub struct Audit {
     pub action: pb::AuditAction,
     pub target_id: String,
     pub channel_name: String,
+    pub role_name: String,
     pub reason: String,
     pub changes: Vec<pb::AuditChange>,
 }
@@ -107,6 +110,11 @@ impl Audit {
 
     pub fn channel(mut self, name: impl Into<String>) -> Self {
         self.channel_name = name.into();
+        self
+    }
+
+    pub fn role(mut self, name: impl Into<String>) -> Self {
+        self.role_name = name.into();
         self
     }
 
@@ -129,14 +137,15 @@ impl Audit {
 pub async fn audit(conn: &Connection, actor_id: &str, entry: Audit) -> Result<()> {
     let changes = (!entry.changes.is_empty()).then(|| AuditChanges { changes: entry.changes }.encode_to_vec());
     conn.execute(
-        "INSERT INTO audit (id, actor_id, action, target_id, channel_name, reason, changes, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO audit (id, actor_id, action, target_id, channel_name, role_name, reason, changes, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         (
             new_id(),
             actor_id,
             entry.action as i64,
             entry.target_id.as_str(),
             entry.channel_name.as_str(),
+            entry.role_name.as_str(),
             entry.reason.as_str(),
             changes,
             now_ms(),
@@ -561,6 +570,8 @@ impl Servers {
         if server.id != id {
             return Err(Error::internal(format!("file is named {id} but holds server {}", server.id)));
         }
+        // Servers from before roles get theirs the first time they open.
+        db::write(&sdb.db, async |conn| permissions::seed(conn, id, now_ms()).await.map(drop)).await?;
         self.write().insert(id.to_string(), sdb);
         Ok(())
     }
@@ -648,7 +659,10 @@ impl Servers {
                     (id.as_str(), new.name.as_str(), new.description.as_str(), new.icon_url.as_str(), owner.id.as_str(), new.discoverable, general.as_str(), now),
                 )
                 .await?;
-                let member = add_member(conn, owner, pb::MemberRole::Owner, &id, now).await?;
+                for role in permissions::seed(conn, &id, now).await? {
+                    events.push(Payload::RoleCreated(pb::RoleCreated { role: Some(role) }));
+                }
+                let member = add_member(conn, owner, &id, now).await?;
                 events.push(Payload::MemberJoined(pb::MemberJoined { member: Some(member) }));
                 let channel = pb::Channel {
                     id: general.clone(),
@@ -661,6 +675,7 @@ impl Servers {
                     created_at: Some(timestamp(now)),
                     updated_at: Some(timestamp(now)),
                     slowmode_seconds: 0,
+                    permission_overwrites: vec![],
                 };
                 conn.execute(
                     "INSERT INTO channels (id, name, type, position, created_at, updated_at) VALUES (?1, ?2, ?3, 0, ?4, ?4)",
@@ -718,28 +733,107 @@ impl Servers {
 }
 
 /// Adds (or re-adds) someone to a server, keeping their profile for display.
-pub async fn add_member(
-    conn: &Connection,
-    user: &pb::User,
-    role: pb::MemberRole,
-    server_id: &str,
-    now: i64,
-) -> Result<pb::Member> {
+/// They start with no roles but @everyone.
+pub async fn add_member(conn: &Connection, user: &pb::User, server_id: &str, now: i64) -> Result<pb::Member> {
     upsert_user(conn, user).await?;
-    conn.execute(
-        "INSERT INTO members (user_id, role, joined_at) VALUES (?1, ?2, ?3)",
-        (user.id.as_str(), role as i64, now),
-    )
-    .await?;
+    // `role` is from before roles and no longer read.
+    conn.execute("INSERT INTO members (user_id, role, joined_at) VALUES (?1, 0, ?2)", (user.id.as_str(), now)).await?;
     conn.execute("UPDATE usage SET members = members + 1, updated_at = ?1 WHERE id = 1", [now]).await?;
     Ok(pb::Member {
         server_id: server_id.to_string(),
         user: Some(user.clone()),
         nickname: String::new(),
-        role: role as i32,
         joined_at: Some(timestamp(now)),
         timed_out_until: None,
+        role_ids: vec![],
     })
+}
+
+/// Takes someone out of a server, inside a write: their membership, their
+/// roles, and the channel overwrites that named them, each such channel's
+/// change going out as an event. False if they weren't a member.
+pub async fn remove_member(
+    conn: &Connection,
+    server_id: &str,
+    user_id: &str,
+    events: &mut Vec<Payload>,
+) -> Result<bool> {
+    if conn.execute("DELETE FROM members WHERE user_id = ?1", [user_id]).await? == 0 {
+        return Ok(false);
+    }
+    conn.execute("UPDATE usage SET members = members - 1, updated_at = ?1 WHERE id = 1", [now_ms()]).await?;
+    conn.execute("DELETE FROM member_roles WHERE user_id = ?1", [user_id]).await?;
+    let channels = query_all(
+        conn,
+        "SELECT channel_id FROM channel_overwrites WHERE target_id = ?1 AND target = ?2",
+        (user_id, pb::OverwriteTarget::Member as i64),
+        |r| r.get::<String>(0),
+    )
+    .await?;
+    if !channels.is_empty() {
+        conn.execute(
+            "DELETE FROM channel_overwrites WHERE target_id = ?1 AND target = ?2",
+            (user_id, pb::OverwriteTarget::Member as i64),
+        )
+        .await?;
+        for id in channels {
+            if let Some(channel) = load_channel(conn, server_id, &id).await? {
+                events.push(Payload::ChannelUpdated(pb::ChannelUpdated { channel: Some(channel) }));
+            }
+        }
+    }
+    Ok(true)
+}
+
+pub const CHANNEL_COLUMNS: &str =
+    "id, name, type, parent_id, topic, position, created_at, updated_at, slowmode_seconds";
+
+/// Reads a channel row; its overwrites come from [`permissions::attach_overwrites`].
+pub fn channel_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Channel> + '_ {
+    move |r| {
+        Ok(pb::Channel {
+            id: r.get(0)?,
+            server_id: server_id.to_string(),
+            name: r.get(1)?,
+            r#type: r.get(2)?,
+            parent_id: r.get::<Option<String>>(3)?.unwrap_or_default(),
+            topic: r.get(4)?,
+            position: r.get(5)?,
+            created_at: Some(timestamp(r.get(6)?)),
+            updated_at: Some(timestamp(r.get(7)?)),
+            slowmode_seconds: r.get(8)?,
+            permission_overwrites: vec![],
+        })
+    }
+}
+
+/// A channel with its overwrites.
+pub async fn load_channel(conn: &Connection, server_id: &str, channel_id: &str) -> Result<Option<pb::Channel>> {
+    let Some(mut channel) = query_one(
+        conn,
+        &format!("SELECT {CHANNEL_COLUMNS} FROM channels WHERE id = ?1"),
+        [channel_id],
+        channel_row(server_id),
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    permissions::attach_overwrites(conn, std::slice::from_mut(&mut channel)).await?;
+    Ok(Some(channel))
+}
+
+/// Every channel with its overwrites, in display order.
+pub async fn load_channels(conn: &Connection, server_id: &str) -> Result<Vec<pb::Channel>> {
+    let mut channels = query_all(
+        conn,
+        &format!("SELECT {CHANNEL_COLUMNS} FROM channels ORDER BY position, id"),
+        (),
+        channel_row(server_id),
+    )
+    .await?;
+    permissions::attach_overwrites(conn, &mut channels).await?;
+    Ok(channels)
 }
 
 /// Stores the latest look of a user who is or was a member.
@@ -800,23 +894,25 @@ pub async fn user(conn: &Connection, user_id: &str) -> Result<Option<pb::User>> 
     query_one(conn, &format!("SELECT {USER_COLUMNS} FROM users WHERE users.id = ?1"), [user_id], user_row).await
 }
 
-pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, members.nickname, members.role, members.joined_at, members.timed_out_until";
+pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, members.nickname, members.joined_at, members.timed_out_until";
 
+/// Reads a member row; their roles come from [`permissions::attach_roles`].
 pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member> + '_ {
     move |r| {
         Ok(pb::Member {
             server_id: server_id.to_string(),
             user: Some(user_row(r)?),
             nickname: r.get(7)?,
-            role: r.get(8)?,
-            joined_at: Some(timestamp(r.get(9)?)),
-            timed_out_until: r.get::<Option<i64>>(10)?.map(timestamp),
+            joined_at: Some(timestamp(r.get(8)?)),
+            timed_out_until: r.get::<Option<i64>>(9)?.map(timestamp),
+            role_ids: vec![],
         })
     }
 }
 
+/// A member with their roles.
 pub async fn member(conn: &Connection, server_id: &str, user_id: &str) -> Result<Option<pb::Member>> {
-    query_one(
+    let Some(mut member) = query_one(
         conn,
         &format!(
             "SELECT {MEMBER_COLUMNS} FROM members JOIN users ON users.id = members.user_id WHERE members.user_id = ?1"
@@ -824,7 +920,25 @@ pub async fn member(conn: &Connection, server_id: &str, user_id: &str) -> Result
         [user_id],
         member_row(server_id),
     )
-    .await
+    .await?
+    else {
+        return Ok(None);
+    };
+    member.role_ids = permissions::member_role_ids(conn, user_id).await?;
+    Ok(Some(member))
+}
+
+/// A member and what they can do, as the server's file has it now.
+pub async fn member_access(
+    conn: &Connection,
+    server_id: &str,
+    user_id: &str,
+) -> Result<Option<(pb::Member, permissions::Access)>> {
+    let Some(member) = member(conn, server_id, user_id).await? else {
+        return Ok(None);
+    };
+    let access = permissions::load(conn, server_id).await?.access(user_id, &member.role_ids);
+    Ok(Some((member, access)))
 }
 
 /// One of the usage counters, read inside a write so limits hold under concurrency.

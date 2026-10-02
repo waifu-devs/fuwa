@@ -8,6 +8,7 @@ mod events;
 mod media;
 mod messages;
 mod node;
+mod roles;
 mod servers;
 
 pub(crate) use account::export_server;
@@ -23,6 +24,7 @@ use crate::db::query_all;
 use crate::error::{Error, Result};
 use crate::node::Account;
 use crate::pb;
+use crate::permissions::Access;
 use crate::servers::{self as store, ServerDb, USER_COLUMNS};
 
 #[derive(Clone)]
@@ -54,27 +56,29 @@ impl Api {
         self.app.forget_notifications(server_id, channel_id, account_id).await
     }
 
-    /// The server and the caller's membership in it.
-    async fn membership(&self, account: &Account, server_id: &str) -> Result<(Arc<ServerDb>, pb::Member)> {
+    /// The server, the caller's membership in it, and what they can do there.
+    async fn membership(&self, account: &Account, server_id: &str) -> Result<Seat> {
         let sdb = self.app.servers.get(server_id).await?;
         let conn = sdb.read()?;
-        let member =
-            store::member(&conn, &sdb.id, &account.id).await?.ok_or_else(|| Error::denied("join this server first"))?;
-        Ok((sdb, member))
+        let (member, access) = store::member_access(&conn, &sdb.id, &account.id)
+            .await?
+            .ok_or_else(|| Error::denied("join this server first"))?;
+        Ok(Seat { sdb, member, access })
     }
 
-    /// Like `membership`, for callers who must be able to manage the server.
-    async fn manager(&self, account: &Account, server_id: &str) -> Result<(Arc<ServerDb>, pb::Member)> {
-        let (sdb, member) = self.membership(account, server_id).await?;
-        if !can_manage(&member) {
-            return Err(Error::denied("only the server's owner and admins can do that"));
-        }
-        Ok((sdb, member))
+    /// Like `membership`, for callers who need `permission` server-wide.
+    async fn with(&self, account: &Account, server_id: &str, permission: pb::Permission) -> Result<Seat> {
+        let seat = self.membership(account, server_id).await?;
+        seat.access.require(permission)?;
+        Ok(seat)
     }
 }
 
-fn can_manage(member: &pb::Member) -> bool {
-    matches!(pb::MemberRole::try_from(member.role), Ok(pb::MemberRole::Owner | pb::MemberRole::Admin))
+/// A caller's place in a server, as of their request.
+struct Seat {
+    sdb: Arc<ServerDb>,
+    member: pb::Member,
+    access: Access,
 }
 
 /// Trims `value` and checks its length in characters.

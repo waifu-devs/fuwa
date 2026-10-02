@@ -7,7 +7,6 @@ import {
   FingerprintIcon,
   PencilIcon,
   RotateCwIcon,
-  ShieldIcon,
   SparklesIcon,
   Trash2Icon,
   XIcon,
@@ -22,21 +21,23 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { MemberRole, MessageKind, type Channel, type Member, type Message, type User } from "@/gen/fuwa/v1/types_pb";
+import { MessageKind, Permission, type Channel, type Member, type Message, type User } from "@/gen/fuwa/v1/types_pb";
 import { deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
-import { useInstance } from "@/fuwa/hooks";
+import { useAccess, useInstance, useRoles } from "@/fuwa/hooks";
 import type { PendingMessage } from "@/fuwa/store";
 import { sendsMessage } from "@/components/chat/Composer";
-import { Markdown } from "@/components/Markdown";
+import { Mention, remarkMentions, ServerLookProvider, useRoleColor, useServerLook, type ServerLook } from "@/components/chat/mentions";
+import { Markdown, type MarkdownExtension } from "@/components/Markdown";
+import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
 import { ProfilePopover } from "@/components/ProfilePopover";
-import { displayName, formatDay, formatFull, formatStamp, formatTime, hueOf, mentions, sameDay, toDate } from "@/lib/format";
+import { displayName, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
 import { comboLabel } from "@/lib/keybinds";
-import { pingsEveryone, useNotificationSettings } from "@/lib/notifications";
+import { pingsMe, useNotificationSettings } from "@/lib/notifications";
+import { hasIn } from "@/lib/permissions";
 import { usePrefs, type MessageDisplay } from "@/lib/prefs";
 import { copy } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -55,9 +56,12 @@ export type MessageListHandle = { editLast: () => void };
 
 export const MessageList = forwardRef<
   MessageListHandle,
-  { instanceKey: string; serverId: string; channel: Channel; manager: boolean }
->(function MessageList({ instanceKey, serverId, channel, manager }, ref) {
+  { instanceKey: string; serverId: string; channel: Channel }
+>(function MessageList({ instanceKey, serverId, channel }, ref) {
   const inst = useInstance(instanceKey);
+  const access = useAccess(instanceKey, serverId);
+  const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
+  const roles = useRoles(instanceKey, serverId);
   const state = inst?.messages[channel.id];
   const items = state?.items ?? EMPTY;
   const pending = inst?.pending[channel.id] ?? EMPTY;
@@ -83,6 +87,18 @@ export const MessageList = forwardRef<
   }, [instanceKey, serverId, channel.id]);
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
+  const myRoleIds = memberById.get(me?.id ?? "")?.roleIds;
+  const ownerId = inst?.servers.find((s) => s.id === serverId)?.ownerId ?? "";
+  const look = useMemo<ServerLook>(
+    () => ({
+      instanceKey,
+      ownerId,
+      roles,
+      members,
+      me: me ? { id: me.id, username: me.username, roleIds: myRoleIds ?? [] } : undefined,
+    }),
+    [instanceKey, ownerId, roles, members, me, myRoleIds],
+  );
 
   const rows = useMemo(() => {
     const out: Row[] = [];
@@ -169,6 +185,7 @@ export const MessageList = forwardRef<
   const beginning = state && !state.loading && !state.hasMore;
 
   return (
+    <ServerLookProvider value={look}>
     <div className="relative min-h-0 flex-1">
       <div ref={scroller} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">
         <motion.div
@@ -228,12 +245,7 @@ export const MessageList = forwardRef<
                   author={author}
                   member={memberById.get(row.message.authorId)}
                   mine={row.message.authorId === me?.id}
-                  mentionsMe={
-                    !!me &&
-                    row.message.authorId !== me.id &&
-                    (mentions(row.message.content, me.username) ||
-                      (!suppressEveryone && pingsEveryone(row.message.content, memberById.get(row.message.authorId)?.role)))
-                  }
+                  mentionsMe={!!inst && pingsMe(inst, serverId, row.message, suppressEveryone)}
                   instanceKey={instanceKey}
                   canDelete={manager || row.message.authorId === me?.id}
                   animate={!initial.current?.has(row.message.id)}
@@ -268,6 +280,7 @@ export const MessageList = forwardRef<
         )}
       </AnimatePresence>
     </div>
+    </ServerLookProvider>
   );
 });
 
@@ -316,17 +329,14 @@ function Skeleton({ rows }: { rows: number }) {
   );
 }
 
-const hue = (id: string) => ({ "--h": hueOf(id) }) as CSSProperties;
-
+/** Someone's name in chat, in their role's color, with a crown for the server's owner. */
 export function AuthorName({ user, member }: { user: User | undefined; member: Member | undefined }) {
-  const role = member?.role;
+  const { ownerId } = useServerLook();
+  const color = useRoleColor(member);
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
-      <span className="name-tint truncate font-bold" style={hue(user?.id ?? "")}>
-        {member?.nickname || displayName(user)}
-      </span>
-      {role === MemberRole.OWNER && <CrownIcon aria-label="Owner" className="size-3.5 shrink-0 text-amber-400" />}
-      {role === MemberRole.ADMIN && <ShieldIcon aria-label="Admin" className="size-3.5 shrink-0 text-primary" />}
+      <RoleName id={user?.id ?? ""} name={member?.nickname || displayName(user)} color={color} />
+      {!!ownerId && user?.id === ownerId && <CrownIcon aria-label="Owner" className="size-3.5 shrink-0 text-amber-400" />}
     </span>
   );
 }
@@ -426,9 +436,15 @@ export function MessageLine({
   );
 }
 
-/** A message's text; in compact display its first paragraph runs on after the name. */
+const CHAT: MarkdownExtension = { remarkPlugins: [remarkMentions], components: { "fuwa-mention": Mention } };
+
+/** A message's text, mentions and all; in compact display its first paragraph runs on after the name. */
 export function MessageBody({ content, display, className }: { content: string; display: MessageDisplay; className?: string }) {
-  return <Markdown className={cn("chat", display === "compact" && "inline-first", className)}>{content}</Markdown>;
+  return (
+    <Markdown className={cn("chat", display === "compact" && "inline-first", className)} extension={CHAT}>
+      {content}
+    </Markdown>
+  );
 }
 
 function MessageRow({
@@ -608,10 +624,11 @@ function JoinRow({
   const [done, setDone] = useState(waved.has(message.id));
   const [waving, setWaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const color = useRoleColor(member);
   const name = (
     <ProfilePopover instanceKey={instanceKey} user={author} member={member}>
-      <button type="button" className="name-tint font-bold hover:underline" style={hue(message.authorId)}>
-        {member?.nickname || displayName(author)}
+      <button type="button" className="inline-flex align-bottom hover:underline">
+        <RoleName id={message.authorId} name={member?.nickname || displayName(author)} color={color} />
       </button>
     </ProfilePopover>
   );

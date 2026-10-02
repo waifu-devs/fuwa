@@ -1,5 +1,7 @@
+import { CircleIcon, CircleOffIcon, PaletteIcon } from "lucide-react";
 import { Markdown } from "@/components/Markdown";
-import { Toggle } from "@/components/settings/controls";
+import { RoleName } from "@/components/RoleName";
+import { Choice, Toggle } from "@/components/settings/controls";
 import { Slider } from "@/components/ui/slider";
 import { reduceMotion, setPrefs, usePrefs } from "@/lib/prefs";
 import { MotionChoice } from "./Appearance";
@@ -41,6 +43,28 @@ export function Accessibility() {
             { value: 100, label: "100%" },
           ]}
         />
+      </PrefSetting>
+      <PrefSetting
+        id="role-colors"
+        title="Role colors"
+        hint="Roles can give people's names a color. Show it on the name, as a dot beside it, or not at all."
+        keys={["roleColors"]}
+        delay={0.06}
+      >
+        <Choice
+          value={p.roleColors}
+          onChange={(roleColors) => setPrefs({ roleColors })}
+          options={[
+            { value: "names", label: "On names", hint: "Names take their role's color.", icon: <PaletteIcon className="size-4" /> },
+            { value: "beside", label: "Beside names", hint: "A dot in the role's color.", icon: <CircleIcon className="size-4" /> },
+            { value: "off", label: "Off", hint: "Names keep their own tint.", icon: <CircleOffIcon className="size-4" /> },
+          ]}
+        />
+        <div className="flex flex-wrap gap-x-5 gap-y-1 rounded-xl bg-muted/50 px-3 py-2 text-sm">
+          <RoleName id="preview-sakura" name="Sakura" color={0xf472b6} />
+          <RoleName id="preview-ren" name="Ren" color={0x60a5fa} />
+          <RoleName id="preview-mio" name="Mio" color={0x34d399} />
+        </div>
       </PrefSetting>
       <PrefSetting id="underline-links" title="Links" keys={["underlineLinks"]} delay={0.08}>
         <Toggle

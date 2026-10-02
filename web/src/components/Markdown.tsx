@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -42,11 +42,17 @@ const blockComponents: Components = {
   h6: ({ node: _node, ...props }) => <h4 {...props} />,
 };
 
+/** Extra syntax for one kind of text, like mentions in chat: more remark plugins and the elements they make. */
+export type MarkdownExtension = { remarkPlugins: NonNullable<Options["remarkPlugins"]>; components: Record<string, unknown> };
+
 /** Block Markdown: paragraphs, lists, quotes, code blocks. A single newline is a line break. */
-export function Markdown({ children, className }: { children: string; className?: string }) {
+export function Markdown({ children, className, extension }: { children: string; className?: string; extension?: MarkdownExtension }) {
   return (
     <div className={cn("markdown", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={blockComponents}>
+      <ReactMarkdown
+        remarkPlugins={extension ? [remarkGfm, remarkBreaks, ...extension.remarkPlugins] : [remarkGfm, remarkBreaks]}
+        components={extension ? ({ ...blockComponents, ...extension.components } as Components) : blockComponents}
+      >
         {children}
       </ReactMarkdown>
     </div>

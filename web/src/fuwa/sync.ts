@@ -16,6 +16,7 @@ import {
   removeServer,
   store,
   updateInstance,
+  withChannels,
 } from "./store";
 
 /**
@@ -178,11 +179,17 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
     const cursors = new Map<string, bigint>();
     /** Events for servers whose snapshot is still loading, applied once it lands. */
     const held = new Map<string, Event[]>();
+    /** Where each resumed server's replay started, to tell whether anything happened while away. */
+    const resumedFrom = new Map<string, bigint>();
+    /** Channel events that arrived while a server's channels were being listed again. */
+    const relisting = new Map<string, Event[]>();
 
     const subscribe = (ids: readonly string[]) =>
       Stream.suspend(() => {
         const controller = new AbortController();
         const request = { servers: ids.map((serverId) => ({ serverId, afterSequence: cursors.get(serverId) })) };
+        resumedFrom.clear();
+        for (const [serverId, sequence] of cursors) resumedFrom.set(serverId, sequence);
         return Stream.fromAsyncIterable<SubscribeResponse, FuwaError>(
           api.events.subscribe(request, { signal: controller.signal }),
           toFuwaError,
@@ -197,18 +204,19 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
 
     const snapshot = (serverId: string) =>
       Effect.gen(function* () {
-        const [server, channels, members] = yield* Effect.all(
+        const [server, channels, members, roles] = yield* Effect.all(
           [
             call((signal) => api.servers.getServer({ serverId }, { signal })),
             call((signal) => api.channels.listChannels({ serverId }, { signal })),
             call((signal) => api.servers.listMembers({ serverId }, { signal })),
+            call((signal) => api.roles.listRoles({ serverId }, { signal })),
           ],
           { concurrency: "unbounded" },
         ).pipe(Effect.retry(retryPolicy));
         store.update((s) => {
           const current = s.instances[key];
           if (!current || !server.server) return s;
-          let next = applySnapshot(current, server.server, channels.channels, members.members);
+          let next = applySnapshot(current, server.server, channels.channels, members.members, roles.roles);
           const focus = s.focus?.instance === key ? s.focus.channel : null;
           for (const event of held.get(serverId) ?? []) next = applyEvent(next, event, focus);
           return { ...s, instances: { ...s.instances, [key]: next } };
@@ -225,11 +233,36 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
         ),
       );
 
+    // A replay goes by what you can see now, so channels you gained or lost
+    // while away only show up by listing them again.
+    const relist = (serverId: string) =>
+      Effect.gen(function* () {
+        relisting.set(serverId, []);
+        const { channels } = yield* call((signal) => api.channels.listChannels({ serverId }, { signal })).pipe(
+          Effect.retry(retryPolicy),
+        );
+        store.update((s) => {
+          const current = s.instances[key];
+          if (!current?.synced[serverId]) return s;
+          let next = withChannels(current, serverId, channels);
+          const focus = s.focus?.instance === key ? s.focus.channel : null;
+          for (const event of relisting.get(serverId) ?? []) next = applyEvent(next, event, focus);
+          return { ...s, instances: { ...s.instances, [key]: next } };
+        });
+      }).pipe(
+        Effect.ignore,
+        Effect.ensuring(Effect.sync(() => relisting.delete(serverId))),
+      );
+
     const handle = (res: SubscribeResponse) =>
       Effect.gen(function* () {
         if (res.ready) {
           for (const head of res.ready.servers) {
-            if (cursors.has(head.serverId)) continue;
+            if (cursors.has(head.serverId)) {
+              const from = resumedFrom.get(head.serverId);
+              if (from !== undefined && head.sequence > from) yield* FiberSet.run(snapshots, relist(head.serverId));
+              continue;
+            }
             cursors.set(head.serverId, head.sequence);
             held.set(head.serverId, []);
             yield* FiberSet.run(snapshots, snapshot(head.serverId));
@@ -259,6 +292,8 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
             return { ...s, instances: { ...s.instances, [key]: applyEvent(current, event, focus) } };
           });
           onLiveEvent(key, event);
+          const kind = event.payload.case;
+          if (kind === "channelCreated" || kind === "channelUpdated" || kind === "channelDeleted") relisting.get(sid)?.push(event);
         }
         if (removed?.name) onRemoved(removed.name, removed.reason);
         const gone =

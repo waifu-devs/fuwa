@@ -4,7 +4,8 @@ package fuwa.v1;
 
 import "fuwa/v1/types.proto";
 
-// Channels in a community server. Members can read them; owners and admins manage them.
+// Channels in a community server. Members see the ones VIEW_CHANNELS lets
+// them; MANAGE_CHANNELS changes them, MANAGE_ROLES their permissions.
 service ChannelService {
   rpc CreateChannel(CreateChannelRequest) returns (CreateChannelResponse);
   rpc GetChannel(GetChannelRequest) returns (GetChannelResponse);
@@ -13,6 +14,9 @@ service ChannelService {
   rpc DeleteChannel(DeleteChannelRequest) returns (DeleteChannelResponse);
   // Puts every channel in a new order, and in or out of categories, at once.
   rpc ReorderChannels(ReorderChannelsRequest) returns (ReorderChannelsResponse);
+  // Replaces a channel's permission overwrites. The caller can only change
+  // permissions they have in the channel.
+  rpc SetChannelPermissions(SetChannelPermissionsRequest) returns (SetChannelPermissionsResponse);
 }
 
 message CreateChannelRequest {
@@ -84,4 +88,15 @@ message ChannelPlacement {
 message ReorderChannelsResponse {
   // In display order.
   repeated Channel channels = 1;
+}
+
+message SetChannelPermissionsRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // At most one per role or member. Server-wide permissions can't be in one.
+  repeated PermissionOverwrite overwrites = 3;
+}
+
+message SetChannelPermissionsResponse {
+  Channel channel = 1;
 }

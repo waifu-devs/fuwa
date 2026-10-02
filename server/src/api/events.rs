@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{Stream, StreamExt};
@@ -9,11 +10,12 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tonic::{Request, Response, Status};
 
-use super::{Api, respond};
+use super::{Api, Seat, respond};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::pb::{self, event_service_server::EventService};
-use crate::servers::Payload;
+use crate::permissions::Access;
+use crate::servers::{self as store, Payload, ServerDb};
 
 /// How often an idle stream gets a heartbeat, so proxies don't close it.
 const HEARTBEAT: Duration = Duration::from_secs(25);
@@ -23,6 +25,119 @@ const MAX_SERVERS: usize = 200;
 const REPLAY_PAGE: i64 = 500;
 
 type EventStream = Pin<Box<dyn Stream<Item = Result<pb::SubscribeResponse, Status>> + Send>>;
+
+/// The channel an event is about, if it's about one.
+fn channel_of(payload: &Payload) -> Option<&str> {
+    match payload {
+        Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
+        | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) }) => Some(&m.channel_id),
+        Payload::MessageDeleted(d) => Some(&d.channel_id),
+        Payload::ChannelCreated(pb::ChannelCreated { channel: Some(c) })
+        | Payload::ChannelUpdated(pb::ChannelUpdated { channel: Some(c) }) => Some(&c.id),
+        Payload::ChannelDeleted(d) => Some(&d.channel_id),
+        _ => None,
+    }
+}
+
+/// Whether an event can change what `account_id` can see or do in its server.
+fn changes_access(payload: &Payload, account_id: &str) -> bool {
+    match payload {
+        Payload::RoleCreated(_)
+        | Payload::RoleUpdated(_)
+        | Payload::RoleDeleted(_)
+        | Payload::ChannelCreated(_)
+        | Payload::ChannelUpdated(_)
+        | Payload::ChannelDeleted(_)
+        | Payload::ServerUpdated(_) => true,
+        Payload::MemberUpdated(pb::MemberUpdated { member: Some(m) }) => {
+            m.user.as_ref().is_some_and(|u| u.id == account_id)
+        }
+        _ => false,
+    }
+}
+
+/// One member's view of one server's events: what they can see, worked out
+/// again whenever an event changes it.
+struct View {
+    sdb: Arc<ServerDb>,
+    account_id: String,
+    access: Access,
+    /// Catching up: what the member can see is what they can see now, not
+    /// what they could when each event happened.
+    replaying: bool,
+}
+
+impl View {
+    /// What the member gets for `event`: nothing if it's about a channel they
+    /// can't see; when it changes what they can see, the channels that appear
+    /// for them (ChannelCreated) and go (ChannelDeleted), not stored, so
+    /// sequence 0.
+    async fn pass(&mut self, event: &pb::Event) -> Vec<pb::Event> {
+        let Some(payload) = &event.payload else { return vec![event.clone()] };
+        if !changes_access(payload, &self.account_id) {
+            return match channel_of(payload) {
+                Some(channel_id) if !self.access.can_see(channel_id) => vec![],
+                _ => vec![event.clone()],
+            };
+        }
+        let before = self.access.visible();
+        match self.load().await {
+            Ok(Some(access)) => self.access = access,
+            Ok(None) => {}
+            Err(err) => tracing::warn!(server = %self.sdb.id, error = %err, "couldn't work out a member's permissions"),
+        }
+        let after = self.access.visible();
+        let own = channel_of(payload);
+        let (created, deleted) =
+            (matches!(payload, Payload::ChannelCreated(_)), matches!(payload, Payload::ChannelDeleted(_)));
+        let shown = match own {
+            // The member may have had a channel deleted while they were away,
+            // so a replay always says it went; its id is all it gives away.
+            Some(id) if deleted => self.replaying || before.contains(id),
+            Some(id) if created => after.contains(id),
+            // A channel that appears or goes because of this change comes as
+            // ChannelCreated or ChannelDeleted below instead.
+            Some(id) => before.contains(id) && after.contains(id),
+            None => true,
+        };
+        let mut out = Vec::new();
+        if shown {
+            out.push(event.clone());
+        }
+        let unstored = |payload| pb::Event {
+            id: new_id(),
+            server_id: event.server_id.clone(),
+            sequence: 0,
+            actor_id: event.actor_id.clone(),
+            created_at: Some(timestamp(now_ms())),
+            payload: Some(payload),
+        };
+        let mut appeared: Vec<&String> =
+            after.difference(&before).filter(|id| !(created && Some(id.as_str()) == own)).collect();
+        appeared.sort();
+        if !appeared.is_empty()
+            && let Ok(conn) = self.sdb.read()
+        {
+            for id in appeared {
+                if let Ok(Some(channel)) = store::load_channel(&conn, &self.sdb.id, id).await {
+                    out.push(unstored(Payload::ChannelCreated(pb::ChannelCreated { channel: Some(channel) })));
+                }
+            }
+        }
+        let mut gone: Vec<&String> =
+            before.difference(&after).filter(|id| !(deleted && Some(id.as_str()) == own)).collect();
+        gone.sort();
+        for id in gone {
+            out.push(unstored(Payload::ChannelDeleted(pb::ChannelDeleted { channel_id: id.clone() })));
+        }
+        out
+    }
+
+    async fn load(&self) -> Result<Option<Access>> {
+        let conn = self.sdb.read()?;
+        Ok(store::member_access(&conn, &self.sdb.id, &self.account_id).await?.map(|(_, access)| access))
+    }
+}
 
 #[tonic::async_trait]
 impl EventService for Api {
@@ -43,9 +158,10 @@ impl EventService for Api {
         let mut gone = Vec::new();
         for cursor in cursors {
             let payload = match self.membership(&account, &cursor.server_id).await {
-                Ok((sdb, _)) => {
+                Ok(Seat { sdb, access, .. }) => {
                     let live = self.app.hub.subscribe(&sdb.id);
-                    followed.push((sdb, cursor.after_sequence, live));
+                    let view = View { sdb: sdb.clone(), account_id: account.id.clone(), access, replaying: true };
+                    followed.push((sdb, cursor.after_sequence, live, view));
                     continue;
                 }
                 Err(Error::NotFound(_)) => Payload::ServerDeleted(pb::ServerDeleted {}),
@@ -78,9 +194,10 @@ impl EventService for Api {
             }
             let mut live = StreamMap::new();
             let mut last_sent: HashMap<String, i64> = HashMap::new();
+            let mut views: HashMap<String, View> = HashMap::new();
 
             let mut heads = Vec::with_capacity(followed.len());
-            for (sdb, after, receiver) in followed {
+            for (sdb, after, receiver, mut view) in followed {
                 let mut sequence = match after {
                     Some(after) => after.max(0),
                     // Live only: anything committed up to now is already in the
@@ -105,15 +222,19 @@ impl EventService for Api {
                         let Some(last) = page.last() else { break };
                         sequence = last.sequence;
                         for event in page {
-                            if !send(Ok(pb::SubscribeResponse { event: Some(event), ready: None })).await {
-                                return;
+                            for event in view.pass(&event).await {
+                                if !send(Ok(pb::SubscribeResponse { event: Some(event), ready: None })).await {
+                                    return;
+                                }
                             }
                         }
                     }
                 }
+                view.replaying = false;
                 last_sent.insert(sdb.id.clone(), sequence);
                 heads.push(pb::ServerHead { server_id: sdb.id.clone(), sequence });
                 live.insert(sdb.id.clone(), BroadcastStream::new(receiver));
+                views.insert(sdb.id.clone(), view);
             }
             let ready = pb::SubscribeReady { servers: heads };
             if !send(Ok(pb::SubscribeResponse { event: None, ready: Some(ready) })).await {
@@ -154,11 +275,18 @@ impl EventService for Api {
                                 Some(Payload::MemberLeft(left)) => left.user_id == account_id,
                                 _ => false,
                             };
-                            if !send(Ok(pb::SubscribeResponse { event: Some((*event).clone()), ready: None })).await {
-                                return;
+                            let out = match views.get_mut(&server_id) {
+                                Some(view) if !ends => view.pass(&event).await,
+                                _ => vec![(*event).clone()],
+                            };
+                            for event in out {
+                                if !send(Ok(pb::SubscribeResponse { event: Some(event), ready: None })).await {
+                                    return;
+                                }
                             }
                             if ends {
                                 live.remove(&server_id);
+                                views.remove(&server_id);
                                 if live.is_empty() {
                                     return;
                                 }
@@ -180,11 +308,16 @@ impl EventService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, _) = self.membership(&account, &req.server_id).await?;
+                let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
                 let limit = if req.limit <= 0 { 100 } else { req.limit.min(500) } as i64;
                 let mut events = sdb.events_after(req.after_sequence.max(0), limit + 1).await?;
                 let has_more = events.len() as i64 > limit;
                 events.truncate(limit as usize);
+                // What they can't see now is left out, as a stream leaves it out.
+                events.retain(|e| match &e.payload {
+                    Some(Payload::ChannelDeleted(_)) | None => true,
+                    Some(payload) => channel_of(payload).is_none_or(|channel_id| access.can_see(channel_id)),
+                });
                 Ok(pb::ListEventsResponse { events, has_more })
             }
             .await,

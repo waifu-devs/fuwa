@@ -1,6 +1,7 @@
-import { CalendarHeartIcon, CrownIcon, ShieldIcon } from "lucide-react";
+import { CalendarHeartIcon, CrownIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { MemberRole, type Member, type Profile, type User } from "@/gen/fuwa/v1/types_pb";
+import type { ReactNode } from "react";
+import type { Member, Profile, User } from "@/gen/fuwa/v1/types_pb";
 import { hue, UserAvatar } from "@/components/Icons";
 import { Markdown } from "@/components/Markdown";
 import { SPRING, SwapText } from "@/components/motion";
@@ -22,6 +23,8 @@ export function ProfileCard({
   user,
   profile,
   member,
+  owner = false,
+  roles,
   me = false,
   loading = false,
   editing = false,
@@ -32,6 +35,10 @@ export function ProfileCard({
   profile?: Pick<Profile, "pronouns" | "bio" | "bannerUrl" | "accentColor" | "createdAt">;
   /** Their membership in the server it opened from. */
   member?: Member;
+  /** They own the server it opened from. */
+  owner?: boolean;
+  /** Their roles in that server. */
+  roles?: ReactNode;
   /** Your own card: your username hides in streamer mode. */
   me?: boolean;
   loading?: boolean;
@@ -43,7 +50,6 @@ export function ProfileCard({
   const name = member?.nickname || displayName(user);
   const status = shownStatus(user);
   const accent = profile?.accentColor;
-  const role = member?.role;
   const since = profile?.createdAt ? toDate(profile.createdAt) : null;
   const joined = member?.joinedAt ? toDate(member.joinedAt) : null;
   const day = (d: Date) => d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -96,8 +102,7 @@ export function ProfileCard({
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={stagger(0)} className="mt-2">
           <p className="flex min-w-0 items-center gap-1.5 text-xl font-extrabold">
             <Text className="truncate">{name}</Text>
-            {role === MemberRole.OWNER && <CrownIcon aria-label="Owner" className="size-4 shrink-0 text-amber-400" />}
-            {role === MemberRole.ADMIN && <ShieldIcon aria-label="Admin" className="size-4 shrink-0 text-primary" />}
+            {owner && <CrownIcon aria-label="Owner" className="size-4 shrink-0 text-amber-400" />}
           </p>
           <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
             <span className="truncate">@{me ? <Private text={user.username} kind="name" /> : user.username}</span>
@@ -118,6 +123,7 @@ export function ProfileCard({
             {member?.nickname && member.nickname !== displayName(user) && <span className="truncate">· {displayName(user)}</span>}
           </p>
         </motion.div>
+        {roles}
         <AnimatePresence initial={false}>
           {(profile?.bio || loading) && (
             <motion.div

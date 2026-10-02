@@ -1,6 +1,7 @@
 //! End-to-end tests: a real instance on a local port, driven through the
 //! generated gRPC clients (and raw gRPC-Web, as a browser would).
 
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -71,6 +72,7 @@ struct Clients {
     admin: pb::admin_service_client::AdminServiceClient<Channel>,
     node: pb::node_service_client::NodeServiceClient<Channel>,
     media: pb::media_service_client::MediaServiceClient<Channel>,
+    roles: pb::role_service_client::RoleServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -84,7 +86,8 @@ async fn clients(instance: &Instance) -> Clients {
         events: pb::event_service_client::EventServiceClient::new(channel.clone()),
         admin: pb::admin_service_client::AdminServiceClient::new(channel.clone()),
         node: pb::node_service_client::NodeServiceClient::new(channel.clone()),
-        media: pb::media_service_client::MediaServiceClient::new(channel),
+        media: pb::media_service_client::MediaServiceClient::new(channel.clone()),
+        roles: pb::role_service_client::RoleServiceClient::new(channel),
     }
 }
 
@@ -410,7 +413,10 @@ async fn a_community_end_to_end() {
     // `ready` came right after the replay and names the last replayed event.
     let (replayed, head) = ready_after.expect("ready arrives");
     assert!(replayed >= 1 && replayed == head, "replayed {replayed}, head {head}");
-    assert!(matches!(seen[0].payload, Some(Payload::MemberJoined(_))));
+    // A new server starts with its roles, then its owner.
+    assert!(matches!(&seen[0].payload, Some(Payload::RoleCreated(r)) if r.role.as_ref().unwrap().name == "Admin"));
+    assert!(matches!(&seen[1].payload, Some(Payload::RoleCreated(r)) if r.role.as_ref().unwrap().id == sid));
+    assert!(matches!(seen[2].payload, Some(Payload::MemberJoined(_))));
     assert!(matches!(seen.last().unwrap().payload, Some(Payload::MessageDeleted(_))));
     assert!(seen.iter().any(|e| matches!(&e.payload, Some(Payload::MemberJoined(j)) if j.member.as_ref().unwrap().user.as_ref().unwrap().id == mika_user.id)));
 
@@ -465,7 +471,7 @@ async fn a_community_end_to_end() {
         .into_inner()
         .members;
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].role, pb::MemberRole::Owner as i32);
+    assert!(members[0].role_ids.is_empty() && members[1].role_ids.is_empty());
     assert_eq!(members[1].user.as_ref().unwrap().display_name, "Mika ✨");
 
     // Mika leaves; the owner can't.
@@ -934,10 +940,10 @@ async fn concurrent_writes_stay_ordered_and_counted() {
         .unwrap()
         .into_inner();
     // The stream says where the server stands before anything live arrives:
-    // the owner, #general, three joins with their join messages, and #doomed.
+    // two roles, the owner, #general, three joins with their join messages, and #doomed.
     let ready =
         tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap().ready.unwrap();
-    assert_eq!(ready.servers, [pb::ServerHead { server_id: server.id.clone(), sequence: 9 }]);
+    assert_eq!(ready.servers, [pb::ServerHead { server_id: server.id.clone(), sequence: 11 }]);
 
     // 300 messages from four people at once, half of them into a channel that
     // gets deleted halfway through: more than enough to fold usage changes.
@@ -977,22 +983,29 @@ async fn concurrent_writes_stay_ordered_and_counted() {
     // Live events arrive once each, in sequence, with nothing missing.
     let expected = sent + 1; // the messages that landed, and the channel going
     let mut sequences = Vec::new();
+    let mut in_doomed = HashSet::new();
     while sequences.len() < expected {
         let item = tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap();
         if let Some(event) = item.event {
+            if let Some(Payload::MessageCreated(created)) = &event.payload
+                && created.message.as_ref().unwrap().channel_id == doomed
+            {
+                in_doomed.insert(event.sequence);
+            }
             sequences.push(event.sequence);
         }
     }
     assert!(sequences.windows(2).all(|pair| pair[1] == pair[0] + 1), "live events arrive in sequence: {sequences:?}");
-    assert_eq!((sequences[0], *sequences.last().unwrap()), (10, 9 + expected as i64));
+    assert_eq!((sequences[0], *sequences.last().unwrap()), (12, 11 + expected as i64));
 
-    // Catching up from the start replays the same log, in the same order.
+    // Catching up replays the same log, in the same order, less the messages
+    // in #doomed: a replay shows what can be seen now.
     let mut replay = c
         .events
         .subscribe(authed(
             &owner,
             pb::SubscribeRequest {
-                servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: Some(9) }],
+                servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: Some(11) }],
             },
         ))
         .await
@@ -1006,7 +1019,8 @@ async fn concurrent_writes_stay_ordered_and_counted() {
             None => break,
         }
     }
-    assert_eq!(replayed, sequences);
+    let visible: Vec<i64> = sequences.iter().copied().filter(|s| !in_doomed.contains(s)).collect();
+    assert_eq!(replayed, visible);
     drop((stream, replay));
 
     // The totals count what's in #general, whichever order things landed in.
@@ -1029,7 +1043,7 @@ async fn concurrent_writes_stay_ordered_and_counted() {
     assert_eq!((u.members, u.channels), (4, 1));
     assert_eq!(u.messages, 153, "only #general's messages are left, join messages included");
     assert_eq!(u.messages_sent, sent as i64 + 3);
-    assert_eq!(u.events, 9 + expected as i64);
+    assert_eq!(u.events, 11 + expected as i64);
     drop(c);
     instance.stop().await;
 
@@ -1421,7 +1435,6 @@ async fn profiles_nicknames_and_notification_settings() {
         server_id: server.id.clone(),
         user_id: user.into(),
         nickname: Some(nickname.into()),
-        role: None,
     };
     let own = c.servers.update_member(authed(&mika, nick("", "  Mika ✨ "))).await.unwrap().into_inner();
     assert_eq!(own.member.unwrap().nickname, "Mika ✨");
@@ -1559,7 +1572,7 @@ async fn data_export_and_account_deletion() {
     assert_eq!(export["sessions"].as_array().unwrap().len(), 1);
     let servers = export["servers"].as_array().unwrap();
     assert_eq!(servers.len(), 1);
-    assert_eq!(servers[0]["role"], "member");
+    assert_eq!((&servers[0]["owner"], &servers[0]["roles"]), (&serde_json::json!(false), &serde_json::json!([])));
     let messages = servers[0]["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 3);
     assert_eq!(messages[2]["content"], "hello \"2\"");
@@ -1786,25 +1799,18 @@ async fn server_settings_and_moderation() {
     let listed = c.servers.list_servers(authed(&mika, pb::ListServersRequest {})).await.unwrap().into_inner().servers;
     assert_eq!(listed[0].system_channel_id, welcome.id, "the index keeps the new settings");
 
-    // Roles: only the owner hands them out.
-    let role = |token: &str, user: &str, role: pb::MemberRole| {
-        authed(
-            token,
-            pb::UpdateMemberRequest {
-                server_id: sid.clone(),
-                user_id: user.into(),
-                nickname: None,
-                role: Some(role as i32),
-            },
-        )
+    // New servers start with an Admin role, which only those above it hand out.
+    let roles = c.roles.list_roles(authed(&mika, pb::ListRolesRequest { server_id: sid.clone() })).await.unwrap();
+    let admin_role = roles.into_inner().roles.into_iter().find(|r| r.name == "Admin").unwrap();
+    let give = |token: &str, user: &str, role: &str| {
+        authed(token, pb::AddMemberRoleRequest { server_id: sid.clone(), user_id: user.into(), role_id: role.into() })
     };
-    let promoted =
-        c.servers.update_member(role(&juan, &mika_user.id, pb::MemberRole::Admin)).await.unwrap().into_inner();
-    assert_eq!(promoted.member.unwrap().role, pb::MemberRole::Admin as i32);
-    let by_admin = c.servers.update_member(role(&mika, &aoi_user.id, pb::MemberRole::Admin)).await;
+    let promoted = c.roles.add_member_role(give(&juan, &mika_user.id, &admin_role.id)).await.unwrap().into_inner();
+    assert_eq!(promoted.member.unwrap().role_ids, std::slice::from_ref(&admin_role.id));
+    let by_admin = c.roles.add_member_role(give(&mika, &aoi_user.id, &admin_role.id)).await;
     assert_eq!(by_admin.unwrap_err().code(), Code::PermissionDenied);
-    let to_owner = c.servers.update_member(role(&juan, &aoi_user.id, pb::MemberRole::Owner)).await;
-    assert_eq!(to_owner.unwrap_err().code(), Code::InvalidArgument);
+    let everyone = c.roles.add_member_role(give(&juan, &aoi_user.id, &sid)).await;
+    assert_eq!(everyone.unwrap_err().code(), Code::InvalidArgument);
 
     // Time-outs stop someone sending, until they end.
     let time_out = |token: &str, user: &str, seconds: i64| {
@@ -2054,7 +2060,7 @@ async fn server_settings_and_moderation() {
             A::ChannelUpdate,
             A::MemberTimeOut,
             A::MemberTimeOut,
-            A::MemberUpdate,
+            A::MemberRolesUpdate,
             A::ServerUpdate,
             A::ChannelCreate,
             A::ChannelCreate,
@@ -2134,21 +2140,20 @@ async fn server_settings_and_moderation() {
         .unwrap()
         .into_inner()
         .members;
-    let role_of = |id: &str| members.iter().find(|m| m.user.as_ref().unwrap().id == id).unwrap().role;
-    assert_eq!(
-        (role_of(&mika_user.id), role_of(&owner_id)),
-        (pb::MemberRole::Owner as i32, pb::MemberRole::Admin as i32)
-    );
+    assert_eq!(members[0].user.as_ref().unwrap().id, mika_user.id, "the owner ranks first");
+    let roles_of = |id: &str| members.iter().find(|m| m.user.as_ref().unwrap().id == id).unwrap().role_ids.clone();
+    assert!(roles_of(&owner_id).is_empty(), "the old owner keeps their roles, which were none");
     // The old owner no longer hands out roles, and can leave like anyone else.
+    let roles = c.roles.list_roles(authed(&juan, pb::ListRolesRequest { server_id: sid.clone() })).await.unwrap();
+    let admin_role = roles.into_inner().roles.into_iter().find(|r| r.name == "Admin").unwrap();
     let old_owner = c
-        .servers
-        .update_member(authed(
+        .roles
+        .add_member_role(authed(
             &juan,
-            pb::UpdateMemberRequest {
+            pb::AddMemberRoleRequest {
                 server_id: sid.clone(),
                 user_id: aoi_user.id.clone(),
-                nickname: None,
-                role: Some(pb::MemberRole::Admin as i32),
+                role_id: admin_role.id.clone(),
             },
         ))
         .await;
@@ -2679,5 +2684,466 @@ async fn pictures_upload_serve_and_clean_up() {
     let instance = start(dir.path(), &[("FUWA_PUBLIC_URL", "https://chat.example.com")]).await;
     assert!(!dir.path().join("media").join(&stray).exists());
     assert_eq!(fetch(&instance, &second_avatar).await.2, png(200, 2));
+    instance.stop().await;
+}
+
+async fn join(c: &mut Clients, token: &str, server_id: &str) {
+    c.servers.join_server(authed(token, pb::JoinServerRequest { server_id: server_id.into() })).await.unwrap();
+}
+
+async fn roles(c: &mut Clients, token: &str, server_id: &str) -> Vec<pb::Role> {
+    c.roles
+        .list_roles(authed(token, pb::ListRolesRequest { server_id: server_id.into() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .roles
+}
+
+async fn create_role(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    name: &str,
+    permissions: &[pb::Permission],
+) -> Result<pb::Role, tonic::Status> {
+    c.roles
+        .create_role(authed(
+            token,
+            pb::CreateRoleRequest {
+                server_id: server_id.into(),
+                name: name.into(),
+                permissions: permissions.iter().map(|&p| p as i32).collect(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().role.unwrap())
+}
+
+async fn give_role(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    user_id: &str,
+    role_id: &str,
+) -> Result<pb::Member, Code> {
+    c.roles
+        .add_member_role(authed(
+            token,
+            pb::AddMemberRoleRequest { server_id: server_id.into(), user_id: user_id.into(), role_id: role_id.into() },
+        ))
+        .await
+        .map(|r| r.into_inner().member.unwrap())
+        .map_err(|s| s.code())
+}
+
+async fn channel_names(c: &mut Clients, token: &str, server_id: &str) -> Vec<String> {
+    c.channels
+        .list_channels(authed(token, pb::ListChannelsRequest { server_id: server_id.into() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .map(|ch| ch.name)
+        .collect()
+}
+
+fn overwrite(
+    target_id: &str,
+    target: pb::OverwriteTarget,
+    allow: &[pb::Permission],
+    deny: &[pb::Permission],
+) -> pb::PermissionOverwrite {
+    pb::PermissionOverwrite {
+        target_id: target_id.into(),
+        target: target as i32,
+        allow: allow.iter().map(|&p| p as i32).collect(),
+        deny: deny.iter().map(|&p| p as i32).collect(),
+    }
+}
+
+async fn set_permissions(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    overwrites: Vec<pb::PermissionOverwrite>,
+) -> Result<pb::Channel, Code> {
+    c.channels
+        .set_channel_permissions(authed(
+            token,
+            pb::SetChannelPermissionsRequest { server_id: server_id.into(), channel_id: channel_id.into(), overwrites },
+        ))
+        .await
+        .map(|r| r.into_inner().channel.unwrap())
+        .map_err(|s| s.code())
+}
+
+/// The next event on a stream, skipping heartbeats and `ready`.
+async fn next_event(stream: &mut tonic::Streaming<pb::SubscribeResponse>) -> pb::Event {
+    loop {
+        let item = tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap();
+        if let Some(event) = item.event {
+            return event;
+        }
+    }
+}
+
+#[tokio::test]
+async fn roles_and_channel_permissions() {
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (aoi, aoi_user, _) = sign_up(&mut c, "aoi").await;
+    let (rin, _, _) = sign_up(&mut c, "rin").await;
+    let server = create_server(&mut c, &juan, "Roles", true).await;
+    let sid = server.id.clone();
+    for token in [&mika, &aoi, &rin] {
+        join(&mut c, token, &sid).await;
+    }
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels[0]
+        .id
+        .clone();
+
+    // Every server starts with Admin above @everyone, whose id is the server's.
+    let start = roles(&mut c, &rin, &sid).await;
+    let names: Vec<(&str, i32)> = start.iter().map(|r| (r.name.as_str(), r.position)).collect();
+    assert_eq!(names, [("Admin", 1), ("@everyone", 0)]);
+    assert_eq!(start[1].id, sid);
+    assert!(start[1].permissions.contains(&(P::SendMessages as i32)));
+    assert!(!start[1].permissions.contains(&(P::MentionEveryone as i32)));
+    let admin = start[0].clone();
+
+    // Only people with Manage Roles make roles; new ones land right above @everyone.
+    let denied = create_role(&mut c, &rin, &sid, "Nope", &[]).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let mods =
+        create_role(&mut c, &juan, &sid, "Mods", &[P::ManageRoles, P::ManageMessages, P::KickMembers]).await.unwrap();
+    assert_eq!(mods.position, 1);
+    let unknown = create_role(&mut c, &juan, &sid, "Odd", &[P::Unspecified]).await.unwrap_err();
+    assert_eq!(unknown.code(), Code::InvalidArgument);
+    let order: Vec<String> = roles(&mut c, &juan, &sid).await.into_iter().map(|r| r.name).collect();
+    assert_eq!(order, ["Admin", "Mods", "@everyone"]);
+    let mika_member = give_role(&mut c, &juan, &sid, &mika_user.id, &mods.id).await.unwrap();
+    assert_eq!(mika_member.role_ids, std::slice::from_ref(&mods.id));
+    assert_eq!(give_role(&mut c, &juan, &sid, &mika_user.id, &sid).await.unwrap_err(), Code::InvalidArgument);
+
+    // A moderator hands out only what they have, and only below their own role.
+    let ban = create_role(&mut c, &mika, &sid, "Banners", &[P::BanMembers]).await.unwrap_err();
+    assert_eq!(ban.code(), Code::PermissionDenied);
+    let helpers = create_role(&mut c, &mika, &sid, "Helpers", &[P::ManageMessages]).await.unwrap();
+    for role in [&admin, &mods] {
+        let touch = c
+            .roles
+            .update_role(authed(
+                &mika,
+                pb::UpdateRoleRequest {
+                    server_id: sid.clone(),
+                    role_id: role.id.clone(),
+                    name: Some("Mine".into()),
+                    ..Default::default()
+                },
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(touch.code(), Code::PermissionDenied, "{}", role.name);
+    }
+    let renamed = c
+        .roles
+        .update_role(authed(
+            &mika,
+            pb::UpdateRoleRequest {
+                server_id: sid.clone(),
+                role_id: helpers.id.clone(),
+                name: Some("Helpers ✿".into()),
+                color: Some(0x60A5FA),
+                hoist: Some(true),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .role
+        .unwrap();
+    assert_eq!((renamed.name.as_str(), renamed.color, renamed.hoist), ("Helpers ✿", Some(0x60A5FA), true));
+    let everyone_name = c
+        .roles
+        .update_role(authed(
+            &juan,
+            pb::UpdateRoleRequest {
+                server_id: sid.clone(),
+                role_id: sid.clone(),
+                name: Some("all".into()),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(everyone_name.code(), Code::InvalidArgument);
+    assert_eq!(
+        give_role(&mut c, &mika, &sid, &aoi_user.id, &helpers.id).await.unwrap().role_ids,
+        std::slice::from_ref(&helpers.id)
+    );
+    assert_eq!(give_role(&mut c, &mika, &sid, &aoi_user.id, &mods.id).await.unwrap_err(), Code::PermissionDenied);
+
+    // Reordering: a moderator can't lift a role over their own; the owner can.
+    let reorder = |token: &str, ids: [&String; 3]| {
+        authed(
+            token,
+            pb::ReorderRolesRequest { server_id: sid.clone(), role_ids: ids.iter().map(|s| s.to_string()).collect() },
+        )
+    };
+    let lifted = c.roles.reorder_roles(reorder(&mika, [&admin.id, &helpers.id, &mods.id])).await.unwrap_err();
+    assert_eq!(lifted.code(), Code::PermissionDenied);
+    let stale = c.roles.reorder_roles(authed(
+        &juan,
+        pb::ReorderRolesRequest { server_id: sid.clone(), role_ids: vec![admin.id.clone()] },
+    ));
+    assert_eq!(stale.await.unwrap_err().code(), Code::FailedPrecondition);
+    let reordered =
+        c.roles.reorder_roles(reorder(&juan, [&mods.id, &admin.id, &helpers.id])).await.unwrap().into_inner().roles;
+    let order: Vec<(&str, i32)> = reordered.iter().map(|r| (r.name.as_str(), r.position)).collect();
+    assert_eq!(order, [("Mods", 3), ("Admin", 2), ("Helpers ✿", 1), ("@everyone", 0)]);
+
+    // Members are listed by rank: the owner, then by their highest role.
+    let members = c
+        .servers
+        .list_members(authed(&rin, pb::ListMembersRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .members;
+    let usernames: Vec<&str> = members.iter().map(|m| m.user.as_ref().unwrap().username.as_str()).collect();
+    assert_eq!(usernames, ["juan", "mika", "aoi", "rin"]);
+
+    // A private channel: Aoi watches it appear and then go, live.
+    let mut aoi_stream = c
+        .events
+        .subscribe(authed(
+            &aoi,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let staff = new_channel(&mut c, &juan, &sid, "staff", pb::ChannelType::Text).await;
+    let created = next_event(&mut aoi_stream).await;
+    assert!(created.sequence > 0);
+    assert!(matches!(&created.payload, Some(Payload::ChannelCreated(e)) if e.channel.as_ref().unwrap().id == staff.id));
+
+    use pb::OverwriteTarget as T;
+    let private =
+        vec![overwrite(&sid, T::Role, &[], &[P::ViewChannels]), overwrite(&mods.id, T::Role, &[P::ViewChannels], &[])];
+    let shut = set_permissions(&mut c, &juan, &sid, &staff.id, private.clone()).await.unwrap();
+    assert_eq!(shut.permission_overwrites.len(), 2);
+    let went = next_event(&mut aoi_stream).await;
+    assert_eq!(went.sequence, 0);
+    assert!(matches!(&went.payload, Some(Payload::ChannelDeleted(e)) if e.channel_id == staff.id));
+    assert_eq!(channel_names(&mut c, &aoi, &sid).await, ["general"]);
+    assert_eq!(channel_names(&mut c, &mika, &sid).await, ["general", "staff"]);
+    let read = c
+        .messages
+        .list_messages(authed(
+            &aoi,
+            pb::ListMessagesRequest { server_id: sid.clone(), channel_id: staff.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(read.code(), Code::NotFound);
+    assert_eq!(send(&mut c, &aoi, &sid, &staff.id, "hi?").await.unwrap_err().code(), Code::NotFound);
+    let secret = send(&mut c, &mika, &sid, &staff.id, "staff only").await.unwrap();
+    // Aoi's stream skips the staff message and goes straight to the next thing she can see.
+    let public = send(&mut c, &rin, &sid, &general, "hello").await.unwrap();
+    let next = next_event(&mut aoi_stream).await;
+    assert!(matches!(&next.payload, Some(Payload::MessageCreated(e)) if e.message.as_ref().unwrap().id == public.id));
+
+    // Getting the role brings the channel back, live.
+    give_role(&mut c, &juan, &sid, &aoi_user.id, &mods.id).await.unwrap();
+    let updated = next_event(&mut aoi_stream).await;
+    assert!(matches!(&updated.payload, Some(Payload::MemberUpdated(_))));
+    let back = next_event(&mut aoi_stream).await;
+    assert_eq!(back.sequence, 0);
+    assert!(matches!(&back.payload, Some(Payload::ChannelCreated(e)) if e.channel.as_ref().unwrap().id == staff.id));
+    assert_eq!(messages(&mut c, &aoi, &sid, &staff.id).await[0].id, secret.id);
+    drop(aoi_stream);
+
+    // Overwrites hold channel permissions only, never both ways, and only ones the setter has.
+    let server_wide = vec![overwrite(&sid, T::Role, &[P::KickMembers], &[])];
+    assert_eq!(set_permissions(&mut c, &juan, &sid, &staff.id, server_wide).await.unwrap_err(), Code::InvalidArgument);
+    let both = vec![overwrite(&sid, T::Role, &[P::SendMessages], &[P::SendMessages])];
+    assert_eq!(set_permissions(&mut c, &juan, &sid, &staff.id, both).await.unwrap_err(), Code::InvalidArgument);
+    let nobody = vec![overwrite(&new_id_like(&sid), T::Role, &[P::SendMessages], &[])];
+    assert_eq!(set_permissions(&mut c, &juan, &sid, &staff.id, nobody).await.unwrap_err(), Code::NotFound);
+    let mut grant = private.clone();
+    grant.push(overwrite(&aoi_user.id, T::Member, &[P::MentionEveryone], &[]));
+    assert_eq!(set_permissions(&mut c, &mika, &sid, &staff.id, grant).await.unwrap_err(), Code::PermissionDenied);
+    assert_eq!(set_permissions(&mut c, &rin, &sid, &general, vec![]).await.unwrap_err(), Code::PermissionDenied);
+
+    // @everyone and role pings count only from people allowed to make them.
+    let ping = send(&mut c, &rin, &sid, &general, "@everyone look").await.unwrap();
+    assert!(!ping.mentions_everyone);
+    let ping = send(&mut c, &juan, &sid, &general, "@here look").await.unwrap();
+    assert!(ping.mentions_everyone);
+    let role_ping = format!("<@&{}> help please", helpers.id);
+    assert!(send(&mut c, &rin, &sid, &general, &role_ping).await.unwrap().mention_role_ids.is_empty());
+    assert_eq!(
+        send(&mut c, &juan, &sid, &general, &role_ping).await.unwrap().mention_role_ids,
+        std::slice::from_ref(&helpers.id)
+    );
+    c.roles
+        .update_role(authed(
+            &juan,
+            pb::UpdateRoleRequest {
+                server_id: sid.clone(),
+                role_id: helpers.id.clone(),
+                mentionable: Some(true),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    let pinged = send(&mut c, &rin, &sid, &general, &role_ping).await.unwrap();
+    assert_eq!(pinged.mention_role_ids, std::slice::from_ref(&helpers.id));
+    assert_eq!(
+        messages(&mut c, &rin, &sid, &general).await.iter().find(|m| m.id == pinged.id).unwrap().mention_role_ids,
+        std::slice::from_ref(&helpers.id)
+    );
+
+    // Slow mode holds back plain members, not people who manage messages.
+    c.channels
+        .update_channel(authed(
+            &juan,
+            pb::UpdateChannelRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                slowmode_seconds: Some(60),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    send(&mut c, &rin, &sid, &general, "one").await.unwrap();
+    assert_eq!(send(&mut c, &rin, &sid, &general, "two").await.unwrap_err().code(), Code::ResourceExhausted);
+    for text in ["one", "two"] {
+        send(&mut c, &aoi, &sid, &general, text).await.unwrap();
+    }
+
+    // Taking @everyone's Send Messages away silences plain members everywhere.
+    let mut everyone = roles(&mut c, &juan, &sid).await.into_iter().find(|r| r.id == sid).unwrap();
+    everyone.permissions.retain(|&p| p != P::SendMessages as i32);
+    c.roles
+        .update_role(authed(
+            &juan,
+            pb::UpdateRoleRequest {
+                server_id: sid.clone(),
+                role_id: sid.clone(),
+                permissions: Some(pb::PermissionSet { permissions: everyone.permissions.clone() }),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(send(&mut c, &rin, &sid, &general, "three").await.unwrap_err().code(), Code::PermissionDenied);
+    send(&mut c, &juan, &sid, &general, "three").await.unwrap();
+
+    // Deleting a role takes it from its members and from every channel.
+    c.roles
+        .delete_role(authed(&juan, pb::DeleteRoleRequest { server_id: sid.clone(), role_id: mods.id.clone() }))
+        .await
+        .unwrap();
+    assert_eq!(channel_names(&mut c, &mika, &sid).await, ["general"]);
+    let staff_now = c
+        .channels
+        .get_channel(authed(&juan, pb::GetChannelRequest { server_id: sid.clone(), channel_id: staff.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channel
+        .unwrap();
+    assert_eq!(staff_now.permission_overwrites.len(), 1);
+    let order: Vec<(String, i32)> =
+        roles(&mut c, &juan, &sid).await.into_iter().map(|r| (r.name, r.position)).collect();
+    assert_eq!(order, [("Admin".into(), 2), ("Helpers ✿".into(), 1), ("@everyone".into(), 0)]);
+    let audit =
+        audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    let deleted = &audit.entries[0];
+    assert_eq!((deleted.action(), deleted.role_name.as_str()), (pb::AuditAction::RoleDelete, "Mods"));
+    assert!(audit.entries.iter().any(|e| e.action() == pb::AuditAction::ChannelPermissionsUpdate));
+    assert!(audit.entries.iter().any(|e| e.action() == pb::AuditAction::RolesReorder));
+
+    drop(c);
+    instance.stop().await;
+}
+
+/// An id shaped like a real one that names nothing.
+fn new_id_like(id: &str) -> String {
+    let mut chars: Vec<char> = id.chars().collect();
+    let last = chars.len() - 1;
+    chars[last] = if chars[last] == '0' { '1' } else { '0' };
+    chars.into_iter().collect()
+}
+
+#[tokio::test]
+async fn servers_from_before_roles_keep_their_admins() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let server = create_server(&mut c, &juan, "Older", true).await;
+    join(&mut c, &mika, &server.id).await;
+    drop(c);
+    instance.stop().await;
+
+    // Make the file look like one from before roles, with Mika an admin by rank.
+    let file = dir.path().join("servers").join(format!("{}.db", server.id));
+    let db = fuwa_server::db::open(&file, None, &[]).await.unwrap();
+    let conn = fuwa_server::db::connect(&db).unwrap();
+    conn.execute("DELETE FROM roles", ()).await.unwrap();
+    conn.execute("DELETE FROM member_roles", ()).await.unwrap();
+    conn.execute("UPDATE members SET role = 2 WHERE user_id = ?1", [mika_user.id.as_str()]).await.unwrap();
+    drop((conn, db));
+
+    // Opening it again gives it @everyone and an Admin role that Mika holds.
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let seeded = roles(&mut c, &mika, &server.id).await;
+    let names: Vec<&str> = seeded.iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(names, ["Admin", "@everyone"]);
+    let members = c
+        .servers
+        .list_members(authed(&mika, pb::ListMembersRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .members;
+    let mika_member = members.iter().find(|m| m.user.as_ref().unwrap().id == mika_user.id).unwrap();
+    assert_eq!(mika_member.role_ids, std::slice::from_ref(&seeded[0].id));
+    let renamed = c
+        .servers
+        .update_server(authed(
+            &mika,
+            pb::UpdateServerRequest {
+                server_id: server.id.clone(),
+                name: Some("Still here".into()),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(renamed.into_inner().server.unwrap().name, "Still here");
+    drop(c);
     instance.stop().await;
 }
