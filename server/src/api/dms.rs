@@ -32,6 +32,8 @@ const MAX_COMMIT_BYTES: usize = 512 * 1024;
 const MAX_LOOKUPS: usize = 100;
 /// How often an idle stream gets a heartbeat, so proxies don't close it.
 const HEARTBEAT: Duration = Duration::from_secs(25);
+/// What an open stream gets when the instance stops.
+const RESTARTING: &str = "this instance is restarting; watch again";
 
 type WatchStream = Pin<Box<dyn Stream<Item = Result<pb::WatchResponse, Status>> + Send>>;
 
@@ -534,7 +536,11 @@ impl DirectMessageService for Api {
             heartbeat.tick().await;
             loop {
                 tokio::select! {
-                    _ = app.shutdown.cancelled() => return,
+                    _ = app.shutdown.cancelled() => {
+                        // Stopping, say for a deploy: tell the client to watch again.
+                        let _ = tx.try_send(Err(Status::unavailable(RESTARTING)));
+                        return;
+                    }
                     _ = tx.closed() => return,
                     _ = heartbeat.tick() => {
                         // A session signed out elsewhere stops getting events.

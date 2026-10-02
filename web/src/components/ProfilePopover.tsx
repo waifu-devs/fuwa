@@ -50,8 +50,11 @@ export function ProfilePopover({
   const owner = useFuwa((s) => !!member && s.instances[instanceKey]?.servers.find((x) => x.id === member.serverId)?.ownerId === user?.id);
   const [moderating, setModerating] = useState<ModAction | null>(null);
   const now = useNow();
-  // Anyone signed in can write to someone else privately.
-  const canMessage = useFuwa((s) => !me && s.instances[instanceKey]?.dms.status !== "off" && !!s.instances[instanceKey]?.me);
+  // Anyone signed in can write to someone else privately, where the instance and this browser can.
+  const canMessage = useFuwa((s) => {
+    const status = s.instances[instanceKey]?.dms.status;
+    return !me && (status === "ready" || status === "starting");
+  });
   const [opening, setOpening] = useState(false);
   const navigate = useNavigate();
 
