@@ -131,6 +131,30 @@
     covers the embedded app; `tests/cluster.rs` runs a directory, two shards
     and a gateway and drives them through the gateway; `tests/replica.rs`
     loses a split instance's volumes and brings it back from its replica.
+- `desktop/`: the desktop app (`fuwa-desktop`), native Rust with GPUI Kit,
+  for Windows, macOS and Linux. Its own Cargo workspace (the root one
+  excludes it), so GPUI stays out of the server's lock file and reproducible
+  build. It talks to any instance over the same gRPC API as the web app, as
+  gRPC-Web (`tonic-web`), and generates its client from `proto/fuwa/v1` in
+  `build.rs`.
+  - `src/core/`: everything that isn't drawing, ported from `web/src/fuwa` and
+    `web/src/e2ee`: `api.rs` (clients, the `rpc!` macro, addresses),
+    `store.rs` (state and reducers), `sync.rs` (one task per instance:
+    subscribe, snapshot, apply, reconnect), `dms.rs` and `vault.rs` (one MLS
+    device per install and account, through `fuwa-e2ee`'s `client` feature,
+    kept in 0600 files under the app's data folder; signing out wipes it),
+    `linked.rs` (waifu.dev sign-in through the browser and a loopback page),
+    `config.rs` (saved instances and the app's settings). It runs on its own
+    Tokio runtime and knows nothing of GPUI; the window watches its version.
+  - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
+    `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
+    `overlay.rs` draw the parts; `motion.rs` is how things move (springs,
+    rises, glides, all settling at once with reduced motion); `theme.rs` is
+    the web app's palettes and the bundled font (M PLUS Rounded 1c, whose
+    files name the family "Rounded Mplus 1c").
+  - `tests/core.rs`: two app cores against an in-process instance: servers,
+    live messages, unread counts, encrypted DMs both ways, and that no
+    plaintext reaches the instance's files.
 - `web/`: the web app (pnpm, Vite, React 19, TanStack Router, Tailwind 4,
   shadcn/ui and Animate UI copied from the waifu.dev site, Effect).
   - `src/gen/`: protobuf code from `pnpm generate`. Generated, committed, never
@@ -332,4 +356,10 @@
   ports, image tags, the proxy).
 - Before pushing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test`, and `buf lint`; for `web/`, `pnpm wasm` and `pnpm build`, then
-  `cargo test --features web`.
+  `cargo test --features web`; for `desktop/`, the same three cargo commands
+  run inside `desktop/` (`cargo fmt`, not `--all`).
+- The desktop app and the web app are two faces of one client: a feature,
+  setting or fix in one belongs in the other too, and the desktop's core
+  mirrors `web/src/fuwa` and `web/src/e2ee` file for file where it can. Its
+  settings are this computer's and apply to every instance, like
+  `web/src/lib/prefs.ts`. Pictures in messages show as links, as on the web.

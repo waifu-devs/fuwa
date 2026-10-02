@@ -4,3 +4,4 @@
 *.db-shm
 .env
 /node_modules
+/desktop/target
