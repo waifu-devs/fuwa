@@ -5,17 +5,19 @@
 //! event stream following servers on several shards is one stream per shard,
 //! merged here.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::Request;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
+use futures::stream::{FuturesUnordered, SelectAll};
 use futures::{Stream, StreamExt};
 use http::{HeaderName, StatusCode, header};
 use tokio::sync::{mpsc, watch};
@@ -26,11 +28,11 @@ use tonic::metadata::{AsciiMetadataValue, MetadataMap};
 use tonic::transport::Channel;
 use tonic::{Status, Streaming};
 
-use super::{Backoff, DirectoryClient, KEY_HEADER, Keyed, WithKey, forward_metadata};
+use super::{Backoff, DirectoryClient, KEY_HEADER, Keyed, Patience, WithKey, forward_metadata, ride_out};
 use crate::app::{HasSettings, cors};
 use crate::config::Config;
 use crate::cpb;
-use crate::error::{Error, MISROUTED};
+use crate::error::{Error, MISROUTED, NOT_READY};
 use crate::id::{new_id, now_ms, parse_id, timestamp};
 use crate::pb::{self, event_service_server::EventService};
 use crate::servers::Payload;
@@ -41,9 +43,10 @@ use crate::settings::Settings;
 const MAX_REQUEST: usize = 64 * 1024 * 1024;
 /// Most servers one stream can follow, as a single process allows.
 const MAX_SERVERS: usize = 200;
-/// Merged streams pass on at most one heartbeat this often, however many
-/// shards send them.
+/// How often merged streams send a heartbeat, whatever the shards send.
 const HEARTBEAT_EVERY: Duration = Duration::from_secs(20);
+/// What an open stream gets when the gateway stops.
+const RESTARTING: &str = "this instance is restarting; subscribe again from your last sequence";
 
 /// Where a call goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +145,9 @@ pub struct Gateway {
     placements: RwLock<HashMap<String, Placement>>,
     /// Connections to shards, by URL.
     shards: RwLock<HashMap<String, Channel>>,
+    /// Whether it has heard from the directory yet: until then it isn't
+    /// healthy, so a deploy keeps the gateways before it running meanwhile.
+    followed: AtomicBool,
     shutdown: CancellationToken,
 }
 
@@ -186,6 +192,7 @@ impl Gateway {
             directory,
             placements: RwLock::new(HashMap::new()),
             shards: RwLock::new(HashMap::new()),
+            followed: AtomicBool::new(false),
             shutdown: CancellationToken::new(),
         });
         tokio::spawn(follow_settings(gateway.clone()));
@@ -216,8 +223,20 @@ impl Gateway {
             .layer(tonic_web::GrpcWebLayer::new());
 
         let media = self.clone();
+        let health = self.clone();
         let http = Router::new()
-            .route("/healthz", get(|| async { "ok" }))
+            .route(
+                "/healthz",
+                get(move || {
+                    let followed = health.followed.load(Ordering::Relaxed);
+                    async move {
+                        match followed {
+                            true => (StatusCode::OK, "ok"),
+                            false => (StatusCode::SERVICE_UNAVAILABLE, "waiting for the directory"),
+                        }
+                    }
+                }),
+            )
             .route(
                 "/media/{*rest}",
                 any(move |request: Request| {
@@ -243,7 +262,9 @@ impl Gateway {
             .layer(cors(self.clone()))
     }
 
-    /// Passes a call on to whichever part answers it.
+    /// Passes a call on to whichever part answers it. A part that's down,
+    /// restarting for a deploy say, is waited for: the call goes through once
+    /// it's back, unless that takes longer than [`RIDE_OUT`](super::RIDE_OUT).
     async fn forward(&self, request: Request) -> Response {
         let target = route(request.uri().path());
         let (parts, body) = request.into_parts();
@@ -251,11 +272,19 @@ impl Gateway {
             Ok(body) => body,
             Err(_) => return grpc_error(Status::resource_exhausted("that request is too big")),
         };
+        let mut patience = Patience::new(self.config.cluster.ride_out);
         match target {
             Target::Unknown => grpc_error(Status::unimplemented(format!("{} isn't a fuwa call", parts.uri.path()))),
-            Target::Directory => match self.send(self.directory_channel.clone(), &parts, body).await {
-                Ok(response) => response,
-                Err(err) => grpc_error(unreachable_part(&err)),
+            Target::Directory => loop {
+                let failed = match self.send(self.directory_channel.clone(), &parts, body.clone()).await {
+                    // Just started, it's waiting for the shards.
+                    Ok(response) if response.headers().contains_key(NOT_READY) => Ok(response),
+                    Ok(response) => return response,
+                    Err(err) => Err(err),
+                };
+                if !patience.wait().await {
+                    return failed.unwrap_or_else(|err| grpc_error(unreachable_part(&err)));
+                }
             },
             Target::Shard => {
                 let Some(server_id) = server_id_of(&body) else {
@@ -264,21 +293,26 @@ impl Gateway {
                 if let Err(err) = parse_id("server_id", &server_id) {
                     return grpc_error(err.into());
                 }
-                for attempt in 0..2 {
-                    let refresh = attempt > 0;
-                    let channel = match self.shard_for(&server_id, refresh).await {
-                        Ok(channel) => channel,
-                        Err(status) if !refresh && status.code() == tonic::Code::Unavailable => continue,
+                // Asks the directory where the server is after the first try
+                // fails: it may have moved, or its shard may be starting again.
+                let mut refresh = false;
+                loop {
+                    let failed = match self.shard_for(&server_id, refresh).await {
+                        Ok(channel) => match self.send(channel, &parts, body.clone()).await {
+                            // Not there any more: it moved to another shard.
+                            Ok(response) if response.headers().contains_key(MISROUTED) => Ok(response),
+                            Ok(response) if response.headers().contains_key(NOT_READY) => Ok(response),
+                            Ok(response) => return response,
+                            Err(err) => Err(err),
+                        },
+                        Err(status) if status.code() == tonic::Code::Unavailable => Ok(grpc_error(status)),
                         Err(status) => return grpc_error(status),
                     };
-                    match self.send(channel, &parts, body.clone()).await {
-                        Ok(response) if !refresh && response.headers().contains_key(MISROUTED) => continue,
-                        Ok(response) => return response,
-                        Err(_) if !refresh => continue,
-                        Err(err) => return grpc_error(unreachable_part(&err)),
+                    if !patience.wait().await {
+                        return failed.unwrap_or_else(|err| grpc_error(unreachable_part(&err)));
                     }
+                    refresh = true;
                 }
-                grpc_error(Status::unavailable("that server is moving between shards; try again soon"))
             }
         }
     }
@@ -299,22 +333,30 @@ impl Gateway {
     }
 
     /// Passes a plain HTTP request (a picture, an upload) on, streaming.
+    /// Pictures wait out a directory restart like calls do; an upload streams
+    /// its body on as it comes, so it gets one try.
     async fn pass(&self, mut channel: Channel, request: Request) -> Response {
         let (parts, body) = request.into_parts();
-        let mut request = http::Request::new(tonic::body::Body::new(body));
-        *request.method_mut() = parts.method;
-        *request.uri_mut() = parts.uri;
-        *request.headers_mut() = passed_headers(&parts.headers, &self.key);
-        let sent = async {
-            std::future::poll_fn(|cx| channel.poll_ready(cx)).await?;
-            channel.call(request).await
-        };
-        match sent.await {
-            Ok(response) => response.map(Body::new),
-            Err(err) => {
+        let reads = matches!(parts.method, http::Method::GET | http::Method::HEAD);
+        let mut body = Some(body);
+        let mut patience = Patience::new(self.config.cluster.ride_out);
+        loop {
+            let mut request = http::Request::new(tonic::body::Body::new(body.take().unwrap_or_else(Body::empty)));
+            *request.method_mut() = parts.method.clone();
+            *request.uri_mut() = parts.uri.clone();
+            *request.headers_mut() = passed_headers(&parts.headers, &self.key);
+            let sent = async {
+                std::future::poll_fn(|cx| channel.poll_ready(cx)).await?;
+                channel.call(request).await
+            };
+            let err = match sent.await {
+                Ok(response) => return response.map(Body::new),
+                Err(err) => err,
+            };
+            if !reads || !patience.wait().await {
                 tracing::warn!(error = %err, "couldn't reach the directory");
-                (StatusCode::BAD_GATEWAY, "part of this instance is unreachable right now; try again soon\n")
-                    .into_response()
+                return (StatusCode::BAD_GATEWAY, "part of this instance is unreachable right now; try again soon\n")
+                    .into_response();
             }
         }
     }
@@ -423,6 +465,7 @@ async fn follow_settings(gateway: Arc<Gateway>) {
                         Ok(Some(message)) => {
                             if !connected {
                                 connected = true;
+                                gateway.followed.store(true, Ordering::Relaxed);
                                 tracing::info!(directory = %gateway.directory_url, "following the directory");
                             }
                             backoff.reset();
@@ -497,74 +540,118 @@ fn gone_event(server_id: String) -> pb::SubscribeResponse {
     }
 }
 
+/// A stream opened on one shard, and the servers it follows from where.
+struct Opened {
+    stream: Streaming<pb::SubscribeResponse>,
+    cursors: Vec<pb::ServerCursor>,
+}
+
+/// Why streams couldn't be opened.
+enum NotOpened {
+    /// Worth another try: a shard is down, or servers are moving.
+    Again(Status),
+    Refused(Status),
+}
+
+impl Events {
+    /// Opens a stream on each shard holding these servers, from each cursor.
+    /// While a shard is down, or the servers are moving, it asks the directory
+    /// again and tries again, until `patience` runs out. Servers that no
+    /// longer exist come back as the events that say so.
+    async fn open(
+        gateway: &Gateway,
+        metadata: &MetadataMap,
+        cursors: &[pb::ServerCursor],
+        mut patience: Patience,
+    ) -> Result<(Vec<Opened>, Vec<pb::SubscribeResponse>), Status> {
+        let ids: Vec<String> = cursors.iter().map(|cursor| cursor.server_id.clone()).collect();
+        let mut refresh = false;
+        loop {
+            let status = match Self::try_open(gateway, metadata, cursors, &ids, refresh).await {
+                Ok(opened) => return Ok(opened),
+                Err(NotOpened::Refused(status)) => return Err(status),
+                Err(NotOpened::Again(status)) => status,
+            };
+            gateway.forget(&ids);
+            if !patience.wait().await {
+                return Err(status);
+            }
+            refresh = true;
+        }
+    }
+
+    async fn try_open(
+        gateway: &Gateway,
+        metadata: &MetadataMap,
+        cursors: &[pb::ServerCursor],
+        ids: &[String],
+        refresh: bool,
+    ) -> Result<(Vec<Opened>, Vec<pb::SubscribeResponse>), NotOpened> {
+        let placements = gateway.placements(ids, refresh).await.map_err(|status| match status.code() {
+            tonic::Code::Unavailable => NotOpened::Again(status),
+            _ => NotOpened::Refused(status),
+        })?;
+        let mut by_shard: HashMap<String, Vec<pb::ServerCursor>> = HashMap::new();
+        let mut gone = Vec::new();
+        for cursor in cursors {
+            match placements.get(&cursor.server_id) {
+                None => gone.push(gone_event(cursor.server_id.clone())),
+                Some(placement) if placement.url.is_empty() => {
+                    return Err(NotOpened::Again(Status::unavailable(
+                        "the part of this instance holding one of these servers is down; try again soon",
+                    )));
+                }
+                Some(placement) => by_shard.entry(placement.url.clone()).or_default().push(cursor.clone()),
+            }
+        }
+        let mut opened = Vec::with_capacity(by_shard.len());
+        for (url, cursors) in by_shard {
+            let request = forward_metadata(metadata, pb::SubscribeRequest { servers: cursors.clone() });
+            match gateway.shard_client(&url).map_err(NotOpened::Refused)?.subscribe(request).await {
+                Ok(stream) => opened.push(Opened { stream: stream.into_inner(), cursors }),
+                Err(status) if status.metadata().get(MISROUTED).is_some() || super::unreachable(&status) => {
+                    return Err(NotOpened::Again(status));
+                }
+                Err(status) => return Err(NotOpened::Refused(status)),
+            }
+        }
+        Ok((opened, gone))
+    }
+}
+
+/// Adds a shard's stream to the merged ones, numbered by its place in
+/// `following`: the servers it follows, each with the last sequence the
+/// client has of it.
+fn follow(opened: Opened, merged: &mut SelectAll<Tagged>, following: &mut Vec<HashMap<String, Option<i64>>>) {
+    merged.push(tag(following.len(), opened.stream));
+    following.push(opened.cursors.into_iter().map(|cursor| (cursor.server_id, cursor.after_sequence)).collect());
+}
+
 #[tonic::async_trait]
 impl EventService for Events {
     type SubscribeStream = EventStream;
 
+    /// One stream per shard involved, merged. When a shard's stream ends
+    /// early, because the shard is restarting say, the gateway follows its
+    /// servers again from the last event the client got once the shard is
+    /// back (waiting up to twice the ride-out), and the client's stream
+    /// carries on.
     async fn subscribe(
         &self,
         request: tonic::Request<pb::SubscribeRequest>,
     ) -> Result<tonic::Response<EventStream>, Status> {
-        let gateway = &self.0;
+        let gateway = self.0.clone();
         let metadata = request.metadata().clone();
-        let cursors = request.into_inner().servers;
+        let mut cursors = request.into_inner().servers;
         if cursors.is_empty() || cursors.len() > MAX_SERVERS {
             return Err(Error::invalid(format!("follow 1 to {MAX_SERVERS} servers per stream")).into());
         }
-        let account_id = gateway.caller(&metadata).await?;
-        let mut ids = Vec::with_capacity(cursors.len());
-        for cursor in &cursors {
-            ids.push(parse_id("server_id", &cursor.server_id).map_err(Status::from)?);
+        let account_id = ride_out(gateway.config.cluster.ride_out, || gateway.caller(&metadata)).await?;
+        for cursor in &mut cursors {
+            cursor.server_id = parse_id("server_id", &cursor.server_id).map_err(Status::from)?;
         }
-
-        // Each shard's share of the servers; servers that no longer exist get
-        // the event that says so, so the client lets them go.
-        let mut opened: Vec<Tagged> = Vec::new();
-        // The servers each opened stream still follows.
-        let mut following: Vec<HashSet<String>> = Vec::new();
-        let mut gone = Vec::new();
-        for attempt in 0..2 {
-            let refresh = attempt > 0;
-            let placements = gateway.placements(&ids, refresh).await?;
-            let mut by_shard: HashMap<String, Vec<pb::ServerCursor>> = HashMap::new();
-            gone.clear();
-            for cursor in &cursors {
-                match placements.get(&cursor.server_id) {
-                    None => gone.push(gone_event(cursor.server_id.clone())),
-                    Some(placement) if placement.url.is_empty() => {
-                        return Err(Status::unavailable(
-                            "the part of this instance holding one of these servers is down; try again soon",
-                        ));
-                    }
-                    Some(placement) => by_shard.entry(placement.url.clone()).or_default().push(cursor.clone()),
-                }
-            }
-            opened.clear();
-            following.clear();
-            let mut misrouted = false;
-            for (index, (url, servers)) in by_shard.into_iter().enumerate() {
-                let ids = servers.iter().map(|cursor| cursor.server_id.clone()).collect();
-                let request = forward_metadata(&metadata, pb::SubscribeRequest { servers });
-                match gateway.shard_client(&url)?.subscribe(request).await {
-                    Ok(stream) => {
-                        opened.push(tag(index, stream.into_inner()));
-                        following.push(ids);
-                    }
-                    Err(status) if status.metadata().get(MISROUTED).is_some() || status.source_is_transport() => {
-                        misrouted = true;
-                        break;
-                    }
-                    Err(status) => return Err(status),
-                }
-            }
-            if !misrouted {
-                break;
-            }
-            gateway.forget(&ids);
-            if refresh {
-                return Err(Status::unavailable("these servers are moving between shards; try again soon"));
-            }
-        }
+        let (opened, gone) =
+            Self::open(&gateway, &metadata, &cursors, Patience::new(gateway.config.cluster.ride_out)).await?;
 
         let (tx, rx) = mpsc::channel::<Result<pb::SubscribeResponse, Status>>(256);
         let shutdown = gateway.shutdown();
@@ -580,37 +667,105 @@ impl EventService for Events {
                     .await;
                 return;
             }
+            // Shards still to say they're ready, and what those that did said.
             let mut waiting = opened.len();
             let mut heads = Vec::new();
-            let mut merged = futures::stream::select_all(opened);
-            let mut last_heartbeat = Instant::now();
+            let mut following = Vec::new();
+            let mut merged = SelectAll::new();
+            for opened in opened {
+                follow(opened, &mut merged, &mut following);
+            }
+            // Servers being followed again after their shard's stream ended.
+            let mut resuming = FuturesUnordered::new();
+            let mut heartbeat = tokio::time::interval(HEARTBEAT_EVERY);
+            heartbeat.tick().await;
             loop {
-                let item = tokio::select! {
+                if merged.is_empty() && resuming.is_empty() {
+                    // Everything followed is gone.
+                    return;
+                }
+                let (index, item) = tokio::select! {
                     _ = shutdown.cancelled() => {
                         // Stopping, say for a deploy: tell the client to follow again
                         // rather than end the stream as if it were done.
-                        let _ = tx.try_send(Err(Status::unavailable(
-                            "this instance is restarting; subscribe again from your last sequence",
-                        )));
+                        let _ = tx.try_send(Err(Status::unavailable(RESTARTING)));
                         return;
                     }
                     _ = tx.closed() => return,
-                    item = merged.next() => item,
-                };
-                let message = match item {
-                    None => return,
-                    // A shard's stream ends by itself once every server it
-                    // followed is gone. Ending sooner, it went away (say, to
-                    // restart), so the client follows again from where it got to.
-                    Some((index, None)) if following[index].is_empty() => continue,
-                    Some((_, None)) => {
-                        Err(Status::unavailable("lost touch with part of this instance; subscribe again"))
+                    _ = heartbeat.tick(), if waiting == 0 => {
+                        if tx.send(Ok(pb::SubscribeResponse::default())).await.is_err() {
+                            return;
+                        }
+                        continue;
                     }
-                    Some((_, Some(Err(status)))) => Err(status),
-                    Some((index, Some(Ok(response)))) => match (response.event, response.ready) {
+                    Some(resumed) = resuming.next(), if !resuming.is_empty() => {
+                        let (opened, gone) = match resumed {
+                            Ok(resumed) => resumed,
+                            Err(status) => {
+                                let _ = tx.send(Err(status)).await;
+                                return;
+                            }
+                        };
+                        for event in gone {
+                            if tx.send(Ok(event)).await.is_err() {
+                                return;
+                            }
+                        }
+                        for opened in opened {
+                            follow(opened, &mut merged, &mut following);
+                        }
+                        continue;
+                    }
+                    Some(item) = merged.next(), if !merged.is_empty() => item,
+                };
+
+                // A shard's stream ends by itself once every server it followed
+                // is gone. Ending sooner, or cut off, the shard went away (to
+                // restart, say).
+                let went_away = !following[index].is_empty()
+                    && match &item {
+                        None => true,
+                        Some(Err(status)) => super::unreachable(status),
+                        Some(Ok(_)) => false,
+                    };
+                if went_away {
+                    if waiting > 0 {
+                        // The client hasn't everything up to now yet: it starts over.
+                        let _ = tx
+                            .send(Err(Status::unavailable("lost touch with part of this instance; subscribe again")))
+                            .await;
+                        return;
+                    }
+                    let cursors: Vec<_> = following[index]
+                        .drain()
+                        .map(|(server_id, after_sequence)| pb::ServerCursor { server_id, after_sequence })
+                        .collect();
+                    tracing::info!(servers = cursors.len(), "lost a shard's stream; following its servers again");
+                    let (gateway, metadata) = (gateway.clone(), metadata.clone());
+                    resuming.push(async move {
+                        Self::open(&gateway, &metadata, &cursors, Patience::new(gateway.config.cluster.ride_out * 2))
+                            .await
+                    });
+                    continue;
+                }
+
+                let message = match item {
+                    None => continue,
+                    Some(Err(status)) => Err(status),
+                    Some(Ok(response)) => match (response.event, response.ready) {
                         (_, Some(ready)) => {
+                            for head in &ready.servers {
+                                if let Some(at) = following[index].get_mut(&head.server_id) {
+                                    *at = Some(head.sequence);
+                                }
+                            }
+                            // A shard followed again has caught up; the client
+                            // was told it's ready long ago.
+                            if waiting == 0 {
+                                continue;
+                            }
                             heads.extend(ready.servers);
-                            waiting = waiting.saturating_sub(1);
+                            waiting -= 1;
                             if waiting > 0 {
                                 continue;
                             }
@@ -627,16 +782,15 @@ impl EventService for Events {
                             };
                             if ends {
                                 following[index].remove(&event.server_id);
+                            } else if event.sequence > 0
+                                && let Some(at) = following[index].get_mut(&event.server_id)
+                            {
+                                *at = Some(event.sequence);
                             }
                             Ok(pb::SubscribeResponse { event: Some(event), ready: None })
                         }
-                        (None, None) => {
-                            if waiting > 0 || last_heartbeat.elapsed() < HEARTBEAT_EVERY {
-                                continue;
-                            }
-                            last_heartbeat = Instant::now();
-                            Ok(pb::SubscribeResponse::default())
-                        }
+                        // The shard's heartbeat; the gateway sends its own.
+                        (None, None) => continue,
                     },
                 };
                 let failed = message.is_err();
@@ -656,42 +810,40 @@ impl EventService for Events {
         let server_id = parse_id("server_id", &request.get_ref().server_id).map_err(Status::from)?;
         let metadata = request.metadata().clone();
         let message = request.into_inner();
-        for attempt in 0..2 {
-            let refresh = attempt > 0;
-            let placements = gateway.placements(std::slice::from_ref(&server_id), refresh).await?;
-            let placement = placements.get(&server_id).ok_or_else(|| Status::not_found("server not found"))?;
-            if placement.url.is_empty() {
-                return Err(Status::unavailable(
-                    "the part of this instance holding that server is down; try again soon",
-                ));
-            }
-            let request = forward_metadata(&metadata, message.clone());
-            match gateway.shard_client(&placement.url)?.list_events(request).await {
-                Err(status)
-                    if !refresh && (status.metadata().get(MISROUTED).is_some() || status.source_is_transport()) =>
-                {
-                    gateway.forget(std::slice::from_ref(&server_id));
+        let mut patience = Patience::new(gateway.config.cluster.ride_out);
+        let mut refresh = false;
+        loop {
+            let status = match gateway.placements(std::slice::from_ref(&server_id), refresh).await {
+                Err(status) if status.code() == tonic::Code::Unavailable => status,
+                Err(status) => return Err(status),
+                Ok(placements) => {
+                    let placement = placements.get(&server_id).ok_or_else(|| Status::not_found("server not found"))?;
+                    if placement.url.is_empty() {
+                        Status::unavailable("the part of this instance holding that server is down; try again soon")
+                    } else {
+                        let request = forward_metadata(&metadata, message.clone());
+                        match gateway.shard_client(&placement.url)?.list_events(request).await {
+                            Err(status)
+                                if status.metadata().get(MISROUTED).is_some() || super::unreachable(&status) =>
+                            {
+                                status
+                            }
+                            answer => return answer,
+                        }
+                    }
                 }
-                answer => return answer,
+            };
+            gateway.forget(std::slice::from_ref(&server_id));
+            if !patience.wait().await {
+                return Err(status);
             }
+            refresh = true;
         }
-        Err(Status::unavailable("that server is moving between shards; try again soon"))
     }
 }
 
 fn tag(index: usize, stream: Streaming<pb::SubscribeResponse>) -> Tagged {
     Box::pin(stream.map(move |item| (index, Some(item))).chain(futures::stream::once(async move { (index, None) })))
-}
-
-/// Whether a failed call never reached the other side.
-trait TransportFailure {
-    fn source_is_transport(&self) -> bool;
-}
-
-impl TransportFailure for Status {
-    fn source_is_transport(&self) -> bool {
-        std::error::Error::source(self).is_some()
-    }
 }
 
 #[cfg(test)]

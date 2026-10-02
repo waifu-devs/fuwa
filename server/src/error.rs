@@ -2,6 +2,9 @@ use tonic::{Code, Status};
 
 /// Set on the answer to a request that reached the wrong shard.
 pub const MISROUTED: &str = "fuwa-misrouted";
+/// Set on the answer to a request a part turned away without doing anything,
+/// because it isn't ready yet: the gateway tries again shortly.
+pub const NOT_READY: &str = "fuwa-not-ready";
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 

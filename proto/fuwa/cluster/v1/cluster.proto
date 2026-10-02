@@ -46,6 +46,14 @@ service DirectoryService {
   rpc DropPicture(DropPictureRequest) returns (DropPictureResponse);
   // How many servers an account owns, for the cap on that.
   rpc CountOwnedServers(CountOwnedServersRequest) returns (CountOwnedServersResponse);
+  // The server files the directory's data folder still holds from when the
+  // instance ran as one process, sent to a starting shard: the first shard
+  // to ask gets them all, and nothing goes to any other. Empty when there are
+  // none (or they're promised to another shard).
+  rpc TakeServers(TakeServersRequest) returns (stream TakeServersResponse);
+  // The shard has a checked copy of the files TakeServers sent; the
+  // directory moves its own out of the way, to handed-over/.
+  rpc HandedOver(HandedOverRequest) returns (HandedOverResponse);
 }
 
 // Run by each shard, which keeps some of the servers' files.
@@ -222,6 +230,29 @@ message CountOwnedServersRequest {
 message CountOwnedServersResponse {
   int64 count = 1;
 }
+
+message TakeServersRequest {
+  string shard_id = 1;
+}
+
+// A piece of one file. A file's pieces come in order, one file after another.
+message TakeServersResponse {
+  // The file's name in servers/: `<server id>.db`, or one of the files kept
+  // beside it (`-log`, `-wal`, `-shm`).
+  string name = 1;
+  bytes data = 2;
+  // Set on a file's last piece (which may have no data): the SHA-256 of the
+  // whole file, to check the copy against.
+  bytes sha256 = 3;
+}
+
+message HandedOverRequest {
+  string shard_id = 1;
+  // The files the shard now has, by name.
+  repeated string names = 2;
+}
+
+message HandedOverResponse {}
 
 message CreateServerRequest {
   fuwa.v1.User owner = 1;

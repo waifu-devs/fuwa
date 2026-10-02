@@ -7,6 +7,7 @@
 //! directory of a split instance through [`Internal`].
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -50,6 +51,7 @@ pub struct Link {
     /// The directory may have missed a change: register again.
     dirty: AtomicBool,
     registered: watch::Sender<bool>,
+    ride_out: Duration,
 }
 
 impl Link {
@@ -65,6 +67,7 @@ impl Link {
             changes: AtomicU64::new(0),
             dirty: AtomicBool::new(false),
             registered: watch::Sender::new(false),
+            ride_out: cluster.ride_out,
         })
     }
 
@@ -84,8 +87,10 @@ impl Link {
                 return Ok(viewer.clone());
             }
         }
-        let found = self.directory().authenticate(cpb::AuthenticateRequest { token: token.to_string() }).await?;
-        let found = found.into_inner();
+        // A directory that's restarting is waited out, so calls here don't fail
+        // during a deploy.
+        let request = cpb::AuthenticateRequest { token: token.to_string() };
+        let found = self.ask(request, |mut d, r| async move { d.authenticate(r).await }).await?;
         let viewer = match found.account {
             Some(account) => Viewer::Account { account: account_from_pb(account), token_hash: found.token_hash },
             None => Viewer::Operator,
@@ -96,6 +101,17 @@ impl Link {
         }
         sessions.insert(key, (viewer.clone(), Instant::now()));
         Ok(viewer)
+    }
+
+    /// Asks the directory something, waiting out a restart of it (see
+    /// [`ride_out`](super::ride_out)). Only for questions: a change may be
+    /// sent twice.
+    pub async fn ask<R: Clone, T, F>(&self, request: R, call: impl Fn(DirectoryClient, R) -> F) -> Result<T>
+    where
+        F: Future<Output = Result<tonic::Response<T>, Status>>,
+    {
+        let answer = super::ride_out(self.ride_out, || call(self.directory(), request.clone())).await?;
+        Ok(answer.into_inner())
     }
 
     /// Tells the directory's index something changed. A failure means it may
@@ -215,6 +231,135 @@ async fn register(app: &App, link: &Link) {
         }
     }
     link.dirty.store(true, Ordering::SeqCst);
+}
+
+// ─────────────── Taking over a single process's servers ───────────────
+
+/// Where server files from the directory wait until every one is whole and
+/// checked.
+const INCOMING: &str = "incoming-servers";
+/// Written among them once they are.
+const CHECKED: &str = ".checked";
+
+/// Takes the servers the directory's folder still holds from when the
+/// instance ran as one process, when this shard is the one they go to (the
+/// first to ask). Runs as a shard starts, before it opens its servers: it
+/// copies them, checks each against its SHA-256, tells the directory it has
+/// them, then moves them into servers/.
+pub async fn take_servers(config: &Config) -> Result<()> {
+    let cluster = &config.cluster;
+    let shard_id = super::shard_id(cluster, &config.data_path)?;
+    let directory_url = cluster.directory_url.as_deref().ok_or_else(|| Error::internal("no directory URL"))?;
+    let directory = super::directory_client(directory_url, cluster.key_value()?)?;
+    let servers = config.data_path.join("servers");
+    let incoming = config.data_path.join(INCOMING);
+    std::fs::create_dir_all(&servers)?;
+
+    let mut backoff = Backoff::default();
+    loop {
+        let attempt = async {
+            let names = receive(directory.clone(), &shard_id, &incoming).await?;
+            if names.is_empty() {
+                return Ok(());
+            }
+            if let Some(name) = names.iter().find(|name| servers.join(name).exists()) {
+                return Err(Error::internal(format!(
+                    "the directory is handing over servers/{name}, but this shard already has a file by that name; \
+                     move one of them out of the way and start again"
+                )));
+            }
+            std::fs::write(incoming.join(CHECKED), "")?;
+            let request = cpb::HandedOverRequest { shard_id: shard_id.clone(), names: names.clone() };
+            directory.clone().handed_over(request).await?;
+            tracing::info!(files = names.len(), "took over the servers of this instance's single process");
+            Ok(())
+        }
+        .await;
+        match attempt {
+            Ok(()) => break,
+            Err(Error::Unavailable(_)) => {
+                tracing::info!(directory = %directory_url, "waiting for the directory");
+            }
+            Err(Error::Remote(status)) if passing(&status) => {
+                tracing::warn!(error = %status.message(), "taking over servers failed; trying again");
+            }
+            Err(err) => return Err(err),
+        }
+        tokio::time::sleep(backoff.wait()).await;
+    }
+
+    // A whole, checked copy goes into servers/: the one just made, or one
+    // made before a restart that came after the directory let go of its own.
+    if incoming.join(CHECKED).exists() {
+        std::fs::remove_file(incoming.join(CHECKED))?;
+        for entry in std::fs::read_dir(&incoming)? {
+            let entry = entry?;
+            std::fs::rename(entry.path(), servers.join(entry.file_name()))?;
+        }
+    }
+    match std::fs::remove_dir_all(&incoming) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err.into()),
+        _ => Ok(()),
+    }
+}
+
+/// A failure worth trying again: the directory restarting, or a stream cut
+/// short.
+fn passing(status: &Status) -> bool {
+    use tonic::Code;
+    matches!(
+        status.code(),
+        Code::Unavailable | Code::Unknown | Code::Internal | Code::Cancelled | Code::DeadlineExceeded | Code::Aborted
+    )
+}
+
+/// Copies what the directory sends into `incoming`, replacing anything there,
+/// and checks each file. Returns the files' names; none when there's nothing
+/// to take, which leaves `incoming` as it was.
+async fn receive(mut directory: DirectoryClient, shard_id: &str, incoming: &Path) -> Result<Vec<String>> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncWriteExt;
+
+    let request = cpb::TakeServersRequest { shard_id: shard_id.to_string() };
+    let mut stream = match directory.take_servers(request).await {
+        Ok(response) => response.into_inner(),
+        // A directory from before handing over servers has none to give.
+        Err(status) if status.code() == tonic::Code::Unimplemented => return Ok(Vec::new()),
+        Err(status) => return Err(status.into()),
+    };
+    let mut names = Vec::new();
+    let mut file: Option<(String, tokio::fs::File, Sha256)> = None;
+    while let Some(piece) = stream.message().await? {
+        if !super::is_server_file(&piece.name) {
+            return Err(Error::internal(format!("the directory sent {:?}, which isn't a server's file", piece.name)));
+        }
+        if names.is_empty() && file.is_none() {
+            match std::fs::remove_dir_all(incoming) {
+                Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err.into()),
+                _ => std::fs::create_dir_all(incoming)?,
+            }
+        }
+        let (name, mut out, mut hash) = match file.take() {
+            Some((name, out, hash)) if name == piece.name => (name, out, hash),
+            Some((name, ..)) => return Err(Error::internal(format!("the directory stopped partway through {name}"))),
+            None => (piece.name.clone(), tokio::fs::File::create(incoming.join(&piece.name)).await?, Sha256::new()),
+        };
+        out.write_all(&piece.data).await?;
+        hash.update(&piece.data);
+        if piece.sha256.is_empty() {
+            file = Some((name, out, hash));
+            continue;
+        }
+        out.sync_all().await?;
+        if hash.finalize().as_slice() != piece.sha256.as_slice() {
+            return Err(Error::internal(format!("servers/{name} didn't arrive intact")));
+        }
+        names.push(name);
+    }
+    if let Some((name, ..)) = file {
+        return Err(Error::internal(format!("the directory stopped partway through {name}")));
+    }
+    Ok(names)
 }
 
 // ─────────────── Work across the servers kept here ───────────────
