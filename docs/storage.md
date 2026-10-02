@@ -236,9 +236,9 @@ one.
 
 1. **Continuous backup and restore** (this release), for split instances.
    Off unless `FUWA_S3_BUCKET` or `FUWA_REPLICA_PATH` is set on the directory
-   and shards. For fuwa.chat, once `SPLIT` is on: a bucket in
-   `.railway/railway.ts`, behind a switch of its own, with the variables
-   below on the directory and every shard.
+   and shards. fuwa.chat has it on: the `fuwa-replica` bucket in
+   `.railway/railway.ts`, with the variables below on the directory and every
+   shard.
 2. **Placement through the bucket**: leases with conditional writes, shards
    that restore servers they don't have, moving and failing over through the
    bucket, shard deploys that overlap.
@@ -266,13 +266,15 @@ one.
 Set them on the directory and every shard. A gateway ignores them, and an
 instance run as one process refuses them.
 
-On Railway, a bucket gives the services the values to reference:
+On Railway, a bucket gives the services the values to reference (fuwa.chat's
+[`.railway/railway.ts`](../.railway/railway.ts) does this):
 
 ```ts
 const replica = bucket("fuwa-replica", { region: "iad" });
 // in the directory's and each shard's env:
 FUWA_S3_BUCKET: ref(replica, "BUCKET"),
 FUWA_S3_ENDPOINT: ref(replica, "ENDPOINT"),
+FUWA_S3_REGION: ref(replica, "REGION"),
 FUWA_S3_ACCESS_KEY_ID: ref(replica, "ACCESS_KEY_ID"),
 FUWA_S3_SECRET_ACCESS_KEY: ref(replica, "SECRET_ACCESS_KEY"),
 FUWA_RESTORE: "if-empty",
