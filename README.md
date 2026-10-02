@@ -345,3 +345,12 @@ In development Vite passes the app's own API calls to `FUWA_DEV_URL` (default
 After `pnpm build`, `cargo test --features web` also tests the embedded app.
 
 See [AGENTS.md](AGENTS.md) for how the code is laid out.
+
+## Infrastructure
+
+[fuwa.chat](https://fuwa.chat), the instance Waifu Devs hosts, runs in a Railway
+project of its own, and that project is public, so anyone can check out the
+live infrastructure behind it at
+<https://railway.com/project/380ce29d-aa58-46a3-b54f-b8e571dd8702>. It's what
+[`.railway/railway.ts`](.railway/railway.ts) declares: the `fuwa` service,
+running the image every merge to master publishes, and its `fuwa-data` volume.
