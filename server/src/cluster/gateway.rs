@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -32,7 +32,7 @@ use super::{Backoff, DirectoryClient, KEY_HEADER, Keyed, Patience, WithKey, forw
 use crate::app::{HasSettings, cors};
 use crate::config::Config;
 use crate::cpb;
-use crate::error::{Error, MISROUTED, NOT_READY};
+use crate::error::{Error, MISROUTED, NOT_READY, UNREACHABLE};
 use crate::id::{new_id, now_ms, parse_id, timestamp};
 use crate::pb::{self, event_service_server::EventService};
 use crate::servers::Payload;
@@ -285,7 +285,7 @@ impl Gateway {
                     Err(err) => Err(err),
                 };
                 if !patience.wait().await {
-                    return failed.unwrap_or_else(|err| grpc_error(unreachable_part(&err)));
+                    return gave_up(parts.uri.path(), failed);
                 }
             },
             Target::Shard => {
@@ -311,7 +311,7 @@ impl Gateway {
                         Err(status) => return grpc_error(status),
                     };
                     if !patience.wait().await {
-                        return failed.unwrap_or_else(|err| grpc_error(unreachable_part(&err)));
+                        return gave_up(parts.uri.path(), failed);
                     }
                     refresh = true;
                 }
@@ -398,7 +398,7 @@ impl Gateway {
             return Ok(found);
         }
         let answer = self.directory.clone().placements(cpb::PlacementsRequest { server_ids: missing.clone() }).await;
-        let answer = answer.map_err(|status| Status::from(Error::from(status)))?.into_inner();
+        let answer = answer.map_err(|status| Status::from(Error::retried(status)))?.into_inner();
         let mut known = self.placements.write().unwrap_or_else(|p| p.into_inner());
         for id in &missing {
             known.remove(id);
@@ -436,7 +436,7 @@ impl Gateway {
     async fn caller(&self, metadata: &MetadataMap) -> Result<String, Status> {
         let token = crate::auth::bearer(metadata).ok_or_else(|| Status::from(Error::Unauthenticated))?;
         let found = self.directory.clone().authenticate(cpb::AuthenticateRequest { token: token.to_string() }).await;
-        let found = found.map_err(|status| Status::from(Error::from(status)))?.into_inner();
+        let found = found.map_err(|status| Status::from(Error::retried(status)))?.into_inner();
         match found.account {
             Some(account) => Ok(account.id),
             None => Err(Error::denied("the admin token can't act as an account; sign in instead").into()),
@@ -448,6 +448,9 @@ impl Gateway {
 async fn follow_settings(gateway: Arc<Gateway>) {
     let mut backoff = Backoff::default();
     let mut connected = false;
+    // A restart takes seconds, so the directory being out of reach is only
+    // worth a warning once it's been longer than calls wait for it.
+    let mut away_since = Instant::now();
     loop {
         let mut directory = gateway.directory.clone();
         let watch = directory.watch(cpb::WatchRequest { shard_id: String::new() });
@@ -476,12 +479,18 @@ async fn follow_settings(gateway: Arc<Gateway>) {
                             }
                         }
                         Ok(None) | Err(_) => {
+                            if connected {
+                                away_since = Instant::now();
+                                tracing::info!("lost the directory; waiting for it to come back");
+                            }
                             connected = false;
-                            tracing::warn!("lost the directory");
                             break;
                         }
                     }
                 }
+            }
+            Err(err) if away_since.elapsed() < gateway.config.cluster.ride_out => {
+                tracing::info!(directory = %gateway.directory_url, error = %err.message(), "can't reach the directory yet")
             }
             Err(err) => {
                 tracing::warn!(directory = %gateway.directory_url, error = %err.message(), "can't reach the directory")
@@ -515,7 +524,19 @@ fn grpc_error(status: Status) -> Response {
 
 fn unreachable_part(err: &tonic::transport::Error) -> Status {
     tracing::warn!(error = %err, "a part of this instance didn't answer");
-    Status::unavailable("part of this instance is unreachable right now; try again soon")
+    Status::unavailable(UNREACHABLE)
+}
+
+/// What a call gets once its part has been waited for long enough: the last
+/// answer it gave, or "unavailable" if it never answered.
+fn gave_up(path: &str, failed: Result<Response, tonic::transport::Error>) -> Response {
+    match failed {
+        Ok(response) => {
+            tracing::warn!(path, "a part of this instance stayed unavailable; gave up waiting");
+            response
+        }
+        Err(err) => grpc_error(unreachable_part(&err)),
+    }
 }
 
 /// The event service, answered by the gateway: live streams merge the
@@ -576,6 +597,7 @@ impl Events {
             };
             gateway.forget(&ids);
             if !patience.wait().await {
+                tracing::warn!(error = %status.message(), "couldn't follow servers: part of this instance stayed unavailable");
                 return Err(status);
             }
             refresh = true;

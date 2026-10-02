@@ -314,6 +314,10 @@
   A part must be able to restart without clients noticing: only retry what
   can't have been done twice (a call that never reached its part, or one
   turned away with `fuwa-not-ready`), and use `Link::ask` only for questions.
+  Every deploy restarts parts, so a part being out of reach is logged as info
+  while it's waited for, and as a warning only once something gives up: a
+  call tried again reads another part's failure with `Error::retried`, not
+  `From<Status>` (which warns).
 - Direct messages are end-to-end encrypted, always: no off switch, no
   server-side copy of keys or plaintext, nothing about their content in logs,
   events, exports or the usage signal. The server checks only what it can
