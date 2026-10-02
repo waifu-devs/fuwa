@@ -14,9 +14,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex as SyncMutex};
 
 use tokio::sync::{Mutex, broadcast};
-use turso::{Connection, Database, Row, Value};
+use turso::{Connection, Row, Value};
 
-use crate::db::{self, EncryptionKey, query_all, query_one};
+use crate::db::{self, Db, EncryptionKey, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::pb;
@@ -153,7 +153,7 @@ pub struct NewRecord<'a> {
 type Outbox = Vec<(Vec<String>, pb::DirectMessageEvent)>;
 
 pub struct DmDb {
-    db: Database,
+    db: Arc<Db>,
     /// Commits and publishes one write at a time, so watchers get each
     /// conversation's records in sequence.
     publishing: Mutex<()>,
@@ -162,8 +162,13 @@ pub struct DmDb {
 
 impl DmDb {
     pub async fn open(path: &Path, key: Option<&EncryptionKey>) -> Result<Self> {
-        let db = db::open(path, key, MIGRATIONS).await?;
+        let db = Arc::new(db::open(path, key, MIGRATIONS).await?);
         Ok(Self { db, publishing: Mutex::new(()), watchers: SyncMutex::default() })
+    }
+
+    /// The open file, for the replica to track.
+    pub fn db(&self) -> &Arc<Db> {
+        &self.db
     }
 
     fn read(&self) -> Result<Connection> {
@@ -650,6 +655,7 @@ impl DmDb {
     /// the outbox, one write at a time so watchers get events in commit order.
     /// A clash runs `f` again (see [`db::transaction`]).
     async fn write<T>(&self, f: impl AsyncFnOnce(&Connection, &mut Outbox) -> Result<T> + Clone) -> Result<T> {
+        let _shared = self.db.shared().await;
         let conn = db::connect(&self.db)?;
         let mut attempt = 0;
         loop {

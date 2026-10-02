@@ -6,8 +6,9 @@
 //! touch the same row. Anything a write must not race on (a cap, a count) has
 //! to live in a row that every such write updates, so they clash instead.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use turso::{Builder, Connection, Database, IntoParams, Row};
 
 use crate::error::{Error, Result};
@@ -32,13 +33,71 @@ impl std::fmt::Debug for EncryptionKey {
     }
 }
 
+/// An open database file, and the gate its writes go through.
+///
+/// Every write holds the gate shared, so writes still run side by side. The
+/// few that must not overlap any other hold it alone, and so does the replica
+/// when it folds the file's log into it (`replica/`), so no commit lands
+/// between the last bytes it reads from the log and the log starting over.
+pub struct Db {
+    database: Database,
+    path: PathBuf,
+    gate: RwLock<()>,
+}
+
+impl std::ops::Deref for Db {
+    type Target = Database;
+
+    fn deref(&self) -> &Database {
+        &self.database
+    }
+}
+
+impl Db {
+    /// The database file.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The file of commits not yet folded into the database (Turso's logical log).
+    pub fn log_path(&self) -> PathBuf {
+        let mut name = self.path.as_os_str().to_owned();
+        name.push("-log");
+        PathBuf::from(name)
+    }
+
+    /// Held by every write while it runs.
+    pub async fn shared(&self) -> RwLockReadGuard<'_, ()> {
+        self.gate.read().await
+    }
+
+    /// Waits for the writes running now to finish and keeps new ones waiting.
+    pub async fn alone(&self) -> RwLockWriteGuard<'_, ()> {
+        self.gate.write().await
+    }
+
+    /// Folds the log into the database file and empties it. Readers and
+    /// writers wait while it runs; it answers busy if a transaction is open,
+    /// so it tries again a few times.
+    pub async fn checkpoint(&self) -> Result<()> {
+        let conn = connect(self)?;
+        let mut attempt = 0;
+        loop {
+            match pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").await {
+                Err(err) if is_conflict(&err) => retry_after(&err, &mut attempt).await?,
+                other => return other,
+            }
+        }
+    }
+}
+
 /// Opens (or creates) a database file in Turso's concurrent-writer mode and
 /// brings its schema up to date.
 ///
 /// The mode (MVCC) lives in the file's header, so this switches a file once,
 /// including one made before fuwa used it, and is a no-op after. Encryption has
 /// to be set up before the switch, which the builder does.
-pub async fn open(path: &Path, key: Option<&EncryptionKey>, migrations: &[&str]) -> Result<Database> {
+pub async fn open(path: &Path, key: Option<&EncryptionKey>, migrations: &[&str]) -> Result<Db> {
     let db = build(path, key).await.map_err(|err| explain_key(err, path, key.is_some()))?;
     let conn = connect(&db)?;
     let mode = query_one(&conn, "PRAGMA journal_mode = 'mvcc'", (), |r| r.get::<String>(0))
@@ -48,7 +107,7 @@ pub async fn open(path: &Path, key: Option<&EncryptionKey>, migrations: &[&str])
         return Err(Error::internal(format!("{} stayed in {mode:?} journal mode", path.display())));
     }
     migrate(&conn, migrations).await?;
-    Ok(db)
+    Ok(Db { database: db, path: path.to_path_buf(), gate: RwLock::new(()) })
 }
 
 /// Opening a file is where the wrong FUWA_ENCRYPTION_KEY shows up, as Turso's
@@ -135,7 +194,8 @@ const ATTEMPTS: u32 = 50;
 
 /// Runs `f` once in a concurrent write transaction on a connection of its
 /// own: for writes that may simply give way when they clash.
-pub async fn write_once<T>(db: &Database, f: impl AsyncFnOnce(&Connection) -> Result<T>) -> Result<T> {
+pub async fn write_once<T>(db: &Db, f: impl AsyncFnOnce(&Connection) -> Result<T>) -> Result<T> {
+    let _shared = db.shared().await;
     let conn = connect(db)?;
     begin(&conn).await?;
     let result = match f(&conn).await {
@@ -150,7 +210,8 @@ pub async fn write_once<T>(db: &Database, f: impl AsyncFnOnce(&Connection) -> Re
 
 /// Runs `f` in a concurrent write transaction on a connection of its own,
 /// committing if it succeeds. See [`transaction`].
-pub async fn write<T>(db: &Database, f: impl AsyncFnOnce(&Connection) -> Result<T> + Clone) -> Result<T> {
+pub async fn write<T>(db: &Db, f: impl AsyncFnOnce(&Connection) -> Result<T> + Clone) -> Result<T> {
+    let _shared = db.shared().await;
     transaction(&connect(db)?, f).await
 }
 

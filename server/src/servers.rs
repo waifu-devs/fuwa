@@ -12,16 +12,17 @@ use std::sync::{Arc, RwLock};
 
 use prost::Message as _;
 use tokio::sync::Mutex;
-use turso::{Connection, Database, Row};
+use turso::{Connection, Row};
 
 use crate::config;
 use crate::cpb;
-use crate::db::{self, EncryptionKey, query_all, query_one};
+use crate::db::{self, Db, EncryptionKey, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::hub::Hub;
 use crate::id::{millis, new_id, now_ms, parse_id, timestamp};
 use crate::pb;
 use crate::permissions;
+use crate::replica::Replica;
 
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0001_init.sql"),
@@ -39,11 +40,10 @@ pub type Payload = pb::event::Payload;
 pub struct ServerDb {
     pub id: String,
     path: PathBuf,
-    db: Database,
-    /// Writes hold this shared, so they run side by side. The few that sweep
-    /// rows other writes may be adding to (deleting a channel and its
-    /// messages, deleting the server) hold it alone.
-    gate: tokio::sync::RwLock<()>,
+    /// The file. Writes hold its gate shared, so they run side by side; the
+    /// few that sweep rows other writes may be adding to (deleting a channel
+    /// and its messages, deleting the server) hold it alone.
+    db: Arc<Db>,
     /// The event log's last sequence, or `None` to read it again from the file.
     /// Held from handing out a write's sequences until it has committed and
     /// published them, so the log commits and goes out in sequence order.
@@ -185,7 +185,7 @@ impl ServerDb {
         actor_id: &str,
         f: impl AsyncFnOnce(&Connection, &mut Vec<Payload>) -> Result<T> + Clone,
     ) -> Result<T> {
-        let shared = self.gate.read().await;
+        let shared = self.db.shared().await;
         let value = self.run(actor_id, f).await;
         drop(shared);
         if value.is_ok() {
@@ -202,7 +202,7 @@ impl ServerDb {
         actor_id: &str,
         f: impl AsyncFnOnce(&Connection, &mut Vec<Payload>) -> Result<T> + Clone,
     ) -> Result<T> {
-        let _alone = self.gate.write().await;
+        let _alone = self.db.alone().await;
         self.run(actor_id, f).await
     }
 
@@ -359,7 +359,7 @@ impl ServerDb {
             .filter(|p| !p.contains('\''))
             .ok_or_else(|| Error::internal(format!("can't export to {}", dest.display())))?;
         {
-            let _alone = self.gate.write().await;
+            let _alone = self.db.alone().await;
             let conn = self.read()?;
             conn.execute(&format!("VACUUM INTO '{path}'"), ()).await?;
         }
@@ -459,6 +459,11 @@ fn storage_bytes(path: &Path) -> i64 {
     size(path) + size(&sidecar(path, "-log")) + size(&sidecar(path, "-wal"))
 }
 
+/// What a server's file is called in the replica, wherever it's kept.
+pub fn replica_name(id: &str) -> String {
+    format!("servers/{id}")
+}
+
 fn sidecar(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push(suffix);
@@ -522,6 +527,8 @@ pub struct Servers {
     open: RwLock<HashMap<String, Arc<ServerDb>>>,
     /// Part of a split instance, where a server not here may be on another shard.
     split: bool,
+    /// Where every server file here is continuously copied, if anywhere.
+    replica: Option<Arc<Replica>>,
 }
 
 /// What a new server starts with.
@@ -542,15 +549,23 @@ impl Servers {
             hub,
             open: RwLock::new(HashMap::new()),
             split: true,
+            replica: None,
         }
     }
 
-    /// Opens every server under `<data>/servers/`, bringing each schema up to date.
-    pub async fn open(data_path: &Path, key: Option<EncryptionKey>, hub: Arc<Hub>, split: bool) -> Result<Self> {
+    /// Opens every server under `<data>/servers/`, bringing each schema up to
+    /// date, and replicates each to `replica`.
+    pub async fn open(
+        data_path: &Path,
+        key: Option<EncryptionKey>,
+        hub: Arc<Hub>,
+        split: bool,
+        replica: Option<Arc<Replica>>,
+    ) -> Result<Self> {
         let dir = data_path.join("servers");
         let trash = data_path.join("deleted");
         std::fs::create_dir_all(&dir)?;
-        let servers = Self { dir, trash, key, hub, open: RwLock::new(HashMap::new()), split };
+        let servers = Self { dir, trash, key, hub, open: RwLock::new(HashMap::new()), split, replica };
 
         let mut entries: Vec<PathBuf> = std::fs::read_dir(&servers.dir)?
             .filter_map(|entry| entry.ok().map(|e| e.path()))
@@ -571,6 +586,7 @@ impl Servers {
 
     async fn load(&self, id: &str, path: &Path) -> Result<()> {
         let sdb = Arc::new(self.open_file(id, path).await?);
+        self.replicate(&sdb).await?;
         sdb.fold_usage().await?;
         let server = sdb.server().await?;
         if server.id != id {
@@ -583,17 +599,24 @@ impl Servers {
     }
 
     async fn open_file(&self, id: &str, path: &Path) -> Result<ServerDb> {
-        let db = db::open(path, self.key.as_ref(), MIGRATIONS).await?;
+        let db = Arc::new(db::open(path, self.key.as_ref(), MIGRATIONS).await?);
         Ok(ServerDb {
             id: id.to_string(),
             path: path.to_path_buf(),
             db,
-            gate: tokio::sync::RwLock::new(()),
             head: Mutex::new(None),
             unfolded: AtomicU32::new(0),
             folding: AtomicBool::new(false),
             hub: self.hub.clone(),
         })
+    }
+
+    /// Starts copying a server's file to the replica, if there is one.
+    async fn replicate(&self, sdb: &ServerDb) -> Result<()> {
+        match &self.replica {
+            Some(replica) => replica.track(&replica_name(&sdb.id), sdb.db.clone()).await,
+            None => Ok(()),
+        }
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, HashMap<String, Arc<ServerDb>>> {
@@ -656,6 +679,7 @@ impl Servers {
         let id = new_id();
         let path = self.path(&id);
         let sdb = Arc::new(self.open_file(&id, &path).await?);
+        self.replicate(&sdb).await?;
         let created = sdb
             .write(&owner.id, async |conn, events| {
                 let now = now_ms();
@@ -697,6 +721,9 @@ impl Servers {
         let server = match created {
             Ok(server) => server,
             Err(err) => {
+                if let Some(replica) = &self.replica {
+                    replica.forget(&replica_name(&id), false).await;
+                }
                 drop(sdb);
                 for suffix in SIDECARS {
                     let _ = std::fs::remove_file(sidecar(&path, suffix));
@@ -714,9 +741,12 @@ impl Servers {
         let sdb = self.get(id).await?;
         let id = sdb.id.clone();
         self.write().remove(&id);
+        if let Some(replica) = &self.replica {
+            replica.forget(&replica_name(&id), true).await;
+        }
         {
             // Wait out any write in flight, then settle the logs into the main file.
-            let _alone = sdb.gate.write().await;
+            let _alone = sdb.db.alone().await;
             let _ = db::pragma(&sdb.read()?, "PRAGMA wal_checkpoint(TRUNCATE)").await;
             std::fs::create_dir_all(&self.trash)?;
             let stamp = now_ms();
@@ -1238,8 +1268,7 @@ mod tests {
         let sdb = ServerDb {
             id: "s".into(),
             path: path.clone(),
-            db,
-            gate: tokio::sync::RwLock::new(()),
+            db: Arc::new(db),
             head: Mutex::new(None),
             unfolded: AtomicU32::new(0),
             folding: AtomicBool::new(false),

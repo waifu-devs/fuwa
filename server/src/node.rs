@@ -2,11 +2,12 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use turso::{Connection, Database, Row};
+use turso::{Connection, Row};
 
-use crate::db::{self, EncryptionKey, query_all, query_one};
+use crate::db::{self, Db, EncryptionKey, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::media::MediaRow;
@@ -163,7 +164,7 @@ pub fn clip_user_agent(user_agent: &str) -> String {
 }
 
 pub struct NodeDb {
-    db: Database,
+    db: Arc<Db>,
     /// Sign-ups one at a time, so only the very first account becomes admin.
     sign_ups: Mutex<()>,
     /// Changes to who is an admin one at a time, so the last one stays.
@@ -215,8 +216,13 @@ pub struct AccountCounts {
 
 impl NodeDb {
     pub async fn open(path: &Path, key: Option<&EncryptionKey>) -> Result<Self> {
-        let db = db::open(path, key, MIGRATIONS).await?;
+        let db = Arc::new(db::open(path, key, MIGRATIONS).await?);
         Ok(Self { db, sign_ups: Mutex::new(()), admin_changes: Mutex::new(()) })
+    }
+
+    /// The file itself, for the replica.
+    pub fn db(&self) -> &Arc<Db> {
+        &self.db
     }
 
     fn read(&self) -> Result<Connection> {

@@ -74,7 +74,18 @@
   - `db.rs`: Turso helpers: opening, `user_version` migrations, transactions.
     Every database runs in Turso's concurrent-writer mode (MVCC): writes are
     `BEGIN CONCURRENT` transactions that run side by side and are retried
-    when two touch the same row.
+    when two touch the same row. An open file is a `Db`, whose gate
+    (`shared` for writes, `alone` for folding the log in) lets the replica
+    hold writes for a moment.
+  - `replica/`: a split instance's continuous backup to a bucket or a folder
+    (`FUWA_S3_*`, `FUWA_REPLICA_PATH`) and restoring from it (`FUWA_RESTORE`,
+    `fuwa restore`): the directory's node.db and pictures, each shard's
+    servers under its name. It ships each file's MVCC log as it grows and
+    folds the log in itself. `docs/storage.md` is the one design doc for
+    storage, with the phases after this one. `s3.rs` is a small S3 client
+    (Signature V4), `store.rs` a bucket or a folder behind one interface. A
+    single process (`FUWA_ROLE=all`) refuses the settings: it keeps plain
+    local files.
   - `config.rs`: `FUWA_*` environment variables: how the process starts, and
     the defaults for settings.
   - `settings.rs`: settings admins change from a client (`AdminService`), stored
@@ -118,7 +129,8 @@
     `index.html` for any path the API doesn't answer so deep links work.
   - `tests/api.rs`: end-to-end tests against a running instance; `tests/web.rs`
     covers the embedded app; `tests/cluster.rs` runs a directory, two shards
-    and a gateway and drives them through the gateway.
+    and a gateway and drives them through the gateway; `tests/replica.rs`
+    loses a split instance's volumes and brings it back from its replica.
 - `web/`: the web app (pnpm, Vite, React 19, TanStack Router, Tailwind 4,
   shadcn/ui and Animate UI copied from the waifu.dev site, Effect).
   - `src/gen/`: protobuf code from `pnpm generate`. Generated, committed, never
@@ -226,6 +238,11 @@
 - Never write outside a transaction or with `BEGIN`/`BEGIN IMMEDIATE`: those
   lock out concurrent commits. Schema changes go in migrations, which run
   before anything else touches the file.
+- Every write to an open file holds its gate: `db::write`, `ServerDb::write`
+  and `write_alone` do. With a replica on, only the replica folds a tracked
+  file's log in (Turso's own checkpoint is off for it), so anything else that
+  checkpoints takes `Db::alone`, and a new database file gets
+  `replica.track` (servers go through `Servers::replicate`).
 - Permissions, not ranks, decide what someone may do: a handler takes a `Seat`
   from `Api::with(account, server_id, Permission)` (or `membership` plus
   `access.require_in(channel, ...)` for channel ones). Rank only decides who
