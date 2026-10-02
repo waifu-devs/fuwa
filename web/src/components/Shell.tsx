@@ -45,20 +45,26 @@ export function rememberedPath(): string | null {
 }
 
 export function Shell() {
-  const params = useParams({ strict: false }) as { instance?: string; server?: string; channel?: string; code?: string };
+  const params = useParams({ strict: false }) as {
+    instance?: string;
+    server?: string;
+    channel?: string;
+    code?: string;
+    conversation?: string;
+  };
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const compact = !useMediaQuery("(min-width: 768px)");
   const wide = useMediaQuery("(min-width: 1280px)");
-  const [navOpen, setNavOpen] = useState(!params.channel && !params.code);
+  const [navOpen, setNavOpen] = useState(!params.channel && !params.code && !params.conversation);
   const [membersOpen, setMembersOpen] = useState(wide);
 
-  // Opening a channel on a phone shows the chat; leaving one shows the list. Signed out (the session
+  // Opening a channel or a conversation on a phone shows the chat; leaving one shows the list. Signed out (the session
   // ended, or an admin turned the account off), it shows the page asking to sign in; an invite shows itself.
   const inst = useInstance(params.instance);
   const signedOut = inst?.connection === "signed-out";
   // An instance this browser doesn't know yet has nothing to list, only the page asking to connect.
   const known = !!inst;
-  const page = !!params.channel || !!params.code || !known;
+  const page = !!params.channel || !!params.code || !!params.conversation || !known;
   useEffect(() => {
     setNavOpen(!page && !signedOut);
   }, [page, params.server, signedOut]);
@@ -136,10 +142,10 @@ function Nav({ side }: { side: ReactNode }) {
 
 /** The page, rising in softly when you go to another server or instance. */
 function Page() {
-  const params = useParams({ strict: false }) as { instance?: string; server?: string };
+  const params = useParams({ strict: false }) as { instance?: string; server?: string; conversation?: string };
   return (
     <motion.div
-      key={`${params.instance}/${params.server ?? ""}`}
+      key={`${params.instance}/${params.server ?? (params.conversation ? "dm" : "")}`}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: EASE_OUT }}

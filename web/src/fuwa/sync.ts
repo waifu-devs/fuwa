@@ -2,6 +2,7 @@ import { Code } from "@connectrpc/connect";
 import { Effect, Fiber, FiberSet, Schedule, Stream, SubscriptionRef } from "effect";
 import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
 import type { Event } from "@/gen/fuwa/v1/types_pb";
+import { startDms, stopDms, wipeDms } from "@/e2ee/engine";
 import { onLiveEvent, onRemoved } from "@/lib/notify";
 import { makeApi, type Api } from "./client";
 import { FuwaError, call, toFuwaError } from "./errors";
@@ -131,6 +132,15 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
 
     const me = yield* retrying(call((signal) => api.auth.getMe({}, { signal })));
     patchInstance(key, { me: me.user ?? null, admin: me.admin });
+    // Encrypted direct messages run alongside, for as long as this does.
+    const token = e.token;
+    if (me.user) {
+      const user = me.user;
+      yield* Effect.acquireRelease(
+        Effect.sync(() => startDms(key, api, user, token)),
+        () => Effect.sync(() => stopDms(key)),
+      );
+    }
     // Notification settings follow the account; an older instance without them just has none.
     const notifications = yield* call((signal) => api.account.getNotificationSettings({}, { signal })).pipe(
       Effect.map((r) => Object.fromEntries(r.settings.map((n) => [notificationKey(n.serverId, n.channelId), n]))),
@@ -161,9 +171,10 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
     Effect.catchAll((err) =>
       Effect.sync(() => {
         if (err.signedOut) {
-          // The session expired or was revoked elsewhere.
+          // The session expired or was revoked elsewhere, and its device with it.
           e.token = null;
           persist();
+          void wipeDms(key);
           patchInstance(key, { connection: "signed-out", problem: "Your session ended. Sign in again." });
         } else {
           patchInstance(key, { connection: "offline", problem: err.message });

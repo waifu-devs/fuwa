@@ -12,7 +12,7 @@ import { Count, EASE_OUT, SPRING } from "@/components/motion";
 import { Keycaps } from "@/components/settings/app/common";
 import { fuzzy } from "@/lib/fuzzy";
 import { ACTIONS, GROUPS, actionById, bindingOf, bindings, comboOf, composerKeys, normalize } from "@/lib/keybinds";
-import { setNotificationTarget } from "@/lib/notify";
+import { setDmNotificationTarget, setNotificationTarget } from "@/lib/notify";
 import { getPrefs, setPrefs, usePrefs } from "@/lib/prefs";
 import { hidesPersonal, shownAddress } from "@/lib/streamer";
 import {
@@ -71,11 +71,12 @@ export function AppOverlays() {
   const hereRef = useRef(here);
   hereRef.current = here;
 
-  // Clicking a desktop notification opens its channel.
+  // Clicking a desktop notification opens its channel or conversation.
   useEffect(() => {
     setNotificationTarget((instance, server, channel) =>
       void navigate({ to: "/$instance/$server/$channel", params: { instance, server, channel } }),
     );
+    setDmNotificationTarget((instance, conversation) => void navigate({ to: "/$instance/dm/$conversation", params: { instance, conversation } }));
   }, [navigate]);
 
   // Streamer mode swaps the address bar, and every link, between an instance's

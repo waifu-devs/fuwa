@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "wasm": "node scripts/e2ee.mjs",
     "build": "tsc --noEmit && vite build",
     "generate": "buf generate --template buf.gen.yaml",
     "typecheck": "tsc --noEmit",

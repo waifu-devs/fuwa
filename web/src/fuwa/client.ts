@@ -4,6 +4,7 @@ import { AccountService } from "@/gen/fuwa/v1/account_pb";
 import { AdminService } from "@/gen/fuwa/v1/admin_pb";
 import { AuthService } from "@/gen/fuwa/v1/auth_pb";
 import { ChannelService } from "@/gen/fuwa/v1/channel_pb";
+import { DirectMessageService } from "@/gen/fuwa/v1/dm_pb";
 import { EventService } from "@/gen/fuwa/v1/event_pb";
 import { InviteService } from "@/gen/fuwa/v1/invite_pb";
 import { JoinService } from "@/gen/fuwa/v1/join_pb";
@@ -27,6 +28,7 @@ export type Api = {
   roles: Client<typeof RoleService>;
   invites: Client<typeof InviteService>;
   join: Client<typeof JoinService>;
+  dms: Client<typeof DirectMessageService>;
 };
 
 /**
@@ -54,5 +56,6 @@ export function makeApi(url: string, token: () => string | null): Api {
     roles: createClient(RoleService, transport),
     invites: createClient(InviteService, transport),
     join: createClient(JoinService, transport),
+    dms: createClient(DirectMessageService, transport),
   };
 }

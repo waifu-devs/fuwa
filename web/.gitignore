@@ -1,3 +1,5 @@
 node_modules/
 dist/
 *.tsbuildinfo
+# Built by `pnpm run wasm` from e2ee-wasm/.
+src/e2ee/pkg/

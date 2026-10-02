@@ -9,10 +9,11 @@ import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { SPRING, SwapText } from "@/components/motion";
 import { UserPanel } from "@/components/UserPanel";
+import { DmList } from "@/components/dm/DmList";
 import { HostedBadge } from "@/components/HostedBadge";
 import { InstanceSettingsDialog } from "@/components/settings/InstanceSettingsDialog";
 
-/** The sidebar on an instance's home: what it is, and your servers there. */
+/** The sidebar on an instance's home: what it is, your conversations and your servers there. */
 export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
   const inst = useInstance(instanceKey);
   const { compact, setNavOpen } = useLayout();
@@ -54,6 +55,7 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
         >
           <CompassIcon className="size-4" /> Browse servers
         </Link>
+        <DmList instanceKey={instanceKey} />
         <AnimatePresence initial={false}>
           {inst.servers.length > 0 && (
             <motion.p

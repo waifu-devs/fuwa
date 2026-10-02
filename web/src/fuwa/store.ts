@@ -13,6 +13,8 @@ import type {
   User,
 } from "@/gen/fuwa/v1/types_pb";
 import { ApplicationStatus, ChannelType } from "@/gen/fuwa/v1/types_pb";
+import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
+import type { Item } from "@/e2ee/vault";
 import { loadApplied, type Applied } from "@/lib/applied";
 import { sortRoles } from "@/lib/permissions";
 
@@ -34,6 +36,53 @@ export type ChannelMessages = {
 
 /** A message this browser sent that the server hasn't confirmed yet. */
 export type PendingMessage = { nonce: string; content: string; createdAt: number; failed: string | null };
+
+/** A device in an encrypted conversation, as its group says. */
+export type DmMember = { userId: string; deviceId: string; signatureKey: Uint8Array };
+
+/** Encrypted direct messages on one instance, as this browser's device sees them. */
+export type DmState = {
+  /**
+   * starting: loading the encryption and registering this device. ready:
+   * working. unsupported: this browser can't keep encrypted messages (no
+   * IndexedDB or WebAssembly). failed: something else went wrong; see problem.
+   */
+  status: "off" | "starting" | "ready" | "unsupported" | "failed";
+  problem: string | null;
+  /** This browser's device for the account. */
+  deviceId: string;
+  /** The latest first. */
+  conversations: Conversation[];
+  /** What each conversation said, as this device opened it, oldest first. Only conversations someone opened. */
+  items: Record<string, Item[]>;
+  pending: Record<string, PendingMessage[]>;
+  unread: Record<string, number>;
+  /** Every device in each conversation's group. */
+  members: Record<string, DmMember[]>;
+  /** The safety number as it is now, per conversation. */
+  safety: Record<string, string>;
+  /** The safety number you checked with the other person. */
+  verified: Record<string, string>;
+  /** Why you can't send in a conversation right now, if you can't. */
+  blocked: Record<string, string>;
+  /** Conversations this device is still joining. */
+  joining: Record<string, boolean>;
+};
+
+export const emptyDms = (): DmState => ({
+  status: "off",
+  problem: null,
+  deviceId: "",
+  conversations: [],
+  items: {},
+  pending: {},
+  unread: {},
+  members: {},
+  safety: {},
+  verified: {},
+  blocked: {},
+  joining: {},
+});
 
 export type InstanceState = {
   key: string;
@@ -68,6 +117,7 @@ export type InstanceState = {
   applications: Record<string, Application[]>;
   /** Servers you applied to and aren't in yet, by server id. Kept in this browser. */
   applied: Record<string, Applied>;
+  dms: DmState;
 };
 
 /** Where a server's (channel "") or a channel's notification settings are kept. */
@@ -77,7 +127,7 @@ export type FuwaState = {
   instances: Record<string, InstanceState>;
   /** Instance keys, in the order they were added. */
   order: string[];
-  /** The channel on screen, so it doesn't collect unread counts. */
+  /** The channel (or conversation) on screen, so it doesn't collect unread counts. */
   focus: { instance: string; channel: string } | null;
 };
 
@@ -125,7 +175,16 @@ export function emptyInstance(key: string, url: string): InstanceState {
     profiles: {},
     applications: {},
     applied: loadApplied(key),
+    dms: emptyDms(),
   };
+}
+
+/** Changes an instance's direct messages. */
+export function updateDms(key: string, fn: (d: DmState, i: InstanceState) => DmState) {
+  updateInstance(key, (i) => {
+    const dms = fn(i.dms, i);
+    return dms === i.dms ? i : { ...i, dms };
+  });
 }
 
 /** Changes one instance; a no-op if it was removed meanwhile. */
