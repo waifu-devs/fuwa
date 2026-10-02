@@ -294,7 +294,7 @@ impl Drop for Following {
         if let Link::Directory(shards) = &self.app.link {
             shards.watch(&self.shard, -1);
             if shards.url_if_up(&self.shard).is_none() {
-                tracing::warn!(shard = %self.shard, "a shard went away");
+                tracing::info!(shard = %self.shard, "a shard went away; waiting for it to register again");
             }
         }
     }

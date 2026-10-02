@@ -58,7 +58,20 @@ impl Error {
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Internal(message.into())
     }
+
+    /// An answer from another part, read as [`From<Status>`] does but without
+    /// its warning: for a call that's tried again while that part restarts,
+    /// where only giving up is worth a warning.
+    pub fn retried(status: Status) -> Self {
+        if std::error::Error::source(&status).is_some() {
+            return Self::Unavailable(UNREACHABLE.into());
+        }
+        Self::Remote(status)
+    }
 }
+
+/// What a call gets when another part of the instance didn't answer it.
+pub const UNREACHABLE: &str = "part of this instance is unreachable right now; try again soon";
 
 impl From<Status> for Error {
     /// An answer from another part of a split instance. Failing to reach it at
@@ -66,9 +79,8 @@ impl From<Status> for Error {
     fn from(status: Status) -> Self {
         if std::error::Error::source(&status).is_some() {
             tracing::warn!(error = %status, "a part of this instance didn't answer");
-            return Self::Unavailable("part of this instance is unreachable right now; try again soon".into());
         }
-        Self::Remote(status)
+        Self::retried(status)
     }
 }
 

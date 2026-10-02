@@ -148,6 +148,9 @@ pub async fn connect(app: &Arc<App>) {
 async fn stay_in_touch(app: Arc<App>) {
     let AppLink::Shard(link) = &app.link else { return };
     let mut backoff = Backoff::default();
+    // A restart takes seconds, so the directory being out of reach is only
+    // worth a warning once it's been longer than calls wait for it.
+    let mut away_since = Instant::now();
     loop {
         let mut directory = link.directory();
         let watch = directory.watch(cpb::WatchRequest { shard_id: link.id.clone() });
@@ -176,11 +179,13 @@ async fn stay_in_touch(app: Arc<App>) {
                                 }
                             }
                             Ok(None) => {
-                                tracing::warn!("the directory closed its connection");
+                                away_since = Instant::now();
+                                tracing::info!("the directory closed its connection; waiting for it to come back");
                                 break;
                             }
                             Err(err) => {
-                                tracing::warn!(error = %err.message(), "lost the directory");
+                                away_since = Instant::now();
+                                tracing::info!(error = %err.message(), "lost the directory; waiting for it to come back");
                                 break;
                             }
                         },
@@ -189,6 +194,9 @@ async fn stay_in_touch(app: Arc<App>) {
                         },
                     }
                 }
+            }
+            Err(err) if away_since.elapsed() < link.ride_out => {
+                tracing::info!(directory = %link.directory_url, error = %err.message(), "can't reach the directory yet")
             }
             Err(err) => {
                 tracing::warn!(directory = %link.directory_url, error = %err.message(), "can't reach the directory")
@@ -270,7 +278,7 @@ pub async fn take_servers(config: &Config) -> Result<()> {
             }
             std::fs::write(incoming.join(CHECKED), "")?;
             let request = cpb::HandedOverRequest { shard_id: shard_id.clone(), names: names.clone() };
-            directory.clone().handed_over(request).await?;
+            directory.clone().handed_over(request).await.map_err(Error::retried)?;
             tracing::info!(files = names.len(), "took over the servers of this instance's single process");
             Ok(())
         }
@@ -325,11 +333,11 @@ async fn receive(mut directory: DirectoryClient, shard_id: &str, incoming: &Path
         Ok(response) => response.into_inner(),
         // A directory from before handing over servers has none to give.
         Err(status) if status.code() == tonic::Code::Unimplemented => return Ok(Vec::new()),
-        Err(status) => return Err(status.into()),
+        Err(status) => return Err(Error::retried(status)),
     };
     let mut names = Vec::new();
     let mut file: Option<(String, tokio::fs::File, Sha256)> = None;
-    while let Some(piece) = stream.message().await? {
+    while let Some(piece) = stream.message().await.map_err(Error::retried)? {
         if !super::is_server_file(&piece.name) {
             return Err(Error::internal(format!("the directory sent {:?}, which isn't a server's file", piece.name)));
         }

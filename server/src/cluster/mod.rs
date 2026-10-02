@@ -314,16 +314,21 @@ pub fn unreachable(status: &tonic::Status) -> bool {
 }
 
 /// Makes a call that only reads, trying it again while the part it goes to is
-/// unreachable, for up to `within`.
+/// unreachable, for up to `within`. Only giving up is logged, as a warning.
 pub async fn ride_out<T, F>(within: Duration, mut call: impl FnMut() -> F) -> std::result::Result<T, tonic::Status>
 where
     F: Future<Output = std::result::Result<T, tonic::Status>>,
 {
     let mut patience = Patience::new(within);
     loop {
-        let answer = call().await;
-        if !matches!(&answer, Err(status) if unreachable(status)) || !patience.wait().await {
-            return answer;
+        match call().await {
+            Err(status) if unreachable(&status) => {
+                if !patience.wait().await {
+                    tracing::warn!(error = %status, waited = ?within, "a part of this instance didn't answer in time");
+                    return Err(Error::retried(status).into());
+                }
+            }
+            answer => return answer,
         }
     }
 }
@@ -440,5 +445,26 @@ mod tests {
         assert_eq!(shard_id(&config, dir.path()).unwrap(), first);
         let named = ClusterConfig { shard_id: Some("eu-1".into()), ..config };
         assert_eq!(shard_id(&named, dir.path()).unwrap(), "eu-1");
+    }
+
+    #[tokio::test]
+    async fn riding_out_tries_again_then_gives_up_as_unavailable() {
+        let refused = || tonic::Status::from_error(Box::new(std::io::Error::other("connection refused")));
+        let mut tries = 0;
+        let answer = ride_out(Duration::from_millis(250), || {
+            tries += 1;
+            let answer = if tries < 3 { Err(refused()) } else { Ok(tries) };
+            async move { answer }
+        })
+        .await;
+        assert_eq!(answer.unwrap(), 3);
+
+        let answer: std::result::Result<(), _> = ride_out(Duration::ZERO, || async { Err(refused()) }).await;
+        let status = answer.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::Unavailable);
+        assert_eq!(status.message(), crate::error::UNREACHABLE);
+        // Already logged: passing it on doesn't warn again.
+        assert!(std::error::Error::source(&status).is_none());
+        assert!(matches!(Error::from(status), Error::Remote(_)));
     }
 }
