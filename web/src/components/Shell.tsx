@@ -44,37 +44,44 @@ export function rememberedPath(): string | null {
 }
 
 export function Shell() {
-  const params = useParams({ strict: false }) as { instance?: string; server?: string; channel?: string };
+  const params = useParams({ strict: false }) as { instance?: string; server?: string; channel?: string; code?: string };
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const compact = !useMediaQuery("(min-width: 768px)");
   const wide = useMediaQuery("(min-width: 1280px)");
-  const [navOpen, setNavOpen] = useState(!params.channel);
+  const [navOpen, setNavOpen] = useState(!params.channel && !params.code);
   const [membersOpen, setMembersOpen] = useState(wide);
 
   // Opening a channel on a phone shows the chat; leaving one shows the list. Signed out (the session
-  // ended, or an admin turned the account off), it shows the page asking to sign in.
-  const signedOut = useInstance(params.instance)?.connection === "signed-out";
+  // ended, or an admin turned the account off), it shows the page asking to sign in; an invite shows itself.
+  const inst = useInstance(params.instance);
+  const signedOut = inst?.connection === "signed-out";
+  // An instance this browser doesn't know yet has nothing to list, only the page asking to connect.
+  const known = !!inst;
+  const page = !!params.channel || !!params.code || !known;
   useEffect(() => {
-    setNavOpen(!params.channel && !signedOut);
-  }, [params.channel, params.server, signedOut]);
+    setNavOpen(!page && !signedOut);
+  }, [page, params.server, signedOut]);
   useEffect(() => setMembersOpen(wide), [wide]);
   // The members shortcut works while a channel is open.
   const inChannel = !!params.channel;
   useEffect(() => (inChannel ? onCommand("toggleMembers", () => setMembersOpen((open) => !open)) : undefined), [inChannel]);
+  // An invite isn't a place to come back to, so it isn't remembered.
+  const invite = !!params.code;
   useEffect(() => {
+    if (invite) return;
     try {
       localStorage.setItem(LAST_PATH, pathname);
     } catch {
       // Not remembered; the app still opens on the first server next time.
     }
-  }, [pathname]);
+  }, [pathname, invite]);
 
   const layout = useMemo(
     () => ({ compact, navOpen, setNavOpen, membersOpen, setMembersOpen }),
     [compact, navOpen, membersOpen],
   );
 
-  const side = params.instance ? (
+  const side = params.instance && known ? (
     params.server ? (
       <ChannelSidebar key={`${params.instance}/${params.server}`} instanceKey={params.instance} serverId={params.server} />
     ) : (

@@ -67,6 +67,18 @@ impl App {
         }
     }
 
+    /// Records an invite made (`exists`), or deleted, used up or expired.
+    pub async fn index_invite(&self, server_id: &str, code: &str, exists: bool) {
+        match &self.link {
+            Link::Shard(link) => {
+                let request =
+                    cpb::IndexInviteRequest { server_id: server_id.to_string(), code: code.to_string(), exists };
+                link.tell("about an invite", async |mut d| d.index_invite(request).await).await;
+            }
+            _ => self.index.index_invite(server_id, code, exists),
+        }
+    }
+
     /// Forgets a deleted server: its place in the index, and notification
     /// settings for it.
     pub async fn server_gone(&self, server_id: &str) {
@@ -212,7 +224,7 @@ impl App {
     pub async fn create_server(&self, owner: &pb::User, new: NewServer) -> Result<pb::Server> {
         let Link::Directory(shards) = &self.link else {
             let server = self.servers.create(owner, new).await?;
-            self.index.insert(server.clone(), vec![owner.id.clone()], None);
+            self.index.insert(server.clone(), vec![owner.id.clone()], vec![], None);
             return Ok(server);
         };
         let sizes = self.index.shard_sizes();
@@ -235,7 +247,7 @@ impl App {
             .server
             .ok_or_else(|| Error::internal("the shard didn't say what it made"))?;
         self.node()?.place(&server.id, Some(&shard_id)).await?;
-        self.index.insert(server.clone(), vec![owner.id.clone()], Some(&shard_id));
+        self.index.insert(server.clone(), vec![owner.id.clone()], vec![], Some(&shard_id));
         Ok(server)
     }
 
@@ -355,6 +367,17 @@ impl App {
             id(a).cmp(&id(b))
         });
         Ok(described)
+    }
+
+    /// Where an invite leads, asked of the shard holding its server.
+    pub async fn describe_invite(&self, code: &str) -> Result<pb::GetInviteResponse> {
+        let server_id = self.index.invite(code).ok_or(Error::NotFound("invite"))?;
+        let Link::Directory(shards) = &self.link else {
+            return shard::describe_invite(&self.servers, &server_id, code).await;
+        };
+        let shard_id = self.index.placement(&server_id).ok_or(Error::NotFound("invite"))?;
+        let request = cpb::DescribeInviteRequest { server_id, code: code.to_string() };
+        shards.client(&shard_id)?.describe_invite(request).await?.into_inner().invite.ok_or(Error::NotFound("invite"))
     }
 
     /// Whether a server has a channel.

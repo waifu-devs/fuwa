@@ -1,5 +1,5 @@
 //! What the directory knows about every community server: its profile, who's
-//! in it, and (in a split instance) which shard holds it. Kept in memory and
+//! in it, its invites' codes, and (in a split instance) which shard holds it. Kept in memory and
 //! built from the servers' own files: read at start by a single process, or
 //! reported by each shard when it registers.
 
@@ -24,16 +24,22 @@ struct Inner {
     /// Server id to the shard holding it. Also has servers whose shard hasn't
     /// registered since the directory started, which aren't in `servers` yet.
     placements: HashMap<String, String>,
+    /// Invite code to the server it's for.
+    invites: HashMap<String, String>,
 }
 
 impl Inner {
-    fn insert(&mut self, server: pb::Server, member_ids: Vec<String>) {
+    fn insert(&mut self, server: pb::Server, member_ids: Vec<String>, invite_codes: Vec<String>) {
         let id = server.id.clone();
         self.forget_members(&id);
         for member in &member_ids {
             self.memberships.entry(member.clone()).or_default().insert(id.clone());
         }
         self.members.insert(id.clone(), member_ids.into_iter().collect());
+        self.invites.retain(|_, server_id| *server_id != id);
+        for code in invite_codes {
+            self.invites.insert(code, id.clone());
+        }
         self.servers.insert(id, server);
     }
 
@@ -52,6 +58,7 @@ impl Inner {
         self.forget_members(server_id);
         self.servers.remove(server_id);
         self.placements.remove(server_id);
+        self.invites.retain(|_, id| id != server_id);
     }
 }
 
@@ -66,12 +73,12 @@ impl Index {
 
     /// Adds a server (or replaces what was known about it), on `shard` if the
     /// instance is split.
-    pub fn insert(&self, server: pb::Server, member_ids: Vec<String>, shard: Option<&str>) {
+    pub fn insert(&self, server: pb::Server, member_ids: Vec<String>, invite_codes: Vec<String>, shard: Option<&str>) {
         let mut inner = self.write();
         if let Some(shard) = shard {
             inner.placements.insert(server.id.clone(), shard.to_string());
         }
-        inner.insert(server, member_ids);
+        inner.insert(server, member_ids, invite_codes);
     }
 
     /// Takes what a shard says it holds as the truth about that shard: its
@@ -96,7 +103,7 @@ impl Index {
                 tracing::warn!(server = %server.id, from = %other, to = %shard, "a server moved shards");
             }
             inner.placements.insert(server.id.clone(), shard.to_string());
-            inner.insert(server, entry.member_ids);
+            inner.insert(server, entry.member_ids, entry.invite_codes);
         }
         gone
     }
@@ -186,6 +193,21 @@ impl Index {
         }
     }
 
+    /// The server an invite code is for.
+    pub fn invite(&self, code: &str) -> Option<String> {
+        self.read().invites.get(code).cloned()
+    }
+
+    /// An invite was made (`exists`), or deleted, used up or expired.
+    pub fn index_invite(&self, server_id: &str, code: &str, exists: bool) {
+        let mut inner = self.write();
+        if !exists {
+            inner.invites.remove(code);
+        } else if inner.servers.contains_key(server_id) {
+            inner.invites.insert(code.to_string(), server_id.to_string());
+        }
+    }
+
     /// Ids of the servers an account is a member of.
     pub fn joined_ids(&self, account_id: &str) -> Vec<String> {
         self.read().memberships.get(account_id).map(|ids| ids.iter().cloned().collect()).unwrap_or_default()
@@ -249,13 +271,14 @@ mod tests {
         cpb::ServerEntry {
             server: Some(server(id, members.len() as i64)),
             member_ids: members.iter().map(|m| m.to_string()).collect(),
+            invite_codes: vec![format!("{id}-invite")],
         }
     }
 
     #[test]
     fn memberships_count_once() {
         let index = Index::default();
-        index.insert(server("s1", 1), vec!["owner".into()], None);
+        index.insert(server("s1", 1), vec!["owner".into()], vec![], None);
         index.join("mika", "s1");
         index.join("mika", "s1");
         assert_eq!(index.summary("s1").unwrap().member_count, 2);
@@ -291,8 +314,24 @@ mod tests {
         assert!(index.joined_ids("mika").is_empty());
         assert!(index.register("a", vec![entry("s4", &["owner"])]).is_empty());
         assert_eq!(index.placement("s1").as_deref(), Some("b"));
+        assert_eq!(index.invite("s1-invite").as_deref(), Some("s1"));
+        assert_eq!(index.invite("s2-invite"), None);
         let grouped = index.by_shard(&[]);
         assert_eq!(grouped["a"], ["s4"]);
         assert_eq!(index.by_shard(&["s3".into(), "gone".into()]).len(), 1);
+    }
+
+    #[test]
+    fn invites_go_with_their_server() {
+        let index = Index::default();
+        index.insert(server("s1", 1), vec!["owner".into()], vec!["old".into()], None);
+        index.index_invite("s1", "new", true);
+        index.index_invite("nowhere", "stray", true);
+        assert_eq!(index.invite("new").as_deref(), Some("s1"));
+        assert_eq!(index.invite("stray"), None);
+        index.index_invite("s1", "old", false);
+        assert_eq!(index.invite("old"), None);
+        index.remove("s1");
+        assert_eq!(index.invite("new"), None);
     }
 }

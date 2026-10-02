@@ -3,13 +3,19 @@ import {
   AtSignIcon,
   BellIcon,
   ChartColumnIcon,
+  CheckIcon,
   ChevronDownIcon,
+  CompassIcon,
   CrownIcon,
+  DoorOpenIcon,
   EyeOffIcon,
   GaugeIcon,
   GavelIcon,
   HashIcon,
+  HourglassIcon,
+  LinkIcon,
   LoaderCircleIcon,
+  LockIcon,
   ScrollTextIcon,
   SettingsIcon,
   ShieldIcon,
@@ -28,6 +34,8 @@ import { PictureField } from "@/components/PictureField";
 import { joinLine } from "@/components/chat/MessageList";
 import { AuditLog } from "@/components/settings/server/AuditLog";
 import { Bans } from "@/components/settings/server/Bans";
+import { Invites } from "@/components/settings/server/Invites";
+import { Chips } from "@/components/settings/account/common";
 import { Channels } from "@/components/settings/server/Channels";
 import { Members } from "@/components/settings/server/Members";
 import { Ownership } from "@/components/settings/server/Ownership";
@@ -44,9 +52,9 @@ import { Count, CountUp, SPRING, SwapText } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { displayName, formatBytes, initials } from "@/lib/format";
+import { displayName, formatBytes, formatDuration, initials } from "@/lib/format";
+import { ACCOUNT_AGES, timeLeft } from "@/lib/invites";
 import { bit, has, type Access } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { Choice, Cap, SaveBar, WithPreview } from "@/components/settings/controls";
@@ -55,6 +63,9 @@ import { SettingsScreen } from "@/components/settings/SettingsScreen";
 /** Every section of server settings, and whether your permissions open it. Instance admins also get the server's caps, and can delete it. */
 const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boolean> = {
   overview: (a) => has(a, Permission.MANAGE_SERVER),
+  access: (a) => has(a, Permission.MANAGE_SERVER),
+  invites: (a) =>
+    has(a, Permission.MANAGE_SERVER) || has(a, Permission.CREATE_INVITE) || [...a.channels.values()].some((bits) => bits & bit(Permission.CREATE_INVITE)),
   roles: (a) => has(a, Permission.MANAGE_ROLES),
   channels: (a) => [...a.channels.values()].some((bits) => bits & (bit(Permission.MANAGE_CHANNELS) | bit(Permission.MANAGE_ROLES))),
   usage: (a, admin) => admin || has(a, Permission.MANAGE_SERVER),
@@ -107,16 +118,33 @@ export function ServerSettingsDialog({
       id: "overview",
       label: "Overview",
       icon: SettingsIcon,
-      description: "How the server looks, whether people can find it, and how it greets them.",
+      description: "How the server looks and how it greets people.",
       settings: [
         { id: "name", label: "Server name" },
         { id: "icon", label: "Server icon", keywords: "picture image upload logo avatar" },
         { id: "description", label: "Description" },
-        { id: "discoverable", label: "Show in Browse", keywords: "discoverable public hidden" },
         { id: "join-messages", label: "Join messages", keywords: "system channel welcome greet" },
         { id: "default-notifications", label: "Default notifications", keywords: "mentions ping" },
       ],
     }],
+    {
+      id: "access",
+      label: "Access",
+      icon: DoorOpenIcon,
+      description: "Who can join: anyone who finds it in Browse, or only people with an invite.",
+      keywords: "join public private lock",
+      settings: [
+        { id: "discoverable", label: "Show in Browse", keywords: "discoverable public hidden invite only" },
+        { id: "account-age", label: "Minimum account age", keywords: "new accounts spam raid verification" },
+      ],
+    },
+    {
+      id: "invites",
+      label: "Invites",
+      icon: LinkIcon,
+      description: "Invite links that still work, and who made them.",
+      keywords: "invite link code revoke expire uses",
+    },
     {
       id: "roles",
       label: "Roles",
@@ -170,6 +198,8 @@ export function ServerSettingsDialog({
       groups={[{ label: server.name, sections }, ...people, ...(danger.length ? [{ sections: danger }] : [])]}
     >
       {tab === "overview" && can("overview") && <Overview instanceKey={instanceKey} server={server} />}
+      {tab === "access" && can("access") && <Access instanceKey={instanceKey} server={server} />}
+      {tab === "invites" && can("invites") && <Invites instanceKey={instanceKey} serverId={server.id} />}
       {tab === "roles" && can("roles") && <Roles instanceKey={instanceKey} serverId={server.id} initial={target} />}
       {tab === "channels" && can("channels") && <Channels instanceKey={instanceKey} serverId={server.id} initial={target} />}
       {tab === "usage" && can("usage") && <Usage instanceKey={instanceKey} serverId={server.id} />}
@@ -191,7 +221,6 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
   const [name, setName] = useState(server.name);
   const [iconUrl, setIconUrl] = useState(server.iconUrl);
   const [description, setDescription] = useState(server.description);
-  const [discoverable, setDiscoverable] = useState(server.discoverable);
   const [systemChannel, setSystemChannel] = useState(server.systemChannelId);
   const [mentionsOnly, setMentionsOnly] = useState(onlyMentions(server.defaultNotifications));
   const save = useAction(updateServer);
@@ -199,7 +228,6 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
     name !== server.name,
     iconUrl !== server.iconUrl,
     description !== server.description,
-    discoverable !== server.discoverable,
     systemChannel !== server.systemChannelId,
     mentionsOnly !== onlyMentions(server.defaultNotifications),
   ].filter(Boolean).length;
@@ -208,7 +236,6 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
     setName(server.name);
     setIconUrl(server.iconUrl);
     setDescription(server.description);
-    setDiscoverable(server.discoverable);
     setSystemChannel(server.systemChannelId);
     setMentionsOnly(onlyMentions(server.defaultNotifications));
     save.setError(null);
@@ -222,7 +249,6 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
       ...(name !== server.name && { name: name.trim() }),
       ...(iconUrl !== server.iconUrl && { iconUrl: iconUrl.trim() }),
       ...(description !== server.description && { description: description.trim() }),
-      ...(discoverable !== server.discoverable && { discoverable }),
       ...(systemChannel !== server.systemChannelId && { systemChannelId: systemChannel }),
       ...(mentionsOnly !== onlyMentions(server.defaultNotifications) && {
         defaultNotifications: mentionsOnly ? NotificationLevel.MENTIONS : NotificationLevel.UNSPECIFIED,
@@ -230,7 +256,7 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
     });
   }
 
-  const shown = { ...server, name: name || server.name, iconUrl: /^https?:\/\//i.test(iconUrl.trim()) ? iconUrl.trim() : "", description, discoverable };
+  const shown = { ...server, name: name || server.name, iconUrl: /^https?:\/\//i.test(iconUrl.trim()) ? iconUrl.trim() : "", description };
   const greeting = textChannels.find((c) => c.id === systemChannel);
   return (
     <form onSubmit={submit}>
@@ -271,13 +297,6 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
             <Textarea id="settings-description" rows={4} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} className="rounded-xl" />
             <p className="text-sm text-muted-foreground">Shown in Browse. Markdown works.</p>
           </div>
-          <label data-setting="discoverable" className="flex cursor-pointer items-center justify-between gap-4 border-b border-border/70 py-5">
-            <span>
-              <span className="block font-extrabold">Show in Browse</span>
-              <span className="block text-sm text-muted-foreground">Anyone on this fuwa server can find and join it.</span>
-            </span>
-            <Switch checked={discoverable} onCheckedChange={setDiscoverable} />
-          </label>
           <div data-setting="join-messages" className="flex flex-col gap-2 border-b border-border/70 py-5">
             <span className="font-extrabold">Join messages</span>
             <span className="text-sm text-muted-foreground">A hello in a channel whenever someone joins, so people can wave.</span>
@@ -322,6 +341,108 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
         <SaveBar count={changes} saving={save.pending} error={save.error} onSave={() => void submit()} onDiscard={discard} />
       </WithPreview>
     </form>
+  );
+}
+
+/** Who can join: anyone who finds it in Browse, or only people with an invite; and how old their account must be. */
+function Access({ instanceKey, server }: { instanceKey: string; server: Server }) {
+  const [discoverable, setDiscoverable] = useState(server.discoverable);
+  const [minAge, setMinAge] = useState(server.minAccountAgeSeconds);
+  const save = useAction(updateServer);
+  const changes = [discoverable !== server.discoverable, minAge !== server.minAccountAgeSeconds].filter(Boolean).length;
+  // A value set some other way (the API, an older client) still shows as a choice.
+  const ages = ACCOUNT_AGES.some((a) => a.value === server.minAccountAgeSeconds)
+    ? ACCOUNT_AGES
+    : [...ACCOUNT_AGES, { value: server.minAccountAgeSeconds, label: formatDuration(server.minAccountAgeSeconds) }].sort((a, b) => a.value - b.value);
+
+  function discard() {
+    setDiscoverable(server.discoverable);
+    setMinAge(server.minAccountAgeSeconds);
+    save.setError(null);
+  }
+
+  async function submit() {
+    await save.go(instanceKey, server.id, {
+      ...(discoverable !== server.discoverable && { discoverable }),
+      ...(minAge !== server.minAccountAgeSeconds && { minAccountAgeSeconds: minAge }),
+    });
+  }
+
+  return (
+    <WithPreview
+      preview={
+        <div className="flex flex-col gap-4">
+          <BrowseCard server={{ ...server, discoverable }} />
+          <GatePreview minAge={minAge} />
+        </div>
+      }
+    >
+      <div className="flex flex-col">
+        <div data-setting="discoverable" className="flex flex-col gap-3 border-b border-border/70 pb-5">
+          <span>
+            <span className="block font-extrabold">Who can join</span>
+            <span className="block text-sm text-muted-foreground">Invite links work either way, for anyone allowed to make them.</span>
+          </span>
+          <Choice
+            value={discoverable ? "browse" : "invite"}
+            onChange={(v) => setDiscoverable(v === "browse")}
+            options={[
+              { value: "invite", label: "Invite only", hint: "Hidden from Browse. People join with an invite link.", icon: <LockIcon className="size-4" /> },
+              { value: "browse", label: "Anyone here", hint: "Listed in Browse for everyone on this fuwa server.", icon: <CompassIcon className="size-4" /> },
+            ]}
+          />
+        </div>
+        <div data-setting="account-age" className="flex flex-col gap-3 py-5">
+          <span>
+            <span className="block font-extrabold">Minimum account age</span>
+            <span className="block text-sm text-muted-foreground">
+              Accounts newer than this wait before they can join, by invite or from Browse. It keeps throwaway accounts out during a raid.
+            </span>
+          </span>
+          <Chips label="Minimum account age" value={minAge} options={ages} onChange={setMinAge} />
+        </div>
+      </div>
+      <SaveBar count={changes} saving={save.pending} error={save.error} onSave={() => void submit()} onDiscard={discard} />
+    </WithPreview>
+  );
+}
+
+/** Two accounts at the door: one made today, one made last month, and whether each gets in. */
+function GatePreview({ minAge }: { minAge: number }) {
+  const people = [
+    { name: "2 hours old", age: 2 * 3600, hue: 330 },
+    { name: "A month old", age: 30 * 86_400, hue: 200 },
+  ];
+  return (
+    <div className="flex flex-col gap-2 rounded-3xl border bg-card p-4 shadow-lg">
+      <p className="text-xs font-bold text-muted-foreground">At the door</p>
+      {people.map((p) => {
+        const wait = minAge - p.age;
+        const ok = wait <= 0;
+        return (
+          <div key={p.name} className="flex items-center gap-2.5 text-sm">
+            <span className="size-7 shrink-0 rounded-full" style={{ background: `linear-gradient(135deg, oklch(0.75 0.14 ${p.hue}), oklch(0.6 0.16 ${p.hue + 40}))` }} />
+            <span className="min-w-0 flex-1 truncate">{p.name}</span>
+            <AnimatePresence mode="popLayout" initial={false}>
+              <motion.span
+                key={ok ? "in" : `wait-${wait}`}
+                initial={{ scale: 0.6, opacity: 0, rotate: ok ? -20 : 20 }}
+                animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                exit={{ scale: 0.6, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 600, damping: 18 }}
+                className={cn(
+                  "flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold",
+                  ok ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+                )}
+              >
+                {ok ? <CheckIcon className="size-3" strokeWidth={3} /> : <HourglassIcon className="size-3" />}
+                {ok ? "Joins" : `Waits ${timeLeft(wait * 1000)}`}
+              </motion.span>
+            </AnimatePresence>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -381,7 +502,7 @@ function BrowseCard({ server }: { server: Server }) {
             <span className="flex flex-col items-center gap-1.5">
               <EyeOffIcon className="size-6 text-muted-foreground" />
               <span className="text-sm font-extrabold">Hidden from Browse</span>
-              <span className="text-xs text-muted-foreground">Only its members see it.</span>
+              <span className="text-xs text-muted-foreground">People join with an invite link.</span>
             </span>
           </motion.div>
         )}

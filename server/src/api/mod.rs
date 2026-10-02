@@ -5,6 +5,7 @@ mod admin;
 mod auth;
 mod channels;
 mod events;
+mod invites;
 mod media;
 mod messages;
 mod node;

@@ -147,6 +147,7 @@ struct Clients {
     admin: pb::admin_service_client::AdminServiceClient<Channel>,
     node: pb::node_service_client::NodeServiceClient<Channel>,
     media: pb::media_service_client::MediaServiceClient<Channel>,
+    invites: pb::invite_service_client::InviteServiceClient<Channel>,
 }
 
 async fn clients(part: &Part) -> Clients {
@@ -160,7 +161,8 @@ async fn clients(part: &Part) -> Clients {
         events: pb::event_service_client::EventServiceClient::new(channel.clone()),
         admin: pb::admin_service_client::AdminServiceClient::new(channel.clone()),
         node: pb::node_service_client::NodeServiceClient::new(channel.clone()),
-        media: pb::media_service_client::MediaServiceClient::new(channel),
+        media: pb::media_service_client::MediaServiceClient::new(channel.clone()),
+        invites: pb::invite_service_client::InviteServiceClient::new(channel),
     }
 }
 
@@ -193,9 +195,14 @@ async fn send(c: &mut Clients, token: &str, server_id: &str, channel_id: &str, c
 
 async fn join(c: &mut Clients, token: &str, server_id: &str) -> Result<pb::JoinServerResponse, tonic::Status> {
     c.servers
-        .join_server(authed(token, pb::JoinServerRequest { server_id: server_id.into() }))
+        .join_server(authed(token, pb::JoinServerRequest { server_id: server_id.into(), ..Default::default() }))
         .await
         .map(|r| r.into_inner())
+}
+
+async fn invite(c: &mut Clients, token: &str, server_id: &str) -> pb::Invite {
+    let request = pb::CreateInviteRequest { server_id: server_id.into(), ..Default::default() };
+    c.invites.create_invite(authed(token, request)).await.unwrap().into_inner().invite.unwrap()
 }
 
 async fn members(c: &mut Clients, token: &str, server_id: &str) -> Vec<pb::Member> {
@@ -276,6 +283,21 @@ async fn a_split_instance_works_like_one() {
     );
     assert!(mine.iter().all(|s| s.member_count == 2));
 
+    // Invites: made on a shard, found through the directory, used on the shard.
+    let (rin, _) = sign_up(&mut c, "rin").await;
+    let code = invite(&mut c, &juan, &on_b.id).await.code;
+    let shown = c.invites.get_invite(pb::GetInviteRequest { code: code.clone() }).await.unwrap().into_inner();
+    assert_eq!(shown.server.unwrap().id, on_b.id);
+    assert_eq!(shown.inviter.unwrap().id, juan_user.id);
+    let request = pb::JoinServerRequest { server_id: on_b.id.clone(), invite_code: code.clone() };
+    c.servers.join_server(authed(&rin, request)).await.unwrap();
+    let shown = c.invites.get_invite(pb::GetInviteRequest { code: code.clone() }).await.unwrap().into_inner();
+    assert_eq!(shown.invite.unwrap().uses, 1);
+    let request = pb::DeleteInviteRequest { server_id: on_b.id.clone(), code: code.clone() };
+    c.invites.delete_invite(authed(&juan, request)).await.unwrap();
+    let gone = c.invites.get_invite(pb::GetInviteRequest { code }).await.unwrap_err();
+    assert_eq!(gone.code(), Code::NotFound);
+
     // Unknown and malformed servers read the same as on one process.
     let missing = c
         .servers
@@ -350,7 +372,7 @@ async fn a_split_instance_works_like_one() {
 
     // Admins see every server, from every shard.
     let usage = c.admin.get_node_usage(authed(&juan, pb::GetNodeUsageRequest {})).await.unwrap().into_inner();
-    assert_eq!((usage.accounts, usage.servers, usage.server_usage.len()), (2, 4, 4));
+    assert_eq!((usage.accounts, usage.servers, usage.server_usage.len()), (3, 4, 4));
     let listed = c.admin.list_instance_servers(authed(ADMIN_TOKEN, pb::ListInstanceServersRequest {})).await.unwrap();
     let listed = listed.into_inner().servers;
     assert_eq!(listed.len(), 4);
@@ -513,6 +535,7 @@ async fn shards_come_and_go() {
     let on_b = if cluster.placement(&first.id).as_deref() == Some("b") { first } else { second };
     assert_eq!(cluster.placement(&on_b.id).as_deref(), Some("b"));
     let channel = general(&mut c, &juan, &on_b.id).await;
+    let code = invite(&mut c, &juan, &on_b.id).await.code;
 
     // A live stream following a shard that stops ends, so the client follows again.
     let cursors = vec![pb::ServerCursor { server_id: on_b.id.clone(), after_sequence: None }];
@@ -594,6 +617,9 @@ async fn shards_come_and_go() {
     })
     .await;
     assert!(listed.into_inner().messages.iter().any(|m| m.content == "back"));
+    // Its invites follow it to the shard that holds it now.
+    let shown = c.invites.get_invite(pb::GetInviteRequest { code }).await.unwrap().into_inner();
+    assert_eq!(shown.server.unwrap().id, on_b.id);
 
     cluster.stop().await;
 }

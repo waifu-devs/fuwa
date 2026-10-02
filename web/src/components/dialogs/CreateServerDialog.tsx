@@ -139,7 +139,9 @@ export function CreateServerDialog({
           <label className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl border p-3">
             <span>
               <span className="block text-sm font-bold">Show in Browse</span>
-              <span className="block text-xs text-muted-foreground">Anyone on {inst?.node?.name ?? "this fuwa server"} can find and join it.</span>
+              <span className="block text-xs text-muted-foreground">
+                {discoverable ? `Anyone on ${inst?.node?.name ?? "this fuwa server"} can find and join it.` : "Off: people join with an invite link."}
+              </span>
             </span>
             <Switch checked={discoverable} onCheckedChange={setDiscoverable} />
           </label>

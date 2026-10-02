@@ -13,6 +13,7 @@ import {
   MegaphoneIcon,
   PlusIcon,
   SettingsIcon,
+  UserPlusIcon,
   Volume2Icon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -23,6 +24,7 @@ import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
+import { InviteDialog } from "@/components/dialogs/InviteDialog";
 import { ServerSettingsDialog, useServerSettingsTabs } from "@/components/dialogs/ServerSettingsDialog";
 import { useLayout } from "@/components/Shell";
 import { Count, SPRING, SwapText } from "@/components/motion";
@@ -120,6 +122,10 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [creating, setCreating] = useState<{ parentId: string } | null>(null);
   const [settings, setSettings] = useState<{ tab: string; target?: string } | null>(null);
+  const [inviting, setInviting] = useState<string | null>(null);
+  // The server menu's invite opens the channel you're in, as Discord's does, if you may invite to it.
+  const inviteTo =
+    params.channel && hasIn(access, params.channel, Permission.CREATE_INVITE) ? params.channel : has(access, Permission.CREATE_INVITE) ? "" : null;
   const leave = useAction(leaveServer);
   const developer = usePrefs((p) => p.developerMode);
 
@@ -149,6 +155,12 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-60">
+          {inviteTo !== null && (
+            <DropdownMenuItem onSelect={() => setInviting(inviteTo)} className="font-bold text-primary focus:text-primary [&_svg]:text-primary">
+              <UserPlusIcon /> Invite people
+            </DropdownMenuItem>
+          )}
+          {inviteTo !== null && <DropdownMenuSeparator />}
           {settingsTabs.length > 0 && (
             <DropdownMenuItem onSelect={() => setSettings({ tab: settingsTabs[0]! })}>
               <SettingsIcon /> Server settings
@@ -248,6 +260,9 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                                 ? () => setSettings({ tab: "channels", target: c.id })
                                 : undefined
                             }
+                            onInvite={
+                              c.type !== ChannelType.VOICE && hasIn(access, c.id, Permission.CREATE_INVITE) ? () => setInviting(c.id) : undefined
+                            }
                           />
                         ))}
                       </AnimatePresence>
@@ -261,6 +276,13 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
       </div>
       <UserPanel instanceKey={instanceKey} />
 
+      <InviteDialog
+        open={inviting !== null}
+        onOpenChange={(open) => !open && setInviting(null)}
+        instanceKey={instanceKey}
+        serverId={serverId}
+        channelId={inviting ?? ""}
+      />
       <CreateChannelDialog
         open={!!creating}
         onOpenChange={(open) => !open && setCreating(null)}
@@ -289,6 +311,7 @@ function ChannelRow({
   index,
   ref,
   onEdit,
+  onInvite,
 }: {
   instanceKey: string;
   channel: Channel;
@@ -297,6 +320,8 @@ function ChannelRow({
   ref?: Ref<HTMLLIElement>;
   /** With Manage Channels or Manage Roles there: opens the channel's settings. */
   onEdit?: () => void;
+  /** With Create Invite there: invites people straight into it. */
+  onInvite?: () => void;
 }) {
   const muted = useMuted(instanceKey, channel.serverId, channel.id);
   const unread = useFuwa((s) => (muted ? 0 : (s.instances[instanceKey]?.unread[channel.id] ?? 0)));
@@ -360,6 +385,25 @@ function ChannelRow({
           </AnimatePresence>
         </span>
         <span className="truncate">{channel.name}</span>
+        {onInvite && (
+          <span
+            role="button"
+            tabIndex={-1}
+            aria-label={`Invite people to #${channel.name}`}
+            title="Invite people"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onInvite();
+            }}
+            className={cn(
+              "ml-auto size-5 shrink-0 place-items-center rounded text-muted-foreground transition group-hover:grid hover:scale-110 hover:text-foreground",
+              active ? "grid" : "hidden",
+            )}
+          >
+            <UserPlusIcon className="size-3.5" />
+          </span>
+        )}
         {onEdit && (
           <span
             role="button"
@@ -372,7 +416,8 @@ function ChannelRow({
               onEdit();
             }}
             className={cn(
-              "ml-auto size-5 shrink-0 place-items-center rounded text-muted-foreground transition group-hover:grid hover:rotate-45 hover:text-foreground",
+              !onInvite && "ml-auto",
+              "size-5 shrink-0 place-items-center rounded text-muted-foreground transition group-hover:grid hover:rotate-45 hover:text-foreground",
               // Like Discord: always there on the channel you're in, on hover elsewhere.
               active ? "grid" : "hidden",
             )}

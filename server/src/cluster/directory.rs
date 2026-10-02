@@ -296,6 +296,15 @@ impl DirectoryService for Internal {
         Ok(Response::new(cpb::IndexMembershipResponse {}))
     }
 
+    async fn index_invite(
+        &self,
+        request: Request<cpb::IndexInviteRequest>,
+    ) -> Result<Response<cpb::IndexInviteResponse>, Status> {
+        let req = request.into_inner();
+        self.app.index.index_invite(&req.server_id, &req.code, req.exists);
+        Ok(Response::new(cpb::IndexInviteResponse {}))
+    }
+
     async fn drop_server(
         &self,
         request: Request<cpb::DropServerRequest>,

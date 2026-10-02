@@ -321,6 +321,30 @@ pub async fn channel_exists(servers: &Servers, server_id: &str, channel_id: &str
     Ok(query_one(&conn, "SELECT 1 FROM channels WHERE id = ?1", [channel_id], |r| r.get::<i64>(0)).await?.is_some())
 }
 
+/// Where an invite leads: the invite while it still works, its server, the
+/// channel it opens if everyone can see that one, and who made it.
+pub async fn describe_invite(servers: &Servers, server_id: &str, code: &str) -> Result<pb::GetInviteResponse> {
+    let sdb = servers.get(server_id).await?;
+    let conn = sdb.read()?;
+    let invite = store::load_invite(&conn, &sdb.id, code)
+        .await?
+        .filter(|invite| store::invite_works(invite, crate::id::now_ms()))
+        .ok_or(Error::NotFound("invite"))?;
+    let server = store::load_server(&conn).await?;
+    let mut channel_name = String::new();
+    if !invite.channel_id.is_empty() {
+        // Without roles, as someone about to join.
+        let newcomer = crate::permissions::load(&conn, &sdb.id).await?.access("", &[]);
+        if newcomer.can_see(&invite.channel_id)
+            && let Some(channel) = store::load_channel(&conn, &sdb.id, &invite.channel_id).await?
+        {
+            channel_name = channel.name;
+        }
+    }
+    let inviter = store::user(&conn, &invite.inviter_id).await?;
+    Ok(pb::GetInviteResponse { invite: Some(invite), server: Some(server), channel_name, inviter })
+}
+
 // ─────────────── What the directory asks of a shard ───────────────
 
 /// The cluster calls a shard answers.
@@ -411,6 +435,18 @@ impl ShardService for Internal {
             channel_exists(&self.app.servers, &req.server_id, &req.channel_id)
                 .await
                 .map(|exists| cpb::ChannelExistsResponse { exists }),
+        )
+    }
+
+    async fn describe_invite(
+        &self,
+        request: Request<cpb::DescribeInviteRequest>,
+    ) -> Result<Response<cpb::DescribeInviteResponse>, Status> {
+        let req = request.into_inner();
+        respond(
+            describe_invite(&self.app.servers, &req.server_id, &req.code)
+                .await
+                .map(|invite| cpb::DescribeInviteResponse { invite: Some(invite) }),
         )
     }
 }

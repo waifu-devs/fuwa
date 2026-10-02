@@ -24,7 +24,10 @@
     transaction and publishes them to the `Hub` after commit. What owners and
     admins do also goes in the server's `audit` table (`servers::Audit`),
     kept apart from the event log so reasons for kicks and bans reach only
-    managers.
+    managers. Invites live in the server file too (`invites`, made and
+    revoked in `api/invites.rs`); the directory's index maps each code to its
+    server, so `InviteService.GetInvite` finds one by code alone
+    (`App::index_invite`, `App::describe_invite`).
   - `permissions.rs`: roles and permissions. `Rules::access` works out what a
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's
@@ -52,7 +55,8 @@
     `PRAGMA user_version`. Never edit a migration that has shipped; add a new file
     and list it in `MIGRATIONS`.
   - `cluster/`: running as separate parts (`FUWA_ROLE`). `index.rs` is the
-    directory's in-memory index of every server, its members and its shard.
+    directory's in-memory index of every server, its members, its invite
+    codes and its shard.
     `calls.rs` holds every call that crosses parts, as `App` methods that run
     locally in one process and over `proto/fuwa/cluster` when split
     (`app.authenticate`, `server_changed`, `membership_changed`,
@@ -91,9 +95,13 @@
   - `src/components/settings/account/`: the "Your account" pages (profile,
     server profiles, devices, two-step sign-in, server notifications, data).
   - `src/components/settings/server/`: server settings pages beyond Overview
-    (roles, channels and their permissions, members, bans, audit log,
-    ownership), shown by `dialogs/ServerSettingsDialog.tsx`, which also says
-    which pages your permissions open (`useServerSettingsTabs`).
+    and Access (roles, channels and their permissions, invites, members,
+    bans, audit log, ownership), shown by `dialogs/ServerSettingsDialog.tsx`,
+    which also says which pages your permissions open (`useServerSettingsTabs`).
+  - Invites: `dialogs/InviteDialog.tsx` makes and copies a link (from the
+    server menu or a channel), `pages/InvitePage.tsx` is where a link lands
+    (`/invite/<code>` on the instance, which goes to `/<instance>/invite/<code>`),
+    and `src/lib/invites.ts` holds the choices, link format and paste parsing.
     `components/ModerateDialog.tsx` is the one dialog for nicknames,
     time-outs, kicks and bans, from the Members page and from profile cards;
     `components/MemberRoles.tsx` hands roles out wherever a member is shown.
@@ -120,7 +128,9 @@
 
 - Every change to a community server is a `ServerDb::write` that pushes at least
   one event payload and keeps the usage totals in step: members and channels in
-  the `usage` row, message totals through `servers::add_usage`.
+  the `usage` row, message totals through `servers::add_usage`. Invites are the
+  exception: their codes are secrets, so making or revoking one writes only an
+  audit entry, never an event.
 - Writes can run more than once (after a clash), so the closure given to
   `ServerDb::write` or `db::write` does nothing outside its transaction. Reads
   inside a write aren't checked for clashes, only rows written: a check that

@@ -36,6 +36,7 @@ export const KNOWN: P[] = [
   P.ATTACH_FILES,
   P.MENTION_EVERYONE,
   P.MANAGE_MESSAGES,
+  P.CREATE_INVITE,
 ];
 
 export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), 0);
@@ -50,6 +51,7 @@ export const CHANNEL: Bits = [
   P.ATTACH_FILES,
   P.MENTION_EVERYONE,
   P.MANAGE_MESSAGES,
+  P.CREATE_INVITE,
 ].reduce((bits, p) => bits | bit(p), 0);
 
 export const fromList = (list: readonly P[]): Bits => list.reduce((bits, p) => (KNOWN.includes(p) ? bits | bit(p) : bits), 0);
@@ -93,6 +95,11 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     about: "Ping everyone with @everyone or @here, and any role, even ones that can't be mentioned.",
   },
   [P.MANAGE_MESSAGES]: { label: "Manage messages", about: "Delete other people's messages. Also skips slow mode." },
+  [P.CREATE_INVITE]: {
+    label: "Create invite",
+    about: "Make invite links that let people join, even when the server isn't in Browse.",
+    channel: "Make invite links that open this channel.",
+  },
 };
 
 export const permissionInfo = (p: P): PermissionInfo => (p === P.UNSPECIFIED ? { label: "", about: "" } : PERMISSIONS[p]);
@@ -106,7 +113,7 @@ export const PERMISSION_GROUPS: { title: string; permissions: P[] }[] = [
   },
   {
     title: "Membership",
-    permissions: [P.CHANGE_NICKNAME, P.MANAGE_NICKNAMES, P.KICK_MEMBERS, P.BAN_MEMBERS, P.TIME_OUT_MEMBERS],
+    permissions: [P.CREATE_INVITE, P.CHANGE_NICKNAME, P.MANAGE_NICKNAMES, P.KICK_MEMBERS, P.BAN_MEMBERS, P.TIME_OUT_MEMBERS],
   },
   {
     title: "Text channels",
@@ -117,7 +124,7 @@ export const PERMISSION_GROUPS: { title: string; permissions: P[] }[] = [
 
 /** The channel permissions, grouped for a channel's settings. */
 export const CHANNEL_GROUPS: { title: string; permissions: P[] }[] = [
-  { title: "General", permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES] },
+  { title: "General", permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.CREATE_INVITE] },
   {
     title: "Text",
     permissions: [P.SEND_MESSAGES, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],

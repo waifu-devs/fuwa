@@ -67,9 +67,13 @@ fn route(path: &str) -> Target {
         "fuwa.v1.ServerService" if matches!(method, "CreateServer" | "ListServers" | "DiscoverServers") => {
             Target::Directory
         }
-        "fuwa.v1.ServerService" | "fuwa.v1.ChannelService" | "fuwa.v1.MessageService" | "fuwa.v1.RoleService" => {
-            Target::Shard
-        }
+        // Only the directory knows which server a code is for.
+        "fuwa.v1.InviteService" if method == "GetInvite" => Target::Directory,
+        "fuwa.v1.ServerService"
+        | "fuwa.v1.ChannelService"
+        | "fuwa.v1.MessageService"
+        | "fuwa.v1.RoleService"
+        | "fuwa.v1.InviteService" => Target::Shard,
         _ => Target::Unknown,
     }
 }

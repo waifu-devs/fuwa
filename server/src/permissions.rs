@@ -21,7 +21,7 @@ pub const fn bit(p: P) -> Bits {
     1 << p as u64
 }
 
-const KNOWN: [P; 16] = [
+const KNOWN: [P; 17] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -38,6 +38,7 @@ const KNOWN: [P; 16] = [
     P::AttachFiles,
     P::MentionEveryone,
     P::ManageMessages,
+    P::CreateInvite,
 ];
 
 /// Every permission there is.
@@ -59,11 +60,16 @@ pub const CHANNEL: Bits = bit(P::ManageChannels)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
     | bit(P::MentionEveryone)
-    | bit(P::ManageMessages);
+    | bit(P::ManageMessages)
+    | bit(P::CreateInvite);
 
 /// What @everyone can do in a new server.
-pub const EVERYONE: Bits =
-    bit(P::ViewChannels) | bit(P::SendMessages) | bit(P::EmbedLinks) | bit(P::AttachFiles) | bit(P::ChangeNickname);
+pub const EVERYONE: Bits = bit(P::ViewChannels)
+    | bit(P::SendMessages)
+    | bit(P::EmbedLinks)
+    | bit(P::AttachFiles)
+    | bit(P::ChangeNickname)
+    | bit(P::CreateInvite);
 
 /// The Admin role a new server starts with, and that the admins of servers
 /// from before roles were given: what admins could do then.
@@ -110,6 +116,7 @@ pub fn label(p: P) -> &'static str {
         P::AttachFiles => "Attach files",
         P::MentionEveryone => "Mention everyone",
         P::ManageMessages => "Manage messages",
+        P::CreateInvite => "Create invite",
     }
 }
 
