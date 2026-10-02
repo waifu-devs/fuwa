@@ -128,13 +128,28 @@ jobs:
     needs: tags
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
     concurrency: deploy-fuwa-chat
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # --from-source pulls :latest again; a plain redeploy would rerun the old image.
-      - run: npx --yes @railway/cli@5.63.1 redeploy --service fuwa --from-source --yes
+      - run: npm ci --no-audit --no-fund
+      # Every service the config declares: `fuwa`, or each part of a split instance
+      # (the directory, the shards, then the gateways). --from-source pulls :latest
+      # again; a plain redeploy would rerun the old image.
+      - name: Redeploy
+        run: |
+          services=$(node --experimental-strip-types --input-type=module -e '
+            const { createRailwayContext, project } = await import("railway/iac");
+            const { default: config } = await import("./.railway/railway.ts");
+            const { resources } = await config(createRailwayContext({ environment: "production" }), project);
+            for (const r of resources.flat(Infinity)) if (r.type === "service") console.log(r.name);
+          ')
+          for service in $services; do
+            npx --yes @railway/cli@5.63.1 redeploy --service "$service" --from-source --yes
+          done
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

@@ -6,8 +6,10 @@ import { defineRailway, image, project, service, volume } from "railway/iac";
  * merging applies it (.github/workflows/railway-config.yml).
  *
  * Set once by hand, not here: the shared variable FUWA_ENCRYPTION_KEY (64 hex
- * characters). Every database on the volume is encrypted with it and fuwa won't open
+ * characters). Every database on the volumes is encrypted with it and fuwa won't open
  * them with any other key, so it must never change. Keep a copy in a password manager.
+ * Before turning SPLIT on, also FUWA_CLUSTER_KEY (`openssl rand -hex 32`), the secret the
+ * parts send each other; that one can change later, and every part restarts with it.
  * The DNS records for fuwa.chat live with its registrar.
  */
 
@@ -21,37 +23,164 @@ const PORT = 8080;
  * the dashboard's "Anytime". Without it, updates wait for a maintenance window.
  */
 const ANYTIME = [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, startHour: 0, endHour: 24 }));
+/** 5 GB, the most a Hobby plan volume holds. A volume can grow but never shrink. */
+const VOLUME_MB = 5000;
+/** Volumes a Hobby plan project can have: the directory's, and one per shard. */
+const MAX_VOLUMES = 10;
+/**
+ * How long a split part has to finish what it's doing once told to stop: calls a gateway
+ * holds while another part restarts wait up to 30 seconds.
+ */
+const DRAIN = 45;
+
+/**
+ * How fuwa.chat runs (see "Scaling out" in the README). `null` is one `fuwa` process
+ * doing everything, which is how it runs now. Set, it runs as separate parts, each a
+ * service here:
+ *
+ * - `fuwa`, the gateways clients reach at fuwa.chat. They keep nothing, so `gateways`
+ *   replicas of it share the connections (2 or more, so one going down isn't noticed).
+ * - `fuwa-directory`, with accounts, sessions, settings and pictures. It takes over the
+ *   `fuwa-data` volume the single process used. Always one.
+ * - `fuwa-shard-1` to `fuwa-shard-<shards>`, the community servers, each shard on a
+ *   volume of its own. New servers go to the shard holding the fewest.
+ *
+ * The first time it's set, the first shard to start takes the single process's servers
+ * from the directory, so nothing has to be copied by hand. Raise `shards` to spread new
+ * servers wider, but never lower it: removing a shard here deletes its volume, and the
+ * servers on it.
+ *
+ * Deploys don't interrupt anyone. Gateways have no volume, so Railway starts the new ones,
+ * waits until they're healthy (reaching the directory), then stops the old ones; clients'
+ * live streams move over and carry on from where they were. The directory and shards each
+ * have a volume, so Railway has to stop the old process before starting the new one; for
+ * those few seconds the gateways hold calls (up to 30 seconds) and keep live streams open,
+ * then carry on once the part is back. See "Deploys" in the README.
+ */
+const SPLIT: { gateways: number; shards: number } | null = null;
 
 export default defineRailway((ctx) => {
-  // node.db (accounts, sessions, instance settings) and one file per community server.
-  // 5 GB, the most the Hobby plan allows. A volume can grow but never shrink.
-  const data = volume("fuwa-data", { region: REGION, sizeMB: 5000 });
-
-  const fuwa = service("fuwa", {
-    // The image every merge to master publishes; the publish workflow redeploys fuwa
-    // onto it right away. Auto updates are the fallback: Railway takes a new image as
-    // soon as it notices one, which can take a few hours.
-    source: image("ghcr.io/waifu-devs/fuwa:latest", {
+  // The image every merge to master publishes; the publish workflow redeploys every
+  // part onto it right away. Auto updates are the fallback: Railway takes a new image
+  // as soon as it notices one, which can take a few hours.
+  const fuwaImage = () =>
+    image("ghcr.io/waifu-devs/fuwa:latest", {
       autoUpdates: { type: "patch", schedule: ANYTIME },
-    }),
+    });
+
+  // node.db (accounts, sessions, instance settings) and, while it's one process, one
+  // file per community server.
+  const data = volume("fuwa-data", { region: REGION, sizeMB: VOLUME_MB });
+
+  // What fuwa.chat is, whichever part reads it.
+  const instance = {
+    FUWA_PUBLIC_URL: `https://${DOMAIN}`,
+    FUWA_NODE_NAME: "fuwa",
+  };
+
+  if (!SPLIT) {
+    const fuwa = service("fuwa", {
+      source: fuwaImage(),
+      healthcheck: "/healthz",
+      // One replica: every database is a file on the one volume.
+      regions: { [REGION]: 1 },
+      // Added in the dashboard first (Railway configuration can't register a new custom
+      // domain), declared here so later applies keep it.
+      domains: [{ domain: DOMAIN, port: PORT }],
+      volumeMounts: { "/data": data },
+      // Give open streams and the last writes time to finish on shutdown.
+      deploy: { drainingSeconds: 30 },
+      env: {
+        PORT: String(PORT),
+        ...instance,
+        // Marks this instance's anonymous usage signal as ours; changes nothing else.
+        FUWA_HOSTING: "hosted",
+        FUWA_ENCRYPTION_KEY: ctx.shared.FUWA_ENCRYPTION_KEY,
+      },
+    });
+
+    return project("fuwa", { resources: [data, fuwa] });
+  }
+
+  const { gateways, shards } = SPLIT;
+  if (!Number.isInteger(gateways) || gateways < 1) {
+    throw new Error("SPLIT.gateways must be a whole number, at least 1");
+  }
+  if (!Number.isInteger(shards) || shards < 1 || shards > MAX_VOLUMES - 1) {
+    throw new Error(`SPLIT.shards must be a whole number from 1 to ${MAX_VOLUMES - 1}`);
+  }
+
+  // Every part listens on PORT on both IPv4 and IPv6, and the parts reach each other over
+  // Railway's private network, sending the cluster key with every call.
+  const part = (role: string) => ({
+    PORT: String(PORT),
+    FUWA_HOST: "::",
+    FUWA_ROLE: role,
+    FUWA_CLUSTER_KEY: ctx.shared.FUWA_CLUSTER_KEY,
+  });
+  const internalUrl = (name: string) => `http://\${{${name}.RAILWAY_PRIVATE_DOMAIN}}:${PORT}`;
+
+  const directory = service("fuwa-directory", {
+    source: fuwaImage(),
     healthcheck: "/healthz",
-    // One replica: every database is a file on the one volume.
+    // One replica: node.db is a file on its volume.
     regions: { [REGION]: 1 },
-    // Added in the dashboard first (Railway configuration can't register a new custom
-    // domain), declared here so later applies keep it.
-    domains: [{ domain: DOMAIN, port: PORT }],
     volumeMounts: { "/data": data },
-    // Give open streams and the last writes time to finish on shutdown.
-    deploy: { drainingSeconds: 30 },
+    // Calls still being answered when it's told to stop get time to finish.
+    deploy: { drainingSeconds: DRAIN },
     env: {
-      PORT: String(PORT),
-      FUWA_PUBLIC_URL: `https://${DOMAIN}`,
-      FUWA_NODE_NAME: "fuwa",
-      // Marks this instance's anonymous usage signal as ours; changes nothing else.
+      ...part("directory"),
+      // The instance's own settings live with the directory, which hands them to every
+      // other part, and it sends the usage signal.
+      ...instance,
       FUWA_HOSTING: "hosted",
       FUWA_ENCRYPTION_KEY: ctx.shared.FUWA_ENCRYPTION_KEY,
     },
   });
 
-  return project("fuwa", { resources: [data, fuwa] });
+  const shardParts = Array.from({ length: shards }, (_, i) => {
+    const name = `fuwa-shard-${i + 1}`;
+    const shardData = volume(`${name}-data`, { region: REGION, sizeMB: VOLUME_MB });
+    const shard = service(name, {
+      source: fuwaImage(),
+      healthcheck: "/healthz",
+      regions: { [REGION]: 1 },
+      volumeMounts: { "/data": shardData },
+      deploy: { drainingSeconds: DRAIN },
+      env: {
+        ...part("shard"),
+        // Never renamed: the directory knows which servers are on which shard by it.
+        FUWA_SHARD_ID: `shard-${i + 1}`,
+        FUWA_DIRECTORY_URL: internalUrl(directory.name),
+        FUWA_INTERNAL_URL: internalUrl(name),
+        // The same key as the directory's, so server files can move between shards.
+        FUWA_ENCRYPTION_KEY: ctx.shared.FUWA_ENCRYPTION_KEY,
+      },
+    });
+    return [shardData, shard];
+  });
+
+  const gateway = service("fuwa", {
+    source: fuwaImage(),
+    healthcheck: "/healthz",
+    // Gateways keep nothing, so any number of replicas share fuwa.chat's traffic.
+    regions: { [REGION]: gateways },
+    domains: [{ domain: DOMAIN, port: PORT }],
+    // On a deploy the old gateways keep serving for a little while after the new ones
+    // are up, then tell open streams to follow again (they do, on a new gateway) and
+    // finish the calls they're holding.
+    deploy: { overlapSeconds: 10, drainingSeconds: DRAIN },
+    env: {
+      ...part("gateway"),
+      ...instance,
+      FUWA_DIRECTORY_URL: internalUrl(directory.name),
+    },
+  });
+
+  // Room for later: calls (WebRTC) get a `media` part of their own. Like the gateways it
+  // keeps nothing on a volume, so its deploys overlap too: the old one takes no new calls
+  // and lets the ones on it end (with a long drainingSeconds) while new calls start on the
+  // new one.
+
+  return project("fuwa", { resources: [data, directory, ...shardParts.flat(), gateway] });
 });
