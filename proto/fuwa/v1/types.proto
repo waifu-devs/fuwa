@@ -21,6 +21,21 @@ message Node {
   bool telemetry = 6;
   // A banner the instance's admins put up for everyone, while it runs.
   Announcement announcement = 7;
+  // The build the instance says it runs.
+  Build build = 8;
+}
+
+// What a fuwa binary was built from. The instance reports this about itself,
+// so it's a claim, not proof: clients show it as plain text, never as a sign
+// the server is verified.
+message Build {
+  // Same as Node.version, such as "0.4.2".
+  string version = 1;
+  // The full git commit the binary was built from. Empty when the builder
+  // didn't know it.
+  string commit = 2;
+  // Where the source lives, such as "https://github.com/waifu-devs/fuwa".
+  string source = 3;
 }
 
 // A notice from an instance's admins, shown on every client, signed in or not.

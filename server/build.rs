@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf};
+use std::{env, path::PathBuf, process::Command};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = ["types", "node", "auth", "account", "server", "channel", "message", "event", "admin", "media"]
@@ -14,5 +14,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile_with_config(config, &protos, &[PathBuf::from("../proto"), protoc_bin_vendored::include_path()?])?;
 
     println!("cargo:rerun-if-changed=../proto");
+
+    // The commit this binary is built from, reported in GetNode. The Docker
+    // build has no .git, so the Dockerfile passes FUWA_COMMIT; other builds ask
+    // git. It's the same for every build of a commit, so builds stay identical.
+    println!("cargo:rerun-if-env-changed=FUWA_COMMIT");
+    let commit = match env::var("FUWA_COMMIT") {
+        Ok(commit) if !commit.is_empty() => commit,
+        _ => git_commit().unwrap_or_default(),
+    };
+    println!("cargo:rustc-env=FUWA_COMMIT={commit}");
     Ok(())
+}
+
+/// HEAD's commit, and a rerun whenever HEAD or the branch it's on moves.
+fn git_commit() -> Option<String> {
+    let git = |args: &[&str]| {
+        let out = Command::new("git").args(args).output().ok().filter(|out| out.status.success())?;
+        Some(String::from_utf8(out.stdout).ok()?.trim().to_owned())
+    };
+    let commit = git(&["rev-parse", "HEAD"])?;
+    println!("cargo:rerun-if-changed={}", git(&["rev-parse", "--git-path", "HEAD"])?);
+    if let Some(branch) = git(&["symbolic-ref", "-q", "HEAD"]) {
+        // A branch lives in its own file until git packs it into packed-refs.
+        let loose = git(&["rev-parse", "--git-path", &branch])?;
+        let path =
+            if PathBuf::from(&loose).exists() { loose } else { git(&["rev-parse", "--git-path", "packed-refs"])? };
+        println!("cargo:rerun-if-changed={path}");
+    }
+    Some(commit)
 }

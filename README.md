@@ -43,6 +43,29 @@ The first account to sign up becomes the instance's admin. Put it behind a
 reverse proxy with TLS for anything public; the server speaks plain HTTP/1.1
 and HTTP/2.
 
+### Checking the image
+
+Every published image comes with a signed record of the commit and the
+workflow that built it, so you can check that what you pulled is an official
+build:
+
+```sh
+gh attestation verify oci://ghcr.io/waifu-devs/fuwa:latest --repo waifu-devs/fuwa
+```
+
+Builds are also reproducible: building the same commit gives the same binary,
+byte for byte, so you can rebuild an image's binary yourself and compare:
+
+```sh
+git checkout <commit>
+docker build --target binary --build-arg FUWA_COMMIT=$(git rev-parse HEAD) --output type=local,dest=out .
+docker cp $(docker create ghcr.io/waifu-devs/fuwa:sha-<short commit>):/usr/local/bin/fuwa published
+sha256sum out/fuwa published
+```
+
+The instance reports the commit it was built from in `NodeService.GetNode`,
+and the app shows it next to the version.
+
 ### Configuration
 
 The instance starts from environment variables (a `.env` file in the working

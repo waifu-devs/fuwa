@@ -129,6 +129,11 @@ impl App {
             server_creation: settings.server_creation as i32,
             telemetry: settings.telemetry,
             announcement: self.announcement(),
+            build: Some(pb::Build {
+                version: crate::VERSION.into(),
+                commit: crate::COMMIT.into(),
+                source: crate::SOURCE.into(),
+            }),
         }
     }
 

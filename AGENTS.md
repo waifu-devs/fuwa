@@ -138,6 +138,15 @@
   and hovers answer. Use the springs and helpers in
   `web/src/components/motion.tsx` (`SwapText`, `Count`, `CountUp`) so the app
   moves alike everywhere, and keep it working with reduced motion.
+- Builds are reproducible: the same commit gives the same binary, byte for
+  byte, and the `Reproducible build` workflow fails a change that breaks this.
+  Nothing that differs between builds goes in the binary: no build time, no
+  random value, no absolute path (the commit is fine, it's in `FUWA_COMMIT`
+  from `build.rs`). Keep rust-embed's `deterministic-timestamps` and the
+  Dockerfile's `SOURCE_DATE_EPOCH`, and pin any new base image by digest. This is what will let clients
+  check, later, that a server runs an official build.
+- Every role runs this one binary. A role is configuration, never a separate
+  build, so one build covers a whole cluster.
 - Before pushing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test`, and `buf lint`; for `web/`, `pnpm build` then
   `cargo test --features web`.

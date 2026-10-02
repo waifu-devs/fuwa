@@ -35,3 +35,9 @@ pub use proto::fuwa::v1 as pb;
 
 /// This build's version, reported to clients and in the usage signal.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The git commit this binary was built from (see `build.rs`), or empty.
+pub const COMMIT: &str = env!("FUWA_COMMIT");
+
+/// Where this build's source lives.
+pub const SOURCE: &str = env!("CARGO_PKG_REPOSITORY");

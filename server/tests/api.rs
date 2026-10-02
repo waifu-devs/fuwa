@@ -120,6 +120,9 @@ async fn a_community_end_to_end() {
 
     let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
     assert_eq!(node.name, "Test instance");
+    let build = node.build.unwrap();
+    assert_eq!((build.version.as_str(), build.commit.as_str()), (env!("CARGO_PKG_VERSION"), env!("FUWA_COMMIT")));
+    assert_eq!(build.source, "https://github.com/waifu-devs/fuwa");
     let auth = node.auth.unwrap();
     assert!(auth.local_sign_in && auth.local_sign_up && !auth.linked_sign_in);
 
