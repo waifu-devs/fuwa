@@ -8,3 +8,4 @@ target
 web/node_modules
 web/dist
 *.tsbuildinfo
+web/src/e2ee/pkg

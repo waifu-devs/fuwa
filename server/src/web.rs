@@ -23,10 +23,11 @@ mod embedded {
     struct Assets;
 
     /// The client talks to any fuwa server and shows avatars from anywhere, but
-    /// runs only its own scripts.
-    const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-        img-src * data: blob:; connect-src *; font-src 'self' data:; object-src 'none'; \
-        base-uri 'none'; frame-ancestors 'none'";
+    /// runs only its own scripts. 'wasm-unsafe-eval' lets it compile its own
+    /// WebAssembly (the encryption direct messages use), and nothing else.
+    const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; \
+        style-src 'self' 'unsafe-inline'; img-src * data: blob:; connect-src *; font-src 'self' data:; \
+        object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
 
     pub async fn serve(uri: Uri, headers: HeaderMap) -> Response {
         let path = uri.path().trim_start_matches('/');

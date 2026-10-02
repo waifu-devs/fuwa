@@ -285,7 +285,7 @@ export const MessageList = forwardRef<
   );
 });
 
-function DayDivider({ date }: { date: Date }) {
+export function DayDivider({ date }: { date: Date }) {
   return (
     <div role="separator" className="my-3 flex items-center gap-3 px-4 text-xs font-bold text-muted-foreground">
       <span className="h-px flex-1 bg-border" />
@@ -706,7 +706,7 @@ function JoinRow({
   );
 }
 
-function ToolButton({
+export function ToolButton({
   label,
   danger = false,
   onClick,
@@ -733,7 +733,7 @@ function ToolButton({
   );
 }
 
-function EditBox({ initial, onCancel, onSave }: { initial: string; onCancel: () => void; onSave: (c: string) => Promise<void> }) {
+export function EditBox({ initial, onCancel, onSave }: { initial: string; onCancel: () => void; onSave: (c: string) => Promise<void> }) {
   const [text, setText] = useState(initial);
   const sendWith = usePrefs((p) => p.sendWith);
   const [error, setError] = useState<string | null>(null);

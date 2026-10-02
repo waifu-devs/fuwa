@@ -11,6 +11,7 @@ jobs:
   server:
     # One Rust build for both: the tests run with the web client built in, and a
     # second clippy (which reuses the dependencies) keeps the API-only build clean.
+    # The web client needs its WebAssembly (e2ee-wasm) built first.
     name: Server and web client (fmt, clippy, tests, build)
     runs-on: ubuntu-latest
     steps:
@@ -31,12 +32,20 @@ jobs:
           pnpm run generate
           git diff --exit-code -- src/gen
           test -z "$(git status --porcelain -- src/gen)"
-      - run: pnpm run build
-        working-directory: web
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      # The version e2ee-wasm/Cargo.toml pins.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - name: Encryption for direct messages, as WebAssembly
+        run: pnpm run wasm
+        working-directory: web
+      - run: pnpm run build
+        working-directory: web
       - run: cargo fmt --all --check
       - name: Clippy, API only
         run: cargo clippy --all-targets --locked -- -D warnings

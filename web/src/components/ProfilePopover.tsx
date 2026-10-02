@@ -1,15 +1,19 @@
 import * as Popover from "@radix-ui/react-popover";
-import { DoorOpenIcon, GavelIcon, HourglassIcon, type LucideIcon } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { DoorOpenIcon, GavelIcon, HourglassIcon, LoaderCircleIcon, LockKeyholeIcon, MessageCircleIcon, type LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { Member, User } from "@/gen/fuwa/v1/types_pb";
 import { loadProfile, run } from "@/fuwa/actions";
+import { openConversation } from "@/fuwa/dms";
 import { useFuwa } from "@/fuwa/store";
 import { MemberRoles } from "@/components/MemberRoles";
 import { ModerateDialog, useModeration, type ModAction } from "@/components/ModerateDialog";
 import { ProfileCard } from "@/components/ProfileCard";
 import { timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
+import { toast } from "@/lib/ui";
+import { useMediaQuery } from "@/lib/use-media-query";
 
 const MOD_ACTIONS: { action: ModAction; label: string; icon: LucideIcon; hover: string }[] = [
   { action: "timeout", label: "Time out", icon: HourglassIcon, hover: "group-hover:rotate-180" },
@@ -36,6 +40,8 @@ export function ProfilePopover({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  // A phone has no room beside a name for the card, so it opens under it and slides to fit.
+  const roomy = useMediaQuery("(min-width: 768px)");
   const profile = useFuwa((s) => (user ? s.instances[instanceKey]?.profiles[user.id] : undefined));
   const me = useFuwa((s) => s.instances[instanceKey]?.me?.id === user?.id);
   const [failed, setFailed] = useState(false);
@@ -44,6 +50,27 @@ export function ProfilePopover({
   const owner = useFuwa((s) => !!member && s.instances[instanceKey]?.servers.find((x) => x.id === member.serverId)?.ownerId === user?.id);
   const [moderating, setModerating] = useState<ModAction | null>(null);
   const now = useNow();
+  // Anyone signed in can write to someone else privately, where the instance and this browser can.
+  const canMessage = useFuwa((s) => {
+    const status = s.instances[instanceKey]?.dms.status;
+    return !me && (status === "ready" || status === "starting");
+  });
+  const [opening, setOpening] = useState(false);
+  const navigate = useNavigate();
+
+  async function message() {
+    if (!user || opening) return;
+    setOpening(true);
+    try {
+      const conversation = await run(openConversation(instanceKey, user.id));
+      setOpen(false);
+      void navigate({ to: "/$instance/dm/$conversation", params: { instance: instanceKey, conversation } });
+    } catch (err) {
+      toast((err as Error).message);
+    } finally {
+      setOpening(false);
+    }
+  }
 
   useEffect(() => {
     if (!open || !user) return;
@@ -60,7 +87,7 @@ export function ProfilePopover({
       <AnimatePresence>
         {open && (
           <Popover.Portal forceMount>
-            <Popover.Content forceMount side={side} align="start" sideOffset={10} collisionPadding={12} className="z-50 outline-none">
+            <Popover.Content forceMount side={roomy ? side : "bottom"} align="start" sideOffset={10} collisionPadding={12} className="z-50 outline-none">
               <motion.div
                 initial={{ opacity: 0, scale: 0.92, y: 6 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -78,6 +105,45 @@ export function ProfilePopover({
                   loading={!profile && !failed}
                   className="w-[19rem] max-w-[calc(100vw-1.5rem)]"
                 />
+                {canMessage && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ type: "spring", stiffness: 520, damping: 32, delay: 0.05 }}
+                    className="mt-2 rounded-2xl border bg-popover p-1.5 shadow-lg"
+                  >
+                    <motion.button
+                      type="button"
+                      onClick={() => void message()}
+                      disabled={opening}
+                      whileTap={{ scale: 0.96 }}
+                      className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-foreground transition hover:brightness-110 disabled:opacity-80"
+                    >
+                      <span aria-hidden className="shine pointer-events-none absolute inset-0" />
+                      <AnimatePresence mode="popLayout" initial={false}>
+                        <motion.span
+                          key={opening ? "opening" : "idle"}
+                          initial={{ scale: 0.4, opacity: 0, rotate: -30 }}
+                          animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                          exit={{ scale: 0.4, opacity: 0 }}
+                          transition={{ type: "spring", stiffness: 600, damping: 20 }}
+                          className="grid place-items-center"
+                        >
+                          {opening ? (
+                            <LoaderCircleIcon className="size-4 animate-spin" />
+                          ) : (
+                            <MessageCircleIcon className="size-4 transition-transform duration-300 group-hover:-rotate-12 group-hover:scale-110" />
+                          )}
+                        </motion.span>
+                      </AnimatePresence>
+                      Message
+                      <LockKeyholeIcon
+                        aria-label="End-to-end encrypted"
+                        className="size-3.5 opacity-80 transition-transform duration-300 group-hover:translate-x-0.5"
+                      />
+                    </motion.button>
+                  </motion.div>
+                )}
                 {canModerate && (
                   <motion.div
                     initial={{ opacity: 0, y: -6 }}

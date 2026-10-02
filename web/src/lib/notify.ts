@@ -1,5 +1,5 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import { LeaveReason, MessageKind, type Event } from "@/gen/fuwa/v1/types_pb";
+import { LeaveReason, MessageKind, type Event, type User } from "@/gen/fuwa/v1/types_pb";
 import { store, type InstanceState } from "@/fuwa/store";
 import { displayName, memberName } from "@/lib/format";
 import { effectiveNotifications, pingsMe, shouldAlert } from "@/lib/notifications";
@@ -20,6 +20,14 @@ let openChannel: Open | null = null;
 /** Where clicking a notification goes; set once the router is up. */
 export const setNotificationTarget = (open: Open) => {
   openChannel = open;
+};
+
+type OpenDm = (instance: string, conversation: string) => void;
+let openDm: OpenDm | null = null;
+
+/** Where clicking a direct message's notification goes. */
+export const setDmNotificationTarget = (open: OpenDm) => {
+  openDm = open;
 };
 
 /** Events older than this came in while catching up after a reconnect; they stay quiet. */
@@ -56,6 +64,39 @@ export function onLiveEvent(key: string, event: Event) {
     const user = p.value.member?.user;
     const viewing = s.focus?.instance === key && (inst.channels[event.serverId] ?? []).some((c) => c.id === s.focus!.channel);
     if (user && user.id !== me.id && viewing) playSome("join", 800);
+  }
+}
+
+/**
+ * A direct message this device just opened: it chimes like a mention and,
+ * while you're elsewhere, shows on the desktop. The text only ever goes to
+ * this device's own notifications.
+ */
+export function onDirectMessage(key: string, conversationId: string, author: User | undefined, content: string, at: number) {
+  if (Date.now() - at > FRESH_MS) return;
+  const s = store.get();
+  const inst = s.instances[key];
+  if (!inst?.me || author?.id === inst.me.id) return;
+  const looking = !document.hidden && s.focus?.instance === key && s.focus.channel === conversationId;
+  if (!looking) playSome("mention", 600);
+  if (!document.hidden && document.hasFocus()) return;
+  const p = getPrefs();
+  if (!p.desktopNotifications || (p.streamer && p.streamerMuteNotifications)) return;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  const body = content.replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
+  try {
+    const n = new Notification(displayName(author), {
+      body: body.length > 160 ? `${body.slice(0, 159)}…` : body,
+      icon: "/favicon.svg",
+      tag: conversationId,
+    });
+    n.onclick = () => {
+      window.focus();
+      openDm?.(key, conversationId);
+      n.close();
+    };
+  } catch {
+    // Some browsers only allow notifications from a service worker; stay quiet there.
   }
 }
 
@@ -122,6 +163,7 @@ function unreadTotal(): number {
         if (n && !effectiveNotifications(inst, serverId, channel.id, now).muted) total += n;
       }
     }
+    for (const n of Object.values(inst.dms.unread)) total += n;
   }
   return total;
 }

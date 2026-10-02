@@ -123,10 +123,19 @@ function InstanceGroup({ inst, params }: { inst: InstanceState; params: { instan
   const address = useAddress(inst.key);
   const label = inst.node?.name ?? address;
   const hosted = hostedByUs(inst.url) ? " · Hosted by Waifu Devs" : "";
+  // Unread direct messages show on the instance they're on.
+  const dms = useFuwa((s) => Object.values(s.instances[inst.key]?.dms.unread ?? {}).reduce((sum, n) => sum + n, 0));
   return (
     <>
       <Divider />
-      <RailItem label={inst.node ? `${label} · ${address}${hosted}` : label} active={here && !params.server} to="/$instance" params={{ instance: inst.key }} small>
+      <RailItem
+        label={inst.node ? `${label} · ${address}${hosted}` : label}
+        active={here && !params.server}
+        unread={dms > 0}
+        to="/$instance"
+        params={{ instance: inst.key }}
+        small
+      >
         <span
           className={cn(
             "server-icon relative grid size-9 place-items-center bg-card text-[0.7rem] font-extrabold text-muted-foreground",
@@ -136,6 +145,20 @@ function InstanceGroup({ inst, params }: { inst: InstanceState; params: { instan
         >
           {inst.node ? initials(inst.node.name) : <GlobeIcon className="size-4" />}
           <ConnDot state={inst.connection} className="absolute -right-0.5 -bottom-0.5 ring-2 ring-[color-mix(in_srgb,var(--background)_75%,black)]" />
+          <AnimatePresence>
+            {dms > 0 && (
+              <motion.span
+                title="Unread direct messages"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                exit={{ scale: 0 }}
+                transition={{ type: "spring", stiffness: 600, damping: 18 }}
+                className="absolute -top-1.5 -right-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-destructive px-1 text-[0.6rem] font-extrabold text-white ring-[3px] ring-[color-mix(in_srgb,var(--background)_75%,black)]"
+              >
+                <Count value={dms} max={99} />
+              </motion.span>
+            )}
+          </AnimatePresence>
         </span>
       </RailItem>
       <AnimatePresence initial={false} mode="popLayout">

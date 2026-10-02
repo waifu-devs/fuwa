@@ -1,0 +1,76 @@
+import { Code } from "@connectrpc/connect";
+import { Effect } from "effect";
+import { dmEngine, DmError, type Content } from "@/e2ee/engine";
+import { engine } from "./sync";
+import { call, FuwaError, toFuwaError } from "./errors";
+import { store, updateDms, type PendingMessage } from "./store";
+
+/**
+ * What people do with encrypted direct messages. The encryption happens in
+ * this browser (`@/e2ee/engine`); these fold it into the store, with the same
+ * optimistic sending as channels.
+ */
+
+const ready = (key: string) => {
+  const dms = dmEngine(key);
+  if (!dms) throw new DmError(store.get().instances[key]?.dms.problem ?? "encrypted messages are still starting");
+  return dms;
+};
+
+/** In words, for the screen. */
+export const dmProblem = (err: unknown) => (err instanceof DmError ? err.message : toFuwaError(err).message);
+
+/** The conversation with someone: the one you have, or a new one. Answers its id. */
+export const openConversation = (key: string, userId: string) =>
+  Effect.gen(function* () {
+    const { conversation } = yield* call((signal) => engine(key).api.dms.openConversation({ userId }, { signal }));
+    if (!conversation) return yield* Effect.fail(new FuwaError({ code: Code.Unknown, message: "couldn't open that conversation" }));
+    dmEngine(key)?.add(conversation);
+    return conversation.id;
+  });
+
+/** Catches the conversation up and adds everyone's devices, so it's ready to write in. */
+export async function prepareConversation(key: string, id: string) {
+  try {
+    await ready(key).prepare(id);
+    updateDms(key, (d) => (d.blocked[id] ? { ...d, blocked: { ...d.blocked, [id]: "" } } : d));
+  } catch (err) {
+    if (err instanceof DmError) updateDms(key, (d) => ({ ...d, blocked: { ...d.blocked, [id]: err.message } }));
+    else throw err;
+  }
+}
+
+const setPending = (key: string, id: string, fn: (list: PendingMessage[]) => PendingMessage[]) =>
+  updateDms(key, (d) => ({ ...d, pending: { ...d.pending, [id]: fn(d.pending[id] ?? []) } }));
+
+/** Sends a message. It shows at once, faded, until the instance has it; failing leaves it with a retry. */
+export async function sendDm(key: string, id: string, text: string, replyTo = 0) {
+  const nonce = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+  setPending(key, id, (list) => [...list, { nonce, content: text, createdAt: Date.now(), failed: null }]);
+  try {
+    await ready(key).send(id, { text, replyTo });
+    setPending(key, id, (list) => list.filter((p) => p.nonce !== nonce));
+    updateDms(key, (d) => (d.blocked[id] ? { ...d, blocked: { ...d.blocked, [id]: "" } } : d));
+  } catch (err) {
+    const problem = dmProblem(err);
+    setPending(key, id, (list) => list.map((p) => (p.nonce === nonce ? { ...p, failed: problem } : p)));
+    if (err instanceof DmError) updateDms(key, (d) => ({ ...d, blocked: { ...d.blocked, [id]: problem } }));
+  }
+}
+
+export const dismissDm = (key: string, id: string, nonce: string) => setPending(key, id, (list) => list.filter((p) => p.nonce !== nonce));
+
+export async function retryDm(key: string, id: string, pending: PendingMessage) {
+  dismissDm(key, id, pending.nonce);
+  await sendDm(key, id, pending.content);
+}
+
+/** New text for one of your messages, sent encrypted like a message. */
+export const editDm = (key: string, id: string, seq: number, text: string) => ready(key).send(id, { edit: seq, text } satisfies Content);
+
+export const deleteDm = (key: string, id: string, seq: number) => ready(key).remove(id, seq);
+
+export const markDmRead = (key: string, id: string) => dmEngine(key)?.markRead(id).catch(() => {});
+
+/** Marks the conversation's safety number as checked with the other person, or not ("" ). */
+export const verifyDm = (key: string, id: string, safety: string) => ready(key).verify(id, safety);

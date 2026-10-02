@@ -158,6 +158,8 @@ impl Api {
         self.app.forget_account(&account.id, &gone).await?;
         let uploads = self.app.node()?.account_media(&account.id).await?;
         self.app.node()?.delete_account(&account.id).await?;
+        // Their conversations stay for the other person in each; their devices go.
+        self.app.dms()?.forget_account(&account.id).await?;
         if let Err(err) = self.app.delete_media(&uploads).await {
             tracing::warn!(account = %account.id, error = %err, "couldn't delete a deleted account's pictures");
         }

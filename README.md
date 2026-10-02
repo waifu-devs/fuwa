@@ -17,6 +17,12 @@ like, hosted or self-hosted, over the same protocol.
   applications, with questions, that someone looks over before letting people
   in; waifu.dev accounts only; a minimum account age. All of it is set from
   the app.
+- **Direct messages only the two of you can read.** Every direct message is
+  end-to-end encrypted with [MLS](https://www.rfc-editor.org/rfc/rfc9420)
+  (RFC 9420, through [OpenMLS](https://github.com/openmls/openmls)). Each
+  device has its own keys, which never leave it; the instance only stores and
+  passes along ciphertext, and can't read it even if its operator wanted to.
+  There's no off switch. See [docs/e2ee.md](docs/e2ee.md).
 - **Usage tracked, limits optional.** Every server counts its members, channels,
   messages and storage. Limits are off unless the operator sets them.
 - **Live by design.** Every change is an event in the server's log; clients
@@ -203,6 +209,7 @@ instance settings:
 ```
 <FUWA_DATA_PATH>/
   node.db              accounts, sessions, the install id
+  dms.db               direct messages: devices, public keys and ciphertext only
   servers/<id>.db      one file per community server
   *.db-log             recent commits not yet folded into the file beside it
   deleted/             deleted servers, parked here instead of erased
@@ -228,8 +235,9 @@ One `fuwa` process runs a whole instance, and that's the right choice until
 one machine isn't enough. Then the same binary runs as separate parts, chosen
 with `FUWA_ROLE`:
 
-- **Directory** (one): keeps `node.db` (accounts, sessions, settings) and the
-  uploaded pictures, and knows which shard holds each community server.
+- **Directory** (one): keeps `node.db` (accounts, sessions, settings), `dms.db`
+  (direct messages) and the uploaded pictures, and knows which shard holds each
+  community server.
 - **Shards** (one or more): each keeps some of the community servers' files and
   sends their live events. New servers go to the shard holding the fewest.
 - **Gateways** (one or more): what clients connect to. They keep nothing, serve
@@ -408,10 +416,16 @@ port 8080:
 ```sh
 cd web
 pnpm install
+pnpm wasm                      # build the direct messages' encryption (e2ee-wasm)
 pnpm dev                       # the app on http://localhost:5173
 pnpm generate                  # regenerate src/gen after changing proto/
 pnpm build                     # typecheck and build web/dist
 ```
+
+`pnpm wasm` needs the WebAssembly target and the wasm-bindgen CLI at the version
+`e2ee-wasm/Cargo.toml` pins (`rustup target add wasm32-unknown-unknown` and
+`cargo install wasm-bindgen-cli --version 0.2.129 --locked`); run it again
+after changing `e2ee/` or `e2ee-wasm/`.
 
 In development Vite passes the app's own API calls to `FUWA_DEV_URL` (default
 `http://localhost:8080`), so the dev page works as an instance of its own.

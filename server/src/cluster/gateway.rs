@@ -62,9 +62,11 @@ enum Target {
 fn route(path: &str) -> Target {
     let Some((service, method)) = path.trim_start_matches('/').split_once('/') else { return Target::Unknown };
     match service {
-        "fuwa.v1.NodeService" | "fuwa.v1.AuthService" | "fuwa.v1.AccountService" | "fuwa.v1.MediaService" => {
-            Target::Directory
-        }
+        "fuwa.v1.NodeService"
+        | "fuwa.v1.AuthService"
+        | "fuwa.v1.AccountService"
+        | "fuwa.v1.MediaService"
+        | "fuwa.v1.DirectMessageService" => Target::Directory,
         "fuwa.v1.AdminService" if matches!(method, "SetServerLimits" | "ExportServer") => Target::Shard,
         "fuwa.v1.AdminService" => Target::Directory,
         "fuwa.v1.ServerService" if matches!(method, "CreateServer" | "ListServers" | "DiscoverServers") => {

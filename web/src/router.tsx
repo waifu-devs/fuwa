@@ -12,6 +12,7 @@ import { rememberedPath, Shell } from "@/components/Shell";
 import { AppOverlays, StreamerBanner } from "@/components/Shortcuts";
 import { UserSettings } from "@/components/settings/UserSettings";
 import { instanceKey } from "@/fuwa/saved";
+import { DmView } from "@/components/dm/DmView";
 import { InstanceHome } from "@/pages/InstanceHome";
 import { InvitePage } from "@/pages/InvitePage";
 import { LinkedCallback } from "@/pages/LinkedCallback";
@@ -101,6 +102,16 @@ const invite = createRoute({
   },
 });
 
+/** An encrypted conversation with someone on the instance. */
+const dm = createRoute({
+  getParentRoute: () => instance,
+  path: "dm/$conversation",
+  component: function DmRoute() {
+    const { instance: key, conversation } = useParams({ from: "/$instance/dm/$conversation" });
+    return <DmView key={`${key}/${conversation}`} instanceKey={key} conversationId={conversation} />;
+  },
+});
+
 const server = createRoute({ getParentRoute: () => instance, path: "$server" });
 
 const serverIndex = createRoute({
@@ -126,7 +137,7 @@ const routeTree = root.addChildren([
   connect,
   inviteHere,
   linkedCallback,
-  instance.addChildren([instanceIndex, invite, server.addChildren([serverIndex, channel])]),
+  instance.addChildren([instanceIndex, invite, dm, server.addChildren([serverIndex, channel])]),
 ]);
 
 export const router = createRouter({

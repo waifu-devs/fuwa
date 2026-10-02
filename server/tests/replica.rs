@@ -171,6 +171,7 @@ struct Clients {
     channels: pb::channel_service_client::ChannelServiceClient<Channel>,
     messages: Messages,
     media: pb::media_service_client::MediaServiceClient<Channel>,
+    dms: pb::direct_message_service_client::DirectMessageServiceClient<Channel>,
 }
 
 async fn clients(part: &Part) -> Clients {
@@ -180,7 +181,8 @@ async fn clients(part: &Part) -> Clients {
         servers: pb::server_service_client::ServerServiceClient::new(channel.clone()),
         channels: pb::channel_service_client::ChannelServiceClient::new(channel.clone()),
         messages: pb::message_service_client::MessageServiceClient::new(channel.clone()),
-        media: pb::media_service_client::MediaServiceClient::new(channel),
+        media: pb::media_service_client::MediaServiceClient::new(channel.clone()),
+        dms: pb::direct_message_service_client::DirectMessageServiceClient::new(channel),
     }
 }
 
@@ -269,14 +271,23 @@ async fn a_split_instance_comes_back_from_its_replica() {
         path
     };
 
-    // The instance as it ran: an account, two servers (one later deleted),
-    // enough messages to fold the shard's log, and a picture.
+    // The instance as it ran: an account with a direct-message device, two
+    // servers (one later deleted), enough messages to fold the shard's log,
+    // and a picture.
     let first = folder("first");
     let setup = Setup { root: &first, replica: replica.clone(), restore: false };
     let cluster = setup.start().await;
     let mut c = clients(&cluster.gateway).await;
     let request = pb::SignUpRequest { username: "juan".into(), password: PASSWORD.into(), display_name: String::new() };
-    let juan = c.auth.sign_up(request).await.unwrap().into_inner().token;
+    let signed_up = c.auth.sign_up(request).await.unwrap().into_inner();
+    let (juan, juan_id) = (signed_up.token, signed_up.user.unwrap().id);
+    let device = fuwa_e2ee::Device::new(&juan_id).unwrap();
+    let request = pb::RegisterDeviceRequest {
+        signature_key: device.signature_key().to_vec(),
+        key_packages: device.key_packages(3).unwrap(),
+        last_resort_key_package: device.last_resort_key_package().unwrap(),
+    };
+    c.dms.register_device(authed(&juan, request)).await.unwrap();
     let (kept, general) = create_server(&mut c, &juan, "Kept").await;
     let (gone, _) = create_server(&mut c, &juan, "Gone").await;
     // About 5 MB from four writers at once: more than one log's worth.
@@ -339,6 +350,12 @@ async fn a_split_instance_comes_back_from_its_replica() {
     let served = reqwest::get(on(&cluster.gateway, &picture_url)).await.unwrap();
     assert_eq!(served.status(), reqwest::StatusCode::OK);
     assert_eq!(served.bytes().await.unwrap().to_vec(), picture);
+    let request = pb::ListDevicesRequest { user_ids: vec![juan_id.clone()] };
+    let devices = c.dms.list_devices(authed(&juan, request)).await.unwrap().into_inner().devices;
+    assert!(
+        devices.iter().any(|d| d.signature_key == device.signature_key()),
+        "the direct-message device came back with dms.db"
+    );
 
     // They carry on replicating: what's written now survives the next loss.
     send(&mut c.messages, &juan, &kept, &general, "after the restore").await;

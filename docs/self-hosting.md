@@ -214,6 +214,12 @@ can change, without restarting:
 What's set there is kept in the data folder and wins over the environment
 variables, which stay as the defaults underneath.
 
+Direct messages are end-to-end encrypted with nothing to set up: the instance
+keeps only ciphertext and public keys for them (`dms.db`), and can't read them.
+If a proxy in front of fuwa sets its own `Content-Security-Policy`, let scripts
+use `'wasm-unsafe-eval'`, which the app's encryption needs (see
+[docs/e2ee.md](e2ee.md)).
+
 ## Updating
 
 Back up first (see below). Then, with Docker Compose:

@@ -16,6 +16,7 @@ use crate::auth::SignInLimiter;
 use crate::cluster::Role;
 use crate::cluster::index::Index;
 use crate::config::Config;
+use crate::dms::DmDb;
 use crate::error::{Error, Result};
 use crate::hub::Hub;
 use crate::node::NodeDb;
@@ -23,10 +24,11 @@ use crate::pb;
 use crate::pb::{
     account_service_server::AccountServiceServer, admin_service_server::AdminServiceServer,
     auth_service_server::AuthServiceServer, channel_service_server::ChannelServiceServer,
-    event_service_server::EventServiceServer, invite_service_server::InviteServiceServer,
-    join_service_server::JoinServiceServer, media_service_server::MediaServiceServer,
-    message_service_server::MessageServiceServer, node_service_server::NodeServiceServer,
-    role_service_server::RoleServiceServer, server_service_server::ServerServiceServer,
+    direct_message_service_server::DirectMessageServiceServer, event_service_server::EventServiceServer,
+    invite_service_server::InviteServiceServer, join_service_server::JoinServiceServer,
+    media_service_server::MediaServiceServer, message_service_server::MessageServiceServer,
+    node_service_server::NodeServiceServer, role_service_server::RoleServiceServer,
+    server_service_server::ServerServiceServer,
 };
 use crate::replica::Replica;
 use crate::servers::Servers;
@@ -41,6 +43,8 @@ pub struct App {
     /// Accounts, sessions and settings: kept by a single process, or a split
     /// instance's directory. See [`App::node`].
     node: Option<NodeDb>,
+    /// Direct messages' devices, conversations and ciphertext, where `node` is.
+    dms: Option<DmDb>,
     /// Uploaded pictures, under `<data>/media/`, where `node` is.
     media: Option<crate::media::Store>,
     /// Every server and who's in it, where `node` is.
@@ -102,7 +106,7 @@ impl App {
             _ => None,
         };
 
-        let (node, media, servers, link) = match role {
+        let (node, dms, media, servers, link) = match role {
             Role::Gateway => return Err(Error::internal("a gateway keeps no data")),
             Role::All | Role::Directory => {
                 let node = NodeDb::open(&config.data_path.join("node.db"), key.as_ref()).await?;
@@ -111,6 +115,10 @@ impl App {
                     replica.track_media(config.data_path.join("media"));
                 }
                 node.install_id().await?;
+                let dms = DmDb::open(&config.data_path.join("dms.db"), key.as_ref()).await?;
+                if let Some(replica) = &replica {
+                    replica.track("dms", dms.db().clone()).await?;
+                }
                 let media = crate::media::Store::open(&config.data_path)?;
                 let media_ids = node.media_ids().await?;
                 media.remove_strays(&media_ids)?;
@@ -127,11 +135,11 @@ impl App {
                     let shards = crate::cluster::directory::Shards::load(&config, &node).await?;
                     (Servers::none(hub.clone()), Link::Directory(Box::new(shards)))
                 };
-                (Some(node), Some(media), servers, link)
+                (Some(node), Some(dms), Some(media), servers, link)
             }
             Role::Shard => {
                 let servers = Servers::open(&config.data_path, key, hub.clone(), true, replica.clone()).await?;
-                (None, None, servers, Link::Shard(Box::new(crate::cluster::shard::Link::new(&config)?)))
+                (None, None, None, servers, Link::Shard(Box::new(crate::cluster::shard::Link::new(&config)?)))
             }
         };
 
@@ -158,6 +166,7 @@ impl App {
             settings: watch::Sender::new(Arc::new(settings)),
             announcement: RwLock::new(announcement),
             node,
+            dms,
             media,
             index,
             servers,
@@ -180,6 +189,17 @@ impl App {
     /// needs them there.
     pub fn node(&self) -> Result<&NodeDb> {
         self.node.as_ref().ok_or_else(|| Error::internal("this part of the instance doesn't keep accounts"))
+    }
+
+    /// Direct messages, where accounts are kept.
+    pub fn dms(&self) -> Result<&DmDb> {
+        self.dms.as_ref().ok_or_else(|| Error::internal("this part of the instance doesn't keep direct messages"))
+    }
+
+    /// Forgets the direct-message devices of sessions that ended.
+    pub async fn sweep_devices(&self) -> Result<usize> {
+        let live = self.node()?.live_session_ids(None).await?;
+        self.dms()?.sweep(&live).await
     }
 
     /// Uploaded pictures' files, where accounts are kept.
@@ -266,6 +286,7 @@ impl App {
             .add_service(JoinServiceServer::new(api.clone()))
             .add_service(EventServiceServer::new(api.clone()))
             .add_service(MediaServiceServer::new(api.clone()))
+            .add_service(DirectMessageServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
             .add_service(reflection);
@@ -417,7 +438,8 @@ pub fn spawn_signal_handler(shutdown: CancellationToken) {
     });
 }
 
-/// Hourly: drops expired sessions and sweeps uploads nothing uses.
+/// Hourly: drops expired sessions, the direct-message devices they had, and
+/// uploads nothing uses.
 fn spawn_housekeeping(app: Arc<App>) {
     tokio::spawn(async move {
         let mut every = tokio::time::interval(Duration::from_secs(60 * 60));
@@ -427,6 +449,9 @@ fn spawn_housekeeping(app: Arc<App>) {
                 _ = every.tick() => {
                     if let Err(err) = async { app.node()?.prune_sessions().await }.await {
                         tracing::warn!(error = %err, "couldn't prune expired sessions");
+                    }
+                    if let Err(err) = app.sweep_devices().await {
+                        tracing::warn!(error = %err, "couldn't forget the devices of ended sessions");
                     }
                     if let Err(err) = app.sweep_media(crate::id::now_ms()).await {
                         tracing::warn!(error = %err, "couldn't sweep unused uploads");

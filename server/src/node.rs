@@ -575,6 +575,63 @@ impl NodeDb {
         .is_some())
     }
 
+    /// The id of the live session a token hash belongs to.
+    pub async fn session_id(&self, token_hash: &str) -> Result<Option<String>> {
+        let conn = self.read()?;
+        query_one(
+            &conn,
+            "SELECT id FROM sessions WHERE token_hash = ?1 AND expires_at > ?2",
+            (token_hash, now_ms()),
+            |r| r.get::<String>(0),
+        )
+        .await
+    }
+
+    /// The ids of every live session, or only those of some accounts.
+    pub async fn live_session_ids(&self, account_ids: Option<&[&str]>) -> Result<HashSet<String>> {
+        let conn = self.read()?;
+        let ids = match account_ids {
+            None => {
+                query_all(&conn, "SELECT id FROM sessions WHERE expires_at > ?1 AND id IS NOT NULL", [now_ms()], |r| {
+                    r.get::<String>(0)
+                })
+                .await?
+            }
+            Some([]) => vec![],
+            Some(account_ids) => {
+                let placeholders = (2..account_ids.len() + 2).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+                let mut params = vec![turso::Value::from(now_ms())];
+                params.extend(account_ids.iter().map(|id| turso::Value::from(*id)));
+                query_all(
+                    &conn,
+                    &format!(
+                        "SELECT id FROM sessions WHERE expires_at > ?1 AND id IS NOT NULL AND account_id IN ({placeholders})"
+                    ),
+                    params,
+                    |r| r.get::<String>(0),
+                )
+                .await?
+            }
+        };
+        Ok(ids.into_iter().collect())
+    }
+
+    /// The accounts with these ids, those that exist.
+    pub async fn accounts(&self, ids: &[&str]) -> Result<Vec<Account>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let conn = self.read()?;
+        let placeholders = (1..=ids.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        query_all(
+            &conn,
+            &format!("SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE id IN ({placeholders})"),
+            ids.iter().map(|id| turso::Value::from(*id)).collect::<Vec<_>>(),
+            account,
+        )
+        .await
+    }
+
     /// An account's live sessions, the one with `current_hash` first, then by last use.
     pub async fn sessions(&self, account_id: &str, current_hash: &str) -> Result<Vec<Session>> {
         let conn = self.read()?;

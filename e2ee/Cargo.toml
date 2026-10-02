@@ -1,0 +1,34 @@
+[package]
+name = "fuwa-e2ee"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+description = "End-to-end encryption for fuwa's direct messages (MLS, RFC 9420), shared by the server and every client"
+repository = "https://github.com/waifu-devs/fuwa"
+publish = false
+
+[dependencies]
+sha2 = "0.10"
+
+# What clients need to take part: keys, groups, encrypting and decrypting.
+# The server only reads message headers, so it leaves `client` off.
+openmls = { version = "0.9", optional = true }
+openmls_basic_credential = { version = "0.6", optional = true }
+openmls_rust_crypto = { version = "0.6", optional = true }
+openmls_traits = { version = "0.6", optional = true }
+thiserror = { version = "2", optional = true }
+
+[features]
+client = [
+    "dep:openmls",
+    "dep:openmls_basic_credential",
+    "dep:openmls_rust_crypto",
+    "dep:openmls_traits",
+    "dep:thiserror",
+]
+# Browsers: randomness and the clock from JavaScript.
+js = ["client", "openmls/js"]
+
+[[test]]
+name = "conversation"
+required-features = ["client"]

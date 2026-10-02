@@ -240,9 +240,10 @@ async fn restore(args: Vec<String>) -> ExitCode {
                 );
             } else {
                 println!(
-                    "restored {} from {}: node.db and {} pictures",
+                    "restored {} from {}: node.db{} and {} pictures",
                     dir.display(),
                     store.describe(),
+                    if restored.dms { ", dms.db" } else { "" },
                     restored.media
                 );
             }

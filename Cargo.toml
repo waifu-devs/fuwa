@@ -1,8 +1,17 @@
 [workspace]
-members = ["server"]
+members = ["server", "e2ee", "e2ee-wasm"]
 resolver = "3"
 
 [profile.release]
 lto = "thin"
 codegen-units = 4
 strip = true
+
+# The web app's WebAssembly (e2ee-wasm): smaller rather than faster, since
+# every browser downloads it and the work it does is tiny.
+[profile.wasm]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"

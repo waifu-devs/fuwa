@@ -55,13 +55,14 @@ changes whenever it starts over, and on Turso to replay it.
   node/current                      "<generation> <writer>": which generation is in use, and who wrote it
   node/<generation>/snapshot        node.db as the generation began
   node/<generation>/<epoch>-<offset>  bytes of the log, from that offset, in that epoch
+  dms/…                             dms.db (direct messages, end-to-end encrypted), laid out like node/
   servers/<id>/current              "<generation> <writer> <shard>": the same, and the shard holding it
   servers/<id>/<generation>/…
   servers/<id>/deleted              set when the server is deleted; restores leave it out
   media/<id>                        each uploaded picture, as it is on disk
 ```
 
-The directory replicates `node.db` and the pictures; each shard, the servers
+The directory replicates `node.db`, `dms.db` and the pictures; each shard, the servers
 it holds. Servers are kept by their id, not under the shard holding them, so a
 server keeps its history wherever it moves; its `current` names the shard that
 wrote it last.
@@ -116,7 +117,7 @@ writing that file's replica rather than mixing two histories.
 With `FUWA_RESTORE=if-empty`, each part restores itself at start when its
 data directory is empty (a new or wiped volume):
 
-- the **directory**, when it has no `node.db`: `node.db` and the pictures;
+- the **directory**, when it has no `node.db`: `node.db`, `dms.db` and the pictures;
 - a **shard**, when its `servers/` has no server files: every server whose
   `current` names it (by `FUWA_SHARD_ID`), leaving out deleted ones. A shard
   whose name was made up on its first start loses that name with its volume,
@@ -189,7 +190,7 @@ folded as usual.
 ## What changes for shards
 
 - **Now (phase 1).** Every part that keeps files replicates its own: the
-  directory `node.db` and the pictures, each shard the servers it holds. Give
+  directory `node.db`, `dms.db` and the pictures, each shard the servers it holds. Give
   them all the same bucket and prefix; the keys don't overlap, and gateways,
   which keep nothing, ignore the settings. A part that loses its volume comes
   back with `FUWA_RESTORE=if-empty`, the shards by their `FUWA_SHARD_ID`.
