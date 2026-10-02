@@ -14,6 +14,7 @@ import { UserSettings } from "@/components/settings/UserSettings";
 import { instanceKey } from "@/fuwa/saved";
 import { InstanceHome } from "@/pages/InstanceHome";
 import { InvitePage } from "@/pages/InvitePage";
+import { LinkedCallback } from "@/pages/LinkedCallback";
 import { ChannelPage, ServerIndex } from "@/pages/ServerPages";
 import { Welcome } from "@/pages/Welcome";
 
@@ -77,6 +78,9 @@ const inviteHere = createRoute({
   },
 });
 
+/** Where waifu.dev sends people back to after signing in with a linked account. */
+const linkedCallback = createRoute({ getParentRoute: () => root, path: "auth/waifu/callback", component: LinkedCallback });
+
 const instance = createRoute({ getParentRoute: () => root, path: "$instance", component: Shell });
 
 const instanceIndex = createRoute({
@@ -121,6 +125,7 @@ const routeTree = root.addChildren([
   index,
   connect,
   inviteHere,
+  linkedCallback,
   instance.addChildren([instanceIndex, invite, server.addChildren([serverIndex, channel])]),
 ]);
 

@@ -1,4 +1,4 @@
-import { CheckIcon, KeyRoundIcon, LogOutIcon } from "lucide-react";
+import { CheckIcon, ExternalLinkIcon, Flower2Icon, KeyRoundIcon, LogOutIcon, MonitorSmartphoneIcon, ShieldCheckIcon, UserPenIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useState, type FormEvent } from "react";
 import { AccountKind, type User } from "@/gen/fuwa/v1/types_pb";
@@ -7,10 +7,67 @@ import { useAction, useInstance } from "@/fuwa/hooks";
 import { SPRING, SwapText } from "@/components/motion";
 import { PASSWORD_MAX, PasswordInput, Row, Warn } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
+import { issuerName, WAIFU_DEV_ISSUER } from "@/lib/linked";
 import { cn } from "@/lib/utils";
 
 /** Accounts made on the instance sign in with a password; linked ones sign in through waifu.dev. */
 export const hasPassword = (user: User | undefined) => !!user && user.kind !== AccountKind.LINKED;
+
+// ───────────────────────── Linked sign-in ─────────────────────────
+
+/** For a linked account, which has no password here: where its sign-in lives instead. */
+export function LinkedSignIn({ instanceKey }: { instanceKey: string }) {
+  const inst = useInstance(instanceKey);
+  const issuer = inst?.node?.auth?.linkedIssuer || WAIFU_DEV_ISSUER;
+  const name = issuerName(issuer);
+  const where = inst?.node?.name ?? "this instance";
+  const lines = [
+    { icon: ShieldCheckIcon, text: `Your password and two-step sign-in live with ${name}, so there's nothing to set up here.` },
+    { icon: MonitorSmartphoneIcon, text: `Signing out of ${name} doesn't sign you out of ${where}. Devices shows where you're signed in.` },
+    { icon: UserPenIcon, text: `Your name and picture here started from ${name}, and they're yours to change.` },
+  ];
+  return (
+    <div className="flex flex-col gap-5">
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={SPRING}
+        className="group flex items-center gap-4 rounded-2xl border bg-card p-4"
+      >
+        <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-foreground text-primary shadow-lg">
+          <Flower2Icon className="size-6 transition-transform duration-700 group-hover:rotate-[144deg]" />
+        </span>
+        <div className="min-w-0">
+          <p className="font-extrabold">Linked to {name}</p>
+          <p className="text-sm text-muted-foreground">You sign in with your {name} account. There's no password here.</p>
+        </div>
+      </motion.div>
+      <ul className="flex flex-col gap-2.5">
+        {lines.map((line, n) => (
+          <motion.li
+            key={line.text}
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ ...SPRING, delay: 0.08 + n * 0.05 }}
+            className="flex items-start gap-2.5 text-sm text-muted-foreground"
+          >
+            <line.icon className="mt-0.5 size-4 shrink-0 text-primary" /> {line.text}
+          </motion.li>
+        ))}
+      </ul>
+      {issuer === WAIFU_DEV_ISSUER && (
+        <a
+          href="https://www.waifu.dev/settings"
+          target="_blank"
+          rel="noreferrer"
+          className="group inline-flex items-center gap-1.5 self-start text-sm font-bold text-primary underline-offset-4 hover:underline"
+        >
+          Your waifu.dev settings <ExternalLinkIcon className="size-3.5 transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+        </a>
+      )}
+    </div>
+  );
+}
 
 // ───────────────────────── Password ─────────────────────────
 

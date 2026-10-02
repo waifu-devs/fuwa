@@ -3,6 +3,7 @@ import {
   CrownIcon,
   DoorClosedIcon,
   DoorOpenIcon,
+  Flower2Icon,
   GlobeIcon,
   LinkIcon,
   LockIcon,
@@ -15,21 +16,23 @@ import {
   SlidersHorizontalIcon,
   UserPlusIcon,
 } from "lucide-react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   InstanceSettingsSchema,
+  LinkedAccounts,
   LocalAccounts,
   type InstanceConfig,
   type InstanceSettings,
 } from "@/gen/fuwa/v1/admin_pb";
-import { ServerCreation, ServerLimitsSchema } from "@/gen/fuwa/v1/types_pb";
+import { AccountKind, ServerCreation, ServerLimitsSchema } from "@/gen/fuwa/v1/types_pb";
 import { getSettings, run, updateSettings } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Private, usePrivateField } from "@/components/Private";
 import { formatBytes } from "@/lib/format";
+import { canReturnTo, WAIFU_DEV_ISSUER } from "@/lib/linked";
 import { HIDDEN_ADDRESS } from "@/lib/streamer";
 import { cn } from "@/lib/utils";
 import { Cap, Choice, SaveBar, Setting, SPRING, Toggle } from "./controls";
@@ -44,6 +47,8 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "public_url", get: (s) => s.publicUrl.trim() },
   { path: "allowed_origins", get: (s) => s.allowedOrigins.map((o) => o.trim()).filter(Boolean).join("\n") },
   { path: "local_accounts", get: (s) => s.localAccounts },
+  { path: "linked_accounts", get: (s) => s.linkedAccounts },
+  { path: "linked_issuer", get: (s) => s.linkedIssuer.trim().replace(/\/+$/, "") },
   { path: "server_creation", get: (s) => s.serverCreation },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
@@ -135,6 +140,7 @@ export function InstanceSettingsDialog({
 
   const name = inst?.node?.name ?? instanceKey;
   const loading = !config || !draft || !defaults;
+  const hasPasswordHere = inst?.me?.kind !== AccountKind.LINKED;
 
   return (
     <SettingsScreen
@@ -167,6 +173,8 @@ export function InstanceSettingsDialog({
               description: "Who can join this instance and what they can make.",
               settings: [
                 { id: "local-accounts", label: "Standalone accounts", keywords: "sign up password" },
+                { id: "linked-accounts", label: "waifu.dev accounts", keywords: "linked sign in sign up" },
+                { id: "linked-issuer", label: "Sign-in provider", keywords: "issuer openauth waifu.dev linked" },
                 { id: "server-creation", label: "Who can create servers" },
                 { id: "servers-per-account", label: "Servers per account" },
               ],
@@ -303,7 +311,7 @@ export function InstanceSettingsDialog({
                 id="local-accounts"
                 title="Standalone accounts"
                 hint="A username and password kept on this instance only."
-                defaultLabel={LOCAL_LABEL[defaults.localAccounts]}
+                defaultLabel={ACCOUNTS_LABEL[defaults.localAccounts]}
                 {...resetter("local_accounts")}
               >
                 <Choice
@@ -317,16 +325,71 @@ export function InstanceSettingsDialog({
                       label: "Off",
                       hint: "No standalone accounts.",
                       icon: <LockIcon className="size-4" />,
-                      disabled: draft.localAccounts === LocalAccounts.OFF ? undefined : "Needs another way to sign in first.",
+                      disabled:
+                        draft.localAccounts === LocalAccounts.OFF || linkedWorks(draft)
+                          ? undefined
+                          : "Needs waifu.dev sign-in working first.",
                     },
                   ]}
                 />
+                <Notice show={draft.localAccounts === LocalAccounts.OFF && saved?.localAccounts !== LocalAccounts.OFF && hasPasswordHere}>
+                  You sign in here with a password. Once you sign out, you'll need a waifu.dev account here to get back in.
+                </Notice>
+              </Setting>
+              <Setting
+                id="linked-accounts"
+                title="waifu.dev accounts"
+                hint="People sign in with their waifu.dev account, and get an account here the first time."
+                defaultLabel={ACCOUNTS_LABEL[defaults.linkedAccounts]}
+                delay={0.04}
+                {...resetter("linked_accounts")}
+              >
+                <Choice
+                  value={draft.linkedAccounts}
+                  onChange={(v) => patch((d) => (d.linkedAccounts = v))}
+                  options={[
+                    { value: LinkedAccounts.OPEN, label: "Open", hint: "Anyone with waifu.dev.", icon: <Flower2Icon className="size-4" /> },
+                    { value: LinkedAccounts.CLOSED, label: "Closed", hint: "Linked accounts only.", icon: <DoorClosedIcon className="size-4" /> },
+                    {
+                      value: LinkedAccounts.OFF,
+                      label: "Off",
+                      hint: "No waifu.dev sign-in.",
+                      icon: <LockIcon className="size-4" />,
+                      disabled:
+                        draft.linkedAccounts === LinkedAccounts.OFF || draft.localAccounts !== LocalAccounts.OFF
+                          ? undefined
+                          : "Needs standalone accounts on first.",
+                    },
+                  ]}
+                />
+                <Notice show={draft.linkedAccounts !== LinkedAccounts.OFF && !canReturnTo(draft.publicUrl)}>
+                  waifu.dev can only send people back to an https address. Set the public address under General to turn this on.
+                </Notice>
+              </Setting>
+              <Setting
+                id="linked-issuer"
+                title="Sign-in provider"
+                hint="The OpenAuth issuer waifu.dev sign-ins go through. Accounts already linked stay tied to the one they came from."
+                defaultLabel={defaults.linkedIssuer}
+                delay={0.08}
+                {...resetter("linked_issuer")}
+              >
+                <div className="relative">
+                  <Flower2Icon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={draft.linkedIssuer}
+                    type="url"
+                    placeholder={WAIFU_DEV_ISSUER}
+                    onChange={(e) => patch((d) => (d.linkedIssuer = e.target.value))}
+                    className="h-10 rounded-xl pl-9"
+                  />
+                </div>
               </Setting>
               <Setting
                 id="server-creation"
                 title="Who can create servers"
                 defaultLabel={CREATION_LABEL[defaults.serverCreation]}
-                delay={0.04}
+                delay={0.12}
                 {...resetter("server_creation")}
               >
                 <Choice
@@ -344,7 +407,7 @@ export function InstanceSettingsDialog({
                 title="Servers per account"
                 hint="How many servers one account may own."
                 defaultLabel={count(defaults.serversPerAccount)}
-                delay={0.08}
+                delay={0.16}
                 {...resetter("servers_per_account")}
               >
                 <Cap label="Up to" value={draft.serversPerAccount} onChange={(v) => patch((d) => (d.serversPerAccount = v))} />
@@ -425,11 +488,33 @@ export function InstanceSettingsDialog({
   );
 }
 
-const LOCAL_LABEL: Record<number, string> = {
+const ACCOUNTS_LABEL: Record<number, string> = {
   [LocalAccounts.OPEN]: "open",
   [LocalAccounts.CLOSED]: "closed",
   [LocalAccounts.OFF]: "off",
 };
+
+/** Whether waifu.dev sign-in would work with these settings: on, with an https public address. */
+const linkedWorks = (s: InstanceSettings) => s.linkedAccounts !== LinkedAccounts.OFF && canReturnTo(s.publicUrl);
+
+/** A heads-up under a setting, sliding in while it applies. */
+function Notice({ show, children }: { show: boolean; children: ReactNode }) {
+  return (
+    <AnimatePresence initial={false}>
+      {show && (
+        <motion.p
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={SPRING}
+          className="overflow-hidden rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+        >
+          {children}
+        </motion.p>
+      )}
+    </AnimatePresence>
+  );
+}
 
 const CREATION_LABEL: Record<number, string> = {
   [ServerCreation.EVERYONE]: "everyone",
@@ -452,6 +537,12 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "local_accounts":
         into.localAccounts = from.localAccounts;
+        break;
+      case "linked_accounts":
+        into.linkedAccounts = from.linkedAccounts;
+        break;
+      case "linked_issuer":
+        into.linkedIssuer = from.linkedIssuer;
         break;
       case "server_creation":
         into.serverCreation = from.serverCreation;

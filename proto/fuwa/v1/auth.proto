@@ -23,6 +23,17 @@ service AuthService {
   // anyone for instance admins.
   rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+
+  // Signing in with a waifu.dev account (a linked account) takes three calls.
+  // StartLinkedSignIn returns the address to send the browser to. waifu.dev
+  // sends it back to this instance's /auth/waifu/callback with a code, and
+  // FinishLinkedSignIn trades that code for a session. Someone new gets a
+  // linked account here, while linked sign-ups are open.
+  rpc StartLinkedSignIn(StartLinkedSignInRequest) returns (StartLinkedSignInResponse);
+  // Which app a sign-in that came back to this instance belongs to, so the
+  // callback page can hand it on when another fuwa app started it.
+  rpc GetLinkedSignIn(GetLinkedSignInRequest) returns (GetLinkedSignInResponse);
+  rpc FinishLinkedSignIn(FinishLinkedSignInRequest) returns (FinishLinkedSignInResponse);
 }
 
 message SignUpRequest {
@@ -109,3 +120,44 @@ message ChangePasswordRequest {
 }
 
 message ChangePasswordResponse {}
+
+message StartLinkedSignInRequest {
+  // The origin of the app signing in, like https://chat.example.com. The
+  // sign-in ends at <return_origin>/auth/waifu/callback.
+  string return_origin = 1;
+  // The SHA-256 (hex) of a random secret the app keeps until FinishLinkedSignIn,
+  // so only the app that started a sign-in can finish it.
+  string secret_hash = 2;
+}
+
+message StartLinkedSignInResponse {
+  // Where to send the browser: the issuer's sign-in page.
+  string authorize_url = 1;
+  // Comes back with the code; good for ten minutes.
+  string state = 2;
+}
+
+message GetLinkedSignInRequest {
+  string state = 1;
+}
+
+message GetLinkedSignInResponse {
+  // The app that started the sign-in.
+  string return_origin = 1;
+}
+
+message FinishLinkedSignInRequest {
+  string state = 1;
+  // The code the issuer sent back.
+  string code = 2;
+  // The secret whose hash started the sign-in.
+  string secret = 3;
+}
+
+message FinishLinkedSignInResponse {
+  string token = 1;
+  User user = 2;
+  bool admin = 3;
+  // Whether this sign-in made the account.
+  bool created = 4;
+}

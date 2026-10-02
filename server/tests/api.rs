@@ -129,7 +129,9 @@ async fn a_community_end_to_end() {
     assert_eq!((build.version.as_str(), build.commit.as_str()), (env!("CARGO_PKG_VERSION"), env!("FUWA_COMMIT")));
     assert_eq!(build.source, "https://github.com/waifu-devs/fuwa");
     let auth = node.auth.unwrap();
-    assert!(auth.local_sign_in && auth.local_sign_up && !auth.linked_sign_in);
+    assert!(auth.local_sign_in && auth.local_sign_up);
+    assert!(auth.linked_sign_in && auth.linked_sign_up, "on by default, and localhost can be sent back to");
+    assert_eq!(auth.linked_issuer, "https://api.waifu.dev");
 
     // Accounts: the first one is the instance admin.
     let (juan, juan_user, juan_admin) = sign_up(&mut c, "Juan").await;
@@ -773,8 +775,15 @@ async fn admins_change_settings_from_a_client() {
         refuse(&mut c, &admin, settings_update(Default::default(), &["port"], &[])).await,
         Code::InvalidArgument
     );
-    let off = pb::InstanceSettings { local_accounts: pb::LocalAccounts::Off as i32, ..Default::default() };
-    assert_eq!(refuse(&mut c, &admin, settings_update(off, &["local_accounts"], &[])).await, Code::FailedPrecondition);
+    let off = pb::InstanceSettings {
+        local_accounts: pb::LocalAccounts::Off as i32,
+        linked_accounts: pb::LinkedAccounts::Off as i32,
+        ..Default::default()
+    };
+    assert_eq!(
+        refuse(&mut c, &admin, settings_update(off, &["local_accounts", "linked_accounts"], &[])).await,
+        Code::FailedPrecondition
+    );
     assert_eq!(
         refuse(&mut c, &member, settings_update(Default::default(), &[], &["name"])).await,
         Code::PermissionDenied
@@ -3381,4 +3390,266 @@ async fn invites_let_people_into_servers() {
     let mut c = clients(&instance).await;
     assert_eq!(look_up(&mut c, &open.code).await.unwrap().server.unwrap().id, sid);
     assert_eq!(look_up(&mut c, &brief.code).await.unwrap_err(), Code::NotFound);
+}
+
+/// A stand-in for waifu.dev's OpenAuth issuer: codes the test hands out, and
+/// the token, userinfo and sign-out endpoints fuwa calls.
+#[derive(Default)]
+struct FakeIssuer {
+    /// code → (PKCE challenge, client_id, redirect_uri, who signed in)
+    codes: std::sync::Mutex<std::collections::HashMap<String, (String, String, String, serde_json::Value)>>,
+    tokens: std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>>,
+    revoked: std::sync::Mutex<Vec<String>>,
+}
+
+async fn fake_issuer() -> (String, Arc<FakeIssuer>) {
+    use axum::extract::State;
+    use axum::http::{HeaderMap, StatusCode, header};
+    use axum::response::IntoResponse;
+    use axum::routing::{get, post};
+
+    fn json(status: StatusCode, value: serde_json::Value) -> axum::response::Response {
+        (status, [(header::CONTENT_TYPE, "application/json")], value.to_string()).into_response()
+    }
+
+    async fn token(State(issuer): State<Arc<FakeIssuer>>, body: String) -> axum::response::Response {
+        let form: std::collections::HashMap<String, String> =
+            reqwest::Url::parse(&format!("http://form/?{body}")).unwrap().query_pairs().into_owned().collect();
+        let field = |name: &str| form.get(name).cloned().unwrap_or_default();
+        let Some((challenge, client_id, redirect_uri, user)) = issuer.codes.lock().unwrap().remove(&field("code"))
+        else {
+            return json(StatusCode::BAD_REQUEST, serde_json::json!({ "error": "invalid_grant" }));
+        };
+        use base64::Engine;
+        use sha2::Digest;
+        let verified = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(sha2::Sha256::digest(field("code_verifier").as_bytes()))
+            == challenge;
+        if field("grant_type") != "authorization_code"
+            || field("client_id") != client_id
+            || field("redirect_uri") != redirect_uri
+            || !verified
+        {
+            return json(StatusCode::BAD_REQUEST, serde_json::json!({ "error": "invalid_grant" }));
+        }
+        let access = format!("access-{}", issuer.tokens.lock().unwrap().len());
+        issuer.tokens.lock().unwrap().insert(access.clone(), user);
+        json(
+            StatusCode::OK,
+            serde_json::json!({ "access_token": access, "refresh_token": "refresh-me", "expires_in": 3600 }),
+        )
+    }
+
+    async fn userinfo(State(issuer): State<Arc<FakeIssuer>>, headers: HeaderMap) -> axum::response::Response {
+        let bearer = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).unwrap_or_default();
+        match issuer.tokens.lock().unwrap().get(bearer.trim_start_matches("Bearer ")) {
+            Some(user) => json(StatusCode::OK, user.clone()),
+            None => json(StatusCode::UNAUTHORIZED, serde_json::json!({})),
+        }
+    }
+
+    async fn revoke(State(issuer): State<Arc<FakeIssuer>>, body: String) -> StatusCode {
+        issuer.revoked.lock().unwrap().push(body);
+        StatusCode::NO_CONTENT
+    }
+
+    let issuer = Arc::new(FakeIssuer::default());
+    let router = axum::Router::new()
+        .route("/token", post(token))
+        .route("/userinfo", get(userinfo))
+        .route("/session/revoke", post(revoke))
+        .with_state(issuer.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    (url, issuer)
+}
+
+/// What the browser does between StartLinkedSignIn and FinishLinkedSignIn:
+/// visits the issuer, which signs `user` in and sends back a code.
+fn approve(issuer: &FakeIssuer, authorize_url: &str, user: serde_json::Value) -> String {
+    let url = reqwest::Url::parse(authorize_url).unwrap();
+    let query: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
+    assert_eq!(url.path(), "/authorize");
+    assert_eq!(query["response_type"], "code");
+    assert_eq!(query["code_challenge_method"], "S256");
+    assert_eq!(query["redirect_uri"], format!("{}/auth/waifu/callback", query["client_id"]));
+    let code = format!("code-{}", issuer.codes.lock().unwrap().len() + issuer.tokens.lock().unwrap().len());
+    issuer.codes.lock().unwrap().insert(
+        code.clone(),
+        (query["code_challenge"].clone(), query["client_id"].clone(), query["redirect_uri"].clone(), user),
+    );
+    code
+}
+
+async fn start_linked(c: &mut Clients, secret: &str) -> Result<pb::StartLinkedSignInResponse, Code> {
+    let request = pb::StartLinkedSignInRequest {
+        return_origin: "http://localhost:5173".into(),
+        secret_hash: fuwa_server::linked::secret_hash(secret),
+    };
+    c.auth.start_linked_sign_in(request).await.map(|r| r.into_inner()).map_err(|e| e.code())
+}
+
+async fn finish_linked(
+    c: &mut Clients,
+    state: &str,
+    code: &str,
+    secret: &str,
+) -> Result<pb::FinishLinkedSignInResponse, Code> {
+    let request = pb::FinishLinkedSignInRequest { state: state.into(), code: code.into(), secret: secret.into() };
+    c.auth.finish_linked_sign_in(request).await.map(|r| r.into_inner()).map_err(|e| e.code())
+}
+
+/// One whole sign-in with waifu.dev, as `user`.
+async fn linked_sign_in(
+    c: &mut Clients,
+    issuer: &FakeIssuer,
+    user: serde_json::Value,
+) -> Result<pb::FinishLinkedSignInResponse, Code> {
+    let started = start_linked(c, "the app's secret").await?;
+    let code = approve(issuer, &started.authorize_url, user);
+    finish_linked(c, &started.state, &code, "the app's secret").await
+}
+
+#[tokio::test]
+async fn linked_accounts_sign_in_with_waifu_dev() {
+    let dir = tempfile::tempdir().unwrap();
+    let (issuer_url, issuer) = fake_issuer().await;
+    let instance = start(dir.path(), &[("FUWA_LINKED_ISSUER", &issuer_url)]).await;
+    let mut c = clients(&instance).await;
+    let juan = serde_json::json!({
+        "sub": "user-juan", "preferred_username": "Juan-Dev", "name": "Juan",
+        "picture": "https://avatars.example/juan.png", "profile": "https://www.waifu.dev/u/Juan-Dev",
+    });
+
+    let auth = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap().auth.unwrap();
+    assert!(auth.linked_sign_in && auth.linked_sign_up);
+    assert_eq!(auth.linked_issuer, issuer_url);
+
+    // The app's origin and secret are checked.
+    let bad_origin = pb::StartLinkedSignInRequest {
+        return_origin: "http://evil.example".into(),
+        secret_hash: fuwa_server::linked::secret_hash("s"),
+    };
+    assert_eq!(c.auth.start_linked_sign_in(bad_origin).await.unwrap_err().code(), Code::InvalidArgument);
+    let bad_hash =
+        pb::StartLinkedSignInRequest { return_origin: "https://app.example".into(), secret_hash: "x".into() };
+    assert_eq!(c.auth.start_linked_sign_in(bad_hash).await.unwrap_err().code(), Code::InvalidArgument);
+
+    // A sign-in goes to the issuer, as this instance, and comes back here.
+    let started = start_linked(&mut c, "the app's secret").await.unwrap();
+    let query: std::collections::HashMap<String, String> =
+        reqwest::Url::parse(&started.authorize_url).unwrap().query_pairs().into_owned().collect();
+    assert!(started.authorize_url.starts_with(&format!("{issuer_url}/authorize?")));
+    assert_eq!(query["client_id"], "http://localhost:8080");
+    assert_eq!(query["state"], started.state);
+    let get = |state: &str| pb::GetLinkedSignInRequest { state: state.into() };
+    let shown = c.auth.get_linked_sign_in(get(&started.state)).await.unwrap().into_inner();
+    assert_eq!(shown.return_origin, "http://localhost:5173");
+    assert_eq!(c.auth.get_linked_sign_in(get("nope")).await.unwrap_err().code(), Code::NotFound);
+
+    // Only the app holding the secret can finish it, once.
+    let code = approve(&issuer, &started.authorize_url, juan.clone());
+    assert_eq!(finish_linked(&mut c, &started.state, &code, "a guess").await.unwrap_err(), Code::PermissionDenied);
+    let first = finish_linked(&mut c, &started.state, &code, "the app's secret").await.unwrap();
+    assert!(first.created && first.admin, "the instance's first account is its admin");
+    let user = first.user.unwrap();
+    assert_eq!(user.kind, pb::AccountKind::Linked as i32);
+    assert_eq!((user.username.as_str(), user.display_name.as_str()), ("juan_dev", "Juan"));
+    assert_eq!(user.avatar_url, "https://avatars.example/juan.png");
+    assert_eq!(
+        finish_linked(&mut c, &started.state, &code, "the app's secret").await.unwrap_err(),
+        Code::FailedPrecondition
+    );
+    let me = c.auth.get_me(authed(&first.token, pb::GetMeRequest {})).await.unwrap().into_inner();
+    assert_eq!(me.user.unwrap().id, user.id);
+    // The refresh token fuwa doesn't need goes back.
+    for _ in 0..50 {
+        if !issuer.revoked.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(issuer.revoked.lock().unwrap()[0].contains("refresh-me"));
+
+    // Signing in again is the same account; a code the issuer doesn't know isn't.
+    let again = linked_sign_in(&mut c, &issuer, juan.clone()).await.unwrap();
+    assert!(!again.created);
+    assert_eq!(again.user.unwrap().id, user.id);
+    let started = start_linked(&mut c, "the app's secret").await.unwrap();
+    assert_eq!(
+        finish_linked(&mut c, &started.state, "made-up", "the app's secret").await.unwrap_err(),
+        Code::FailedPrecondition
+    );
+
+    // Usernames already taken get a number.
+    let (_, local_mika, _) = sign_up(&mut c, "mika").await;
+    let mika = serde_json::json!({ "sub": "user-mika", "preferred_username": "mika", "name": "", "picture": null });
+    let linked_mika = linked_sign_in(&mut c, &issuer, mika).await.unwrap();
+    let linked_user = linked_mika.user.unwrap();
+    assert!(linked_mika.created && !linked_mika.admin);
+    assert_eq!((linked_user.username.as_str(), linked_user.display_name.as_str()), ("mika_2", "mika"));
+    assert_ne!(linked_user.id, local_mika.id);
+    assert_eq!(linked_user.avatar_url, "");
+
+    // Closed: people who have an account still sign in, nobody new gets one.
+    let admin = first.token;
+    let closed = pb::InstanceSettings { linked_accounts: pb::LinkedAccounts::Closed as i32, ..Default::default() };
+    c.admin.update_settings(authed(&admin, settings_update(closed, &["linked_accounts"], &[]))).await.unwrap();
+    let auth = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap().auth.unwrap();
+    assert!(auth.linked_sign_in && !auth.linked_sign_up);
+    assert!(linked_sign_in(&mut c, &issuer, juan.clone()).await.is_ok());
+    let kai = serde_json::json!({ "sub": "user-kai", "preferred_username": "kai" });
+    assert_eq!(linked_sign_in(&mut c, &issuer, kai).await.unwrap_err(), Code::FailedPrecondition);
+
+    // Turned-off accounts stay out.
+    update_account(
+        &mut c,
+        &admin,
+        pb::UpdateAccountRequest { account_id: linked_user.id.clone(), disabled: Some(true), ..Default::default() },
+    )
+    .await
+    .unwrap();
+    let mika = serde_json::json!({ "sub": "user-mika", "preferred_username": "mika" });
+    assert_eq!(linked_sign_in(&mut c, &issuer, mika).await.unwrap_err(), Code::PermissionDenied);
+
+    // Off, or without an https address to come back to, there's no signing in with waifu.dev.
+    let local = pb::InstanceSettings { public_url: "http://192.168.1.5:8080".into(), ..Default::default() };
+    c.admin.update_settings(authed(&admin, settings_update(local, &["public_url"], &[]))).await.unwrap();
+    let auth = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap().auth.unwrap();
+    assert!(!auth.linked_sign_in && auth.linked_issuer.is_empty());
+    assert_eq!(start_linked(&mut c, "s").await.unwrap_err(), Code::FailedPrecondition);
+    // With waifu.dev out of reach too, standalone accounts can't be turned off.
+    let off = pb::InstanceSettings { local_accounts: pb::LocalAccounts::Off as i32, ..Default::default() };
+    assert_eq!(
+        c.admin
+            .update_settings(authed(&admin, settings_update(off, &["local_accounts"], &[])))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::FailedPrecondition
+    );
+    let https = pb::InstanceSettings {
+        public_url: "https://chat.example.com".into(),
+        linked_accounts: pb::LinkedAccounts::Off as i32,
+        ..Default::default()
+    };
+    c.admin
+        .update_settings(authed(&admin, settings_update(https, &["public_url", "linked_accounts"], &[])))
+        .await
+        .unwrap();
+    assert_eq!(start_linked(&mut c, "s").await.unwrap_err(), Code::FailedPrecondition);
+    let on = pb::InstanceSettings { linked_accounts: pb::LinkedAccounts::Open as i32, ..Default::default() };
+    c.admin.update_settings(authed(&admin, settings_update(on, &["linked_accounts"], &[]))).await.unwrap();
+    let started = start_linked(&mut c, "s").await.unwrap();
+    assert!(started.authorize_url.contains("client_id=https%3A%2F%2Fchat.example.com"));
+    // Standalone accounts can go now, since waifu.dev sign-in works.
+    let off = pb::InstanceSettings { local_accounts: pb::LocalAccounts::Off as i32, ..Default::default() };
+    c.admin.update_settings(authed(&admin, settings_update(off, &["local_accounts"], &[]))).await.unwrap();
+    // ...and then the public URL has to stay one waifu.dev can send people back to.
+    let lan = pb::InstanceSettings { public_url: "http://192.168.1.5:8080".into(), ..Default::default() };
+    let refused =
+        c.admin.update_settings(authed(&admin, settings_update(lan, &["public_url"], &[]))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::FailedPrecondition);
+    assert!(refused.message().contains("https"), "{}", refused.message());
 }

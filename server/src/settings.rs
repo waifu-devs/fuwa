@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use crate::config::{Config, Limits, LocalAccounts};
+use crate::config::{Accounts, Config, Limits};
 use crate::error::{Error, Result};
 use crate::pb;
 
@@ -14,6 +14,8 @@ pub const FIELDS: &[&str] = &[
     "public_url",
     "allowed_origins",
     "local_accounts",
+    "linked_accounts",
+    "linked_issuer",
     "server_creation",
     "servers_per_account",
     "default_limits.members",
@@ -32,7 +34,9 @@ pub struct Settings {
     pub public_url: String,
     /// `["*"]` for any origin.
     pub allowed_origins: Vec<String>,
-    pub local_accounts: LocalAccounts,
+    pub local_accounts: Accounts,
+    pub linked_accounts: Accounts,
+    pub linked_issuer: String,
     pub server_creation: pb::ServerCreation,
     pub limits: Limits,
     pub telemetry: bool,
@@ -47,6 +51,8 @@ impl Settings {
             public_url: config.public_url.clone(),
             allowed_origins: config.allowed_origins.clone(),
             local_accounts: config.local_accounts,
+            linked_accounts: config.linked_accounts,
+            linked_issuer: config.linked_issuer.clone(),
             server_creation: config.server_creation,
             limits: config.limits.clone(),
             telemetry: config.telemetry.enabled,
@@ -86,6 +92,17 @@ impl Settings {
         self.allowed_origins.iter().any(|allowed| allowed == "*" || allowed.as_bytes() == origin)
     }
 
+    /// Whether linked accounts can sign in: they're on, and the issuer can send
+    /// people back to the public URL (https, or this machine while testing).
+    pub fn linked_sign_in(&self) -> bool {
+        self.linked_accounts.sign_in() && crate::linked::can_return_to(&self.public_url)
+    }
+
+    /// Whether someone new can sign in with waifu.dev and get an account.
+    pub fn linked_sign_up(&self) -> bool {
+        self.linked_accounts.sign_up() && self.linked_sign_in()
+    }
+
     pub fn to_pb(&self) -> pb::InstanceSettings {
         let limits = &self.limits;
         pb::InstanceSettings {
@@ -93,10 +110,16 @@ impl Settings {
             public_url: self.public_url.clone(),
             allowed_origins: self.allowed_origins.clone(),
             local_accounts: match self.local_accounts {
-                LocalAccounts::Open => pb::LocalAccounts::Open,
-                LocalAccounts::Closed => pb::LocalAccounts::Closed,
-                LocalAccounts::Off => pb::LocalAccounts::Off,
+                Accounts::Open => pb::LocalAccounts::Open,
+                Accounts::Closed => pb::LocalAccounts::Closed,
+                Accounts::Off => pb::LocalAccounts::Off,
             } as i32,
+            linked_accounts: match self.linked_accounts {
+                Accounts::Open => pb::LinkedAccounts::Open,
+                Accounts::Closed => pb::LinkedAccounts::Closed,
+                Accounts::Off => pb::LinkedAccounts::Off,
+            } as i32,
+            linked_issuer: self.linked_issuer.clone(),
             server_creation: self.server_creation as i32,
             servers_per_account: limits.servers_per_account,
             default_limits: Some(pb::ServerLimits {
@@ -126,6 +149,15 @@ impl Settings {
                     pb::LocalAccounts::Unspecified => "",
                 },
             ),
+            "linked_accounts" => Value::from(
+                match pb::LinkedAccounts::try_from(from.linked_accounts).unwrap_or(pb::LinkedAccounts::Unspecified) {
+                    pb::LinkedAccounts::Open => "open",
+                    pb::LinkedAccounts::Closed => "closed",
+                    pb::LinkedAccounts::Off => "off",
+                    pb::LinkedAccounts::Unspecified => "",
+                },
+            ),
+            "linked_issuer" => Value::from(from.linked_issuer.clone()),
             "server_creation" => Value::from(
                 match pb::ServerCreation::try_from(from.server_creation).unwrap_or(pb::ServerCreation::Unspecified) {
                     pb::ServerCreation::Everyone => "everyone",
@@ -155,6 +187,8 @@ impl Settings {
             "public_url" => Value::from(self.public_url.clone()),
             "allowed_origins" => Value::from(self.allowed_origins.clone()),
             "local_accounts" => Value::from(self.local_accounts.as_str()),
+            "linked_accounts" => Value::from(self.linked_accounts.as_str()),
+            "linked_issuer" => Value::from(self.linked_issuer.clone()),
             "server_creation" => Value::from(match self.server_creation {
                 pb::ServerCreation::Admins => "admins",
                 pb::ServerCreation::Disabled => "off",
@@ -178,14 +212,18 @@ impl Settings {
             "name" => self.name = name(value)?,
             "public_url" => self.public_url = public_url(value)?,
             "allowed_origins" => self.allowed_origins = origins(value)?,
-            "local_accounts" => {
-                self.local_accounts = match value.as_str() {
-                    Some("open") => LocalAccounts::Open,
-                    Some("closed") => LocalAccounts::Closed,
-                    Some("off") => LocalAccounts::Off,
-                    _ => return Err(Error::invalid("local_accounts must be open, closed or off")),
+            "local_accounts" | "linked_accounts" => {
+                let accounts = value
+                    .as_str()
+                    .and_then(Accounts::parse)
+                    .ok_or_else(|| Error::invalid(format!("{field} must be open, closed or off")))?;
+                if field == "local_accounts" {
+                    self.local_accounts = accounts;
+                } else {
+                    self.linked_accounts = accounts;
                 }
             }
+            "linked_issuer" => self.linked_issuer = issuer(value)?,
             "server_creation" => {
                 self.server_creation = match value.as_str() {
                     Some("everyone") => pb::ServerCreation::Everyone,
@@ -245,6 +283,14 @@ fn public_url(value: &Value) -> Result<String> {
     let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"));
     if url.len() > 2048 || rest.is_none_or(|rest| rest.is_empty() || rest.contains(char::is_whitespace)) {
         return Err(Error::invalid("public_url must be an http(s) URL, like https://chat.example.com"));
+    }
+    Ok(url.to_string())
+}
+
+fn issuer(value: &Value) -> Result<String> {
+    let url = value.as_str().unwrap_or_default().trim().trim_end_matches('/');
+    if url.len() > 2048 || !crate::linked::can_return_to(url) || url.contains(['?', '#', ' ']) {
+        return Err(Error::invalid("linked_issuer must be an https URL, like https://api.waifu.dev"));
     }
     Ok(url.to_string())
 }
@@ -310,7 +356,7 @@ mod tests {
         let settings = Settings::load(&config(), &stored);
         assert_eq!(settings.name, "Set here");
         assert_eq!(settings.limits.members, Some(50));
-        assert_eq!(settings.local_accounts, LocalAccounts::Closed);
+        assert_eq!(settings.local_accounts, Accounts::Closed);
         assert!(!settings.telemetry);
         assert_eq!(Settings::defaults(&config()).name, "Env name");
     }
@@ -324,8 +370,11 @@ mod tests {
             ("default_limits.storage_bytes".to_string(), "5000".to_string()),
             ("picture_upload_bytes".to_string(), "1000".to_string()),
             ("web".to_string(), "false".to_string()),
+            ("linked_accounts".to_string(), "\"closed\"".to_string()),
+            ("linked_issuer".to_string(), "\"https://id.example.com\"".to_string()),
         ];
         let settings = Settings::load(&config(), &stored);
+        assert_eq!(settings.linked_accounts, Accounts::Closed);
         assert_eq!(Settings::from_pb(&config(), &settings.to_pb()), settings);
     }
 
@@ -363,8 +412,26 @@ mod tests {
         assert!(s.set_json("allowed_origins", &serde_json::json!([])).is_err());
         assert!(s.set_json("default_limits.members", &Value::from(-1)).is_err());
         assert!(s.set_json("telemetry", &Value::from("yes")).is_err());
+        assert!(s.set_json("linked_accounts", &Value::from("sometimes")).is_err());
+        assert!(s.set_json("linked_issuer", &Value::from("http://id.example.com")).is_err());
+        assert!(s.set_json("linked_issuer", &Value::from("https://id.example.com/?x")).is_err());
+        assert!(s.set_json("linked_issuer", &Value::from("http://localhost:4000/")).is_ok());
+        assert_eq!(s.linked_issuer, "http://localhost:4000");
         assert!(expand(&["nope".into()]).is_err());
         assert_eq!(expand(&["default_limits".into()]).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn linked_sign_in_needs_an_address_to_come_back_to() {
+        let mut s = Settings::defaults(&config());
+        assert!(s.linked_sign_in() && s.linked_sign_up(), "localhost works while testing");
+        s.set_json("public_url", &Value::from("http://192.168.1.5:8080")).unwrap();
+        assert!(!s.linked_sign_in() && !s.linked_sign_up());
+        s.set_json("public_url", &Value::from("https://chat.example.com")).unwrap();
+        s.set_json("linked_accounts", &Value::from("closed")).unwrap();
+        assert!(s.linked_sign_in() && !s.linked_sign_up());
+        s.set_json("linked_accounts", &Value::from("off")).unwrap();
+        assert!(!s.linked_sign_in());
     }
 
     #[test]

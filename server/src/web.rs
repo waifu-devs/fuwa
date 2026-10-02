@@ -87,11 +87,21 @@ pub fn handler(source: Arc<impl HasSettings>) -> MethodRouter {
                 return (StatusCode::NOT_FOUND, "not found\n").into_response();
             }
             let settings = source.settings();
+            // Signing in with waifu.dev comes back to its callback page (and the
+            // scripts it runs) even with the app off, since a fuwa app on another
+            // address may have started the sign-in.
             #[cfg(feature = "web")]
-            if settings.web {
+            if settings.web || uri.path() == crate::linked::CALLBACK || uri.path().starts_with("/assets/") {
                 return embedded::serve(uri, headers).await;
             }
             let _ = &headers;
+            if uri.path() == crate::linked::CALLBACK {
+                return (
+                    StatusCode::NOT_FOUND,
+                    "this fuwa server was built without its web app, so it can't finish signing in with waifu.dev\n",
+                )
+                    .into_response();
+            }
             if uri.path() == "/" {
                 let info = crate::app::node_info(&settings, None);
                 return format!(

@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
+  Flower2Icon,
   KeyRoundIcon,
   LoaderCircleIcon,
   ServerIcon as ServerGlyph,
@@ -11,7 +12,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { Node } from "@/gen/fuwa/v1/types_pb";
-import { probe, run, signIn, signUp, verifyTwoFactor } from "@/fuwa/actions";
+import { probe, run, signIn, signUp, startLinkedSignIn, verifyTwoFactor } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
 import { instanceKey } from "@/fuwa/saved";
 import { AutoHeight } from "@/components/animate-ui/primitives/effects/auto-height";
@@ -22,6 +23,7 @@ import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/compon
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { issuerName } from "@/lib/linked";
 import { cn } from "@/lib/utils";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -160,22 +162,30 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
   );
 }
 
-/** Signs in or creates an account on an instance already found. Without `onBack` there's no going back to pick another. */
+/**
+ * Signs in or creates an account on an instance already found. Without
+ * `onBack` there's no going back to pick another. Signing in with waifu.dev
+ * leaves the page, so it comes back to `returnTo` (or the instance's home)
+ * instead of calling `onDone`.
+ */
 export function Account({
   url,
   node,
   onBack,
   onDone,
+  returnTo,
 }: {
   url: string;
   node: Node;
   onBack?: () => void;
   onDone?: (key: string) => void;
+  returnTo?: string;
 }) {
   const navigate = useNavigate();
   const methods = node.auth;
   const canSignUp = !!methods?.localSignUp;
   const canSignIn = !!methods?.localSignIn;
+  const linked = !!methods?.linkedSignIn;
   const [tab, setTab] = useState(canSignIn ? "sign-in" : "sign-up");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -225,9 +235,13 @@ export function Account({
     return (
       <div className="flex flex-col gap-4">
         <Header url={url} node={node} onBack={onBack} />
-        <p className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
-          This server doesn't take sign-ins with a username and password. Linked waifu.dev accounts are coming soon.
-        </p>
+        {linked ? (
+          <LinkedButton url={url} node={node} returnTo={returnTo} />
+        ) : (
+          <p className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
+            This server isn't taking sign-ins right now. Ask its admin about it.
+          </p>
+        )}
       </div>
     );
   }
@@ -235,6 +249,14 @@ export function Account({
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <Header url={url} node={node} onBack={onBack} />
+      {linked && (
+        <>
+          <LinkedButton url={url} node={node} returnTo={returnTo} />
+          <div className="flex items-center gap-3 text-xs font-bold text-muted-foreground uppercase">
+            <span className="h-px flex-1 bg-border" /> or with a password here <span className="h-px flex-1 bg-border" />
+          </div>
+        </>
+      )}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="w-full">
           <TabsTrigger value="sign-in" disabled={!canSignIn}>
@@ -453,6 +475,78 @@ function TwoFactorStep({
         {backup ? "Use the authenticator app instead" : "Lost your phone? Use a backup code"}
       </button>
     </motion.form>
+  );
+}
+
+/**
+ * "Continue with waifu.dev": signs in with a linked account, making one here
+ * for someone new while the instance takes them. The browser leaves for
+ * waifu.dev and comes back to /auth/waifu/callback.
+ */
+function LinkedButton({ url, node, returnTo }: { url: string; node: Node; returnTo?: string }) {
+  const start = useAction(startLinkedSignIn);
+  const [leaving, setLeaving] = useState(false);
+  const issuer = issuerName(node.auth?.linkedIssuer);
+
+  async function go() {
+    setLeaving(true);
+    // On success the browser is already on its way out.
+    if (!(await start.go(url, returnTo ?? null))) setLeaving(false);
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <motion.button
+        type="button"
+        onClick={go}
+        disabled={leaving}
+        whileHover={{ y: -2 }}
+        whileTap={{ scale: 0.97 }}
+        transition={{ type: "spring", stiffness: 500, damping: 26 }}
+        className="group relative isolate flex h-12 items-center justify-center gap-2.5 overflow-hidden rounded-xl bg-foreground px-4 font-extrabold text-background shadow-[0_14px_30px_-16px_var(--primary)] disabled:cursor-progress"
+      >
+        <span
+          aria-hidden
+          className="absolute inset-y-0 -left-1/3 -z-10 w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-[color-mix(in_srgb,var(--primary)_55%,transparent)] to-transparent opacity-0 transition-[left,opacity] duration-700 group-hover:left-[110%] group-hover:opacity-100"
+        />
+        <motion.span
+          animate={leaving ? { rotate: 360 } : { rotate: 0 }}
+          transition={leaving ? { repeat: Infinity, duration: 1.2, ease: "linear" } : { type: "spring", stiffness: 300, damping: 18 }}
+          className="grid place-items-center text-primary"
+        >
+          <Flower2Icon className="size-5 transition-transform duration-500 group-hover:rotate-[72deg] group-hover:scale-110" />
+        </motion.span>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={leaving ? "leaving" : "idle"}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18 }}
+            className="min-w-0 truncate"
+          >
+            {leaving ? `Off to ${issuer}…` : `Continue with ${issuer}`}
+          </motion.span>
+        </AnimatePresence>
+        <ArrowRightIcon className={cn("size-4 transition group-hover:translate-x-1", leaving && "translate-x-2 opacity-0")} />
+      </motion.button>
+      <AnimatePresence>
+        {start.error ? (
+          <motion.p
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="text-center text-sm text-destructive first-letter:uppercase"
+          >
+            {start.error}
+          </motion.p>
+        ) : !node.auth?.linkedSignUp ? (
+          <p className="text-center text-xs text-muted-foreground">
+            For people who already have a {issuer} account here. New ones aren't being made right now.
+          </p>
+        ) : null}
+      </AnimatePresence>
+    </div>
   );
 }
 

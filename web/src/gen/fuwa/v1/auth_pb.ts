@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/auth.proto.
  */
 export const file_fuwa_v1_auth: GenFile = /*@__PURE__*/
-  fileDesc("ChJmdXdhL3YxL2F1dGgucHJvdG8SB2Z1d2EudjEiSQoNU2lnblVwUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkiSwoOU2lnblVwUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCCIzCg1TaWduSW5SZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhAKCHBhc3N3b3JkGAIgASgJImYKDlNpZ25JblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEhsKBHVzZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISDQoFYWRtaW4YAyABKAgSGQoRdHdvX2ZhY3Rvcl90aWNrZXQYBCABKAkiNgoWVmVyaWZ5VHdvRmFjdG9yUmVxdWVzdBIOCgZ0aWNrZXQYASABKAkSDAoEY29kZRgCIAEoCSJUChdWZXJpZnlUd29GYWN0b3JSZXNwb25zZRINCgV0b2tlbhgBIAEoCRIbCgR1c2VyGAIgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAMgASgIIhAKDlNpZ25PdXRSZXF1ZXN0IhEKD1NpZ25PdXRSZXNwb25zZSIOCgxHZXRNZVJlcXVlc3QiOwoNR2V0TWVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAIgASgIItMCChRVcGRhdGVQcm9maWxlUmVxdWVzdBIZCgxkaXNwbGF5X25hbWUYASABKAlIAIgBARIXCgphdmF0YXJfdXJsGAIgASgJSAGIAQESFQoIcHJvbm91bnMYAyABKAlIAogBARIQCgNiaW8YBCABKAlIA4gBARIXCgpiYW5uZXJfdXJsGAUgASgJSASIAQESGQoMYWNjZW50X2NvbG9yGAYgASgFSAWIAQESEwoGc3RhdHVzGAcgASgJSAaIAQESNQoRc3RhdHVzX2V4cGlyZXNfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQg8KDV9kaXNwbGF5X25hbWVCDQoLX2F2YXRhcl91cmxCCwoJX3Byb25vdW5zQgYKBF9iaW9CDQoLX2Jhbm5lcl91cmxCDwoNX2FjY2VudF9jb2xvckIJCgdfc3RhdHVzIlcKFVVwZGF0ZVByb2ZpbGVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEiEKB3Byb2ZpbGUYAiABKAsyEC5mdXdhLnYxLlByb2ZpbGUiJAoRR2V0UHJvZmlsZVJlcXVlc3QSDwoHdXNlcl9pZBgBIAEoCSI3ChJHZXRQcm9maWxlUmVzcG9uc2USIQoHcHJvZmlsZRgBIAEoCzIQLmZ1d2EudjEuUHJvZmlsZSJHChVDaGFuZ2VQYXNzd29yZFJlcXVlc3QSGAoQY3VycmVudF9wYXNzd29yZBgBIAEoCRIUCgxuZXdfcGFzc3dvcmQYAiABKAkiGAoWQ2hhbmdlUGFzc3dvcmRSZXNwb25zZTK5BAoLQXV0aFNlcnZpY2USOQoGU2lnblVwEhYuZnV3YS52MS5TaWduVXBSZXF1ZXN0GhcuZnV3YS52MS5TaWduVXBSZXNwb25zZRI5CgZTaWduSW4SFi5mdXdhLnYxLlNpZ25JblJlcXVlc3QaFy5mdXdhLnYxLlNpZ25JblJlc3BvbnNlElQKD1ZlcmlmeVR3b0ZhY3RvchIfLmZ1d2EudjEuVmVyaWZ5VHdvRmFjdG9yUmVxdWVzdBogLmZ1d2EudjEuVmVyaWZ5VHdvRmFjdG9yUmVzcG9uc2USPAoHU2lnbk91dBIXLmZ1d2EudjEuU2lnbk91dFJlcXVlc3QaGC5mdXdhLnYxLlNpZ25PdXRSZXNwb25zZRI2CgVHZXRNZRIVLmZ1d2EudjEuR2V0TWVSZXF1ZXN0GhYuZnV3YS52MS5HZXRNZVJlc3BvbnNlEk4KDVVwZGF0ZVByb2ZpbGUSHS5mdXdhLnYxLlVwZGF0ZVByb2ZpbGVSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVQcm9maWxlUmVzcG9uc2USRQoKR2V0UHJvZmlsZRIaLmZ1d2EudjEuR2V0UHJvZmlsZVJlcXVlc3QaGy5mdXdhLnYxLkdldFByb2ZpbGVSZXNwb25zZRJRCg5DaGFuZ2VQYXNzd29yZBIeLmZ1d2EudjEuQ2hhbmdlUGFzc3dvcmRSZXF1ZXN0Gh8uZnV3YS52MS5DaGFuZ2VQYXNzd29yZFJlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChJmdXdhL3YxL2F1dGgucHJvdG8SB2Z1d2EudjEiSQoNU2lnblVwUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkiSwoOU2lnblVwUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCCIzCg1TaWduSW5SZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhAKCHBhc3N3b3JkGAIgASgJImYKDlNpZ25JblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEhsKBHVzZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISDQoFYWRtaW4YAyABKAgSGQoRdHdvX2ZhY3Rvcl90aWNrZXQYBCABKAkiNgoWVmVyaWZ5VHdvRmFjdG9yUmVxdWVzdBIOCgZ0aWNrZXQYASABKAkSDAoEY29kZRgCIAEoCSJUChdWZXJpZnlUd29GYWN0b3JSZXNwb25zZRINCgV0b2tlbhgBIAEoCRIbCgR1c2VyGAIgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAMgASgIIhAKDlNpZ25PdXRSZXF1ZXN0IhEKD1NpZ25PdXRSZXNwb25zZSIOCgxHZXRNZVJlcXVlc3QiOwoNR2V0TWVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAIgASgIItMCChRVcGRhdGVQcm9maWxlUmVxdWVzdBIZCgxkaXNwbGF5X25hbWUYASABKAlIAIgBARIXCgphdmF0YXJfdXJsGAIgASgJSAGIAQESFQoIcHJvbm91bnMYAyABKAlIAogBARIQCgNiaW8YBCABKAlIA4gBARIXCgpiYW5uZXJfdXJsGAUgASgJSASIAQESGQoMYWNjZW50X2NvbG9yGAYgASgFSAWIAQESEwoGc3RhdHVzGAcgASgJSAaIAQESNQoRc3RhdHVzX2V4cGlyZXNfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQg8KDV9kaXNwbGF5X25hbWVCDQoLX2F2YXRhcl91cmxCCwoJX3Byb25vdW5zQgYKBF9iaW9CDQoLX2Jhbm5lcl91cmxCDwoNX2FjY2VudF9jb2xvckIJCgdfc3RhdHVzIlcKFVVwZGF0ZVByb2ZpbGVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEiEKB3Byb2ZpbGUYAiABKAsyEC5mdXdhLnYxLlByb2ZpbGUiJAoRR2V0UHJvZmlsZVJlcXVlc3QSDwoHdXNlcl9pZBgBIAEoCSI3ChJHZXRQcm9maWxlUmVzcG9uc2USIQoHcHJvZmlsZRgBIAEoCzIQLmZ1d2EudjEuUHJvZmlsZSJHChVDaGFuZ2VQYXNzd29yZFJlcXVlc3QSGAoQY3VycmVudF9wYXNzd29yZBgBIAEoCRIUCgxuZXdfcGFzc3dvcmQYAiABKAkiGAoWQ2hhbmdlUGFzc3dvcmRSZXNwb25zZSJGChhTdGFydExpbmtlZFNpZ25JblJlcXVlc3QSFQoNcmV0dXJuX29yaWdpbhgBIAEoCRITCgtzZWNyZXRfaGFzaBgCIAEoCSJBChlTdGFydExpbmtlZFNpZ25JblJlc3BvbnNlEhUKDWF1dGhvcml6ZV91cmwYASABKAkSDQoFc3RhdGUYAiABKAkiJwoWR2V0TGlua2VkU2lnbkluUmVxdWVzdBINCgVzdGF0ZRgBIAEoCSIwChdHZXRMaW5rZWRTaWduSW5SZXNwb25zZRIVCg1yZXR1cm5fb3JpZ2luGAEgASgJIkgKGUZpbmlzaExpbmtlZFNpZ25JblJlcXVlc3QSDQoFc3RhdGUYASABKAkSDAoEY29kZRgCIAEoCRIOCgZzZWNyZXQYAyABKAkiaAoaRmluaXNoTGlua2VkU2lnbkluUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCBIPCgdjcmVhdGVkGAQgASgIMsoGCgtBdXRoU2VydmljZRI5CgZTaWduVXASFi5mdXdhLnYxLlNpZ25VcFJlcXVlc3QaFy5mdXdhLnYxLlNpZ25VcFJlc3BvbnNlEjkKBlNpZ25JbhIWLmZ1d2EudjEuU2lnbkluUmVxdWVzdBoXLmZ1d2EudjEuU2lnbkluUmVzcG9uc2USVAoPVmVyaWZ5VHdvRmFjdG9yEh8uZnV3YS52MS5WZXJpZnlUd29GYWN0b3JSZXF1ZXN0GiAuZnV3YS52MS5WZXJpZnlUd29GYWN0b3JSZXNwb25zZRI8CgdTaWduT3V0EhcuZnV3YS52MS5TaWduT3V0UmVxdWVzdBoYLmZ1d2EudjEuU2lnbk91dFJlc3BvbnNlEjYKBUdldE1lEhUuZnV3YS52MS5HZXRNZVJlcXVlc3QaFi5mdXdhLnYxLkdldE1lUmVzcG9uc2USTgoNVXBkYXRlUHJvZmlsZRIdLmZ1d2EudjEuVXBkYXRlUHJvZmlsZVJlcXVlc3QaHi5mdXdhLnYxLlVwZGF0ZVByb2ZpbGVSZXNwb25zZRJFCgpHZXRQcm9maWxlEhouZnV3YS52MS5HZXRQcm9maWxlUmVxdWVzdBobLmZ1d2EudjEuR2V0UHJvZmlsZVJlc3BvbnNlElEKDkNoYW5nZVBhc3N3b3JkEh4uZnV3YS52MS5DaGFuZ2VQYXNzd29yZFJlcXVlc3QaHy5mdXdhLnYxLkNoYW5nZVBhc3N3b3JkUmVzcG9uc2USWgoRU3RhcnRMaW5rZWRTaWduSW4SIS5mdXdhLnYxLlN0YXJ0TGlua2VkU2lnbkluUmVxdWVzdBoiLmZ1d2EudjEuU3RhcnRMaW5rZWRTaWduSW5SZXNwb25zZRJUCg9HZXRMaW5rZWRTaWduSW4SHy5mdXdhLnYxLkdldExpbmtlZFNpZ25JblJlcXVlc3QaIC5mdXdhLnYxLkdldExpbmtlZFNpZ25JblJlc3BvbnNlEl0KEkZpbmlzaExpbmtlZFNpZ25JbhIiLmZ1d2EudjEuRmluaXNoTGlua2VkU2lnbkluUmVxdWVzdBojLmZ1d2EudjEuRmluaXNoTGlua2VkU2lnbkluUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.SignUpRequest
@@ -393,6 +393,161 @@ export const ChangePasswordResponseSchema: GenMessage<ChangePasswordResponse> = 
   messageDesc(file_fuwa_v1_auth, 15);
 
 /**
+ * @generated from message fuwa.v1.StartLinkedSignInRequest
+ */
+export type StartLinkedSignInRequest = Message<"fuwa.v1.StartLinkedSignInRequest"> & {
+  /**
+   * The origin of the app signing in, like https://chat.example.com. The
+   * sign-in ends at <return_origin>/auth/waifu/callback.
+   *
+   * @generated from field: string return_origin = 1;
+   */
+  returnOrigin: string;
+
+  /**
+   * The SHA-256 (hex) of a random secret the app keeps until FinishLinkedSignIn,
+   * so only the app that started a sign-in can finish it.
+   *
+   * @generated from field: string secret_hash = 2;
+   */
+  secretHash: string;
+};
+
+/**
+ * Describes the message fuwa.v1.StartLinkedSignInRequest.
+ * Use `create(StartLinkedSignInRequestSchema)` to create a new message.
+ */
+export const StartLinkedSignInRequestSchema: GenMessage<StartLinkedSignInRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 16);
+
+/**
+ * @generated from message fuwa.v1.StartLinkedSignInResponse
+ */
+export type StartLinkedSignInResponse = Message<"fuwa.v1.StartLinkedSignInResponse"> & {
+  /**
+   * Where to send the browser: the issuer's sign-in page.
+   *
+   * @generated from field: string authorize_url = 1;
+   */
+  authorizeUrl: string;
+
+  /**
+   * Comes back with the code; good for ten minutes.
+   *
+   * @generated from field: string state = 2;
+   */
+  state: string;
+};
+
+/**
+ * Describes the message fuwa.v1.StartLinkedSignInResponse.
+ * Use `create(StartLinkedSignInResponseSchema)` to create a new message.
+ */
+export const StartLinkedSignInResponseSchema: GenMessage<StartLinkedSignInResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 17);
+
+/**
+ * @generated from message fuwa.v1.GetLinkedSignInRequest
+ */
+export type GetLinkedSignInRequest = Message<"fuwa.v1.GetLinkedSignInRequest"> & {
+  /**
+   * @generated from field: string state = 1;
+   */
+  state: string;
+};
+
+/**
+ * Describes the message fuwa.v1.GetLinkedSignInRequest.
+ * Use `create(GetLinkedSignInRequestSchema)` to create a new message.
+ */
+export const GetLinkedSignInRequestSchema: GenMessage<GetLinkedSignInRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 18);
+
+/**
+ * @generated from message fuwa.v1.GetLinkedSignInResponse
+ */
+export type GetLinkedSignInResponse = Message<"fuwa.v1.GetLinkedSignInResponse"> & {
+  /**
+   * The app that started the sign-in.
+   *
+   * @generated from field: string return_origin = 1;
+   */
+  returnOrigin: string;
+};
+
+/**
+ * Describes the message fuwa.v1.GetLinkedSignInResponse.
+ * Use `create(GetLinkedSignInResponseSchema)` to create a new message.
+ */
+export const GetLinkedSignInResponseSchema: GenMessage<GetLinkedSignInResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 19);
+
+/**
+ * @generated from message fuwa.v1.FinishLinkedSignInRequest
+ */
+export type FinishLinkedSignInRequest = Message<"fuwa.v1.FinishLinkedSignInRequest"> & {
+  /**
+   * @generated from field: string state = 1;
+   */
+  state: string;
+
+  /**
+   * The code the issuer sent back.
+   *
+   * @generated from field: string code = 2;
+   */
+  code: string;
+
+  /**
+   * The secret whose hash started the sign-in.
+   *
+   * @generated from field: string secret = 3;
+   */
+  secret: string;
+};
+
+/**
+ * Describes the message fuwa.v1.FinishLinkedSignInRequest.
+ * Use `create(FinishLinkedSignInRequestSchema)` to create a new message.
+ */
+export const FinishLinkedSignInRequestSchema: GenMessage<FinishLinkedSignInRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 20);
+
+/**
+ * @generated from message fuwa.v1.FinishLinkedSignInResponse
+ */
+export type FinishLinkedSignInResponse = Message<"fuwa.v1.FinishLinkedSignInResponse"> & {
+  /**
+   * @generated from field: string token = 1;
+   */
+  token: string;
+
+  /**
+   * @generated from field: fuwa.v1.User user = 2;
+   */
+  user?: User | undefined;
+
+  /**
+   * @generated from field: bool admin = 3;
+   */
+  admin: boolean;
+
+  /**
+   * Whether this sign-in made the account.
+   *
+   * @generated from field: bool created = 4;
+   */
+  created: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.FinishLinkedSignInResponse.
+ * Use `create(FinishLinkedSignInResponseSchema)` to create a new message.
+ */
+export const FinishLinkedSignInResponseSchema: GenMessage<FinishLinkedSignInResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 21);
+
+/**
  * Accounts on this instance. Signing up or in returns a session token, which
  * every other call sends as `authorization: Bearer <token>`.
  *
@@ -473,6 +628,39 @@ export const AuthService: GenService<{
     methodKind: "unary";
     input: typeof ChangePasswordRequestSchema;
     output: typeof ChangePasswordResponseSchema;
+  },
+  /**
+   * Signing in with a waifu.dev account (a linked account) takes three calls.
+   * StartLinkedSignIn returns the address to send the browser to. waifu.dev
+   * sends it back to this instance's /auth/waifu/callback with a code, and
+   * FinishLinkedSignIn trades that code for a session. Someone new gets a
+   * linked account here, while linked sign-ups are open.
+   *
+   * @generated from rpc fuwa.v1.AuthService.StartLinkedSignIn
+   */
+  startLinkedSignIn: {
+    methodKind: "unary";
+    input: typeof StartLinkedSignInRequestSchema;
+    output: typeof StartLinkedSignInResponseSchema;
+  },
+  /**
+   * Which app a sign-in that came back to this instance belongs to, so the
+   * callback page can hand it on when another fuwa app started it.
+   *
+   * @generated from rpc fuwa.v1.AuthService.GetLinkedSignIn
+   */
+  getLinkedSignIn: {
+    methodKind: "unary";
+    input: typeof GetLinkedSignInRequestSchema;
+    output: typeof GetLinkedSignInResponseSchema;
+  },
+  /**
+   * @generated from rpc fuwa.v1.AuthService.FinishLinkedSignIn
+   */
+  finishLinkedSignIn: {
+    methodKind: "unary";
+    input: typeof FinishLinkedSignInRequestSchema;
+    output: typeof FinishLinkedSignInResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_auth, 0);
