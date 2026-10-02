@@ -15,6 +15,7 @@ import { probe, run, signIn, signUp, verifyTwoFactor } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
 import { instanceKey } from "@/fuwa/saved";
 import { AutoHeight } from "@/components/animate-ui/primitives/effects/auto-height";
+import { BuildLabel } from "@/components/BuildLabel";
 import { CodeInput } from "@/components/CodeInput";
 import { Private, usePrivateField } from "@/components/Private";
 import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -468,7 +469,7 @@ function Header({ url, node, onBack }: { url: string; node: Node; onBack: () => 
       <div className="min-w-0">
         <p className="truncate font-extrabold">{node.name}</p>
         <p className="truncate text-xs text-muted-foreground">
-          <Private text={instanceKey(url)} /> · fuwa {node.version}
+          <Private text={instanceKey(url)} /> · <BuildLabel node={node} />
         </p>
       </div>
     </div>

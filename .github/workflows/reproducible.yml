@@ -1,0 +1,28 @@
+name: Reproducible build
+
+# Builds the release binary twice from scratch, minutes apart, and fails if the
+# two differ by a single byte. A client can only check that a server runs an
+# official build if anyone can rebuild that build and get the same bytes.
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  twice:
+    name: Same commit, same binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: First build
+        run: docker buildx build --no-cache --target binary --build-arg FUWA_COMMIT=${{ github.sha }} --output type=local,dest=first .
+      - name: Second build
+        run: docker buildx build --no-cache --target binary --build-arg FUWA_COMMIT=${{ github.sha }} --output type=local,dest=second .
+      - name: Both builds are identical
+        run: |
+          sha256sum first/fuwa second/fuwa
+          if ! cmp -s first/fuwa second/fuwa; then
+            echo "::error::Two builds of this commit differ in $(cmp -l first/fuwa second/fuwa | wc -l) bytes. Something in the binary changes between builds: a time, a random value or an absolute path."
+            exit 1
+          fi

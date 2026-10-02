@@ -181,12 +181,20 @@
   and hovers answer. Use the springs and helpers in
   `web/src/components/motion.tsx` (`SwapText`, `Count`, `CountUp`) so the app
   moves alike everywhere, and keep it working with reduced motion.
+- Builds are reproducible: the same commit gives the same binary, byte for
+  byte, and the `Reproducible build` workflow fails a change that breaks this.
+  Nothing that differs between builds goes in the binary: no build time, no
+  random value, no absolute path (the commit is fine, it's in `FUWA_COMMIT`
+  from `build.rs`). Keep rust-embed's `deterministic-timestamps` and the
+  Dockerfile's `SOURCE_DATE_EPOCH`, and pin any new base image by digest.
+  This is what will let clients check, later, that a server runs an official
+  build, and one build covers every part of a split instance.
 - Every part of a split instance (`FUWA_ROLE`) is the same binary; the part is
-  configuration, never a build feature. Handlers that take a `server_id` run on the shard holding it, so
-  they read only that server's file and reach accounts, other servers, the
-  index and pictures through the `App` methods in `cluster/calls.rs`, never
-  `app.node()` or `app.index` directly. Handlers without one run on the
-  directory. A new server-scoped request keeps `server_id` as field 1, and a
+  configuration, never a build feature. Handlers that take a `server_id` run
+  on the shard holding it, so they read only that server's file and reach
+  accounts, other servers, the index and pictures through the `App` methods
+  in `cluster/calls.rs`, never `app.node()` or `app.index` directly. Handlers
+  without one run on the directory. A new server-scoped request keeps `server_id` as field 1, and a
   new RPC gets a line in `gateway::route`; `every_call_is_routed` checks both.
 - Before pushing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test`, and `buf lint`; for `web/`, `pnpm build` then

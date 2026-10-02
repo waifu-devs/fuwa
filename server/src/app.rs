@@ -263,6 +263,11 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         server_creation: settings.server_creation as i32,
         telemetry: settings.telemetry,
         announcement,
+        build: Some(pb::Build {
+            version: crate::VERSION.into(),
+            commit: crate::COMMIT.into(),
+            source: crate::SOURCE.into(),
+        }),
     }
 }
 
