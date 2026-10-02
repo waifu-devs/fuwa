@@ -4,9 +4,10 @@
 use std::env;
 use std::path::PathBuf;
 
-use crate::cluster::ClusterConfig;
+use crate::cluster::{ClusterConfig, Role};
 use crate::db::EncryptionKey;
 use crate::pb;
+use crate::replica::{ReplicaConfig, Restore, S3Config, Target};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -47,6 +48,9 @@ pub struct Config {
     pub web: bool,
     /// FUWA_ROLE and the rest of how a split instance fits together.
     pub cluster: ClusterConfig,
+    /// Where the databases and pictures are continuously copied to:
+    /// FUWA_S3_* (a bucket) or FUWA_REPLICA_PATH (a directory). None is off.
+    pub replica: Option<ReplicaConfig>,
 }
 
 /// Whether a kind of account works here: standalone ones (username and
@@ -249,6 +253,18 @@ impl Config {
         };
 
         let cluster = ClusterConfig::from_lookup(&get)?;
+        let replica = match (replica(&get)?, cluster.role) {
+            // Only the parts that keep files replicate them: a split
+            // instance's directory and shards. One process keeps plain local files.
+            (Some(_), Role::All) => {
+                return Err("FUWA_S3_BUCKET and FUWA_REPLICA_PATH replicate a split instance's directory and shards \
+                            (FUWA_ROLE=directory or shard); an instance run as one process keeps its files on its own disk"
+                    .into());
+            }
+            // Gateways keep nothing (and may share the others' variables).
+            (Some(_), Role::Gateway) => None,
+            (replica, _) => replica,
+        };
 
         Ok(Self {
             data_path,
@@ -271,8 +287,82 @@ impl Config {
             },
             web,
             cluster,
+            replica,
         })
     }
+}
+
+fn replica(get: &impl Fn(&str) -> Option<String>) -> Result<Option<ReplicaConfig>, String> {
+    let target = match (get("FUWA_S3_BUCKET"), get("FUWA_REPLICA_PATH")) {
+        (Some(_), Some(_)) => return Err("set FUWA_S3_BUCKET or FUWA_REPLICA_PATH, not both".into()),
+        (Some(bucket), None) => {
+            let region = get("FUWA_S3_REGION").map(|r| r.trim().to_string()).unwrap_or_else(|| "auto".into());
+            let endpoint = match get("FUWA_S3_ENDPOINT") {
+                Some(endpoint) => endpoint.trim().trim_end_matches('/').to_string(),
+                None if region != "auto" => format!("https://s3.{region}.amazonaws.com"),
+                None => {
+                    return Err("FUWA_S3_ENDPOINT is needed with FUWA_S3_BUCKET (or a FUWA_S3_REGION on AWS)".into());
+                }
+            };
+            if !(endpoint.starts_with("https://") || endpoint.starts_with("http://")) {
+                return Err(format!("FUWA_S3_ENDPOINT must start with https://, got {endpoint:?}"));
+            }
+            let secret = |key: &str| {
+                get(key).map(|v| v.trim().to_string()).ok_or_else(|| format!("{key} is needed with FUWA_S3_BUCKET"))
+            };
+            let path_style = match get("FUWA_S3_PATH_STYLE").as_deref().map(str::trim) {
+                None | Some("off" | "false" | "0") => false,
+                Some("on" | "true" | "1") => true,
+                Some(other) => return Err(format!("FUWA_S3_PATH_STYLE must be on or off, got {other:?}")),
+            };
+            Target::Bucket {
+                s3: S3Config {
+                    bucket: bucket.trim().to_string(),
+                    endpoint,
+                    region,
+                    access_key_id: secret("FUWA_S3_ACCESS_KEY_ID")?,
+                    secret_access_key: secret("FUWA_S3_SECRET_ACCESS_KEY")?,
+                    path_style,
+                },
+                prefix: get("FUWA_S3_PREFIX").unwrap_or_default().trim().to_string(),
+            }
+        }
+        (None, Some(path)) => Target::Dir(PathBuf::from(path.trim())),
+        (None, None) => {
+            if get("FUWA_RESTORE").is_some_and(|value| value.trim() != "off") {
+                return Err("FUWA_RESTORE needs a replica to restore from: FUWA_S3_BUCKET or FUWA_REPLICA_PATH".into());
+            }
+            return Ok(None);
+        }
+    };
+    let interval = match get("FUWA_REPLICA_INTERVAL") {
+        Some(value) => parse_duration(&value).map_err(|err| format!("FUWA_REPLICA_INTERVAL {err}"))?,
+        None => std::time::Duration::from_secs(1),
+    };
+    let restore = match get("FUWA_RESTORE").as_deref().map(str::trim) {
+        None | Some("off") => Restore::Off,
+        Some("if-empty") => Restore::IfEmpty,
+        Some(other) => return Err(format!("FUWA_RESTORE must be off or if-empty, got {other:?}")),
+    };
+    Ok(Some(ReplicaConfig { target, interval, restore }))
+}
+
+/// Parses a duration like `500ms`, `1s` or `2m` (a bare number is seconds).
+pub fn parse_duration(value: &str) -> Result<std::time::Duration, String> {
+    let value = value.trim();
+    let split = value.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(value.len());
+    let (number, unit) = value.split_at(split);
+    let number: f64 = number.parse().map_err(|_| format!("must be a duration like 500ms, 1s or 2m, got {value:?}"))?;
+    let seconds = match unit.trim() {
+        "" | "s" => number,
+        "ms" => number / 1000.0,
+        "m" => number * 60.0,
+        _ => return Err(format!("has an unknown unit in {value:?}; use ms, s or m")),
+    };
+    if !(0.05..=3600.0).contains(&seconds) {
+        return Err(format!("must be between 50ms and 60m, got {value:?}"));
+    }
+    Ok(std::time::Duration::from_secs_f64(seconds))
 }
 
 /// Parses a size like `500MB`, `2GiB` or `1048576`.
@@ -357,5 +447,63 @@ mod tests {
         assert!(config(&[("FUWA_LINKED_ISSUER", "api.waifu.dev")]).unwrap_err().contains("https://"));
         assert!(config(&[("FUWA_ENCRYPTION_KEY", "short")]).unwrap_err().contains("64 hex"));
         assert!(config(&[("FUWA_LIMIT_STORAGE", "5 parsecs")]).unwrap_err().contains("unknown unit"));
+    }
+
+    #[test]
+    fn the_replica_is_off_until_a_bucket_or_path_is_set() {
+        assert!(config(&[]).unwrap().replica.is_none());
+        assert!(config(&[("FUWA_RESTORE", "if-empty")]).unwrap_err().contains("needs a replica"));
+        let split = [("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", "cluster-key-0123456789abcdef0123456789abcdef")];
+        // The test's own variables win (the last one set is kept).
+        let config = |vars: &[(&str, &str)]| config(&[&split[..], vars].concat());
+
+        let railway = config(&[
+            ("FUWA_S3_BUCKET", "fuwa-replica-abc123"),
+            ("FUWA_S3_ENDPOINT", "https://t3.storageapi.dev/"),
+            ("FUWA_S3_REGION", "auto"),
+            ("FUWA_S3_ACCESS_KEY_ID", "id"),
+            ("FUWA_S3_SECRET_ACCESS_KEY", "secret"),
+            ("FUWA_RESTORE", "if-empty"),
+        ])
+        .unwrap()
+        .replica
+        .unwrap();
+        assert_eq!(railway.interval, std::time::Duration::from_secs(1));
+        assert_eq!(railway.restore, Restore::IfEmpty);
+        let Target::Bucket { s3, prefix } = &railway.target else { panic!("not a bucket") };
+        assert_eq!((s3.endpoint.as_str(), s3.path_style, prefix.as_str()), ("https://t3.storageapi.dev", false, ""));
+        assert!(!format!("{railway:?}").contains("secret"));
+
+        let aws = config(&[
+            ("FUWA_S3_BUCKET", "b"),
+            ("FUWA_S3_REGION", "eu-west-1"),
+            ("FUWA_S3_ACCESS_KEY_ID", "id"),
+            ("FUWA_S3_SECRET_ACCESS_KEY", "s"),
+        ]);
+        let Target::Bucket { s3, .. } = aws.unwrap().replica.unwrap().target else { panic!("not a bucket") };
+        assert_eq!(s3.endpoint, "https://s3.eu-west-1.amazonaws.com");
+        assert!(
+            config(&[("FUWA_S3_BUCKET", "b"), ("FUWA_S3_ENDPOINT", "https://x")])
+                .unwrap_err()
+                .contains("ACCESS_KEY_ID")
+        );
+        assert!(config(&[("FUWA_S3_BUCKET", "b")]).unwrap_err().contains("FUWA_S3_ENDPOINT"));
+
+        let dir =
+            config(&[("FUWA_REPLICA_PATH", "/backups"), ("FUWA_REPLICA_INTERVAL", "250ms")]).unwrap().replica.unwrap();
+        assert!(matches!(dir.target, Target::Dir(ref path) if path == std::path::Path::new("/backups")));
+
+        // Only for the parts of a split instance that keep files.
+        let one_process = super::tests::config(&[("FUWA_REPLICA_PATH", "/backups")]).unwrap_err();
+        assert!(one_process.contains("FUWA_ROLE=directory or shard"), "{one_process}");
+        let gateway = config(&[
+            ("FUWA_ROLE", "gateway"),
+            ("FUWA_DIRECTORY_URL", "http://directory:8080"),
+            ("FUWA_REPLICA_PATH", "/backups"),
+        ]);
+        assert!(gateway.unwrap().replica.is_none());
+        assert_eq!(dir.interval, std::time::Duration::from_millis(250));
+        assert!(config(&[("FUWA_REPLICA_PATH", "/b"), ("FUWA_REPLICA_INTERVAL", "1 fortnight")]).is_err());
+        assert!(config(&[("FUWA_REPLICA_PATH", "/b"), ("FUWA_S3_BUCKET", "b")]).unwrap_err().contains("not both"));
     }
 }

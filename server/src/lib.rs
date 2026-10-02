@@ -17,6 +17,7 @@ pub mod linked;
 pub mod media;
 pub mod node;
 pub mod permissions;
+pub mod replica;
 pub mod servers;
 pub mod settings;
 pub mod telemetry;

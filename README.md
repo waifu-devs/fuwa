@@ -120,6 +120,9 @@ the log filter are read only from the environment.
 | `FUWA_TELEMETRY_URL` | `https://analytics.waifu.dev/v1/fuwa/signals` | Where the signal goes |
 | `FUWA_HOSTING` | `self_hosted` | `hosted` only on Waifu Devs' own instance; reported in the signal |
 | `FUWA_LOG` | `info,turso_core=warn` | Log filter ([syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)) |
+| `FUWA_S3_BUCKET` and the other `FUWA_S3_*` | unset | Split instances only: a bucket the directory and shards copy their files to as they change; see [Replicating to a bucket](#replicating-to-a-bucket) |
+| `FUWA_REPLICA_PATH` | unset | Split instances only: a folder to replicate to instead of a bucket |
+| `FUWA_RESTORE` | `off` | `if-empty`: restore a part from the replica when its data folder is empty |
 
 The `FUWA_LIMIT_*` values are instance-wide defaults. An admin can give a single
 server its own caps from that server's settings or the Servers page of the
@@ -269,6 +272,9 @@ Turning a single-process instance into a split one: its data folder becomes
 the directory's (its `servers/` folder can stay there and be served by a shard
 started on that same folder, or be moved to shards' folders).
 
+With a bucket set (see [Replicating to a bucket](#replicating-to-a-bucket)),
+a directory or shard that lost its volume restores itself from it.
+
 While a shard is down, its servers answer "unavailable" and live streams
 following them end, so clients reconnect once it's back; everything else keeps
 working. Deleting an account and exporting someone's data are refused until
@@ -278,6 +284,42 @@ it) from one `servers/` folder to the other, and start them; the directory
 learns where it went when the shard starts. Shards check sessions with the directory and remember the answer for a
 few seconds, so a signed-out device can keep reading for up to five seconds
 (its live streams end at the next heartbeat check).
+
+### Replicating to a bucket
+
+A split instance's directory and shards can copy their files to a bucket as
+they change: each file's recent commits go up every second, so losing a
+volume loses about a second of writes at most, and a clean shutdown ships
+everything. Any S3-compatible bucket works (Railway, Cloudflare R2, AWS S3,
+MinIO). With `FUWA_ENCRYPTION_KEY` set, the bucket holds only encrypted data.
+An instance run as one process doesn't replicate: it refuses these settings,
+and its backups are a copy of its data folder.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `FUWA_S3_BUCKET` | unset | The bucket |
+| `FUWA_S3_ENDPOINT` | AWS, from the region | Its endpoint, like `https://t3.storageapi.dev` on Railway |
+| `FUWA_S3_REGION` | `auto` | Its region (`auto` on Railway, R2 and Tigris) |
+| `FUWA_S3_ACCESS_KEY_ID`, `FUWA_S3_SECRET_ACCESS_KEY` | unset | Its credentials |
+| `FUWA_S3_PATH_STYLE` | `off` | `on` for services that want `endpoint/bucket/key` addresses (MinIO, Garage) |
+| `FUWA_S3_PREFIX` | none | A folder in the bucket, to share one between instances |
+| `FUWA_REPLICA_PATH` | unset | A folder to replicate to instead (another disk, a network share) |
+| `FUWA_REPLICA_INTERVAL` | `1s` | How often new commits go up |
+| `FUWA_RESTORE` | `off` | `if-empty`: at start, restore from the replica when the data folder is empty |
+
+Give the directory and every shard the same bucket and prefix (gateways
+ignore it): the directory keeps `node.db` and the pictures there, each shard
+its servers, under its `FUWA_SHARD_ID`. A part that lost its volume comes
+back by starting on an empty one with the same bucket, the same encryption key
+and `FUWA_RESTORE=if-empty`: the directory restores `node.db` and the
+pictures, a shard the servers it held (so set `FUWA_SHARD_ID`; a made-up name
+goes with the volume). Without `FUWA_RESTORE`, a part with an empty data
+folder over a bucket that has its files won't start, so a lost volume never
+turns into an empty instance quietly writing over its own backup. By hand,
+with the part stopped: `fuwa restore [DIR]` restores what the part keeps,
+`fuwa restore --server <id> [DIR]` one community server, and
+`fuwa restore --list` shows what the bucket holds. How it works, what it
+costs and where it's going are in [docs/storage.md](docs/storage.md).
 
 ### The anonymous usage signal
 
