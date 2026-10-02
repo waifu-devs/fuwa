@@ -189,6 +189,12 @@ with its `SPLIT` setting on, the service with the domain becomes the gateways
 shard is a service with a volume of its own, all on Railway's private network
 with `FUWA_HOST=::`.
 
+A service with a volume can't run its old and new deployments side by side, so
+with one process each deploy drops connections for a few seconds; the app
+reconnects and catches up by itself. Split, only the directory and shards have
+volumes, and the gateways hold calls and live streams while those restart, so
+deploys go unnoticed (see [Restarts and deploys](../README.md#restarts-and-deploys)).
+
 ## After it's up
 
 Open your address and choose **Create account**. The first account made on an
