@@ -2,7 +2,8 @@
 //!
 //! One running server is an *instance* (called a node in the API). It keeps its
 //! accounts in `node.db` and hosts any number of community servers, each in its
-//! own Turso database under `servers/`. Clients speak gRPC or gRPC-Web.
+//! own Turso database under `servers/`. Direct messages, end-to-end encrypted,
+//! go through `dms.db`. Clients speak gRPC or gRPC-Web.
 
 pub mod api;
 pub mod app;
@@ -10,6 +11,7 @@ pub mod auth;
 pub mod cluster;
 pub mod config;
 pub mod db;
+pub mod dms;
 pub mod error;
 pub mod hub;
 pub mod id;

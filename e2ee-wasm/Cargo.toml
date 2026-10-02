@@ -1,0 +1,25 @@
+[package]
+name = "fuwa-e2ee-wasm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+description = "fuwa-e2ee for the web app, as WebAssembly"
+repository = "https://github.com/waifu-devs/fuwa"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+fuwa-e2ee = { path = "../e2ee", features = ["client"] }
+js-sys = "0.3"
+sha2 = "0.10"
+# Must match the wasm-bindgen CLI that turns the build into JavaScript
+# (web/scripts/e2ee.mjs, the Dockerfile and CI install this version).
+wasm-bindgen = "=0.2.129"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+fuwa-e2ee = { path = "../e2ee", features = ["js"] }
+# Older RustCrypto crates draw randomness through getrandom 0.2, which needs
+# telling to use the browser's.
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }

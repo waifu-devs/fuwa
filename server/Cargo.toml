@@ -18,6 +18,8 @@ axum = { version = "0.8", default-features = false, features = ["http1", "http2"
 base64 = "0.22"
 dotenvy = "0.15"
 futures = "0.3"
+# Reads MLS message headers for direct messages; never decrypts.
+fuwa-e2ee = { path = "../e2ee" }
 getrandom = "0.3"
 hmac = "0.12"
 http = "1"
@@ -56,4 +58,6 @@ protoc-bin-vendored = "3"
 tonic-prost-build = "0.14"
 
 [dev-dependencies]
+# Real devices for the direct-message tests.
+fuwa-e2ee = { path = "../e2ee", features = ["client"] }
 tempfile = "3"

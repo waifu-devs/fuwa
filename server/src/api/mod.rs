@@ -4,6 +4,7 @@ mod account;
 mod admin;
 mod auth;
 mod channels;
+mod dms;
 mod events;
 mod invites;
 mod join;

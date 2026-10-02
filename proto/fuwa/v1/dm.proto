@@ -1,0 +1,292 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// Direct messages: conversations between two people, end-to-end encrypted
+// with MLS (RFC 9420). The instance delivers them but can't read them.
+//
+// Every signed-in device that uses them registers a signing key of its own
+// (RegisterDevice) and keeps some MLS key packages here, so others can add
+// it. A conversation is an MLS group of every device of both people, whose
+// group id is the conversation's id. The instance keeps each conversation's
+// records (commits that change who's in it, and encrypted messages) in one
+// order, takes a record only for the group's current epoch (so devices
+// never fork it), and keeps the group's latest group info so a device can
+// join by itself. It never sees a key that opens a message. See
+// docs/e2ee.md for the whole design.
+service DirectMessageService {
+  // Registers the calling device's signing key, with key packages for it.
+  // A session has one device: registering a new key replaces the old one.
+  // Signing the session out removes its device.
+  rpc RegisterDevice(RegisterDeviceRequest) returns (RegisterDeviceResponse);
+  // Adds single-use key packages for the calling device.
+  rpc AddKeyPackages(AddKeyPackagesRequest) returns (AddKeyPackagesResponse);
+  // The devices of people: yourself, anyone you have a conversation with,
+  // or anyone you could open one with.
+  rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+  // Takes one key package per device, to add the devices to a conversation.
+  // Each is handed out once; once a device has none left, its last-resort
+  // key package is handed out instead. Only for devices of people you have
+  // a conversation with, and your own.
+  rpc ClaimKeyPackages(ClaimKeyPackagesRequest) returns (ClaimKeyPackagesResponse);
+
+  // The conversation with someone: the one you already have, or a new one.
+  // A new one takes someone who shares a server with you.
+  rpc OpenConversation(OpenConversationRequest) returns (OpenConversationResponse);
+  // Every conversation you're in, the latest first.
+  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
+  // The group as the last commit left it, for joining by yourself.
+  rpc GetGroupInfo(GetGroupInfoRequest) returns (GetGroupInfoResponse);
+  // A conversation's records, oldest first.
+  rpc ListRecords(ListRecordsRequest) returns (ListRecordsResponse);
+  // Welcomes for the calling device: conversations it was added to.
+  rpc ListWelcomes(ListWelcomesRequest) returns (ListWelcomesResponse);
+  // Adds a commit. It must be for the conversation's current epoch, which it
+  // then moves on; a commit for an older one fails with FAILED_PRECONDITION:
+  // catch up and try again.
+  rpc PostCommit(PostCommitRequest) returns (PostCommitResponse);
+  // Adds an encrypted message, for the current epoch like a commit.
+  rpc PostMessage(PostMessageRequest) returns (PostMessageResponse);
+  // Deletes a record you sent: its ciphertext goes, a gap stays.
+  rpc DeleteRecord(DeleteRecordRequest) returns (DeleteRecordResponse);
+  // Live changes to your conversations. The stream says `ready` once it's
+  // listening; anything from before then, read with ListConversations and
+  // ListRecords. A response with nothing set is a heartbeat.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+}
+
+// A device that takes part in encrypted conversations: one per signed-in
+// session that uses them. Only its public key is kept here.
+message Device {
+  // The first 16 bytes of the SHA-256 of signature_key, as hex, so anyone
+  // can check which key a device id stands for.
+  string id = 1;
+  string user_id = 2;
+  // The Ed25519 key it signs everything it sends with, as in its MLS credential.
+  bytes signature_key = 3;
+  // The device it's on, as its User-Agent said, for telling devices apart.
+  string label = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message RegisterDeviceRequest {
+  // Ed25519, 32 bytes.
+  bytes signature_key = 1;
+  // MLS key packages (each an MLSMessage) for this key and the caller's
+  // account, each good for being added once. Up to 100.
+  repeated bytes key_packages = 2;
+  // A key package marked last resort, handed out when the others run out.
+  // Replaces the one kept before.
+  bytes last_resort_key_package = 3;
+}
+
+message RegisterDeviceResponse {
+  Device device = 1;
+  // Single-use key packages kept for it now.
+  int32 key_packages = 2;
+}
+
+message AddKeyPackagesRequest {
+  repeated bytes key_packages = 1;
+}
+
+message AddKeyPackagesResponse {
+  int32 key_packages = 1;
+}
+
+message ListDevicesRequest {
+  repeated string user_ids = 1;
+}
+
+message ListDevicesResponse {
+  // Devices signed in now, oldest first.
+  repeated Device devices = 1;
+}
+
+message ClaimKeyPackagesRequest {
+  repeated string device_ids = 1;
+}
+
+message ClaimKeyPackagesResponse {
+  // One per device that has one. Devices that registered no last-resort key
+  // package and ran out are left out.
+  repeated ClaimedKeyPackage key_packages = 1;
+}
+
+message ClaimedKeyPackage {
+  string device_id = 1;
+  bytes key_package = 2;
+}
+
+// A conversation between two people.
+message Conversation {
+  // Also its MLS group id (as UTF-8).
+  string id = 1;
+  // Both people, the caller among them. Someone whose account was deleted
+  // shows as "Deleted account", as in servers.
+  repeated User users = 2;
+  // The epoch the next record must be in. Zero until the first commit.
+  int64 epoch = 3;
+  // The latest record's sequence; zero before any.
+  int64 last_sequence = 4;
+  google.protobuf.Timestamp created_at = 5;
+  // When the latest record came, for putting conversations in order.
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message OpenConversationRequest {
+  string user_id = 1;
+}
+
+message OpenConversationResponse {
+  Conversation conversation = 1;
+  // Whether this call started it.
+  bool created = 2;
+}
+
+message ListConversationsRequest {}
+
+message ListConversationsResponse {
+  repeated Conversation conversations = 1;
+}
+
+message GetGroupInfoRequest {
+  string conversation_id = 1;
+}
+
+message GetGroupInfoResponse {
+  // The epoch it describes. Zero, with no group info, before the first commit.
+  int64 epoch = 1;
+  // An MLSMessage carrying a GroupInfo, with the ratchet tree.
+  bytes group_info = 2;
+}
+
+enum ConversationRecordKind {
+  CONVERSATION_RECORD_KIND_UNSPECIFIED = 0;
+  // Changes who's in the conversation and moves it to the next epoch.
+  CONVERSATION_RECORD_KIND_COMMIT = 1;
+  // An encrypted message.
+  CONVERSATION_RECORD_KIND_MESSAGE = 2;
+}
+
+// One entry in a conversation's log. Devices read them in order.
+message ConversationRecord {
+  string conversation_id = 1;
+  // Its place in the conversation: 1, 2, 3...
+  int64 sequence = 2;
+  ConversationRecordKind kind = 3;
+  // The epoch it was made in.
+  int64 epoch = 4;
+  // Who sent it, as the instance knows (the record itself says, signed).
+  string sender_id = 5;
+  string sender_device_id = 6;
+  // The MLS message. Empty once deleted.
+  bytes data = 7;
+  google.protobuf.Timestamp created_at = 8;
+  // When its sender deleted it.
+  google.protobuf.Timestamp deleted_at = 9;
+}
+
+message ListRecordsRequest {
+  string conversation_id = 1;
+  int64 after_sequence = 2;
+  // 1 to 500; defaults to 100.
+  int32 limit = 3;
+}
+
+message ListRecordsResponse {
+  repeated ConversationRecord records = 1;
+  bool has_more = 2;
+}
+
+message ListWelcomesRequest {}
+
+message ListWelcomesResponse {
+  repeated ConversationWelcome welcomes = 1;
+}
+
+// A device was added to a conversation: what it joins with.
+message ConversationWelcome {
+  string conversation_id = 1;
+  // The commit that added it: the device reads the records after it.
+  int64 sequence = 2;
+  // An MLSMessage carrying a Welcome.
+  bytes data = 3;
+}
+
+message PostCommitRequest {
+  string conversation_id = 1;
+  // An MLSMessage carrying the commit, for the conversation's current epoch.
+  bytes commit = 2;
+  // The group as the commit leaves it, with its ratchet tree.
+  bytes group_info = 3;
+  // For the devices the commit adds, named in welcome_device_ids.
+  bytes welcome = 4;
+  repeated string welcome_device_ids = 5;
+}
+
+message PostCommitResponse {
+  ConversationRecord record = 1;
+}
+
+message PostMessageRequest {
+  string conversation_id = 1;
+  // An MLSMessage carrying an encrypted application message.
+  bytes message = 2;
+}
+
+message PostMessageResponse {
+  ConversationRecord record = 1;
+}
+
+message DeleteRecordRequest {
+  string conversation_id = 1;
+  int64 sequence = 2;
+}
+
+message DeleteRecordResponse {}
+
+message WatchRequest {}
+
+message WatchResponse {
+  // The stream is listening: everything from now on comes through it.
+  bool ready = 1;
+  DirectMessageEvent event = 2;
+}
+
+// Something that changed in one of your conversations.
+message DirectMessageEvent {
+  oneof payload {
+    // A conversation you're in was opened.
+    Conversation conversation_opened = 1;
+    ConversationRecord record_added = 2;
+    // Without its data.
+    ConversationRecord record_deleted = 3;
+  }
+}
+
+// What a direct message says: the plaintext inside an encrypted record,
+// which only the conversation's devices ever see. The instance never does,
+// so these fields are for the apps alone.
+message DirectMessageContent {
+  oneof body {
+    DirectMessageText text = 1;
+    DirectMessageEdit edit = 2;
+  }
+}
+
+message DirectMessageText {
+  // Markdown, up to 4000 characters.
+  string content = 1;
+  // The record it answers, if any.
+  int64 reply_to_sequence = 2;
+}
+
+// New text for one of the sender's own earlier messages.
+message DirectMessageEdit {
+  int64 sequence = 1;
+  string content = 2;
+}
