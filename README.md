@@ -12,6 +12,11 @@ like, hosted or self-hosted, over the same protocol.
   instance) work with no dependency on anyone. Linked accounts sign in with a
   waifu.dev account (see [Signing in with waifu.dev](#signing-in-with-waifudev)).
   The operator switches each kind on or off.
+- **Each server picks its door.** Anyone on the instance from Browse, or only
+  people with an invite; rules new members agree to before they talk;
+  applications, with questions, that someone looks over before letting people
+  in; waifu.dev accounts only; a minimum account age. All of it is set from
+  the app.
 - **Usage tracked, limits optional.** Every server counts its members, channels,
   messages and storage. Limits are off unless the operator sets them.
 - **Live by design.** Every change is an event in the server's log; clients
@@ -144,6 +149,10 @@ The callback page is served even with `FUWA_WEB=off`, so apps on other
 addresses can still sign in to the instance. Turning standalone accounts off
 needs waifu.dev sign-in working first, and the other way around, so there's
 always a way in.
+
+A community server can take waifu.dev accounts only (Access, in its settings):
+people with an account made on the instance can't join or apply there, though
+members who are already in stay.
 
 ### Pictures
 

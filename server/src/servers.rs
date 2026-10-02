@@ -30,6 +30,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0004_moderation.sql"),
     include_str!("../migrations/server/0005_roles.sql"),
     include_str!("../migrations/server/0006_invites.sql"),
+    include_str!("../migrations/server/0007_join.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -484,7 +485,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
     query_one(
         conn,
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
-                default_notifications, system_channel_id, min_account_age_seconds
+                default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]'
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -501,6 +502,9 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 default_notifications: r.get(9)?,
                 system_channel_id: r.get::<Option<String>>(10)?.unwrap_or_default(),
                 min_account_age_seconds: r.get(11)?,
+                applications: r.get(12)?,
+                linked_only: r.get(13)?,
+                has_rules: r.get(14)?,
             })
         },
     )
@@ -665,7 +669,7 @@ impl Servers {
                 for role in permissions::seed(conn, &id, now).await? {
                     events.push(Payload::RoleCreated(pb::RoleCreated { role: Some(role) }));
                 }
-                let member = add_member(conn, owner, &id, now).await?;
+                let member = add_member(conn, owner, &id, now, false).await?;
                 events.push(Payload::MemberJoined(pb::MemberJoined { member: Some(member) }));
                 let channel = pb::Channel {
                     id: general.clone(),
@@ -736,11 +740,22 @@ impl Servers {
 }
 
 /// Adds (or re-adds) someone to a server, keeping their profile for display.
-/// They start with no roles but @everyone.
-pub async fn add_member(conn: &Connection, user: &pb::User, server_id: &str, now: i64) -> Result<pb::Member> {
+/// They start with no roles but @everyone, and `pending` until they agree to
+/// the rules.
+pub async fn add_member(
+    conn: &Connection,
+    user: &pb::User,
+    server_id: &str,
+    now: i64,
+    pending: bool,
+) -> Result<pb::Member> {
     upsert_user(conn, user).await?;
     // `role` is from before roles and no longer read.
-    conn.execute("INSERT INTO members (user_id, role, joined_at) VALUES (?1, 0, ?2)", (user.id.as_str(), now)).await?;
+    conn.execute(
+        "INSERT INTO members (user_id, role, joined_at, pending) VALUES (?1, 0, ?2, ?3)",
+        (user.id.as_str(), now, pending),
+    )
+    .await?;
     conn.execute("UPDATE usage SET members = members + 1, updated_at = ?1 WHERE id = 1", [now]).await?;
     Ok(pb::Member {
         server_id: server_id.to_string(),
@@ -749,6 +764,7 @@ pub async fn add_member(conn: &Connection, user: &pb::User, server_id: &str, now
         joined_at: Some(timestamp(now)),
         timed_out_until: None,
         role_ids: vec![],
+        pending,
     })
 }
 
@@ -897,7 +913,7 @@ pub async fn user(conn: &Connection, user_id: &str) -> Result<Option<pb::User>> 
     query_one(conn, &format!("SELECT {USER_COLUMNS} FROM users WHERE users.id = ?1"), [user_id], user_row).await
 }
 
-pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, members.nickname, members.joined_at, members.timed_out_until";
+pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, members.nickname, members.joined_at, members.timed_out_until, members.pending";
 
 /// Reads a member row; their roles come from [`permissions::attach_roles`].
 pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member> + '_ {
@@ -909,6 +925,7 @@ pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member>
             joined_at: Some(timestamp(r.get(8)?)),
             timed_out_until: r.get::<Option<i64>>(9)?.map(timestamp),
             role_ids: vec![],
+            pending: r.get(10)?,
         })
     }
 }
@@ -940,7 +957,10 @@ pub async fn member_access(
     let Some(member) = member(conn, server_id, user_id).await? else {
         return Ok(None);
     };
-    let access = permissions::load(conn, server_id).await?.access(user_id, &member.role_ids);
+    let mut access = permissions::load(conn, server_id).await?.access(user_id, &member.role_ids);
+    if member.pending {
+        access.hold_back();
+    }
     Ok(Some((member, access)))
 }
 
@@ -1000,6 +1020,178 @@ pub async fn sweep_invites(conn: &Connection, now: i64) -> Result<Vec<String>> {
         conn.execute("DELETE FROM invites WHERE expires_at <= ?1", [now]).await?;
     }
     Ok(expired)
+}
+
+// ───────────────────────── Joining ─────────────────────────
+
+/// A question as the server's file keeps it.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredQuestion {
+    prompt: String,
+    #[serde(default)]
+    paragraph: bool,
+    #[serde(default)]
+    required: bool,
+}
+
+/// An answer as an application keeps it, with the question as it was asked.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredAnswer {
+    question: String,
+    answer: String,
+}
+
+/// JSON from the server's file; a value that doesn't parse reads as empty.
+fn from_json<T: serde::de::DeserializeOwned + Default>(text: &str, what: &str) -> T {
+    serde_json::from_str(text).unwrap_or_else(|err| {
+        tracing::warn!(error = %err, "couldn't read the {what} in a server's file");
+        T::default()
+    })
+}
+
+fn to_json<T: serde::Serialize>(value: &T) -> Result<String> {
+    serde_json::to_string(value).map_err(|err| Error::internal(err.to_string()))
+}
+
+/// The server's rules and questions.
+pub async fn load_join_form(conn: &Connection) -> Result<pb::JoinForm> {
+    let (rules, questions) =
+        query_one(conn, "SELECT rules, questions FROM server", (), |r| Ok((r.get::<String>(0)?, r.get::<String>(1)?)))
+            .await?
+            .ok_or_else(|| Error::internal("server row missing"))?;
+    let questions: Vec<StoredQuestion> = from_json(&questions, "questions");
+    Ok(pb::JoinForm {
+        rules: from_json(&rules, "rules"),
+        questions: questions
+            .into_iter()
+            .map(|q| pb::JoinQuestion { prompt: q.prompt, paragraph: q.paragraph, required: q.required })
+            .collect(),
+    })
+}
+
+/// Replaces the rules and questions, inside a write.
+pub async fn save_join_form(conn: &Connection, form: &pb::JoinForm) -> Result<()> {
+    let questions: Vec<StoredQuestion> = form
+        .questions
+        .iter()
+        .map(|q| StoredQuestion { prompt: q.prompt.clone(), paragraph: q.paragraph, required: q.required })
+        .collect();
+    conn.execute(
+        "UPDATE server SET rules = ?1, questions = ?2, updated_at = ?3",
+        (to_json(&form.rules)?, to_json(&questions)?, now_ms()),
+    )
+    .await?;
+    Ok(())
+}
+
+const APPLICATION_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, applications.answers, applications.status, applications.reason, applications.account_created_at, applications.created_at, applications.reviewed_by, applications.reviewed_at";
+
+fn application_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Application> + '_ {
+    move |r| {
+        let answers: Vec<StoredAnswer> = from_json(&r.get::<String>(7)?, "answers");
+        Ok(pb::Application {
+            server_id: server_id.to_string(),
+            user: Some(user_row(r)?),
+            answers: answers
+                .into_iter()
+                .map(|a| pb::ApplicationAnswer { question: a.question, answer: a.answer })
+                .collect(),
+            status: r.get(8)?,
+            reason: r.get(9)?,
+            account_created_at: Some(timestamp(r.get(10)?)),
+            created_at: Some(timestamp(r.get(11)?)),
+            reviewed_by_id: r.get::<Option<String>>(12)?.unwrap_or_default(),
+            reviewed_at: r.get::<Option<i64>>(13)?.map(timestamp),
+        })
+    }
+}
+
+pub async fn load_application(conn: &Connection, server_id: &str, user_id: &str) -> Result<Option<pb::Application>> {
+    query_one(
+        conn,
+        &format!(
+            "SELECT {APPLICATION_COLUMNS} FROM applications JOIN users ON users.id = applications.user_id
+             WHERE applications.user_id = ?1"
+        ),
+        [user_id],
+        application_row(server_id),
+    )
+    .await
+}
+
+/// Applications with this status, oldest first.
+pub async fn load_applications(
+    conn: &Connection,
+    server_id: &str,
+    status: pb::ApplicationStatus,
+) -> Result<Vec<pb::Application>> {
+    query_all(
+        conn,
+        &format!(
+            "SELECT {APPLICATION_COLUMNS} FROM applications JOIN users ON users.id = applications.user_id
+             WHERE applications.status = ?1 ORDER BY applications.created_at, applications.user_id"
+        ),
+        [status as i64],
+        application_row(server_id),
+    )
+    .await
+}
+
+/// Files someone's application, inside a write, replacing any turned-down one.
+pub async fn save_application(conn: &Connection, application: &pb::Application) -> Result<()> {
+    let user = application.user.as_ref().ok_or_else(|| Error::internal("application without its applicant"))?;
+    upsert_user(conn, user).await?;
+    let answers: Vec<StoredAnswer> = application
+        .answers
+        .iter()
+        .map(|a| StoredAnswer { question: a.question.clone(), answer: a.answer.clone() })
+        .collect();
+    conn.execute("DELETE FROM applications WHERE user_id = ?1", [user.id.as_str()]).await?;
+    conn.execute(
+        "INSERT INTO applications (user_id, answers, status, account_created_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        (
+            user.id.as_str(),
+            to_json(&answers)?,
+            application.status as i64,
+            application.account_created_at.as_ref().map_or(0, millis),
+            application.created_at.as_ref().map_or_else(now_ms, millis),
+        ),
+    )
+    .await?;
+    Ok(())
+}
+
+/// What reviewers hear when an application closes: who, and how, without the answers.
+pub fn closed_application(server_id: &str, user: pb::User, status: pb::ApplicationStatus, actor_id: &str) -> Payload {
+    let now = now_ms();
+    Payload::ApplicationUpdated(pb::ApplicationUpdated {
+        application: Some(pb::Application {
+            server_id: server_id.to_string(),
+            user: Some(user),
+            status: status as i32,
+            reviewed_by_id: actor_id.to_string(),
+            reviewed_at: Some(timestamp(now)),
+            ..Default::default()
+        }),
+    })
+}
+
+/// Drops someone's application, inside a write, telling reviewers it went:
+/// for a ban, or an account that's gone. False if they had none.
+pub async fn drop_application(
+    conn: &Connection,
+    server_id: &str,
+    user_id: &str,
+    actor_id: &str,
+    events: &mut Vec<Payload>,
+) -> Result<bool> {
+    let Some(application) = load_application(conn, server_id, user_id).await? else { return Ok(false) };
+    conn.execute("DELETE FROM applications WHERE user_id = ?1", [user_id]).await?;
+    if application.status == pb::ApplicationStatus::Pending as i32 {
+        let user = application.user.unwrap_or_default();
+        events.push(closed_application(server_id, user, pb::ApplicationStatus::Withdrawn, actor_id));
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@ import {
   ArrowDownUpIcon,
   ArrowRightIcon,
   ChevronDownIcon,
+  ClipboardListIcon,
   CrownIcon,
   DoorOpenIcon,
   FolderPlusIcon,
@@ -20,7 +21,9 @@ import {
   ShieldXIcon,
   Trash2Icon,
   UndoIcon,
+  UserCheckIcon,
   UserCogIcon,
+  UserXIcon,
   type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -68,6 +71,9 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.OWNERSHIP_TRANSFER]: { label: "Ownership", icon: CrownIcon, tint: "bg-amber-500/15 text-amber-500" },
   [AuditAction.INVITE_CREATE]: { label: "New invites", icon: LinkIcon, tint: "bg-emerald-500/15 text-emerald-500" },
   [AuditAction.INVITE_DELETE]: { label: "Revoked invites", icon: Link2OffIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.APPLICATION_APPROVE]: { label: "Applications let in", icon: UserCheckIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.APPLICATION_REJECT]: { label: "Applications turned down", icon: UserXIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.JOIN_FORM_UPDATE]: { label: "Rules and questions", icon: ClipboardListIcon, tint: "bg-sky-500/15 text-sky-500" },
 };
 
 const FIELD: Record<string, string> = {
@@ -93,6 +99,10 @@ const FIELD: Record<string, string> = {
   expires_at: "Expires",
   uses: "People it let in",
   min_account_age_seconds: "Minimum account age",
+  applications: "Apply to join",
+  linked_only: "waifu.dev accounts only",
+  rules: "Rules",
+  questions: "Questions",
 };
 
 /** Entries for things made or removed show just the one side of each change. */
@@ -380,6 +390,12 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
     case AuditAction.SERVER_UPDATE: {
       const listed = change("discoverable");
       const age = change("min_account_age_seconds");
+      const apply = change("applications");
+      const linked = change("linked_only");
+      if (apply && entry.changes.length === 1)
+        return apply.after === "true" ? <>{actor} made people apply to join</> : <>{actor} let people join without applying</>;
+      if (linked && entry.changes.length === 1)
+        return linked.after === "true" ? <>{actor} let in waifu.dev accounts only</> : <>{actor} let in accounts made on this instance too</>;
       if (listed && entry.changes.length === 1)
         return listed.after === "true" ? <>{actor} listed the server in Browse</> : <>{actor} made the server invite only</>;
       if (age && entry.changes.length === 1)
@@ -482,6 +498,17 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
       ) : (
         <>{actor} revoked an invite</>
       );
+    case AuditAction.APPLICATION_APPROVE:
+      return <>{actor} let {target} in</>;
+    case AuditAction.APPLICATION_REJECT:
+      return <>{actor} turned down {target}'s application</>;
+    case AuditAction.JOIN_FORM_UPDATE: {
+      const rules = change("rules");
+      const questions = change("questions");
+      if (rules && !questions) return <>{actor} changed the rules</>;
+      if (questions && !rules) return <>{actor} changed the questions</>;
+      return <>{actor} changed the rules and questions</>;
+    }
     default:
       return <>{actor} did something</>;
   }

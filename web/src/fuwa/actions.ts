@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
 import type { AccountFilter, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
@@ -7,8 +8,11 @@ import type { ChannelPlacement } from "@/gen/fuwa/v1/channel_pb";
 import type { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
+  ApplicationStatus,
   ChannelType,
+  JoinFormSchema,
   type AnnouncementTone,
+  type Application,
   type Channel,
   type Member,
   type NotificationLevel,
@@ -19,6 +23,7 @@ import {
   type Server,
   type ServerLimits,
 } from "@/gen/fuwa/v1/types_pb";
+import { saveApplied, type Applied } from "@/lib/applied";
 import { canReturnTo, newSecret, savePending, sha256Hex, type PendingSignIn } from "@/lib/linked";
 import { accessOf, canSee, sortRoles } from "@/lib/permissions";
 import { makeApi } from "./client";
@@ -540,6 +545,133 @@ export const joinServer = (key: string, serverId: string, inviteCode = "") =>
     return server!;
   });
 
+// ───────────────────────── Rules and applications ─────────────────────────
+
+/** A server's rules and questions; `inviteCode` for one you aren't in that's out of Browse. */
+export const getJoinForm = (key: string, serverId: string, inviteCode = "") =>
+  call((signal) => api(key).join.getJoinForm({ serverId, inviteCode }, { signal })).pipe(
+    Effect.map((r) => r.form ?? create(JoinFormSchema)),
+  );
+
+export type QuestionDraft = { prompt: string; paragraph: boolean; required: boolean };
+
+export const setJoinForm = (key: string, serverId: string, rules: string[], questions: QuestionDraft[]) =>
+  Effect.gen(function* () {
+    const { form } = yield* call((signal) =>
+      api(key).join.setJoinForm({ serverId, form: { rules, questions } }, { signal }),
+    );
+    updateInstance(key, (i) => {
+      const server = i.servers.find((s) => s.id === serverId);
+      return server ? addServer(i, { ...server, hasRules: rules.length > 0 }) : i;
+    });
+    return form ?? create(JoinFormSchema);
+  });
+
+/** Agrees to a server's rules, so you can talk there. */
+export const agreeToRules = (key: string, serverId: string) =>
+  Effect.gen(function* () {
+    const { member } = yield* call((signal) => api(key).join.agreeToRules({ serverId }, { signal }));
+    storeMember(key, serverId, member);
+    return true;
+  });
+
+/** Changes which servers you're waiting on, here and in this browser's memory. */
+function setApplied(key: string, serverId: string, applied: Applied | null) {
+  updateInstance(key, (i) => {
+    const { [serverId]: _, ...rest } = i.applied;
+    const next = applied ? { ...rest, [serverId]: applied } : rest;
+    saveApplied(key, next);
+    return { ...i, applied: next };
+  });
+}
+
+/** Asks to join a server that lets people in by hand, answering its questions as shown. */
+export const applyToJoin = (
+  key: string,
+  server: Server,
+  inviteCode: string,
+  answers: { question: string; answer: string }[],
+) =>
+  Effect.gen(function* () {
+    const { application } = yield* call((signal) =>
+      api(key).join.applyToJoin({ serverId: server.id, inviteCode, answers }, { signal }),
+    );
+    setApplied(key, server.id, { server, status: ApplicationStatus.PENDING, reason: "", appliedAt: Date.now(), inviteCode });
+    return application!;
+  });
+
+export const withdrawApplication = (key: string, serverId: string) =>
+  Effect.gen(function* () {
+    yield* call((signal) => api(key).join.withdrawApplication({ serverId }, { signal })).pipe(
+      // Already gone on the server: forgetting it here is all that's left.
+      Effect.catchIf((e) => e.code === Code.NotFound, () => Effect.void),
+    );
+    setApplied(key, serverId, null);
+    return true;
+  });
+
+/** Lets go of a turned-down application in the rail. */
+export const dismissApplied = (key: string, serverId: string) => setApplied(key, serverId, null);
+
+/**
+ * Asks how each waiting application went: the ones that were let in become
+ * servers, turned-down ones say why, and ones that are gone go. Returns the
+ * servers that let you in and the ones that turned you down, to say so.
+ */
+export const checkApplied = (key: string) =>
+  Effect.gen(function* () {
+    const waiting = Object.values(store.get().instances[key]?.applied ?? {}).filter((a) => a.status === ApplicationStatus.PENDING);
+    const letIn: Server[] = [];
+    const turnedDown: Server[] = [];
+    for (const a of waiting) {
+      const res = yield* call((signal) => api(key).join.getApplication({ serverId: a.server.id }, { signal })).pipe(
+        Effect.map((r) => ({ found: r })),
+        Effect.catchIf((e) => e.code === Code.NotFound, () => Effect.succeed({ found: null })),
+        Effect.catchAll(() => Effect.succeed(undefined)),
+      );
+      if (!res) continue; // couldn't reach it; ask again later
+      const { found } = res;
+      if (found?.member && found.server) {
+        setApplied(key, a.server.id, null);
+        yield* joined(key, found.server);
+        letIn.push(found.server);
+      } else if (!found?.application) {
+        setApplied(key, a.server.id, null);
+      } else if (found.application.status === ApplicationStatus.REJECTED) {
+        setApplied(key, a.server.id, { ...a, status: ApplicationStatus.REJECTED, reason: found.application.reason });
+        turnedDown.push(a.server);
+      }
+    }
+    return { letIn, turnedDown };
+  });
+
+/** The applications waiting in a server, for people who review them. */
+export const listApplications = (key: string, serverId: string) =>
+  Effect.gen(function* () {
+    const { applications } = yield* call((signal) => api(key).join.listApplications({ serverId }, { signal }));
+    updateInstance(key, (i) => ({
+      ...i,
+      applications: { ...i.applications, [serverId]: applications },
+      users: withUsers(i.users, applications.map((a) => a.user)),
+    }));
+    return applications;
+  });
+
+export const reviewApplication = (key: string, serverId: string, application: Application, approve: boolean, reason = "") =>
+  Effect.gen(function* () {
+    const userId = application.user!.id;
+    const { member } = yield* call((signal) =>
+      api(key).join.reviewApplication({ serverId, userId, approve, reason }, { signal }),
+    );
+    updateInstance(key, (i) => {
+      const list = i.applications[serverId];
+      const applications = list ? { ...i.applications, [serverId]: list.filter((a) => a.user?.id !== userId) } : i.applications;
+      return { ...i, applications };
+    });
+    if (member) storeMember(key, serverId, member);
+    return member ?? null;
+  });
+
 // ───────────────────────── Invites ─────────────────────────
 
 /** Where an invite leads, on an instance you may not be signed in to yet. */
@@ -590,6 +722,8 @@ export const updateServer = (
     /** Empty for no join messages. */
     systemChannelId?: string;
     minAccountAgeSeconds?: number;
+    applications?: boolean;
+    linkedOnly?: boolean;
   },
 ) =>
   Effect.gen(function* () {

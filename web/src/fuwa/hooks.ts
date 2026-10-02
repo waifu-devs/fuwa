@@ -70,12 +70,16 @@ export const useMyMember = (key: string, serverId: string): Member | undefined =
 /** What you can do in a server, worked out as the server does. */
 export function useAccess(key: string, serverId: string): Access {
   const ownerId = useFuwa((s) => s.instances[key]?.servers.find((x) => x.id === serverId)?.ownerId);
+  const hasRules = useFuwa((s) => !!s.instances[key]?.servers.find((x) => x.id === serverId)?.hasRules);
   const meId = useFuwa((s) => s.instances[key]?.me?.id);
   const member = useMyMember(key, serverId);
   const roles = useRoles(key, serverId);
   const channels = useFuwa((s) => s.instances[key]?.channels[serverId] ?? NO_CHANNELS);
   return useMemo(
-    () => (ownerId && meId ? accessOf(serverId, ownerId, roles, channels, meId, member?.roleIds ?? []) : NO_ACCESS),
-    [serverId, ownerId, meId, member, roles, channels],
+    () =>
+      ownerId && meId
+        ? accessOf(serverId, ownerId, roles, channels, meId, member?.roleIds ?? [], !!member?.pending && hasRules)
+        : NO_ACCESS,
+    [serverId, ownerId, meId, member, roles, channels, hasRules],
   );
 }

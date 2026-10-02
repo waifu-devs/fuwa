@@ -73,7 +73,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.ChannelService"
         | "fuwa.v1.MessageService"
         | "fuwa.v1.RoleService"
-        | "fuwa.v1.InviteService" => Target::Shard,
+        | "fuwa.v1.InviteService"
+        | "fuwa.v1.JoinService" => Target::Shard,
         _ => Target::Unknown,
     }
 }

@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// How people get into a community server beyond joining straight away: the
+// rules members agree to before they talk, and applications for servers that
+// let people in by hand. Joining straight away is ServerService.JoinServer.
+service JoinService {
+  // The server's rules and questions. Anyone who could join or apply can read
+  // them: members, and anyone on this instance when the server is in Browse or
+  // they have one of its invites.
+  rpc GetJoinForm(GetJoinFormRequest) returns (GetJoinFormResponse);
+  // Changes the rules and questions. MANAGE_SERVER. Taking every rule away
+  // lets members still waiting to agree talk straight away.
+  rpc SetJoinForm(SetJoinFormRequest) returns (SetJoinFormResponse);
+  // The caller agrees to the server's rules and can talk.
+  rpc AgreeToRules(AgreeToRulesRequest) returns (AgreeToRulesResponse);
+
+  // Asks to join a server that takes applications, agreeing to its rules and
+  // answering its questions. Who can join is checked as JoinServer checks it:
+  // Browse or an invite (whose use this counts), bans, the minimum account
+  // age, waifu.dev accounts only. Applying again replaces a turned-down
+  // application.
+  rpc ApplyToJoin(ApplyToJoinRequest) returns (ApplyToJoinResponse);
+  // The caller's application to the server, and whether they're in.
+  rpc GetApplication(GetApplicationRequest) returns (GetApplicationResponse);
+  // Takes back the caller's waiting or turned-down application.
+  rpc WithdrawApplication(WithdrawApplicationRequest) returns (WithdrawApplicationResponse);
+
+  // Applications waiting for review, oldest first. KICK_MEMBERS.
+  rpc ListApplications(ListApplicationsRequest) returns (ListApplicationsResponse);
+  // Lets an applicant in, or turns them down. KICK_MEMBERS.
+  rpc ReviewApplication(ReviewApplicationRequest) returns (ReviewApplicationResponse);
+}
+
+message GetJoinFormRequest {
+  string server_id = 1;
+  // For someone who isn't a member yet, when the server isn't in Browse.
+  string invite_code = 2;
+}
+
+message GetJoinFormResponse {
+  JoinForm form = 1;
+}
+
+message SetJoinFormRequest {
+  string server_id = 1;
+  JoinForm form = 2;
+}
+
+message SetJoinFormResponse {
+  JoinForm form = 1;
+}
+
+message AgreeToRulesRequest {
+  string server_id = 1;
+}
+
+message AgreeToRulesResponse {
+  Member member = 1;
+}
+
+message ApplyToJoinRequest {
+  string server_id = 1;
+  // Needed unless the server is in Browse.
+  string invite_code = 2;
+  // One for each of the server's questions, in order, naming the question as
+  // it was shown. If the questions changed meanwhile, it's refused and the
+  // app asks them again.
+  repeated ApplicationAnswer answers = 3;
+}
+
+message ApplyToJoinResponse {
+  Application application = 1;
+}
+
+message GetApplicationRequest {
+  string server_id = 1;
+}
+
+message GetApplicationResponse {
+  // Unset when they have none: never applied, withdrew, or were let in.
+  Application application = 1;
+  // They're a member.
+  bool member = 2;
+  // The server, once they're a member.
+  Server server = 3;
+}
+
+message WithdrawApplicationRequest {
+  string server_id = 1;
+}
+
+message WithdrawApplicationResponse {}
+
+message ListApplicationsRequest {
+  string server_id = 1;
+}
+
+message ListApplicationsResponse {
+  repeated Application applications = 1;
+}
+
+message ReviewApplicationRequest {
+  string server_id = 1;
+  string user_id = 2;
+  bool approve = 3;
+  // Why they were turned down. Shown to them, and kept in the audit log.
+  string reason = 4;
+}
+
+message ReviewApplicationResponse {
+  // The new member, when let in.
+  Member member = 1;
+}

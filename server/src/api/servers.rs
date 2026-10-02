@@ -6,6 +6,7 @@ use super::{Api, Seat, respond, text, url, users};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{millis, now_ms, span, timestamp};
+use crate::node::Account;
 use crate::pb::{self, Permission, server_service_server::ServerService};
 use crate::permissions::{self, Access};
 use crate::servers::{
@@ -60,6 +61,67 @@ async fn remove_member(
     }
     events.push(Payload::MemberLeft(pb::MemberLeft { user_id: user_id.to_string(), reason: reason as i32 }));
     Ok(true)
+}
+
+/// Whether someone may come in, before touching the server's file: they need
+/// it in Browse or an invite, a waifu.dev account if it asks for one, and an
+/// account old enough.
+pub(super) fn at_the_door(account: &Account, server: &pb::Server, code: &str, now: i64) -> Result<()> {
+    if code.is_empty() && !server.discoverable {
+        return Err(Error::NotFound("server"));
+    }
+    if server.linked_only && account.kind != pb::AccountKind::Linked {
+        return Err(Error::FailedPrecondition("only people who sign in with waifu.dev can join this server".into()));
+    }
+    let wait = i64::from(server.min_account_age_seconds) * 1000 - (now - account.created_at);
+    if wait > 0 {
+        return Err(Error::FailedPrecondition(format!(
+            "this server lets in accounts once they're {} old; yours can join in {}",
+            span(i64::from(server.min_account_age_seconds) * 1000),
+            span(wait),
+        )));
+    }
+    Ok(())
+}
+
+/// The rest of the checks, inside a write: the invite still works, and they
+/// aren't a member already or banned. Returns the invite, if they came with one.
+pub(super) async fn let_in(
+    conn: &turso::Connection,
+    server_id: &str,
+    user_id: &str,
+    code: &str,
+    now: i64,
+) -> Result<Option<pb::Invite>> {
+    let invite = match code {
+        "" => None,
+        code => Some(
+            store::load_invite(conn, server_id, code)
+                .await?
+                .filter(|invite| store::invite_works(invite, now))
+                .ok_or(Error::NotFound("invite"))?,
+        ),
+    };
+    if store::member(conn, server_id, user_id).await?.is_some() {
+        return Err(Error::AlreadyExists("you're already a member".into()));
+    }
+    if query_one(conn, "SELECT 1 FROM bans WHERE user_id = ?1", [user_id], |r| r.get::<i64>(0)).await?.is_some() {
+        return Err(Error::denied("you're banned from this server"));
+    }
+    Ok(invite)
+}
+
+/// Counts a use of the invite someone came in with, inside a write. Its last
+/// use deletes it, so a used-up invite isn't kept around; true when it did.
+pub(super) async fn use_invite(conn: &turso::Connection, invite: Option<&pb::Invite>) -> Result<bool> {
+    let Some(invite) = invite else { return Ok(false) };
+    let used_up = invite.max_uses > 0 && invite.uses + 1 >= invite.max_uses;
+    if used_up {
+        conn.execute("DELETE FROM invites WHERE code = ?1", [invite.code.as_str()]).await?;
+    } else {
+        conn.execute("UPDATE invites SET uses = uses + 1 WHERE code = ?1", [invite.code.as_str()]).await?;
+    }
+    Ok(used_up)
 }
 
 #[tonic::async_trait]
@@ -197,7 +259,8 @@ impl ServerService for Api {
                          icon_url = coalesce(?3, icon_url), discoverable = coalesce(?4, discoverable),
                          default_notifications = coalesce(?5, default_notifications),
                          system_channel_id = CASE WHEN ?6 IS NULL THEN system_channel_id WHEN ?6 = '' THEN NULL ELSE ?6 END,
-                         min_account_age_seconds = coalesce(?8, min_account_age_seconds), updated_at = ?7",
+                         min_account_age_seconds = coalesce(?8, min_account_age_seconds),
+                         applications = coalesce(?9, applications), linked_only = coalesce(?10, linked_only), updated_at = ?7",
                             (
                                 name,
                                 description,
@@ -207,6 +270,8 @@ impl ServerService for Api {
                                 req.system_channel_id.as_deref(),
                                 now_ms(),
                                 req.min_account_age_seconds,
+                                req.applications,
+                                req.linked_only,
                             ),
                         )
                         .await?;
@@ -222,7 +287,9 @@ impl ServerService for Api {
                                 "min_account_age_seconds",
                                 before.min_account_age_seconds,
                                 server.min_account_age_seconds,
-                            );
+                            )
+                            .change("applications", before.applications, server.applications)
+                            .change("linked_only", before.linked_only, server.linked_only);
                         if !entry.changes.is_empty() {
                             store::audit(conn, &account.id, entry).await?;
                         }
@@ -275,58 +342,28 @@ impl ServerService for Api {
                 let code = req.invite_code.trim();
                 let sdb = self.app.servers.get(&req.server_id).await?;
                 let server = sdb.server().await?;
-                if code.is_empty() && !server.discoverable {
-                    return Err(Error::NotFound("server"));
-                }
                 let now = now_ms();
-                let wait = i64::from(server.min_account_age_seconds) * 1000 - (now - account.created_at);
-                if wait > 0 {
-                    return Err(Error::FailedPrecondition(format!(
-                        "this server lets in accounts once they're {} old; yours can join in {}",
-                        span(i64::from(server.min_account_age_seconds) * 1000),
-                        span(wait),
-                    )));
+                at_the_door(&account, &server, code, now)?;
+                if server.applications {
+                    return Err(Error::FailedPrecondition("this server takes applications: apply to join".into()));
                 }
                 let limits = sdb.limits(&self.app.settings().limits).await?;
                 let user = account.user();
                 let (member, used_up) = sdb
                     .write(&account.id, async |conn, events| {
-                        let invite = match code {
-                            "" => None,
-                            code => Some(
-                                store::load_invite(conn, &sdb.id, code)
-                                    .await?
-                                    .filter(|invite| store::invite_works(invite, now))
-                                    .ok_or(Error::NotFound("invite"))?,
-                            ),
-                        };
-                        if store::member(conn, &sdb.id, &user.id).await?.is_some() {
-                            return Err(Error::AlreadyExists("you're already a member".into()));
-                        }
-                        if query_one(conn, "SELECT 1 FROM bans WHERE user_id = ?1", [user.id.as_str()], |r| {
-                            r.get::<i64>(0)
-                        })
-                        .await?
-                        .is_some()
-                        {
-                            return Err(Error::denied("you're banned from this server"));
-                        }
+                        let invite = let_in(conn, &sdb.id, &user.id, code, now).await?;
                         if let Some(limit) = limits.members
                             && store::usage_count(conn, "members").await? >= limit
                         {
                             return Err(Error::ResourceExhausted(format!("this server is full ({limit} members)")));
                         }
-                        let member = store::add_member(conn, &user, &sdb.id, now).await?;
+                        let server = store::load_server(conn).await?;
+                        let member = store::add_member(conn, &user, &sdb.id, now, server.has_rules).await?;
                         events.push(Payload::MemberJoined(pb::MemberJoined { member: Some(member.clone()) }));
-                        post_join(conn, &store::load_server(conn).await?, &user.id, now, events).await?;
-                        // Its last use deletes it, so a used-up invite isn't kept around.
-                        let used_up = invite.as_ref().is_some_and(|i| i.max_uses > 0 && i.uses + 1 >= i.max_uses);
-                        if used_up {
-                            conn.execute("DELETE FROM invites WHERE code = ?1", [code]).await?;
-                        } else if invite.is_some() {
-                            conn.execute("UPDATE invites SET uses = uses + 1 WHERE code = ?1", [code]).await?;
-                        }
-                        Ok((member, used_up))
+                        post_join(conn, &server, &user.id, now, events).await?;
+                        // An application left over from when the server took them.
+                        store::drop_application(conn, &sdb.id, &user.id, &user.id, events).await?;
+                        Ok((member, use_invite(conn, invite.as_ref()).await?))
                     })
                     .await?;
                 self.app.membership_changed(&account.id, &sdb.id, true).await;
@@ -584,6 +621,7 @@ impl ServerService for Api {
                         other => other?,
                     };
                     let was_member = remove_member(conn, &sdb.id, &req.user_id, pb::LeaveReason::Banned, events).await?;
+                    store::drop_application(conn, &sdb.id, &req.user_id, &account.id, events).await?;
                     let mut deleted = 0;
                     if req.delete_message_seconds > 0 {
                         let messages = query_all(

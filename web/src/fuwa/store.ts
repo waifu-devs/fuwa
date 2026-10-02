@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type {
+  Application,
   Channel,
   Event,
   Member,
@@ -11,7 +12,8 @@ import type {
   Server,
   User,
 } from "@/gen/fuwa/v1/types_pb";
-import { ChannelType } from "@/gen/fuwa/v1/types_pb";
+import { ApplicationStatus, ChannelType } from "@/gen/fuwa/v1/types_pb";
+import { loadApplied, type Applied } from "@/lib/applied";
 import { sortRoles } from "@/lib/permissions";
 
 /**
@@ -62,6 +64,10 @@ export type InstanceState = {
   notifications: Record<string, NotificationSettings>;
   /** Profiles looked at, by user id. */
   profiles: Record<string, Profile>;
+  /** Per server you can review applications for, once loaded: the ones waiting, oldest first. */
+  applications: Record<string, Application[]>;
+  /** Servers you applied to and aren't in yet, by server id. Kept in this browser. */
+  applied: Record<string, Applied>;
 };
 
 /** Where a server's (channel "") or a channel's notification settings are kept. */
@@ -117,6 +123,8 @@ export function emptyInstance(key: string, url: string): InstanceState {
     synced: {},
     notifications: {},
     profiles: {},
+    applications: {},
+    applied: loadApplied(key),
   };
 }
 
@@ -200,6 +208,7 @@ export function removeServer(i: InstanceState, serverId: string): InstanceState 
     members: without(i.members, serverId),
     roles: without(i.roles, serverId),
     synced: without(i.synced, serverId),
+    applications: without(i.applications, serverId),
     messages: keep(i.messages),
     pending: keep(i.pending),
     unread: keep(i.unread),
@@ -353,6 +362,18 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
         members: i.members[sid] ? { ...i.members, [sid]: i.members[sid]!.map(strip) } : i.members,
         channels: i.channels[sid] ? { ...i.channels, [sid]: i.channels[sid]!.map(unwrite) } : i.channels,
       };
+    }
+    case "applicationUpdated": {
+      // Only kept for servers whose list someone opened; the rest load fresh.
+      const application = p.value.application;
+      const list = i.applications[sid];
+      if (!application?.user || !list) return i;
+      const others = list.filter((a) => a.user?.id !== application.user!.id);
+      const next =
+        application.status === ApplicationStatus.PENDING
+          ? [...others, application].sort((a, b) => Number((a.createdAt?.seconds ?? 0n) - (b.createdAt?.seconds ?? 0n)))
+          : others;
+      return { ...i, applications: { ...i.applications, [sid]: next }, users: withUsers(i.users, [application.user]) };
     }
     case "memberLeft": {
       if (p.value.userId === i.me?.id) return removeServer(i, sid);

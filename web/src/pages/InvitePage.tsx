@@ -1,16 +1,18 @@
 import { Code } from "@connectrpc/connect";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { Effect } from "effect";
-import { ArrowRightIcon, CheckIcon, ChevronLeftIcon, HashIcon, Link2OffIcon, LoaderCircleIcon, UsersIcon } from "lucide-react";
+import { ChevronLeftIcon, HashIcon, Link2OffIcon, LoaderCircleIcon, UsersIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { joinServer, lookUpInvite, run } from "@/fuwa/actions";
+import { lookUpInvite, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
-import { useAction, useInstance } from "@/fuwa/hooks";
+import { useInstance } from "@/fuwa/hooks";
 import { Account } from "@/components/Connect";
 import { ServerIcon, UserAvatar } from "@/components/Icons";
+import { JoinButton } from "@/components/join/JoinButton";
+import { ServerDoor } from "@/components/join/ServerDoor";
 import { InlineMarkdown } from "@/components/Markdown";
-import { Count, EASE_OUT, SPRING } from "@/components/motion";
+import { Count, EASE_OUT } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
@@ -25,13 +27,18 @@ type Found = Effect.Effect.Success<ReturnType<typeof lookUpInvite>>;
  * make one right here, then go straight in.
  */
 export function InvitePage({ instanceKey, code }: { instanceKey: string; code: string }) {
-  const inst = useInstance(instanceKey);
   const navigate = useNavigate();
   const { compact, setNavOpen } = useLayout();
   const [found, setFound] = useState<Found | null>(null);
   const [problem, setProblem] = useState<FuwaError | null>(null);
-  const [joined, setJoined] = useState(false);
-  const join = useAction(joinServer);
+  // Signing in here can save the instance under a slightly different address; the button follows it.
+  const [key, setKey] = useState(instanceKey);
+  const [justSignedIn, setJustSignedIn] = useState(false);
+  useEffect(() => {
+    setKey(instanceKey);
+    setJustSignedIn(false);
+  }, [instanceKey]);
+  const inst = useInstance(key);
   // From the key alone, so signing in partway (which adds the instance) doesn't look the invite up again.
   const address = instanceKey.replaceAll("~", "/");
 
@@ -49,20 +56,12 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
   }, [address, code]);
 
   const signedOut = !inst || inst.connection === "signed-out" || (!inst.me && !!inst.node && inst.connection !== "connecting");
-  const member = !!found && !!inst?.servers.some((s) => s.id === found.server.id);
 
-  function open(key: string) {
+  function open() {
     if (!found) return;
     const channel = found.channelName ? found.invite.channelId : "";
     if (channel) navigate({ to: "/$instance/$server/$channel", params: { instance: key, server: found.server.id, channel } });
     else navigate({ to: "/$instance/$server", params: { instance: key, server: found.server.id } });
-  }
-
-  async function accept(key: string) {
-    if (!found) return;
-    if ((await join.go(key, found.server.id, code)) === undefined) return;
-    setJoined(true);
-    setTimeout(() => open(key), 650);
   }
 
   return (
@@ -139,6 +138,7 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
                     <InlineMarkdown>{found.server.description}</InlineMarkdown>
                   </p>
                 )}
+                <ServerDoor server={found.server} className="relative justify-center" />
                 {!signedOut && (
                   <p className="relative text-xs text-muted-foreground">
                     on <b>{found.node.name}</b> · <Private text={instanceKey} />
@@ -149,51 +149,30 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
                 {signedOut ? (
                   <div className="flex flex-col gap-3">
                     <p className="text-center text-sm text-muted-foreground">Sign in, or make an account on this fuwa server, to join.</p>
-                    <Account url={found.url} node={found.node} onDone={(key) => void accept(key)} returnTo={window.location.pathname} />
+                    <Account
+                      url={found.url}
+                      node={found.node}
+                      onDone={(k) => {
+                        setKey(k);
+                        setJustSignedIn(true);
+                      }}
+                      returnTo={window.location.pathname}
+                    />
                   </div>
                 ) : !inst?.me ? (
                   <div className="grid h-11 place-items-center">
                     <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
                   </div>
-                ) : member && !joined ? (
-                  <Button size="lg" variant="outline" onClick={() => open(instanceKey)} className="group h-11 w-full rounded-xl font-bold">
-                    You're already in. Open it <ArrowRightIcon className="transition-transform group-hover:translate-x-1" />
-                  </Button>
                 ) : (
-                  <div className="flex flex-col gap-2">
-                    <Button
-                      size="lg"
-                      onClick={() => void accept(instanceKey)}
-                      disabled={join.pending || joined}
-                      className={joined ? "h-11 w-full rounded-xl bg-emerald-500 font-bold text-white hover:bg-emerald-500" : "btn h-11 w-full rounded-xl font-bold"}
-                    >
-                      <AnimatePresence mode="wait" initial={false}>
-                        <motion.span
-                          key={joined ? "done" : join.pending ? "busy" : "join"}
-                          initial={{ opacity: 0, y: 8, scale: 0.9 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: -8, scale: 0.9 }}
-                          transition={SPRING}
-                          className="flex items-center gap-2"
-                        >
-                          {joined ? <CheckIcon strokeWidth={3} /> : join.pending ? <LoaderCircleIcon className="animate-spin" /> : null}
-                          {joined ? "Joined" : `Join ${found.server.name}`}
-                        </motion.span>
-                      </AnimatePresence>
-                    </Button>
-                    <AnimatePresence>
-                      {join.error && (
-                        <motion.p
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto", x: [0, -6, 6, -3, 3, 0] }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="text-center text-sm text-destructive first-letter:uppercase"
-                        >
-                          {join.error}
-                        </motion.p>
-                      )}
-                    </AnimatePresence>
-                  </div>
+                  <JoinButton
+                    instanceKey={key}
+                    server={found.server}
+                    inviteCode={code}
+                    auto={justSignedIn}
+                    size="lg"
+                    openLabel="You're already in. Open it"
+                    onOpen={open}
+                  />
                 )}
                 {(() => {
                   const until = expiresAt(found.invite);

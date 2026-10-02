@@ -74,6 +74,7 @@ struct Clients {
     media: pb::media_service_client::MediaServiceClient<Channel>,
     roles: pb::role_service_client::RoleServiceClient<Channel>,
     invites: pb::invite_service_client::InviteServiceClient<Channel>,
+    join: pb::join_service_client::JoinServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -89,7 +90,8 @@ async fn clients(instance: &Instance) -> Clients {
         node: pb::node_service_client::NodeServiceClient::new(channel.clone()),
         media: pb::media_service_client::MediaServiceClient::new(channel.clone()),
         roles: pb::role_service_client::RoleServiceClient::new(channel.clone()),
-        invites: pb::invite_service_client::InviteServiceClient::new(channel),
+        invites: pb::invite_service_client::InviteServiceClient::new(channel.clone()),
+        join: pb::join_service_client::JoinServiceClient::new(channel),
     }
 }
 
@@ -3652,4 +3654,305 @@ async fn linked_accounts_sign_in_with_waifu_dev() {
         c.admin.update_settings(authed(&admin, settings_update(lan, &["public_url"], &[]))).await.unwrap_err();
     assert_eq!(refused.code(), Code::FailedPrecondition);
     assert!(refused.message().contains("https"), "{}", refused.message());
+}
+
+async fn set_form(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    rules: &[&str],
+    questions: &[(&str, bool)],
+) -> Result<(), Code> {
+    let form = pb::JoinForm {
+        rules: rules.iter().map(|r| r.to_string()).collect(),
+        questions: questions
+            .iter()
+            .map(|(prompt, required)| pb::JoinQuestion {
+                prompt: prompt.to_string(),
+                paragraph: false,
+                required: *required,
+            })
+            .collect(),
+    };
+    c.join
+        .set_join_form(authed(token, pb::SetJoinFormRequest { server_id: server_id.into(), form: Some(form) }))
+        .await
+        .map(|_| ())
+        .map_err(|s| s.code())
+}
+
+async fn get_form(c: &mut Clients, token: &str, server_id: &str, code: &str) -> Result<pb::JoinForm, Code> {
+    c.join
+        .get_join_form(authed(token, pb::GetJoinFormRequest { server_id: server_id.into(), invite_code: code.into() }))
+        .await
+        .map(|r| r.into_inner().form.unwrap())
+        .map_err(|s| s.code())
+}
+
+async fn update_server(c: &mut Clients, token: &str, request: pb::UpdateServerRequest) -> pb::Server {
+    c.servers.update_server(authed(token, request)).await.unwrap().into_inner().server.unwrap()
+}
+
+async fn apply(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    answers: &[(&str, &str)],
+) -> Result<pb::Application, Code> {
+    let answers =
+        answers.iter().map(|(q, a)| pb::ApplicationAnswer { question: q.to_string(), answer: a.to_string() }).collect();
+    c.join
+        .apply_to_join(authed(
+            token,
+            pb::ApplyToJoinRequest { server_id: server_id.into(), invite_code: String::new(), answers },
+        ))
+        .await
+        .map(|r| r.into_inner().application.unwrap())
+        .map_err(|s| s.code())
+}
+
+async fn my_application(c: &mut Clients, token: &str, server_id: &str) -> pb::GetApplicationResponse {
+    c.join
+        .get_application(authed(token, pb::GetApplicationRequest { server_id: server_id.into() }))
+        .await
+        .unwrap()
+        .into_inner()
+}
+
+async fn waiting(c: &mut Clients, token: &str, server_id: &str) -> Result<Vec<String>, Code> {
+    c.join
+        .list_applications(authed(token, pb::ListApplicationsRequest { server_id: server_id.into() }))
+        .await
+        .map(|r| r.into_inner().applications.into_iter().map(|a| a.user.unwrap().username).collect())
+        .map_err(|s| s.code())
+}
+
+async fn review(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    user_id: &str,
+    approve: bool,
+    reason: &str,
+) -> Result<Option<pb::Member>, Code> {
+    c.join
+        .review_application(authed(
+            token,
+            pb::ReviewApplicationRequest {
+                server_id: server_id.into(),
+                user_id: user_id.into(),
+                approve,
+                reason: reason.into(),
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().member)
+        .map_err(|s| s.code())
+}
+
+/// The application events in a server's log, as one member is shown them.
+async fn application_events(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+) -> Vec<(String, pb::ApplicationStatus, usize)> {
+    let request = pb::ListEventsRequest { server_id: server_id.into(), after_sequence: 0, limit: 500 };
+    c.events
+        .list_events(authed(token, request))
+        .await
+        .unwrap()
+        .into_inner()
+        .events
+        .into_iter()
+        .filter_map(|e| match e.payload {
+            Some(Payload::ApplicationUpdated(u)) => {
+                let a = u.application.unwrap();
+                let status = a.status();
+                Some((a.user.unwrap().username, status, a.answers.len()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn rules_and_applications() {
+    use pb::ApplicationStatus as S;
+    let dir = tempfile::tempdir().unwrap();
+    let (issuer_url, issuer) = fake_issuer().await;
+    let instance = start(dir.path(), &[("FUWA_LINKED_ISSUER", &issuer_url)]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let (kai, kai_user, _) = sign_up(&mut c, "kai").await;
+    let server = create_server(&mut c, &juan, "Garden", true).await;
+    let sid = server.id.clone();
+    assert!(!server.has_rules && !server.applications && !server.linked_only);
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .remove(0);
+
+    // Only people who manage the server write the rules, within limits.
+    assert_eq!(set_form(&mut c, &mika, &sid, &["Be kind"], &[]).await.unwrap_err(), Code::PermissionDenied);
+    assert_eq!(set_form(&mut c, &juan, &sid, &["  "], &[]).await.unwrap_err(), Code::InvalidArgument);
+    assert_eq!(set_form(&mut c, &juan, &sid, &["x"; 17], &[]).await.unwrap_err(), Code::InvalidArgument);
+    let six = [("q", false); 6];
+    assert_eq!(set_form(&mut c, &juan, &sid, &[], &six).await.unwrap_err(), Code::InvalidArgument);
+    let questions = [("Why do you want to join?", true), ("Favorite tea?", false)];
+    set_form(&mut c, &juan, &sid, &[" Be kind ", "No spoilers outside **#spoilers**"], &questions).await.unwrap();
+    let form = get_form(&mut c, &mika, &sid, "").await.unwrap();
+    assert_eq!(form.rules, ["Be kind", "No spoilers outside **#spoilers**"]);
+    assert_eq!(form.questions.len(), 2);
+    assert!(form.questions[0].required);
+    let server = c.servers.get_server(authed(&juan, pb::GetServerRequest { server_id: sid.clone() })).await;
+    assert!(server.unwrap().into_inner().server.unwrap().has_rules);
+
+    // Joining straight away, new members read first and talk once they agree.
+    let member = join_with(&mut c, &mika, &sid, "").await.unwrap();
+    assert!(member.pending);
+    let refused = send(&mut c, &mika, &sid, &general.id, "hi!").await.unwrap_err();
+    assert_eq!(refused.code(), Code::FailedPrecondition);
+    assert!(refused.message().contains("rules"), "{}", refused.message());
+    assert_eq!(invite(&mut c, &mika, &sid, "", 0, 0).await.unwrap_err(), Code::FailedPrecondition);
+    assert!(!messages(&mut c, &mika, &sid, &general.id).await.is_empty(), "pending members can read");
+    let agreed = c.join.agree_to_rules(authed(&mika, pb::AgreeToRulesRequest { server_id: sid.clone() })).await;
+    assert!(!agreed.unwrap().into_inner().member.unwrap().pending);
+    send(&mut c, &mika, &sid, &general.id, "hi!").await.unwrap();
+
+    // With applications on, people apply instead, and answer the questions as asked.
+    let on = pb::UpdateServerRequest { server_id: sid.clone(), applications: Some(true), ..Default::default() };
+    assert!(update_server(&mut c, &juan, on).await.applications);
+    assert_eq!(join_with(&mut c, &rin, &sid, "").await.unwrap_err(), Code::FailedPrecondition);
+    let answers = [("Why do you want to join?", "I like gardens"), ("Favorite tea?", "")];
+    assert_eq!(apply(&mut c, &rin, &sid, &answers[..1]).await.unwrap_err(), Code::FailedPrecondition);
+    let reworded = [("Why join?", "I like gardens"), ("Favorite tea?", "")];
+    assert_eq!(apply(&mut c, &rin, &sid, &reworded).await.unwrap_err(), Code::FailedPrecondition);
+    let blank = [("Why do you want to join?", "  "), ("Favorite tea?", "")];
+    assert_eq!(apply(&mut c, &rin, &sid, &blank).await.unwrap_err(), Code::InvalidArgument);
+    let sent = apply(&mut c, &rin, &sid, &answers).await.unwrap();
+    assert_eq!(sent.status(), S::Pending);
+    assert_eq!(sent.answers[0].answer, "I like gardens");
+    assert_eq!(apply(&mut c, &rin, &sid, &answers).await.unwrap_err(), Code::AlreadyExists);
+    assert_eq!(my_application(&mut c, &rin, &sid).await.application.unwrap().status(), S::Pending);
+    assert_eq!(apply(&mut c, &mika, &sid, &answers).await.unwrap_err(), Code::AlreadyExists);
+
+    // People who can kick members review them; nobody else sees them.
+    assert_eq!(waiting(&mut c, &juan, &sid).await.unwrap(), ["rin"]);
+    assert_eq!(waiting(&mut c, &mika, &sid).await.unwrap_err(), Code::PermissionDenied);
+    assert_eq!(review(&mut c, &mika, &sid, &rin_user.id, true, "").await.unwrap_err(), Code::PermissionDenied);
+    assert_eq!(review(&mut c, &juan, &sid, &kai_user.id, true, "").await.unwrap_err(), Code::NotFound);
+    assert_eq!(review(&mut c, &juan, &sid, &rin_user.id, false, "Tell us a bit more").await.unwrap(), None);
+    let turned_down = my_application(&mut c, &rin, &sid).await.application.unwrap();
+    assert_eq!((turned_down.status(), turned_down.reason.as_str()), (S::Rejected, "Tell us a bit more"));
+    assert_eq!(waiting(&mut c, &juan, &sid).await.unwrap(), Vec::<String>::new());
+    assert_eq!(review(&mut c, &juan, &sid, &rin_user.id, true, "").await.unwrap_err(), Code::NotFound);
+
+    // A turned-down applicant can try again; this time they're let in, rules agreed.
+    let again = [("Why do you want to join?", "I grow roses and want to share"), ("Favorite tea?", "Sencha")];
+    apply(&mut c, &rin, &sid, &again).await.unwrap();
+    let member = review(&mut c, &juan, &sid, &rin_user.id, true, "").await.unwrap().unwrap();
+    assert!(!member.pending);
+    let status = my_application(&mut c, &rin, &sid).await;
+    assert!(status.member && status.application.is_none());
+    assert_eq!(status.server.unwrap().member_count, 3);
+    send(&mut c, &rin, &sid, &general.id, "hello garden").await.unwrap();
+
+    // Applicants can take it back.
+    apply(&mut c, &kai, &sid, &answers).await.unwrap();
+    c.join.withdraw_application(authed(&kai, pb::WithdrawApplicationRequest { server_id: sid.clone() })).await.unwrap();
+    assert!(my_application(&mut c, &kai, &sid).await.application.is_none());
+    let gone =
+        c.join.withdraw_application(authed(&kai, pb::WithdrawApplicationRequest { server_id: sid.clone() })).await;
+    assert_eq!(gone.unwrap_err().code(), Code::NotFound);
+
+    // Banning an applicant takes their application away.
+    apply(&mut c, &kai, &sid, &answers).await.unwrap();
+    let ban = pb::BanMemberRequest { server_id: sid.clone(), user_id: kai_user.id.clone(), ..Default::default() };
+    c.servers.ban_member(authed(&juan, ban)).await.unwrap();
+    assert!(my_application(&mut c, &kai, &sid).await.application.is_none());
+    assert_eq!(waiting(&mut c, &juan, &sid).await.unwrap(), Vec::<String>::new());
+    assert_eq!(apply(&mut c, &kai, &sid, &answers).await.unwrap_err(), Code::PermissionDenied);
+
+    // Reviewers hear about applications; other members don't, and closed ones carry no answers.
+    assert_eq!(application_events(&mut c, &mika, &sid).await, []);
+    assert_eq!(
+        application_events(&mut c, &juan, &sid).await,
+        [
+            ("rin".to_string(), S::Pending, 2),
+            ("rin".to_string(), S::Rejected, 0),
+            ("rin".to_string(), S::Pending, 2),
+            ("rin".to_string(), S::Approved, 0),
+            ("kai".to_string(), S::Pending, 2),
+            ("kai".to_string(), S::Withdrawn, 0),
+            ("kai".to_string(), S::Pending, 2),
+            ("kai".to_string(), S::Withdrawn, 0),
+        ]
+    );
+    let log = audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    let actions: Vec<_> = log.entries.iter().map(|e| e.action()).collect();
+    use pb::AuditAction as A;
+    for action in [A::JoinFormUpdate, A::ApplicationReject, A::ApplicationApprove] {
+        assert!(actions.contains(&action), "{action:?} in {actions:?}");
+    }
+    let rejected = log.entries.iter().find(|e| e.action() == A::ApplicationReject).unwrap();
+    assert_eq!((rejected.target_id.as_str(), rejected.reason.as_str()), (rin_user.id.as_str(), "Tell us a bit more"));
+
+    // waifu.dev accounts only.
+    let linked = pb::UpdateServerRequest { server_id: sid.clone(), linked_only: Some(true), ..Default::default() };
+    assert!(update_server(&mut c, &juan, linked).await.linked_only);
+    let (momo, _, _) = sign_up(&mut c, "momo").await;
+    assert_eq!(apply(&mut c, &momo, &sid, &answers).await.unwrap_err(), Code::FailedPrecondition);
+    let user = serde_json::json!({ "sub": "user-sora", "preferred_username": "sora", "name": "Sora" });
+    let sora = linked_sign_in(&mut c, &issuer, user).await.unwrap();
+    apply(&mut c, &sora.token, &sid, &answers).await.unwrap();
+    assert_eq!(waiting(&mut c, &juan, &sid).await.unwrap(), ["sora"]);
+
+    // Turning applications off: people join straight away, and leftovers go.
+    let off = pb::UpdateServerRequest {
+        server_id: sid.clone(),
+        applications: Some(false),
+        linked_only: Some(false),
+        ..Default::default()
+    };
+    update_server(&mut c, &juan, off).await;
+    assert!(join_with(&mut c, &momo, &sid, "").await.unwrap().pending);
+    join_with(&mut c, &sora.token, &sid, "").await.unwrap();
+    assert_eq!(waiting(&mut c, &juan, &sid).await.unwrap(), Vec::<String>::new());
+
+    // Without rules there's nothing to agree to: people waiting can talk, newcomers too.
+    set_form(&mut c, &juan, &sid, &[], &questions).await.unwrap();
+    send(&mut c, &momo, &sid, &general.id, "finally").await.unwrap();
+    let (nao, _, _) = sign_up(&mut c, "nao").await;
+    assert!(!join_with(&mut c, &nao, &sid, "").await.unwrap().pending);
+
+    // A server out of Browse shows its form only to members and people with an invite.
+    let hidden = create_server(&mut c, &juan, "Hidden", false).await;
+    assert_eq!(get_form(&mut c, &mika, &hidden.id, "").await.unwrap_err(), Code::NotFound);
+    let code = invite(&mut c, &juan, &hidden.id, "", 0, 0).await.unwrap().code;
+    assert!(get_form(&mut c, &mika, &hidden.id, &code).await.is_ok());
+    assert_eq!(
+        c.join
+            .get_application(authed(&mika, pb::GetApplicationRequest { server_id: hidden.id.clone() }))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::NotFound
+    );
+
+    // It all survives a restart.
+    drop(c);
+    instance.stop().await;
+    let instance = start(dir.path(), &[("FUWA_LINKED_ISSUER", &issuer_url)]).await;
+    let mut c = clients(&instance).await;
+    let form = get_form(&mut c, &juan, &sid, "").await.unwrap();
+    assert!(form.rules.is_empty());
+    assert_eq!(form.questions.len(), 2);
+    drop(c);
+    instance.stop().await;
 }

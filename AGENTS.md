@@ -36,7 +36,15 @@
     managers. Invites live in the server file too (`invites`, made and
     revoked in `api/invites.rs`); the directory's index maps each code to its
     server, so `InviteService.GetInvite` finds one by code alone
-    (`App::index_invite`, `App::describe_invite`).
+    (`App::index_invite`, `App::describe_invite`). Who may come in
+    (Browse or an invite, bans, account age, waifu.dev only) is checked in
+    one place, `api/servers.rs`'s `at_the_door`, for joining and applying
+    alike. Rules, application questions and applications live in the server
+    file too, served by `api/join.rs` (`JoinService`): a member who joined
+    while the server has rules is `pending` and loses the talking
+    permissions (`permissions::TALK`) until they agree; an approved
+    applicant agreed when they applied. Applications are seen only by
+    members who can kick (`events::shown_to`).
   - `permissions.rs`: roles and permissions. `Rules::access` works out what a
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's
@@ -104,13 +112,21 @@
   - `src/components/settings/account/`: the "Your account" pages (profile,
     server profiles, devices, two-step sign-in, server notifications, data).
   - `src/components/settings/server/`: server settings pages beyond Overview
-    and Access (roles, channels and their permissions, invites, members,
-    bans, audit log, ownership), shown by `dialogs/ServerSettingsDialog.tsx`,
+    and Access (rules and questions, roles, channels and their permissions,
+    invites, applications, members, bans, audit log, ownership), shown by `dialogs/ServerSettingsDialog.tsx`,
     which also says which pages your permissions open (`useServerSettingsTabs`).
   - Invites: `dialogs/InviteDialog.tsx` makes and copies a link (from the
     server menu or a channel), `pages/InvitePage.tsx` is where a link lands
     (`/invite/<code>` on the instance, which goes to `/<instance>/invite/<code>`),
     and `src/lib/invites.ts` holds the choices, link format and paste parsing.
+  - Getting in: `components/join/JoinButton.tsx` is the one button for it on
+    Browse cards and invite pages (Join, Apply to join, waiting, waifu.dev
+    only), `ApplyDialog.tsx` the application, `Rules.tsx` the rules sheet a
+    new member agrees to (the composer shows it until they do), and
+    `Applied.tsx` the applications waiting in the rail. Those are kept in
+    this browser (`src/lib/applied.ts`) and `AppliedWatcher` asks the
+    instance how they went. Reviewers use `settings/server/Applications.tsx`;
+    owners write rules and questions in `settings/server/JoinFormEditor.tsx`.
     `components/ModerateDialog.tsx` is the one dialog for nicknames,
     time-outs, kicks and bans, from the Members page and from profile cards;
     `components/MemberRoles.tsx` hands roles out wherever a member is shown.

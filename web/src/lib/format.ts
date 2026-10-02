@@ -111,6 +111,24 @@ export function formatDuration(seconds: number) {
 export const shortDuration = (seconds: number) =>
   formatDuration(seconds).replace(/ (second|minute|hour|day)s?$/, (_, unit: string) => unit[0]!);
 
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+/** How long something has been around, rounded down to its largest unit: "5 minutes", "3 days", "2 months". */
+export function roughly(ms: number) {
+  const minutes = Math.floor(Math.max(0, ms) / 60_000);
+  if (minutes < 1) return "less than a minute";
+  if (minutes < 60) return plural(minutes, "minute");
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return plural(hours, "hour");
+  const days = Math.floor(hours / 24);
+  if (days < 30) return plural(days, "day");
+  if (days < 365) return plural(Math.floor(days / 30), "month");
+  return plural(Math.floor(days / 365), "year");
+}
+
+/** "just now", "5 minutes ago", "3 days ago". */
+export const ago = (date: Date, now = Date.now()) => (now - date.getTime() < 60_000 ? "just now" : `${roughly(now - date.getTime())} ago`);
+
 /** Time left, as a countdown: "0:42", "12:05", "3h 20m", "2d 4h". */
 export function formatLeft(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));

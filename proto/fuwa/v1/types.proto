@@ -133,6 +133,9 @@ message Member {
   google.protobuf.Timestamp timed_out_until = 6;
   // The roles they have, besides @everyone, which every member has.
   repeated string role_ids = 7;
+  // Joined, but hasn't agreed to the server's rules yet: they can read, but
+  // not send messages, make invites or change their nickname until they do.
+  bool pending = 8;
 }
 
 // ============================================================================
@@ -243,6 +246,62 @@ message Server {
   string system_channel_id = 11;
   // How old an account must be to join, in seconds. Zero lets anyone in.
   int32 min_account_age_seconds = 12;
+  // People apply to join, answering the server's questions, and wait for
+  // someone who can kick members to let them in.
+  bool applications = 13;
+  // Only accounts that sign in with waifu.dev (linked accounts) can join or apply.
+  bool linked_only = 14;
+  // It has rules: new members agree to them before they talk.
+  bool has_rules = 15;
+}
+
+// What people read and answer on their way into a server.
+message JoinForm {
+  // Up to 16, each a line of Markdown. People agree to them before they talk.
+  repeated string rules = 1;
+  // Up to 5, asked when the server takes applications.
+  repeated JoinQuestion questions = 2;
+}
+
+message JoinQuestion {
+  string prompt = 1;
+  // A few paragraphs rather than a line.
+  bool paragraph = 2;
+  bool required = 3;
+}
+
+enum ApplicationStatus {
+  APPLICATION_STATUS_UNSPECIFIED = 0;
+  // Waiting for someone to review it.
+  APPLICATION_STATUS_PENDING = 1;
+  // Turned down. They can apply again.
+  APPLICATION_STATUS_REJECTED = 2;
+  // Let in: they're a member now. Only in events; it isn't kept.
+  APPLICATION_STATUS_APPROVED = 3;
+  // Taken back by the applicant, or gone with a ban. Only in events.
+  APPLICATION_STATUS_WITHDRAWN = 4;
+}
+
+// Someone asking to join a server that takes applications.
+message Application {
+  string server_id = 1;
+  User user = 2;
+  // The questions as they were asked, with what they said.
+  repeated ApplicationAnswer answers = 3;
+  ApplicationStatus status = 4;
+  // Why it was turned down, when the reviewer said.
+  string reason = 5;
+  // When their account was made, to judge throwaway accounts by.
+  google.protobuf.Timestamp account_created_at = 6;
+  google.protobuf.Timestamp created_at = 7;
+  // Whoever reviewed it, and when.
+  string reviewed_by_id = 8;
+  google.protobuf.Timestamp reviewed_at = 9;
+}
+
+message ApplicationAnswer {
+  string question = 1;
+  string answer = 2;
 }
 
 // A link into a server. Anyone with its code can join, even when the server
@@ -434,6 +493,7 @@ message Event {
     RoleCreated role_created = 22;
     RoleUpdated role_updated = 23;
     RoleDeleted role_deleted = 24;
+    ApplicationUpdated application_updated = 25;
   }
 }
 
@@ -499,6 +559,12 @@ message UserUpdated {
 
 message RoleCreated {
   Role role = 1;
+}
+
+// Someone applied, or an application was reviewed or withdrawn. Only members
+// who can kick members get these. Closed applications carry no answers.
+message ApplicationUpdated {
+  Application application = 1;
 }
 
 message RoleUpdated {
