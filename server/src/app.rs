@@ -28,6 +28,7 @@ use crate::pb::{
     message_service_server::MessageServiceServer, node_service_server::NodeServiceServer,
     role_service_server::RoleServiceServer, server_service_server::ServerServiceServer,
 };
+use crate::replica::Replica;
 use crate::servers::Servers;
 use crate::settings::Settings;
 
@@ -53,6 +54,8 @@ pub struct App {
     pub shutdown: CancellationToken,
     /// How this process reaches the other parts of a split instance.
     pub link: Link,
+    /// Where this process's databases and pictures are continuously copied.
+    pub replica: Option<Arc<Replica>>,
 }
 
 /// Where the parts this process doesn't run are.
@@ -76,15 +79,50 @@ impl App {
         // Exports are written here and streamed; one left by a crash is stale.
         let _ = std::fs::remove_dir_all(config.data_path.join("exports"));
 
+        // A shard takes the single process's servers first, so a shard that
+        // just took them never looks empty to the replica's restore check.
+        if role == Role::Shard {
+            crate::cluster::shard::take_servers(&config).await?;
+        }
+        // Only a split instance's directory and shards replicate (see config.rs).
+        let replica = match &config.replica {
+            Some(replica_config) if matches!(role, Role::Directory | Role::Shard) => {
+                let store = replica_config.store()?;
+                let shard = match role {
+                    Role::Shard => Some(crate::cluster::shard_id(&config.cluster, &config.data_path)?),
+                    _ => None,
+                };
+                let part = match &shard {
+                    Some(shard) => crate::replica::Part::Shard(shard),
+                    None => crate::replica::Part::Directory,
+                };
+                crate::replica::prepare(replica_config, &store, &config.data_path, key.as_ref(), part).await?;
+                Some(Replica::new(store, replica_config.interval, &config.data_path, shard)?)
+            }
+            _ => None,
+        };
+
         let (node, media, servers, link) = match role {
             Role::Gateway => return Err(Error::internal("a gateway keeps no data")),
             Role::All | Role::Directory => {
                 let node = NodeDb::open(&config.data_path.join("node.db"), key.as_ref()).await?;
+                if let Some(replica) = &replica {
+                    replica.track("node", node.db().clone()).await?;
+                    replica.track_media(config.data_path.join("media"));
+                }
                 node.install_id().await?;
                 let media = crate::media::Store::open(&config.data_path)?;
-                media.remove_strays(&node.media_ids().await?)?;
+                let media_ids = node.media_ids().await?;
+                media.remove_strays(&media_ids)?;
+                if let Some(replica) = &replica {
+                    match replica.prune_media(&media_ids).await {
+                        Ok(0) => {}
+                        Ok(pruned) => tracing::info!(pruned, "deleted pictures from the replica that nothing knows"),
+                        Err(err) => tracing::warn!(error = %err, "couldn't tidy the pictures in the replica"),
+                    }
+                }
                 let (servers, link) = if role == Role::All {
-                    (Servers::open(&config.data_path, key, hub.clone(), false).await?, Link::Alone)
+                    (Servers::open(&config.data_path, key, hub.clone(), false, None).await?, Link::Alone)
                 } else {
                     let shards = crate::cluster::directory::Shards::load(&config, &node).await?;
                     (Servers::none(hub.clone()), Link::Directory(Box::new(shards)))
@@ -92,8 +130,7 @@ impl App {
                 (Some(node), Some(media), servers, link)
             }
             Role::Shard => {
-                crate::cluster::shard::take_servers(&config).await?;
-                let servers = Servers::open(&config.data_path, key, hub.clone(), true).await?;
+                let servers = Servers::open(&config.data_path, key, hub.clone(), true, replica.clone()).await?;
                 (None, None, servers, Link::Shard(Box::new(crate::cluster::shard::Link::new(&config)?)))
             }
         };
@@ -129,6 +166,7 @@ impl App {
             started: Instant::now(),
             shutdown: CancellationToken::new(),
             link,
+            replica,
         });
         if app.node.is_some() {
             app.sweep_media(crate::id::now_ms()).await?;
@@ -164,6 +202,9 @@ impl App {
         self.node()?.delete_media(ids).await?;
         for id in ids {
             self.media()?.remove(id);
+        }
+        if let Some(replica) = &self.replica {
+            replica.drop_media(ids).await;
         }
         Ok(())
     }
@@ -338,6 +379,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         %address,
         public_url = %app.settings().public_url,
         data = %data_path.display(),
+        replica = app.replica.as_ref().map(|r| r.store().describe()).unwrap_or_else(|| "off".into()),
         encrypted = app.config.encryption_key.is_some(),
         servers = app.servers.len(),
         local_accounts = app.settings().local_accounts.as_str(),
@@ -350,12 +392,20 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         spawn_housekeeping(app.clone());
     }
     spawn_signal_handler(app.shutdown.clone());
+    if let Some(replica) = &app.replica {
+        replica.start();
+    }
 
     let shutdown = app.shutdown.clone();
-    axum::serve(listener, app.router())
+    let served = axum::serve(listener, app.router())
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
         .await
-        .map_err(|err| format!("server error: {err}"))
+        .map_err(|err| format!("server error: {err}"));
+    // The last commits go out before the process does.
+    if let Some(replica) = &app.replica {
+        replica.close().await;
+    }
+    served
 }
 
 /// Cancels `shutdown` on Ctrl-C or SIGTERM.
