@@ -493,12 +493,36 @@ export const createServer = (key: string, name: string, description: string, dis
 export const discover = (key: string) =>
   call((signal) => api(key).servers.discoverServers({}, { signal })).pipe(Effect.map((r) => r.servers));
 
-export const joinServer = (key: string, serverId: string) =>
+/** Joins a server from Browse, or with one of its invites. */
+export const joinServer = (key: string, serverId: string, inviteCode = "") =>
   Effect.gen(function* () {
-    const { server } = yield* call((signal) => api(key).servers.joinServer({ serverId }, { signal }));
+    const { server } = yield* call((signal) => api(key).servers.joinServer({ serverId, inviteCode }, { signal }));
     yield* joined(key, server);
     return server!;
   });
+
+// ───────────────────────── Invites ─────────────────────────
+
+/** Where an invite leads, on an instance you may not be signed in to yet. */
+export const lookUpInvite = (address: string, code: string) =>
+  Effect.gen(function* () {
+    const { url, node } = yield* probe(address);
+    const found = yield* call((signal) => makeApi(url, () => null).invites.getInvite({ code }, { signal }));
+    return { url, node, invite: found.invite!, server: found.server!, channelName: found.channelName, inviter: found.inviter };
+  });
+
+export type InviteOptions = { channelId?: string; maxUses: number; maxAgeSeconds: number };
+
+export const createInvite = (key: string, serverId: string, { channelId = "", maxUses, maxAgeSeconds }: InviteOptions) =>
+  call((signal) => api(key).invites.createInvite({ serverId, channelId, maxUses, maxAgeSeconds }, { signal })).pipe(
+    Effect.map((r) => r.invite!),
+  );
+
+export const listInvites = (key: string, serverId: string) =>
+  call((signal) => api(key).invites.listInvites({ serverId }, { signal }));
+
+export const deleteInvite = (key: string, serverId: string, code: string) =>
+  call((signal) => api(key).invites.deleteInvite({ serverId, code }, { signal })).pipe(Effect.as(true));
 
 export const leaveServer = (key: string, serverId: string) =>
   Effect.gen(function* () {
@@ -526,6 +550,7 @@ export const updateServer = (
     defaultNotifications?: NotificationLevel;
     /** Empty for no join messages. */
     systemChannelId?: string;
+    minAccountAgeSeconds?: number;
   },
 ) =>
   Effect.gen(function* () {

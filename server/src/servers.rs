@@ -29,6 +29,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0003_status.sql"),
     include_str!("../migrations/server/0004_moderation.sql"),
     include_str!("../migrations/server/0005_roles.sql"),
+    include_str!("../migrations/server/0006_invites.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -483,7 +484,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
     query_one(
         conn,
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
-                default_notifications, system_channel_id
+                default_notifications, system_channel_id, min_account_age_seconds
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -499,6 +500,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 member_count: r.get(8)?,
                 default_notifications: r.get(9)?,
                 system_channel_id: r.get::<Option<String>>(10)?.unwrap_or_default(),
+                min_account_age_seconds: r.get(11)?,
             })
         },
     )
@@ -624,7 +626,8 @@ impl Servers {
             let conn = sdb.read()?;
             let server = load_server(&conn).await?;
             let member_ids = query_all(&conn, "SELECT user_id FROM members", (), |r| r.get::<String>(0)).await?;
-            entries.push(cpb::ServerEntry { server: Some(server), member_ids });
+            let invite_codes = query_all(&conn, "SELECT code FROM invites", (), |r| r.get::<String>(0)).await?;
+            entries.push(cpb::ServerEntry { server: Some(server), member_ids, invite_codes });
         }
         Ok(entries)
     }
@@ -946,6 +949,57 @@ pub async fn usage_count(conn: &Connection, counter: &'static str) -> Result<i64
     query_one(conn, &format!("SELECT {counter} FROM usage WHERE id = 1"), (), |r| r.get::<i64>(0))
         .await?
         .ok_or_else(|| Error::internal("usage row missing"))
+}
+
+// ───────────────────────── Invites ─────────────────────────
+
+const INVITE_COLUMNS: &str = "code, channel_id, inviter_id, max_uses, uses, expires_at, created_at";
+
+pub fn invite_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Invite> + '_ {
+    move |r| {
+        Ok(pb::Invite {
+            code: r.get(0)?,
+            server_id: server_id.to_string(),
+            channel_id: r.get::<Option<String>>(1)?.unwrap_or_default(),
+            inviter_id: r.get(2)?,
+            max_uses: r.get(3)?,
+            uses: r.get(4)?,
+            expires_at: r.get::<Option<i64>>(5)?.map(timestamp),
+            created_at: Some(timestamp(r.get(6)?)),
+        })
+    }
+}
+
+/// Whether an invite still lets people in at `now`.
+pub fn invite_works(invite: &pb::Invite, now: i64) -> bool {
+    (invite.max_uses == 0 || invite.uses < invite.max_uses)
+        && invite.expires_at.as_ref().is_none_or(|t| millis(t) > now)
+}
+
+pub async fn load_invite(conn: &Connection, server_id: &str, code: &str) -> Result<Option<pb::Invite>> {
+    query_one(conn, &format!("SELECT {INVITE_COLUMNS} FROM invites WHERE code = ?1"), [code], invite_row(server_id))
+        .await
+}
+
+/// Every invite, newest first, including ones that no longer work.
+pub async fn load_invites(conn: &Connection, server_id: &str) -> Result<Vec<pb::Invite>> {
+    query_all(
+        conn,
+        &format!("SELECT {INVITE_COLUMNS} FROM invites ORDER BY created_at DESC, code"),
+        (),
+        invite_row(server_id),
+    )
+    .await
+}
+
+/// Deletes invites that expired, inside a write; returns their codes.
+pub async fn sweep_invites(conn: &Connection, now: i64) -> Result<Vec<String>> {
+    let expired =
+        query_all(conn, "SELECT code FROM invites WHERE expires_at <= ?1", [now], |r| r.get::<String>(0)).await?;
+    if !expired.is_empty() {
+        conn.execute("DELETE FROM invites WHERE expires_at <= ?1", [now]).await?;
+    }
+    Ok(expired)
 }
 
 #[cfg(test)]

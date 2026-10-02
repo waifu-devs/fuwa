@@ -8,6 +8,8 @@ import {
   GavelIcon,
   HashIcon,
   HourglassIcon,
+  Link2OffIcon,
+  LinkIcon,
   LoaderCircleIcon,
   LockIcon,
   MessageSquareXIcon,
@@ -64,6 +66,8 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.MEMBER_UNBAN]: { label: "Unbans", icon: UndoIcon, tint: "bg-emerald-500/15 text-emerald-500" },
   [AuditAction.MESSAGE_DELETE]: { label: "Deleted messages", icon: MessageSquareXIcon, tint: "bg-destructive/15 text-destructive" },
   [AuditAction.OWNERSHIP_TRANSFER]: { label: "Ownership", icon: CrownIcon, tint: "bg-amber-500/15 text-amber-500" },
+  [AuditAction.INVITE_CREATE]: { label: "New invites", icon: LinkIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.INVITE_DELETE]: { label: "Revoked invites", icon: Link2OffIcon, tint: "bg-destructive/15 text-destructive" },
 };
 
 const FIELD: Record<string, string> = {
@@ -85,6 +89,16 @@ const FIELD: Record<string, string> = {
   permissions: "Permissions",
   hoist: "Shown apart",
   mentionable: "Anyone can mention it",
+  max_uses: "How many people",
+  expires_at: "Expires",
+  uses: "People it let in",
+  min_account_age_seconds: "Minimum account age",
+};
+
+/** Entries for things made or removed show just the one side of each change. */
+const ONE_SIDE: Partial<Record<AuditAction, "before" | "after">> = {
+  [AuditAction.INVITE_CREATE]: "after",
+  [AuditAction.INVITE_DELETE]: "before",
 };
 
 /** Ranks from before roles, as entries from back then keep them. */
@@ -294,13 +308,19 @@ function Entry({
                   className="flex flex-wrap items-center gap-1.5"
                 >
                   <span className="text-muted-foreground">{FIELD[change.field] ?? change.field}:</span>
-                  <span className="rounded-md bg-destructive/10 px-1.5 text-destructive line-through decoration-destructive/50">
-                    {value(change.field, change.before, users, channels, entry)}
-                  </span>
-                  <ArrowRightIcon className="size-3.5 text-muted-foreground" />
-                  <span className="rounded-md bg-emerald-500/10 px-1.5 text-emerald-600 dark:text-emerald-400">
-                    {value(change.field, change.after, users, channels, entry)}
-                  </span>
+                  {ONE_SIDE[entry.action] ? (
+                    <span className="rounded-md bg-muted px-1.5">{value(change.field, change[ONE_SIDE[entry.action]!], users, channels, entry)}</span>
+                  ) : (
+                    <>
+                      <span className="rounded-md bg-destructive/10 px-1.5 text-destructive line-through decoration-destructive/50">
+                        {value(change.field, change.before, users, channels, entry)}
+                      </span>
+                      <ArrowRightIcon className="size-3.5 text-muted-foreground" />
+                      <span className="rounded-md bg-emerald-500/10 px-1.5 text-emerald-600 dark:text-emerald-400">
+                        {value(change.field, change.after, users, channels, entry)}
+                      </span>
+                    </>
+                  )}
                 </motion.p>
               ))}
             </div>
@@ -338,6 +358,9 @@ function value(field: string, raw: string, users: Record<string, User>, channels
     return formatStamp(new Date(until)) + ` (${formatDuration(Math.round((until - toDate(entry.createdAt).getTime()) / 1000))})`;
   }
   if (field === "owner_id") return displayName(users[raw]);
+  if (field === "max_uses") return raw === "0" ? "No limit" : raw;
+  if (field === "expires_at") return raw ? formatStamp(new Date(Number(raw))) : "Never";
+  if (field === "min_account_age_seconds") return raw === "0" ? "Any age" : formatDuration(Number(raw));
   return raw || "Nothing";
 }
 
@@ -354,8 +377,21 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
   const known = channels.find((c) => c.id === entry.targetId);
   const channel = <b>{known ? (known.type === ChannelType.CATEGORY ? known.name : `#${known.name}`) : `#${entry.channelName}`}</b>;
   switch (entry.action) {
-    case AuditAction.SERVER_UPDATE:
+    case AuditAction.SERVER_UPDATE: {
+      const listed = change("discoverable");
+      const age = change("min_account_age_seconds");
+      if (listed && entry.changes.length === 1)
+        return listed.after === "true" ? <>{actor} listed the server in Browse</> : <>{actor} made the server invite only</>;
+      if (age && entry.changes.length === 1)
+        return age.after === "0" ? (
+          <>{actor} let in accounts of any age</>
+        ) : (
+          <>
+            {actor} let in accounts once they're {formatDuration(Number(age.after))} old
+          </>
+        );
       return <>{actor} changed the server's settings</>;
+    }
     case AuditAction.CHANNEL_CREATE:
       return <>{actor} created {channel}</>;
     case AuditAction.CHANNEL_UPDATE: {
@@ -430,6 +466,22 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
       );
     case AuditAction.OWNERSHIP_TRANSFER:
       return <>{actor} handed the server to {target}</>;
+    case AuditAction.INVITE_CREATE:
+      return entry.channelName ? (
+        <>
+          {actor} made an invite to <b>#{entry.channelName}</b>
+        </>
+      ) : (
+        <>{actor} made an invite</>
+      );
+    case AuditAction.INVITE_DELETE:
+      return entry.channelName ? (
+        <>
+          {actor} revoked an invite to <b>#{entry.channelName}</b>
+        </>
+      ) : (
+        <>{actor} revoked an invite</>
+      );
     default:
       return <>{actor} did something</>;
   }

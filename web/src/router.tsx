@@ -11,7 +11,9 @@ import { aliasToKey, keyToAlias } from "@/lib/streamer";
 import { rememberedPath, Shell } from "@/components/Shell";
 import { AppOverlays, StreamerBanner } from "@/components/Shortcuts";
 import { UserSettings } from "@/components/settings/UserSettings";
+import { instanceKey } from "@/fuwa/saved";
 import { InstanceHome } from "@/pages/InstanceHome";
+import { InvitePage } from "@/pages/InvitePage";
 import { ChannelPage, ServerIndex } from "@/pages/ServerPages";
 import { Welcome } from "@/pages/Welcome";
 
@@ -62,6 +64,19 @@ const connect = createRoute({
   },
 });
 
+/**
+ * An invite link as the instance hands it out (/invite/<code>): this page is
+ * served by that instance, so it's the one the invite is for.
+ */
+const inviteHere = createRoute({
+  getParentRoute: () => root,
+  path: "invite/$code",
+  component: function InviteHere() {
+    const { code } = inviteHere.useParams();
+    return <Navigate to="/$instance/invite/$code" params={{ instance: instanceKey(window.location.origin), code }} replace />;
+  },
+});
+
 const instance = createRoute({ getParentRoute: () => root, path: "$instance", component: Shell });
 
 const instanceIndex = createRoute({
@@ -70,6 +85,15 @@ const instanceIndex = createRoute({
   component: function InstanceIndex() {
     const { instance: key } = useParams({ from: "/$instance/" });
     return <InstanceHome instanceKey={key} />;
+  },
+});
+
+const invite = createRoute({
+  getParentRoute: () => instance,
+  path: "invite/$code",
+  component: function InviteRoute() {
+    const { instance: key, code } = useParams({ from: "/$instance/invite/$code" });
+    return <InvitePage key={`${key}/${code}`} instanceKey={key} code={code} />;
   },
 });
 
@@ -96,7 +120,8 @@ const channel = createRoute({
 const routeTree = root.addChildren([
   index,
   connect,
-  instance.addChildren([instanceIndex, server.addChildren([serverIndex, channel])]),
+  inviteHere,
+  instance.addChildren([instanceIndex, invite, server.addChildren([serverIndex, channel])]),
 ]);
 
 export const router = createRouter({

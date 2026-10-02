@@ -17,7 +17,7 @@ service ServerService {
   rpc UpdateServer(UpdateServerRequest) returns (UpdateServerResponse);
   // Deletes the server and its database. Owner or instance admin only.
   rpc DeleteServer(DeleteServerRequest) returns (DeleteServerResponse);
-  // Joins a discoverable server.
+  // Joins a discoverable server, or any server with one of its invites.
   rpc JoinServer(JoinServerRequest) returns (JoinServerResponse);
   rpc LeaveServer(LeaveServerRequest) returns (LeaveServerResponse);
   rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
@@ -85,6 +85,7 @@ message UpdateServerRequest {
   optional NotificationLevel default_notifications = 6;
   // A text channel, or empty to post no system messages.
   optional string system_channel_id = 7;
+  optional int32 min_account_age_seconds = 8;
 }
 
 message UpdateServerResponse {
@@ -99,6 +100,8 @@ message DeleteServerResponse {}
 
 message JoinServerRequest {
   string server_id = 1;
+  // An invite into the server, needed unless it's discoverable.
+  string invite_code = 2;
 }
 
 message JoinServerResponse {
@@ -251,6 +254,9 @@ enum AuditAction {
   // A role handed to or taken from a member; the change names the role.
   AUDIT_ACTION_MEMBER_ROLES_UPDATE = 17;
   AUDIT_ACTION_CHANNEL_PERMISSIONS_UPDATE = 18;
+  // Invite actions have the invite's code as their target.
+  AUDIT_ACTION_INVITE_CREATE = 19;
+  AUDIT_ACTION_INVITE_DELETE = 20;
 }
 
 // One thing someone did with a moderator's or manager's permission.

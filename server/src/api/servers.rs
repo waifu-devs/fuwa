@@ -5,7 +5,7 @@ use super::messages::post_join;
 use super::{Api, Seat, respond, text, url, users};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
-use crate::id::{millis, now_ms, timestamp};
+use crate::id::{millis, now_ms, span, timestamp};
 use crate::pb::{self, Permission, server_service_server::ServerService};
 use crate::permissions::{self, Access};
 use crate::servers::{
@@ -15,6 +15,9 @@ use crate::servers::{
 
 /// The longest time-out, as Discord has it: 28 days.
 const MAX_TIME_OUT_SECONDS: i64 = 28 * 24 * 60 * 60;
+
+/// The longest minimum account age a server can ask for: a year.
+const MAX_ACCOUNT_AGE: i32 = 365 * 24 * 60 * 60;
 /// How far back a ban can take someone's messages with them: seven days.
 const MAX_DELETE_MESSAGE_SECONDS: i64 = 7 * 24 * 60 * 60;
 
@@ -172,6 +175,9 @@ impl ServerService for Api {
                 {
                     return Err(Error::invalid("servers can default to all messages or only @mentions"));
                 }
+                if req.min_account_age_seconds.is_some_and(|age| !(0..=MAX_ACCOUNT_AGE).contains(&age)) {
+                    return Err(Error::invalid("the minimum account age is up to a year"));
+                }
                 let server = sdb
                     .write(&account.id, async |conn, events| {
                         let before = store::load_server(conn).await?;
@@ -191,7 +197,7 @@ impl ServerService for Api {
                          icon_url = coalesce(?3, icon_url), discoverable = coalesce(?4, discoverable),
                          default_notifications = coalesce(?5, default_notifications),
                          system_channel_id = CASE WHEN ?6 IS NULL THEN system_channel_id WHEN ?6 = '' THEN NULL ELSE ?6 END,
-                         updated_at = ?7",
+                         min_account_age_seconds = coalesce(?8, min_account_age_seconds), updated_at = ?7",
                             (
                                 name,
                                 description,
@@ -200,6 +206,7 @@ impl ServerService for Api {
                                 req.default_notifications,
                                 req.system_channel_id.as_deref(),
                                 now_ms(),
+                                req.min_account_age_seconds,
                             ),
                         )
                         .await?;
@@ -210,7 +217,12 @@ impl ServerService for Api {
                             .change("icon_url", &before.icon_url, &server.icon_url)
                             .change("discoverable", before.discoverable, server.discoverable)
                             .change("default_notifications", before.default_notifications, server.default_notifications)
-                            .change("system_channel_id", &before.system_channel_id, &server.system_channel_id);
+                            .change("system_channel_id", &before.system_channel_id, &server.system_channel_id)
+                            .change(
+                                "min_account_age_seconds",
+                                before.min_account_age_seconds,
+                                server.min_account_age_seconds,
+                            );
                         if !entry.changes.is_empty() {
                             store::audit(conn, &account.id, entry).await?;
                         }
@@ -259,15 +271,35 @@ impl ServerService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let sdb = self.app.servers.get(&request.get_ref().server_id).await?;
+                let req = request.into_inner();
+                let code = req.invite_code.trim();
+                let sdb = self.app.servers.get(&req.server_id).await?;
                 let server = sdb.server().await?;
-                if !server.discoverable {
+                if code.is_empty() && !server.discoverable {
                     return Err(Error::NotFound("server"));
+                }
+                let now = now_ms();
+                let wait = i64::from(server.min_account_age_seconds) * 1000 - (now - account.created_at);
+                if wait > 0 {
+                    return Err(Error::FailedPrecondition(format!(
+                        "this server lets in accounts once they're {} old; yours can join in {}",
+                        span(i64::from(server.min_account_age_seconds) * 1000),
+                        span(wait),
+                    )));
                 }
                 let limits = sdb.limits(&self.app.settings().limits).await?;
                 let user = account.user();
-                let member = sdb
+                let (member, used_up) = sdb
                     .write(&account.id, async |conn, events| {
+                        let invite = match code {
+                            "" => None,
+                            code => Some(
+                                store::load_invite(conn, &sdb.id, code)
+                                    .await?
+                                    .filter(|invite| store::invite_works(invite, now))
+                                    .ok_or(Error::NotFound("invite"))?,
+                            ),
+                        };
                         if store::member(conn, &sdb.id, &user.id).await?.is_some() {
                             return Err(Error::AlreadyExists("you're already a member".into()));
                         }
@@ -284,14 +316,23 @@ impl ServerService for Api {
                         {
                             return Err(Error::ResourceExhausted(format!("this server is full ({limit} members)")));
                         }
-                        let now = now_ms();
                         let member = store::add_member(conn, &user, &sdb.id, now).await?;
                         events.push(Payload::MemberJoined(pb::MemberJoined { member: Some(member.clone()) }));
                         post_join(conn, &store::load_server(conn).await?, &user.id, now, events).await?;
-                        Ok(member)
+                        // Its last use deletes it, so a used-up invite isn't kept around.
+                        let used_up = invite.as_ref().is_some_and(|i| i.max_uses > 0 && i.uses + 1 >= i.max_uses);
+                        if used_up {
+                            conn.execute("DELETE FROM invites WHERE code = ?1", [code]).await?;
+                        } else if invite.is_some() {
+                            conn.execute("UPDATE invites SET uses = uses + 1 WHERE code = ?1", [code]).await?;
+                        }
+                        Ok((member, used_up))
                     })
                     .await?;
                 self.app.membership_changed(&account.id, &sdb.id, true).await;
+                if used_up {
+                    self.app.index_invite(&sdb.id, code, false).await;
+                }
                 Ok(pb::JoinServerResponse { server: Some(sdb.server().await?), member: Some(member) })
             }
             .await,

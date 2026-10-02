@@ -4,13 +4,13 @@ import { HIDDEN_ADDRESS, hidesPersonal, maskName, shownAddress } from "@/lib/str
 import { cn } from "@/lib/utils";
 
 /**
- * Something a stream shouldn't show: an instance's address or your own
- * username. In streamer mode it blurs away into a stand-in instead of
- * snapping, and blurs back when streamer mode ends.
+ * Something a stream shouldn't show: an instance's address, your own
+ * username, or a secret like an invite code. In streamer mode it blurs away
+ * into a stand-in instead of snapping, and blurs back when streamer mode ends.
  */
-export function Private({ text, kind = "address", className }: { text: string; kind?: "address" | "name"; className?: string }) {
+export function Private({ text, kind = "address", className }: { text: string; kind?: "address" | "name" | "secret"; className?: string }) {
   const hidden = usePrefs(hidesPersonal);
-  const shown = hidden ? (kind === "name" ? maskName(text) : HIDDEN_ADDRESS) : text;
+  const shown = hidden ? (kind === "name" ? maskName(text) : kind === "secret" ? "••••••••" : HIDDEN_ADDRESS) : text;
   return (
     <AnimatePresence mode="popLayout" initial={false}>
       <motion.span

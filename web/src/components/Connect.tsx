@@ -160,7 +160,8 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
   );
 }
 
-function Account({
+/** Signs in or creates an account on an instance already found. Without `onBack` there's no going back to pick another. */
+export function Account({
   url,
   node,
   onBack,
@@ -168,7 +169,7 @@ function Account({
 }: {
   url: string;
   node: Node;
-  onBack: () => void;
+  onBack?: () => void;
   onDone?: (key: string) => void;
 }) {
   const navigate = useNavigate();
@@ -455,17 +456,19 @@ function TwoFactorStep({
   );
 }
 
-function Header({ url, node, onBack }: { url: string; node: Node; onBack: () => void }) {
+function Header({ url, node, onBack }: { url: string; node: Node; onBack?: () => void }) {
   return (
     <div className="flex items-center gap-3">
-      <button
-        type="button"
-        onClick={onBack}
-        className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted hover:text-foreground"
-        aria-label="Pick another server"
-      >
-        <ArrowLeftIcon className="size-4" />
-      </button>
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted hover:text-foreground"
+          aria-label="Pick another server"
+        >
+          <ArrowLeftIcon className="size-4" />
+        </button>
+      )}
       <div className="min-w-0">
         <p className="truncate font-extrabold">{node.name}</p>
         <p className="truncate text-xs text-muted-foreground">

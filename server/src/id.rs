@@ -37,9 +37,30 @@ pub fn millis(t: &prost_types::Timestamp) -> i64 {
     t.seconds.saturating_mul(1000).saturating_add(i64::from(t.nanos) / 1_000_000)
 }
 
+/// A length of time as people say it, in its largest whole unit, rounded up:
+/// "1 minute", "3 days".
+pub fn span(ms: i64) -> String {
+    let seconds = (ms.max(0) + 999) / 1000;
+    let (count, unit) = [(86_400, "day"), (3_600, "hour"), (60, "minute"), (1, "second")]
+        .into_iter()
+        .find(|(size, _)| seconds >= *size)
+        .map(|(size, unit)| ((seconds + size - 1) / size, unit))
+        .unwrap_or((0, "second"));
+    format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spans_read_like_people_say_them() {
+        assert_eq!(span(0), "0 seconds");
+        assert_eq!(span(1), "1 second");
+        assert_eq!(span(60_000), "1 minute");
+        assert_eq!(span(61_000), "2 minutes");
+        assert_eq!(span(7 * 86_400_000), "7 days");
+    }
 
     #[test]
     fn ids_sort_in_creation_order() {

@@ -3,6 +3,7 @@ syntax = "proto3";
 package fuwa.cluster.v1;
 
 import "fuwa/v1/admin.proto";
+import "fuwa/v1/invite.proto";
 import "fuwa/v1/media.proto";
 import "fuwa/v1/types.proto";
 import "google/protobuf/timestamp.proto";
@@ -30,6 +31,8 @@ service DirectoryService {
   rpc IndexServer(IndexServerRequest) returns (IndexServerResponse);
   // Someone joined or left a server.
   rpc IndexMembership(IndexMembershipRequest) returns (IndexMembershipResponse);
+  // An invite was made, or stopped working.
+  rpc IndexInvite(IndexInviteRequest) returns (IndexInviteResponse);
   // A server was deleted.
   rpc DropServer(DropServerRequest) returns (DropServerResponse);
   // Notification settings that point at a deleted server or channel, or a
@@ -61,6 +64,8 @@ service ShardService {
   rpc DescribeServers(DescribeServersRequest) returns (DescribeServersResponse);
   // Whether a server has a channel, before notification settings point at it.
   rpc ChannelExists(ChannelExistsRequest) returns (ChannelExistsResponse);
+  // Where an invite leads, for the directory's GetInvite.
+  rpc DescribeInvite(DescribeInviteRequest) returns (DescribeInviteResponse);
 }
 
 // An account as the directory knows it.
@@ -113,6 +118,8 @@ message WatchResponse {
 message ServerEntry {
   fuwa.v1.Server server = 1;
   repeated string member_ids = 2;
+  // The codes of the server's invites.
+  repeated string invite_codes = 3;
 }
 
 message RegisterShardRequest {
@@ -156,6 +163,15 @@ message IndexMembershipRequest {
 }
 
 message IndexMembershipResponse {}
+
+message IndexInviteRequest {
+  string server_id = 1;
+  string code = 2;
+  // True for a new invite, false for one deleted, used up or expired.
+  bool exists = 3;
+}
+
+message IndexInviteResponse {}
 
 message DropServerRequest {
   string server_id = 1;
@@ -273,4 +289,13 @@ message ChannelExistsRequest {
 
 message ChannelExistsResponse {
   bool exists = 1;
+}
+
+message DescribeInviteRequest {
+  string server_id = 1;
+  string code = 2;
+}
+
+message DescribeInviteResponse {
+  fuwa.v1.GetInviteResponse invite = 1;
 }

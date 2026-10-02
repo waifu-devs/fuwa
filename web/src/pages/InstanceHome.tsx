@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRightIcon, CheckIcon, ChevronLeftIcon, LoaderCircleIcon, PlusIcon, SearchIcon, TvMinimalPlayIcon, UsersIcon } from "lucide-react";
+import { ArrowRightIcon, CheckIcon, ChevronLeftIcon, LoaderCircleIcon, PlusIcon, SearchIcon, TicketIcon, TvMinimalPlayIcon, UsersIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { discover, joinServer, run } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
@@ -11,10 +11,12 @@ import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
 import { Count, SwapText, Tilt } from "@/components/motion";
-import { Private, useAddress } from "@/components/Private";
+import { Private, useAddress, usePrivateField } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { parseInvite } from "@/lib/invites";
+import { cn } from "@/lib/utils";
 
 /** An instance's front page: sign in if needed, then browse and create servers. */
 export function InstanceHome({ instanceKey }: { instanceKey: string }) {
@@ -122,6 +124,8 @@ function Browse({ instanceKey }: { instanceKey: string }) {
         </div>
       </section>
 
+      <HaveInvite instanceKey={instanceKey} />
+
       <div className="mt-8 mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg font-extrabold">Browse servers</h2>
         <div className="relative sm:w-72">
@@ -142,7 +146,7 @@ function Browse({ instanceKey }: { instanceKey: string }) {
         <div className="grid place-items-center rounded-3xl border border-dashed p-10 text-center">
           <p className="font-bold">{q ? "Nothing matches that." : "No public servers here yet."}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            {q ? "Try another word." : "Make the first one, and turn on “Show in Browse” so people can find it."}
+            {q ? "Try another word." : "Make the first one, and set who can join to “Anyone here” so people can find it."}
           </p>
         </div>
       ) : (
@@ -165,6 +169,56 @@ function Browse({ instanceKey }: { instanceKey: string }) {
       )}
       <CreateServerDialog open={creating} onOpenChange={setCreating} defaultInstance={instanceKey} />
     </div>
+  );
+}
+
+/** Servers that stay out of Browse are joined by invite: paste a link (from any fuwa server) or a code. */
+function HaveInvite({ instanceKey }: { instanceKey: string }) {
+  const navigate = useNavigate();
+  const [text, setText] = useState("");
+  const [shake, setShake] = useState(0);
+  const [bad, setBad] = useState(false);
+  const privateField = usePrivateField();
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    const found = parseInvite(text, instanceKey);
+    if (!found) {
+      setBad(true);
+      return setShake((n) => n + 1);
+    }
+    navigate({ to: "/$instance/invite/$code", params: { instance: found.instance, code: found.code } });
+  }
+  return (
+    <form onSubmit={submit} className="mt-4 flex flex-col gap-3 rounded-3xl border bg-card/70 p-4 sm:flex-row sm:items-center">
+      <span className="flex items-center gap-3 sm:w-64">
+        <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary">
+          <TicketIcon className="size-5 -rotate-12" />
+        </span>
+        <span>
+          <span className="block font-extrabold">Have an invite?</span>
+          <span className="block text-xs text-muted-foreground">{bad ? "That doesn't look like an invite link." : "Paste the link or its code."}</span>
+        </span>
+      </span>
+      <div key={shake} className={cn("flex flex-1 gap-2", shake > 0 && "shake")}>
+        <Input
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setBad(false);
+          }}
+          placeholder="https://chat.example.com/invite/…"
+          aria-label="Invite link or code"
+          aria-invalid={bad}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          className={cn("h-10 flex-1 rounded-xl", privateField)}
+        />
+        <Button type="submit" disabled={!text.trim()} className="group h-10 rounded-xl font-bold">
+          Open <ArrowRightIcon className="transition-transform group-hover:translate-x-0.5" />
+        </Button>
+      </div>
+    </form>
   );
 }
 

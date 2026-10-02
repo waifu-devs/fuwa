@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// Invite links into community servers. Joining with one goes through
+// ServerService.JoinServer.
+service InviteService {
+  // Makes an invite into the server, or into one of its channels.
+  // CREATE_INVITE, in that channel when there is one.
+  rpc CreateInvite(CreateInviteRequest) returns (CreateInviteResponse);
+  // The server's invites that still work, newest first: all of them with
+  // MANAGE_SERVER, else the caller's own.
+  rpc ListInvites(ListInvitesRequest) returns (ListInvitesResponse);
+  // The caller's own invite, or anyone's with MANAGE_SERVER.
+  rpc DeleteInvite(DeleteInviteRequest) returns (DeleteInviteResponse);
+  // Where an invite leads, for showing it before joining. Needs no sign-in,
+  // so a link can say what it's for to someone without an account yet.
+  rpc GetInvite(GetInviteRequest) returns (GetInviteResponse);
+}
+
+message CreateInviteRequest {
+  string server_id = 1;
+  // Empty for the server rather than a channel.
+  string channel_id = 2;
+  // Zero for no limit.
+  int32 max_uses = 3;
+  // How long it works, in seconds. Zero for forever.
+  int32 max_age_seconds = 4;
+}
+
+message CreateInviteResponse {
+  Invite invite = 1;
+}
+
+message ListInvitesRequest {
+  string server_id = 1;
+}
+
+message ListInvitesResponse {
+  repeated Invite invites = 1;
+  // Whoever made them.
+  repeated User inviters = 2;
+}
+
+message DeleteInviteRequest {
+  string server_id = 1;
+  string code = 2;
+}
+
+message DeleteInviteResponse {}
+
+message GetInviteRequest {
+  string code = 1;
+}
+
+message GetInviteResponse {
+  Invite invite = 1;
+  Server server = 2;
+  // The channel it opens, if it opens one people can see without a role.
+  string channel_name = 3;
+  // Who made it.
+  User inviter = 4;
+}
