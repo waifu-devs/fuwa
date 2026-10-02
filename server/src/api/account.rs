@@ -11,12 +11,13 @@ use super::messages::decode_extras;
 use super::{Api, respond};
 use crate::app::App;
 use crate::auth::{self, Caller};
-use crate::db::{query_all, query_one};
+use crate::cpb;
+use crate::db::query_all;
 use crate::error::{Error, Result};
 use crate::id::{millis, now_ms, timestamp};
 use crate::node::Account;
 use crate::pb::{self, account_service_server::AccountService};
-use crate::servers::{self as store, Payload};
+use crate::servers::{self as store, ServerDb};
 use crate::twofactor;
 
 /// Messages read from a server at a time while exporting.
@@ -34,7 +35,7 @@ impl Api {
         }
         let guesses = format!("password:{}", account.id);
         self.app.limiter.check(&guesses)?;
-        let hash = self.app.node.password_hash(&account.id).await?;
+        let hash = self.app.node()?.password_hash(&account.id).await?;
         if !auth::verify_password(password.to_string(), hash).await? {
             self.app.limiter.failed(&guesses);
             return Err(Error::denied("that password is wrong"));
@@ -47,7 +48,7 @@ impl Api {
     async fn confirm_code(&self, account: &Account, code: &str) -> Result<()> {
         let guesses = format!("two-factor:{}", account.id);
         self.app.limiter.check(&guesses)?;
-        if !twofactor::check(&self.app.node, &account.id, code).await? {
+        if !twofactor::check(self.app.node()?, &account.id, code).await? {
             self.app.limiter.failed(&guesses);
             return Err(Error::denied("that code didn't work"));
         }
@@ -72,20 +73,12 @@ impl Api {
         if paths.is_empty() {
             return Err(Error::invalid("update_mask names nothing to change"));
         }
-        let sdb = self.app.servers.get(&wanted.server_id).await?;
-        if !self.app.servers.is_member(&account.id, &sdb.id) {
+        let server = self.app.index.summary(&wanted.server_id).ok_or(Error::NotFound("server"))?;
+        if !self.app.index.is_member(&account.id, &server.id) {
             return Err(Error::denied("join this server first"));
         }
-        if !wanted.channel_id.is_empty() {
-            let conn = sdb.read()?;
-            let exists = query_one(&conn, "SELECT 1 FROM channels WHERE id = ?1", [wanted.channel_id.as_str()], |r| {
-                r.get::<i64>(0)
-            })
-            .await?
-            .is_some();
-            if !exists {
-                return Err(Error::NotFound("channel"));
-            }
+        if !wanted.channel_id.is_empty() && !self.app.channel_exists(&server.id, &wanted.channel_id).await? {
+            return Err(Error::NotFound("channel"));
         }
         for path in &paths {
             match path.as_str() {
@@ -106,8 +99,8 @@ impl Api {
         let until = wanted.muted_until.as_ref().map(millis);
         let muted = wanted.muted && until.is_none_or(|until| until > now_ms());
         self.app
-            .node
-            .update_notification_settings(&account.id, &sdb.id, &wanted.channel_id, move |settings| {
+            .node()?
+            .update_notification_settings(&account.id, &server.id, &wanted.channel_id, move |settings| {
                 if level {
                     settings.level = wanted.level;
                 }
@@ -135,7 +128,7 @@ impl Api {
 
         let owned: Vec<String> = self
             .app
-            .servers
+            .index
             .joined(&account.id)
             .into_iter()
             .filter(|server| server.owner_id == account.id)
@@ -145,7 +138,10 @@ impl Api {
             let (names, which) = if owned.len() == 1 { (owned[0].clone(), "it") } else { (owned.join(", "), "them") };
             return Err(Error::FailedPrecondition(format!("you own {names}; delete {which} first")));
         }
-        if account.admin && self.app.node.admin_count().await? == 1 && self.app.node.account_counts().await?.total > 1 {
+        if account.admin
+            && self.app.node()?.admin_count().await? == 1
+            && self.app.node()?.account_counts().await?.total > 1
+        {
             return Err(Error::FailedPrecondition(
                 "you're this instance's only admin; make someone else an admin first".into(),
             ));
@@ -159,36 +155,9 @@ impl Api {
             kind: account.kind as i32,
             ..Default::default()
         };
-        for server_id in self.app.servers.ids() {
-            let Ok(sdb) = self.app.servers.get(&server_id).await else { continue };
-            if store::user(&sdb.read()?, &account.id).await?.is_none() {
-                continue;
-            }
-            let left = sdb
-                .write(&account.id, async |conn, events| {
-                    let left = conn.execute("DELETE FROM members WHERE user_id = ?1", [account.id.as_str()]).await? > 0;
-                    if left {
-                        conn.execute(
-                            "UPDATE usage SET members = members - 1, updated_at = ?1 WHERE id = 1",
-                            [now_ms()],
-                        )
-                        .await?;
-                        events.push(Payload::MemberLeft(pb::MemberLeft {
-                            user_id: account.id.clone(),
-                            reason: pb::LeaveReason::Left as i32,
-                        }));
-                    }
-                    store::upsert_user(conn, &gone).await?;
-                    events.push(Payload::UserUpdated(pb::UserUpdated { user: Some(gone.clone()) }));
-                    Ok(left)
-                })
-                .await?;
-            if left {
-                self.app.servers.index_leave(&account.id, &sdb.id);
-            }
-        }
-        let uploads = self.app.node.account_media(&account.id).await?;
-        self.app.node.delete_account(&account.id).await?;
+        self.app.forget_account(&account.id, &gone).await?;
+        let uploads = self.app.node()?.account_media(&account.id).await?;
+        self.app.node()?.delete_account(&account.id).await?;
         if let Err(err) = self.app.delete_media(&uploads).await {
             tracing::warn!(account = %account.id, error = %err, "couldn't delete a deleted account's pictures");
         }
@@ -206,7 +175,7 @@ impl AccountService for Api {
         respond(
             async {
                 let caller = self.caller(request.metadata()).await?;
-                let sessions = self.app.node.sessions(&caller.account.id, &caller.token_hash).await?;
+                let sessions = self.app.node()?.sessions(&caller.account.id, &caller.token_hash).await?;
                 Ok(pb::ListSessionsResponse {
                     sessions: sessions
                         .into_iter()
@@ -232,7 +201,7 @@ impl AccountService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                if !self.app.node.delete_session_by_id(&account.id, &request.get_ref().session_id).await? {
+                if !self.app.node()?.delete_session_by_id(&account.id, &request.get_ref().session_id).await? {
                     return Err(Error::NotFound("session"));
                 }
                 Ok(pb::RevokeSessionResponse {})
@@ -248,7 +217,7 @@ impl AccountService for Api {
         respond(
             async {
                 let caller = self.caller(request.metadata()).await?;
-                let revoked = self.app.node.delete_other_sessions(&caller.account.id, &caller.token_hash).await?;
+                let revoked = self.app.node()?.delete_other_sessions(&caller.account.id, &caller.token_hash).await?;
                 Ok(pb::RevokeOtherSessionsResponse { revoked: revoked as i32 })
             }
             .await,
@@ -262,7 +231,7 @@ impl AccountService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let left = if account.two_factor { self.app.node.backup_codes_left(&account.id).await? } else { 0 };
+                let left = if account.two_factor { self.app.node()?.backup_codes_left(&account.id).await? } else { 0 };
                 Ok(pb::GetTwoFactorResponse { enabled: account.two_factor, backup_codes_left: left as i32 })
             }
             .await,
@@ -281,7 +250,7 @@ impl AccountService for Api {
                 }
                 self.confirm_password(&account, &request.get_ref().password).await?;
                 let secret = twofactor::new_secret();
-                self.app.node.set_totp_pending(&account.id, &secret).await?;
+                self.app.node()?.set_totp_pending(&account.id, &secret).await?;
                 let uri = twofactor::uri(&secret, &self.app.settings().name, &account.username);
                 Ok(pb::SetUpTwoFactorResponse { secret, uri })
             }
@@ -296,7 +265,7 @@ impl AccountService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let state = self.app.node.totp_state(&account.id).await?;
+                let state = self.app.node()?.totp_state(&account.id).await?;
                 if state.secret.is_some() {
                     return Err(Error::FailedPrecondition("two-step sign-in is already on".into()));
                 }
@@ -312,7 +281,7 @@ impl AccountService for Api {
                 };
                 self.app.limiter.succeeded(&guesses);
                 let (backup_codes, hashes) = twofactor::new_backup_codes();
-                if !self.app.node.enable_totp(&account.id, &pending, step, &hashes).await? {
+                if !self.app.node()?.enable_totp(&account.id, &pending, step, &hashes).await? {
                     return Err(Error::FailedPrecondition("the setup changed meanwhile; start again".into()));
                 }
                 tracing::info!(account = %account.id, "two-step sign-in turned on");
@@ -333,7 +302,7 @@ impl AccountService for Api {
                 let req = request.into_inner();
                 self.confirm_password(&account, &req.password).await?;
                 self.confirm_code(&account, &req.code).await?;
-                self.app.node.disable_totp(&account.id).await?;
+                self.app.node()?.disable_totp(&account.id).await?;
                 tracing::info!(account = %account.id, "two-step sign-in turned off");
                 Ok(pb::DisableTwoFactorResponse {})
             }
@@ -351,7 +320,7 @@ impl AccountService for Api {
                 Self::two_factor_on(&account)?;
                 self.confirm_password(&account, &request.get_ref().password).await?;
                 let (backup_codes, hashes) = twofactor::new_backup_codes();
-                self.app.node.set_backup_codes(&account.id, &hashes).await?;
+                self.app.node()?.set_backup_codes(&account.id, &hashes).await?;
                 Ok(pb::RegenerateBackupCodesResponse { backup_codes })
             }
             .await,
@@ -365,7 +334,7 @@ impl AccountService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let settings = self.app.node.notification_settings(&account.id).await?;
+                let settings = self.app.node()?.notification_settings(&account.id).await?;
                 Ok(pb::GetNotificationSettingsResponse { settings })
             }
             .await,
@@ -451,7 +420,7 @@ async fn send(tx: &ExportSender, chunk: Vec<u8>) -> bool {
 /// never sits in memory whole. Stops early if the client goes away.
 async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()> {
     let account = &caller.account;
-    let node = &app.node;
+    let node = app.node()?;
     let profile = node.profile(&account.id).await?.ok_or(Error::NotFound("account"))?;
     let sessions = node.sessions(&account.id, &caller.token_hash).await?;
     let notifications = node.notification_settings(&account.id).await?;
@@ -501,89 +470,111 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
         return Ok(());
     }
 
+    // Each server's part comes from wherever its file is.
+    let mut pieces = app.export_account(&account.id);
     let mut first_server = true;
-    for server_id in app.servers.ids() {
-        let Ok(sdb) = app.servers.get(&server_id).await else { continue };
-        let conn = sdb.read()?;
-        if store::user(&conn, &account.id).await?.is_none() {
-            continue; // never a member
+    while let Some(piece) = pieces.recv().await {
+        let piece = piece?;
+        let mut chunk = piece.chunk;
+        if piece.starts_server {
+            let separator: &[u8] = if first_server { b"\n    " } else { b",\n    " };
+            chunk.splice(0..0, separator.iter().copied());
+            first_server = false;
         }
-        let server = sdb.server().await?;
-        let member = store::member(&conn, &sdb.id, &account.id).await?;
-        let about = json!({
-            "id": server.id,
-            "name": server.name,
-            "member": member.is_some(),
-            "role": member.as_ref().map(|m| role_name(m.role)),
-            "nickname": member.as_ref().map(|m| m.nickname.clone()).filter(|n| !n.is_empty()),
-            "joined_at": member.as_ref().map_or(Value::Null, |m| wire_time(&m.joined_at)),
-        });
-        let mut piece = serde_json::to_string(&about).map_err(|err| Error::internal(err.to_string()))?;
-        piece.pop();
-        piece.insert_str(0, if first_server { "\n    " } else { ",\n    " });
-        piece.push_str(",\"messages\":[");
-        first_server = false;
-
-        let mut after = String::new();
-        let mut first_message = true;
-        loop {
-            let page = query_all(
-                &conn,
-                "SELECT m.id, m.channel_id, coalesce(c.name, ''), m.content, m.extras, m.reply_to_id, m.created_at, m.edited_at
-                 FROM messages m LEFT JOIN channels c ON c.id = m.channel_id
-                 WHERE m.author_id = ?1 AND m.kind = 0 AND m.id > ?2 ORDER BY m.id LIMIT ?3",
-                (account.id.as_str(), after.as_str(), EXPORT_PAGE),
-                |r| {
-                    Ok((
-                        r.get::<String>(0)?,
-                        r.get::<String>(1)?,
-                        r.get::<String>(2)?,
-                        r.get::<String>(3)?,
-                        r.get::<Option<Vec<u8>>>(4)?,
-                        r.get::<Option<String>>(5)?,
-                        r.get::<i64>(6)?,
-                        r.get::<Option<i64>>(7)?,
-                    ))
-                },
-            )
-            .await?;
-            let Some(last) = page.last() else { break };
-            after = last.0.clone();
-            for (id, channel_id, channel, content, extras, reply_to, created_at, edited_at) in page {
-                let attachments = match extras {
-                    Some(bytes) => decode_extras(&bytes)?.0,
-                    None => vec![],
-                };
-                let message = json!({
-                    "id": id,
-                    "channel_id": channel_id,
-                    "channel": channel,
-                    "content": content,
-                    "reply_to_id": reply_to,
-                    "attachments": attachments.iter().map(|a| json!({
-                        "filename": a.filename,
-                        "content_type": a.content_type,
-                        "size": a.size,
-                        "url": a.url,
-                    })).collect::<Vec<_>>(),
-                    "created_at": time(created_at),
-                    "edited_at": edited_at.map_or(Value::Null, time),
-                });
-                if !first_message {
-                    piece.push(',');
-                }
-                first_message = false;
-                piece.push_str(&message.to_string());
-            }
-            if !send(tx, std::mem::take(&mut piece).into_bytes()).await {
-                return Ok(());
-            }
-        }
-        piece.push_str("]}");
-        if !send(tx, piece.into_bytes()).await {
+        if !send(tx, chunk).await {
             return Ok(());
         }
     }
     send(tx, b"\n  ]\n}\n".to_vec()).await;
     Ok(())
+}
+
+/// Pieces of one server's part of an export; the first of each server's
+/// starts its JSON object.
+pub(crate) type ExportPieces = mpsc::Sender<Result<cpb::ExportAccountResponse>>;
+
+/// A server's part of an account's export, if the account was ever in it:
+/// its membership and the messages it wrote, sent as pieces of JSON. False
+/// once nobody is listening.
+pub(crate) async fn export_server(sdb: &ServerDb, account_id: &str, tx: &ExportPieces) -> Result<bool> {
+    let conn = sdb.read()?;
+    if store::user(&conn, account_id).await?.is_none() {
+        return Ok(true); // never a member
+    }
+    let server = sdb.server().await?;
+    let member = store::member(&conn, &sdb.id, account_id).await?;
+    let about = json!({
+        "id": server.id,
+        "name": server.name,
+        "member": member.is_some(),
+        "role": member.as_ref().map(|m| role_name(m.role)),
+        "nickname": member.as_ref().map(|m| m.nickname.clone()).filter(|n| !n.is_empty()),
+        "joined_at": member.as_ref().map_or(Value::Null, |m| wire_time(&m.joined_at)),
+    });
+    let mut piece = serde_json::to_string(&about).map_err(|err| Error::internal(err.to_string()))?;
+    piece.pop();
+    piece.push_str(",\"messages\":[");
+    let mut starts_server = true;
+    let emit = async |piece: String, starts_server: bool| {
+        tx.send(Ok(cpb::ExportAccountResponse { chunk: piece.into_bytes(), starts_server })).await.is_ok()
+    };
+
+    let mut after = String::new();
+    let mut first_message = true;
+    loop {
+        let page = query_all(
+            &conn,
+            "SELECT m.id, m.channel_id, coalesce(c.name, ''), m.content, m.extras, m.reply_to_id, m.created_at, m.edited_at
+             FROM messages m LEFT JOIN channels c ON c.id = m.channel_id
+             WHERE m.author_id = ?1 AND m.kind = 0 AND m.id > ?2 ORDER BY m.id LIMIT ?3",
+            (account_id, after.as_str(), EXPORT_PAGE),
+            |r| {
+                Ok((
+                    r.get::<String>(0)?,
+                    r.get::<String>(1)?,
+                    r.get::<String>(2)?,
+                    r.get::<String>(3)?,
+                    r.get::<Option<Vec<u8>>>(4)?,
+                    r.get::<Option<String>>(5)?,
+                    r.get::<i64>(6)?,
+                    r.get::<Option<i64>>(7)?,
+                ))
+            },
+        )
+        .await?;
+        let Some(last) = page.last() else { break };
+        after = last.0.clone();
+        for (id, channel_id, channel, content, extras, reply_to, created_at, edited_at) in page {
+            let attachments = match extras {
+                Some(bytes) => decode_extras(&bytes)?.0,
+                None => vec![],
+            };
+            let message = json!({
+                "id": id,
+                "channel_id": channel_id,
+                "channel": channel,
+                "content": content,
+                "reply_to_id": reply_to,
+                "attachments": attachments.iter().map(|a| json!({
+                    "filename": a.filename,
+                    "content_type": a.content_type,
+                    "size": a.size,
+                    "url": a.url,
+                })).collect::<Vec<_>>(),
+                "created_at": time(created_at),
+                "edited_at": edited_at.map_or(Value::Null, time),
+            });
+            if !first_message {
+                piece.push(',');
+            }
+            first_message = false;
+            piece.push_str(&message.to_string());
+        }
+        if !emit(std::mem::take(&mut piece), starts_server).await {
+            return Ok(false);
+        }
+        starts_server = false;
+    }
+    piece.push_str("]}");
+    Ok(emit(piece, starts_server).await)
 }

@@ -4,6 +4,9 @@
 
 - `proto/fuwa/v1/`: the protocol (gRPC). `buf lint` must pass; the Rust code is
   generated from it at build time (`server/build.rs`, protoc is vendored).
+- `proto/fuwa/cluster/v1/`: the internal protocol between the parts of a split
+  instance (`cpb` in Rust). Never for clients: it isn't in the reflection
+  descriptor set or `web/src/gen`.
 - `server/`: the Rust server (`fuwa` binary, `fuwa_server` library).
   - `app.rs`: shared state, the HTTP router (gRPC, gRPC-Web, CORS, health), serving.
   - `api/`: one file per gRPC service, all implemented on `Api`.
@@ -15,8 +18,8 @@
     one server lives here; a server file keeps only a copy of what its members
     see (name, avatar, status) in its `users` table.
   - `twofactor.rs`: TOTP codes (RFC 6238) and backup codes for two-step sign-in.
-  - `servers.rs`: community servers, one Turso file each under `servers/`, plus the
-    in-memory index of servers and memberships. Every change goes through
+  - `servers.rs`: community servers, one Turso file each under `servers/`: the
+    ones this process keeps (all of them, or a shard's share). Every change goes through
     `ServerDb::write`, which appends events to the server's log in the same
     transaction and publishes them to the `Hub` after commit. What owners and
     admins do also goes in the server's `audit` table (`servers::Audit`),
@@ -41,10 +44,22 @@
   - `migrations/node`, `migrations/server`: SQL applied in order, tracked in
     `PRAGMA user_version`. Never edit a migration that has shipped; add a new file
     and list it in `MIGRATIONS`.
+  - `cluster/`: running as separate parts (`FUWA_ROLE`). `index.rs` is the
+    directory's in-memory index of every server, its members and its shard.
+    `calls.rs` holds every call that crosses parts, as `App` methods that run
+    locally in one process and over `proto/fuwa/cluster` when split
+    (`app.authenticate`, `server_changed`, `membership_changed`,
+    `server_gone`, `check_picture`, `create_server`, `update_user`,
+    `forget_account`, `describe_servers`…). `directory.rs` and `shard.rs`
+    answer the internal protocol; `gateway.rs` routes client calls (by
+    service, and by the `server_id` in field 1 for server-scoped ones) and
+    merges live streams. `require_key` and `WithKey` are the only places the
+    cluster key is checked and sent.
   - `web.rs`: serves the embedded web app (feature `web`, from `web/dist`), with
     `index.html` for any path the API doesn't answer so deep links work.
   - `tests/api.rs`: end-to-end tests against a running instance; `tests/web.rs`
-    covers the embedded app.
+    covers the embedded app; `tests/cluster.rs` runs a directory, two shards
+    and a gateway and drives them through the gateway.
 - `web/`: the web app (pnpm, Vite, React 19, TanStack Router, Tailwind 4,
   shadcn/ui and Animate UI copied from the waifu.dev site, Effect).
   - `src/gen/`: protobuf code from `pnpm generate`. Generated, committed, never
@@ -138,6 +153,13 @@
   and hovers answer. Use the springs and helpers in
   `web/src/components/motion.tsx` (`SwapText`, `Count`, `CountUp`) so the app
   moves alike everywhere, and keep it working with reduced motion.
+- Every role is the same binary; the role is configuration, never a build
+  feature. Handlers that take a `server_id` run on the shard holding it, so
+  they read only that server's file and reach accounts, other servers, the
+  index and pictures through the `App` methods in `cluster/calls.rs`, never
+  `app.node()` or `app.index` directly. Handlers without one run on the
+  directory. A new server-scoped request keeps `server_id` as field 1, and a
+  new RPC gets a line in `gateway::route`; `every_call_is_routed` checks both.
 - Before pushing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test`, and `buf lint`; for `web/`, `pnpm build` then
   `cargo test --features web`.

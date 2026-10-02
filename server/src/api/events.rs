@@ -128,7 +128,7 @@ impl EventService for Api {
                     _ = tx.closed() => return,
                     _ = heartbeat.tick() => {
                         // A session signed out from another device ends its streams too.
-                        if matches!(app.node.session_live(&token_hash).await, Ok(false)) {
+                        if matches!(app.session_live(&token_hash).await, Ok(false)) {
                             send(Err(Status::unauthenticated("this device was signed out"))).await;
                             return;
                         }

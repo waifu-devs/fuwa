@@ -1,0 +1,370 @@
+//! The calls that cross between parts: made right here when one process runs
+//! everything, and over the cluster protocol when the instance is split.
+//! Handlers use these, so each runs the same whichever part it's in.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use tokio::sync::mpsc;
+use tonic::metadata::MetadataMap;
+
+use super::shard;
+use crate::api::PictureOwner;
+use crate::app::{App, Link};
+use crate::auth::Viewer;
+use crate::cpb;
+use crate::error::{Error, Result};
+use crate::media;
+use crate::pb;
+use crate::servers::NewServer;
+
+impl App {
+    // ─────────────── Asked of the directory ───────────────
+
+    /// Who a request comes from.
+    pub async fn authenticate(&self, metadata: &MetadataMap) -> Result<Viewer> {
+        match &self.link {
+            Link::Shard(link) => link.authenticate(metadata).await,
+            _ => crate::auth::authenticate(self.node()?, self.config.admin_token.as_deref(), metadata).await,
+        }
+    }
+
+    /// Whether a session is still signed in.
+    pub async fn session_live(&self, token_hash: &str) -> Result<bool> {
+        match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::SessionLiveRequest { token_hash: token_hash.to_string() };
+                Ok(link.directory().session_live(request).await?.into_inner().live)
+            }
+            _ => self.node()?.session_live(token_hash).await,
+        }
+    }
+
+    /// Records a server's new profile after a committed change.
+    pub async fn server_changed(&self, server: &pb::Server) {
+        match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::IndexServerRequest { server: Some(server.clone()) };
+                link.tell("a server changed", async |mut d| d.index_server(request).await).await;
+            }
+            _ => self.index.update(server.clone()),
+        }
+    }
+
+    /// Records someone joining (or leaving) a server.
+    pub async fn membership_changed(&self, account_id: &str, server_id: &str, joined: bool) {
+        match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::IndexMembershipRequest {
+                    server_id: server_id.to_string(),
+                    account_id: account_id.to_string(),
+                    joined,
+                };
+                link.tell("about a membership", async |mut d| d.index_membership(request).await).await;
+            }
+            _ if joined => self.index.join(account_id, server_id),
+            _ => self.index.leave(account_id, server_id),
+        }
+    }
+
+    /// Forgets a deleted server: its place in the index, and notification
+    /// settings for it.
+    pub async fn server_gone(&self, server_id: &str) {
+        match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::DropServerRequest { server_id: server_id.to_string() };
+                link.tell("a server was deleted", async |mut d| d.drop_server(request).await).await;
+            }
+            Link::Directory(_) => {
+                self.index.remove(server_id);
+                if let Err(err) = async { self.node()?.place(server_id, None).await }.await {
+                    tracing::warn!(server = %server_id, error = %err, "couldn't forget where a deleted server was");
+                }
+                self.forget_notifications(server_id, None, None).await;
+            }
+            Link::Alone => {
+                self.index.remove(server_id);
+                self.forget_notifications(server_id, None, None).await;
+            }
+        }
+    }
+
+    /// Drops notification settings that no longer point anywhere. Losing them
+    /// only leaves a few unused rows, so a failure is just logged.
+    pub async fn forget_notifications(&self, server_id: &str, channel_id: Option<&str>, account_id: Option<&str>) {
+        let forgotten = match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::ForgetNotificationsRequest {
+                    server_id: server_id.to_string(),
+                    channel_id: channel_id.unwrap_or_default().to_string(),
+                    account_id: account_id.unwrap_or_default().to_string(),
+                };
+                link.directory().forget_notifications(request).await.map(|_| ()).map_err(Error::from)
+            }
+            _ => async { self.node()?.forget_notification_settings(server_id, channel_id, account_id).await }.await,
+        };
+        if let Err(err) = forgotten {
+            tracing::warn!(server = %server_id, error = %err, "couldn't forget notification settings");
+        }
+    }
+
+    /// Checks a picture link about to be set. A link to one of this
+    /// instance's uploads must be to one the caller uploaded, for this
+    /// purpose, and stored; its id comes back so `keep_picture` can mark it
+    /// used once the change is saved. Any other link passes as it is.
+    pub async fn check_picture(
+        &self,
+        account_id: &str,
+        purpose: pb::MediaPurpose,
+        url: &str,
+    ) -> Result<Option<String>> {
+        let Some(id) = media::id_in_url(url) else { return Ok(None) };
+        if let Link::Shard(link) = &self.link {
+            let request = cpb::CheckPictureRequest {
+                account_id: account_id.to_string(),
+                purpose: purpose as i32,
+                url: url.to_string(),
+            };
+            let id = link.directory().check_picture(request).await?.into_inner().media_id;
+            return Ok(Some(id).filter(|id| !id.is_empty()));
+        }
+        let Some(row) = self.node()?.media(&id).await? else { return Ok(None) };
+        if row.account_id != account_id || row.purpose != purpose {
+            return Err(Error::denied("upload that picture yourself to use it here"));
+        }
+        if !row.stored {
+            return Err(Error::FailedPrecondition("that picture hasn't finished uploading".into()));
+        }
+        Ok(Some(id))
+    }
+
+    /// Marks a checked upload as used. A failure only means it may be swept
+    /// later, so it's logged.
+    pub async fn keep_picture(&self, id: Option<&str>, server_id: Option<&str>) {
+        let Some(id) = id else { return };
+        let kept = match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::KeepPictureRequest {
+                    media_id: id.to_string(),
+                    server_id: server_id.unwrap_or_default().into(),
+                };
+                link.directory().keep_picture(request).await.map(|_| ()).map_err(Error::from)
+            }
+            _ => async { self.node()?.use_media(id, server_id).await }.await,
+        };
+        if let Err(err) = kept {
+            tracing::warn!(media = %id, error = %err, "couldn't mark a picture as used");
+        }
+    }
+
+    /// Deletes the picture a change replaced, if it was one of this
+    /// instance's uploads and belonged to what changed: the account's own
+    /// avatar or banner, or the server's icon.
+    pub async fn drop_picture(&self, old_url: &str, new_url: &str, owner: PictureOwner<'_>) {
+        if old_url == new_url {
+            return;
+        }
+        let Some(id) = media::id_in_url(old_url) else { return };
+        if let (Link::Shard(link), PictureOwner::Server(server_id)) = (&self.link, owner) {
+            let request = cpb::DropPictureRequest {
+                old_url: old_url.to_string(),
+                new_url: new_url.to_string(),
+                server_id: server_id.to_string(),
+            };
+            if let Err(err) = link.directory().drop_picture(request).await {
+                tracing::warn!(media = %id, error = %err.message(), "couldn't delete a replaced picture");
+            }
+            return;
+        }
+        let row = match async { self.node()?.media(&id).await }.await {
+            Ok(Some(row)) => row,
+            Ok(None) => return,
+            Err(err) => {
+                tracing::warn!(media = %id, error = %err, "couldn't look up a replaced picture");
+                return;
+            }
+        };
+        let belongs = match owner {
+            PictureOwner::Account(account_id, purpose) => row.account_id == account_id && row.purpose == purpose,
+            PictureOwner::Server(server_id) => {
+                row.purpose == pb::MediaPurpose::ServerIcon && row.server_id.as_deref() == Some(server_id)
+            }
+        };
+        if belongs && let Err(err) = self.delete_media(&[id]).await {
+            tracing::warn!(media = %row.id, error = %err, "couldn't delete a replaced picture");
+        }
+    }
+
+    /// How many servers an account owns.
+    pub async fn owned_count(&self, account_id: &str) -> Result<i64> {
+        match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::CountOwnedServersRequest { account_id: account_id.to_string() };
+                Ok(link.directory().count_owned_servers(request).await?.into_inner().count)
+            }
+            _ => Ok(self.index.owned_count(account_id)),
+        }
+    }
+
+    // ─────────────── Asked of the shards ───────────────
+
+    /// Makes a new server: here, or on the shard holding the fewest.
+    pub async fn create_server(&self, owner: &pb::User, new: NewServer) -> Result<pb::Server> {
+        let Link::Directory(shards) = &self.link else {
+            let server = self.servers.create(owner, new).await?;
+            self.index.insert(server.clone(), vec![owner.id.clone()], None);
+            return Ok(server);
+        };
+        let sizes = self.index.shard_sizes();
+        let (shard_id, mut client) = shards
+            .up()
+            .into_iter()
+            .min_by_key(|(id, _)| (sizes.get(id).copied().unwrap_or(0), id.clone()))
+            .ok_or_else(|| Error::Unavailable("no shard is up to hold a new server; try again soon".into()))?;
+        let request = cpb::CreateServerRequest {
+            owner: Some(owner.clone()),
+            name: new.name,
+            description: new.description,
+            icon_url: new.icon_url,
+            discoverable: new.discoverable,
+        };
+        let server = client
+            .create_server(request)
+            .await?
+            .into_inner()
+            .server
+            .ok_or_else(|| Error::internal("the shard didn't say what it made"))?;
+        self.node()?.place(&server.id, Some(&shard_id)).await?;
+        self.index.insert(server.clone(), vec![owner.id.clone()], Some(&shard_id));
+        Ok(server)
+    }
+
+    /// Copies someone's new profile into every server they're in.
+    pub async fn update_user(&self, user: &pb::User, server_ids: Vec<String>) {
+        let Link::Directory(shards) = &self.link else {
+            return shard::update_user(&self.servers, user, &server_ids).await;
+        };
+        for (shard_id, server_ids) in self.index.by_shard(&server_ids) {
+            let request = cpb::UpdateUserRequest { user: Some(user.clone()), server_ids };
+            let updated = match shards.client(&shard_id) {
+                Ok(mut client) => client.update_user(request).await.map(|_| ()).map_err(Error::from),
+                Err(err) => Err(err),
+            };
+            if let Err(err) = updated {
+                tracing::warn!(shard = %shard_id, error = %err, "couldn't update a member's profile");
+            }
+        }
+    }
+
+    /// Takes a deleted account out of every server it was ever in, leaving
+    /// `placeholder` as its name on what it wrote. Every shard must be up, so
+    /// none keeps the account's name.
+    pub async fn forget_account(&self, account_id: &str, placeholder: &pb::User) -> Result<()> {
+        let left = match &self.link {
+            Link::Directory(shards) => {
+                let all = shards.all();
+                if let Some((id, _)) = all.iter().find(|(_, client)| client.is_none()) {
+                    return Err(Error::Unavailable(format!(
+                        "shard {id} is down, and it may hold servers you were in; try again once it's back"
+                    )));
+                }
+                let mut left = Vec::new();
+                for (_, client) in all {
+                    let Some(mut client) = client else { continue };
+                    let request = cpb::ForgetAccountRequest {
+                        account_id: account_id.to_string(),
+                        placeholder: Some(placeholder.clone()),
+                    };
+                    left.extend(client.forget_account(request).await?.into_inner().left_server_ids);
+                }
+                left
+            }
+            _ => shard::forget_account(&self.servers, account_id, placeholder).await?,
+        };
+        for server_id in left {
+            self.index.leave(account_id, &server_id);
+        }
+        Ok(())
+    }
+
+    /// An account's part of a data export from every server: pieces of JSON,
+    /// the first of each server's starting its object.
+    pub fn export_account(self: &Arc<Self>, account_id: &str) -> mpsc::Receiver<Result<cpb::ExportAccountResponse>> {
+        let Link::Directory(shards) = &self.link else {
+            return shard::export_account(self.clone(), account_id.to_string());
+        };
+        let all = shards.all();
+        let account_id = account_id.to_string();
+        let (tx, rx) = mpsc::channel(4);
+        tokio::spawn(async move {
+            for (id, client) in all {
+                let Some(mut client) = client else {
+                    let down = format!("shard {id} is down, so the export would be missing servers; try again soon");
+                    let _ = tx.send(Err(Error::Unavailable(down))).await;
+                    return;
+                };
+                let mut stream =
+                    match client.export_account(cpb::ExportAccountRequest { account_id: account_id.clone() }).await {
+                        Ok(stream) => stream.into_inner(),
+                        Err(status) => {
+                            let _ = tx.send(Err(status.into())).await;
+                            return;
+                        }
+                    };
+                loop {
+                    let piece = match stream.message().await {
+                        Ok(Some(piece)) => Ok(piece),
+                        Ok(None) => break,
+                        Err(status) => Err(Error::from(status)),
+                    };
+                    let failed = piece.is_err();
+                    if tx.send(piece).await.is_err() || failed {
+                        return;
+                    }
+                }
+            }
+        });
+        rx
+    }
+
+    /// What admins see about servers (all of them when `ids` is empty). A
+    /// shard that's down leaves its servers out.
+    pub async fn describe_servers(&self, ids: &[String]) -> Result<Vec<cpb::ServerDescription>> {
+        let Link::Directory(shards) = &self.link else {
+            return shard::describe_servers(&self.servers, ids).await;
+        };
+        let mut described = Vec::new();
+        let mut grouped: HashMap<String, Vec<String>> = self.index.by_shard(ids);
+        if ids.is_empty() {
+            grouped.values_mut().for_each(Vec::clear);
+        }
+        for (shard_id, server_ids) in grouped {
+            let found = match shards.client(&shard_id) {
+                Ok(mut client) => {
+                    client.describe_servers(cpb::DescribeServersRequest { server_ids }).await.map_err(Error::from)
+                }
+                Err(err) => Err(err),
+            };
+            match found {
+                Ok(found) => described.extend(found.into_inner().servers),
+                Err(err) => tracing::warn!(shard = %shard_id, error = %err, "left a shard's servers out"),
+            }
+        }
+        described.sort_by(|a, b| {
+            let id = |d: &cpb::ServerDescription| d.server.as_ref().map(|s| s.id.clone()).unwrap_or_default();
+            id(a).cmp(&id(b))
+        });
+        Ok(described)
+    }
+
+    /// Whether a server has a channel.
+    pub async fn channel_exists(&self, server_id: &str, channel_id: &str) -> Result<bool> {
+        let Link::Directory(shards) = &self.link else {
+            return shard::channel_exists(&self.servers, server_id, channel_id).await;
+        };
+        let shard_id = self.index.placement(server_id).ok_or(Error::NotFound("server"))?;
+        let request =
+            cpb::ChannelExistsRequest { server_id: server_id.to_string(), channel_id: channel_id.to_string() };
+        Ok(shards.client(&shard_id)?.channel_exists(request).await?.into_inner().exists)
+    }
+}

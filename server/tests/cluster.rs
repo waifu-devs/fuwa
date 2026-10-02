@@ -1,0 +1,599 @@
+//! A split instance end to end: a directory, two shards and a gateway, each
+//! on its own local port, driven through the gateway as clients would.
+
+use std::collections::HashSet;
+use std::net::SocketAddr;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+
+use fuwa_server::app::App;
+use fuwa_server::cluster::gateway::Gateway;
+use fuwa_server::config::Config;
+use fuwa_server::pb;
+use fuwa_server::pb::event::Payload;
+use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
+use tokio_stream::StreamExt;
+use tokio_util::sync::CancellationToken;
+use tonic::transport::Channel;
+use tonic::{Code, Request, Streaming};
+
+const KEY: &str = "cluster-key-0123456789abcdef0123456789abcdef";
+const ADMIN_TOKEN: &str = "test-admin-token-0123456789abcdef0123456789";
+const PASSWORD: &str = "correct horse battery";
+
+/// One running part.
+struct Part {
+    app: Option<Arc<App>>,
+    addr: SocketAddr,
+    shutdown: CancellationToken,
+    serving: JoinHandle<()>,
+}
+
+impl Part {
+    fn url(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+
+    fn app(&self) -> &Arc<App> {
+        self.app.as_ref().unwrap()
+    }
+
+    async fn stop(mut self) {
+        self.shutdown.cancel();
+        self.serving.await.unwrap();
+        self.app.take();
+    }
+}
+
+async fn listen() -> (TcpListener, SocketAddr) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    (listener, addr)
+}
+
+fn config(dir: &Path, vars: &[(&str, String)]) -> Config {
+    let dir = dir.to_str().unwrap().to_string();
+    let vars: Vec<(String, String)> = vars.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
+    Config::from_lookup(|key| match key {
+        "FUWA_DATA_PATH" => Some(dir.clone()),
+        "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_ADMIN_TOKEN" => Some(ADMIN_TOKEN.into()),
+        "FUWA_CLUSTER_KEY" => Some(KEY.into()),
+        _ => vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()),
+    })
+    .unwrap()
+}
+
+fn serve(listener: TcpListener, router: axum::Router, shutdown: CancellationToken) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        axum::serve(listener, router).with_graceful_shutdown(async move { shutdown.cancelled().await }).await.unwrap();
+    })
+}
+
+async fn start_app(config: Config, listener: TcpListener, addr: SocketAddr) -> Part {
+    let app = App::open(config).await.unwrap();
+    let shutdown = app.shutdown.clone();
+    let serving = serve(listener, app.router(), shutdown.clone());
+    Part { app: Some(app), addr, shutdown, serving }
+}
+
+async fn start_shard(dir: &Path, name: &str, directory: &Part) -> Part {
+    let (listener, addr) = listen().await;
+    let vars = [
+        ("FUWA_ROLE", "shard".to_string()),
+        ("FUWA_SHARD_ID", name.to_string()),
+        ("FUWA_DIRECTORY_URL", directory.url()),
+        ("FUWA_INTERNAL_URL", format!("http://{addr}")),
+    ];
+    start_app(config(dir, &vars), listener, addr).await
+}
+
+struct Cluster {
+    directory: Part,
+    shards: Vec<Part>,
+    gateway: Part,
+    _gateway: Arc<Gateway>,
+}
+
+async fn start_cluster(root: &Path, vars: &[(&str, String)]) -> Cluster {
+    let (gateway_listener, gateway_addr) = listen().await;
+    let (listener, addr) = listen().await;
+    let mut directory_vars =
+        vec![("FUWA_ROLE", "directory".to_string()), ("FUWA_PUBLIC_URL", format!("http://{gateway_addr}"))];
+    directory_vars.extend(vars.iter().cloned());
+    let directory = start_app(config(&root.join("directory"), &directory_vars), listener, addr).await;
+    let shards = vec![
+        start_shard(&root.join("shard-a"), "a", &directory).await,
+        start_shard(&root.join("shard-b"), "b", &directory).await,
+    ];
+    let gateway_vars = [("FUWA_ROLE", "gateway".to_string()), ("FUWA_DIRECTORY_URL", directory.url())];
+    let gateway = Gateway::new(config(&root.join("gateway"), &gateway_vars)).unwrap();
+    let shutdown = gateway.shutdown();
+    let serving = serve(gateway_listener, gateway.router(), shutdown.clone());
+    let part = Part { app: None, addr: gateway_addr, shutdown, serving };
+    Cluster { directory, shards, gateway: part, _gateway: gateway }
+}
+
+impl Cluster {
+    async fn stop(self) {
+        self.gateway.stop().await;
+        for shard in self.shards {
+            shard.stop().await;
+        }
+        self.directory.stop().await;
+    }
+
+    /// Which shard holds a server, as the directory knows it.
+    fn placement(&self, server_id: &str) -> Option<String> {
+        self.directory.app().index.placement(server_id)
+    }
+}
+
+fn authed<T>(token: &str, message: T) -> Request<T> {
+    let mut request = Request::new(message);
+    request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
+    request
+}
+
+struct Clients {
+    auth: pb::auth_service_client::AuthServiceClient<Channel>,
+    account: pb::account_service_client::AccountServiceClient<Channel>,
+    servers: pb::server_service_client::ServerServiceClient<Channel>,
+    channels: pb::channel_service_client::ChannelServiceClient<Channel>,
+    messages: pb::message_service_client::MessageServiceClient<Channel>,
+    events: pb::event_service_client::EventServiceClient<Channel>,
+    admin: pb::admin_service_client::AdminServiceClient<Channel>,
+    node: pb::node_service_client::NodeServiceClient<Channel>,
+    media: pb::media_service_client::MediaServiceClient<Channel>,
+}
+
+async fn clients(part: &Part) -> Clients {
+    let channel = Channel::from_shared(part.url()).unwrap().connect().await.unwrap();
+    Clients {
+        auth: pb::auth_service_client::AuthServiceClient::new(channel.clone()),
+        account: pb::account_service_client::AccountServiceClient::new(channel.clone()),
+        servers: pb::server_service_client::ServerServiceClient::new(channel.clone()),
+        channels: pb::channel_service_client::ChannelServiceClient::new(channel.clone()),
+        messages: pb::message_service_client::MessageServiceClient::new(channel.clone()),
+        events: pb::event_service_client::EventServiceClient::new(channel.clone()),
+        admin: pb::admin_service_client::AdminServiceClient::new(channel.clone()),
+        node: pb::node_service_client::NodeServiceClient::new(channel.clone()),
+        media: pb::media_service_client::MediaServiceClient::new(channel),
+    }
+}
+
+async fn sign_up(c: &mut Clients, username: &str) -> (String, pb::User) {
+    let request =
+        pb::SignUpRequest { username: username.into(), password: PASSWORD.into(), display_name: String::new() };
+    let res = c.auth.sign_up(request).await.unwrap().into_inner();
+    (res.token, res.user.unwrap())
+}
+
+async fn create_server(c: &mut Clients, token: &str, name: &str) -> pb::Server {
+    let request = pb::CreateServerRequest { name: name.into(), discoverable: true, ..Default::default() };
+    c.servers.create_server(authed(token, request)).await.unwrap().into_inner().server.unwrap()
+}
+
+async fn general(c: &mut Clients, token: &str, server_id: &str) -> pb::Channel {
+    let request = pb::ListChannelsRequest { server_id: server_id.into() };
+    c.channels.list_channels(authed(token, request)).await.unwrap().into_inner().channels.remove(0)
+}
+
+async fn send(c: &mut Clients, token: &str, server_id: &str, channel_id: &str, content: &str) -> pb::Message {
+    let request = pb::SendMessageRequest {
+        server_id: server_id.into(),
+        channel_id: channel_id.into(),
+        content: content.into(),
+        ..Default::default()
+    };
+    c.messages.send_message(authed(token, request)).await.unwrap().into_inner().message.unwrap()
+}
+
+async fn join(c: &mut Clients, token: &str, server_id: &str) -> Result<pb::JoinServerResponse, tonic::Status> {
+    c.servers
+        .join_server(authed(token, pb::JoinServerRequest { server_id: server_id.into() }))
+        .await
+        .map(|r| r.into_inner())
+}
+
+async fn members(c: &mut Clients, token: &str, server_id: &str) -> Vec<pb::Member> {
+    let request = pb::ListMembersRequest { server_id: server_id.into() };
+    c.servers.list_members(authed(token, request)).await.unwrap().into_inner().members
+}
+
+async fn next(stream: &mut Streaming<pb::SubscribeResponse>) -> pb::SubscribeResponse {
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(10), stream.next()).await.unwrap().unwrap().unwrap();
+        if message.event.is_some() || message.ready.is_some() {
+            return message;
+        }
+    }
+}
+
+/// Reads events until one matches.
+async fn until(stream: &mut Streaming<pb::SubscribeResponse>, matches: impl Fn(&pb::Event) -> bool) -> pb::Event {
+    loop {
+        if let Some(event) = next(stream).await.event
+            && matches(&event)
+        {
+            return event;
+        }
+    }
+}
+
+/// Retries until a call stops failing as `code`, for changes that take a
+/// moment to reach every part.
+async fn eventually<T, F: Future<Output = Result<T, tonic::Status>>>(mut call: impl FnMut() -> F) -> T {
+    for _ in 0..100 {
+        match call().await {
+            Ok(value) => return value,
+            Err(status) if matches!(status.code(), Code::Unavailable | Code::NotFound) => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(status) => panic!("{status:?}"),
+        }
+    }
+    panic!("still failing");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_split_instance_works_like_one() {
+    let root = tempfile::tempdir().unwrap();
+    let cluster = start_cluster(root.path(), &[("FUWA_NODE_NAME", "Split".to_string())]).await;
+    let mut c = clients(&cluster.gateway).await;
+
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert_eq!(node.name, "Split");
+    let (juan, juan_user) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user) = sign_up(&mut c, "mika").await;
+
+    // New servers go to the shard holding the fewest.
+    let mut servers = Vec::new();
+    for name in ["One", "Two", "Three", "Four"] {
+        servers.push(create_server(&mut c, &juan, name).await);
+    }
+    let shards: Vec<String> = servers.iter().map(|s| cluster.placement(&s.id).unwrap()).collect();
+    assert_eq!(shards.iter().filter(|s| *s == "a").count(), 2);
+    assert_eq!(shards.iter().filter(|s| *s == "b").count(), 2);
+    let on_a = servers[shards.iter().position(|s| s == "a").unwrap()].clone();
+    let on_b = servers[shards.iter().position(|s| s == "b").unwrap()].clone();
+    assert!(cluster.shards[0].app().servers.holds(&on_a.id) && !cluster.shards[1].app().servers.holds(&on_a.id));
+
+    // Joining servers on both shards; the directory's lists keep up.
+    let discovered =
+        c.servers.discover_servers(authed(&mika, pb::DiscoverServersRequest {})).await.unwrap().into_inner().servers;
+    assert_eq!(discovered.len(), 4);
+    let joined = join(&mut c, &mika, &on_a.id).await.unwrap();
+    assert_eq!(joined.server.unwrap().member_count, 2);
+    join(&mut c, &mika, &on_b.id).await.unwrap();
+    assert_eq!(join(&mut c, &mika, &on_b.id).await.unwrap_err().code(), Code::AlreadyExists);
+    let mine = c.servers.list_servers(authed(&mika, pb::ListServersRequest {})).await.unwrap().into_inner().servers;
+    assert_eq!(
+        mine.iter().map(|s| s.id.as_str()).collect::<HashSet<_>>(),
+        HashSet::from([on_a.id.as_str(), on_b.id.as_str()])
+    );
+    assert!(mine.iter().all(|s| s.member_count == 2));
+
+    // Unknown and malformed servers read the same as on one process.
+    let missing = c
+        .servers
+        .get_server(authed(&mika, pb::GetServerRequest { server_id: "01J00000000000000000000000".into() }))
+        .await;
+    assert_eq!(missing.unwrap_err().code(), Code::NotFound);
+    let malformed = c.servers.get_server(authed(&mika, pb::GetServerRequest { server_id: "../x".into() })).await;
+    assert_eq!(malformed.unwrap_err().code(), Code::InvalidArgument);
+
+    // One live stream follows servers on both shards: replays, one ready, then live.
+    let cursors =
+        [&on_a, &on_b].iter().map(|s| pb::ServerCursor { server_id: s.id.clone(), after_sequence: Some(0) }).collect();
+    let mut stream =
+        c.events.subscribe(authed(&mika, pb::SubscribeRequest { servers: cursors })).await.unwrap().into_inner();
+    let mut replayed = HashSet::new();
+    let ready = loop {
+        let message = next(&mut stream).await;
+        match (message.event, message.ready) {
+            (Some(event), _) => {
+                replayed.insert(event.server_id);
+            }
+            (None, Some(ready)) => break ready,
+            _ => unreachable!(),
+        }
+    };
+    assert_eq!(replayed.len(), 2);
+    assert_eq!(ready.servers.len(), 2);
+    assert!(ready.servers.iter().all(|head| head.sequence > 0));
+
+    let channel_a = general(&mut c, &juan, &on_a.id).await;
+    let channel_b = general(&mut c, &juan, &on_b.id).await;
+    send(&mut c, &juan, &on_a.id, &channel_a.id, "hello from a").await;
+    send(&mut c, &juan, &on_b.id, &channel_b.id, "hello from b").await;
+    let mut seen = HashSet::new();
+    while seen.len() < 2 {
+        let event = until(&mut stream, |e| matches!(e.payload, Some(Payload::MessageCreated(_)))).await;
+        seen.insert(event.server_id);
+    }
+    send(&mut c, &mika, &on_b.id, &channel_b.id, "mika was here").await;
+    let listed = c
+        .events
+        .list_events(authed(&mika, pb::ListEventsRequest { server_id: on_b.id.clone(), ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(listed.events.len() >= 4);
+
+    // A new profile reaches every server, on every shard.
+    let rename = pb::UpdateProfileRequest { display_name: Some("Mika ✨".into()), ..Default::default() };
+    c.auth.update_profile(authed(&mika, rename)).await.unwrap();
+    for server in [&on_a, &on_b] {
+        let found = members(&mut c, &juan, &server.id).await;
+        assert!(found.iter().any(|m| m.user.as_ref().unwrap().display_name == "Mika ✨"), "on {}", server.name);
+    }
+    until(&mut stream, |e| matches!(&e.payload, Some(Payload::MemberUpdated(_)))).await;
+    let profile = c.auth.get_profile(authed(&mika, pb::GetProfileRequest { user_id: juan_user.id.clone() })).await;
+    assert!(profile.is_ok());
+
+    // Notification settings check the channel on its shard.
+    let change = |channel_id: &str| pb::UpdateNotificationSettingsRequest {
+        settings: Some(pb::NotificationSettings {
+            server_id: on_b.id.clone(),
+            channel_id: channel_id.into(),
+            muted: true,
+            ..Default::default()
+        }),
+        update_mask: Some(prost_types::FieldMask { paths: vec!["muted".into()] }),
+    };
+    c.account.update_notification_settings(authed(&mika, change(&channel_b.id))).await.unwrap();
+    let nowhere = c.account.update_notification_settings(authed(&mika, change(&channel_a.id))).await;
+    assert_eq!(nowhere.unwrap_err().code(), Code::NotFound);
+
+    // Admins see every server, from every shard.
+    let usage = c.admin.get_node_usage(authed(&juan, pb::GetNodeUsageRequest {})).await.unwrap().into_inner();
+    assert_eq!((usage.accounts, usage.servers, usage.server_usage.len()), (2, 4, 4));
+    let listed = c.admin.list_instance_servers(authed(ADMIN_TOKEN, pb::ListInstanceServersRequest {})).await.unwrap();
+    let listed = listed.into_inner().servers;
+    assert_eq!(listed.len(), 4);
+    assert!(listed.iter().all(|s| s.owner.as_ref().unwrap().id == juan_user.id));
+    let limits = pb::SetServerLimitsRequest {
+        server_id: on_b.id.clone(),
+        limits: Some(pb::ServerLimits { channels: Some(5), ..Default::default() }),
+    };
+    let set = c.admin.set_server_limits(authed(&juan, limits)).await.unwrap().into_inner();
+    assert_eq!(set.limits.unwrap().channels, Some(5));
+
+    // Settings changed on the directory reach the shards.
+    let settings = pb::InstanceSettings {
+        default_limits: Some(pb::ServerLimits { members: Some(2), ..Default::default() }),
+        ..Default::default()
+    };
+    let update = pb::UpdateSettingsRequest {
+        settings: Some(settings),
+        update_mask: Some(prost_types::FieldMask { paths: vec!["default_limits.members".into()] }),
+        reset_mask: None,
+    };
+    c.admin.update_settings(authed(&juan, update)).await.unwrap();
+    let (kai, _) = sign_up(&mut c, "kai").await;
+    let mut full = None;
+    for _ in 0..50 {
+        match join(&mut c, &kai, &on_a.id).await {
+            Err(status) if status.code() == Code::ResourceExhausted => {
+                full = Some(status);
+                break;
+            }
+            Err(status) => panic!("{status:?}"),
+            Ok(_) => {
+                let leave = pb::LeaveServerRequest { server_id: on_a.id.clone() };
+                c.servers.leave_server(authed(&kai, leave)).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+    assert!(full.unwrap().message().contains("full"));
+
+    // Pictures go up and come back through the gateway, and a shard's server
+    // can use one as its icon.
+    let png = {
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        bytes.resize(600, 7);
+        bytes
+    };
+    let reserved = c
+        .media
+        .create_upload(authed(
+            &juan,
+            pb::CreateUploadRequest {
+                purpose: pb::MediaPurpose::ServerIcon as i32,
+                content_type: "image/png".into(),
+                size: png.len() as i64,
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let http = reqwest::Client::new();
+    assert!(reserved.upload_url.starts_with(&cluster.gateway.url()));
+    let put = http.put(&reserved.upload_url).body(png.clone()).send().await.unwrap();
+    assert_eq!(put.status(), reqwest::StatusCode::NO_CONTENT);
+    let picture = reserved.media.unwrap();
+    let fetched = http.get(&picture.url).send().await.unwrap();
+    assert_eq!(fetched.status(), 200);
+    assert_eq!(fetched.bytes().await.unwrap().to_vec(), png);
+    let icon = pb::UpdateServerRequest {
+        server_id: on_b.id.clone(),
+        icon_url: Some(picture.url.clone()),
+        ..Default::default()
+    };
+    c.servers.update_server(authed(&juan, icon)).await.unwrap();
+    let row = cluster.directory.app().node().unwrap().media(&picture.id).await.unwrap().unwrap();
+    assert!(row.used);
+    assert_eq!(row.server_id.as_deref(), Some(on_b.id.as_str()));
+    let theirs = pb::UpdateServerRequest {
+        server_id: on_a.id.clone(),
+        icon_url: Some(picture.url.clone()),
+        ..Default::default()
+    };
+    assert_eq!(c.servers.update_server(authed(&mika, theirs)).await.unwrap_err().code(), Code::PermissionDenied);
+
+    // Browsers reach everything through the gateway too.
+    let response = http
+        .post(format!("{}/fuwa.v1.ServerService/GetServer", cluster.gateway.url()))
+        .header("content-type", "application/grpc-web+proto")
+        .header("authorization", format!("Bearer {mika}"))
+        .header("origin", "https://fuwa.waifu.dev")
+        .body({
+            let payload = prost::Message::encode_to_vec(&pb::GetServerRequest { server_id: on_b.id.clone() });
+            let mut framed = vec![0u8];
+            framed.extend((payload.len() as u32).to_be_bytes());
+            framed.extend(payload);
+            framed
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["access-control-allow-origin"], "https://fuwa.waifu.dev");
+    let body = response.bytes().await.unwrap();
+    let length = u32::from_be_bytes(body[1..5].try_into().unwrap()) as usize;
+    let reply = <pb::GetServerResponse as prost::Message>::decode(&body[5..5 + length]).unwrap();
+    assert_eq!(reply.server.unwrap().icon_url, picture.url);
+    assert_eq!(
+        http.get(format!("{}/healthz", cluster.gateway.url())).send().await.unwrap().text().await.unwrap(),
+        "ok"
+    );
+
+    // The parts behind the gateway answer only calls carrying the cluster key.
+    let mut direct = clients(&cluster.shards[0]).await;
+    let refused = direct.servers.get_server(authed(&mika, pb::GetServerRequest { server_id: on_a.id.clone() })).await;
+    assert_eq!(refused.unwrap_err().code(), Code::PermissionDenied);
+    let mut direct = clients(&cluster.directory).await;
+    assert_eq!(direct.node.get_node(pb::GetNodeRequest {}).await.unwrap_err().code(), Code::PermissionDenied);
+    assert_eq!(http.get(format!("{}/healthz", cluster.directory.url())).send().await.unwrap().status(), 200);
+
+    // Deleting a server: the stream says so, and the directory forgets it.
+    c.servers.delete_server(authed(&juan, pb::DeleteServerRequest { server_id: on_a.id.clone() })).await.unwrap();
+    let deleted = until(&mut stream, |e| matches!(e.payload, Some(Payload::ServerDeleted(_)))).await;
+    assert_eq!(deleted.server_id, on_a.id);
+    assert_eq!(cluster.placement(&on_a.id), None);
+    let gone = c.servers.get_server(authed(&juan, pb::GetServerRequest { server_id: on_a.id.clone() })).await;
+    assert_eq!(gone.unwrap_err().code(), Code::NotFound);
+    let mine = c.servers.list_servers(authed(&mika, pb::ListServersRequest {})).await.unwrap().into_inner().servers;
+    assert_eq!(mine.len(), 1);
+
+    // A data export gathers every shard's part.
+    let mut chunks = c.account.export_data(authed(&mika, pb::ExportDataRequest {})).await.unwrap().into_inner();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = chunks.next().await {
+        bytes.extend(chunk.unwrap().chunk);
+    }
+    let export: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let exported = export["servers"].as_array().unwrap();
+    assert_eq!(exported.len(), 1);
+    assert_eq!(exported[0]["messages"][0]["content"], "mika was here");
+
+    // Deleting an account takes it out of every shard's servers.
+    drop(stream);
+    let delete = pb::DeleteAccountRequest { password: PASSWORD.into(), ..Default::default() };
+    c.account.delete_account(authed(&mika, delete)).await.unwrap();
+    let left = members(&mut c, &juan, &on_b.id).await;
+    assert!(left.iter().all(|m| m.user.as_ref().unwrap().id != mika_user.id));
+    assert_eq!(c.auth.get_me(authed(&mika, pb::GetMeRequest {})).await.unwrap_err().code(), Code::Unauthenticated);
+
+    cluster.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shards_come_and_go() {
+    let root = tempfile::tempdir().unwrap();
+    let mut cluster = start_cluster(root.path(), &[]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let first = create_server(&mut c, &juan, "First").await;
+    let second = create_server(&mut c, &juan, "Second").await;
+    let on_b = if cluster.placement(&first.id).as_deref() == Some("b") { first } else { second };
+    assert_eq!(cluster.placement(&on_b.id).as_deref(), Some("b"));
+    let channel = general(&mut c, &juan, &on_b.id).await;
+
+    // A live stream following a shard that stops ends, so the client follows again.
+    let cursors = vec![pb::ServerCursor { server_id: on_b.id.clone(), after_sequence: None }];
+    let mut stream = c
+        .events
+        .subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(next(&mut stream).await.ready.is_some());
+
+    // While shard b is down, its servers can't be reached; the rest can.
+    let b = cluster.shards.remove(1);
+    b.stop().await;
+    let ended = tokio::time::timeout(Duration::from_secs(10), stream.next()).await.unwrap();
+    assert_eq!(ended.unwrap().unwrap_err().code(), Code::Unavailable);
+    let mut down = None;
+    for _ in 0..50 {
+        let request = pb::GetServerRequest { server_id: on_b.id.clone() };
+        match c.servers.get_server(authed(&juan, request)).await {
+            Err(status) if status.code() == Code::Unavailable => {
+                down = Some(status);
+                break;
+            }
+            _ => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
+    assert!(down.is_some(), "a down shard's servers read as unavailable");
+    assert!(c.servers.list_servers(authed(&juan, pb::ListServersRequest {})).await.is_ok());
+    let made =
+        c.servers.create_server(authed(&juan, pb::CreateServerRequest { name: "Third".into(), ..Default::default() }));
+    let made = made.await.unwrap().into_inner().server.unwrap();
+    assert_eq!(cluster.placement(&made.id).as_deref(), Some("a"), "new servers go to shards that are up");
+    // Deleting an account needs every shard, so nobody's name stays behind.
+    let (temp, _) = sign_up(&mut c, "temp").await;
+    let delete = pb::DeleteAccountRequest { password: PASSWORD.into(), ..Default::default() };
+    assert_eq!(c.account.delete_account(authed(&temp, delete)).await.unwrap_err().code(), Code::Unavailable);
+
+    // Back on another port, it registers again and its servers work.
+    let b = start_shard(&root.path().join("shard-b"), "b", &cluster.directory).await;
+    cluster.shards.push(b);
+    eventually(|| {
+        let mut c = c.messages.clone();
+        let request = pb::SendMessageRequest {
+            server_id: on_b.id.clone(),
+            channel_id: channel.id.clone(),
+            content: "back".into(),
+            ..Default::default()
+        };
+        let request = authed(&juan, request);
+        async move { c.send_message(request).await }
+    })
+    .await;
+
+    // Moving a server: stop its shard, move the file, start the other one.
+    let b = cluster.shards.remove(1);
+    b.stop().await;
+    let a = cluster.shards.remove(0);
+    a.stop().await;
+    let file = format!("{}.db", on_b.id);
+    for suffix in ["", "-log", "-wal", "-shm"] {
+        let from = root.path().join("shard-b/servers").join(format!("{file}{suffix}"));
+        if from.exists() {
+            std::fs::rename(&from, root.path().join("shard-a/servers").join(format!("{file}{suffix}"))).unwrap();
+        }
+    }
+    cluster.shards.push(start_shard(&root.path().join("shard-a"), "a", &cluster.directory).await);
+    cluster.shards.push(start_shard(&root.path().join("shard-b"), "b", &cluster.directory).await);
+    assert_eq!(cluster.placement(&on_b.id).as_deref(), Some("a"));
+    let listed = eventually(|| {
+        let mut c = c.messages.clone();
+        let request = pb::ListMessagesRequest {
+            server_id: on_b.id.clone(),
+            channel_id: channel.id.clone(),
+            ..Default::default()
+        };
+        let request = authed(&juan, request);
+        async move { c.list_messages(request).await }
+    })
+    .await;
+    assert!(listed.into_inner().messages.iter().any(|m| m.content == "back"));
+
+    cluster.stop().await;
+}

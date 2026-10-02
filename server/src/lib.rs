@@ -7,6 +7,7 @@
 pub mod api;
 pub mod app;
 pub mod auth;
+pub mod cluster;
 pub mod config;
 pub mod db;
 pub mod error;
@@ -25,12 +26,20 @@ pub mod proto {
         pub mod v1 {
             tonic::include_proto!("fuwa.v1");
         }
+
+        pub mod cluster {
+            pub mod v1 {
+                include!(concat!(env!("OUT_DIR"), "/cluster/fuwa.cluster.v1.rs"));
+            }
+        }
     }
 
     /// Every fuwa.v1 descriptor, for gRPC reflection.
     pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("fuwa_descriptor");
 }
 
+/// The internal protocol between the parts of a split instance.
+pub use proto::fuwa::cluster::v1 as cpb;
 pub use proto::fuwa::v1 as pb;
 
 /// This build's version, reported to clients and in the usage signal.
