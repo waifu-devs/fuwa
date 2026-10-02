@@ -93,7 +93,19 @@
     answer the internal protocol; `gateway.rs` routes client calls (by
     service, and by the `server_id` in field 1 for server-scoped ones) and
     merges live streams. `require_key` and `WithKey` are the only places the
-    cluster key is checked and sent.
+    cluster key is checked and sent. A directory whose folder still has a
+    single process's `servers/` hands them to the first shard that asks
+    (`TakeServers`, then `HandedOver`; `shard::take_servers` runs before a
+    shard opens its servers), keeping its copies in `handed-over/`.
+    Restarts go unnoticed: gateways retry a call whose part is unreachable
+    (or answered with the `fuwa-not-ready` header) for up to
+    `ClusterConfig::ride_out` (`RIDE_OUT`, 30s), and re-follow a shard's
+    servers from each one's last sequence when its live stream ends early;
+    shards ask the directory read-only questions through `Link::ask`, which
+    waits the same way; a directory that just started turns client calls
+    away with `fuwa-not-ready` until every known shard has registered again
+    (`Shards::caught_up`). A gateway's `/healthz` fails until it has reached
+    the directory.
   - `web.rs`: serves the embedded web app (feature `web`, from `web/dist`), with
     `index.html` for any path the API doesn't answer so deep links work.
   - `tests/api.rs`: end-to-end tests against a running instance; `tests/web.rs`
@@ -167,13 +179,17 @@
     says about itself.
 - `.railway/railway.ts`: fuwa.chat, the instance Waifu Devs hosts, in its own
   Railway project ("fuwa"): the published image, a volume at `/data`, the
-  domain. Every merge to master redeploys it onto the new image (the `Deploy
-  fuwa.chat` job in `publish.yml`); with a volume attached, Railway stops the
-  old deployment before starting the new one, so each deploy briefly drops
-  connections. A pull request that touches it gets a plan comment and merging
+  domain. Its `SPLIT` setting turns it into a directory (on that volume),
+  shards (a volume each) and gateway replicas; shards can be added, never
+  removed. Every merge to master redeploys each service it declares onto the
+  new image (the `Deploy fuwa.chat` job in `publish.yml`); with a volume
+  attached, Railway stops the old deployment before starting the new one, so
+  while it's one process each deploy briefly drops connections. Split, only
+  the directory and shards have volumes, and the gateways (which overlap old
+  and new) ride out their restarts. A pull request that touches it gets a plan comment and merging
   applies it (`.github/workflows/railway-config.yml`); the root `package.json`
   exists only for this. The encryption key is a shared variable set by hand and
-  must never change. Don't edit the project in Railway's dashboard between a
+  must never change; so is the cluster key, which can. Don't edit the project in Railway's dashboard between a
   plan and its apply, or the apply refuses.
 
 ## Rules
@@ -265,6 +281,9 @@
   in `cluster/calls.rs`, never `app.node()` or `app.index` directly. Handlers
   without one run on the directory. A new server-scoped request keeps `server_id` as field 1, and a
   new RPC gets a line in `gateway::route`; `every_call_is_routed` checks both.
+  A part must be able to restart without clients noticing: only retry what
+  can't have been done twice (a call that never reached its part, or one
+  turned away with `fuwa-not-ready`), and use `Link::ask` only for questions.
 - Releases: set the version in `server/Cargo.toml`, merge, then push the tag
   `v<version>`. `Publish image` tags the image (`0.2.0`, `0.2`; `latest`
   follows master) for x86 and ARM, and `Release` makes the GitHub release with

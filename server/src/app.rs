@@ -1,6 +1,6 @@
 //! The running instance: its state, its HTTP router, and serving it.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -63,7 +63,7 @@ pub enum Link {
     /// Nowhere: this process runs everything.
     Alone,
     /// This is the directory; server files are on shards.
-    Directory(crate::cluster::directory::Shards),
+    Directory(Box<crate::cluster::directory::Shards>),
     /// This is a shard; accounts are on the directory.
     Shard(Box<crate::cluster::shard::Link>),
 }
@@ -79,6 +79,11 @@ impl App {
         // Exports are written here and streamed; one left by a crash is stale.
         let _ = std::fs::remove_dir_all(config.data_path.join("exports"));
 
+        // A shard takes the single process's servers first, so a shard that
+        // just took them never looks empty to the replica's restore check.
+        if role == Role::Shard {
+            crate::cluster::shard::take_servers(&config).await?;
+        }
         // Only a split instance's directory and shards replicate (see config.rs).
         let replica = match &config.replica {
             Some(replica_config) if matches!(role, Role::Directory | Role::Shard) => {
@@ -120,7 +125,7 @@ impl App {
                     (Servers::open(&config.data_path, key, hub.clone(), false, None).await?, Link::Alone)
                 } else {
                     let shards = crate::cluster::directory::Shards::load(&config, &node).await?;
-                    (Servers::none(hub.clone()), Link::Directory(shards))
+                    (Servers::none(hub.clone()), Link::Directory(Box::new(shards)))
                 };
                 (Some(node), Some(media), servers, link)
             }
@@ -282,6 +287,10 @@ impl App {
             // The web app (when it's on) answers every other GET, so its own addresses work on reload.
             return router.fallback(crate::web::handler(self.clone())).layer(cors(self.clone()));
         }
+        if let Link::Directory(_) = &self.link {
+            let wait = crate::cluster::directory::wait_for_shards;
+            router = router.layer(axum::middleware::from_fn_with_state(self.clone(), wait));
+        }
         // Behind gateways, which serve the web app and answer browsers' CORS.
         let key: Arc<str> = self.config.cluster.key.as_deref().unwrap_or_default().into();
         router.layer(axum::middleware::from_fn_with_state(key, crate::cluster::require_key))
@@ -349,8 +358,10 @@ pub fn cors(source: Arc<impl HasSettings>) -> CorsLayer {
 /// Opens the instance (or this process's part of it) and serves it until
 /// Ctrl-C or SIGTERM.
 pub async fn run(config: Config) -> std::result::Result<(), String> {
-    let address: SocketAddr = format!("{}:{}", config.host, config.port)
-        .parse()
+    let host = config.host.trim().trim_start_matches('[').trim_end_matches(']');
+    let address = host
+        .parse::<IpAddr>()
+        .map(|ip| SocketAddr::new(ip, config.port))
         .map_err(|_| format!("FUWA_HOST {:?} isn't an IP address to listen on", config.host))?;
     if config.cluster.role == Role::Gateway {
         return crate::cluster::gateway::run(config, address).await;

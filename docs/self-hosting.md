@@ -183,6 +183,17 @@ same Caddyfile as above, with `h2c://127.0.0.1:8080` as the address.
 
 Keep it to one replica: every server's database is a file on that one volume.
 For more than one machine, see [Scaling out](../README.md#scaling-out).
+fuwa.chat's own [Railway config](../.railway/railway.ts) is a worked example:
+with its `SPLIT` setting on, the service with the domain becomes the gateways
+(several replicas), a `fuwa-directory` service takes over the volume, and each
+shard is a service with a volume of its own, all on Railway's private network
+with `FUWA_HOST=::`.
+
+A service with a volume can't run its old and new deployments side by side, so
+with one process each deploy drops connections for a few seconds; the app
+reconnects and catches up by itself. Split, only the directory and shards have
+volumes, and the gateways hold calls and live streams while those restart, so
+deploys go unnoticed (see [Restarts and deploys](../README.md#restarts-and-deploys)).
 
 ## After it's up
 

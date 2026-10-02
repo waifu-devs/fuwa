@@ -23,6 +23,8 @@ const HEARTBEAT: Duration = Duration::from_secs(25);
 const MAX_SERVERS: usize = 200;
 /// Events read from disk at a time while replaying.
 const REPLAY_PAGE: i64 = 500;
+/// What an open stream gets when the instance stops.
+const RESTARTING: &str = "this instance is restarting; subscribe again from your last sequence";
 
 type EventStream = Pin<Box<dyn Stream<Item = Result<pb::SubscribeResponse, Status>> + Send>>;
 
@@ -251,7 +253,12 @@ impl EventService for Api {
             heartbeat.tick().await;
             loop {
                 tokio::select! {
-                    _ = shutdown.cancelled() => return,
+                    _ = shutdown.cancelled() => {
+                        // Stopping, say for a deploy: tell the client to follow again
+                        // rather than end the stream as if it were done.
+                        let _ = tx.try_send(Err(Status::unavailable(RESTARTING)));
+                        return;
+                    }
                     _ = tx.closed() => return,
                     _ = heartbeat.tick() => {
                         // A session signed out from another device ends its streams too.

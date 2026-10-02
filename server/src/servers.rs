@@ -452,7 +452,7 @@ pub fn effective_limits(own: pb::ServerLimits, defaults: &config::Limits) -> pb:
 
 /// The files a server's database is made of: the database itself, the log of
 /// concurrent commits not yet folded into it, and the write-ahead log.
-const SIDECARS: [&str; 4] = ["", "-log", "-wal", "-shm"];
+pub(crate) const SIDECARS: [&str; 4] = ["", "-log", "-wal", "-shm"];
 
 fn storage_bytes(path: &Path) -> i64 {
     let size = |p: &Path| std::fs::metadata(p).map(|m| m.len() as i64).unwrap_or(0);

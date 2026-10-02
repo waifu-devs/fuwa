@@ -198,9 +198,11 @@ folded as usual.
   `fuwa-shard-<n>` services with a volume each and a fixed `FUWA_SHARD_ID`),
   nothing about the split changes. The first shard to start still takes the
   single process's server files from the directory (`TakeServers`, each file
-  checked before the directory lets go). Those files were never replicated,
-  since a single process doesn't replicate, and they go up from that shard as
-  soon as it opens them, each as a new generation under its name. From then
+  checked before the directory lets go), and only then checks the replica, so
+  a shard that just took them never looks empty to it. Those files were never
+  replicated, since a single process doesn't replicate, and they go up from
+  that shard as soon as it opens them, each as a new generation under its
+  name. From then
   on, a shard deploy that loses nothing on the volume restores nothing, and
   one on a fresh volume restores its servers from the bucket instead of
   starting empty. Moving a server by hand (stop both shards, move its files,

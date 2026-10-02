@@ -142,11 +142,17 @@ impl Setup<'_> {
         Cluster { directory, shard, gateway: part, _gateway: gateway }
     }
 
-    /// Why the directory and the shard won't open.
+    /// Why the directory and the shard won't open. A shard first asks the
+    /// directory for servers to take over, so it gets a restored one to ask.
     async fn refusals(&self) -> (String, String) {
         let unused: SocketAddr = "127.0.0.1:9".parse().unwrap();
         let directory = App::open(self.directory(unused)).await.err().expect("the directory opened");
-        let shard = App::open(self.shard("http://127.0.0.1:9", unused)).await.err().expect("the shard opened");
+        assert!(!self.root.join("directory/node.db").exists());
+        let restoring = Setup { root: self.root, replica: self.replica.clone(), restore: true };
+        let (listener, addr) = listen().await;
+        let running = start_on(restoring.directory(unused), listener, addr).await;
+        let shard = App::open(self.shard(&running.url(), unused)).await.err().expect("the shard opened");
+        running.stop().await;
         (directory.to_string(), shard.to_string())
     }
 }
@@ -321,7 +327,7 @@ async fn a_split_instance_comes_back_from_its_replica() {
     let (directory, shard) = setup.refusals().await;
     assert!(directory.contains("FUWA_RESTORE=if-empty"), "{directory}");
     assert!(shard.contains("FUWA_RESTORE=if-empty") && shard.contains("shard-1"), "{shard}");
-    assert!(!second.join("directory/node.db").exists());
+    assert!(!second.join("shard/servers").join(format!("{kept}.db")).exists());
 
     // ...and with FUWA_RESTORE=if-empty they come back as they were.
     let setup = Setup { restore: true, ..setup };

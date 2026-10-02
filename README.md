@@ -98,7 +98,7 @@ the log filter are read only from the environment.
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `FUWA_DATA_PATH` | `~/.fuwa` (`/data` in Docker) | Where the databases live |
-| `FUWA_HOST` | `0.0.0.0` | Address to listen on |
+| `FUWA_HOST` | `0.0.0.0` | Address to listen on (`::` for IPv6 and IPv4 both) |
 | `FUWA_PORT` | `PORT`, else `8080` | Port to listen on |
 | `FUWA_PUBLIC_URL` | `http://localhost:<port>` | The URL clients reach this instance on; uploaded pictures are linked through it |
 | `FUWA_NODE_NAME` | `Fuwa` | The instance's display name |
@@ -269,16 +269,47 @@ fuwa_part --name gateway -p 8080:8080 -e FUWA_ROLE=gateway \
 ```
 
 Turning a single-process instance into a split one: its data folder becomes
-the directory's (its `servers/` folder can stay there and be served by a shard
-started on that same folder, or be moved to shards' folders).
+the directory's, and the first shard to start takes its community servers. The
+directory sends that shard every file in its `servers/` folder, the shard
+checks each copy and starts with them, and the directory moves its own copies
+to `handed-over/` (delete that folder once everything looks right). No other
+shard gets any of them, and nothing has to be copied by hand, which matters
+where each part has a disk of its own (Railway, Kubernetes, Fly.io). fuwa.chat's
+Railway config ([`.railway/railway.ts`](.railway/railway.ts)) splits this way
+when its `SPLIT` setting is turned on.
 
 With a bucket set (see [Replicating to a bucket](#replicating-to-a-bucket)),
 a directory or shard that lost its volume restores itself from it.
 
-While a shard is down, its servers answer "unavailable" and live streams
-following them end, so clients reconnect once it's back; everything else keeps
-working. Deleting an account and exporting someone's data are refused until
-every shard is up, so nothing is left out. To move a server to another shard,
+#### Restarts and deploys
+
+Restarting a part, say to deploy a new version, interrupts nobody:
+
+- **A shard** stops, then starts again. Meanwhile gateways hold calls for its
+  servers and send them on once it's back (if that takes over 30 seconds, the
+  call answers "unavailable"). Live streams stay open: the gateway follows the
+  shard's servers again from the last event each client got, so nothing is
+  missed and the client never sees a break.
+- **The directory** stops, then starts again. Gateways hold calls for it the
+  same way, and shards wait for it when they need to check who's calling.
+  Once back, it answers clients only after every shard has registered again
+  (or 30 seconds have passed), so nobody gets a server list with servers
+  missing. Live streams don't need it.
+- **A gateway** keeps nothing, so run two or more and start new ones before
+  stopping old ones. When it stops, it tells each open live stream to follow
+  again; clients do, on another gateway, from where they got to. Its health
+  check (`/healthz`) only answers once it has reached the directory, so a new
+  gateway doesn't take traffic before it can serve it.
+
+Every part finishes the calls it's answering before it exits on SIGTERM, so
+give it up to 45 seconds. A part with its files on a disk of its own (the
+directory, shards) can't overlap its old and new processes; a gateway can, and
+that's what keeps clients connected.
+
+A shard that stays down is different: after the 30 seconds its servers answer
+"unavailable" and live streams following them end, so clients reconnect once
+it's back; everything else keeps working. Deleting an account and exporting
+someone's data are refused until every shard is up, so nothing is left out. To move a server to another shard,
 stop both, move its files (`<id>.db` and any `<id>.db-log` or `-wal` beside
 it) from one `servers/` folder to the other, and start them; the directory
 learns where it went when the shard starts. Shards check sessions with the directory and remember the answer for a
