@@ -28,8 +28,10 @@ like, hosted or self-hosted, over the same protocol.
 - **Live by design.** Every change is an event in the server's log; clients
   follow the log live and catch up from their last sequence after a reconnect.
 - **One app for every instance.** Each instance serves the fuwa web app at its
-  own address. The app keeps a list of the instances you've added, hosted or
-  self-hosted, and shows all their servers side by side.
+  own address, and there's a desktop app for Windows, macOS and Linux (native
+  Rust, drawn with [GPUI Kit](https://gpui-kit.com)). Both keep a list of the
+  instances you've added, hosted or self-hosted, and show all their servers
+  side by side.
 - **One binary, split when you need to.** By default one process does
   everything. The same binary can run as gateways, a directory and shards
   instead, to spread a big instance across machines (see
@@ -430,6 +432,21 @@ after changing `e2ee/` or `e2ee-wasm/`.
 In development Vite passes the app's own API calls to `FUWA_DEV_URL` (default
 `http://localhost:8080`), so the dev page works as an instance of its own.
 After `pnpm build`, `cargo test --features web` also tests the embedded app.
+
+The desktop app lives in [`desktop/`](desktop), a Cargo workspace of its own
+(Rust and GPUI Kit). It talks gRPC-Web to any instance, like the web app:
+
+```sh
+cd desktop
+cargo run                      # the app (keeps its data where your OS keeps app data)
+cargo test                     # its core against an in-process instance
+```
+
+On Linux it needs the usual GPUI libraries (`libxkbcommon-dev`,
+`libxkbcommon-x11-dev`, `libwayland-dev`, `libvulkan-dev`, `libx11-xcb-dev`,
+`libfontconfig-dev`). `FUWA_DESKTOP_HOME=<folder>` keeps its instances, settings
+and encrypted messages in one folder instead, to run a second copy signed in as
+someone else. Releases attach a `fuwa-desktop` build for each system.
 
 See [AGENTS.md](AGENTS.md) for how the code is laid out.
 

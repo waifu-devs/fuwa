@@ -27,7 +27,7 @@ over Signal's double ratchet or Matrix's Olm/Megolm, because:
   and one that was stolen stops working once the group moves on.
 - **One library everywhere.** `fuwa-e2ee` (Rust) is the same code in the
   server (which only reads headers), the web app (as WebAssembly) and the
-  native desktop apps to come.
+  desktop app (`desktop/`, natively).
 
 Every conversation uses one cipher suite,
 `MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519` (0x0003): X25519 for
