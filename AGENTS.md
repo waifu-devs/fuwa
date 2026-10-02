@@ -153,6 +153,13 @@
     reached over https, on the welcome screen, the instance home and sidebar,
     and invite pages. Only the address decides it, never anything an instance
     says about itself.
+- `.railway/railway.ts`: fuwa.chat, the instance Waifu Devs hosts, in its own
+  Railway project ("fuwa"): the published image, a volume at `/data`, the
+  domain. A pull request that touches it gets a plan comment and merging
+  applies it (`.github/workflows/railway-config.yml`); the root `package.json`
+  exists only for this. The encryption key is a shared variable set by hand and
+  must never change. Don't edit the project in Railway's dashboard between a
+  plan and its apply, or the apply refuses.
 
 ## Rules
 

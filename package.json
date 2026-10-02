@@ -1,0 +1,12 @@
+{
+  "name": "fuwa-railway",
+  "private": true,
+  "description": "Only for .railway/railway.ts, the hosted instance's Railway config. The web app is in web/.",
+  "type": "module",
+  "devDependencies": {
+    "railway": "^3.11.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

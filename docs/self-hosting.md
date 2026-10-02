@@ -29,7 +29,8 @@ openssl rand -hex 32
 Keep it in a password manager. Set it before fuwa starts for the first time,
 and never change it: fuwa won't open data with a different key, with no key,
 or with a key when the data was made without one. Lose the key and the data
-is gone.
+is gone. When fuwa starts, its "fuwa is up" line says `encrypted=true` if the
+key is in use.
 
 **A version.** Images and binaries come from
 [the releases](https://github.com/waifu-devs/fuwa/releases):
