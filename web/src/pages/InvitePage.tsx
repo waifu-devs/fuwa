@@ -18,6 +18,7 @@ import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { displayName } from "@/lib/format";
 import { expiresAt, timeLeft } from "@/lib/invites";
+import { HostedBadge } from "@/components/HostedBadge";
 
 type Found = Effect.Effect.Success<ReturnType<typeof lookUpInvite>>;
 
@@ -140,8 +141,11 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
                 )}
                 <ServerDoor server={found.server} className="relative justify-center" />
                 {!signedOut && (
-                  <p className="relative text-xs text-muted-foreground">
-                    on <b>{found.node.name}</b> · <Private text={instanceKey} />
+                  <p className="relative flex flex-wrap items-center justify-center gap-x-1 gap-y-1.5 text-xs text-muted-foreground">
+                    <span>
+                      on <b>{found.node.name}</b> · <Private text={instanceKey} />
+                    </span>
+                    <HostedBadge url={found.url} className="ml-1" />
                   </p>
                 )}
               </div>

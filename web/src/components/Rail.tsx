@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { effectiveNotifications, useNow } from "@/lib/notifications";
+import { hostedByUs } from "@/lib/hosted";
 
 /**
  * The far-left column: every server you're in, grouped by the fuwa instance
@@ -121,10 +122,11 @@ function InstanceGroup({ inst, params }: { inst: InstanceState; params: { instan
   const here = params.instance === inst.key;
   const address = useAddress(inst.key);
   const label = inst.node?.name ?? address;
+  const hosted = hostedByUs(inst.url) ? " · Hosted by Waifu Devs" : "";
   return (
     <>
       <Divider />
-      <RailItem label={inst.node ? `${label} · ${address}` : label} active={here && !params.server} to="/$instance" params={{ instance: inst.key }} small>
+      <RailItem label={inst.node ? `${label} · ${address}${hosted}` : label} active={here && !params.server} to="/$instance" params={{ instance: inst.key }} small>
         <span
           className={cn(
             "server-icon relative grid size-9 place-items-center bg-card text-[0.7rem] font-extrabold text-muted-foreground",

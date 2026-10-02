@@ -18,6 +18,7 @@ import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseInvite } from "@/lib/invites";
+import { HostedBadge } from "@/components/HostedBadge";
 import { cn } from "@/lib/utils";
 
 /** An instance's front page: sign in if needed, then browse and create servers. */
@@ -109,8 +110,9 @@ function Browse({ instanceKey }: { instanceKey: string }) {
         <div aria-hidden className="absolute -top-20 -right-16 size-64 rounded-full bg-primary/25 blur-3xl" />
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="flex items-center gap-2 text-sm font-bold text-muted-foreground">
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm font-bold text-muted-foreground">
               <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · <Private text={instanceKey} /> · <BuildLabel node={inst.node} />
+              <HostedBadge url={inst.url} className="sm:ml-1" />
             </p>
             <h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">
               Welcome to <SwapText className="gradient-text">{inst.node?.name ?? address}</SwapText>

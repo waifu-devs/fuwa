@@ -34,10 +34,17 @@ like, hosted or self-hosted, over the same protocol.
 ```sh
 docker run -d --name fuwa -p 8080:8080 -v fuwa:/data \
   -e FUWA_PUBLIC_URL=https://chat.example.com \
-  ghcr.io/waifu-devs/fuwa
+  ghcr.io/waifu-devs/fuwa:0.1
 ```
 
 Then open the address in a browser: the web app is served from the same port.
+[The self-hosting guide](docs/self-hosting.md) goes step by step: a domain
+with https, the binary as a service, Railway, updates and backups.
+
+Images are tagged by release (`0.1` follows the newest 0.1.x, `0.1.0` is that
+release, `latest` follows master) and run on x86 and ARM. Each
+[release](https://github.com/waifu-devs/fuwa/releases) also has the binary for
+Linux (x86 and ARM), macOS and Windows.
 
 Or build and run the binary. The web app is compiled in with the `web` feature,
 after building it once:

@@ -1208,7 +1208,35 @@ async fn databases_can_be_encrypted_at_rest() {
     let mut c = clients(&instance).await;
     let servers = c.servers.list_servers(authed(&token, pb::ListServersRequest {})).await.unwrap().into_inner().servers;
     assert_eq!(servers[0].name, "Vault");
+    drop(c);
     instance.stop().await;
+
+    // Starting with another key, or none, says the key is what to check.
+    let other = "0".repeat(64);
+    for vars in [&[("FUWA_ENCRYPTION_KEY", other.as_str())][..], &[]] {
+        let err = open_error(dir.path(), vars).await;
+        assert!(err.contains("FUWA_ENCRYPTION_KEY"), "{err}");
+    }
+    // And so does a key on data that was made without one.
+    let plain = tempfile::tempdir().unwrap();
+    start(plain.path(), &[]).await.stop().await;
+    let err = open_error(plain.path(), &[("FUWA_ENCRYPTION_KEY", key)]).await;
+    assert!(err.contains("isn't the key this data was made with"), "{err}");
+}
+
+/// Why App::open refused the data directory.
+async fn open_error(dir: &Path, vars: &[(&str, &str)]) -> String {
+    let dir = dir.to_str().unwrap().to_string();
+    let config = Config::from_lookup(|key| match key {
+        "FUWA_DATA_PATH" => Some(dir.clone()),
+        "FUWA_TELEMETRY" => Some("off".into()),
+        _ => vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.to_string()),
+    })
+    .unwrap();
+    match App::open(config).await {
+        Ok(_) => panic!("the data directory opened"),
+        Err(err) => err.to_string(),
+    }
 }
 
 async fn sign_in(c: &mut Clients, username: &str, password: &str) -> Result<pb::SignInResponse, tonic::Status> {

@@ -39,14 +39,30 @@ impl std::fmt::Debug for EncryptionKey {
 /// including one made before fuwa used it, and is a no-op after. Encryption has
 /// to be set up before the switch, which the builder does.
 pub async fn open(path: &Path, key: Option<&EncryptionKey>, migrations: &[&str]) -> Result<Database> {
-    let db = build(path, key).await?;
+    let db = build(path, key).await.map_err(|err| explain_key(err, path, key.is_some()))?;
     let conn = connect(&db)?;
-    let mode = query_one(&conn, "PRAGMA journal_mode = 'mvcc'", (), |r| r.get::<String>(0)).await?;
+    let mode = query_one(&conn, "PRAGMA journal_mode = 'mvcc'", (), |r| r.get::<String>(0))
+        .await
+        .map_err(|err| explain_key(err, path, key.is_some()))?;
     if mode.as_deref() != Some("mvcc") {
         return Err(Error::internal(format!("{} stayed in {mode:?} journal mode", path.display())));
     }
     migrate(&conn, migrations).await?;
     Ok(db)
+}
+
+/// Opening a file is where the wrong FUWA_ENCRYPTION_KEY shows up, as Turso's
+/// bare "Decryption failed"; this says what to check.
+fn explain_key(err: Error, path: &Path, encrypted: bool) -> Error {
+    let text = err.to_string();
+    let hint = if encrypted && text.contains("Decryption failed") {
+        "FUWA_ENCRYPTION_KEY isn't the key this data was made with (data made without a key can't be opened with one)"
+    } else if !encrypted && text.contains("not a database") {
+        "It may be encrypted: set FUWA_ENCRYPTION_KEY to the key this data was made with"
+    } else {
+        return err;
+    };
+    Error::internal(format!("{}: {text}. {hint}", path.display()))
 }
 
 /// Switches a file back to plain SQLite (WAL), so other SQLite tools can open
