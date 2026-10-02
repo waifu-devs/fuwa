@@ -21,14 +21,14 @@ service ServerService {
   rpc JoinServer(JoinServerRequest) returns (JoinServerResponse);
   rpc LeaveServer(LeaveServerRequest) returns (LeaveServerResponse);
   rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
-  // Changes a member's nickname or role. Anyone can change their own
-  // nickname; owners and admins can change those of people ranked below
-  // them. Only the owner changes roles.
+  // Changes a member's nickname: your own with CHANGE_NICKNAME, someone
+  // ranked below you with MANAGE_NICKNAMES. Roles change through RoleService.
   rpc UpdateMember(UpdateMemberRequest) returns (UpdateMemberResponse);
-  // What the server uses and the caps on it. Owner or instance admin only.
+  // What the server uses and the caps on it. MANAGE_SERVER or instance admins.
   rpc GetServerUsage(GetServerUsageRequest) returns (GetServerUsageResponse);
 
-  // Moderation. Owners and admins act on people ranked below them.
+  // Moderation, with KICK_MEMBERS, BAN_MEMBERS or TIME_OUT_MEMBERS, on
+  // people ranked below the caller.
 
   // Stops a member sending messages for a while.
   rpc TimeOutMember(TimeOutMemberRequest) returns (TimeOutMemberResponse);
@@ -38,9 +38,9 @@ service ServerService {
   rpc BanMember(BanMemberRequest) returns (BanMemberResponse);
   rpc UnbanMember(UnbanMemberRequest) returns (UnbanMemberResponse);
   rpc ListBans(ListBansRequest) returns (ListBansResponse);
-  // What owners and admins did in the server, newest first.
+  // Who changed what in the server, newest first. VIEW_AUDIT_LOG.
   rpc ListAuditLog(ListAuditLogRequest) returns (ListAuditLogResponse);
-  // Hands the server to another member. Owner only; they become an admin.
+  // Hands the server to another member. Owner only; they keep their roles.
   rpc TransferOwnership(TransferOwnershipRequest) returns (TransferOwnershipResponse);
 }
 
@@ -117,6 +117,7 @@ message ListMembersRequest {
 }
 
 message ListMembersResponse {
+  // Highest ranked first.
   repeated Member members = 1;
 }
 
@@ -125,8 +126,8 @@ message UpdateMemberRequest {
   string user_id = 2;
   // Empty clears it.
   optional string nickname = 3;
-  // Member or admin. Owner only; ownership moves with TransferOwnership.
-  optional MemberRole role = 4;
+  reserved 4;
+  reserved "role";
 }
 
 message UpdateMemberResponse {
@@ -233,24 +234,32 @@ enum AuditAction {
   AUDIT_ACTION_CHANNEL_UPDATE = 3;
   AUDIT_ACTION_CHANNEL_DELETE = 4;
   AUDIT_ACTION_CHANNELS_REORDER = 5;
-  // A nickname set by someone else, or a new role.
+  // A nickname set by someone else.
   AUDIT_ACTION_MEMBER_UPDATE = 6;
   AUDIT_ACTION_MEMBER_TIME_OUT = 7;
   AUDIT_ACTION_MEMBER_KICK = 8;
   AUDIT_ACTION_MEMBER_BAN = 9;
   AUDIT_ACTION_MEMBER_UNBAN = 10;
-  // Someone else's message, deleted by an owner or admin.
+  // Someone else's message, deleted by a moderator.
   AUDIT_ACTION_MESSAGE_DELETE = 11;
   AUDIT_ACTION_OWNERSHIP_TRANSFER = 12;
+  // Role actions name the role as their target.
+  AUDIT_ACTION_ROLE_CREATE = 13;
+  AUDIT_ACTION_ROLE_UPDATE = 14;
+  AUDIT_ACTION_ROLE_DELETE = 15;
+  AUDIT_ACTION_ROLES_REORDER = 16;
+  // A role handed to or taken from a member; the change names the role.
+  AUDIT_ACTION_MEMBER_ROLES_UPDATE = 17;
+  AUDIT_ACTION_CHANNEL_PERMISSIONS_UPDATE = 18;
 }
 
-// One thing an owner or admin did.
+// One thing someone did with a moderator's or manager's permission.
 message AuditEntry {
   string id = 1;
   string actor_id = 2;
   AuditAction action = 3;
   // A user for member and message actions, a channel for channel actions,
-  // empty for the server itself.
+  // a role for role actions, empty for the server itself.
   string target_id = 4;
   // The channel's name at the time, for channel actions and deleted messages.
   string channel_name = 5;
@@ -258,6 +267,8 @@ message AuditEntry {
   // What changed, for updates.
   repeated AuditChange changes = 7;
   google.protobuf.Timestamp created_at = 8;
+  // The role's name at the time, for role actions and roles handed out.
+  string role_name = 9;
 }
 
 // One field before and after. Values are text: numbers and times (unix

@@ -1,14 +1,15 @@
-import { FolderIcon, GripVerticalIcon, HashIcon, LoaderCircleIcon, PlusIcon, SnailIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
+import { FolderIcon, GripVerticalIcon, HashIcon, LoaderCircleIcon, LockIcon, PlusIcon, SnailIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
 import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { ChannelType, type Channel } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { deleteChannel, reorderChannels, run, updateChannel } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
-import { useAction, useInstance } from "@/fuwa/hooks";
+import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
 import { CHANNEL_ICON, groupChannels } from "@/components/ChannelSidebar";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { SPRING } from "@/components/motion";
-import { Row } from "@/components/settings/account/common";
+import { Row, Segmented } from "@/components/settings/account/common";
+import { ChannelPermissions } from "@/components/settings/server/ChannelPermissions";
 import { SaveBar } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration, shortDuration } from "@/lib/format";
+import { has, hasIn, isPrivate } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +58,8 @@ const same = (a: Layout, b: Layout) => JSON.stringify(placements(a)) === JSON.st
  */
 export function Channels({ instanceKey, serverId, initial }: { instanceKey: string; serverId: string; initial?: string | null }) {
   const inst = useInstance(instanceKey);
+  const access = useAccess(instanceKey, serverId);
+  const arrange = has(access, Permission.MANAGE_CHANNELS);
   const channels = useMemo(() => inst?.channels[serverId] ?? [], [inst?.channels, serverId]);
   const byId = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels]);
   const [layout, setLayout] = useState(() => layoutOf(channels));
@@ -135,6 +139,8 @@ export function Channels({ instanceKey, serverId, initial }: { instanceKey: stri
         onDragEnd={() => commit(latest.current)}
         onKeyMove={(e) => moveKey(e, onMove)}
         position={`${list.indexOf(id) + 1} of ${list.length}`}
+        movable={arrange}
+        locked={isPrivate(channel, serverId)}
       />
     );
   };
@@ -143,10 +149,14 @@ export function Channels({ instanceKey, serverId, initial }: { instanceKey: stri
     <div className="grid gap-6 lg:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] lg:gap-8">
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">Drag by the handle, or focus it and use the arrow keys.</p>
-          <Button type="button" size="sm" onClick={() => setCreating("")} className="btn shrink-0 rounded-xl font-bold">
-            <PlusIcon /> New
-          </Button>
+          <p className="text-xs text-muted-foreground">
+            {arrange ? "Drag by the handle, or focus it and use the arrow keys." : "Pick a channel to change who can see and use it."}
+          </p>
+          {arrange && (
+            <Button type="button" size="sm" onClick={() => setCreating("")} className="btn shrink-0 rounded-xl font-bold">
+              <PlusIcon /> New
+            </Button>
+          )}
         </div>
         <div className="rounded-2xl border bg-background/40 p-2">
           <Reorder.Group axis="y" values={layout.loose} onReorder={setLoose} className="flex flex-col gap-0.5">
@@ -175,6 +185,9 @@ export function Channels({ instanceKey, serverId, initial }: { instanceKey: stri
                     })
                   }
                   position={`${ids.indexOf(category.id) + 1} of ${ids.length}`}
+                  movable={arrange}
+                  locked={isPrivate(channel, serverId)}
+                  canAdd={hasIn(access, category.id, Permission.MANAGE_CHANNELS)}
                 >
                   <Reorder.Group axis="y" values={category.children} onReorder={(children) => setChildren(category.id, children)} className="flex min-h-2 flex-col gap-0.5 pl-3">
                     {category.children.map((id) =>
@@ -194,7 +207,7 @@ export function Channels({ instanceKey, serverId, initial }: { instanceKey: stri
         <AnimatePresence mode="wait" initial={false}>
           {selected && byId.get(selected) ? (
             <motion.div key={selected} initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={SPRING}>
-              <ChannelEditor instanceKey={instanceKey} serverId={serverId} channel={byId.get(selected)!} channels={channels} />
+              <ChannelSettings instanceKey={instanceKey} serverId={serverId} channel={byId.get(selected)!} channels={channels} />
             </motion.div>
           ) : (
             <motion.p key="none" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-10 text-center text-sm text-muted-foreground">
@@ -222,6 +235,10 @@ type ItemProps = {
   onDragEnd: () => void;
   onKeyMove: (e: KeyboardEvent) => void;
   position: string;
+  /** You can rearrange channels. */
+  movable: boolean;
+  /** Private: hidden from @everyone. */
+  locked: boolean;
 };
 
 function Grip({ controls, label, onKeyMove }: { controls: ReturnType<typeof useDragControls>; label: string; onKeyMove: (e: KeyboardEvent) => void }) {
@@ -241,7 +258,7 @@ function Grip({ controls, label, onKeyMove }: { controls: ReturnType<typeof useD
   );
 }
 
-function ChannelItem({ channel, active, onPick, onDragEnd, onKeyMove, position }: ItemProps) {
+function ChannelItem({ channel, active, onPick, onDragEnd, onKeyMove, position, movable, locked }: ItemProps) {
   const controls = useDragControls();
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
   return (
@@ -254,7 +271,7 @@ function ChannelItem({ channel, active, onPick, onDragEnd, onKeyMove, position }
       transition={SPRING}
       className="relative flex items-center gap-0.5 rounded-lg bg-background"
     >
-      <Grip controls={controls} label={`Move #${channel.name}, ${position}`} onKeyMove={onKeyMove} />
+      {movable && <Grip controls={controls} label={`Move #${channel.name}, ${position}`} onKeyMove={onKeyMove} />}
       <button
         type="button"
         onClick={onPick}
@@ -266,6 +283,7 @@ function ChannelItem({ channel, active, onPick, onDragEnd, onKeyMove, position }
         {active && <motion.span layoutId="channels-editing" transition={SPRING} className="absolute inset-0 rounded-lg bg-primary/12" />}
         <Icon className="relative size-4 shrink-0" />
         <span className="relative truncate">{channel.name}</span>
+        <PrivateMark on={locked} />
         {channel.slowmodeSeconds > 0 && (
           <span className="relative ml-auto flex shrink-0 items-center gap-0.5 text-[0.7rem] text-muted-foreground" title={`Slow mode: ${slowLabel(channel.slowmodeSeconds)}`}>
             <SnailIcon className="size-3" /> {shortDuration(channel.slowmodeSeconds)}
@@ -276,7 +294,39 @@ function ChannelItem({ channel, active, onPick, onDragEnd, onKeyMove, position }
   );
 }
 
-function CategoryItem({ channel, active, onPick, onAdd, onDragEnd, onKeyMove, position, children }: ItemProps & { onAdd: () => void; children: React.ReactNode }) {
+/** A lock that pops in beside a channel once it's private. */
+function PrivateMark({ on }: { on: boolean }) {
+  return (
+    <AnimatePresence initial={false}>
+      {on && (
+        <motion.span
+          initial={{ scale: 0, rotate: -30 }}
+          animate={{ scale: 1, rotate: 0 }}
+          exit={{ scale: 0 }}
+          transition={{ type: "spring", stiffness: 600, damping: 18 }}
+          className="relative shrink-0 text-muted-foreground"
+          title="Private"
+        >
+          <LockIcon className="size-3" />
+        </motion.span>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function CategoryItem({
+  channel,
+  active,
+  onPick,
+  onAdd,
+  onDragEnd,
+  onKeyMove,
+  position,
+  movable,
+  locked,
+  canAdd,
+  children,
+}: ItemProps & { onAdd: () => void; canAdd: boolean; children: React.ReactNode }) {
   const controls = useDragControls();
   return (
     <Reorder.Item
@@ -289,7 +339,7 @@ function CategoryItem({ channel, active, onPick, onAdd, onDragEnd, onKeyMove, po
       className="relative mt-2 rounded-xl bg-background pb-1"
     >
       <div className="group flex items-center gap-0.5">
-        <Grip controls={controls} label={`Move category ${channel.name}, ${position}`} onKeyMove={onKeyMove} />
+        {movable && <Grip controls={controls} label={`Move category ${channel.name}, ${position}`} onKeyMove={onKeyMove} />}
         <button
           type="button"
           onClick={onPick}
@@ -301,18 +351,53 @@ function CategoryItem({ channel, active, onPick, onAdd, onDragEnd, onKeyMove, po
           {active && <motion.span layoutId="channels-editing" transition={SPRING} className="absolute inset-0 rounded-lg bg-primary/12" />}
           <FolderIcon className="relative size-3.5 shrink-0" />
           <span className="relative truncate">{channel.name}</span>
+          <PrivateMark on={locked} />
         </button>
-        <button
-          type="button"
-          aria-label={`Create a channel in ${channel.name}`}
-          onClick={onAdd}
-          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:rotate-90 hover:bg-muted hover:text-foreground"
-        >
-          <PlusIcon className="size-3.5" />
-        </button>
+        {canAdd && (
+          <button
+            type="button"
+            aria-label={`Create a channel in ${channel.name}`}
+            onClick={onAdd}
+            className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:rotate-90 hover:bg-muted hover:text-foreground"
+          >
+            <PlusIcon className="size-3.5" />
+          </button>
+        )}
       </div>
       {children}
     </Reorder.Item>
+  );
+}
+
+type Tab = "overview" | "permissions";
+
+/** One channel's settings: what it is (with Manage Channels there), and who can do what in it (with Manage Roles there). */
+function ChannelSettings({ instanceKey, serverId, channel, channels }: { instanceKey: string; serverId: string; channel: Channel; channels: Channel[] }) {
+  const access = useAccess(instanceKey, serverId);
+  const tabs = [
+    ...(hasIn(access, channel.id, Permission.MANAGE_CHANNELS) ? [{ value: "overview" as const, label: "Overview" }] : []),
+    ...(hasIn(access, channel.id, Permission.MANAGE_ROLES) ? [{ value: "permissions" as const, label: "Permissions" }] : []),
+  ];
+  const [tab, setTab] = useState<Tab>(tabs[0]?.value ?? "overview");
+  const shown = tabs.some((t) => t.value === tab) ? tab : tabs[0]?.value;
+  const Icon = channel.type === ChannelType.CATEGORY ? FolderIcon : (CHANNEL_ICON[channel.type] ?? HashIcon);
+  return (
+    <div className="flex flex-col">
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <h3 className="flex min-w-0 flex-1 items-center gap-2 text-lg font-extrabold">
+          <Icon className="size-5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{channel.name}</span>
+        </h3>
+        {tabs.length > 1 && <Segmented label="Channel settings" value={shown ?? "overview"} onChange={setTab} options={tabs} />}
+      </div>
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div key={shown} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
+          {shown === "overview" && <ChannelEditor instanceKey={instanceKey} serverId={serverId} channel={channel} channels={channels} />}
+          {shown === "permissions" && <ChannelPermissions instanceKey={instanceKey} serverId={serverId} channel={channel} channels={channels} />}
+          {!shown && <p className="py-10 text-center text-sm text-muted-foreground">You can't change this one.</p>}
+        </motion.div>
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -411,7 +496,7 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
         <Row
           id="slowmode"
           label="Slow mode"
-          hint="How long members wait between messages. Owners and admins don't wait."
+          hint="How long members wait between messages. People who can manage messages or channels here don't wait."
         >
           <div className="flex items-center gap-3">
             <motion.span

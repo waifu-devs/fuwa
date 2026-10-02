@@ -1,50 +1,71 @@
-import { CrownIcon, HourglassIcon, ShieldIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useMemo, type CSSProperties } from "react";
-import { MemberRole, type Member } from "@/gen/fuwa/v1/types_pb";
-import { useInstance } from "@/fuwa/hooks";
+import { CrownIcon, HourglassIcon } from "lucide-react";
+import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import { useMemo } from "react";
+import type { Member, Role } from "@/gen/fuwa/v1/types_pb";
+import { useInstance, useRoles } from "@/fuwa/hooks";
+import { RoleDot } from "@/components/chat/mentions";
+import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
 import { CopyId } from "@/components/CopyId";
 import { Count } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { InlineMarkdown } from "@/components/Markdown";
 import { ProfilePopover } from "@/components/ProfilePopover";
-import { displayName, formatStamp, hueOf, memberName, shownStatus, timedOutUntil } from "@/lib/format";
+import { displayName, formatStamp, memberName, shownStatus, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
+import { colorOf, hoistedRole } from "@/lib/permissions";
 
 const EMPTY: Member[] = [];
 
-const SECTIONS = [
-  { role: MemberRole.OWNER, label: "Owner", icon: CrownIcon, tint: "text-amber-400" },
-  { role: MemberRole.ADMIN, label: "Admins", icon: ShieldIcon, tint: "text-primary" },
-  { role: MemberRole.MEMBER, label: "Members", icon: null, tint: "" },
-] as const;
+type Section = { id: string; role: Role | null; members: Member[] };
 
+/**
+ * Everyone in the server, under their highest role that's shown apart
+ * (hoisted), then everyone else. Someone given or losing a role glides to
+ * their new place.
+ */
 export function MemberList({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
   const inst = useInstance(instanceKey);
   const now = useNow(60_000);
   const members = inst?.members[serverId] ?? EMPTY;
-  const sections = useMemo(
-    () =>
-      SECTIONS.map((s) => ({
-        ...s,
-        members: members.filter((m) => (s.role === MemberRole.MEMBER ? m.role <= MemberRole.MEMBER : m.role === s.role)),
-      })).filter((s) => s.members.length),
-    [members],
-  );
+  const roles = useRoles(instanceKey, serverId);
+  const ownerId = inst?.servers.find((s) => s.id === serverId)?.ownerId;
+  const sections = useMemo(() => {
+    const byRole = new Map<string, Member[]>();
+    const rest: Member[] = [];
+    for (const m of members) {
+      const role = hoistedRole(roles, m);
+      if (role) byRole.set(role.id, [...(byRole.get(role.id) ?? []), m]);
+      else rest.push(m);
+    }
+    const out: Section[] = roles.filter((r) => byRole.has(r.id)).map((r) => ({ id: r.id, role: r, members: byRole.get(r.id)! }));
+    if (rest.length) out.push({ id: "members", role: null, members: rest });
+    return out;
+  }, [members, roles]);
   return (
     <div className="scroll-thin h-full overflow-y-auto px-2 py-4">
+      <LayoutGroup id={`members-${serverId}`}>
+      <AnimatePresence initial={false}>
       {sections.map((section) => (
-        <section key={section.role} className="mb-4">
-          <h3 className="mb-1 px-2 text-xs font-bold tracking-wide text-muted-foreground uppercase">
-            {section.label} — <Count value={section.members.length} />
+        <motion.section
+          key={section.id}
+          layout="position"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={{ type: "spring", stiffness: 500, damping: 36 }}
+          className="mb-4"
+        >
+          <h3 className="mb-1 flex items-center gap-1.5 px-2 text-xs font-bold tracking-wide text-muted-foreground uppercase">
+            {section.role && <RoleDot role={section.role} className="size-2" />}
+            <span className="truncate">{section.role?.name ?? "Members"}</span> — <Count value={section.members.length} />
           </h3>
           <ul>
             <AnimatePresence initial={false}>
               {section.members.map((m, n) => (
                 <motion.li
                   key={m.user?.id}
-                  layout
+                  layoutId={`member-${serverId}-${m.user?.id}`}
                   initial={{ opacity: 0, x: 16 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 16 }}
@@ -56,10 +77,8 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
                       <UserAvatar user={m.user} className="size-8 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:scale-105 group-active:scale-95" />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-1">
-                          <span className="name-tint truncate text-sm font-bold" style={{ "--h": hueOf(m.user?.id ?? "") } as CSSProperties}>
-                            {memberName(m)}
-                          </span>
-                          {section.icon && <section.icon className={`size-3 shrink-0 ${section.tint}`} />}
+                          <RoleName id={m.user?.id ?? ""} name={memberName(m)} color={colorOf(roles, m)} className="text-sm" />
+                          {m.user?.id === ownerId && <CrownIcon aria-label="Owner" className="size-3 shrink-0 text-amber-400" />}
                           <TimedOutMark member={m} now={now} />
                         </span>
                         <MemberSubtitle member={m} me={m.user?.id === inst?.me?.id} now={now} />
@@ -75,8 +94,10 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
               ))}
             </AnimatePresence>
           </ul>
-        </section>
+        </motion.section>
       ))}
+      </AnimatePresence>
+      </LayoutGroup>
     </div>
   );
 }

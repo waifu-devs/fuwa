@@ -188,6 +188,11 @@ export const EventService: GenService<{
    * events. A response with neither set is a heartbeat. A server that was
    * deleted, or that the caller is no longer in, comes first as a
    * ServerDeleted or MemberLeft event with sequence 0, and isn't followed.
+   * Events about channels the caller can't see are left out; when their
+   * permissions change, channels they can now see come as ChannelCreated and
+   * ones they no longer can as ChannelDeleted, both with sequence 0. A replay
+   * goes by what the caller can see now, so after one a client lists the
+   * server's channels again to pick up access that changed while it was away.
    *
    * @generated from rpc fuwa.v1.EventService.Subscribe
    */
@@ -197,6 +202,9 @@ export const EventService: GenService<{
     output: typeof SubscribeResponseSchema;
   },
   /**
+   * A server's log, leaving out events about channels the caller can't see now
+   * (but keeping every ChannelDeleted).
+   *
    * @generated from rpc fuwa.v1.EventService.ListEvents
    */
   listEvents: {

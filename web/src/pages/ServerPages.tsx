@@ -1,18 +1,18 @@
 import { Navigate } from "@tanstack/react-router";
 import { ChevronLeftIcon, HashIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
-import { ChannelType, MemberRole } from "@/gen/fuwa/v1/types_pb";
-import { useInstance } from "@/fuwa/hooks";
-import { useMyRole } from "@/components/ChannelSidebar";
+import { ChannelType, Permission } from "@/gen/fuwa/v1/types_pb";
+import { useAccess, useInstance } from "@/fuwa/hooks";
 import { ChannelView } from "@/components/chat/ChannelView";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
+import { has } from "@/lib/permissions";
 
 /** A server with no channel picked: go to its first text channel once they're loaded. */
 export function ServerIndex({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
   const inst = useInstance(instanceKey);
-  const role = useMyRole(instanceKey, serverId);
+  const access = useAccess(instanceKey, serverId);
   const [creating, setCreating] = useState(false);
   const { compact, setNavOpen } = useLayout();
   // Signed out (the session ended, or an admin turned the account off): the instance's page asks to sign in.
@@ -34,12 +34,12 @@ export function ServerIndex({ instanceKey, serverId }: { instanceKey: string; se
           <HashIcon className="size-8" />
         </span>
         <p className="text-lg font-extrabold">No channels yet</p>
-        {role >= MemberRole.ADMIN || inst.admin ? (
+        {has(access, Permission.MANAGE_CHANNELS) ? (
           <Button onClick={() => setCreating(true)} className="btn rounded-xl font-bold">
             <PlusIcon /> Create a channel
           </Button>
         ) : (
-          <p className="text-sm text-muted-foreground">The server's admins haven't made any yet.</p>
+          <p className="text-sm text-muted-foreground">None that you can see, anyway. Someone who runs the server can make one, or let you in.</p>
         )}
       </div>
       <CreateChannelDialog open={creating} onOpenChange={setCreating} instanceKey={instanceKey} serverId={serverId} />

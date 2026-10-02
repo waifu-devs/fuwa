@@ -1,7 +1,8 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { useEffect, useState } from "react";
-import { MemberRole, NotificationLevel, type NotificationSettings } from "@/gen/fuwa/v1/types_pb";
+import { NotificationLevel, type Message, type NotificationSettings } from "@/gen/fuwa/v1/types_pb";
 import { notificationKey, useFuwa, type InstanceState } from "@/fuwa/store";
+import { mentions } from "@/lib/format";
 import type { Prefs } from "@/lib/prefs";
 
 /**
@@ -46,12 +47,24 @@ export function shouldAlert(e: Effective, mention: boolean, prefs: Prefs): { sou
   return { sound: true, notify: mention || prefs.notifyFor === "all" };
 }
 
-/** @everyone and @here reach everyone, when an owner or admin sends them. */
-export const pingsEveryone = (content: string, authorRole: MemberRole | undefined) =>
-  (authorRole ?? MemberRole.UNSPECIFIED) >= MemberRole.ADMIN && /(^|[^\w@])@(everyone|here)\b/i.test(content);
-
-export function mentionsEveryone(inst: InstanceState, serverId: string, authorId: string, content: string) {
-  return pingsEveryone(content, inst.members[serverId]?.find((m) => m.user?.id === authorId)?.role);
+/**
+ * Whether a message pings you: by your @username, or through @everyone,
+ * @here (unless you hid those) or one of your roles. The server works out
+ * who may ping everyone and which roles a message reached.
+ */
+export function pingsMe(
+  inst: InstanceState,
+  serverId: string,
+  message: Pick<Message, "authorId" | "content" | "mentionsEveryone" | "mentionRoleIds">,
+  suppressEveryone: boolean,
+) {
+  const me = inst.me;
+  if (!me || message.authorId === me.id) return false;
+  if (mentions(message.content, me.username)) return true;
+  if (message.mentionsEveryone && !suppressEveryone) return true;
+  if (!message.mentionRoleIds.length) return false;
+  const mine = inst.members[serverId]?.find((m) => m.user?.id === me.id)?.roleIds ?? [];
+  return message.mentionRoleIds.some((id) => mine.includes(id));
 }
 
 /** A clock that ticks every `ms`, so timed mutes run out on screen. */

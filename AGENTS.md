@@ -25,6 +25,13 @@
     admins do also goes in the server's `audit` table (`servers::Audit`),
     kept apart from the event log so reasons for kicks and bans reach only
     managers.
+  - `permissions.rs`: roles and permissions. `Rules::access` works out what a
+    member may do (an `Access`): server-wide from their roles, and per
+    channel by applying the category's overwrites and then the channel's
+    (@everyone, then the member's roles together, then the member). No View
+    Channels in a channel means no permissions there at all. `Access` also
+    knows rank (the member's highest role; the owner above everything) for
+    `outranks`, `above` and `may_change`.
   - `db.rs`: Turso helpers: opening, `user_version` migrations, transactions.
     Every database runs in Turso's concurrent-writer mode (MVCC): writes are
     `BEGIN CONCURRENT` transactions that run side by side and are retried
@@ -84,10 +91,20 @@
   - `src/components/settings/account/`: the "Your account" pages (profile,
     server profiles, devices, two-step sign-in, server notifications, data).
   - `src/components/settings/server/`: server settings pages beyond Overview
-    (channels, members, bans, audit log, ownership), shown by
-    `dialogs/ServerSettingsDialog.tsx`. `components/ModerateDialog.tsx` is the
-    one dialog for nicknames, time-outs, kicks and bans, from the Members page
-    and from profile cards.
+    (roles, channels and their permissions, members, bans, audit log,
+    ownership), shown by `dialogs/ServerSettingsDialog.tsx`, which also says
+    which pages your permissions open (`useServerSettingsTabs`).
+    `components/ModerateDialog.tsx` is the one dialog for nicknames,
+    time-outs, kicks and bans, from the Members page and from profile cards;
+    `components/MemberRoles.tsx` hands roles out wherever a member is shown.
+  - `src/lib/permissions.ts`: the server's permission math (`accessOf`,
+    `hasIn`, `above`, `mayChange`) and the labels for each permission. UI
+    asks `useAccess` from `fuwa/hooks.ts` what you may do and hides what you
+    can't, but the server decides.
+  - `src/components/chat/mentions.tsx`: mentions in messages as chips (a remark
+    plugin for `Markdown`), and `ServerLook`, the roles and members a server's
+    messages need to color names. `MentionPicker.tsx` is the @ list in the
+    composer; roles go in as `@Name` and are sent as `<@&id>`.
   - `src/components/settings/instance/`: the instance admin pages beyond
     settings (accounts, servers, announcement), shown by
     `settings/InstanceSettingsDialog.tsx`. The announcement itself is drawn by
@@ -113,10 +130,21 @@
 - Never write outside a transaction or with `BEGIN`/`BEGIN IMMEDIATE`: those
   lock out concurrent commits. Schema changes go in migrations, which run
   before anything else touches the file.
-- Moderation follows rank: owners outrank admins, admins outrank members, and
-  nobody acts on someone at or above their own rank (`outranks` on both the
-  server and the client). Every moderation or settings change by a manager
-  writes an audit entry in the same transaction.
+- Permissions, not ranks, decide what someone may do: a handler takes a `Seat`
+  from `Api::with(account, server_id, Permission)` (or `membership` plus
+  `access.require_in(channel, ...)` for channel ones). Rank only decides who
+  may act on whom: nobody moderates, or changes a role, at or above their own
+  highest role (`outranks`, `above`), and nobody grants or takes away a
+  permission they don't have themselves (`may_change`), unless they own the
+  server or are an Administrator. The client mirrors this in
+  `web/src/lib/permissions.ts`. Every moderation or settings change writes an
+  audit entry in the same transaction.
+- A channel the member can't see doesn't exist for them: calls answer
+  NotFound, lists leave it out, and their event stream drops its events. An
+  event that changes what someone can see (roles, channels, their own member)
+  sends them ChannelCreated and ChannelDeleted with sequence 0 for the
+  channels that appear and go. Channel overwrites hold only the permissions
+  `permissions::CHANNEL` lists; the rest are server-wide.
 - Messages have a `kind`. Anything that isn't a plain message (join messages
   today) has empty content, can't be edited, is left out of data exports, and
   never plays a sound or shows a notification.
@@ -153,8 +181,8 @@
   and hovers answer. Use the springs and helpers in
   `web/src/components/motion.tsx` (`SwapText`, `Count`, `CountUp`) so the app
   moves alike everywhere, and keep it working with reduced motion.
-- Every role is the same binary; the role is configuration, never a build
-  feature. Handlers that take a `server_id` run on the shard holding it, so
+- Every part of a split instance (`FUWA_ROLE`) is the same binary; the part is
+  configuration, never a build feature. Handlers that take a `server_id` run on the shard holding it, so
   they read only that server's file and reach accounts, other servers, the
   index and pictures through the `App` methods in `cluster/calls.rs`, never
   `app.node()` or `app.index` directly. Handlers without one run on the

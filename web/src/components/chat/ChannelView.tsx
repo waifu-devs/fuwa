@@ -1,10 +1,10 @@
 import { ChevronLeftIcon, HashIcon, SnailIcon, UsersIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef } from "react";
-import { MemberRole, type Channel } from "@/gen/fuwa/v1/types_pb";
+import { Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { focusChannel } from "@/fuwa/actions";
-import { useInstance } from "@/fuwa/hooks";
-import { CHANNEL_ICON, useMyRole } from "@/components/ChannelSidebar";
+import { useAccess, useInstance } from "@/fuwa/hooks";
+import { CHANNEL_ICON } from "@/components/ChannelSidebar";
 import { Composer } from "@/components/chat/Composer";
 import { MemberList } from "@/components/chat/MemberList";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
@@ -15,14 +15,15 @@ import { InlineMarkdown } from "@/components/Markdown";
 import { SPRING, SwapText } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
 import { formatDuration, shortDuration } from "@/lib/format";
+import { hasIn } from "@/lib/permissions";
 import { setTitle } from "@/lib/notify";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 
 export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: string; serverId: string; channel: Channel }) {
   const inst = useInstance(instanceKey);
-  const role = useMyRole(instanceKey, serverId);
-  const manager = role >= MemberRole.ADMIN || !!inst?.admin;
+  const access = useAccess(instanceKey, serverId);
+  const unslowed = hasIn(access, channel.id, Permission.MANAGE_MESSAGES) || hasIn(access, channel.id, Permission.MANAGE_CHANNELS);
   const list = useRef<MessageListHandle>(null);
   const { compact, setNavOpen, membersOpen, setMembersOpen } = useLayout();
   const docked = useMediaQuery("(min-width: 1024px)");
@@ -85,7 +86,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.6 }}
                 transition={SPRING}
-                title={`Slow mode: one message every ${formatDuration(channel.slowmodeSeconds)}${role >= MemberRole.ADMIN ? " (not for you)" : ""}`}
+                title={`Slow mode: one message every ${formatDuration(channel.slowmodeSeconds)}${unslowed ? " (not for you)" : ""}`}
                 className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-muted-foreground tabular-nums"
               >
                 <SnailIcon className="size-3.5" />
@@ -123,7 +124,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
             </motion.span>
           </motion.button>
         </header>
-        <MessageList key={channel.id} ref={list} instanceKey={instanceKey} serverId={serverId} channel={channel} manager={manager} />
+        <MessageList key={channel.id} ref={list} instanceKey={instanceKey} serverId={serverId} channel={channel} />
         <Composer
           instanceKey={instanceKey}
           serverId={serverId}

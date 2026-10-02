@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Channel, ChannelType } from "./types_pb";
+import type { Channel, ChannelType, PermissionOverwrite } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/channel.proto.
  */
 export const file_fuwa_v1_channel: GenFile = /*@__PURE__*/
-  fileDesc("ChVmdXdhL3YxL2NoYW5uZWwucHJvdG8SB2Z1d2EudjEifQoUQ3JlYXRlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSIgoEdHlwZRgDIAEoDjIULmZ1d2EudjEuQ2hhbm5lbFR5cGUSEQoJcGFyZW50X2lkGAQgASgJEg0KBXRvcGljGAUgASgJIjoKFUNyZWF0ZUNoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIjoKEUdldENoYW5uZWxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJIjcKEkdldENoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIigKE0xpc3RDaGFubmVsc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjoKFExpc3RDaGFubmVsc1Jlc3BvbnNlEiIKCGNoYW5uZWxzGAEgAygLMhAuZnV3YS52MS5DaGFubmVsIvUBChRVcGRhdGVDaGFubmVsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIRCgRuYW1lGAMgASgJSACIAQESEgoFdG9waWMYBCABKAlIAYgBARIVCghwb3NpdGlvbhgFIAEoBUgCiAEBEhYKCXBhcmVudF9pZBgGIAEoCUgDiAEBEh0KEHNsb3dtb2RlX3NlY29uZHMYByABKAVIBIgBAUIHCgVfbmFtZUIICgZfdG9waWNCCwoJX3Bvc2l0aW9uQgwKCl9wYXJlbnRfaWRCEwoRX3Nsb3dtb2RlX3NlY29uZHMiOgoVVXBkYXRlQ2hhbm5lbFJlc3BvbnNlEiEKB2NoYW5uZWwYASABKAsyEC5mdXdhLnYxLkNoYW5uZWwiPQoURGVsZXRlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkiFwoVRGVsZXRlQ2hhbm5lbFJlc3BvbnNlIlgKFlJlb3JkZXJDaGFubmVsc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEisKCGNoYW5uZWxzGAIgAygLMhkuZnV3YS52MS5DaGFubmVsUGxhY2VtZW50IjkKEENoYW5uZWxQbGFjZW1lbnQSEgoKY2hhbm5lbF9pZBgBIAEoCRIRCglwYXJlbnRfaWQYAiABKAkiPQoXUmVvcmRlckNoYW5uZWxzUmVzcG9uc2USIgoIY2hhbm5lbHMYASADKAsyEC5mdXdhLnYxLkNoYW5uZWwy6gMKDkNoYW5uZWxTZXJ2aWNlEk4KDUNyZWF0ZUNoYW5uZWwSHS5mdXdhLnYxLkNyZWF0ZUNoYW5uZWxSZXF1ZXN0Gh4uZnV3YS52MS5DcmVhdGVDaGFubmVsUmVzcG9uc2USRQoKR2V0Q2hhbm5lbBIaLmZ1d2EudjEuR2V0Q2hhbm5lbFJlcXVlc3QaGy5mdXdhLnYxLkdldENoYW5uZWxSZXNwb25zZRJLCgxMaXN0Q2hhbm5lbHMSHC5mdXdhLnYxLkxpc3RDaGFubmVsc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RDaGFubmVsc1Jlc3BvbnNlEk4KDVVwZGF0ZUNoYW5uZWwSHS5mdXdhLnYxLlVwZGF0ZUNoYW5uZWxSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVDaGFubmVsUmVzcG9uc2USTgoNRGVsZXRlQ2hhbm5lbBIdLmZ1d2EudjEuRGVsZXRlQ2hhbm5lbFJlcXVlc3QaHi5mdXdhLnYxLkRlbGV0ZUNoYW5uZWxSZXNwb25zZRJUCg9SZW9yZGVyQ2hhbm5lbHMSHy5mdXdhLnYxLlJlb3JkZXJDaGFubmVsc1JlcXVlc3QaIC5mdXdhLnYxLlJlb3JkZXJDaGFubmVsc1Jlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types]);
+  fileDesc("ChVmdXdhL3YxL2NoYW5uZWwucHJvdG8SB2Z1d2EudjEifQoUQ3JlYXRlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSIgoEdHlwZRgDIAEoDjIULmZ1d2EudjEuQ2hhbm5lbFR5cGUSEQoJcGFyZW50X2lkGAQgASgJEg0KBXRvcGljGAUgASgJIjoKFUNyZWF0ZUNoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIjoKEUdldENoYW5uZWxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJIjcKEkdldENoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIigKE0xpc3RDaGFubmVsc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjoKFExpc3RDaGFubmVsc1Jlc3BvbnNlEiIKCGNoYW5uZWxzGAEgAygLMhAuZnV3YS52MS5DaGFubmVsIvUBChRVcGRhdGVDaGFubmVsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIRCgRuYW1lGAMgASgJSACIAQESEgoFdG9waWMYBCABKAlIAYgBARIVCghwb3NpdGlvbhgFIAEoBUgCiAEBEhYKCXBhcmVudF9pZBgGIAEoCUgDiAEBEh0KEHNsb3dtb2RlX3NlY29uZHMYByABKAVIBIgBAUIHCgVfbmFtZUIICgZfdG9waWNCCwoJX3Bvc2l0aW9uQgwKCl9wYXJlbnRfaWRCEwoRX3Nsb3dtb2RlX3NlY29uZHMiOgoVVXBkYXRlQ2hhbm5lbFJlc3BvbnNlEiEKB2NoYW5uZWwYASABKAsyEC5mdXdhLnYxLkNoYW5uZWwiPQoURGVsZXRlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkiFwoVRGVsZXRlQ2hhbm5lbFJlc3BvbnNlIlgKFlJlb3JkZXJDaGFubmVsc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEisKCGNoYW5uZWxzGAIgAygLMhkuZnV3YS52MS5DaGFubmVsUGxhY2VtZW50IjkKEENoYW5uZWxQbGFjZW1lbnQSEgoKY2hhbm5lbF9pZBgBIAEoCRIRCglwYXJlbnRfaWQYAiABKAkiPQoXUmVvcmRlckNoYW5uZWxzUmVzcG9uc2USIgoIY2hhbm5lbHMYASADKAsyEC5mdXdhLnYxLkNoYW5uZWwidwocU2V0Q2hhbm5lbFBlcm1pc3Npb25zUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIwCgpvdmVyd3JpdGVzGAMgAygLMhwuZnV3YS52MS5QZXJtaXNzaW9uT3ZlcndyaXRlIkIKHVNldENoYW5uZWxQZXJtaXNzaW9uc1Jlc3BvbnNlEiEKB2NoYW5uZWwYASABKAsyEC5mdXdhLnYxLkNoYW5uZWwy0gQKDkNoYW5uZWxTZXJ2aWNlEk4KDUNyZWF0ZUNoYW5uZWwSHS5mdXdhLnYxLkNyZWF0ZUNoYW5uZWxSZXF1ZXN0Gh4uZnV3YS52MS5DcmVhdGVDaGFubmVsUmVzcG9uc2USRQoKR2V0Q2hhbm5lbBIaLmZ1d2EudjEuR2V0Q2hhbm5lbFJlcXVlc3QaGy5mdXdhLnYxLkdldENoYW5uZWxSZXNwb25zZRJLCgxMaXN0Q2hhbm5lbHMSHC5mdXdhLnYxLkxpc3RDaGFubmVsc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RDaGFubmVsc1Jlc3BvbnNlEk4KDVVwZGF0ZUNoYW5uZWwSHS5mdXdhLnYxLlVwZGF0ZUNoYW5uZWxSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVDaGFubmVsUmVzcG9uc2USTgoNRGVsZXRlQ2hhbm5lbBIdLmZ1d2EudjEuRGVsZXRlQ2hhbm5lbFJlcXVlc3QaHi5mdXdhLnYxLkRlbGV0ZUNoYW5uZWxSZXNwb25zZRJUCg9SZW9yZGVyQ2hhbm5lbHMSHy5mdXdhLnYxLlJlb3JkZXJDaGFubmVsc1JlcXVlc3QaIC5mdXdhLnYxLlJlb3JkZXJDaGFubmVsc1Jlc3BvbnNlEmYKFVNldENoYW5uZWxQZXJtaXNzaW9ucxIlLmZ1d2EudjEuU2V0Q2hhbm5lbFBlcm1pc3Npb25zUmVxdWVzdBomLmZ1d2EudjEuU2V0Q2hhbm5lbFBlcm1pc3Npb25zUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
 
 /**
  * @generated from message fuwa.v1.CreateChannelRequest
@@ -315,7 +315,54 @@ export const ReorderChannelsResponseSchema: GenMessage<ReorderChannelsResponse> 
   messageDesc(file_fuwa_v1_channel, 12);
 
 /**
- * Channels in a community server. Members can read them; owners and admins manage them.
+ * @generated from message fuwa.v1.SetChannelPermissionsRequest
+ */
+export type SetChannelPermissionsRequest = Message<"fuwa.v1.SetChannelPermissionsRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * At most one per role or member. Server-wide permissions can't be in one.
+   *
+   * @generated from field: repeated fuwa.v1.PermissionOverwrite overwrites = 3;
+   */
+  overwrites: PermissionOverwrite[];
+};
+
+/**
+ * Describes the message fuwa.v1.SetChannelPermissionsRequest.
+ * Use `create(SetChannelPermissionsRequestSchema)` to create a new message.
+ */
+export const SetChannelPermissionsRequestSchema: GenMessage<SetChannelPermissionsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 13);
+
+/**
+ * @generated from message fuwa.v1.SetChannelPermissionsResponse
+ */
+export type SetChannelPermissionsResponse = Message<"fuwa.v1.SetChannelPermissionsResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.Channel channel = 1;
+   */
+  channel?: Channel | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.SetChannelPermissionsResponse.
+ * Use `create(SetChannelPermissionsResponseSchema)` to create a new message.
+ */
+export const SetChannelPermissionsResponseSchema: GenMessage<SetChannelPermissionsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 14);
+
+/**
+ * Channels in a community server. Members see the ones VIEW_CHANNELS lets
+ * them; MANAGE_CHANNELS changes them, MANAGE_ROLES their permissions.
  *
  * @generated from service fuwa.v1.ChannelService
  */
@@ -369,6 +416,17 @@ export const ChannelService: GenService<{
     methodKind: "unary";
     input: typeof ReorderChannelsRequestSchema;
     output: typeof ReorderChannelsResponseSchema;
+  },
+  /**
+   * Replaces a channel's permission overwrites. The caller can only change
+   * permissions they have in the channel.
+   *
+   * @generated from rpc fuwa.v1.ChannelService.SetChannelPermissions
+   */
+  setChannelPermissions: {
+    methodKind: "unary";
+    input: typeof SetChannelPermissionsRequestSchema;
+    output: typeof SetChannelPermissionsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_channel, 0);

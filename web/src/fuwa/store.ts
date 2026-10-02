@@ -1,6 +1,18 @@
 import { useSyncExternalStore } from "react";
-import type { Channel, Event, Member, Message, Node, NotificationSettings, Profile, Server, User } from "@/gen/fuwa/v1/types_pb";
+import type {
+  Channel,
+  Event,
+  Member,
+  Message,
+  Node,
+  NotificationSettings,
+  Profile,
+  Role,
+  Server,
+  User,
+} from "@/gen/fuwa/v1/types_pb";
 import { ChannelType } from "@/gen/fuwa/v1/types_pb";
+import { sortRoles } from "@/lib/permissions";
 
 /**
  * Everything the client shows, for every instance at once. It changes only
@@ -35,6 +47,8 @@ export type InstanceState = {
   channels: Record<string, Channel[]>;
   /** Per server. */
   members: Record<string, Member[]>;
+  /** Per server, highest first; @everyone (whose id is the server's) last. */
+  roles: Record<string, Role[]>;
   /** Everyone this instance has shown us, by id, so authors resolve even after they leave. */
   users: Record<string, User>;
   /** Per channel, only for channels someone opened. */
@@ -95,6 +109,7 @@ export function emptyInstance(key: string, url: string): InstanceState {
     servers: [],
     channels: {},
     members: {},
+    roles: {},
     users: {},
     messages: {},
     pending: {},
@@ -132,14 +147,12 @@ export function sortChannels(channels: Channel[]): Channel[] {
   return [...channels].sort((a, b) => a.position - b.position || (a.id < b.id ? -1 : 1));
 }
 
-const ROLE_RANK = (m: Member) => -m.role;
+/** By name; lists that rank people group them by role on top of this. */
 export function sortMembers(members: Member[]): Member[] {
-  return [...members].sort(
-    (a, b) =>
-      ROLE_RANK(a) - ROLE_RANK(b) ||
-      (a.nickname || a.user?.displayName || a.user?.username || "").localeCompare(
-        b.nickname || b.user?.displayName || b.user?.username || "",
-      ),
+  return [...members].sort((a, b) =>
+    (a.nickname || a.user?.displayName || a.user?.username || "").localeCompare(
+      b.nickname || b.user?.displayName || b.user?.username || "",
+    ),
   );
 }
 
@@ -185,6 +198,7 @@ export function removeServer(i: InstanceState, serverId: string): InstanceState 
     servers: i.servers.filter((s) => s.id !== serverId),
     channels: without(i.channels, serverId),
     members: without(i.members, serverId),
+    roles: without(i.roles, serverId),
     synced: without(i.synced, serverId),
     messages: keep(i.messages),
     pending: keep(i.pending),
@@ -206,18 +220,32 @@ export function applySnapshot(
   server: Server,
   channels: Channel[],
   members: Member[],
+  roles: Role[],
 ): InstanceState {
-  const next = addServer(i, server);
+  const next = withChannels(addServer(i, server), server.id, channels);
   return {
     ...next,
-    channels: { ...next.channels, [server.id]: sortChannels(channels) },
     members: { ...next.members, [server.id]: sortMembers(members) },
+    roles: { ...next.roles, [server.id]: sortRoles(roles) },
     users: withUsers(
       next.users,
       members.map((m) => m.user),
     ),
     synced: { ...next.synced, [server.id]: true },
   };
+}
+
+/** A server's channels as listed again, letting go of what was in the ones that are gone. */
+export function withChannels(i: InstanceState, serverId: string, channels: Channel[]): InstanceState {
+  const before = i.channels[serverId] ?? [];
+  const kept = new Set(channels.map((c) => c.id));
+  let { messages, unread } = i;
+  for (const c of before) {
+    if (kept.has(c.id)) continue;
+    messages = without(messages, c.id);
+    unread = without(unread, c.id);
+  }
+  return { ...i, channels: { ...i.channels, [serverId]: sortChannels(channels) }, messages, unread };
 }
 
 /** Applies one event from a server's log. Applying the same event twice changes nothing. */
@@ -300,6 +328,30 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
           isNew && p.case === "memberJoined"
             ? i.servers.map((s) => (s.id === sid ? { ...s, memberCount: s.memberCount + 1n } : s))
             : i.servers,
+      };
+    }
+    case "roleCreated":
+    case "roleUpdated": {
+      const role = p.value.role;
+      if (!role) return i;
+      const list = (i.roles[sid] ?? []).filter((r) => r.id !== role.id);
+      return { ...i, roles: { ...i.roles, [sid]: sortRoles([...list, role]) } };
+    }
+    case "roleDeleted": {
+      // The server takes it from everyone and every channel without saying so for each.
+      const id = p.value.roleId;
+      const list = i.roles[sid] ?? [];
+      if (!list.some((r) => r.id === id)) return i;
+      const strip = (m: Member) => (m.roleIds.includes(id) ? { ...m, roleIds: m.roleIds.filter((r) => r !== id) } : m);
+      const unwrite = (c: Channel) =>
+        c.permissionOverwrites.some((o) => o.targetId === id)
+          ? { ...c, permissionOverwrites: c.permissionOverwrites.filter((o) => o.targetId !== id) }
+          : c;
+      return {
+        ...i,
+        roles: { ...i.roles, [sid]: list.filter((r) => r.id !== id) },
+        members: i.members[sid] ? { ...i.members, [sid]: i.members[sid]!.map(strip) } : i.members,
+        channels: i.channels[sid] ? { ...i.channels, [sid]: i.channels[sid]!.map(unwrite) } : i.channels,
       };
     }
     case "memberLeft": {

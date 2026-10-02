@@ -12,16 +12,17 @@ import {
   LoaderCircleIcon,
   ScrollTextIcon,
   SettingsIcon,
+  ShieldIcon,
   Trash2Icon,
   TriangleAlertIcon,
   UsersIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { GetServerUsageResponse } from "@/gen/fuwa/v1/server_pb";
-import { ChannelType, MemberRole, NotificationLevel, type Server, type ServerLimits } from "@/gen/fuwa/v1/types_pb";
+import { ChannelType, NotificationLevel, Permission, type Server, type ServerLimits } from "@/gen/fuwa/v1/types_pb";
 import { deleteServer, nodeUsage, run, serverUsage, setServerLimits, updateServer } from "@/fuwa/actions";
-import { useAction, useInstance } from "@/fuwa/hooks";
+import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
 import { ServerIcon, UserAvatar } from "@/components/Icons";
 import { PictureField } from "@/components/PictureField";
 import { joinLine } from "@/components/chat/MessageList";
@@ -30,6 +31,7 @@ import { Bans } from "@/components/settings/server/Bans";
 import { Channels } from "@/components/settings/server/Channels";
 import { Members } from "@/components/settings/server/Members";
 import { Ownership } from "@/components/settings/server/Ownership";
+import { Roles } from "@/components/settings/server/Roles";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,17 +47,40 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { displayName, formatBytes, initials } from "@/lib/format";
+import { bit, has, type Access } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { Choice, Cap, SaveBar, WithPreview } from "@/components/settings/controls";
 import { SettingsScreen } from "@/components/settings/SettingsScreen";
+
+/** Every section of server settings, and whether your permissions open it. Instance admins also get the server's caps, and can delete it. */
+const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boolean> = {
+  overview: (a) => has(a, Permission.MANAGE_SERVER),
+  roles: (a) => has(a, Permission.MANAGE_ROLES),
+  channels: (a) => [...a.channels.values()].some((bits) => bits & (bit(Permission.MANAGE_CHANNELS) | bit(Permission.MANAGE_ROLES))),
+  usage: (a, admin) => admin || has(a, Permission.MANAGE_SERVER),
+  limits: (_, admin) => admin,
+  members: (a) =>
+    [Permission.MANAGE_ROLES, Permission.MANAGE_NICKNAMES, Permission.KICK_MEMBERS, Permission.BAN_MEMBERS, Permission.TIME_OUT_MEMBERS].some((p) =>
+      has(a, p),
+    ),
+  bans: (a) => has(a, Permission.BAN_MEMBERS),
+  "audit-log": (a) => has(a, Permission.VIEW_AUDIT_LOG),
+  ownership: (a) => a.owner,
+  danger: (a, admin) => a.owner || admin,
+};
+
+/** The server settings sections you can open, in menu order. */
+export function useServerSettingsTabs(instanceKey: string, serverId: string): string[] {
+  const access = useAccess(instanceKey, serverId);
+  const admin = !!useInstance(instanceKey)?.admin;
+  return useMemo(() => Object.keys(SECTION_RULES).filter((id) => SECTION_RULES[id]!(access, admin)), [access, admin]);
+}
 
 export function ServerSettingsDialog({
   open,
   onOpenChange,
   instanceKey,
   server,
-  role,
-  instanceAdmin = false,
   tab: initialTab = "overview",
   target = null,
 }: {
@@ -63,22 +88,22 @@ export function ServerSettingsDialog({
   onOpenChange: (open: boolean) => void;
   instanceKey: string;
   server: Server;
-  /** Your role in the server. Owners and admins manage it; only owners hand it on. */
-  role: MemberRole;
-  /** Instance admins also get the server's own caps, and can delete it. */
-  instanceAdmin?: boolean;
   tab?: string;
   /** What to open the section on, such as a channel. */
   target?: string | null;
 }) {
+  const allowed = useServerSettingsTabs(instanceKey, server.id);
+  const can = (id: string) => allowed.includes(id);
   const [tab, setTab] = useState(initialTab);
   useEffect(() => {
     if (open) setTab(initialTab);
   }, [open, initialTab]);
-  const manager = role >= MemberRole.ADMIN;
-  const owner = role === MemberRole.OWNER;
+  // Permissions can change while it's open: fall back to a section still yours.
+  useEffect(() => {
+    if (open && allowed.length && !allowed.includes(tab)) setTab(allowed[0]!);
+  }, [open, allowed, tab]);
   const sections = [
-    {
+    ...[{
       id: "overview",
       label: "Overview",
       icon: SettingsIcon,
@@ -91,48 +116,48 @@ export function ServerSettingsDialog({
         { id: "join-messages", label: "Join messages", keywords: "system channel welcome greet" },
         { id: "default-notifications", label: "Default notifications", keywords: "mentions ping" },
       ],
+    }],
+    {
+      id: "roles",
+      label: "Roles",
+      icon: ShieldIcon,
+      description: "Who can do what, ranked: colors, permissions and members for each role.",
+      keywords: "permissions admin moderator rank color hoist mention everyone",
+      settings: [
+        { id: "role-permissions", label: "Role permissions", keywords: "administrator manage" },
+        { id: "role-members", label: "Role members", keywords: "assign give" },
+      ],
     },
-    ...(manager
-      ? [
-          {
-            id: "channels",
-            label: "Channels",
-            icon: HashIcon,
-            description: "Order, categories, topics and slow mode.",
-            keywords: "reorder drag category topic slowmode slow mode",
-            settings: [{ id: "slowmode", label: "Slow mode", keywords: "slowmode rate limit" }],
-          },
-        ]
-      : []),
+    {
+      id: "channels",
+      label: "Channels",
+      icon: HashIcon,
+      description: "Order, categories, topics, slow mode, and who can see and use each.",
+      keywords: "reorder drag category topic slowmode slow mode private permissions overwrites",
+      settings: [
+        { id: "slowmode", label: "Slow mode", keywords: "slowmode rate limit" },
+        { id: "channel-permissions", label: "Channel permissions", keywords: "private hidden access roles" },
+      ],
+    },
     { id: "usage", label: "Usage", icon: ChartColumnIcon, description: "What the server holds, against its caps.", keywords: "storage members messages" },
-    ...(instanceAdmin
-      ? [
-          {
-            id: "limits",
-            label: "Limits",
-            icon: GaugeIcon,
-            description: "Caps for this server only, over the instance's defaults.",
-            keywords: "caps members channels storage",
-          },
-        ]
-      : []),
-  ];
-  const people = manager
-    ? [
-        {
-          label: "People",
-          sections: [
-            { id: "members", label: "Members", icon: UsersIcon, description: "Roles, nicknames, time-outs, kicks and bans.", keywords: "admin role kick ban timeout nickname" },
-            { id: "bans", label: "Bans", icon: GavelIcon, description: "Who's kept out, and why.", keywords: "unban banned" },
-            { id: "audit-log", label: "Audit log", icon: ScrollTextIcon, description: "What owners and admins did here.", keywords: "history log moderation" },
-          ],
-        },
-      ]
-    : [];
+    {
+      id: "limits",
+      label: "Limits",
+      icon: GaugeIcon,
+      description: "Caps for this server only, over the instance's defaults.",
+      keywords: "caps members channels storage",
+    },
+  ].filter((s) => can(s.id));
+  const peopleSections = [
+    { id: "members", label: "Members", icon: UsersIcon, description: "Roles, nicknames, time-outs, kicks and bans.", keywords: "admin role kick ban timeout nickname" },
+    { id: "bans", label: "Bans", icon: GavelIcon, description: "Who's kept out, and why.", keywords: "unban banned" },
+    { id: "audit-log", label: "Audit log", icon: ScrollTextIcon, description: "Every change people made here.", keywords: "history log moderation" },
+  ].filter((s) => can(s.id));
+  const people = peopleSections.length ? [{ label: "People", sections: peopleSections }] : [];
   const danger = [
-    ...(owner ? [{ id: "ownership", label: "Transfer ownership", icon: CrownIcon, danger: true, keywords: "owner hand give" }] : []),
-    ...(owner || instanceAdmin ? [{ id: "danger", label: "Delete server", icon: Trash2Icon, danger: true, keywords: "remove" }] : []),
-  ];
+    { id: "ownership", label: "Transfer ownership", icon: CrownIcon, danger: true, keywords: "owner hand give" },
+    { id: "danger", label: "Delete server", icon: Trash2Icon, danger: true, keywords: "remove" },
+  ].filter((s) => can(s.id));
   return (
     <SettingsScreen
       open={open}
@@ -144,15 +169,16 @@ export function ServerSettingsDialog({
       openToSection={initialTab !== "overview"}
       groups={[{ label: server.name, sections }, ...people, ...(danger.length ? [{ sections: danger }] : [])]}
     >
-      {tab === "overview" && <Overview instanceKey={instanceKey} server={server} />}
-      {tab === "channels" && manager && <Channels instanceKey={instanceKey} serverId={server.id} initial={target} />}
-      {tab === "usage" && <Usage instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "limits" && instanceAdmin && <Limits instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "members" && manager && <Members instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "bans" && manager && <Bans instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "audit-log" && manager && <AuditLog instanceKey={instanceKey} serverId={server.id} />}
-      {tab === "ownership" && owner && <Ownership instanceKey={instanceKey} server={server} onDone={() => setTab("overview")} />}
-      {tab === "danger" && (owner || instanceAdmin) && <Danger instanceKey={instanceKey} server={server} onDeleted={() => onOpenChange(false)} />}
+      {tab === "overview" && can("overview") && <Overview instanceKey={instanceKey} server={server} />}
+      {tab === "roles" && can("roles") && <Roles instanceKey={instanceKey} serverId={server.id} initial={target} />}
+      {tab === "channels" && can("channels") && <Channels instanceKey={instanceKey} serverId={server.id} initial={target} />}
+      {tab === "usage" && can("usage") && <Usage instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "limits" && can("limits") && <Limits instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "members" && can("members") && <Members instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "bans" && can("bans") && <Bans instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "audit-log" && can("audit-log") && <AuditLog instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "ownership" && can("ownership") && <Ownership instanceKey={instanceKey} server={server} onDone={() => setTab(allowed[0] ?? "overview")} />}
+      {tab === "danger" && can("danger") && <Danger instanceKey={instanceKey} server={server} onDeleted={() => onOpenChange(false)} />}
     </SettingsScreen>
   );
 }

@@ -11,12 +11,15 @@ import {
   type AnnouncementTone,
   type Channel,
   type Member,
-  type MemberRole,
   type NotificationLevel,
+  type Permission,
+  type PermissionOverwrite,
+  type Role,
   type NotificationSettings,
   type Server,
   type ServerLimits,
 } from "@/gen/fuwa/v1/types_pb";
+import { accessOf, canSee, sortRoles } from "@/lib/permissions";
 import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
 import { normalizeUrl } from "./saved";
@@ -305,12 +308,112 @@ export const setNickname = (key: string, serverId: string, nickname: string, use
 
 // ───────────────────────── Moderation (owners and admins) ─────────────────────────
 
-/** Makes someone an admin or a member. Owner only. */
-export const setRole = (key: string, serverId: string, userId: string, role: MemberRole) =>
+// ───────────────────────── Roles ─────────────────────────
+
+/** Puts roles in the store, ahead of their events. */
+function storeRoles(key: string, serverId: string, changed: Role[]) {
+  const ids = new Set(changed.map((r) => r.id));
+  updateInstance(key, (i) => ({
+    ...i,
+    roles: { ...i.roles, [serverId]: sortRoles([...(i.roles[serverId] ?? []).filter((r) => !ids.has(r.id)), ...changed]) },
+  }));
+}
+
+/** Gives someone a role ranked below your highest one. */
+export const giveRole = (key: string, serverId: string, userId: string, roleId: string) =>
   Effect.gen(function* () {
-    const { member } = yield* call((signal) => api(key).servers.updateMember({ serverId, userId, role }, { signal }));
+    const { member } = yield* call((signal) => api(key).roles.addMemberRole({ serverId, userId, roleId }, { signal }));
     storeMember(key, serverId, member);
     return member!;
+  });
+
+export const takeRole = (key: string, serverId: string, userId: string, roleId: string) =>
+  Effect.gen(function* () {
+    const { member } = yield* call((signal) => api(key).roles.removeMemberRole({ serverId, userId, roleId }, { signal }));
+    storeMember(key, serverId, member);
+    return member!;
+  });
+
+export type RoleDraft = {
+  name: string;
+  color?: number;
+  permissions: Permission[];
+  hoist: boolean;
+  mentionable: boolean;
+};
+
+/** A new role, right above @everyone. */
+export const createRole = (key: string, serverId: string, draft: RoleDraft) =>
+  Effect.gen(function* () {
+    const { role } = yield* call((signal) => api(key).roles.createRole({ serverId, ...draft }, { signal }));
+    // Every other role moved up one; their events say so too.
+    updateInstance(key, (i) => ({
+      ...i,
+      roles: {
+        ...i.roles,
+        [serverId]: (i.roles[serverId] ?? []).map((r) => (r.id !== serverId ? { ...r, position: r.position + 1 } : r)),
+      },
+    }));
+    storeRoles(key, serverId, [role!]);
+    return role!;
+  });
+
+/** Changes what's given; `color: null` clears it. @everyone takes only `permissions`. */
+export const updateRole = (key: string, serverId: string, roleId: string, patch: Partial<Omit<RoleDraft, "color">> & { color?: number | null }) =>
+  Effect.gen(function* () {
+    const { color, permissions, ...rest } = patch;
+    const { role } = yield* call((signal) =>
+      api(key).roles.updateRole(
+        {
+          serverId,
+          roleId,
+          ...rest,
+          clearColor: color === null,
+          color: color ?? undefined,
+          permissions: permissions ? { permissions } : undefined,
+        },
+        { signal },
+      ),
+    );
+    storeRoles(key, serverId, [role!]);
+    return role!;
+  });
+
+export const deleteRole = (key: string, serverId: string, roleId: string) =>
+  Effect.gen(function* () {
+    yield* call((signal) => api(key).roles.deleteRole({ serverId, roleId }, { signal }));
+    return true;
+  });
+
+/** Every role but @everyone, highest first. */
+export const reorderRoles = (key: string, serverId: string, roleIds: string[]) =>
+  Effect.gen(function* () {
+    const { roles } = yield* call((signal) => api(key).roles.reorderRoles({ serverId, roleIds }, { signal }));
+    storeRoles(key, serverId, roles);
+    return roles;
+  });
+
+/** Who can do what in one channel, all its overwrites at once. */
+export const setChannelPermissions = (
+  key: string,
+  serverId: string,
+  channelId: string,
+  overwrites: Omit<PermissionOverwrite, "$typeName" | "$unknown">[],
+) =>
+  Effect.gen(function* () {
+    const { channel } = yield* call((signal) =>
+      api(key).channels.setChannelPermissions({ serverId, channelId, overwrites }, { signal }),
+    );
+    // Unless it just hid the channel from you; then its event takes it away.
+    const i = store.get().instances[key];
+    const me = i?.members[serverId]?.find((m) => m.user?.id === i.me?.id);
+    const server = i?.servers.find((s) => s.id === serverId);
+    if (channel && i && me && server) {
+      const others = (i.channels[serverId] ?? []).filter((c) => c.id !== channel.id);
+      const access = accessOf(serverId, server.ownerId, i.roles[serverId] ?? [], [...others, channel], i.me!.id, me.roleIds);
+      if (canSee(access, channel.id)) storeChannels(key, serverId, [channel]);
+    }
+    return channel!;
   });
 
 /** Times someone out for `seconds`; 0 ends it. */
@@ -551,6 +654,8 @@ export const createChannel = (key: string, serverId: string, name: string, type:
     const { channel } = yield* call((signal) =>
       api(key).channels.createChannel({ serverId, name, type, parentId }, { signal }),
     );
+    // So opening it right away doesn't race its event.
+    if (channel) storeChannels(key, serverId, [channel]);
     return channel!;
   });
 

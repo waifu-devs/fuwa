@@ -2,48 +2,18 @@ use std::collections::{HashMap, HashSet};
 
 use tonic::{Request, Response, Status};
 
-use super::{Api, respond, text};
+use super::{Api, Seat, respond, text};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
-use crate::pb::{self, channel_service_server::ChannelService};
-use crate::servers::{self as store, Audit, Payload, UsageChange, usage_count};
-
-const CHANNEL_COLUMNS: &str = "id, name, type, parent_id, topic, position, created_at, updated_at, slowmode_seconds";
+use crate::pb::{self, Permission, channel_service_server::ChannelService};
+use crate::permissions::{self, Bits};
+use crate::servers::{self as store, Audit, Payload, UsageChange, load_channel, load_channels, usage_count};
 
 /// The longest slow mode, as Discord has it: six hours.
 const MAX_SLOWMODE: i32 = 6 * 60 * 60;
-
-fn channel_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<pb::Channel> + '_ {
-    move |r| {
-        Ok(pb::Channel {
-            id: r.get(0)?,
-            server_id: server_id.to_string(),
-            name: r.get(1)?,
-            r#type: r.get(2)?,
-            parent_id: r.get::<Option<String>>(3)?.unwrap_or_default(),
-            topic: r.get(4)?,
-            position: r.get(5)?,
-            created_at: Some(timestamp(r.get(6)?)),
-            updated_at: Some(timestamp(r.get(7)?)),
-            slowmode_seconds: r.get(8)?,
-        })
-    }
-}
-
-pub(super) async fn load_channel(
-    conn: &turso::Connection,
-    server_id: &str,
-    channel_id: &str,
-) -> Result<Option<pb::Channel>> {
-    query_one(
-        conn,
-        &format!("SELECT {CHANNEL_COLUMNS} FROM channels WHERE id = ?1"),
-        [channel_id],
-        channel_row(server_id),
-    )
-    .await
-}
+/// Most overwrites one channel can have.
+const MAX_OVERWRITES: usize = 100;
 
 /// Channel names read like `#general`: lowercase, words joined by dashes.
 /// Categories keep their name as typed.
@@ -86,7 +56,12 @@ impl ChannelService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, _) = self.manager(&account, &req.server_id).await?;
+                let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
+                if req.parent_id.is_empty() {
+                    access.require(Permission::ManageChannels)?;
+                } else {
+                    access.require_in(&req.parent_id, Permission::ManageChannels)?;
+                }
                 let kind = match pb::ChannelType::try_from(req.r#type) {
                     Ok(pb::ChannelType::Unspecified) | Err(_) => pb::ChannelType::Text,
                     Ok(kind) => kind,
@@ -125,6 +100,7 @@ impl ChannelService for Api {
                             created_at: Some(timestamp(now)),
                             updated_at: Some(timestamp(now)),
                             slowmode_seconds: 0,
+                            permission_overwrites: vec![],
                         };
                         conn.execute(
                             "INSERT INTO channels (id, name, type, parent_id, topic, position, created_at, updated_at)
@@ -166,7 +142,8 @@ impl ChannelService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, _) = self.membership(&account, &req.server_id).await?;
+                let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
+                access.require_in(&req.channel_id, Permission::ViewChannels)?;
                 let channel =
                     load_channel(&sdb.read()?, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
                 Ok(pb::GetChannelResponse { channel: Some(channel) })
@@ -182,14 +159,9 @@ impl ChannelService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let (sdb, _) = self.membership(&account, &request.get_ref().server_id).await?;
-                let channels = query_all(
-                    &sdb.read()?,
-                    &format!("SELECT {CHANNEL_COLUMNS} FROM channels ORDER BY position, id"),
-                    (),
-                    channel_row(&sdb.id),
-                )
-                .await?;
+                let Seat { sdb, access, .. } = self.membership(&account, &request.get_ref().server_id).await?;
+                let mut channels = load_channels(&sdb.read()?, &sdb.id).await?;
+                channels.retain(|c| access.can_see(&c.id));
                 Ok(pb::ListChannelsResponse { channels })
             }
             .await,
@@ -204,7 +176,11 @@ impl ChannelService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, _) = self.manager(&account, &req.server_id).await?;
+                let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
+                access.require_in(&req.channel_id, Permission::ManageChannels)?;
+                if let Some(parent_id) = req.parent_id.as_deref().filter(|p| !p.is_empty()) {
+                    access.require_in(parent_id, Permission::ManageChannels)?;
+                }
                 let topic = req.topic.as_deref().map(|v| text("topic", v, 0, 1024)).transpose()?;
                 if req.slowmode_seconds.is_some_and(|v| !(0..=MAX_SLOWMODE).contains(&v)) {
                     return Err(Error::invalid(format!("slow mode can be 0 to {MAX_SLOWMODE} seconds")));
@@ -271,7 +247,8 @@ impl ChannelService for Api {
         respond(async {
             let account = self.account(request.metadata()).await?;
             let req = request.into_inner();
-            let (sdb, _) = self.manager(&account, &req.server_id).await?;
+            let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
+            access.require_in(&req.channel_id, Permission::ManageChannels)?;
             // Alone, so no message lands in the channel while it goes.
             let server = sdb.write_alone(&account.id, async |conn, events| {
                 let channel = load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
@@ -287,6 +264,7 @@ impl ChannelService for Api {
                 conn.execute("DELETE FROM messages WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 conn.execute("DELETE FROM slowmode WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 conn.execute("DELETE FROM channels WHERE id = ?1", [req.channel_id.as_str()]).await?;
+                conn.execute("DELETE FROM channel_overwrites WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 // A deleted category's channels move to the top level.
                 let children = query_all(conn, "SELECT id FROM channels WHERE parent_id = ?1", [req.channel_id.as_str()], |r| {
                     r.get::<String>(0)
@@ -334,21 +312,16 @@ impl ChannelService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let (sdb, _) = self.manager(&account, &req.server_id).await?;
+                let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageChannels).await?;
                 let channels = sdb
                     .write(&account.id, async |conn, events| {
-                        let current = query_all(
-                            conn,
-                            &format!("SELECT {CHANNEL_COLUMNS} FROM channels"),
-                            (),
-                            channel_row(&sdb.id),
-                        )
-                        .await?;
+                        let current = load_channels(conn, &sdb.id).await?;
                         let by_id: HashMap<&str, &pb::Channel> = current.iter().map(|c| (c.id.as_str(), c)).collect();
                         let listed: HashSet<&str> = req.channels.iter().map(|p| p.channel_id.as_str()).collect();
+                        let visible: Vec<&pb::Channel> = current.iter().filter(|c| access.can_see(&c.id)).collect();
                         if listed.len() != req.channels.len()
-                            || listed.len() != current.len()
-                            || !listed.iter().all(|id| by_id.contains_key(id))
+                            || listed.len() != visible.len()
+                            || !visible.iter().all(|c| listed.contains(c.id.as_str()))
                         {
                             return Err(Error::FailedPrecondition(
                                 "the channels changed while you were moving them; try again".into(),
@@ -369,36 +342,43 @@ impl ChannelService for Api {
                                 return Err(Error::invalid("channels can only sit inside a category"));
                             }
                         }
+                        // The channels the caller can see take their new order; the
+                        // ones they can't keep their places among them.
+                        let mut placed = req.channels.iter();
+                        let order: Vec<(&str, &str)> = current
+                            .iter()
+                            .map(|c| match access.can_see(&c.id) {
+                                true => placed.next().map_or((c.id.as_str(), c.parent_id.as_str()), |p| {
+                                    (p.channel_id.as_str(), p.parent_id.as_str())
+                                }),
+                                false => (c.id.as_str(), c.parent_id.as_str()),
+                            })
+                            .collect();
                         let now = now_ms();
                         let mut moved = vec![];
-                        for (position, placement) in req.channels.iter().enumerate() {
-                            let before = by_id[placement.channel_id.as_str()];
-                            if before.position == position as i32 && before.parent_id == placement.parent_id {
+                        for (position, &(id, parent_id)) in order.iter().enumerate() {
+                            let before = by_id[id];
+                            if before.position == position as i32 && before.parent_id == parent_id {
                                 continue;
                             }
                             conn.execute(
                                 "UPDATE channels SET position = ?2, parent_id = ?3, updated_at = ?4 WHERE id = ?1",
-                                (
-                                    placement.channel_id.as_str(),
-                                    position as i64,
-                                    (!placement.parent_id.is_empty()).then_some(placement.parent_id.as_str()),
-                                    now,
-                                ),
+                                (id, position as i64, (!parent_id.is_empty()).then_some(parent_id), now),
                             )
                             .await?;
-                            moved.push(placement.channel_id.as_str());
+                            moved.push(id);
                         }
                         let mut channels = Vec::with_capacity(req.channels.len());
-                        for placement in &req.channels {
-                            let channel = load_channel(conn, &sdb.id, &placement.channel_id)
-                                .await?
-                                .ok_or(Error::NotFound("channel"))?;
-                            if moved.contains(&channel.id.as_str()) {
+                        for &(id, _) in &order {
+                            let channel = load_channel(conn, &sdb.id, id).await?.ok_or(Error::NotFound("channel"))?;
+                            if moved.contains(&id) {
                                 events.push(Payload::ChannelUpdated(pb::ChannelUpdated {
                                     channel: Some(channel.clone()),
                                 }));
                             }
-                            channels.push(channel);
+                            if access.can_see(id) {
+                                channels.push(channel);
+                            }
                         }
                         if !moved.is_empty() {
                             store::audit(conn, &account.id, Audit::new(pb::AuditAction::ChannelsReorder, "")).await?;
@@ -411,4 +391,111 @@ impl ChannelService for Api {
             .await,
         )
     }
+
+    async fn set_channel_permissions(
+        &self,
+        request: Request<pb::SetChannelPermissionsRequest>,
+    ) -> Result<Response<pb::SetChannelPermissionsResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let req = request.into_inner();
+                let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
+                access.require_in(&req.channel_id, Permission::ManageRoles)?;
+                let wanted = overwrites(&req.overwrites)?;
+                let have = access.in_channel(&req.channel_id);
+                let channel = sdb
+                    .write(&account.id, async |conn, events| {
+                        let before = load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
+                        for o in &wanted {
+                            let exists = if o.member {
+                                store::member(conn, &sdb.id, &o.target_id).await?.is_some()
+                            } else {
+                                permissions::role(conn, &sdb.id, &o.target_id).await?.is_some()
+                            };
+                            if !exists {
+                                return Err(Error::NotFound(if o.member { "member" } else { "role" }));
+                            }
+                        }
+                        // Only permissions the caller has here can change, either way.
+                        let old = overwrites(&before.permission_overwrites)?;
+                        let find = |list: &[Overwrite], id: &str| {
+                            list.iter().find(|o| o.target_id == id).map_or((0, 0), |o| (o.allow, o.deny))
+                        };
+                        let changed = old.iter().chain(&wanted).fold(0, |changed, o| {
+                            let (a, d) = find(&old, &o.target_id);
+                            let (b, e) = find(&wanted, &o.target_id);
+                            changed | (a ^ b) | (d ^ e)
+                        });
+                        if !access.may_change(changed, have) {
+                            return Err(Error::denied("you can only change permissions you have in this channel"));
+                        }
+                        conn.execute("DELETE FROM channel_overwrites WHERE channel_id = ?1", [before.id.as_str()]).await?;
+                        for o in &wanted {
+                            let target = if o.member { pb::OverwriteTarget::Member } else { pb::OverwriteTarget::Role };
+                            conn.execute(
+                                "INSERT INTO channel_overwrites (channel_id, target_id, target, allow, deny) VALUES (?1, ?2, ?3, ?4, ?5)",
+                                (before.id.as_str(), o.target_id.as_str(), target as i64, o.allow as i64, o.deny as i64),
+                            )
+                            .await?;
+                        }
+                        conn.execute("UPDATE channels SET updated_at = ?2 WHERE id = ?1", (before.id.as_str(), now_ms()))
+                            .await?;
+                        let channel = load_channel(conn, &sdb.id, &before.id).await?.ok_or(Error::NotFound("channel"))?;
+                        if changed != 0 {
+                            store::audit(
+                                conn,
+                                &account.id,
+                                Audit::new(pb::AuditAction::ChannelPermissionsUpdate, &channel.id).channel(&channel.name),
+                            )
+                            .await?;
+                        }
+                        events.push(Payload::ChannelUpdated(pb::ChannelUpdated { channel: Some(channel.clone()) }));
+                        Ok(channel)
+                    })
+                    .await?;
+                Ok(pb::SetChannelPermissionsResponse { channel: Some(channel) })
+            }
+            .await,
+        )
+    }
+}
+
+struct Overwrite {
+    target_id: String,
+    member: bool,
+    allow: Bits,
+    deny: Bits,
+}
+
+/// Checks overwrites as a client sent them: one per role or member, channel
+/// permissions only, none both allowed and denied. Empty ones are dropped.
+fn overwrites(list: &[pb::PermissionOverwrite]) -> Result<Vec<Overwrite>> {
+    if list.len() > MAX_OVERWRITES {
+        return Err(Error::invalid(format!("a channel can have at most {MAX_OVERWRITES} overwrites")));
+    }
+    let mut seen = HashSet::new();
+    let mut out = Vec::with_capacity(list.len());
+    for o in list {
+        let member = match pb::OverwriteTarget::try_from(o.target) {
+            Ok(pb::OverwriteTarget::Role) => false,
+            Ok(pb::OverwriteTarget::Member) => true,
+            _ => return Err(Error::invalid("an overwrite is for a role or a member")),
+        };
+        let target_id = crate::id::parse_id("target_id", &o.target_id)?;
+        let (allow, deny) = (permissions::from_list(&o.allow)?, permissions::from_list(&o.deny)?);
+        if (allow | deny) & !permissions::CHANNEL != 0 {
+            return Err(Error::invalid("only channel permissions can change per channel"));
+        }
+        if allow & deny != 0 {
+            return Err(Error::invalid("a permission can't be both allowed and denied"));
+        }
+        if !seen.insert(target_id.clone()) {
+            return Err(Error::invalid("a channel has one overwrite per role or member"));
+        }
+        if allow | deny != 0 {
+            out.push(Overwrite { target_id, member, allow, deny });
+        }
+    }
+    Ok(out)
 }

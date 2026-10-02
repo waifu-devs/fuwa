@@ -15,6 +15,8 @@ export type Clock = "auto" | "12h" | "24h";
 export type SendWith = "enter" | "mod-enter";
 export type NotifyFor = "mentions" | "all";
 export type Sound = "message" | "mention" | "join";
+/** Where role colors show: on names, as a dot beside them, or not at all. */
+export type RoleColors = "names" | "beside" | "off";
 
 export type CustomKeybind = { id: string; action: string; combo: string };
 
@@ -34,6 +36,7 @@ export type Prefs = {
   /** Color saturation, in percent. */
   saturation: number;
   underlineLinks: boolean;
+  roleColors: RoleColors;
   clock: Clock;
   sendWith: SendWith;
   desktopNotifications: boolean;
@@ -67,6 +70,7 @@ export const DEFAULT_PREFS: Prefs = {
   reduceMotion: "system",
   saturation: 100,
   underlineLinks: false,
+  roleColors: "names",
   clock: "auto",
   sendWith: "enter",
   desktopNotifications: false,
@@ -125,6 +129,7 @@ function sanitize(p: Prefs): Prefs {
     zoom: clamp(p.zoom, 80, 150, d.zoom),
     reduceMotion: oneOf(p.reduceMotion, ["system", "always", "never"], d.reduceMotion),
     saturation: clamp(p.saturation, 0, 100, d.saturation),
+    roleColors: oneOf(p.roleColors, ["names", "beside", "off"], d.roleColors),
     clock: oneOf(p.clock, ["auto", "12h", "24h"], d.clock),
     sendWith: oneOf(p.sendWith, ["enter", "mod-enter"], d.sendWith),
     notifyFor: oneOf(p.notifyFor, ["mentions", "all"], d.notifyFor),

@@ -1,5 +1,7 @@
 import type { Effect } from "effect";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import type { Channel, Member, Role } from "@/gen/fuwa/v1/types_pb";
+import { accessOf, NO_ACCESS, type Access } from "@/lib/permissions";
 import { run } from "./actions";
 import type { FuwaError } from "./errors";
 import { store, useFuwa, type InstanceState } from "./store";
@@ -50,3 +52,30 @@ export function useInstances(): InstanceState[] {
 }
 
 export const getInstance = (key: string) => store.get().instances[key];
+
+const NO_ROLES: Role[] = [];
+const NO_CHANNELS: Channel[] = [];
+
+/** A server's roles, highest first; @everyone last. */
+export const useRoles = (key: string, serverId: string): Role[] =>
+  useFuwa((s) => s.instances[key]?.roles[serverId] ?? NO_ROLES);
+
+/** Your membership in a server. */
+export const useMyMember = (key: string, serverId: string): Member | undefined =>
+  useFuwa((s) => {
+    const i = s.instances[key];
+    return i?.members[serverId]?.find((m) => m.user?.id === i.me?.id);
+  });
+
+/** What you can do in a server, worked out as the server does. */
+export function useAccess(key: string, serverId: string): Access {
+  const ownerId = useFuwa((s) => s.instances[key]?.servers.find((x) => x.id === serverId)?.ownerId);
+  const meId = useFuwa((s) => s.instances[key]?.me?.id);
+  const member = useMyMember(key, serverId);
+  const roles = useRoles(key, serverId);
+  const channels = useFuwa((s) => s.instances[key]?.channels[serverId] ?? NO_CHANNELS);
+  return useMemo(
+    () => (ownerId && meId ? accessOf(serverId, ownerId, roles, channels, meId, member?.roleIds ?? []) : NO_ACCESS),
+    [serverId, ownerId, meId, member, roles, channels],
+  );
+}

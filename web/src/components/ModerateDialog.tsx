@@ -1,9 +1,10 @@
 import { DoorOpenIcon, GavelIcon, HourglassIcon, LoaderCircleIcon, PencilIcon, TimerOffIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
-import { MemberRole, type Member } from "@/gen/fuwa/v1/types_pb";
+import { Permission, type Member } from "@/gen/fuwa/v1/types_pb";
 import { banMember, kickMember, setNickname, timeOutMember } from "@/fuwa/actions";
-import { useAction } from "@/fuwa/hooks";
+import { useAccess, useAction, useRoles } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
 import { SPRING } from "@/components/motion";
 import { Chips } from "@/components/settings/account/common";
@@ -14,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration, formatLeft, formatStamp, memberName, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
+import { has, outranks, standing } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -211,8 +213,19 @@ function Body({ instanceKey, serverId, member, action, onDone }: { instanceKey: 
   );
 }
 
-/** Whether `me` can moderate `target`: an owner or admin, ranked above them. */
-export function outranks(me: Member | undefined, target: Member | undefined) {
-  if (!me || !target || me.user?.id === target.user?.id) return false;
-  return me.role >= MemberRole.ADMIN && me.role > target.role;
+/** What you may do to someone: what your permissions allow, and only to people ranked below you. */
+export function useModeration(instanceKey: string, serverId: string, target: Member | undefined) {
+  const access = useAccess(instanceKey, serverId);
+  const roles = useRoles(instanceKey, serverId);
+  const ownerId = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.ownerId ?? "");
+  const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id);
+  const below = !!target?.user && target.user.id !== meId && outranks(access, standing(ownerId, roles, target));
+  const can = (p: Permission) => below && has(access, p);
+  const allowed: Record<ModAction, boolean> = {
+    timeout: can(Permission.TIME_OUT_MEMBERS),
+    kick: can(Permission.KICK_MEMBERS),
+    ban: can(Permission.BAN_MEMBERS),
+    nickname: can(Permission.MANAGE_NICKNAMES),
+  };
+  return { ...allowed, any: Object.values(allowed).some(Boolean) };
 }

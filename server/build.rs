@@ -1,8 +1,9 @@
 use std::{env, path::PathBuf};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let protos = ["types", "node", "auth", "account", "server", "channel", "message", "event", "admin", "media"]
-        .map(|name| PathBuf::from(format!("../proto/fuwa/v1/{name}.proto")));
+    let protos =
+        ["types", "node", "auth", "account", "server", "channel", "message", "event", "admin", "media", "role"]
+            .map(|name| PathBuf::from(format!("../proto/fuwa/v1/{name}.proto")));
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
 
     let mut config = tonic_prost_build::Config::new();
