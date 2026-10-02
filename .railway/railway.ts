@@ -19,7 +19,8 @@ const PORT = 8080;
 
 export default defineRailway((ctx) => {
   // node.db (accounts, sessions, instance settings) and one file per community server.
-  const data = volume("fuwa-data", { region: REGION });
+  // 5 GB, the most the Hobby plan allows. A volume can grow but never shrink.
+  const data = volume("fuwa-data", { region: REGION, sizeMB: 5000 });
 
   const fuwa = service("fuwa", {
     // The image every merge to master publishes; Railway redeploys when it changes.
