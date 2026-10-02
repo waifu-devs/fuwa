@@ -1,0 +1,276 @@
+syntax = "proto3";
+
+package fuwa.cluster.v1;
+
+import "fuwa/v1/admin.proto";
+import "fuwa/v1/media.proto";
+import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// How the parts of a split fuwa instance talk to each other. None of this is
+// for clients: it runs on the private network between a directory, its shards
+// and gateways, and every call carries the cluster key. A single-process
+// instance never uses it.
+
+// Run by the directory, which keeps node.db: accounts, sessions, settings,
+// uploaded pictures, and which shard holds each community server.
+service DirectoryService {
+  // Who a session token (or the admin token) belongs to.
+  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
+  // Whether a session is still signed in, for live streams.
+  rpc SessionLive(SessionLiveRequest) returns (SessionLiveResponse);
+  // The settings in force now, then again each time an admin changes them.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+  // A shard says which servers it holds, when it starts and whenever it has
+  // lost track of what the directory knows.
+  rpc RegisterShard(RegisterShardRequest) returns (RegisterShardResponse);
+  // Which shard holds each server, and where to reach it.
+  rpc Placements(PlacementsRequest) returns (PlacementsResponse);
+  // A server's profile changed.
+  rpc IndexServer(IndexServerRequest) returns (IndexServerResponse);
+  // Someone joined or left a server.
+  rpc IndexMembership(IndexMembershipRequest) returns (IndexMembershipResponse);
+  // A server was deleted.
+  rpc DropServer(DropServerRequest) returns (DropServerResponse);
+  // Notification settings that point at a deleted server or channel, or a
+  // member who left.
+  rpc ForgetNotifications(ForgetNotificationsRequest) returns (ForgetNotificationsResponse);
+  // Checks a picture link about to be set.
+  rpc CheckPicture(CheckPictureRequest) returns (CheckPictureResponse);
+  // Marks a checked picture as used.
+  rpc KeepPicture(KeepPictureRequest) returns (KeepPictureResponse);
+  // Deletes the server icon a change replaced.
+  rpc DropPicture(DropPictureRequest) returns (DropPictureResponse);
+  // How many servers an account owns, for the cap on that.
+  rpc CountOwnedServers(CountOwnedServersRequest) returns (CountOwnedServersResponse);
+}
+
+// Run by each shard, which keeps some of the servers' files.
+service ShardService {
+  // Makes a new server on this shard.
+  rpc CreateServer(CreateServerRequest) returns (CreateServerResponse);
+  // Copies someone's new profile into the servers they're in.
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+  // An account was deleted: takes it out of every server on this shard it was
+  // ever in, leaving a placeholder name behind.
+  rpc ForgetAccount(ForgetAccountRequest) returns (ForgetAccountResponse);
+  // An account's part of a data export: every server on this shard it was
+  // ever in, with the messages it wrote, as JSON.
+  rpc ExportAccount(ExportAccountRequest) returns (stream ExportAccountResponse);
+  // What admins and the usage signal see about each server on this shard.
+  rpc DescribeServers(DescribeServersRequest) returns (DescribeServersResponse);
+  // Whether a server has a channel, before notification settings point at it.
+  rpc ChannelExists(ChannelExistsRequest) returns (ChannelExistsResponse);
+}
+
+// An account as the directory knows it.
+message Account {
+  string id = 1;
+  fuwa.v1.AccountKind kind = 2;
+  string username = 3;
+  string display_name = 4;
+  string avatar_url = 5;
+  bool admin = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp last_seen_at = 8;
+  string status = 9;
+  google.protobuf.Timestamp status_expires_at = 10;
+  bool two_factor = 11;
+  bool disabled = 12;
+  // Whether it signs in with a password.
+  bool has_password = 13;
+}
+
+message AuthenticateRequest {
+  string token = 1;
+}
+
+message AuthenticateResponse {
+  // Unset for the operator's admin token.
+  Account account = 1;
+  // The session's token hash; empty for the admin token.
+  string token_hash = 2;
+}
+
+message SessionLiveRequest {
+  string token_hash = 1;
+}
+
+message SessionLiveResponse {
+  bool live = 1;
+}
+
+message WatchRequest {
+  // Set by shards, so the directory knows which are up.
+  string shard_id = 1;
+}
+
+message WatchResponse {
+  fuwa.v1.InstanceSettings settings = 1;
+}
+
+// A server as a shard reports it: its profile and who's in it.
+message ServerEntry {
+  fuwa.v1.Server server = 1;
+  repeated string member_ids = 2;
+}
+
+message RegisterShardRequest {
+  string shard_id = 1;
+  // How the directory and gateways reach this shard.
+  string url = 2;
+  // Every server the shard holds. Servers the directory had on this shard and
+  // that aren't here are gone.
+  repeated ServerEntry servers = 3;
+}
+
+message RegisterShardResponse {}
+
+message PlacementsRequest {
+  repeated string server_ids = 1;
+}
+
+message Placement {
+  string server_id = 1;
+  string shard_id = 2;
+  // Empty while the shard isn't up.
+  string url = 3;
+}
+
+message PlacementsResponse {
+  // Servers that don't exist are left out.
+  repeated Placement placements = 1;
+}
+
+message IndexServerRequest {
+  fuwa.v1.Server server = 1;
+}
+
+message IndexServerResponse {}
+
+message IndexMembershipRequest {
+  string server_id = 1;
+  string account_id = 2;
+  // True for a join, false for leaving.
+  bool joined = 3;
+}
+
+message IndexMembershipResponse {}
+
+message DropServerRequest {
+  string server_id = 1;
+}
+
+message DropServerResponse {}
+
+message ForgetNotificationsRequest {
+  string server_id = 1;
+  // Only this channel's settings, when set.
+  string channel_id = 2;
+  // Only this account's settings, when set.
+  string account_id = 3;
+}
+
+message ForgetNotificationsResponse {}
+
+message CheckPictureRequest {
+  string account_id = 1;
+  fuwa.v1.MediaPurpose purpose = 2;
+  string url = 3;
+}
+
+message CheckPictureResponse {
+  // The picture's id when the link is to one of this instance's uploads.
+  string media_id = 1;
+}
+
+message KeepPictureRequest {
+  string media_id = 1;
+  string server_id = 2;
+}
+
+message KeepPictureResponse {}
+
+message DropPictureRequest {
+  string old_url = 1;
+  string new_url = 2;
+  string server_id = 3;
+}
+
+message DropPictureResponse {}
+
+message CountOwnedServersRequest {
+  string account_id = 1;
+}
+
+message CountOwnedServersResponse {
+  int64 count = 1;
+}
+
+message CreateServerRequest {
+  fuwa.v1.User owner = 1;
+  string name = 2;
+  string description = 3;
+  string icon_url = 4;
+  bool discoverable = 5;
+}
+
+message CreateServerResponse {
+  fuwa.v1.Server server = 1;
+}
+
+message UpdateUserRequest {
+  fuwa.v1.User user = 1;
+  repeated string server_ids = 2;
+}
+
+message UpdateUserResponse {}
+
+message ForgetAccountRequest {
+  string account_id = 1;
+  // How the account shows from now on.
+  fuwa.v1.User placeholder = 2;
+}
+
+message ForgetAccountResponse {
+  // Servers the account was still a member of.
+  repeated string left_server_ids = 1;
+}
+
+message ExportAccountRequest {
+  string account_id = 1;
+}
+
+message ExportAccountResponse {
+  // The next piece of JSON.
+  bytes chunk = 1;
+  // This piece starts a new server's object.
+  bool starts_server = 2;
+}
+
+message DescribeServersRequest {
+  // Empty for every server on the shard.
+  repeated string server_ids = 1;
+}
+
+message ServerDescription {
+  fuwa.v1.Server server = 1;
+  fuwa.v1.ServerUsage usage = 2;
+  // The server's own caps, before the instance's defaults.
+  fuwa.v1.ServerLimits own_limits = 3;
+  // The owner as the server last saw them.
+  fuwa.v1.User owner = 4;
+}
+
+message DescribeServersResponse {
+  repeated ServerDescription servers = 1;
+}
+
+message ChannelExistsRequest {
+  string server_id = 1;
+  string channel_id = 2;
+}
+
+message ChannelExistsResponse {
+  bool exists = 1;
+}

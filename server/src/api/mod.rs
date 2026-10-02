@@ -10,6 +10,9 @@ mod messages;
 mod node;
 mod servers;
 
+pub(crate) use account::export_server;
+pub use media::PictureOwner;
+
 use std::sync::Arc;
 
 use tonic::metadata::MetadataMap;
@@ -33,7 +36,7 @@ impl Api {
     }
 
     async fn viewer(&self, metadata: &MetadataMap) -> Result<Viewer> {
-        crate::auth::authenticate(&self.app.node, self.app.config.admin_token.as_deref(), metadata).await
+        self.app.authenticate(metadata).await
     }
 
     async fn account(&self, metadata: &MetadataMap) -> Result<Account> {
@@ -48,9 +51,7 @@ impl Api {
     /// Drops notification settings that no longer point anywhere. Losing them
     /// only leaves a few unused rows, so a failure is just logged.
     async fn forget_notifications(&self, server_id: &str, channel_id: Option<&str>, account_id: Option<&str>) {
-        if let Err(err) = self.app.node.forget_notification_settings(server_id, channel_id, account_id).await {
-            tracing::warn!(server = %server_id, error = %err, "couldn't forget notification settings");
-        }
+        self.app.forget_notifications(server_id, channel_id, account_id).await
     }
 
     /// The server and the caller's membership in it.

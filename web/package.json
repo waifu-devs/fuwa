@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "generate": "buf generate .. --template buf.gen.yaml",
+    "generate": "buf generate --template buf.gen.yaml",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },

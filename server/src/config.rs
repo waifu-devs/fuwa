@@ -4,6 +4,7 @@
 use std::env;
 use std::path::PathBuf;
 
+use crate::cluster::ClusterConfig;
 use crate::db::EncryptionKey;
 use crate::pb;
 
@@ -38,6 +39,8 @@ pub struct Config {
     /// FUWA_WEB: on (default) | off. Serves the web client on / when the binary
     /// was built with it (the Docker image and release builds are).
     pub web: bool,
+    /// FUWA_ROLE and the rest of how a split instance fits together.
+    pub cluster: ClusterConfig,
 }
 
 /// Whether standalone accounts (username and password, kept on this instance) are accepted.
@@ -220,6 +223,8 @@ impl Config {
             Some(other) => return Err(format!("FUWA_WEB must be on or off, got {other:?}")),
         };
 
+        let cluster = ClusterConfig::from_lookup(&get)?;
+
         Ok(Self {
             data_path,
             host: get("FUWA_HOST").unwrap_or_else(|| "0.0.0.0".into()),
@@ -238,6 +243,7 @@ impl Config {
                 hosted,
             },
             web,
+            cluster,
         })
     }
 }
