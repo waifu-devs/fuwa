@@ -18,6 +18,15 @@
     one server lives here; a server file keeps only a copy of what its members
     see (name, avatar, status) in its `users` table.
   - `twofactor.rs`: TOTP codes (RFC 6238) and backup codes for two-step sign-in.
+  - `linked.rs`: signing in with waifu.dev (linked accounts): the instance is an
+    OpenAuth client whose client ID is its public URL. `AuthService`'s
+    Start/Get/FinishLinkedSignIn (`api/auth.rs`) keep each sign-in in node.db's
+    `linked_sign_ins` until the code comes back; linked accounts are keyed by
+    `(linked_issuer, linked_subject)` and have no password, so two-step sign-in
+    and password changes don't apply to them. The web app's side is
+    `web/src/lib/linked.ts`, the "Continue with waifu.dev" button in
+    `Connect.tsx` and the callback page (`pages/LinkedCallback.tsx`), which also
+    hands sign-ins started by a fuwa app on another address back to it.
   - `servers.rs`: community servers, one Turso file each under `servers/`: the
     ones this process keeps (all of them, or a shard's share). Every change goes through
     `ServerDb::write`, which appends events to the server's log in the same

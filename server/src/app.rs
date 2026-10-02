@@ -259,8 +259,9 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         auth: Some(pb::AuthMethods {
             local_sign_in: settings.local_accounts.sign_in(),
             local_sign_up: settings.local_accounts.sign_up(),
-            linked_sign_in: false,
-            linked_issuer: String::new(),
+            linked_sign_in: settings.linked_sign_in(),
+            linked_sign_up: settings.linked_sign_up(),
+            linked_issuer: if settings.linked_sign_in() { settings.linked_issuer.clone() } else { String::new() },
         }),
         server_creation: settings.server_creation as i32,
         telemetry: settings.telemetry,
@@ -331,6 +332,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         data = %data_path.display(),
         servers = app.servers.len(),
         local_accounts = app.settings().local_accounts.as_str(),
+        linked_accounts = app.settings().linked_accounts.as_str(),
         "fuwa is up"
     );
 

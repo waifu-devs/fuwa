@@ -101,7 +101,7 @@ pub async fn collect(app: &App) -> Result<Signal> {
         uptime_seconds: app.started.elapsed().as_secs(),
         config: SignalConfig {
             local_accounts: settings.local_accounts.as_str(),
-            linked_accounts: false,
+            linked_accounts: settings.linked_sign_in(),
             server_creation: match settings.server_creation {
                 crate::pb::ServerCreation::Everyone => "everyone",
                 crate::pb::ServerCreation::Admins => "admins",

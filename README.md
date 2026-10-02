@@ -9,8 +9,9 @@ like, hosted or self-hosted, over the same protocol.
   server can be backed up or moved by copying one file. Writes use Turso's
   concurrent writes, so messages to the same server land in parallel.
 - **Accounts your way.** Standalone accounts (a username and password kept on the
-  instance) work with no dependency on anyone. Linked accounts, signed in through
-  waifu.dev, are coming next. The operator switches each kind on or off.
+  instance) work with no dependency on anyone. Linked accounts sign in with a
+  waifu.dev account (see [Signing in with waifu.dev](#signing-in-with-waifudev)).
+  The operator switches each kind on or off.
 - **Usage tracked, limits optional.** Every server counts its members, channels,
   messages and storage. Limits are off unless the operator sets them.
 - **Live by design.** Every change is an event in the server's log; clients
@@ -92,6 +93,8 @@ the log filter are read only from the environment.
 | `FUWA_ALLOWED_ORIGINS` | `*` | Browser origins allowed to call the API, comma-separated |
 | `FUWA_WEB` | `on` | Serve the web app at `/`; `off` leaves only the API |
 | `FUWA_LOCAL_ACCOUNTS` | `open` | Standalone accounts: `open` (anyone can sign up), `closed` (existing accounts only), `off` |
+| `FUWA_LINKED_ACCOUNTS` | `open` | Signing in with waifu.dev: `open` (anyone with a waifu.dev account gets one here), `closed` (existing linked accounts only), `off` |
+| `FUWA_LINKED_ISSUER` | `https://api.waifu.dev` | The OpenAuth issuer linked accounts sign in with |
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |
 | `FUWA_ENCRYPTION_KEY` | unset | 64 hex characters (`openssl rand -hex 32`); encrypts every database at rest |
@@ -110,6 +113,37 @@ The `FUWA_LIMIT_*` values are instance-wide defaults. An admin can give a single
 server its own caps from that server's settings or the Servers page of the
 instance settings (or `AdminService.SetServerLimits`); a server's own caps win
 over the defaults.
+
+### Signing in with waifu.dev
+
+People can sign in with their waifu.dev account instead of making a password
+here. The first time, they get a linked account on the instance, named after
+their waifu.dev username (with a number added if it's taken here), with their
+waifu.dev name and picture to start with. It needs `FUWA_PUBLIC_URL` to be the
+https address people use (or `http://localhost` while testing), because that's
+where waifu.dev sends them back to: the instance is its own OpenAuth client,
+with its public URL as the client ID and `<FUWA_PUBLIC_URL>/auth/waifu/callback`
+as the only address the sign-in can return to.
+
+How it goes:
+
+1. The app calls `AuthService.StartLinkedSignIn` with its own origin and the
+   SHA-256 of a secret it keeps, and sends the browser to the `authorize_url`
+   it gets back (a code flow with PKCE; the verifier stays on the instance).
+2. waifu.dev sends the browser to the instance's `/auth/waifu/callback` with a
+   code. When another fuwa app (on another address) started the sign-in, this
+   page asks the person to confirm it's theirs, then hands the code to that
+   app's own `/auth/waifu/callback`.
+3. The app calls `FinishLinkedSignIn` with the code and its secret. The
+   instance trades the code for a token, asks waifu.dev's `/userinfo` who signed
+   in, and answers with a session. The token is made out to the instance and
+   waifu.dev takes it for nothing else; the instance hands its refresh token
+   straight back.
+
+The callback page is served even with `FUWA_WEB=off`, so apps on other
+addresses can still sign in to the instance. Turning standalone accounts off
+needs waifu.dev sign-in working first, and the other way around, so there's
+always a way in.
 
 ### Pictures
 

@@ -19,6 +19,7 @@ import {
   type Server,
   type ServerLimits,
 } from "@/gen/fuwa/v1/types_pb";
+import { canReturnTo, newSecret, savePending, sha256Hex, type PendingSignIn } from "@/lib/linked";
 import { accessOf, canSee, sortRoles } from "@/lib/permissions";
 import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
@@ -91,6 +92,44 @@ export const signUp = (url: string, username: string, password: string, displayN
       makeApi(url, () => null).auth.signUp({ username, password, displayName }, { signal }),
     );
     return addInstance(url, res.token);
+  });
+
+/**
+ * Starts signing in with waifu.dev: remembers the sign-in in this tab, then
+ * sends the browser to waifu.dev. It comes back to the callback page, which
+ * finishes with `finishLinkedSignIn`.
+ */
+export const startLinkedSignIn = (url: string, next: string | null) =>
+  Effect.gen(function* () {
+    if (!canReturnTo(window.location.origin)) {
+      return yield* Effect.fail(toFuwaError(new Error("signing in with waifu.dev needs this page on an https address")));
+    }
+    const secret = newSecret();
+    const secretHash = yield* Effect.promise(() => sha256Hex(secret));
+    const res = yield* call((signal) =>
+      makeApi(url, () => null).auth.startLinkedSignIn({ returnOrigin: window.location.origin, secretHash }, { signal }),
+    );
+    if (!savePending(res.state, { url, secret, next, startedAt: Date.now() })) {
+      return yield* Effect.fail(toFuwaError(new Error("this browser won't keep the sign-in while you visit waifu.dev")));
+    }
+    window.location.assign(res.authorizeUrl);
+    return true;
+  });
+
+/** Finishes a sign-in with waifu.dev that this tab started. */
+export const finishLinkedSignIn = (pending: PendingSignIn, state: string, code: string) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) =>
+      makeApi(pending.url, () => null).auth.finishLinkedSignIn({ state, code, secret: pending.secret }, { signal }),
+    );
+    return { key: addInstance(pending.url, res.token), user: res.user, created: res.created };
+  });
+
+/** Which app a sign-in that came back to this instance belongs to. */
+export const linkedSignInOrigin = (url: string, state: string) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) => makeApi(url, () => null).auth.getLinkedSignIn({ state }, { signal }));
+    return res.returnOrigin;
   });
 
 /** Ends the session on the server too, then keeps the instance listed but signed out. */

@@ -70,6 +70,8 @@ message AuthMethods {
   bool linked_sign_in = 3;
   // The issuer linked accounts come from.
   string linked_issuer = 4;
+  // Whether someone new can sign in with waifu.dev and get a linked account.
+  bool linked_sign_up = 5;
 }
 
 // Who may create community servers on an instance.

@@ -5,7 +5,8 @@ use super::{Api, respond, text, url};
 use crate::auth::{self, Viewer};
 use crate::error::{Error, Result};
 use crate::id::millis;
-use crate::node::{Account, ProfileChange};
+use crate::linked;
+use crate::node::{Account, LinkedSignIn, NewLinkedAccount, ProfileChange};
 use crate::pb::{self, auth_service_server::AuthService};
 
 use crate::twofactor;
@@ -96,6 +97,95 @@ impl Api {
         let token = auth::new_token();
         self.app.node()?.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
         Ok(pb::VerifyTwoFactorResponse { token, user: Some(account.user()), admin: account.admin })
+    }
+
+    /// The first step of signing in with waifu.dev: where to send the browser.
+    async fn start_linked(&self, req: pb::StartLinkedSignInRequest) -> Result<pb::StartLinkedSignInResponse> {
+        let settings = self.app.settings();
+        if !settings.linked_accounts.sign_in() {
+            return Err(Error::FailedPrecondition("this instance doesn't take waifu.dev sign-ins".into()));
+        }
+        let client_id = linked::client_id(&settings.public_url).ok_or_else(|| {
+            Error::FailedPrecondition(
+                "signing in with waifu.dev needs this instance's public URL to be https; an admin can change it".into(),
+            )
+        })?;
+        let return_origin = linked::return_origin(&req.return_origin)?;
+        let secret_hash = req.secret_hash.trim().to_ascii_lowercase();
+        if secret_hash.len() != 64 || !secret_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(Error::invalid("secret_hash must be a SHA-256 in hex"));
+        }
+        let state = auth::new_token();
+        let (verifier, challenge) = linked::pkce();
+        let authorize_url = linked::authorize_url(&settings.linked_issuer, &client_id, &state, &challenge)?;
+        self.app
+            .node()?
+            .create_linked_sign_in(&LinkedSignIn {
+                state: state.clone(),
+                secret_hash,
+                verifier,
+                issuer: settings.linked_issuer.clone(),
+                client_id,
+                return_origin,
+            })
+            .await?;
+        Ok(pb::StartLinkedSignInResponse { authorize_url, state })
+    }
+
+    /// The last step of signing in with waifu.dev: the code for a session, and
+    /// an account for someone new.
+    async fn finish_linked(
+        &self,
+        req: pb::FinishLinkedSignInRequest,
+        user_agent: &str,
+    ) -> Result<pb::FinishLinkedSignInResponse> {
+        let node = self.app.node()?;
+        let ran_out = || Error::FailedPrecondition("this sign-in ran out; start again".into());
+        let sign_in = node.linked_sign_in(req.state.trim()).await?.ok_or_else(ran_out)?;
+        if !auth::constant_time_eq(linked::secret_hash(&req.secret).as_bytes(), sign_in.secret_hash.as_bytes()) {
+            return Err(Error::denied("another app started this sign-in"));
+        }
+        if !node.take_linked_sign_in(&sign_in.state).await? {
+            return Err(ran_out());
+        }
+        let settings = self.app.settings();
+        if !settings.linked_accounts.sign_in() {
+            return Err(Error::FailedPrecondition("this instance doesn't take waifu.dev sign-ins".into()));
+        }
+        let identity =
+            linked::identify(&sign_in.issuer, &sign_in.client_id, req.code.trim(), &sign_in.verifier).await?;
+        let (account, created) = match node.linked_account(&sign_in.issuer, &identity.sub).await? {
+            Some(account) => (account, false),
+            None => {
+                if !settings.linked_accounts.sign_up() {
+                    return Err(Error::FailedPrecondition("this instance isn't taking new sign-ups".into()));
+                }
+                let base = linked::username_base(&identity.preferred_username);
+                let display_name: String = [identity.name.trim(), identity.preferred_username.trim(), &base]
+                    .into_iter()
+                    .find(|name| !name.is_empty())
+                    .unwrap_or_default()
+                    .chars()
+                    .take(64)
+                    .collect();
+                let avatar_url = identity.picture.as_deref().and_then(|picture| url("avatar_url", picture).ok());
+                node.create_linked_account(&NewLinkedAccount {
+                    issuer: &sign_in.issuer,
+                    subject: &identity.sub,
+                    username_base: &base,
+                    display_name: &display_name,
+                    avatar_url: avatar_url.as_deref().unwrap_or_default(),
+                })
+                .await?
+            }
+        };
+        if account.disabled {
+            return Err(Error::denied(DISABLED));
+        }
+        let token = auth::new_token();
+        node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
+        tracing::info!(account = %account.id, created, admin = account.admin, "signed in with waifu.dev");
+        Ok(pb::FinishLinkedSignInResponse { token, user: Some(account.user()), admin: account.admin, created })
     }
 
     async fn apply_profile(&self, account: &Account, req: pb::UpdateProfileRequest) -> Result<(pb::User, pb::Profile)> {
@@ -237,6 +327,35 @@ impl AuthService for Api {
             }
             .await,
         )
+    }
+
+    async fn start_linked_sign_in(
+        &self,
+        request: Request<pb::StartLinkedSignInRequest>,
+    ) -> Result<Response<pb::StartLinkedSignInResponse>, Status> {
+        respond(self.start_linked(request.into_inner()).await)
+    }
+
+    async fn get_linked_sign_in(
+        &self,
+        request: Request<pb::GetLinkedSignInRequest>,
+    ) -> Result<Response<pb::GetLinkedSignInResponse>, Status> {
+        respond(
+            async {
+                let state = request.get_ref().state.trim();
+                let sign_in = self.app.node()?.linked_sign_in(state).await?.ok_or(Error::NotFound("sign-in"))?;
+                Ok(pb::GetLinkedSignInResponse { return_origin: sign_in.return_origin })
+            }
+            .await,
+        )
+    }
+
+    async fn finish_linked_sign_in(
+        &self,
+        request: Request<pb::FinishLinkedSignInRequest>,
+    ) -> Result<Response<pb::FinishLinkedSignInResponse>, Status> {
+        let user_agent = auth::user_agent(request.metadata());
+        respond(self.finish_linked(request.into_inner(), &user_agent).await)
     }
 
     async fn change_password(

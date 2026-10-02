@@ -27,7 +27,13 @@ pub struct Config {
     /// FUWA_ENCRYPTION_KEY: when set, every database is encrypted at rest.
     pub encryption_key: Option<EncryptionKey>,
     /// FUWA_LOCAL_ACCOUNTS: open (default) | closed | off.
-    pub local_accounts: LocalAccounts,
+    pub local_accounts: Accounts,
+    /// FUWA_LINKED_ACCOUNTS: open (default) | closed | off. Accounts signed in
+    /// with waifu.dev, which needs a public URL waifu.dev can send people back to.
+    pub linked_accounts: Accounts,
+    /// FUWA_LINKED_ISSUER, default https://api.waifu.dev: the OpenAuth issuer
+    /// linked accounts sign in with.
+    pub linked_issuer: String,
     /// FUWA_SERVER_CREATION: everyone (default) | admins | off.
     pub server_creation: pb::ServerCreation,
     /// FUWA_ADMIN_TOKEN: a bearer token with instance-admin rights, for a control
@@ -43,18 +49,19 @@ pub struct Config {
     pub cluster: ClusterConfig,
 }
 
-/// Whether standalone accounts (username and password, kept on this instance) are accepted.
+/// Whether a kind of account works here: standalone ones (username and
+/// password, kept on this instance) or linked ones (signed in with waifu.dev).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LocalAccounts {
+pub enum Accounts {
     /// Anyone can sign up.
     Open,
     /// Existing accounts can sign in; nobody new can sign up.
     Closed,
-    /// No standalone accounts at all.
+    /// None of this kind at all.
     Off,
 }
 
-impl LocalAccounts {
+impl Accounts {
     pub fn sign_in(self) -> bool {
         self != Self::Off
     }
@@ -70,7 +77,18 @@ impl LocalAccounts {
             Self::Off => "off",
         }
     }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "open" => Some(Self::Open),
+            "closed" => Some(Self::Closed),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
 }
+
+pub const DEFAULT_LINKED_ISSUER: &str = "https://api.waifu.dev";
 
 /// Instance-wide caps. `None` is unlimited.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -157,12 +175,19 @@ impl Config {
             .map(|key| EncryptionKey::parse(&key).map_err(|err| format!("FUWA_ENCRYPTION_KEY {err}")))
             .transpose()?;
 
-        let local_accounts = match get("FUWA_LOCAL_ACCOUNTS").as_deref().map(str::trim) {
-            None | Some("open") => LocalAccounts::Open,
-            Some("closed") => LocalAccounts::Closed,
-            Some("off") => LocalAccounts::Off,
-            Some(other) => return Err(format!("FUWA_LOCAL_ACCOUNTS must be open, closed or off, got {other:?}")),
+        let accounts = |key: &str| match get(key) {
+            None => Ok(Accounts::Open),
+            Some(value) => Accounts::parse(value.trim())
+                .ok_or_else(|| format!("{key} must be open, closed or off, got {:?}", value.trim())),
         };
+        let local_accounts = accounts("FUWA_LOCAL_ACCOUNTS")?;
+        let linked_accounts = accounts("FUWA_LINKED_ACCOUNTS")?;
+        let linked_issuer = get("FUWA_LINKED_ISSUER")
+            .map(|url| url.trim().trim_end_matches('/').to_string())
+            .unwrap_or_else(|| DEFAULT_LINKED_ISSUER.into());
+        if !(linked_issuer.starts_with("https://") || linked_issuer.starts_with("http://")) {
+            return Err(format!("FUWA_LINKED_ISSUER must start with https://, got {linked_issuer:?}"));
+        }
 
         let server_creation = match get("FUWA_SERVER_CREATION").as_deref().map(str::trim) {
             None | Some("everyone") => pb::ServerCreation::Everyone,
@@ -234,6 +259,8 @@ impl Config {
             allowed_origins,
             encryption_key,
             local_accounts,
+            linked_accounts,
+            linked_issuer,
             server_creation,
             admin_token,
             limits,
@@ -285,7 +312,9 @@ mod tests {
         let config = config(&[("FUWA_DATA_PATH", "/data")]).unwrap();
         assert_eq!(config.port, 8080);
         assert_eq!(config.public_url, "http://localhost:8080");
-        assert_eq!(config.local_accounts, LocalAccounts::Open);
+        assert_eq!(config.local_accounts, Accounts::Open);
+        assert_eq!(config.linked_accounts, Accounts::Open);
+        assert_eq!(config.linked_issuer, "https://api.waifu.dev");
         assert_eq!(config.server_creation, pb::ServerCreation::Everyone);
         assert!(!config.limits.any());
         assert!(config.telemetry.enabled);
@@ -324,6 +353,8 @@ mod tests {
     #[test]
     fn bad_values_are_explained() {
         assert!(config(&[("FUWA_LOCAL_ACCOUNTS", "maybe")]).unwrap_err().contains("open, closed or off"));
+        assert!(config(&[("FUWA_LINKED_ACCOUNTS", "maybe")]).unwrap_err().contains("FUWA_LINKED_ACCOUNTS"));
+        assert!(config(&[("FUWA_LINKED_ISSUER", "api.waifu.dev")]).unwrap_err().contains("https://"));
         assert!(config(&[("FUWA_ENCRYPTION_KEY", "short")]).unwrap_err().contains("64 hex"));
         assert!(config(&[("FUWA_LIMIT_STORAGE", "5 parsecs")]).unwrap_err().contains("unknown unit"));
     }

@@ -19,6 +19,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0004_admin.sql"),
     include_str!("../migrations/node/0005_media.sql"),
     include_str!("../migrations/node/0006_cluster.sql"),
+    include_str!("../migrations/node/0007_linked_sign_ins.sql"),
 ];
 
 /// How long a session lasts after sign-in.
@@ -99,6 +100,28 @@ fn account(row: &Row) -> turso::Result<Account> {
         two_factor: row.get(10)?,
         disabled: row.get(11)?,
     })
+}
+
+/// A sign-in through waifu.dev waiting for its code.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinkedSignIn {
+    pub state: String,
+    pub secret_hash: String,
+    pub verifier: String,
+    pub issuer: String,
+    pub client_id: String,
+    pub return_origin: String,
+}
+
+/// Someone new from waifu.dev, as their linked account starts out.
+#[derive(Debug, Clone)]
+pub struct NewLinkedAccount<'a> {
+    pub issuer: &'a str,
+    pub subject: &'a str,
+    /// Tried as it is, then with _2, _3, … until one is free.
+    pub username_base: &'a str,
+    pub display_name: &'a str,
+    pub avatar_url: &'a str,
 }
 
 /// What a profile change sets; `None` leaves a field as it is.
@@ -252,6 +275,136 @@ impl NodeDb {
         result.map_err(|err| {
             if db::is_unique_violation(&err) { Error::AlreadyExists("that username is taken".into()) } else { err }
         })
+    }
+
+    /// The linked account for someone on an issuer, if they have one.
+    pub async fn linked_account(&self, issuer: &str, subject: &str) -> Result<Option<Account>> {
+        let conn = self.read()?;
+        query_one(
+            &conn,
+            &format!("SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE linked_issuer = ?1 AND linked_subject = ?2"),
+            (issuer, subject),
+            account,
+        )
+        .await
+    }
+
+    /// Creates a linked account, under the first free username from its base,
+    /// and says it did. The first account on the instance is its admin. Someone
+    /// who got an account meanwhile (a second sign-in racing this one) gets that one.
+    pub async fn create_linked_account(&self, new: &NewLinkedAccount<'_>) -> Result<(Account, bool)> {
+        let _one_at_a_time = self.sign_ups.lock().await;
+        if let Some(account) = self.linked_account(new.issuer, new.subject).await? {
+            return Ok((account, false));
+        }
+        let account = db::write(&self.db, async |conn| {
+            let mut username = None;
+            for attempt in 1..=99 {
+                let candidate = crate::linked::username_candidate(new.username_base, attempt);
+                let taken = query_one(conn, "SELECT 1 FROM accounts WHERE username = ?1", [candidate.as_str()], |r| {
+                    r.get::<i64>(0)
+                })
+                .await?
+                .is_some();
+                if !taken {
+                    username = Some(candidate);
+                    break;
+                }
+            }
+            let username = match username {
+                Some(username) => username,
+                None => format!("{}_{}", new.username_base.chars().take(20).collect::<String>(), &new_id()[16..]),
+            }
+            .to_lowercase();
+            let first = query_one(conn, "SELECT count(*) FROM accounts", (), |r| r.get::<i64>(0)).await? == Some(0);
+            let now = now_ms();
+            let id = new_id();
+            conn.execute(
+                "INSERT INTO accounts (id, kind, username, display_name, avatar_url, linked_issuer, linked_subject, admin, created_at, updated_at, last_seen_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?9)",
+                (
+                    id.as_str(),
+                    pb::AccountKind::Linked as i64,
+                    username.as_str(),
+                    new.display_name,
+                    new.avatar_url,
+                    new.issuer,
+                    new.subject,
+                    first,
+                    now,
+                ),
+            )
+            .await?;
+            Ok(Account {
+                id,
+                kind: pb::AccountKind::Linked,
+                username,
+                display_name: new.display_name.to_string(),
+                avatar_url: new.avatar_url.to_string(),
+                admin: first,
+                created_at: now,
+                last_seen_at: now,
+                status: String::new(),
+                status_expires_at: None,
+                two_factor: false,
+                disabled: false,
+            })
+        })
+        .await?;
+        Ok((account, true))
+    }
+
+    /// Holds a sign-in through waifu.dev until its code comes back.
+    pub async fn create_linked_sign_in(&self, sign_in: &LinkedSignIn) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "INSERT INTO linked_sign_ins (state, secret_hash, verifier, issuer, client_id, return_origin, expires_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                (
+                    sign_in.state.as_str(),
+                    sign_in.secret_hash.as_str(),
+                    sign_in.verifier.as_str(),
+                    sign_in.issuer.as_str(),
+                    sign_in.client_id.as_str(),
+                    sign_in.return_origin.as_str(),
+                    now_ms() + crate::linked::TTL_MS,
+                ),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// A sign-in through waifu.dev that hasn't run out.
+    pub async fn linked_sign_in(&self, state: &str) -> Result<Option<LinkedSignIn>> {
+        let conn = self.read()?;
+        query_one(
+            &conn,
+            "SELECT state, secret_hash, verifier, issuer, client_id, return_origin FROM linked_sign_ins
+             WHERE state = ?1 AND expires_at > ?2",
+            (state, now_ms()),
+            |r| {
+                Ok(LinkedSignIn {
+                    state: r.get(0)?,
+                    secret_hash: r.get(1)?,
+                    verifier: r.get(2)?,
+                    issuer: r.get(3)?,
+                    client_id: r.get(4)?,
+                    return_origin: r.get(5)?,
+                })
+            },
+        )
+        .await
+    }
+
+    /// Ends a sign-in through waifu.dev, so its code is traded once. False if
+    /// another request already did.
+    pub async fn take_linked_sign_in(&self, state: &str) -> Result<bool> {
+        db::write(&self.db, async |conn| {
+            Ok(conn.execute("DELETE FROM linked_sign_ins WHERE state = ?1", [state]).await? > 0)
+        })
+        .await
     }
 
     /// A standalone account and its password hash, by username.
@@ -470,6 +623,7 @@ impl NodeDb {
         db::write(&self.db, async |conn| {
             let now = now_ms();
             conn.execute("DELETE FROM sign_in_tickets WHERE expires_at <= ?1", [now]).await?;
+            conn.execute("DELETE FROM linked_sign_ins WHERE expires_at <= ?1", [now]).await?;
             Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now]).await?)
         })
         .await

@@ -8,7 +8,6 @@ use tonic::{Request, Response, Status};
 
 use super::{Api, respond, text};
 use crate::auth::{self, Viewer};
-use crate::config::LocalAccounts;
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::node::{AccountFilter, AccountSummary};
@@ -134,10 +133,21 @@ impl AdminService for Api {
                     next.set_from_pb(field, &from)?;
                     store.push((field.clone(), next.get_json(field)?.to_string()));
                 }
-                if update.iter().any(|field| field == "local_accounts") && next.local_accounts == LocalAccounts::Off {
-                    return Err(Error::FailedPrecondition(
-                        "turning standalone accounts off would leave no way to sign in to this instance".into(),
-                    ));
+                let touches = |name: &str| update.iter().chain(&reset).any(|field| field == name);
+                let mut after_reset = next.clone();
+                for field in &reset {
+                    after_reset.set_from_pb(field, &Settings::defaults(&self.app.config).to_pb())?;
+                }
+                // There's always a way in: standalone accounts, or waifu.dev sign-in that works.
+                if (touches("local_accounts") || touches("linked_accounts") || touches("public_url"))
+                    && !after_reset.local_accounts.sign_in()
+                    && !after_reset.linked_sign_in()
+                {
+                    return Err(Error::FailedPrecondition(if after_reset.linked_accounts.sign_in() {
+                        "with standalone accounts off, signing in with waifu.dev has to work, and it needs an https public URL".into()
+                    } else {
+                        "turning both kinds of account off would leave no way to sign in to this instance".into()
+                    }));
                 }
 
                 self.app.node()?.save_settings(&store, &reset).await?;

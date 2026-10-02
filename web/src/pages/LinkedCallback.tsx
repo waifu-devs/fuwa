@@ -1,0 +1,256 @@
+import { useNavigate } from "@tanstack/react-router";
+import { ArrowRightIcon, CheckIcon, CloudOffIcon, Flower2Icon, LoaderCircleIcon, ShieldAlertIcon } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { finishLinkedSignIn, linkedSignInOrigin, probe, run } from "@/fuwa/actions";
+import { FuwaMark } from "@/components/Icons";
+import { Petals } from "@/components/Petals";
+import { Private } from "@/components/Private";
+import { Button } from "@/components/ui/button";
+import { CALLBACK, issuerName, takePending } from "@/lib/linked";
+
+const EASE = [0.22, 1, 0.36, 1] as const;
+
+type Phase =
+  /** Trading the code for a session on the instance this tab started with. */
+  | { kind: "finishing" }
+  | { kind: "done"; name: string; created: boolean }
+  /** Another fuwa app started this sign-in; it goes back there if the person says so. */
+  | { kind: "handoff"; origin: string; code: string; state: string }
+  | { kind: "error"; title: string; message: string }
+  | { kind: "cancelled" };
+
+/**
+ * Where waifu.dev sends the browser after signing in, at /auth/waifu/callback.
+ * A sign-in this tab started finishes here. One another fuwa app started (on
+ * another address, signing in to this instance) is handed back to that app,
+ * once the person confirms it's theirs: a sign-in link someone else made
+ * would otherwise give them the account.
+ */
+export function LinkedCallback() {
+  const navigate = useNavigate();
+  const [phase, setPhase] = useState<Phase>({ kind: "finishing" });
+  const [here, setHere] = useState<{ name: string; issuer: string } | null>(null);
+  const once = useRef(false);
+
+  useEffect(() => {
+    if (once.current) return;
+    once.current = true;
+    const query = new URLSearchParams(window.location.search);
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    const read = (name: string) => query.get(name) ?? fragment.get(name) ?? "";
+    const state = read("state");
+    const code = read("code");
+    const problem = read("error_description") || read("error");
+    // The code works once, but it has no business in the address bar or the history.
+    window.history.replaceState(null, "", CALLBACK);
+
+    const pending = state ? takePending(state) : null;
+    if (pending) {
+      if (problem || !code) {
+        setPhase({ kind: "error", title: "Didn't sign in", message: problem || "waifu.dev didn't send a sign-in back." });
+        return;
+      }
+      run(finishLinkedSignIn(pending, state, code)).then(
+        ({ key, user, created }) => {
+          setPhase({ kind: "done", name: user?.displayName || user?.username || "you", created });
+          window.setTimeout(() => {
+            if (pending.next) navigate({ to: pending.next, replace: true });
+            else navigate({ to: "/$instance", params: { instance: key }, replace: true });
+          }, 1500);
+        },
+        (err: Error) => setPhase({ kind: "error", title: "Couldn't sign in", message: err.message }),
+      );
+      return;
+    }
+
+    if (!state) {
+      setPhase({ kind: "error", title: "Nothing to finish", message: "There's no sign-in waiting here." });
+      return;
+    }
+    run(probe(window.location.origin)).then(
+      (found) => setHere({ name: found.node.name, issuer: issuerName(found.node.auth?.linkedIssuer) }),
+      () => {},
+    );
+    run(linkedSignInOrigin(window.location.origin, state)).then(
+      (origin) => {
+        if (origin === window.location.origin) {
+          setPhase({ kind: "error", title: "Started somewhere else", message: "This sign-in began in another tab. Start it again from here." });
+        } else if (problem || !code) {
+          setPhase({ kind: "error", title: "Didn't sign in", message: problem || "waifu.dev didn't send a sign-in back." });
+        } else {
+          setPhase({ kind: "handoff", origin, code, state });
+        }
+      },
+      () => setPhase({ kind: "error", title: "This sign-in ran out", message: "Sign-ins last ten minutes. Start again from the app." }),
+    );
+  }, [navigate]);
+
+  function handOff(p: Extract<Phase, { kind: "handoff" }>) {
+    const fragment = new URLSearchParams({ code: p.code, state: p.state });
+    window.location.replace(`${p.origin}${CALLBACK}#${fragment}`);
+  }
+
+  return (
+    <div className="relative isolate grid min-h-full place-items-center overflow-hidden px-4 py-12">
+      <div aria-hidden className="dot-grid fixed inset-0 -z-10" />
+      <Petals />
+      <motion.div
+        layout
+        initial={{ opacity: 0, y: 24, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.6, ease: EASE }}
+        className="w-full max-w-md rounded-3xl border bg-card/90 p-6 text-center shadow-[0_30px_80px_-40px_var(--primary)] backdrop-blur-xl sm:p-8"
+        data-testid="linked-callback"
+        data-phase={phase.kind}
+      >
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={phase.kind}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.3, ease: EASE }}
+            className="flex flex-col items-center gap-4"
+          >
+            {phase.kind === "finishing" && (
+              <>
+                <Bridge />
+                <Title>Signing you in</Title>
+                <p className="text-sm text-muted-foreground">Checking your sign-in…</p>
+              </>
+            )}
+            {phase.kind === "done" && (
+              <>
+                <Check />
+                <Title>{phase.created ? `Welcome, ${phase.name}!` : `Welcome back, ${phase.name}!`}</Title>
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <LoaderCircleIcon className="size-4 animate-spin" /> Taking you in
+                </p>
+              </>
+            )}
+            {phase.kind === "handoff" && (
+              <>
+                <Bridge still />
+                <Title>Finish signing in?</Title>
+                <p className="text-sm text-muted-foreground">
+                  You signed in with {here?.issuer ?? "waifu.dev"} to use <b className="text-foreground">{here?.name ?? "this server"}</b> in the fuwa app at
+                </p>
+                <span className="max-w-full truncate rounded-xl border bg-muted/60 px-3 py-1.5 font-mono text-sm font-bold">
+                  <Private text={phase.origin} />
+                </span>
+                <p className="flex items-start gap-2 rounded-2xl bg-amber-500/10 p-3 text-left text-xs text-amber-700 dark:text-amber-300">
+                  <ShieldAlertIcon className="mt-0.5 size-4 shrink-0" />
+                  Only continue if you started this there yourself. Whoever runs that app gets signed in as you.
+                </p>
+                <div className="flex w-full flex-col gap-2 sm:flex-row-reverse">
+                  <Button size="lg" className="btn h-11 rounded-xl font-bold sm:flex-1" onClick={() => handOff(phase)}>
+                    Continue <ArrowRightIcon className="transition group-hover:translate-x-0.5" />
+                  </Button>
+                  <Button size="lg" variant="ghost" className="h-11 rounded-xl font-bold sm:flex-1" onClick={() => setPhase({ kind: "cancelled" })}>
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
+            {phase.kind === "cancelled" && (
+              <>
+                <Badge tone="muted">
+                  <CheckIcon className="size-7" />
+                </Badge>
+                <Title>Nothing was signed in</Title>
+                <p className="text-sm text-muted-foreground">You can close this tab.</p>
+              </>
+            )}
+            {phase.kind === "error" && (
+              <>
+                <Badge tone="error">
+                  <CloudOffIcon className="size-7" />
+                </Badge>
+                <Title>{phase.title}</Title>
+                <p className="text-sm text-muted-foreground first-letter:uppercase">{phase.message}</p>
+                <Button size="lg" className="btn h-11 w-full rounded-xl font-bold" onClick={() => navigate({ to: "/", replace: true })}>
+                  Back to fuwa
+                </Button>
+              </>
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </motion.div>
+    </div>
+  );
+}
+
+function Title({ children }: { children: ReactNode }) {
+  return <h1 className="text-2xl font-extrabold tracking-tight">{children}</h1>;
+}
+
+function Badge({ tone, children }: { tone: "error" | "muted"; children: ReactNode }) {
+  return (
+    <motion.span
+      initial={{ scale: 0, rotate: -20 }}
+      animate={{ scale: 1, rotate: 0 }}
+      transition={{ type: "spring", stiffness: 420, damping: 16 }}
+      className={
+        tone === "error"
+          ? "grid size-16 place-items-center rounded-3xl bg-destructive/15 text-destructive"
+          : "grid size-16 place-items-center rounded-3xl bg-muted text-muted-foreground"
+      }
+    >
+      {children}
+    </motion.span>
+  );
+}
+
+/** The waifu.dev flower and fuwa's mark, with petals drifting between them while it works. */
+function Bridge({ still = false }: { still?: boolean }) {
+  const reduce = useReducedMotion();
+  const moving = !still && !reduce;
+  return (
+    <div className="flex items-center gap-3">
+      <motion.span
+        animate={moving ? { rotate: 360 } : { rotate: 0 }}
+        transition={moving ? { repeat: Infinity, duration: 6, ease: "linear" } : { duration: 0 }}
+        className="grid size-14 place-items-center rounded-2xl bg-foreground text-primary shadow-lg"
+      >
+        <Flower2Icon className="size-7" />
+      </motion.span>
+      <span className="relative flex w-16 justify-between">
+        {[0, 1, 2].map((n) => (
+          <motion.span
+            key={n}
+            className="size-2 rounded-full bg-primary"
+            animate={moving ? { opacity: [0.2, 1, 0.2], y: [0, -4, 0] } : { opacity: 0.5 }}
+            transition={moving ? { repeat: Infinity, duration: 1.2, delay: n * 0.2 } : { duration: 0 }}
+          />
+        ))}
+      </span>
+      <FuwaMark className="float size-14" />
+    </div>
+  );
+}
+
+/** A check that pops in with a ring rippling out behind it. */
+function Check() {
+  return (
+    <span className="relative grid size-16 place-items-center">
+      <motion.span
+        aria-hidden
+        className="absolute inset-0 rounded-full bg-emerald-500/30"
+        initial={{ scale: 0.6, opacity: 0.8 }}
+        animate={{ scale: 1.8, opacity: 0 }}
+        transition={{ duration: 0.9, ease: "easeOut" }}
+      />
+      <motion.span
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        transition={{ type: "spring", stiffness: 500, damping: 15 }}
+        className="grid size-16 place-items-center rounded-full bg-emerald-500 text-white shadow-[0_12px_30px_-10px_rgb(16_185_129)]"
+      >
+        <motion.svg viewBox="0 0 24 24" className="size-8" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+          <motion.path d="M5 12.5l4.5 4.5L19 7.5" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.4, delay: 0.15 }} />
+        </motion.svg>
+      </motion.span>
+    </span>
+  );
+}

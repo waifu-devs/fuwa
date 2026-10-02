@@ -5,6 +5,7 @@ import {
   BellRingIcon,
   CodeXmlIcon,
   DatabaseIcon,
+  Flower2Icon,
   IdCardIcon,
   KeyboardIcon,
   KeyRoundIcon,
@@ -25,7 +26,7 @@ import { Chat } from "@/components/settings/app/Chat";
 import { KEYBIND_SETTINGS, Keybinds } from "@/components/settings/app/Keybinds";
 import { Notifications } from "@/components/settings/app/Notifications";
 import { Streamer } from "@/components/settings/app/Streamer";
-import { hasPassword, Password, Session } from "@/components/settings/Account";
+import { hasPassword, LinkedSignIn, Password, Session } from "@/components/settings/Account";
 import { Devices } from "@/components/settings/account/Devices";
 import { Privacy } from "@/components/settings/account/Privacy";
 import { Profile } from "@/components/settings/account/Profile";
@@ -33,6 +34,7 @@ import { Security } from "@/components/settings/account/Security";
 import { ServerNotifications } from "@/components/settings/account/ServerNotifications";
 import { ServerProfiles } from "@/components/settings/account/ServerProfiles";
 import { SettingsScreen, type SettingsGroup, type SettingsSection } from "@/components/settings/SettingsScreen";
+import { issuerName } from "@/lib/linked";
 import { closeSettings, setSettingsSection, useUi } from "@/lib/ui";
 
 const APP: SettingsSection[] = [
@@ -192,7 +194,15 @@ export function UserSettings() {
                 keywords: "security change",
               },
             ]
-          : []),
+          : [
+              {
+                id: "linked",
+                label: "Sign-in",
+                icon: Flower2Icon,
+                description: `You sign in to ${where} with ${issuerName(inst?.node?.auth?.linkedIssuer)}.`,
+                keywords: "waifu.dev linked password 2fa security",
+              },
+            ]),
         {
           id: "server-notifications",
           label: "Server notifications",
@@ -241,6 +251,7 @@ export function UserSettings() {
       {key && section === "devices" && <Devices instanceKey={key} />}
       {key && section === "security" && <Security instanceKey={key} />}
       {key && section === "password" && <Password instanceKey={key} />}
+      {key && section === "linked" && <LinkedSignIn instanceKey={key} />}
       {key && section === "server-notifications" && <ServerNotifications instanceKey={key} />}
       {key && section === "privacy" && <Privacy instanceKey={key} />}
       {key && section === "session" && <Session instanceKey={key} />}

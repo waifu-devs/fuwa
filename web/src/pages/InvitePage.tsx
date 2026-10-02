@@ -149,7 +149,7 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
                 {signedOut ? (
                   <div className="flex flex-col gap-3">
                     <p className="text-center text-sm text-muted-foreground">Sign in, or make an account on this fuwa server, to join.</p>
-                    <Account url={found.url} node={found.node} onDone={(key) => void accept(key)} />
+                    <Account url={found.url} node={found.node} onDone={(key) => void accept(key)} returnTo={window.location.pathname} />
                   </div>
                 ) : !inst?.me ? (
                   <div className="grid h-11 place-items-center">

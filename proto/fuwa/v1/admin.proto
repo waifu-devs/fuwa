@@ -71,6 +71,12 @@ message InstanceSettings {
   // The largest picture (avatar, banner, server icon) one upload may be;
   // unset for no cap. FUWA_LIMIT_PICTURE_UPLOAD.
   optional int64 picture_upload_bytes = 10;
+  // FUWA_LINKED_ACCOUNTS.
+  LinkedAccounts linked_accounts = 11;
+  // Where linked accounts sign in: an OpenAuth issuer, https://api.waifu.dev
+  // unless changed. Accounts already linked keep the issuer they came from.
+  // FUWA_LINKED_ISSUER.
+  string linked_issuer = 12;
 }
 
 // Whether standalone accounts (a username and password kept on the instance) work.
@@ -82,6 +88,17 @@ enum LocalAccounts {
   LOCAL_ACCOUNTS_CLOSED = 2;
   // No standalone accounts.
   LOCAL_ACCOUNTS_OFF = 3;
+}
+
+// Whether linked accounts (signed in with waifu.dev) work.
+enum LinkedAccounts {
+  LINKED_ACCOUNTS_UNSPECIFIED = 0;
+  // Anyone with a waifu.dev account can sign in, and gets an account here.
+  LINKED_ACCOUNTS_OPEN = 1;
+  // Linked accounts that exist can sign in; nobody new can.
+  LINKED_ACCOUNTS_CLOSED = 2;
+  // No signing in with waifu.dev.
+  LINKED_ACCOUNTS_OFF = 3;
 }
 
 // How the process was started. These come only from the environment, since
