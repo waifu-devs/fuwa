@@ -35,8 +35,8 @@ const DRAIN = 45;
 
 /**
  * How fuwa.chat runs (see "Scaling out" in the README). `null` is one `fuwa` process
- * doing everything, which is how it runs now. Set, it runs as separate parts, each a
- * service here:
+ * doing everything, how it ran until 2026-10. Set, as it is now, it runs as separate
+ * parts, each a service here:
  *
  * - `fuwa`, the gateways clients reach at fuwa.chat. They keep nothing, so `gateways`
  *   replicas of it share the connections (2 or more, so one going down isn't noticed).
@@ -57,7 +57,7 @@ const DRAIN = 45;
  * those few seconds the gateways hold calls (up to 30 seconds) and keep live streams open,
  * then carry on once the part is back. See "Deploys" in the README.
  */
-const SPLIT: { gateways: number; shards: number } | null = null;
+const SPLIT: { gateways: number; shards: number } | null = { gateways: 2, shards: 2 };
 
 export default defineRailway((ctx) => {
   // The image every merge to master publishes; the publish workflow redeploys every
