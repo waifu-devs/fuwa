@@ -148,6 +148,18 @@
   - `src/lib/keybinds.ts`: every keyboard action and its default; the key
     handler (`components/Shortcuts.tsx`), the shortcut sheet and the Keybinds
     page all read this one list.
+  - `src/lib/hosted.ts`: which addresses Waifu Devs runs (fuwa.chat).
+    `components/HostedBadge.tsx` shows "Hosted by Waifu Devs" for those alone,
+    reached over https, on the welcome screen, the instance home and sidebar,
+    and invite pages. Only the address decides it, never anything an instance
+    says about itself.
+- `.railway/railway.ts`: fuwa.chat, the instance Waifu Devs hosts, in its own
+  Railway project ("fuwa"): the published image, a volume at `/data`, the
+  domain. A pull request that touches it gets a plan comment and merging
+  applies it (`.github/workflows/railway-config.yml`); the root `package.json`
+  exists only for this. The encryption key is a shared variable set by hand and
+  must never change. Don't edit the project in Railway's dashboard between a
+  plan and its apply, or the apply refuses.
 
 ## Rules
 
@@ -233,6 +245,12 @@
   in `cluster/calls.rs`, never `app.node()` or `app.index` directly. Handlers
   without one run on the directory. A new server-scoped request keeps `server_id` as field 1, and a
   new RPC gets a line in `gateway::route`; `every_call_is_routed` checks both.
+- Releases: set the version in `server/Cargo.toml`, merge, then push the tag
+  `v<version>`. `Publish image` tags the image (`0.2.0`, `0.2`; `latest`
+  follows master) for x86 and ARM, and `Release` makes the GitHub release with
+  the binaries, `SHA256SUMS` and their attestations. Keep
+  `docs/self-hosting.md` in step with anything self-hosters set up (variables,
+  ports, image tags, the proxy).
 - Before pushing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test`, and `buf lint`; for `web/`, `pnpm build` then
   `cargo test --features web`.

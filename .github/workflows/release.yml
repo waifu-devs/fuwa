@@ -1,0 +1,165 @@
+name: Release
+
+# Pushing a tag like v0.2.0 makes a GitHub release with the fuwa binary for
+# Linux (x86 and ARM), macOS (Apple silicon) and Windows, a SHA256SUMS file, and
+# a signed record of the commit and workflow that built each binary. The images
+# for the tag come from the Publish image workflow.
+#
+# To cut one: set the version in server/Cargo.toml, merge it, then
+#   git tag v0.2.0 && git push origin v0.2.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' server/Cargo.toml | head -1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME but server/Cargo.toml says $version. Tag v$version, or change the version first."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  # The same reproducible build as the image (Dockerfile, --target binary), so
+  # these are byte for byte the binaries inside ghcr.io/waifu-devs/fuwa:<version>.
+  # Built on Debian 12, they need glibc 2.36 or newer (Debian 12, Ubuntu 24.04).
+  linux:
+    name: Linux (${{ matrix.arch }})
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            docker: amd64
+            runner: ubuntu-latest
+          - arch: aarch64
+            docker: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: binary
+          platforms: linux/${{ matrix.docker }}
+          outputs: type=local,dest=out
+          build-args: FUWA_COMMIT=${{ github.sha }}
+          # Reuses the dependencies the Publish image workflow built.
+          cache-from: type=gha,scope=${{ matrix.docker }}
+      - run: |
+          mkdir dist
+          cp out/fuwa "dist/fuwa-$VERSION-${{ matrix.arch }}-linux"
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fuwa-${{ matrix.arch }}-linux
+          path: dist/*
+
+  # macOS and Windows build with cargo directly, with the same toolchain the
+  # Dockerfile pins and the web app built in.
+  native:
+    name: ${{ matrix.name }}
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple silicon)
+            runner: macos-latest
+            file: aarch64-macos
+            exe: ""
+          - name: Windows (x86)
+            runner: windows-latest
+            file: x86_64-windows
+            exe: .exe
+    runs-on: ${{ matrix.runner }}
+    env:
+      FUWA_COMMIT: ${{ github.sha }}
+      SOURCE_DATE_EPOCH: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm run build
+        working-directory: web
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - run: cargo build --release --locked --features web --bin fuwa
+      - shell: bash
+        run: |
+          mkdir dist
+          cp "target/release/fuwa${{ matrix.exe }}" "dist/fuwa-$VERSION-${{ matrix.file }}${{ matrix.exe }}"
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fuwa-${{ matrix.file }}
+          path: dist/*
+
+  release:
+    name: Make the release
+    needs: [version, linux, native]
+    # Linux is what servers run, so it has to be there; a macOS or Windows build
+    # that failed is left out rather than holding the release back.
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: fuwa-*
+          merge-multiple: true
+      - working-directory: dist
+        run: sha256sum fuwa-* > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/fuwa-*
+      - name: Publish the release
+        run: |
+          cat > notes.md <<EOF
+          Run it with Docker:
+
+          \`\`\`sh
+          docker run -d --name fuwa -p 8080:8080 -v fuwa:/data ghcr.io/$REPO:$VERSION
+          \`\`\`
+
+          Or download the binary for your machine below. The [self-hosting guide](https://github.com/$REPO/blob/$GITHUB_REF_NAME/docs/self-hosting.md) walks through both.
+
+          Check a download is an official build:
+
+          \`\`\`sh
+          sha256sum --check --ignore-missing SHA256SUMS
+          gh attestation verify fuwa-$VERSION-x86_64-linux --repo $REPO
+          \`\`\`
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$REPO" --verify-tag \
+            --title "fuwa $VERSION" --notes-file notes.md --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.version.outputs.version }}

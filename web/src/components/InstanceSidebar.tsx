@@ -9,6 +9,7 @@ import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { SPRING, SwapText } from "@/components/motion";
 import { UserPanel } from "@/components/UserPanel";
+import { HostedBadge } from "@/components/HostedBadge";
 import { InstanceSettingsDialog } from "@/components/settings/InstanceSettingsDialog";
 
 /** The sidebar on an instance's home: what it is, and your servers there. */
@@ -22,8 +23,9 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
     <>
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
         <div className="min-w-0 flex-1">
-          <p className="truncate font-extrabold">
+          <p className="flex min-w-0 items-center gap-1 font-extrabold">
             <SwapText className="truncate align-bottom">{inst.node?.name ?? address}</SwapText>
+            <HostedBadge url={inst.url} variant="mark" />
           </p>
           <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
             <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · <Private text={instanceKey} />

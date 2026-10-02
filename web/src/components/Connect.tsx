@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { issuerName } from "@/lib/linked";
+import { HostedBadge } from "@/components/HostedBadge";
 import { cn } from "@/lib/utils";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -143,7 +144,10 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
               <SparklesIcon className="size-5 transition group-hover:rotate-12 group-hover:scale-110" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-bold">{home.node.name}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate font-bold">{home.node.name}</span>
+                <HostedBadge url={home.url} variant="still" />
+              </span>
               <span className="block truncate text-xs text-muted-foreground"><Private text={instanceKey(home.url)} /> · this server</span>
             </span>
             <ArrowRightIcon className="size-4 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-primary" />
@@ -156,7 +160,7 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
         {lookup.pending ? "Looking…" : "Continue"}
       </Button>
       <p className="text-center text-xs text-muted-foreground">
-        Any fuwa server works: ours, a friend's, or <a className="font-bold text-primary hover:underline" href="https://github.com/waifu-devs/fuwa#self-host" target="_blank" rel="noreferrer">one you run</a>.
+        Any fuwa server works: ours, a friend's, or <a className="font-bold text-primary hover:underline" href="https://github.com/waifu-devs/fuwa/blob/master/docs/self-hosting.md" target="_blank" rel="noreferrer">one you run</a>.
       </p>
     </form>
   );
@@ -564,7 +568,10 @@ function Header({ url, node, onBack }: { url: string; node: Node; onBack?: () =>
         </button>
       )}
       <div className="min-w-0">
-        <p className="truncate font-extrabold">{node.name}</p>
+        <p className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-extrabold">{node.name}</span>
+          <HostedBadge url={url} />
+        </p>
         <p className="truncate text-xs text-muted-foreground">
           <Private text={instanceKey(url)} /> · <BuildLabel node={node} />
         </p>

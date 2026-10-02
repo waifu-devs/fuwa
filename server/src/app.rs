@@ -331,6 +331,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         %address,
         public_url = %app.settings().public_url,
         data = %data_path.display(),
+        encrypted = app.config.encryption_key.is_some(),
         servers = app.servers.len(),
         local_accounts = app.settings().local_accounts.as_str(),
         linked_accounts = app.settings().linked_accounts.as_str(),
