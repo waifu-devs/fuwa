@@ -39,6 +39,13 @@ const retryPolicy = backoff.pipe(Schedule.whileInput((e: FuwaError) => e.retryab
 /** The server sends a heartbeat every 25 seconds; this long without anything means the connection is gone. */
 const SILENCE = "70 seconds";
 
+/**
+ * A stream that ends without an error: the server stopped (an older one, for a
+ * deploy) or everything it followed is gone. Either way, follow again; nothing
+ * is shown, since the next try says whether the server is really unreachable.
+ */
+const ENDED = new FuwaError({ code: Code.Unavailable, message: "the server closed the connection" });
+
 type Engine = {
   url: string;
   api: Api;
@@ -193,11 +200,16 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
         return Stream.fromAsyncIterable<SubscribeResponse, FuwaError>(
           api.events.subscribe(request, { signal: controller.signal }),
           toFuwaError,
-        ).pipe(Stream.ensuring(Effect.sync(() => controller.abort())));
+        ).pipe(
+          Stream.concat(Stream.fail(ENDED)),
+          Stream.ensuring(Effect.sync(() => controller.abort())),
+        );
       }).pipe(
         Stream.timeoutFail(() => new FuwaError({ code: Code.Unavailable, message: "lost the connection" }), SILENCE),
         Stream.tapError((err) =>
-          Effect.sync(() => err.retryable && patchInstance(key, { connection: "reconnecting", problem: err.message })),
+          Effect.sync(
+            () => err !== ENDED && err.retryable && patchInstance(key, { connection: "reconnecting", problem: err.message }),
+          ),
         ),
         Stream.retry(retryPolicy),
       );
