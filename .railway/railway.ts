@@ -1,4 +1,4 @@
-import { defineRailway, image, project, service, volume } from "railway/iac";
+import { bucket, defineRailway, image, project, ref, service, volume } from "railway/iac";
 
 /**
  * fuwa.chat, the fuwa instance Waifu Devs hosts. It has a Railway project of its own,
@@ -15,6 +15,8 @@ import { defineRailway, image, project, service, volume } from "railway/iac";
 
 /** Railway's US East (Virginia) region, where the site runs too. */
 const REGION = "us-east4-eqdc4a";
+/** Buckets have their own region names; this is Virginia too. It can't change once created. */
+const BUCKET_REGION = "iad";
 const DOMAIN = "fuwa.chat";
 /** fuwa listens on PORT; the domain sends traffic here. */
 const PORT = 8080;
@@ -72,6 +74,21 @@ export default defineRailway((ctx) => {
   // file per community server.
   const data = volume("fuwa-data", { region: REGION, sizeMB: VOLUME_MB });
 
+  // The split parts' continuous backup (docs/storage.md): the directory copies node.db
+  // and the pictures here as they change, each shard its servers. Declared either way,
+  // so turning SPLIT off never deletes it; only the split parts use it, since one
+  // process refuses these settings. A part that starts on an empty volume restores
+  // itself from it, and one over a bucket that has its files never starts empty.
+  const replica = bucket("fuwa-replica", { region: BUCKET_REGION });
+  const replicated = {
+    FUWA_S3_ENDPOINT: ref(replica, "ENDPOINT"),
+    FUWA_S3_REGION: ref(replica, "REGION"),
+    FUWA_S3_BUCKET: ref(replica, "BUCKET"),
+    FUWA_S3_ACCESS_KEY_ID: ref(replica, "ACCESS_KEY_ID"),
+    FUWA_S3_SECRET_ACCESS_KEY: ref(replica, "SECRET_ACCESS_KEY"),
+    FUWA_RESTORE: "if-empty",
+  };
+
   // What fuwa.chat is, whichever part reads it.
   const instance = {
     FUWA_PUBLIC_URL: `https://${DOMAIN}`,
@@ -99,7 +116,7 @@ export default defineRailway((ctx) => {
       },
     });
 
-    return project("fuwa", { resources: [data, fuwa] });
+    return project("fuwa", { resources: [data, replica, fuwa] });
   }
 
   const { gateways, shards } = SPLIT;
@@ -135,6 +152,7 @@ export default defineRailway((ctx) => {
       ...instance,
       FUWA_HOSTING: "hosted",
       FUWA_ENCRYPTION_KEY: ctx.shared.FUWA_ENCRYPTION_KEY,
+      ...replicated,
     },
   });
 
@@ -155,6 +173,7 @@ export default defineRailway((ctx) => {
         FUWA_INTERNAL_URL: internalUrl(name),
         // The same key as the directory's, so server files can move between shards.
         FUWA_ENCRYPTION_KEY: ctx.shared.FUWA_ENCRYPTION_KEY,
+        ...replicated,
       },
     });
     return [shardData, shard];
@@ -182,5 +201,5 @@ export default defineRailway((ctx) => {
   // and lets the ones on it end (with a long drainingSeconds) while new calls start on the
   // new one.
 
-  return project("fuwa", { resources: [data, directory, ...shardParts.flat(), gateway] });
+  return project("fuwa", { resources: [data, replica, directory, ...shardParts.flat(), gateway] });
 });
