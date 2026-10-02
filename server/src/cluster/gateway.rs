@@ -586,7 +586,14 @@ impl EventService for Events {
             let mut last_heartbeat = Instant::now();
             loop {
                 let item = tokio::select! {
-                    _ = shutdown.cancelled() => return,
+                    _ = shutdown.cancelled() => {
+                        // Stopping, say for a deploy: tell the client to follow again
+                        // rather than end the stream as if it were done.
+                        let _ = tx.try_send(Err(Status::unavailable(
+                            "this instance is restarting; subscribe again from your last sequence",
+                        )));
+                        return;
+                    }
                     _ = tx.closed() => return,
                     item = merged.next() => item,
                 };
