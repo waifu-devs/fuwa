@@ -178,8 +178,8 @@ same Caddyfile as above, with `h2c://127.0.0.1:8080` as the address.
 4. Set the health check path to `/healthz`.
 5. Under networking, add your custom domain (or generate a Railway one) for
    the port fuwa listens on, `8080` unless you changed `PORT`.
-6. Turn on automatic updates for the image, so new 0.1.x releases deploy by
-   themselves.
+6. Turn on automatic updates for the image, with the **Anytime** window, so
+   new 0.1.x releases deploy by themselves once Railway notices them.
 
 Keep it to one replica: every server's database is a file on that one volume.
 For more than one machine, see [Scaling out](../README.md#scaling-out).
