@@ -117,6 +117,11 @@ Deleting a message removes its ciphertext from the instance and leaves a gap;
 copies already on devices are removed from the screen when they see the
 deletion. Edits are new encrypted messages that point at the one they change.
 
+A split instance's replica (`docs/storage.md`) backs `dms.db` up like every
+other database, so the bucket holds the same ciphertext and nothing more. A
+deleted message's ciphertext can stay in the replica's older log until that
+generation is replaced.
+
 ## On the device
 
 What a device has read, it keeps: MLS can't decrypt a message twice (its key

@@ -22,7 +22,8 @@
 //! the log and shipping its tail, a file swapped by hand), and on the first
 //! run. Only the current generation and the one before it are kept.
 //!
-//! Keys, under the replica's prefix: `node/…` for node.db, `servers/<id>/…`
+//! Keys, under the replica's prefix: `node/…` for node.db, `dms/…` for
+//! dms.db (direct messages, already end-to-end encrypted), `servers/<id>/…`
 //! for each community server (not per shard, so a server keeps its history
 //! wherever it moves), `media/<id>` for each uploaded picture. A file's
 //! `current` names its generation in use, the data directory that set it and,
@@ -723,6 +724,7 @@ fn unhex(text: &str) -> Vec<u8> {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Restored {
     pub node: bool,
+    pub dms: bool,
     pub servers: usize,
     pub media: usize,
     /// Servers whose replica stopped short (a segment missing): restored up
@@ -735,8 +737,8 @@ pub async fn has_instance(store: &Store) -> Result<bool> {
     Ok(current(store, "node").await?.is_some() || !store.list("node/").await?.is_empty())
 }
 
-/// Restores a directory into `data`: node.db and the pictures. Files
-/// already there are left alone.
+/// Restores a directory into `data`: node.db, dms.db and the pictures.
+/// Files already there are left alone.
 pub async fn restore_directory(store: &Store, data: &Path, key: Option<&EncryptionKey>) -> Result<Restored> {
     let mut restored = Restored::default();
     let node = data.join("node.db");
@@ -745,6 +747,14 @@ pub async fn restore_directory(store: &Store, data: &Path, key: Option<&Encrypti
             restored.incomplete.push("node".into());
         }
         restored.node = true;
+    }
+    // Instances replicated before direct messages have no dms.db to restore.
+    let dms = data.join("dms.db");
+    if !dms.exists() && (current(store, "dms").await?.is_some() || !store.list("dms/").await?.is_empty()) {
+        if !restore_file(store, "dms", &dms, key).await? {
+            restored.incomplete.push("dms".into());
+        }
+        restored.dms = true;
     }
 
     let media = data.join("media");
@@ -971,6 +981,7 @@ pub async fn prepare(
     }
     tracing::info!(
         node = restored.node,
+        dms = restored.dms,
         servers = restored.servers,
         pictures = restored.media,
         seconds = started.elapsed().as_secs_f32(),
@@ -1011,6 +1022,7 @@ pub async fn describe(store: &Store) -> Result<Vec<String>> {
         }
         let name = match object.key.split('/').collect::<Vec<_>>().as_slice() {
             ["node", ..] => "node".to_string(),
+            ["dms", ..] => "dms".to_string(),
             ["servers", id, ..] => format!("servers/{id}"),
             _ => continue,
         };

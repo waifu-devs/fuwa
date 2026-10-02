@@ -79,7 +79,7 @@
     hold writes for a moment.
   - `replica/`: a split instance's continuous backup to a bucket or a folder
     (`FUWA_S3_*`, `FUWA_REPLICA_PATH`) and restoring from it (`FUWA_RESTORE`,
-    `fuwa restore`): the directory's node.db and pictures, each shard's
+    `fuwa restore`): the directory's node.db, dms.db and pictures, each shard's
     servers under its name. It ships each file's MVCC log as it grows and
     folds the log in itself. `docs/storage.md` is the one design doc for
     storage, with the phases after this one. `s3.rs` is a small S3 client
