@@ -39,6 +39,15 @@ fn channel_of(payload: &Payload) -> Option<&str> {
     }
 }
 
+/// Whether a member with `access` gets an event: not one about a channel they
+/// can't see, nor applications unless they can review them.
+fn shown_to(access: &Access, payload: &Payload) -> bool {
+    match payload {
+        Payload::ApplicationUpdated(_) => access.has(pb::Permission::KickMembers),
+        payload => channel_of(payload).is_none_or(|channel_id| access.can_see(channel_id)),
+    }
+}
+
 /// Whether an event can change what `account_id` can see or do in its server.
 fn changes_access(payload: &Payload, account_id: &str) -> bool {
     match payload {
@@ -75,10 +84,7 @@ impl View {
     async fn pass(&mut self, event: &pb::Event) -> Vec<pb::Event> {
         let Some(payload) = &event.payload else { return vec![event.clone()] };
         if !changes_access(payload, &self.account_id) {
-            return match channel_of(payload) {
-                Some(channel_id) if !self.access.can_see(channel_id) => vec![],
-                _ => vec![event.clone()],
-            };
+            return if shown_to(&self.access, payload) { vec![event.clone()] } else { vec![] };
         }
         let before = self.access.visible();
         match self.load().await {
@@ -316,7 +322,7 @@ impl EventService for Api {
                 // What they can't see now is left out, as a stream leaves it out.
                 events.retain(|e| match &e.payload {
                     Some(Payload::ChannelDeleted(_)) | None => true,
-                    Some(payload) => channel_of(payload).is_none_or(|channel_id| access.can_see(channel_id)),
+                    Some(payload) => shown_to(&access, payload),
                 });
                 Ok(pb::ListEventsResponse { events, has_more })
             }

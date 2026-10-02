@@ -18,6 +18,7 @@ service ServerService {
   // Deletes the server and its database. Owner or instance admin only.
   rpc DeleteServer(DeleteServerRequest) returns (DeleteServerResponse);
   // Joins a discoverable server, or any server with one of its invites.
+  // Servers that take applications are joined through JoinService instead.
   rpc JoinServer(JoinServerRequest) returns (JoinServerResponse);
   rpc LeaveServer(LeaveServerRequest) returns (LeaveServerResponse);
   rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
@@ -86,6 +87,8 @@ message UpdateServerRequest {
   // A text channel, or empty to post no system messages.
   optional string system_channel_id = 7;
   optional int32 min_account_age_seconds = 8;
+  optional bool applications = 9;
+  optional bool linked_only = 10;
 }
 
 message UpdateServerResponse {
@@ -257,6 +260,11 @@ enum AuditAction {
   // Invite actions have the invite's code as their target.
   AUDIT_ACTION_INVITE_CREATE = 19;
   AUDIT_ACTION_INVITE_DELETE = 20;
+  // Application actions name the applicant as their target.
+  AUDIT_ACTION_APPLICATION_APPROVE = 21;
+  AUDIT_ACTION_APPLICATION_REJECT = 22;
+  // The rules or questions changed.
+  AUDIT_ACTION_JOIN_FORM_UPDATE = 23;
 }
 
 // One thing someone did with a moderator's or manager's permission.

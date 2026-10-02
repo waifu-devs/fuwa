@@ -499,6 +499,12 @@ pub(crate) async fn export_server(sdb: &ServerDb, account_id: &str, tx: &ExportP
     let role_names: Vec<&str> = member
         .as_ref()
         .map_or(vec![], |m| roles.iter().filter(|r| m.role_ids.contains(&r.id)).map(|r| r.name.as_str()).collect());
+    let application = store::load_application(&conn, &sdb.id, account_id).await?.map(|a| {
+        let status = if a.status == pb::ApplicationStatus::Rejected as i32 { "turned down" } else { "waiting" };
+        let answers: Vec<Value> =
+            a.answers.iter().map(|x| json!({ "question": x.question, "answer": x.answer })).collect();
+        json!({ "status": status, "reason": a.reason, "answers": answers, "applied_at": wire_time(&a.created_at) })
+    });
     let about = json!({
         "id": server.id,
         "name": server.name,
@@ -507,6 +513,7 @@ pub(crate) async fn export_server(sdb: &ServerDb, account_id: &str, tx: &ExportP
         "roles": role_names,
         "nickname": member.as_ref().map(|m| m.nickname.clone()).filter(|n| !n.is_empty()),
         "joined_at": member.as_ref().map_or(Value::Null, |m| wire_time(&m.joined_at)),
+        "application": application,
     });
     let mut piece = serde_json::to_string(&about).map_err(|err| Error::internal(err.to_string()))?;
     piece.pop();

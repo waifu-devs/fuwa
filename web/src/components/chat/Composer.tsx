@@ -1,4 +1,4 @@
-import { HourglassIcon, LockIcon, SendHorizontalIcon, SnailIcon } from "lucide-react";
+import { HourglassIcon, LockIcon, ScrollTextIcon, SendHorizontalIcon, SnailIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MessageKind, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
@@ -6,7 +6,9 @@ import { run, sendMessage } from "@/fuwa/actions";
 import { useAccess } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { MentionPicker, useMentionPicker } from "@/components/chat/MentionPicker";
+import { RulesDialog } from "@/components/join/Rules";
 import { SPRING } from "@/components/motion";
+import { Button } from "@/components/ui/button";
 import { formatDuration, formatLeft, timedOutUntil, toDate } from "@/lib/format";
 import { hasIn } from "@/lib/permissions";
 import { comboLabel, isMac } from "@/lib/keybinds";
@@ -67,6 +69,8 @@ function useSendGate(instanceKey: string, serverId: string, channel: Channel) {
     now,
     /** Synced and allowed to write here. */
     canSend: !member || hasIn(access, channel.id, Permission.SEND_MESSAGES),
+    /** Joined, but hasn't agreed to the server's rules yet. */
+    pending: !!member && access.pending,
     slowmode,
     /** Slow mode is on here, but it doesn't hold you back. */
     exempt: exempt && channel.slowmodeSeconds > 0,
@@ -104,6 +108,8 @@ export function Composer({
   const cooling = gate.cooldownUntil > 0;
   const timedOut = gate.timedOutUntil > 0;
   const picker = useMentionPicker(instanceKey, serverId, channel, box, text, setText);
+  const server = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId));
+  const [rules, setRules] = useState(false);
 
   useEffect(() => {
     setText(drafts.get(channelId) ?? "");
@@ -161,7 +167,9 @@ export function Composer({
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
       <AnimatePresence mode="popLayout" initial={false}>
-        {timedOut ? (
+        {gate.pending ? (
+          <AgreeFirst key="rules" onRead={() => setRules(true)} />
+        ) : timedOut ? (
           <TimedOut key="timed-out" left={gate.timedOutUntil - gate.now} />
         ) : !gate.canSend ? (
           <ReadOnly key="read-only" name={channel.name} />
@@ -241,7 +249,7 @@ export function Composer({
           <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
         </p>
         <AnimatePresence initial={false}>
-          {(gate.slowmode > 0 || gate.exempt) && !timedOut && gate.canSend && (
+          {(gate.slowmode > 0 || gate.exempt) && !timedOut && gate.canSend && !gate.pending && (
             <motion.p
               initial={{ opacity: 0, x: 8 }}
               animate={{ opacity: 1, x: 0 }}
@@ -260,7 +268,38 @@ export function Composer({
           )}
         </AnimatePresence>
       </div>
+      {server && <RulesDialog open={rules} onOpenChange={setRules} instanceKey={instanceKey} server={server} agree={gate.pending} />}
     </div>
+  );
+}
+
+/** In place of the box until you agree to the server's rules: one button to read them. */
+function AgreeFirst({ onRead }: { onRead: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.98 }}
+      transition={SPRING}
+      role="status"
+      className="flex flex-wrap items-center gap-3 rounded-2xl border border-primary/40 bg-primary/10 px-3 py-2.5"
+    >
+      <motion.span
+        initial={{ rotate: -20, scale: 0.6 }}
+        animate={{ rotate: [0, -12, 10, 0], scale: 1 }}
+        transition={{ ...SPRING, rotate: { duration: 0.7, delay: 0.15 } }}
+        className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary"
+      >
+        <ScrollTextIcon className="size-[18px]" />
+      </motion.span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-bold">Agree to the rules to start talking</p>
+        <p className="text-xs text-muted-foreground">You can read along until then.</p>
+      </div>
+      <Button size="sm" onClick={onRead} className="btn h-9 shrink-0 rounded-xl px-4 font-bold max-sm:w-full">
+        Read the rules
+      </Button>
+    </motion.div>
   );
 }
 

@@ -3,8 +3,11 @@ import {
   AtSignIcon,
   BellIcon,
   ChartColumnIcon,
+  BadgeCheckIcon,
   CheckIcon,
   ChevronDownIcon,
+  ClipboardListIcon,
+  ClipboardPenIcon,
   CompassIcon,
   CrownIcon,
   DoorOpenIcon,
@@ -13,6 +16,7 @@ import {
   GavelIcon,
   HashIcon,
   HourglassIcon,
+  InboxIcon,
   LinkIcon,
   LoaderCircleIcon,
   LockIcon,
@@ -22,17 +26,22 @@ import {
   Trash2Icon,
   TriangleAlertIcon,
   UsersIcon,
+  XIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { GetServerUsageResponse } from "@/gen/fuwa/v1/server_pb";
-import { ChannelType, NotificationLevel, Permission, type Server, type ServerLimits } from "@/gen/fuwa/v1/types_pb";
+import { AccountKind, ChannelType, NotificationLevel, Permission, type Server, type ServerLimits } from "@/gen/fuwa/v1/types_pb";
 import { deleteServer, nodeUsage, run, serverUsage, setServerLimits, updateServer } from "@/fuwa/actions";
 import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
 import { ServerIcon, UserAvatar } from "@/components/Icons";
 import { PictureField } from "@/components/PictureField";
 import { joinLine } from "@/components/chat/MessageList";
+import { Applications } from "@/components/settings/server/Applications";
 import { AuditLog } from "@/components/settings/server/AuditLog";
+import { JoinFormEditor } from "@/components/settings/server/JoinFormEditor";
+import { ServerDoor } from "@/components/join/ServerDoor";
+import { useFuwa } from "@/fuwa/store";
 import { Bans } from "@/components/settings/server/Bans";
 import { Invites } from "@/components/settings/server/Invites";
 import { Chips } from "@/components/settings/account/common";
@@ -57,19 +66,21 @@ import { displayName, formatBytes, formatDuration, initials } from "@/lib/format
 import { ACCOUNT_AGES, timeLeft } from "@/lib/invites";
 import { bit, has, type Access } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
-import { Choice, Cap, SaveBar, WithPreview } from "@/components/settings/controls";
+import { Choice, Cap, SaveBar, Toggle, WithPreview } from "@/components/settings/controls";
 import { SettingsScreen } from "@/components/settings/SettingsScreen";
 
 /** Every section of server settings, and whether your permissions open it. Instance admins also get the server's caps, and can delete it. */
 const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boolean> = {
   overview: (a) => has(a, Permission.MANAGE_SERVER),
   access: (a) => has(a, Permission.MANAGE_SERVER),
+  "join-form": (a) => has(a, Permission.MANAGE_SERVER),
   invites: (a) =>
     has(a, Permission.MANAGE_SERVER) || has(a, Permission.CREATE_INVITE) || [...a.channels.values()].some((bits) => bits & bit(Permission.CREATE_INVITE)),
   roles: (a) => has(a, Permission.MANAGE_ROLES),
   channels: (a) => [...a.channels.values()].some((bits) => bits & (bit(Permission.MANAGE_CHANNELS) | bit(Permission.MANAGE_ROLES))),
   usage: (a, admin) => admin || has(a, Permission.MANAGE_SERVER),
   limits: (_, admin) => admin,
+  applications: (a) => has(a, Permission.KICK_MEMBERS),
   members: (a) =>
     [Permission.MANAGE_ROLES, Permission.MANAGE_NICKNAMES, Permission.KICK_MEMBERS, Permission.BAN_MEMBERS, Permission.TIME_OUT_MEMBERS].some((p) =>
       has(a, p),
@@ -105,6 +116,7 @@ export function ServerSettingsDialog({
 }) {
   const allowed = useServerSettingsTabs(instanceKey, server.id);
   const can = (id: string) => allowed.includes(id);
+  const waiting = useFuwa((s) => s.instances[instanceKey]?.applications[server.id]?.length ?? 0);
   const [tab, setTab] = useState(initialTab);
   useEffect(() => {
     if (open) setTab(initialTab);
@@ -131,11 +143,24 @@ export function ServerSettingsDialog({
       id: "access",
       label: "Access",
       icon: DoorOpenIcon,
-      description: "Who can join: anyone who finds it in Browse, or only people with an invite.",
+      description: "Who can join, and whether they apply first.",
       keywords: "join public private lock",
       settings: [
         { id: "discoverable", label: "Show in Browse", keywords: "discoverable public hidden invite only" },
+        { id: "applications", label: "Apply to join", keywords: "applications review approve screening vetting questions" },
+        { id: "linked-only", label: "waifu.dev accounts only", keywords: "linked verified account sign in" },
         { id: "account-age", label: "Minimum account age", keywords: "new accounts spam raid verification" },
+      ],
+    },
+    {
+      id: "join-form",
+      label: "Rules & questions",
+      icon: ClipboardListIcon,
+      description: "Rules new members agree to before they talk, and what people answer when they apply.",
+      keywords: "rules screening agree questions application form onboarding",
+      settings: [
+        { id: "rules", label: "Rules", keywords: "screening agree code of conduct" },
+        { id: "questions", label: "Application questions", keywords: "apply form" },
       ],
     },
     {
@@ -177,6 +202,14 @@ export function ServerSettingsDialog({
     },
   ].filter((s) => can(s.id));
   const peopleSections = [
+    {
+      id: "applications",
+      label: "Applications",
+      icon: InboxIcon,
+      badge: waiting,
+      description: "People asking to join, with their answers.",
+      keywords: "apply review approve reject let in turn down pending waiting",
+    },
     { id: "members", label: "Members", icon: UsersIcon, description: "Roles, nicknames, time-outs, kicks and bans.", keywords: "admin role kick ban timeout nickname" },
     { id: "bans", label: "Bans", icon: GavelIcon, description: "Who's kept out, and why.", keywords: "unban banned" },
     { id: "audit-log", label: "Audit log", icon: ScrollTextIcon, description: "Every change people made here.", keywords: "history log moderation" },
@@ -199,11 +232,15 @@ export function ServerSettingsDialog({
     >
       {tab === "overview" && can("overview") && <Overview instanceKey={instanceKey} server={server} />}
       {tab === "access" && can("access") && <Access instanceKey={instanceKey} server={server} />}
+      {tab === "join-form" && can("join-form") && <JoinFormEditor instanceKey={instanceKey} server={server} onOpenAccess={() => setTab("access")} />}
       {tab === "invites" && can("invites") && <Invites instanceKey={instanceKey} serverId={server.id} />}
       {tab === "roles" && can("roles") && <Roles instanceKey={instanceKey} serverId={server.id} initial={target} />}
       {tab === "channels" && can("channels") && <Channels instanceKey={instanceKey} serverId={server.id} initial={target} />}
       {tab === "usage" && can("usage") && <Usage instanceKey={instanceKey} serverId={server.id} />}
       {tab === "limits" && can("limits") && <Limits instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "applications" && can("applications") && (
+        <Applications instanceKey={instanceKey} serverId={server.id} takesApplications={server.applications} />
+      )}
       {tab === "members" && can("members") && <Members instanceKey={instanceKey} serverId={server.id} />}
       {tab === "bans" && can("bans") && <Bans instanceKey={instanceKey} serverId={server.id} />}
       {tab === "audit-log" && can("audit-log") && <AuditLog instanceKey={instanceKey} serverId={server.id} />}
@@ -344,19 +381,35 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
   );
 }
 
-/** Who can join: anyone who finds it in Browse, or only people with an invite; and how old their account must be. */
+/**
+ * Who can join: anyone who finds it in Browse, or only people with an invite;
+ * whether they join straight away or apply first; waifu.dev accounts only;
+ * and how old their account must be.
+ */
 function Access({ instanceKey, server }: { instanceKey: string; server: Server }) {
+  const inst = useInstance(instanceKey);
+  const linkedOffered = !!inst?.node?.auth?.linkedSignIn;
   const [discoverable, setDiscoverable] = useState(server.discoverable);
+  const [applications, setApplications] = useState(server.applications);
+  const [linkedOnly, setLinkedOnly] = useState(server.linkedOnly);
   const [minAge, setMinAge] = useState(server.minAccountAgeSeconds);
   const save = useAction(updateServer);
-  const changes = [discoverable !== server.discoverable, minAge !== server.minAccountAgeSeconds].filter(Boolean).length;
+  const changes = [
+    discoverable !== server.discoverable,
+    applications !== server.applications,
+    linkedOnly !== server.linkedOnly,
+    minAge !== server.minAccountAgeSeconds,
+  ].filter(Boolean).length;
   // A value set some other way (the API, an older client) still shows as a choice.
   const ages = ACCOUNT_AGES.some((a) => a.value === server.minAccountAgeSeconds)
     ? ACCOUNT_AGES
     : [...ACCOUNT_AGES, { value: server.minAccountAgeSeconds, label: formatDuration(server.minAccountAgeSeconds) }].sort((a, b) => a.value - b.value);
+  const shown = { ...server, discoverable, applications, linkedOnly, minAccountAgeSeconds: minAge };
 
   function discard() {
     setDiscoverable(server.discoverable);
+    setApplications(server.applications);
+    setLinkedOnly(server.linkedOnly);
     setMinAge(server.minAccountAgeSeconds);
     save.setError(null);
   }
@@ -364,6 +417,8 @@ function Access({ instanceKey, server }: { instanceKey: string; server: Server }
   async function submit() {
     await save.go(instanceKey, server.id, {
       ...(discoverable !== server.discoverable && { discoverable }),
+      ...(applications !== server.applications && { applications }),
+      ...(linkedOnly !== server.linkedOnly && { linkedOnly }),
       ...(minAge !== server.minAccountAgeSeconds && { minAccountAgeSeconds: minAge }),
     });
   }
@@ -372,8 +427,8 @@ function Access({ instanceKey, server }: { instanceKey: string; server: Server }
     <WithPreview
       preview={
         <div className="flex flex-col gap-4">
-          <BrowseCard server={{ ...server, discoverable }} />
-          <GatePreview minAge={minAge} />
+          <BrowseCard server={shown} />
+          <GatePreview minAge={minAge} applications={applications} linkedOnly={linkedOnly} />
         </div>
       }
     >
@@ -392,11 +447,52 @@ function Access({ instanceKey, server }: { instanceKey: string; server: Server }
             ]}
           />
         </div>
+        <div data-setting="applications" className="flex flex-col gap-3 border-b border-border/70 py-5">
+          <span>
+            <span className="block font-extrabold">How people get in</span>
+            <span className="block text-sm text-muted-foreground">
+              Applications wait under Applications for anyone who can kick members. Set the questions under Rules &amp; questions.
+            </span>
+          </span>
+          <Choice
+            value={applications ? "apply" : "join"}
+            onChange={(v) => setApplications(v === "apply")}
+            options={[
+              { value: "join", label: "Join straight away", hint: "Anyone who finds it or has an invite is in at once.", icon: <DoorOpenIcon className="size-4" /> },
+              {
+                value: "apply",
+                label: "Apply to join",
+                hint: "People answer your questions and wait for someone to let them in.",
+                icon: <ClipboardPenIcon className="size-4" />,
+              },
+            ]}
+          />
+          <AnimatePresence initial={false}>
+            {server.applications && !applications && (
+              <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-xs text-amber-600 dark:text-amber-400">
+                Applications still waiting are dropped. Those people can join straight away instead.
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </div>
+        <div data-setting="linked-only" className="flex flex-col gap-2 border-b border-border/70 py-5">
+          <Toggle
+            checked={linkedOnly}
+            onChange={setLinkedOnly}
+            disabled={!linkedOffered && !linkedOnly}
+            label="waifu.dev accounts only"
+            hint={
+              linkedOffered || linkedOnly
+                ? "Only people who sign in with waifu.dev can join or apply. Accounts made on this fuwa server can't. Members already here stay."
+                : "This fuwa server doesn't offer waifu.dev sign-in, so nobody could join."
+            }
+          />
+        </div>
         <div data-setting="account-age" className="flex flex-col gap-3 py-5">
           <span>
             <span className="block font-extrabold">Minimum account age</span>
             <span className="block text-sm text-muted-foreground">
-              Accounts newer than this wait before they can join, by invite or from Browse. It keeps throwaway accounts out during a raid.
+              Accounts newer than this wait before they can join or apply, by invite or from Browse. It keeps throwaway accounts out during a raid.
             </span>
           </span>
           <Chips label="Minimum account age" value={minAge} options={ages} onChange={setMinAge} />
@@ -407,36 +503,55 @@ function Access({ instanceKey, server }: { instanceKey: string; server: Server }
   );
 }
 
-/** Two accounts at the door: one made today, one made last month, and whether each gets in. */
-function GatePreview({ minAge }: { minAge: number }) {
+/** Three accounts at the door, and what happens to each: in, applying, waiting out the age limit, or kept out for not being waifu.dev. */
+function GatePreview({ minAge, applications, linkedOnly }: { minAge: number; applications: boolean; linkedOnly: boolean }) {
   const people = [
-    { name: "2 hours old", age: 2 * 3600, hue: 330 },
-    { name: "A month old", age: 30 * 86_400, hue: 200 },
+    { name: "2 hours old", sub: "waifu.dev account", age: 2 * 3600, kind: AccountKind.LINKED, hue: 330 },
+    { name: "A month old", sub: "waifu.dev account", age: 30 * 86_400, kind: AccountKind.LINKED, hue: 200 },
+    { name: "A month old", sub: "Made on this server", age: 30 * 86_400, kind: AccountKind.LOCAL, hue: 140 },
   ];
   return (
-    <div className="flex flex-col gap-2 rounded-3xl border bg-card p-4 shadow-lg">
+    <div className="flex flex-col gap-2.5 rounded-3xl border bg-card p-4 shadow-lg">
       <p className="text-xs font-bold text-muted-foreground">At the door</p>
-      {people.map((p) => {
+      {people.map((p, n) => {
         const wait = minAge - p.age;
-        const ok = wait <= 0;
+        const out = linkedOnly && p.kind !== AccountKind.LINKED;
+        const state = out ? "out" : wait > 0 ? `wait-${wait}` : applications ? "apply" : "in";
         return (
-          <div key={p.name} className="flex items-center gap-2.5 text-sm">
+          <div key={n} className="flex items-center gap-2.5 text-sm">
             <span className="size-7 shrink-0 rounded-full" style={{ background: `linear-gradient(135deg, oklch(0.75 0.14 ${p.hue}), oklch(0.6 0.16 ${p.hue + 40}))` }} />
-            <span className="min-w-0 flex-1 truncate">{p.name}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate leading-tight">{p.name}</span>
+              <span className="flex items-center gap-1 truncate text-[0.7rem] text-muted-foreground">
+                {p.kind === AccountKind.LINKED && <BadgeCheckIcon className="size-3" />}
+                {p.sub}
+              </span>
+            </span>
             <AnimatePresence mode="popLayout" initial={false}>
               <motion.span
-                key={ok ? "in" : `wait-${wait}`}
-                initial={{ scale: 0.6, opacity: 0, rotate: ok ? -20 : 20 }}
+                key={state}
+                initial={{ scale: 0.6, opacity: 0, rotate: state === "in" ? -20 : 20 }}
                 animate={{ scale: 1, opacity: 1, rotate: 0 }}
                 exit={{ scale: 0.6, opacity: 0 }}
                 transition={{ type: "spring", stiffness: 600, damping: 18 }}
                 className={cn(
                   "flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold",
-                  ok ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+                  state === "in" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+                  state === "apply" && "bg-primary/15 text-primary",
+                  state === "out" && "bg-destructive/15 text-destructive",
+                  state.startsWith("wait") && "bg-amber-500/15 text-amber-600 dark:text-amber-400",
                 )}
               >
-                {ok ? <CheckIcon className="size-3" strokeWidth={3} /> : <HourglassIcon className="size-3" />}
-                {ok ? "Joins" : `Waits ${timeLeft(wait * 1000)}`}
+                {state === "in" ? (
+                  <CheckIcon className="size-3" strokeWidth={3} />
+                ) : state === "apply" ? (
+                  <ClipboardPenIcon className="size-3" />
+                ) : state === "out" ? (
+                  <XIcon className="size-3" strokeWidth={3} />
+                ) : (
+                  <HourglassIcon className="size-3" />
+                )}
+                {state === "in" ? "Joins" : state === "apply" ? "Applies" : state === "out" ? "Can't join" : `Waits ${timeLeft(wait * 1000)}`}
               </motion.span>
             </AnimatePresence>
           </div>
@@ -488,7 +603,10 @@ function BrowseCard({ server }: { server: Server }) {
         <p className="line-clamp-4 text-sm break-words text-muted-foreground">
           {server.description.trim() ? <InlineMarkdown>{server.description}</InlineMarkdown> : "No description yet."}
         </p>
-        <span className="btn grid h-9 place-items-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">Join</span>
+        <ServerDoor server={server} />
+        <span className="btn grid h-9 place-items-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">
+          <SwapText>{server.applications ? "Apply to join" : "Join"}</SwapText>
+        </span>
       </motion.div>
       <AnimatePresence>
         {!server.discoverable && (

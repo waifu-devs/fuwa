@@ -54,6 +54,12 @@ export const CHANNEL: Bits = [
   P.CREATE_INVITE,
 ].reduce((bits, p) => bits | bit(p), 0);
 
+/** What a member who hasn't agreed to the server's rules yet can't do, as on the server. */
+export const TALK: Bits = [P.SEND_MESSAGES, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.CREATE_INVITE, P.CHANGE_NICKNAME].reduce(
+  (bits, p) => bits | bit(p),
+  0,
+);
+
 export const fromList = (list: readonly P[]): Bits => list.reduce((bits, p) => (KNOWN.includes(p) ? bits | bit(p) : bits), 0);
 export const toList = (bits: Bits): P[] => KNOWN.filter((p) => bits & bit(p));
 
@@ -140,9 +146,11 @@ export type Access = {
   rank: number;
   /** Per channel they can see, after its overwrites. */
   channels: ReadonlyMap<string, Bits>;
+  /** Hasn't agreed to the server's rules yet, so can read but not talk. */
+  pending: boolean;
 };
 
-export const NO_ACCESS: Access = { owner: false, server: 0, rank: 0, channels: new Map() };
+export const NO_ACCESS: Access = { owner: false, server: 0, rank: 0, channels: new Map(), pending: false };
 
 const isRole = (o: PermissionOverwrite) => o.target !== OverwriteTarget.MEMBER;
 
@@ -175,7 +183,11 @@ function channelBits(
   return bits & bit(P.VIEW_CHANNELS) ? bits : 0;
 }
 
-/** What someone with these roles can do. `everyoneId` is the server's id. */
+/**
+ * What someone with these roles can do. `everyoneId` is the server's id.
+ * Someone `pending` (joined, rules not agreed yet) is held back from talking;
+ * the owner never is.
+ */
 export function accessOf(
   everyoneId: string,
   ownerId: string,
@@ -183,6 +195,7 @@ export function accessOf(
   channels: readonly Channel[],
   userId: string,
   roleIds: readonly string[],
+  pending = false,
 ): Access {
   const owner = userId === ownerId;
   const held = roles.filter((r) => roleIds.includes(r.id));
@@ -203,7 +216,9 @@ export function accessOf(
       visible.set(parent.id, bit(P.VIEW_CHANNELS));
     }
   }
-  return { owner, server: unbound ? ALL : base, rank, channels: visible };
+  const heldBack = pending && !owner;
+  if (heldBack) for (const [id, bits] of visible) visible.set(id, bits & ~TALK);
+  return { owner, server: (unbound ? ALL : base) & (heldBack ? ~TALK : ALL), rank, channels: visible, pending: heldBack };
 }
 
 export const has = (a: Access, p: P) => !!(a.server & bit(p));

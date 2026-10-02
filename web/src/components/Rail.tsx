@@ -8,6 +8,7 @@ import { useInstances } from "@/fuwa/hooks";
 import { AddInstanceDialog } from "@/components/dialogs/AddInstanceDialog";
 import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, FuwaMark, ServerIcon } from "@/components/Icons";
+import { AppliedButton } from "@/components/join/Applied";
 import { Count, SPRING } from "@/components/motion";
 import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
@@ -141,6 +142,13 @@ function InstanceGroup({ inst, params }: { inst: InstanceState; params: { instan
             <ServerButton inst={inst} server={server} active={here && params.server === server.id} />
           </Pop>
         ))}
+        {Object.values(inst.applied)
+          .filter((a) => !inst.servers.some((s) => s.id === a.server.id))
+          .map((a) => (
+            <Pop key={`applied-${a.server.id}`}>
+              <AppliedButton inst={inst} applied={a} />
+            </Pop>
+          ))}
       </AnimatePresence>
     </>
   );

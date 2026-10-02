@@ -61,6 +61,7 @@ export const MessageList = forwardRef<
   const inst = useInstance(instanceKey);
   const access = useAccess(instanceKey, serverId);
   const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
+  const canSend = hasIn(access, channel.id, Permission.SEND_MESSAGES);
   const roles = useRoles(instanceKey, serverId);
   const state = inst?.messages[channel.id];
   const items = state?.items ?? EMPTY;
@@ -230,7 +231,7 @@ export const MessageList = forwardRef<
                     mine={row.message.authorId === me?.id}
                     animate={!initial.current?.has(row.message.id)}
                     canDelete={manager}
-                    onWave={() => run(sendMessage(instanceKey, serverId, channel.id, `👋 @${author?.username ?? ""}`))}
+                    onWave={canSend ? () => run(sendMessage(instanceKey, serverId, channel.id, `👋 @${author?.username ?? ""}`)) : undefined}
                     onDelete={() => run(deleteMessage(instanceKey, serverId, channel.id, row.message.id))}
                   />
                 );
@@ -618,7 +619,8 @@ function JoinRow({
   mine: boolean;
   animate: boolean;
   canDelete: boolean;
-  onWave: () => Promise<void>;
+  /** Unset where you can't send messages, such as before agreeing to the rules. */
+  onWave?: () => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
   const [done, setDone] = useState(waved.has(message.id));
@@ -649,7 +651,7 @@ function JoinRow({
           {formatStamp(date)}
         </time>
       </p>
-      {!mine && author && (
+      {!mine && author && onWave && (
         <motion.button
           type="button"
           disabled={done || waving}

@@ -83,6 +83,15 @@ pub const ADMIN: Bits = bit(P::ManageServer)
     | bit(P::TimeOutMembers)
     | bit(P::ManageNicknames);
 
+/// What a member who hasn't agreed to the server's rules yet can't do: talk,
+/// bring people in, or rename themselves.
+pub const TALK: Bits = bit(P::SendMessages)
+    | bit(P::EmbedLinks)
+    | bit(P::AttachFiles)
+    | bit(P::MentionEveryone)
+    | bit(P::CreateInvite)
+    | bit(P::ChangeNickname);
+
 /// Reads permissions off the wire, refusing ones this version doesn't know.
 pub fn from_list(list: &[i32]) -> Result<Bits> {
     list.iter().try_fold(0, |bits, &value| match P::try_from(value) {
@@ -163,6 +172,8 @@ pub struct Access {
     pub rank: i64,
     /// Per channel, after its overwrites. Channels they can't see aren't here.
     channels: HashMap<String, Bits>,
+    /// Hasn't agreed to the server's rules yet, so can't talk.
+    pub pending: bool,
 }
 
 impl Rules {
@@ -192,7 +203,7 @@ impl Rules {
         for parent in holders {
             channels.insert(parent, bit(P::ViewChannels));
         }
-        Access { owner, server, rank, channels }
+        Access { owner, server, rank, channels, pending: false }
     }
 
     /// Permissions in a channel: its category's overwrites, then its own. In
@@ -224,9 +235,31 @@ impl Access {
         self.server & bit(p) != 0
     }
 
+    /// Holds back what a member who hasn't agreed to the rules can't do yet.
+    /// The owner never waits.
+    pub fn hold_back(&mut self) {
+        if self.owner {
+            return;
+        }
+        self.pending = true;
+        self.server &= !TALK;
+        for bits in self.channels.values_mut() {
+            *bits &= !TALK;
+        }
+    }
+
+    /// Why they can't do `p`: the rules they haven't agreed to, or a missing permission.
+    fn refuse(&self, p: P) -> Error {
+        if self.pending && TALK & bit(p) != 0 {
+            Error::FailedPrecondition("agree to this server's rules first".into())
+        } else {
+            missing(p)
+        }
+    }
+
     /// Refuses unless they have `p` server-wide.
     pub fn require(&self, p: P) -> Result<()> {
-        if self.has(p) { Ok(()) } else { Err(missing(p)) }
+        if self.has(p) { Ok(()) } else { Err(self.refuse(p)) }
     }
 
     pub fn can_see(&self, channel_id: &str) -> bool {
@@ -248,7 +281,7 @@ impl Access {
         if !self.can_see(channel_id) {
             return Err(Error::NotFound("channel"));
         }
-        if self.has_in(channel_id, p) { Ok(()) } else { Err(missing(p)) }
+        if self.has_in(channel_id, p) { Ok(()) } else { Err(self.refuse(p)) }
     }
 
     /// The channels they can see.

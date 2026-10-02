@@ -1,14 +1,16 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRightIcon, CheckIcon, ChevronLeftIcon, LoaderCircleIcon, PlusIcon, SearchIcon, TicketIcon, TvMinimalPlayIcon, UsersIcon } from "lucide-react";
+import { ArrowRightIcon, ChevronLeftIcon, PlusIcon, SearchIcon, TicketIcon, TvMinimalPlayIcon, UsersIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
-import { discover, joinServer, run } from "@/fuwa/actions";
-import { useAction, useInstance } from "@/fuwa/hooks";
+import { discover, run } from "@/fuwa/actions";
+import { useInstance } from "@/fuwa/hooks";
 import { BuildLabel } from "@/components/BuildLabel";
 import { Connect } from "@/components/Connect";
 import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
+import { JoinButton } from "@/components/join/JoinButton";
+import { ServerDoor } from "@/components/join/ServerDoor";
 import { InlineMarkdown } from "@/components/Markdown";
 import { Count, SwapText, Tilt } from "@/components/motion";
 import { Private, useAddress, usePrivateField } from "@/components/Private";
@@ -91,7 +93,6 @@ function Browse({ instanceKey }: { instanceKey: string }) {
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
   const address = useAddress(instanceKey);
-  const joinedIds = useMemo(() => new Set(inst.servers.map((s) => s.id)), [inst.servers]);
 
   useEffect(() => {
     if (!inst.me) return;
@@ -161,7 +162,7 @@ function Browse({ instanceKey }: { instanceKey: string }) {
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.4, delay: Math.min(n, 8) * 0.05, ease: [0.22, 1, 0.36, 1] }}
               >
-                <ServerCard instanceKey={instanceKey} server={s} joined={joinedIds.has(s.id)} />
+                <ServerCard instanceKey={instanceKey} server={s} />
               </motion.div>
             ))}
           </AnimatePresence>
@@ -222,16 +223,8 @@ function HaveInvite({ instanceKey }: { instanceKey: string }) {
   );
 }
 
-function ServerCard({ instanceKey, server, joined }: { instanceKey: string; server: Server; joined: boolean }) {
+function ServerCard({ instanceKey, server }: { instanceKey: string; server: Server }) {
   const navigate = useNavigate();
-  const join = useAction(joinServer);
-  const [justJoined, setJustJoined] = useState(false);
-  async function onJoin() {
-    const s = await join.go(instanceKey, server.id);
-    if (!s) return;
-    setJustJoined(true);
-    setTimeout(() => navigate({ to: "/$instance/$server", params: { instance: instanceKey, server: s.id } }), 550);
-  }
   return (
     <Tilt className="card-pop tilt h-full rounded-3xl border bg-card">
       <div className="flex h-full flex-col gap-3 p-5">
@@ -247,29 +240,12 @@ function ServerCard({ instanceKey, server, joined }: { instanceKey: string; serv
         <p className="line-clamp-3 flex-1 text-sm text-muted-foreground">
           {server.description ? <InlineMarkdown>{server.description}</InlineMarkdown> : "No description yet."}
         </p>
-        {join.error && <p className="text-xs text-destructive first-letter:uppercase">{join.error}</p>}
-        {joined && !justJoined ? (
-          <Button asChild variant="outline" className="rounded-xl font-bold">
-            <Link to="/$instance/$server" params={{ instance: instanceKey, server: server.id }}>
-              Open <ArrowRightIcon />
-            </Link>
-          </Button>
-        ) : (
-          <Button onClick={onJoin} disabled={join.pending || justJoined} className="btn rounded-xl font-bold">
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.span
-                key={justJoined ? "done" : join.pending ? "busy" : "join"}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                className="flex items-center gap-2"
-              >
-                {justJoined ? <CheckIcon /> : join.pending ? <LoaderCircleIcon className="animate-spin" /> : null}
-                {justJoined ? "Joined" : "Join"}
-              </motion.span>
-            </AnimatePresence>
-          </Button>
-        )}
+        <ServerDoor server={server} />
+        <JoinButton
+          instanceKey={instanceKey}
+          server={server}
+          onOpen={(s) => navigate({ to: "/$instance/$server", params: { instance: instanceKey, server: s.id } })}
+        />
       </div>
     </Tilt>
   );

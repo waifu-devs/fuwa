@@ -6,6 +6,7 @@ mod auth;
 mod channels;
 mod events;
 mod invites;
+mod join;
 mod media;
 mod messages;
 mod node;

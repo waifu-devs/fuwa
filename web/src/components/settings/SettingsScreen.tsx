@@ -2,7 +2,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ArrowLeftIcon, ChevronRightIcon, CornerDownRightIcon, SearchIcon, SearchXIcon, XIcon, type LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { EASE_OUT, SPRING } from "@/components/motion";
+import { Count, EASE_OUT, SPRING } from "@/components/motion";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +17,8 @@ export type SettingsSection = {
   keywords?: string;
   /** Single settings on this section that search can jump to; each matches a `Setting` with the same id. */
   settings?: SettingEntry[];
+  /** Something waiting there, such as applications to review. */
+  badge?: number;
 };
 
 export type SettingEntry = { id: string; label: string; keywords?: string };
@@ -348,6 +350,19 @@ function Menu({
                   )}
                   {!wide && <s.icon className={cn(ICON, "size-5")} />}
                   <span className="relative truncate transition-transform duration-200 group-hover:translate-x-0.5">{s.label}</span>
+                  <AnimatePresence initial={false}>
+                    {!!s.badge && (
+                      <motion.span
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        exit={{ scale: 0 }}
+                        transition={{ type: "spring", stiffness: 600, damping: 18 }}
+                        className="relative ml-auto grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-destructive px-1.5 text-[0.65rem] font-extrabold text-white"
+                      >
+                        <Count value={s.badge} max={99} />
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
                   {trailing && <s.icon className={cn(ICON, "ml-auto")} />}
                   {!wide && <ChevronRightIcon className="relative ml-auto size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />}
                 </motion.button>

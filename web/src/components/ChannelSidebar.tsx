@@ -5,6 +5,8 @@ import {
   BellRingIcon,
   ChartColumnIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
+  ClipboardListIcon,
   DoorOpenIcon,
   FingerprintIcon,
   HashIcon,
@@ -12,20 +14,22 @@ import {
   LockIcon,
   MegaphoneIcon,
   PlusIcon,
+  ScrollTextIcon,
   SettingsIcon,
   UserPlusIcon,
   Volume2Icon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useMemo, useState, type Ref } from "react";
+import { useEffect, useMemo, useState, type Ref } from "react";
 import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
-import { leaveServer, run, updateNotifications } from "@/fuwa/actions";
+import { leaveServer, listApplications, run, updateNotifications } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { InviteDialog } from "@/components/dialogs/InviteDialog";
 import { ServerSettingsDialog, useServerSettingsTabs } from "@/components/dialogs/ServerSettingsDialog";
+import { RulesDialog } from "@/components/join/Rules";
 import { useLayout } from "@/components/Shell";
 import { Count, SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
@@ -128,6 +132,13 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
     params.channel && hasIn(access, params.channel, Permission.CREATE_INVITE) ? params.channel : has(access, Permission.CREATE_INVITE) ? "" : null;
   const leave = useAction(leaveServer);
   const developer = usePrefs((p) => p.developerMode);
+  const [reading, setReading] = useState(false);
+  // People waiting to be let in, for whoever can let them in.
+  const reviews = !!server?.applications && has(access, Permission.KICK_MEMBERS);
+  const waiting = inst?.applications[serverId]?.length ?? 0;
+  useEffect(() => {
+    if (reviews) run(listApplications(instanceKey, serverId)).catch(() => {});
+  }, [reviews, instanceKey, serverId]);
 
   if (!inst) return null;
   return (
@@ -166,6 +177,16 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
               <SettingsIcon /> Server settings
             </DropdownMenuItem>
           )}
+          {reviews && (
+            <DropdownMenuItem onSelect={() => setSettings({ tab: "applications" })}>
+              <ClipboardListIcon /> Applications
+              {waiting > 0 && (
+                <span className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-destructive px-1.5 text-[0.65rem] font-extrabold text-white">
+                  <Count value={waiting} max={99} />
+                </span>
+              )}
+            </DropdownMenuItem>
+          )}
           {usage && (
             <DropdownMenuItem onSelect={() => setSettings({ tab: "usage" })}>
               <ChartColumnIcon /> Usage
@@ -177,6 +198,11 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
             </DropdownMenuItem>
           )}
           {(settingsTabs.length > 0 || canCreate) && <DropdownMenuSeparator />}
+          {server?.hasRules && (
+            <DropdownMenuItem onSelect={() => setReading(true)}>
+              <ScrollTextIcon /> Server rules
+            </DropdownMenuItem>
+          )}
           <ServerNotificationItems instanceKey={instanceKey} serverId={serverId} />
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => openSettings("server-profiles", serverId)}>
@@ -204,6 +230,28 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
       </DropdownMenu>
 
       <div className="scroll-thin flex-1 overflow-y-auto px-2 pt-3 pb-4">
+        <AnimatePresence initial={false}>
+          {reviews && waiting > 0 && (
+            <motion.button
+              type="button"
+              onClick={() => setSettings({ tab: "applications" })}
+              initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+              animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
+              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+              transition={SPRING}
+              className="group flex w-full items-center gap-2 overflow-hidden rounded-xl bg-primary/10 px-2.5 py-2 text-left text-sm font-bold text-primary transition-colors hover:bg-primary/15"
+            >
+              <span className="relative grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
+                <ClipboardListIcon className="size-4" />
+                <motion.span aria-hidden animate={{ scale: [1, 1.6], opacity: [0.6, 0] }} transition={{ duration: 1.6, repeat: Infinity }} className="absolute inset-0 rounded-lg bg-primary" />
+              </span>
+              <span className="min-w-0 flex-1 truncate">
+                <Count value={waiting} /> {waiting === 1 ? "person wants" : "people want"} to join
+              </span>
+              <ChevronRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
+            </motion.button>
+          )}
+        </AnimatePresence>
         {!synced && !channels?.length ? (
           <div className="flex flex-col gap-2 px-2">
             {[70, 55, 80, 45].map((w, n) => (
@@ -290,6 +338,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
         serverId={serverId}
         parentId={creating?.parentId}
       />
+      {server && <RulesDialog open={reading} onOpenChange={setReading} instanceKey={instanceKey} server={server} agree={access.pending} />}
       {server && (
         <ServerSettingsDialog
           open={!!settings}
