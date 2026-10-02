@@ -60,7 +60,7 @@ pub enum Link {
     /// Nowhere: this process runs everything.
     Alone,
     /// This is the directory; server files are on shards.
-    Directory(crate::cluster::directory::Shards),
+    Directory(Box<crate::cluster::directory::Shards>),
     /// This is a shard; accounts are on the directory.
     Shard(Box<crate::cluster::shard::Link>),
 }
@@ -87,7 +87,7 @@ impl App {
                     (Servers::open(&config.data_path, key, hub.clone(), false).await?, Link::Alone)
                 } else {
                     let shards = crate::cluster::directory::Shards::load(&config, &node).await?;
-                    (Servers::none(hub.clone()), Link::Directory(shards))
+                    (Servers::none(hub.clone()), Link::Directory(Box::new(shards)))
                 };
                 (Some(node), Some(media), servers, link)
             }
@@ -245,6 +245,10 @@ impl App {
         if !self.config.cluster.is_split() {
             // The web app (when it's on) answers every other GET, so its own addresses work on reload.
             return router.fallback(crate::web::handler(self.clone())).layer(cors(self.clone()));
+        }
+        if let Link::Directory(_) = &self.link {
+            let wait = crate::cluster::directory::wait_for_shards;
+            router = router.layer(axum::middleware::from_fn_with_state(self.clone(), wait));
         }
         // Behind gateways, which serve the web app and answer browsers' CORS.
         let key: Arc<str> = self.config.cluster.key.as_deref().unwrap_or_default().into();

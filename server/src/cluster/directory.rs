@@ -1,10 +1,11 @@
 //! The directory: keeps node.db and the index of every server, knows the
 //! shards, and answers what shards and gateways ask of it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use futures::Stream;
 use tokio::sync::mpsc;
@@ -30,6 +31,13 @@ pub struct Shards {
     /// Held while server files left from a single process are promised to a
     /// shard or let go of.
     handover: tokio::sync::Mutex<()>,
+    /// The servers in those files, until the shard that takes them registers:
+    /// meanwhile they're on a shard that's down, not gone.
+    left: RwLock<HashSet<String>>,
+    /// Shards known before this start that haven't registered since. Until
+    /// they do, the index is missing their servers and who's in them.
+    missing: RwLock<HashSet<String>>,
+    started: Instant,
 }
 
 struct Shard {
@@ -74,7 +82,36 @@ impl Shards {
                  (delete servers-promised-to to offer them to whichever shard starts first)"
             ),
         }
-        Ok(Self { key, known: RwLock::new(known), handover: tokio::sync::Mutex::new(()) })
+        let left = leftovers(&config.data_path)?
+            .iter()
+            .filter_map(|name| name.strip_suffix(".db"))
+            .map(str::to_string)
+            .collect();
+        let missing = RwLock::new(known.keys().cloned().collect());
+        Ok(Self {
+            key,
+            known: RwLock::new(known),
+            handover: tokio::sync::Mutex::new(()),
+            left: RwLock::new(left),
+            missing,
+            started: Instant::now(),
+        })
+    }
+
+    /// Whether every shard known before this start has registered again, and
+    /// a shard has taken any servers left from a single process, so the index
+    /// has every server and member. A shard that stays down is given up on
+    /// after `within`; its servers are missing until it's back.
+    pub fn caught_up(&self, within: Duration) -> bool {
+        self.started.elapsed() >= within
+            || (self.missing.read().unwrap_or_else(|p| p.into_inner()).is_empty()
+                && self.left.read().unwrap_or_else(|p| p.into_inner()).is_empty())
+    }
+
+    /// Whether a server is in the files left from a single process, not yet
+    /// on a shard.
+    fn is_left(&self, server_id: &str) -> bool {
+        self.left.read().unwrap_or_else(|p| p.into_inner()).contains(server_id)
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, HashMap<String, Shard>> {
@@ -87,6 +124,12 @@ impl Shards {
 
     /// Notes where a shard is, as it registers.
     pub fn register(&self, id: &str, url: &str) -> Result<()> {
+        {
+            let mut missing = self.missing.write().unwrap_or_else(|p| p.into_inner());
+            if missing.remove(id) && missing.is_empty() {
+                tracing::info!("every shard has registered again");
+            }
+        }
         let mut known = self.write();
         match known.get_mut(id) {
             Some(shard) if shard.url == url && shard.client.is_some() => {}
@@ -142,6 +185,27 @@ impl Shards {
     pub fn up(&self) -> Vec<(String, ShardClient)> {
         self.all().into_iter().filter_map(|(id, client)| client.map(|client| (id, client))).collect()
     }
+}
+
+/// Turns clients' calls away while a directory that just started waits for
+/// its shards to register again (see [`Shards::caught_up`]), so nobody sees a
+/// server list with servers missing. Gateways try them again shortly.
+pub async fn wait_for_shards(
+    axum::extract::State(app): axum::extract::State<Arc<App>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    if let Link::Directory(shards) = &app.link
+        && request.uri().path().starts_with("/fuwa.v1.")
+        && !shards.caught_up(app.config.cluster.ride_out)
+    {
+        let mut status = Status::unavailable("this instance is starting; try again soon");
+        status.metadata_mut().insert(crate::error::NOT_READY, "1".parse().expect("a valid header value"));
+        return status.into_http::<axum::body::Body>().into_response();
+    }
+    next.run(request).await
 }
 
 /// The server files in a directory's servers/ folder: left there from when
@@ -352,6 +416,11 @@ impl DirectoryService for Internal {
                 if !gone.is_empty() {
                     tracing::info!(shard = %req.shard_id, servers = ?gone, "servers no longer on this shard");
                 }
+                let shards = self.shards()?;
+                if !shards.left.read().unwrap_or_else(|p| p.into_inner()).is_empty() {
+                    let index = &self.app.index;
+                    shards.left.write().unwrap_or_else(|p| p.into_inner()).retain(|id| index.placement(id).is_none());
+                }
                 Ok(cpb::RegisterShardResponse {})
             }
             .await,
@@ -369,10 +438,16 @@ impl DirectoryService for Internal {
                     .into_inner()
                     .server_ids
                     .into_iter()
-                    .filter_map(|server_id| {
-                        let shard_id = self.app.index.placement(&server_id)?;
-                        let url = shards.url_if_up(&shard_id).unwrap_or_default();
-                        Some(cpb::Placement { server_id, shard_id, url })
+                    .filter_map(|server_id| match self.app.index.placement(&server_id) {
+                        Some(shard_id) => {
+                            let url = shards.url_if_up(&shard_id).unwrap_or_default();
+                            Some(cpb::Placement { server_id, shard_id, url })
+                        }
+                        // Still to be handed to a shard: one that isn't up yet.
+                        None if shards.is_left(&server_id) => {
+                            Some(cpb::Placement { server_id, shard_id: String::new(), url: String::new() })
+                        }
+                        None => None,
                     })
                     .collect();
                 Ok(cpb::PlacementsResponse { placements })

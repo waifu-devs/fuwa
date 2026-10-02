@@ -137,7 +137,7 @@ impl App {
                 purpose: purpose as i32,
                 url: url.to_string(),
             };
-            let id = link.directory().check_picture(request).await?.into_inner().media_id;
+            let id = link.ask(request, |mut d, r| async move { d.check_picture(r).await }).await?.media_id;
             return Ok(Some(id).filter(|id| !id.is_empty()));
         }
         let Some(row) = self.node()?.media(&id).await? else { return Ok(None) };
@@ -212,7 +212,7 @@ impl App {
         match &self.link {
             Link::Shard(link) => {
                 let request = cpb::CountOwnedServersRequest { account_id: account_id.to_string() };
-                Ok(link.directory().count_owned_servers(request).await?.into_inner().count)
+                Ok(link.ask(request, |mut d, r| async move { d.count_owned_servers(r).await }).await?.count)
             }
             _ => Ok(self.index.owned_count(account_id)),
         }

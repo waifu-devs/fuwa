@@ -275,10 +275,35 @@ where each part has a disk of its own (Railway, Kubernetes, Fly.io). fuwa.chat's
 Railway config ([`.railway/railway.ts`](.railway/railway.ts)) splits this way
 when its `SPLIT` setting is turned on.
 
-While a shard is down, its servers answer "unavailable" and live streams
-following them end, so clients reconnect once it's back; everything else keeps
-working. Deleting an account and exporting someone's data are refused until
-every shard is up, so nothing is left out. To move a server to another shard,
+#### Restarts and deploys
+
+Restarting a part, say to deploy a new version, interrupts nobody:
+
+- **A shard** stops, then starts again. Meanwhile gateways hold calls for its
+  servers and send them on once it's back (if that takes over 30 seconds, the
+  call answers "unavailable"). Live streams stay open: the gateway follows the
+  shard's servers again from the last event each client got, so nothing is
+  missed and the client never sees a break.
+- **The directory** stops, then starts again. Gateways hold calls for it the
+  same way, and shards wait for it when they need to check who's calling.
+  Once back, it answers clients only after every shard has registered again
+  (or 30 seconds have passed), so nobody gets a server list with servers
+  missing. Live streams don't need it.
+- **A gateway** keeps nothing, so run two or more and start new ones before
+  stopping old ones. When it stops, it tells each open live stream to follow
+  again; clients do, on another gateway, from where they got to. Its health
+  check (`/healthz`) only answers once it has reached the directory, so a new
+  gateway doesn't take traffic before it can serve it.
+
+Every part finishes the calls it's answering before it exits on SIGTERM, so
+give it up to 45 seconds. A part with its files on a disk of its own (the
+directory, shards) can't overlap its old and new processes; a gateway can, and
+that's what keeps clients connected.
+
+A shard that stays down is different: after the 30 seconds its servers answer
+"unavailable" and live streams following them end, so clients reconnect once
+it's back; everything else keeps working. Deleting an account and exporting
+someone's data are refused until every shard is up, so nothing is left out. To move a server to another shard,
 stop both, move its files (`<id>.db` and any `<id>.db-log` or `-wal` beside
 it) from one `servers/` folder to the other, and start them; the directory
 learns where it went when the shard starts. Shards check sessions with the directory and remember the answer for a

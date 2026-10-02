@@ -47,23 +47,35 @@ impl Part {
     }
 }
 
+/// Stands in for a part that was stopped, until it starts again.
+fn stopped(addr: SocketAddr) -> Part {
+    Part { app: None, addr, shutdown: CancellationToken::new(), serving: tokio::spawn(async {}) }
+}
+
 async fn listen() -> (TcpListener, SocketAddr) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     (listener, addr)
 }
 
+/// How long parts wait for one another to restart here: long enough for a
+/// part to stop and start again in this process, short enough to see one
+/// that stays down.
+const RIDE_OUT: Duration = Duration::from_secs(3);
+
 fn config(dir: &Path, vars: &[(&str, String)]) -> Config {
     let dir = dir.to_str().unwrap().to_string();
     let vars: Vec<(String, String)> = vars.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
-    Config::from_lookup(|key| match key {
+    let mut config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
         "FUWA_ADMIN_TOKEN" => Some(ADMIN_TOKEN.into()),
         "FUWA_CLUSTER_KEY" => Some(KEY.into()),
         _ => vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()),
     })
-    .unwrap()
+    .unwrap();
+    config.cluster.ride_out = RIDE_OUT;
+    config
 }
 
 fn serve(listener: TcpListener, router: axum::Router, shutdown: CancellationToken) -> JoinHandle<()> {
@@ -105,16 +117,26 @@ struct Cluster {
 async fn start_cluster(root: &Path, vars: &[(&str, String)]) -> Cluster {
     let (gateway_listener, gateway_addr) = listen().await;
     let (listener, addr) = listen().await;
-    let mut directory_vars =
-        vec![("FUWA_ROLE", "directory".to_string()), ("FUWA_PUBLIC_URL", format!("http://{gateway_addr}"))];
-    directory_vars.extend(vars.iter().cloned());
-    let directory = start_app(config(&root.join("directory"), &directory_vars), listener, addr).await;
+    let directory = start_directory(root, vars, listener, addr, gateway_addr).await;
     let shards = vec![
         start_shard(&root.join("shard-a"), "a", &directory).await,
         start_shard(&root.join("shard-b"), "b", &directory).await,
     ];
     let (gateway, _gateway) = start_gateway(&root.join("gateway"), &directory, gateway_listener, gateway_addr);
     Cluster { directory, shards, gateway, _gateway }
+}
+
+async fn start_directory(
+    root: &Path,
+    vars: &[(&str, String)],
+    listener: TcpListener,
+    addr: SocketAddr,
+    gateway_addr: SocketAddr,
+) -> Part {
+    let mut directory_vars =
+        vec![("FUWA_ROLE", "directory".to_string()), ("FUWA_PUBLIC_URL", format!("http://{gateway_addr}"))];
+    directory_vars.extend(vars.iter().cloned());
+    start_app(config(&root.join("directory"), &directory_vars), listener, addr).await
 }
 
 fn start_gateway(dir: &Path, directory: &Part, listener: TcpListener, addr: SocketAddr) -> (Part, Arc<Gateway>) {
@@ -546,7 +568,8 @@ async fn shards_come_and_go() {
     let channel = general(&mut c, &juan, &on_b.id).await;
     let code = invite(&mut c, &juan, &on_b.id).await.code;
 
-    // A live stream following a shard that stops ends, so the client follows again.
+    // A live stream following a shard that stops waits a while for it to come
+    // back, then ends, so the client follows again.
     let cursors = vec![pb::ServerCursor { server_id: on_b.id.clone(), after_sequence: None }];
     let mut stream = c
         .events
@@ -556,10 +579,10 @@ async fn shards_come_and_go() {
         .into_inner();
     assert!(next(&mut stream).await.ready.is_some());
 
-    // While shard b is down, its servers can't be reached; the rest can.
+    // While shard b stays down, its servers can't be reached; the rest can.
     let b = cluster.shards.remove(1);
     b.stop().await;
-    let ended = tokio::time::timeout(Duration::from_secs(10), stream.next()).await.unwrap();
+    let ended = tokio::time::timeout(RIDE_OUT * 4, stream.next()).await.unwrap();
     assert_eq!(ended.unwrap().unwrap_err().code(), Code::Unavailable);
     let mut down = None;
     for _ in 0..50 {
@@ -629,6 +652,84 @@ async fn shards_come_and_go() {
     // Its invites follow it to the shard that holds it now.
     let shown = c.invites.get_invite(pb::GetInviteRequest { code }).await.unwrap().into_inner();
     assert_eq!(shown.server.unwrap().id, on_b.id);
+
+    cluster.stop().await;
+}
+
+/// A deploy restarts each part. Shards and the directory keep their files on
+/// a volume, so the old process stops before the new one starts: the gateway
+/// holds calls and live streams over the gap, and nobody notices.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn restarts_go_unnoticed() {
+    let root = tempfile::tempdir().unwrap();
+    let mut cluster = start_cluster(root.path(), &[]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let mut on_b = None;
+    while on_b.is_none() {
+        let server = create_server(&mut c, &juan, "Server").await;
+        if cluster.placement(&server.id).as_deref() == Some("b") {
+            on_b = Some(server);
+        }
+    }
+    let on_b = on_b.unwrap();
+    let channel = general(&mut c, &juan, &on_b.id).await;
+    let cursors = vec![pb::ServerCursor { server_id: on_b.id.clone(), after_sequence: None }];
+    let mut stream =
+        c.events.subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors })).await.unwrap().into_inner();
+    assert!(next(&mut stream).await.ready.is_some());
+
+    // Shard b restarts: a message sent meanwhile goes through once it's back,
+    // and the stream, which never ends, brings it.
+    let b = cluster.shards.remove(1);
+    b.stop().await;
+    let sending = {
+        let (mut c, juan, server_id, channel_id) =
+            (c.messages.clone(), juan.clone(), on_b.id.clone(), channel.id.clone());
+        tokio::spawn(async move {
+            let request =
+                pb::SendMessageRequest { server_id, channel_id, content: "during".into(), ..Default::default() };
+            c.send_message(authed(&juan, request)).await
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    cluster.shards.push(start_shard(&root.path().join("shard-b"), "b", &cluster.directory).await);
+    sending.await.unwrap().expect("a call waits for its shard to come back");
+    let event = until(&mut stream, |e| matches!(&e.payload, Some(Payload::MessageCreated(_)))).await;
+    let Some(Payload::MessageCreated(created)) = event.payload else { unreachable!() };
+    assert_eq!(created.message.unwrap().content, "during");
+
+    // The directory restarts on its address: calls it answers, and calls a
+    // shard needs it for (whose sign-in check it no longer remembers), wait
+    // for it too.
+    let addr = cluster.directory.addr;
+    let gateway_addr = cluster.gateway.addr;
+    let directory = std::mem::replace(&mut cluster.directory, stopped(addr));
+    directory.stop().await;
+    // Long enough for shard b to forget who juan is.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let listing = {
+        let (mut c, juan) = (c.servers.clone(), juan.clone());
+        tokio::spawn(async move { c.list_servers(authed(&juan, pb::ListServersRequest {})).await })
+    };
+    let sending = {
+        let (mut c, juan, server_id, channel_id) =
+            (c.messages.clone(), juan.clone(), on_b.id.clone(), channel.id.clone());
+        tokio::spawn(async move {
+            let request =
+                pb::SendMessageRequest { server_id, channel_id, content: "after".into(), ..Default::default() };
+            c.send_message(authed(&juan, request)).await
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let listener = TcpListener::bind(addr).await.unwrap();
+    cluster.directory = start_directory(root.path(), &[], listener, addr, gateway_addr).await;
+    let listed = listing.await.unwrap().expect("a call waits for the directory to come back");
+    assert!(listed.into_inner().servers.iter().any(|s| s.id == on_b.id));
+    sending.await.unwrap().expect("a shard waits for the directory to check who's calling");
+    let event = until(&mut stream, |e| matches!(&e.payload, Some(Payload::MessageCreated(_)))).await;
+    let Some(Payload::MessageCreated(created)) = event.payload else { unreachable!() };
+    assert_eq!(created.message.unwrap().content, "after");
 
     cluster.stop().await;
 }

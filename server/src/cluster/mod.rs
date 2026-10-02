@@ -76,11 +76,14 @@ pub struct ClusterConfig {
     pub shard_id: Option<String>,
     /// FUWA_INTERNAL_URL: where the directory and gateways reach this shard.
     pub internal_url: Option<String>,
+    /// How long a call waits for another part that's restarting: [`RIDE_OUT`]
+    /// (tests make it shorter).
+    pub ride_out: Duration,
 }
 
 impl ClusterConfig {
     pub fn single() -> Self {
-        Self { role: Role::All, key: None, directory_url: None, shard_id: None, internal_url: None }
+        Self { role: Role::All, key: None, directory_url: None, shard_id: None, internal_url: None, ride_out: RIDE_OUT }
     }
 
     pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> std::result::Result<Self, String> {
@@ -130,7 +133,7 @@ impl ClusterConfig {
         if let Some(id) = &shard_id {
             check_shard_id(id).map_err(|err| format!("FUWA_SHARD_ID {err}"))?;
         }
-        Ok(Self { role, key, directory_url, shard_id, internal_url })
+        Ok(Self { role, key, directory_url, shard_id, internal_url, ride_out: RIDE_OUT })
     }
 
     /// This process is one part of several.
@@ -254,7 +257,8 @@ pub fn shard_server<T: cpb::shard_service_server::ShardService>(
         .max_encoding_message_size(MAX_MESSAGE)
 }
 
-/// Waits a little longer after each failure, up to 10 seconds.
+/// Waits a little longer after each failure, up to 2 seconds: a part that's
+/// back after a restart is noticed soon.
 pub struct Backoff(Duration);
 
 impl Default for Backoff {
@@ -266,12 +270,61 @@ impl Default for Backoff {
 impl Backoff {
     pub fn wait(&mut self) -> Duration {
         let wait = self.0;
-        self.0 = (self.0 * 2).min(Duration::from_secs(10));
+        self.0 = (self.0 * 2).min(Duration::from_secs(2));
         wait
     }
 
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+}
+
+/// How long a call waits for a part that's restarting (for a deploy, say)
+/// before giving up on it. A part with a volume can't overlap its old and new
+/// deployments, so it's gone for a few seconds each time.
+pub const RIDE_OUT: Duration = Duration::from_secs(30);
+
+/// Paces tries at a part that's restarting: right away, then a little longer
+/// each time up to a second, until the time runs out.
+pub struct Patience {
+    until: tokio::time::Instant,
+    wait: Duration,
+}
+
+impl Patience {
+    pub fn new(within: Duration) -> Self {
+        Self { until: tokio::time::Instant::now() + within, wait: Duration::ZERO }
+    }
+
+    /// Waits before the next try; false once the time is up.
+    pub async fn wait(&mut self) -> bool {
+        let now = tokio::time::Instant::now();
+        if now >= self.until {
+            return false;
+        }
+        tokio::time::sleep(self.wait.min(self.until - now)).await;
+        self.wait = (self.wait * 2).clamp(Duration::from_millis(100), Duration::from_secs(1));
+        true
+    }
+}
+
+/// Whether a call failed because the part it went to is down or restarting.
+pub fn unreachable(status: &tonic::Status) -> bool {
+    status.code() == tonic::Code::Unavailable || std::error::Error::source(status).is_some()
+}
+
+/// Makes a call that only reads, trying it again while the part it goes to is
+/// unreachable, for up to `within`.
+pub async fn ride_out<T, F>(within: Duration, mut call: impl FnMut() -> F) -> std::result::Result<T, tonic::Status>
+where
+    F: Future<Output = std::result::Result<T, tonic::Status>>,
+{
+    let mut patience = Patience::new(within);
+    loop {
+        let answer = call().await;
+        if !matches!(&answer, Err(status) if unreachable(status)) || !patience.wait().await {
+            return answer;
+        }
     }
 }
 

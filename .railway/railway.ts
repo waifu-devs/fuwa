@@ -27,6 +27,11 @@ const ANYTIME = [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, startHour: 0, endHour
 const VOLUME_MB = 5000;
 /** Volumes a Hobby plan project can have: the directory's, and one per shard. */
 const MAX_VOLUMES = 10;
+/**
+ * How long a split part has to finish what it's doing once told to stop: calls a gateway
+ * holds while another part restarts wait up to 30 seconds.
+ */
+const DRAIN = 45;
 
 /**
  * How fuwa.chat runs (see "Scaling out" in the README). `null` is one `fuwa` process
@@ -34,7 +39,7 @@ const MAX_VOLUMES = 10;
  * service here:
  *
  * - `fuwa`, the gateways clients reach at fuwa.chat. They keep nothing, so `gateways`
- *   replicas of it share the connections.
+ *   replicas of it share the connections (2 or more, so one going down isn't noticed).
  * - `fuwa-directory`, with accounts, sessions, settings and pictures. It takes over the
  *   `fuwa-data` volume the single process used. Always one.
  * - `fuwa-shard-1` to `fuwa-shard-<shards>`, the community servers, each shard on a
@@ -44,6 +49,13 @@ const MAX_VOLUMES = 10;
  * from the directory, so nothing has to be copied by hand. Raise `shards` to spread new
  * servers wider, but never lower it: removing a shard here deletes its volume, and the
  * servers on it.
+ *
+ * Deploys don't interrupt anyone. Gateways have no volume, so Railway starts the new ones,
+ * waits until they're healthy (reaching the directory), then stops the old ones; clients'
+ * live streams move over and carry on from where they were. The directory and shards each
+ * have a volume, so Railway has to stop the old process before starting the new one; for
+ * those few seconds the gateways hold calls (up to 30 seconds) and keep live streams open,
+ * then carry on once the part is back. See "Deploys" in the README.
  */
 const SPLIT: { gateways: number; shards: number } | null = null;
 
@@ -114,7 +126,8 @@ export default defineRailway((ctx) => {
     // One replica: node.db is a file on its volume.
     regions: { [REGION]: 1 },
     volumeMounts: { "/data": data },
-    deploy: { drainingSeconds: 30 },
+    // Calls still being answered when it's told to stop get time to finish.
+    deploy: { drainingSeconds: DRAIN },
     env: {
       ...part("directory"),
       // The instance's own settings live with the directory, which hands them to every
@@ -133,7 +146,7 @@ export default defineRailway((ctx) => {
       healthcheck: "/healthz",
       regions: { [REGION]: 1 },
       volumeMounts: { "/data": shardData },
-      deploy: { drainingSeconds: 30 },
+      deploy: { drainingSeconds: DRAIN },
       env: {
         ...part("shard"),
         // Never renamed: the directory knows which servers are on which shard by it.
@@ -153,14 +166,21 @@ export default defineRailway((ctx) => {
     // Gateways keep nothing, so any number of replicas share fuwa.chat's traffic.
     regions: { [REGION]: gateways },
     domains: [{ domain: DOMAIN, port: PORT }],
-    // Give open streams time to finish on shutdown; clients follow again elsewhere.
-    deploy: { drainingSeconds: 30 },
+    // On a deploy the old gateways keep serving for a little while after the new ones
+    // are up, then tell open streams to follow again (they do, on a new gateway) and
+    // finish the calls they're holding.
+    deploy: { overlapSeconds: 10, drainingSeconds: DRAIN },
     env: {
       ...part("gateway"),
       ...instance,
       FUWA_DIRECTORY_URL: internalUrl(directory.name),
     },
   });
+
+  // Room for later: calls (WebRTC) get a `media` part of their own. Like the gateways it
+  // keeps nothing on a volume, so its deploys overlap too: the old one takes no new calls
+  // and lets the ones on it end (with a long drainingSeconds) while new calls start on the
+  // new one.
 
   return project("fuwa", { resources: [data, directory, ...shardParts.flat(), gateway] });
 });

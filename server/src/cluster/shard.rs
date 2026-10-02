@@ -51,6 +51,7 @@ pub struct Link {
     /// The directory may have missed a change: register again.
     dirty: AtomicBool,
     registered: watch::Sender<bool>,
+    ride_out: Duration,
 }
 
 impl Link {
@@ -66,6 +67,7 @@ impl Link {
             changes: AtomicU64::new(0),
             dirty: AtomicBool::new(false),
             registered: watch::Sender::new(false),
+            ride_out: cluster.ride_out,
         })
     }
 
@@ -85,8 +87,10 @@ impl Link {
                 return Ok(viewer.clone());
             }
         }
-        let found = self.directory().authenticate(cpb::AuthenticateRequest { token: token.to_string() }).await?;
-        let found = found.into_inner();
+        // A directory that's restarting is waited out, so calls here don't fail
+        // during a deploy.
+        let request = cpb::AuthenticateRequest { token: token.to_string() };
+        let found = self.ask(request, |mut d, r| async move { d.authenticate(r).await }).await?;
         let viewer = match found.account {
             Some(account) => Viewer::Account { account: account_from_pb(account), token_hash: found.token_hash },
             None => Viewer::Operator,
@@ -97,6 +101,17 @@ impl Link {
         }
         sessions.insert(key, (viewer.clone(), Instant::now()));
         Ok(viewer)
+    }
+
+    /// Asks the directory something, waiting out a restart of it (see
+    /// [`ride_out`](super::ride_out)). Only for questions: a change may be
+    /// sent twice.
+    pub async fn ask<R: Clone, T, F>(&self, request: R, call: impl Fn(DirectoryClient, R) -> F) -> Result<T>
+    where
+        F: Future<Output = Result<tonic::Response<T>, Status>>,
+    {
+        let answer = super::ride_out(self.ride_out, || call(self.directory(), request.clone())).await?;
+        Ok(answer.into_inner())
     }
 
     /// Tells the directory's index something changed. A failure means it may
