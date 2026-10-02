@@ -35,12 +35,13 @@ import { Cap } from "../controls";
 
 type Sort = "storage" | "members" | "newest";
 type Caps = Omit<ServerLimits, "$typeName">;
-const CAP_FIELDS = ["members", "channels", "storageBytes", "attachmentBytes"] as const;
+const CAP_FIELDS = ["members", "channels", "storageBytes", "attachmentBytes", "emojis"] as const;
 const caps = (l: ServerLimits | undefined): Caps => ({
   members: l?.members,
   channels: l?.channels,
   storageBytes: l?.storageBytes,
   attachmentBytes: l?.attachmentBytes,
+  emojis: l?.emojis,
 });
 
 const storageOf = (s: InstanceServer) => Number(s.usage?.storageBytes ?? 0n);
@@ -349,6 +350,7 @@ function Details({
             <Cap label="Channels" value={draft.channels} onChange={set("channels")} placeholder={fallback("channels")} />
             <Cap label="Storage" bytes value={draft.storageBytes} onChange={set("storageBytes")} placeholder={fallback("storageBytes", true)} />
             <Cap label="Files" bytes value={draft.attachmentBytes} onChange={set("attachmentBytes")} placeholder={fallback("attachmentBytes", true)} />
+            <Cap label="Emoji" value={draft.emojis} onChange={set("emojis")} placeholder={fallback("emojis")} />
           </>
         ) : (
           <div className="shimmer h-40 rounded-xl" />

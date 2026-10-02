@@ -1302,13 +1302,13 @@ impl NodeDb {
     }
 
     /// Everything an account uploaded that goes with it when it's deleted:
-    /// all but the server icons in use, which belong to their servers.
+    /// all but the server icons and emoji in use, which belong to their servers.
     pub async fn account_media(&self, account_id: &str) -> Result<Vec<String>> {
         let conn = self.read()?;
         query_all(
             &conn,
-            "SELECT id FROM media WHERE account_id = ?1 AND NOT (purpose = ?2 AND used_at IS NOT NULL)",
-            (account_id, pb::MediaPurpose::ServerIcon as i64),
+            "SELECT id FROM media WHERE account_id = ?1 AND NOT (purpose IN (?2, ?3) AND used_at IS NOT NULL)",
+            (account_id, pb::MediaPurpose::ServerIcon as i64, pb::MediaPurpose::Emoji as i64),
             |r| r.get::<String>(0),
         )
         .await

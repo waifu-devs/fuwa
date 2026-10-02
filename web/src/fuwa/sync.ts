@@ -227,19 +227,26 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
 
     const snapshot = (serverId: string) =>
       Effect.gen(function* () {
-        const [server, channels, members, roles] = yield* Effect.all(
+        const [server, channels, members, roles, emojis] = yield* Effect.all(
           [
             call((signal) => api.servers.getServer({ serverId }, { signal })),
             call((signal) => api.channels.listChannels({ serverId }, { signal })),
             call((signal) => api.servers.listMembers({ serverId }, { signal })),
             call((signal) => api.roles.listRoles({ serverId }, { signal })),
+            // Instances from before custom emoji don't have them.
+            call((signal) => api.emojis.listEmojis({ serverId }, { signal })).pipe(
+              Effect.catchIf(
+                (e) => e.code === Code.Unimplemented,
+                () => Effect.succeed({ emojis: [] }),
+              ),
+            ),
           ],
           { concurrency: "unbounded" },
         ).pipe(Effect.retry(retryPolicy));
         store.update((s) => {
           const current = s.instances[key];
           if (!current || !server.server) return s;
-          let next = applySnapshot(current, server.server, channels.channels, members.members, roles.roles);
+          let next = applySnapshot(current, server.server, channels.channels, members.members, roles.roles, emojis.emojis);
           const focus = s.focus?.instance === key ? s.focus.channel : null;
           for (const event of held.get(serverId) ?? []) next = applyEvent(next, event, focus);
           return { ...s, instances: { ...s.instances, [key]: next } };

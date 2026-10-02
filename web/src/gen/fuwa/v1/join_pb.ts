@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Application, ApplicationAnswer, JoinForm, Member, Server } from "./types_pb";
+import type { Application, ApplicationAnswer, JoinForm, Member, Server, WelcomeScreen } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,80 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/join.proto.
  */
 export const file_fuwa_v1_join: GenFile = /*@__PURE__*/
-  fileDesc("ChJmdXdhL3YxL2pvaW4ucHJvdG8SB2Z1d2EudjEiPAoSR2V0Sm9pbkZvcm1SZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRITCgtpbnZpdGVfY29kZRgCIAEoCSI2ChNHZXRKb2luRm9ybVJlc3BvbnNlEh8KBGZvcm0YASABKAsyES5mdXdhLnYxLkpvaW5Gb3JtIkgKElNldEpvaW5Gb3JtUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSHwoEZm9ybRgCIAEoCzIRLmZ1d2EudjEuSm9pbkZvcm0iNgoTU2V0Sm9pbkZvcm1SZXNwb25zZRIfCgRmb3JtGAEgASgLMhEuZnV3YS52MS5Kb2luRm9ybSIoChNBZ3JlZVRvUnVsZXNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSI3ChRBZ3JlZVRvUnVsZXNSZXNwb25zZRIfCgZtZW1iZXIYASABKAsyDy5mdXdhLnYxLk1lbWJlciJpChJBcHBseVRvSm9pblJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhMKC2ludml0ZV9jb2RlGAIgASgJEisKB2Fuc3dlcnMYAyADKAsyGi5mdXdhLnYxLkFwcGxpY2F0aW9uQW5zd2VyIkAKE0FwcGx5VG9Kb2luUmVzcG9uc2USKQoLYXBwbGljYXRpb24YASABKAsyFC5mdXdhLnYxLkFwcGxpY2F0aW9uIioKFUdldEFwcGxpY2F0aW9uUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkidAoWR2V0QXBwbGljYXRpb25SZXNwb25zZRIpCgthcHBsaWNhdGlvbhgBIAEoCzIULmZ1d2EudjEuQXBwbGljYXRpb24SDgoGbWVtYmVyGAIgASgIEh8KBnNlcnZlchgDIAEoCzIPLmZ1d2EudjEuU2VydmVyIi8KGldpdGhkcmF3QXBwbGljYXRpb25SZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSIdChtXaXRoZHJhd0FwcGxpY2F0aW9uUmVzcG9uc2UiLAoXTGlzdEFwcGxpY2F0aW9uc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIkYKGExpc3RBcHBsaWNhdGlvbnNSZXNwb25zZRIqCgxhcHBsaWNhdGlvbnMYASADKAsyFC5mdXdhLnYxLkFwcGxpY2F0aW9uIl8KGFJldmlld0FwcGxpY2F0aW9uUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIPCgdhcHByb3ZlGAMgASgIEg4KBnJlYXNvbhgEIAEoCSI8ChlSZXZpZXdBcHBsaWNhdGlvblJlc3BvbnNlEh8KBm1lbWJlchgBIAEoCzIPLmZ1d2EudjEuTWVtYmVyMqIFCgtKb2luU2VydmljZRJICgtHZXRKb2luRm9ybRIbLmZ1d2EudjEuR2V0Sm9pbkZvcm1SZXF1ZXN0GhwuZnV3YS52MS5HZXRKb2luRm9ybVJlc3BvbnNlEkgKC1NldEpvaW5Gb3JtEhsuZnV3YS52MS5TZXRKb2luRm9ybVJlcXVlc3QaHC5mdXdhLnYxLlNldEpvaW5Gb3JtUmVzcG9uc2USSwoMQWdyZWVUb1J1bGVzEhwuZnV3YS52MS5BZ3JlZVRvUnVsZXNSZXF1ZXN0Gh0uZnV3YS52MS5BZ3JlZVRvUnVsZXNSZXNwb25zZRJICgtBcHBseVRvSm9pbhIbLmZ1d2EudjEuQXBwbHlUb0pvaW5SZXF1ZXN0GhwuZnV3YS52MS5BcHBseVRvSm9pblJlc3BvbnNlElEKDkdldEFwcGxpY2F0aW9uEh4uZnV3YS52MS5HZXRBcHBsaWNhdGlvblJlcXVlc3QaHy5mdXdhLnYxLkdldEFwcGxpY2F0aW9uUmVzcG9uc2USYAoTV2l0aGRyYXdBcHBsaWNhdGlvbhIjLmZ1d2EudjEuV2l0aGRyYXdBcHBsaWNhdGlvblJlcXVlc3QaJC5mdXdhLnYxLldpdGhkcmF3QXBwbGljYXRpb25SZXNwb25zZRJXChBMaXN0QXBwbGljYXRpb25zEiAuZnV3YS52MS5MaXN0QXBwbGljYXRpb25zUmVxdWVzdBohLmZ1d2EudjEuTGlzdEFwcGxpY2F0aW9uc1Jlc3BvbnNlEloKEVJldmlld0FwcGxpY2F0aW9uEiEuZnV3YS52MS5SZXZpZXdBcHBsaWNhdGlvblJlcXVlc3QaIi5mdXdhLnYxLlJldmlld0FwcGxpY2F0aW9uUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
+  fileDesc("ChJmdXdhL3YxL2pvaW4ucHJvdG8SB2Z1d2EudjEiLAoXR2V0V2VsY29tZVNjcmVlblJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIkoKGEdldFdlbGNvbWVTY3JlZW5SZXNwb25zZRIuCg53ZWxjb21lX3NjcmVlbhgBIAEoCzIWLmZ1d2EudjEuV2VsY29tZVNjcmVlbiJcChdTZXRXZWxjb21lU2NyZWVuUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSLgoOd2VsY29tZV9zY3JlZW4YAiABKAsyFi5mdXdhLnYxLldlbGNvbWVTY3JlZW4iSgoYU2V0V2VsY29tZVNjcmVlblJlc3BvbnNlEi4KDndlbGNvbWVfc2NyZWVuGAEgASgLMhYuZnV3YS52MS5XZWxjb21lU2NyZWVuIjwKEkdldEpvaW5Gb3JtUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEwoLaW52aXRlX2NvZGUYAiABKAkiNgoTR2V0Sm9pbkZvcm1SZXNwb25zZRIfCgRmb3JtGAEgASgLMhEuZnV3YS52MS5Kb2luRm9ybSJIChJTZXRKb2luRm9ybVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEh8KBGZvcm0YAiABKAsyES5mdXdhLnYxLkpvaW5Gb3JtIjYKE1NldEpvaW5Gb3JtUmVzcG9uc2USHwoEZm9ybRgBIAEoCzIRLmZ1d2EudjEuSm9pbkZvcm0iKAoTQWdyZWVUb1J1bGVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiNwoUQWdyZWVUb1J1bGVzUmVzcG9uc2USHwoGbWVtYmVyGAEgASgLMg8uZnV3YS52MS5NZW1iZXIiaQoSQXBwbHlUb0pvaW5SZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRITCgtpbnZpdGVfY29kZRgCIAEoCRIrCgdhbnN3ZXJzGAMgAygLMhouZnV3YS52MS5BcHBsaWNhdGlvbkFuc3dlciJAChNBcHBseVRvSm9pblJlc3BvbnNlEikKC2FwcGxpY2F0aW9uGAEgASgLMhQuZnV3YS52MS5BcHBsaWNhdGlvbiIqChVHZXRBcHBsaWNhdGlvblJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJInQKFkdldEFwcGxpY2F0aW9uUmVzcG9uc2USKQoLYXBwbGljYXRpb24YASABKAsyFC5mdXdhLnYxLkFwcGxpY2F0aW9uEg4KBm1lbWJlchgCIAEoCBIfCgZzZXJ2ZXIYAyABKAsyDy5mdXdhLnYxLlNlcnZlciIvChpXaXRoZHJhd0FwcGxpY2F0aW9uUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiHQobV2l0aGRyYXdBcHBsaWNhdGlvblJlc3BvbnNlIiwKF0xpc3RBcHBsaWNhdGlvbnNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSJGChhMaXN0QXBwbGljYXRpb25zUmVzcG9uc2USKgoMYXBwbGljYXRpb25zGAEgAygLMhQuZnV3YS52MS5BcHBsaWNhdGlvbiJfChhSZXZpZXdBcHBsaWNhdGlvblJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3VzZXJfaWQYAiABKAkSDwoHYXBwcm92ZRgDIAEoCBIOCgZyZWFzb24YBCABKAkiPAoZUmV2aWV3QXBwbGljYXRpb25SZXNwb25zZRIfCgZtZW1iZXIYASABKAsyDy5mdXdhLnYxLk1lbWJlcjLUBgoLSm9pblNlcnZpY2USSAoLR2V0Sm9pbkZvcm0SGy5mdXdhLnYxLkdldEpvaW5Gb3JtUmVxdWVzdBocLmZ1d2EudjEuR2V0Sm9pbkZvcm1SZXNwb25zZRJICgtTZXRKb2luRm9ybRIbLmZ1d2EudjEuU2V0Sm9pbkZvcm1SZXF1ZXN0GhwuZnV3YS52MS5TZXRKb2luRm9ybVJlc3BvbnNlEksKDEFncmVlVG9SdWxlcxIcLmZ1d2EudjEuQWdyZWVUb1J1bGVzUmVxdWVzdBodLmZ1d2EudjEuQWdyZWVUb1J1bGVzUmVzcG9uc2USSAoLQXBwbHlUb0pvaW4SGy5mdXdhLnYxLkFwcGx5VG9Kb2luUmVxdWVzdBocLmZ1d2EudjEuQXBwbHlUb0pvaW5SZXNwb25zZRJRCg5HZXRBcHBsaWNhdGlvbhIeLmZ1d2EudjEuR2V0QXBwbGljYXRpb25SZXF1ZXN0Gh8uZnV3YS52MS5HZXRBcHBsaWNhdGlvblJlc3BvbnNlEmAKE1dpdGhkcmF3QXBwbGljYXRpb24SIy5mdXdhLnYxLldpdGhkcmF3QXBwbGljYXRpb25SZXF1ZXN0GiQuZnV3YS52MS5XaXRoZHJhd0FwcGxpY2F0aW9uUmVzcG9uc2USVwoQTGlzdEFwcGxpY2F0aW9ucxIgLmZ1d2EudjEuTGlzdEFwcGxpY2F0aW9uc1JlcXVlc3QaIS5mdXdhLnYxLkxpc3RBcHBsaWNhdGlvbnNSZXNwb25zZRJaChFSZXZpZXdBcHBsaWNhdGlvbhIhLmZ1d2EudjEuUmV2aWV3QXBwbGljYXRpb25SZXF1ZXN0GiIuZnV3YS52MS5SZXZpZXdBcHBsaWNhdGlvblJlc3BvbnNlElcKEEdldFdlbGNvbWVTY3JlZW4SIC5mdXdhLnYxLkdldFdlbGNvbWVTY3JlZW5SZXF1ZXN0GiEuZnV3YS52MS5HZXRXZWxjb21lU2NyZWVuUmVzcG9uc2USVwoQU2V0V2VsY29tZVNjcmVlbhIgLmZ1d2EudjEuU2V0V2VsY29tZVNjcmVlblJlcXVlc3QaIS5mdXdhLnYxLlNldFdlbGNvbWVTY3JlZW5SZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types]);
+
+/**
+ * @generated from message fuwa.v1.GetWelcomeScreenRequest
+ */
+export type GetWelcomeScreenRequest = Message<"fuwa.v1.GetWelcomeScreenRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.GetWelcomeScreenRequest.
+ * Use `create(GetWelcomeScreenRequestSchema)` to create a new message.
+ */
+export const GetWelcomeScreenRequestSchema: GenMessage<GetWelcomeScreenRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_join, 0);
+
+/**
+ * @generated from message fuwa.v1.GetWelcomeScreenResponse
+ */
+export type GetWelcomeScreenResponse = Message<"fuwa.v1.GetWelcomeScreenResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.WelcomeScreen welcome_screen = 1;
+   */
+  welcomeScreen?: WelcomeScreen | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.GetWelcomeScreenResponse.
+ * Use `create(GetWelcomeScreenResponseSchema)` to create a new message.
+ */
+export const GetWelcomeScreenResponseSchema: GenMessage<GetWelcomeScreenResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_join, 1);
+
+/**
+ * @generated from message fuwa.v1.SetWelcomeScreenRequest
+ */
+export type SetWelcomeScreenRequest = Message<"fuwa.v1.SetWelcomeScreenRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: fuwa.v1.WelcomeScreen welcome_screen = 2;
+   */
+  welcomeScreen?: WelcomeScreen | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.SetWelcomeScreenRequest.
+ * Use `create(SetWelcomeScreenRequestSchema)` to create a new message.
+ */
+export const SetWelcomeScreenRequestSchema: GenMessage<SetWelcomeScreenRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_join, 2);
+
+/**
+ * @generated from message fuwa.v1.SetWelcomeScreenResponse
+ */
+export type SetWelcomeScreenResponse = Message<"fuwa.v1.SetWelcomeScreenResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.WelcomeScreen welcome_screen = 1;
+   */
+  welcomeScreen?: WelcomeScreen | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.SetWelcomeScreenResponse.
+ * Use `create(SetWelcomeScreenResponseSchema)` to create a new message.
+ */
+export const SetWelcomeScreenResponseSchema: GenMessage<SetWelcomeScreenResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_join, 3);
 
 /**
  * @generated from message fuwa.v1.GetJoinFormRequest
@@ -36,7 +109,7 @@ export type GetJoinFormRequest = Message<"fuwa.v1.GetJoinFormRequest"> & {
  * Use `create(GetJoinFormRequestSchema)` to create a new message.
  */
 export const GetJoinFormRequestSchema: GenMessage<GetJoinFormRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 0);
+  messageDesc(file_fuwa_v1_join, 4);
 
 /**
  * @generated from message fuwa.v1.GetJoinFormResponse
@@ -53,7 +126,7 @@ export type GetJoinFormResponse = Message<"fuwa.v1.GetJoinFormResponse"> & {
  * Use `create(GetJoinFormResponseSchema)` to create a new message.
  */
 export const GetJoinFormResponseSchema: GenMessage<GetJoinFormResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 1);
+  messageDesc(file_fuwa_v1_join, 5);
 
 /**
  * @generated from message fuwa.v1.SetJoinFormRequest
@@ -75,7 +148,7 @@ export type SetJoinFormRequest = Message<"fuwa.v1.SetJoinFormRequest"> & {
  * Use `create(SetJoinFormRequestSchema)` to create a new message.
  */
 export const SetJoinFormRequestSchema: GenMessage<SetJoinFormRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 2);
+  messageDesc(file_fuwa_v1_join, 6);
 
 /**
  * @generated from message fuwa.v1.SetJoinFormResponse
@@ -92,7 +165,7 @@ export type SetJoinFormResponse = Message<"fuwa.v1.SetJoinFormResponse"> & {
  * Use `create(SetJoinFormResponseSchema)` to create a new message.
  */
 export const SetJoinFormResponseSchema: GenMessage<SetJoinFormResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 3);
+  messageDesc(file_fuwa_v1_join, 7);
 
 /**
  * @generated from message fuwa.v1.AgreeToRulesRequest
@@ -109,7 +182,7 @@ export type AgreeToRulesRequest = Message<"fuwa.v1.AgreeToRulesRequest"> & {
  * Use `create(AgreeToRulesRequestSchema)` to create a new message.
  */
 export const AgreeToRulesRequestSchema: GenMessage<AgreeToRulesRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 4);
+  messageDesc(file_fuwa_v1_join, 8);
 
 /**
  * @generated from message fuwa.v1.AgreeToRulesResponse
@@ -126,7 +199,7 @@ export type AgreeToRulesResponse = Message<"fuwa.v1.AgreeToRulesResponse"> & {
  * Use `create(AgreeToRulesResponseSchema)` to create a new message.
  */
 export const AgreeToRulesResponseSchema: GenMessage<AgreeToRulesResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 5);
+  messageDesc(file_fuwa_v1_join, 9);
 
 /**
  * @generated from message fuwa.v1.ApplyToJoinRequest
@@ -159,7 +232,7 @@ export type ApplyToJoinRequest = Message<"fuwa.v1.ApplyToJoinRequest"> & {
  * Use `create(ApplyToJoinRequestSchema)` to create a new message.
  */
 export const ApplyToJoinRequestSchema: GenMessage<ApplyToJoinRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 6);
+  messageDesc(file_fuwa_v1_join, 10);
 
 /**
  * @generated from message fuwa.v1.ApplyToJoinResponse
@@ -176,7 +249,7 @@ export type ApplyToJoinResponse = Message<"fuwa.v1.ApplyToJoinResponse"> & {
  * Use `create(ApplyToJoinResponseSchema)` to create a new message.
  */
 export const ApplyToJoinResponseSchema: GenMessage<ApplyToJoinResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 7);
+  messageDesc(file_fuwa_v1_join, 11);
 
 /**
  * @generated from message fuwa.v1.GetApplicationRequest
@@ -193,7 +266,7 @@ export type GetApplicationRequest = Message<"fuwa.v1.GetApplicationRequest"> & {
  * Use `create(GetApplicationRequestSchema)` to create a new message.
  */
 export const GetApplicationRequestSchema: GenMessage<GetApplicationRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 8);
+  messageDesc(file_fuwa_v1_join, 12);
 
 /**
  * @generated from message fuwa.v1.GetApplicationResponse
@@ -226,7 +299,7 @@ export type GetApplicationResponse = Message<"fuwa.v1.GetApplicationResponse"> &
  * Use `create(GetApplicationResponseSchema)` to create a new message.
  */
 export const GetApplicationResponseSchema: GenMessage<GetApplicationResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 9);
+  messageDesc(file_fuwa_v1_join, 13);
 
 /**
  * @generated from message fuwa.v1.WithdrawApplicationRequest
@@ -243,7 +316,7 @@ export type WithdrawApplicationRequest = Message<"fuwa.v1.WithdrawApplicationReq
  * Use `create(WithdrawApplicationRequestSchema)` to create a new message.
  */
 export const WithdrawApplicationRequestSchema: GenMessage<WithdrawApplicationRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 10);
+  messageDesc(file_fuwa_v1_join, 14);
 
 /**
  * @generated from message fuwa.v1.WithdrawApplicationResponse
@@ -256,7 +329,7 @@ export type WithdrawApplicationResponse = Message<"fuwa.v1.WithdrawApplicationRe
  * Use `create(WithdrawApplicationResponseSchema)` to create a new message.
  */
 export const WithdrawApplicationResponseSchema: GenMessage<WithdrawApplicationResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 11);
+  messageDesc(file_fuwa_v1_join, 15);
 
 /**
  * @generated from message fuwa.v1.ListApplicationsRequest
@@ -273,7 +346,7 @@ export type ListApplicationsRequest = Message<"fuwa.v1.ListApplicationsRequest">
  * Use `create(ListApplicationsRequestSchema)` to create a new message.
  */
 export const ListApplicationsRequestSchema: GenMessage<ListApplicationsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 12);
+  messageDesc(file_fuwa_v1_join, 16);
 
 /**
  * @generated from message fuwa.v1.ListApplicationsResponse
@@ -290,7 +363,7 @@ export type ListApplicationsResponse = Message<"fuwa.v1.ListApplicationsResponse
  * Use `create(ListApplicationsResponseSchema)` to create a new message.
  */
 export const ListApplicationsResponseSchema: GenMessage<ListApplicationsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 13);
+  messageDesc(file_fuwa_v1_join, 17);
 
 /**
  * @generated from message fuwa.v1.ReviewApplicationRequest
@@ -324,7 +397,7 @@ export type ReviewApplicationRequest = Message<"fuwa.v1.ReviewApplicationRequest
  * Use `create(ReviewApplicationRequestSchema)` to create a new message.
  */
 export const ReviewApplicationRequestSchema: GenMessage<ReviewApplicationRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 14);
+  messageDesc(file_fuwa_v1_join, 18);
 
 /**
  * @generated from message fuwa.v1.ReviewApplicationResponse
@@ -343,7 +416,7 @@ export type ReviewApplicationResponse = Message<"fuwa.v1.ReviewApplicationRespon
  * Use `create(ReviewApplicationResponseSchema)` to create a new message.
  */
 export const ReviewApplicationResponseSchema: GenMessage<ReviewApplicationResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_join, 15);
+  messageDesc(file_fuwa_v1_join, 19);
 
 /**
  * How people get into a community server beyond joining straight away: the
@@ -439,6 +512,27 @@ export const JoinService: GenService<{
     methodKind: "unary";
     input: typeof ReviewApplicationRequestSchema;
     output: typeof ReviewApplicationResponseSchema;
+  },
+  /**
+   * The welcome screen, for members. Channels the caller can't see are left
+   * out; managers (MANAGE_SERVER) get it whole, turned on or not.
+   *
+   * @generated from rpc fuwa.v1.JoinService.GetWelcomeScreen
+   */
+  getWelcomeScreen: {
+    methodKind: "unary";
+    input: typeof GetWelcomeScreenRequestSchema;
+    output: typeof GetWelcomeScreenResponseSchema;
+  },
+  /**
+   * Changes the welcome screen. MANAGE_SERVER.
+   *
+   * @generated from rpc fuwa.v1.JoinService.SetWelcomeScreen
+   */
+  setWelcomeScreen: {
+    methodKind: "unary";
+    input: typeof SetWelcomeScreenRequestSchema;
+    output: typeof SetWelcomeScreenResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_join, 0);

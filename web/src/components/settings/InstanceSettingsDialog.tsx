@@ -55,6 +55,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "default_limits.channels", get: (s) => s.defaultLimits?.channels },
   { path: "default_limits.storage_bytes", get: (s) => s.defaultLimits?.storageBytes },
   { path: "default_limits.attachment_bytes", get: (s) => s.defaultLimits?.attachmentBytes },
+  { path: "default_limits.emojis", get: (s) => s.defaultLimits?.emojis },
   { path: "picture_upload_bytes", get: (s) => s.pictureUploadBytes },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
@@ -425,14 +426,22 @@ export function InstanceSettingsDialog({
                   `${count(defaults.defaultLimits?.channels)} channels`,
                   `${size(defaults.defaultLimits?.storageBytes)} storage`,
                   `${size(defaults.defaultLimits?.attachmentBytes)} files`,
+                  `${count(defaults.defaultLimits?.emojis)} emoji`,
                 ].join(", ")}
-                {...resetter("default_limits.members", "default_limits.channels", "default_limits.storage_bytes", "default_limits.attachment_bytes")}
+                {...resetter(
+                  "default_limits.members",
+                  "default_limits.channels",
+                  "default_limits.storage_bytes",
+                  "default_limits.attachment_bytes",
+                  "default_limits.emojis",
+                )}
               >
                 <div className="flex flex-col gap-3">
                   <Cap label="Members" value={draft.defaultLimits?.members} onChange={(v) => patch((d) => (d.defaultLimits!.members = v))} />
                   <Cap label="Channels" value={draft.defaultLimits?.channels} onChange={(v) => patch((d) => (d.defaultLimits!.channels = v))} />
                   <Cap label="Storage" bytes value={draft.defaultLimits?.storageBytes} onChange={(v) => patch((d) => (d.defaultLimits!.storageBytes = v))} />
                   <Cap label="Files" bytes value={draft.defaultLimits?.attachmentBytes} onChange={(v) => patch((d) => (d.defaultLimits!.attachmentBytes = v))} />
+                  <Cap label="Emoji" value={draft.defaultLimits?.emojis} onChange={(v) => patch((d) => (d.defaultLimits!.emojis = v))} />
                 </div>
               </Setting>
               <Setting
@@ -560,7 +569,7 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         into.pictureUploadBytes = from.pictureUploadBytes;
         break;
       default: {
-        const key = path.replace("default_limits.", "") as "members" | "channels" | "storage_bytes" | "attachment_bytes";
+        const key = path.replace("default_limits.", "") as "members" | "channels" | "storage_bytes" | "attachment_bytes" | "emojis";
         const field = key === "storage_bytes" ? "storageBytes" : key === "attachment_bytes" ? "attachmentBytes" : key;
         into.defaultLimits ??= create(ServerLimitsSchema);
         into.defaultLimits[field] = from.defaultLimits?.[field];

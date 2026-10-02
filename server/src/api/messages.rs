@@ -1,7 +1,7 @@
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, respond, url, users};
+use super::{Api, Seat, automod, respond, url, users};
 use crate::db::{is_unique_violation, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
@@ -27,6 +27,8 @@ struct Extras {
     mentions_everyone: bool,
     #[prost(string, repeated, tag = "4")]
     mention_role_ids: Vec<String>,
+    #[prost(message, optional, tag = "5")]
+    auto_mod: Option<pb::AutoModAlert>,
 }
 
 impl Extras {
@@ -36,6 +38,7 @@ impl Extras {
             embeds: message.embeds.clone(),
             mentions_everyone: message.mentions_everyone,
             mention_role_ids: message.mention_role_ids.clone(),
+            auto_mod: message.auto_mod.clone(),
         };
         (extras != Extras::default()).then(|| extras.encode_to_vec())
     }
@@ -123,6 +126,7 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 kind: r.get(8)?,
                 mentions_everyone: false,
                 mention_role_ids: vec![],
+                auto_mod: None,
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -142,6 +146,7 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
         message.embeds = extras.embeds;
         message.mentions_everyone = extras.mentions_everyone;
         message.mention_role_ids = extras.mention_role_ids;
+        message.auto_mod = extras.auto_mod;
     }
     Ok(message)
 }
@@ -250,6 +255,25 @@ async fn check_slowmode(conn: &turso::Connection, channel: &pb::Channel, user_id
     }
 }
 
+/// Stores a message that isn't a plain one (it has no text of its own),
+/// inside a write. The caller counts it and sends its event.
+pub(super) async fn insert_system(conn: &turso::Connection, message: &pb::Message) -> Result<()> {
+    conn.execute(
+        "INSERT INTO messages (id, channel_id, author_id, content, size, extras, kind, created_at)
+         VALUES (?1, ?2, ?3, '', 0, ?4, ?5, ?6)",
+        (
+            message.id.as_str(),
+            message.channel_id.as_str(),
+            message.author_id.as_str(),
+            Extras::of(message),
+            message.kind as i64,
+            message.created_at.as_ref().map_or_else(now_ms, crate::id::millis),
+        ),
+    )
+    .await?;
+    Ok(())
+}
+
 /// Posts "someone joined" in the server's system channel, if it has one,
 /// inside the write that adds them.
 pub(super) async fn post_join(
@@ -274,11 +298,7 @@ pub(super) async fn post_join(
         kind: pb::MessageKind::MemberJoined as i32,
         ..Default::default()
     };
-    conn.execute(
-        "INSERT INTO messages (id, channel_id, author_id, content, size, kind, created_at) VALUES (?1, ?2, ?3, '', 0, ?4, ?5)",
-        (message.id.as_str(), message.channel_id.as_str(), user_id, message.kind as i64, now),
-    )
-    .await?;
+    insert_system(conn, &message).await?;
     store::add_usage(conn, UsageChange { messages: 1, messages_sent: 1, ..Default::default() }).await?;
     events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message) }));
     Ok(())
@@ -329,6 +349,10 @@ impl MessageService for Api {
                             return Err(Error::NotFound("message being replied to"));
                         }
                     }
+                    let verdict = automod::review(conn, &sdb.id, &member, &access, &channel, &req.content, events).await?;
+                    if let Some(why) = verdict.blocked {
+                        return Ok(Err(why));
+                    }
                     let now = now_ms();
                     let exempt = access.has_in(&channel.id, Permission::ManageMessages)
                         || access.has_in(&channel.id, Permission::ManageChannels);
@@ -351,6 +375,7 @@ impl MessageService for Api {
                         kind: pb::MessageKind::Unspecified as i32,
                         mentions_everyone,
                         mention_role_ids,
+                        auto_mod: None,
                     };
                     let extras = Extras::of(&message);
                     let size = message.content.len() as i64;
@@ -377,9 +402,10 @@ impl MessageService for Api {
                     )
                     .await?;
                     events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
-                    Ok(message)
+                    Ok(Ok(message))
                 })
-                .await?;
+                .await?
+                .map_err(Error::denied)?;
             Ok(pb::SendMessageResponse { message: Some(message) })
         }
         .await)
@@ -465,6 +491,17 @@ impl MessageService for Api {
                             return Err(Error::invalid("system messages can't be edited"));
                         }
                         check_content(&req.content, !message.attachments.is_empty() || !message.embeds.is_empty())?;
+                        if message.content != req.content {
+                            let channel = load_channel(conn, &sdb.id, &message.channel_id)
+                                .await?
+                                .ok_or(Error::NotFound("channel"))?;
+                            let verdict =
+                                automod::review(conn, &sdb.id, &member, &access, &channel, &req.content, events)
+                                    .await?;
+                            if let Some(why) = verdict.blocked {
+                                return Ok(Err(why));
+                            }
+                        }
                         let now = now_ms();
                         let growth = req.content.len() as i64 - message.content.len() as i64;
                         (message.mentions_everyone, message.mention_role_ids) =
@@ -484,9 +521,10 @@ impl MessageService for Api {
                         .await?;
                         store::add_usage(conn, UsageChange { message_bytes: growth, ..Default::default() }).await?;
                         events.push(Payload::MessageUpdated(pb::MessageUpdated { message: Some(message.clone()) }));
-                        Ok(message)
+                        Ok(Ok(message))
                     })
-                    .await?;
+                    .await?
+                    .map_err(Error::denied)?;
                 Ok(pb::UpdateMessageResponse { message: Some(message) })
             }
             .await,

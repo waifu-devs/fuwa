@@ -21,7 +21,7 @@ pub const fn bit(p: P) -> Bits {
     1 << p as u64
 }
 
-const KNOWN: [P; 17] = [
+const KNOWN: [P; 18] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -39,6 +39,7 @@ const KNOWN: [P; 17] = [
     P::MentionEveryone,
     P::ManageMessages,
     P::CreateInvite,
+    P::ManageEmoji,
 ];
 
 /// Every permission there is.
@@ -74,6 +75,7 @@ pub const EVERYONE: Bits = bit(P::ViewChannels)
 /// The Admin role a new server starts with, and that the admins of servers
 /// from before roles were given: what admins could do then.
 pub const ADMIN: Bits = bit(P::ManageServer)
+    | bit(P::ManageEmoji)
     | bit(P::ManageChannels)
     | bit(P::ManageMessages)
     | bit(P::MentionEveryone)
@@ -126,6 +128,7 @@ pub fn label(p: P) -> &'static str {
         P::MentionEveryone => "Mention everyone",
         P::ManageMessages => "Manage messages",
         P::CreateInvite => "Create invite",
+        P::ManageEmoji => "Manage emoji",
     }
 }
 

@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import { createContext, use, useMemo, type ReactNode } from "react";
-import type { Member, Role, User } from "@/gen/fuwa/v1/types_pb";
+import type { Emoji, Member, Role, User } from "@/gen/fuwa/v1/types_pb";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { memberName } from "@/lib/format";
 import { colorOf, cssColor } from "@/lib/permissions";
@@ -11,7 +11,8 @@ import { cn } from "@/lib/utils";
  * Mentions in messages: `@username`, `@everyone`, `@here` and roles written
  * `<@&role id>` (the composer writes those for you). Pinging is decided by
  * the server; this only draws them as chips, colored like the role and
- * brighter when they're about you.
+ * brighter when they're about you. A server's own emoji (`<:name:id>`) go
+ * through here too, drawn as their pictures.
  */
 
 /** What a server's messages need to draw names and mentions. */
@@ -21,6 +22,8 @@ export type ServerLook = {
   /** Highest first. */
   roles: Role[];
   members: Member[];
+  /** The server's own emoji. */
+  emojis?: Emoji[];
   /** Your id and roles, to light up mentions of you. */
   me?: { id: string; username: string; roleIds: string[] };
 };
@@ -45,7 +48,8 @@ export function useRoleColor(member: Member | undefined): number | undefined {
 const ROLE = String.raw`<@&([0-9A-Za-z]{26})>`;
 const EVERYONE = String.raw`(?<![\w@<])@(everyone|here)\b`;
 const USER = String.raw`(?<![\w@<.])@([a-z0-9][a-z0-9_.]{0,30}[a-z0-9_]|[a-z0-9])(?![\w])`;
-const PATTERN = new RegExp(`${ROLE}|${EVERYONE}|${USER}`, "gi");
+const EMOJI = String.raw`<(a?):([A-Za-z0-9_]{2,32}):([0-9A-Za-z]{10,32})>`;
+const PATTERN = new RegExp(`${ROLE}|${EVERYONE}|${USER}|${EMOJI}`, "gi");
 
 type MdNode = { type: string; value?: string; children?: MdNode[]; data?: Record<string, unknown> };
 
@@ -61,7 +65,8 @@ function split(value: string): MdNode[] | null {
   for (const m of value.matchAll(PATTERN)) {
     const at = m.index ?? 0;
     if (at > last) out.push({ type: "text", value: value.slice(last, at) });
-    if (m[1]) out.push(mention("role", m[1].toUpperCase(), m[0]));
+    if (m[6]) out.push(mention("emoji", m[6].toUpperCase(), `:${m[5]}:`));
+    else if (m[1]) out.push(mention("role", m[1].toUpperCase(), m[0]));
     else if (m[2]) out.push(mention("everyone", m[2].toLowerCase(), m[0]));
     else out.push(mention("user", m[3]!.toLowerCase(), m[0]));
     last = at + m[0].length;
@@ -108,6 +113,21 @@ export function Mention(props: MentionProps) {
   const target = props["data-target"] ?? "";
   const look = useServerLook();
   const mode = usePrefs((p) => p.roleColors);
+  if (kind === "emoji") {
+    const emoji = look.emojis?.find((e) => e.id === target);
+    if (!emoji) return <span className="text-muted-foreground">{props.children}</span>;
+    return (
+      <motion.img
+        src={emoji.url}
+        alt={`:${emoji.name}:`}
+        title={`:${emoji.name}:`}
+        draggable={false}
+        whileHover={{ scale: 1.35, rotate: -6 }}
+        transition={{ type: "spring", stiffness: 600, damping: 12 }}
+        className="emoji inline-block object-contain"
+      />
+    );
+  }
   if (kind === "role") {
     const role = look.roles.find((r) => r.id === target);
     if (!role) return <span className={cn(chip, "bg-muted text-muted-foreground")}>@deleted-role</span>;

@@ -11,7 +11,11 @@ import {
   ApplicationStatus,
   ChannelType,
   JoinFormSchema,
+  WelcomeScreenSchema,
   type AnnouncementTone,
+  type AutoModRule,
+  type Emoji,
+  type WelcomeScreen,
   type Application,
   type Channel,
   type Member,
@@ -1034,3 +1038,60 @@ export function markServerRead(key: string, serverId: string): number {
 }
 
 export { ChannelType };
+
+// ───────────────────────── AutoMod, emoji and the welcome screen ─────────────────────────
+
+export const listAutoModRules = (key: string, serverId: string) =>
+  call((signal) => api(key).automod.listAutoModRules({ serverId }, { signal })).pipe(Effect.map((r) => r.rules));
+
+/** Adds a rule (no id) or replaces one; resolves to the rule as the server keeps it. */
+export const saveAutoModRule = (key: string, serverId: string, rule: AutoModRule) =>
+  call((signal) => api(key).automod.saveAutoModRule({ serverId, rule }, { signal })).pipe(Effect.map((r) => r.rule!));
+
+export const deleteAutoModRule = (key: string, serverId: string, ruleId: string) =>
+  call((signal) => api(key).automod.deleteAutoModRule({ serverId, ruleId }, { signal })).pipe(Effect.as(true));
+
+/** What a rule, saved or not, makes of some text. */
+export const testAutoModRule = (key: string, serverId: string, rule: AutoModRule, content: string) =>
+  call((signal) => api(key).automod.testAutoModRule({ serverId, rule, content }, { signal }));
+
+const storeEmojis = (key: string, serverId: string, fn: (list: Emoji[]) => Emoji[]) =>
+  updateInstance(key, (i) => ({ ...i, emojis: { ...i.emojis, [serverId]: fn(i.emojis[serverId] ?? []) } }));
+
+/** Adds an emoji from a picture uploaded for it. */
+export const createEmoji = (key: string, serverId: string, name: string, url: string) =>
+  Effect.gen(function* () {
+    const { emoji } = yield* call((signal) => api(key).emojis.createEmoji({ serverId, name, url }, { signal }));
+    if (emoji) storeEmojis(key, serverId, (list) => [...list.filter((e) => e.id !== emoji.id), emoji]);
+    return emoji!;
+  });
+
+export const renameEmoji = (key: string, serverId: string, emojiId: string, name: string) =>
+  Effect.gen(function* () {
+    const { emoji } = yield* call((signal) => api(key).emojis.updateEmoji({ serverId, emojiId, name }, { signal }));
+    if (emoji) storeEmojis(key, serverId, (list) => list.map((e) => (e.id === emoji.id ? emoji : e)));
+    return emoji!;
+  });
+
+export const deleteEmoji = (key: string, serverId: string, emojiId: string) =>
+  Effect.gen(function* () {
+    yield* call((signal) => api(key).emojis.deleteEmoji({ serverId, emojiId }, { signal }));
+    storeEmojis(key, serverId, (list) => list.filter((e) => e.id !== emojiId));
+    return true;
+  });
+
+export const getWelcomeScreen = (key: string, serverId: string) =>
+  call((signal) => api(key).join.getWelcomeScreen({ serverId }, { signal })).pipe(
+    Effect.map((r) => r.welcomeScreen ?? create(WelcomeScreenSchema)),
+  );
+
+export const setWelcomeScreen = (key: string, serverId: string, welcomeScreen: WelcomeScreen) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) => api(key).join.setWelcomeScreen({ serverId, welcomeScreen }, { signal }));
+    const saved = res.welcomeScreen ?? create(WelcomeScreenSchema);
+    updateInstance(key, (i) => {
+      const server = i.servers.find((s) => s.id === serverId);
+      return server ? addServer(i, { ...server, hasWelcomeScreen: saved.enabled }) : i;
+    });
+    return saved;
+  });

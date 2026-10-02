@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// A server's AutoMod: rules that catch messages as they're sent, block them,
+// alert moderators and time people out. Rules are only for people who manage
+// the server, so changing one leaves an audit entry but sends no event.
+service AutoModService {
+  // The server's rules, oldest first. MANAGE_SERVER.
+  rpc ListAutoModRules(ListAutoModRulesRequest) returns (ListAutoModRulesResponse);
+  // Adds a rule (with no id) or replaces one. MANAGE_SERVER. A server has up
+  // to 6 keyword rules, one mention spam rule and one link rule.
+  rpc SaveAutoModRule(SaveAutoModRuleRequest) returns (SaveAutoModRuleResponse);
+  rpc DeleteAutoModRule(DeleteAutoModRuleRequest) returns (DeleteAutoModRuleResponse);
+  // What a rule, saved or not, would make of some text, without sending
+  // anything. MANAGE_SERVER.
+  rpc TestAutoModRule(TestAutoModRuleRequest) returns (TestAutoModRuleResponse);
+}
+
+message ListAutoModRulesRequest {
+  string server_id = 1;
+}
+
+message ListAutoModRulesResponse {
+  repeated AutoModRule rules = 1;
+}
+
+message SaveAutoModRuleRequest {
+  string server_id = 1;
+  AutoModRule rule = 2;
+}
+
+message SaveAutoModRuleResponse {
+  AutoModRule rule = 1;
+}
+
+message DeleteAutoModRuleRequest {
+  string server_id = 1;
+  string rule_id = 2;
+}
+
+message DeleteAutoModRuleResponse {}
+
+message TestAutoModRuleRequest {
+  string server_id = 1;
+  AutoModRule rule = 2;
+  string content = 3;
+}
+
+message TestAutoModRuleResponse {
+  // Whether it would set the rule off.
+  bool matched = 1;
+  // What did: the words or links, or how many pings.
+  repeated string matches = 2;
+}

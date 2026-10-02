@@ -513,12 +513,10 @@ impl DirectoryService for Internal {
     ) -> Result<Response<cpb::CheckPictureResponse>, Status> {
         let req = request.into_inner();
         let purpose = pb::MediaPurpose::try_from(req.purpose).unwrap_or(pb::MediaPurpose::Unspecified);
-        respond(
-            self.app
-                .check_picture(&req.account_id, purpose, &req.url)
-                .await
-                .map(|id| cpb::CheckPictureResponse { media_id: id.unwrap_or_default() }),
-        )
+        respond(self.app.check_upload(&req.account_id, purpose, &req.url).await.map(|upload| {
+            let upload = upload.unwrap_or_default();
+            cpb::CheckPictureResponse { media_id: upload.id, size: upload.size, content_type: upload.content_type }
+        }))
     }
 
     async fn keep_picture(

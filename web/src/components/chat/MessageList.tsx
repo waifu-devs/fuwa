@@ -7,7 +7,10 @@ import {
   FingerprintIcon,
   PencilIcon,
   RotateCwIcon,
+  ShieldAlertIcon,
+  ShieldIcon,
   SparklesIcon,
+  TimerIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -24,17 +27,19 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { MessageKind, Permission, type Channel, type Member, type Message, type User } from "@/gen/fuwa/v1/types_pb";
+import { AutoModTrigger, MessageKind, Permission, type Channel, type Member, type Message, type User } from "@/gen/fuwa/v1/types_pb";
 import { deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
 import { useAccess, useInstance, useRoles } from "@/fuwa/hooks";
 import type { PendingMessage } from "@/fuwa/store";
 import { sendsMessage } from "@/components/chat/Composer";
 import { Mention, remarkMentions, ServerLookProvider, useRoleColor, useServerLook, type ServerLook } from "@/components/chat/mentions";
 import { Markdown, type MarkdownExtension } from "@/components/Markdown";
+import { encodeEmoji } from "@/components/chat/MentionPicker";
+import { EMOJI_TOKEN, onlyEmoji } from "@/lib/emoji";
 import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
 import { ProfilePopover } from "@/components/ProfilePopover";
-import { displayName, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
+import { displayName, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
 import { comboLabel } from "@/lib/keybinds";
 import { pingsMe, useNotificationSettings } from "@/lib/notifications";
 import { hasIn } from "@/lib/permissions";
@@ -50,6 +55,7 @@ type Row =
   | { kind: "day"; key: string; date: Date }
   | { kind: "message"; key: string; message: Message; first: boolean; date: Date }
   | { kind: "join"; key: string; message: Message; date: Date }
+  | { kind: "automod"; key: string; message: Message; date: Date }
   | { kind: "pending"; key: string; pending: PendingMessage; first: boolean };
 
 export type MessageListHandle = { editLast: () => void };
@@ -67,6 +73,7 @@ export const MessageList = forwardRef<
   const items = state?.items ?? EMPTY;
   const pending = inst?.pending[channel.id] ?? EMPTY;
   const members = inst?.members[serverId] ?? EMPTY;
+  const emojis = inst?.emojis[serverId] ?? EMPTY;
   const users = inst?.users;
   const me = inst?.me;
   const [editing, setEditing] = useState<string | null>(null);
@@ -96,9 +103,10 @@ export const MessageList = forwardRef<
       ownerId,
       roles,
       members,
+      emojis,
       me: me ? { id: me.id, username: me.username, roleIds: myRoleIds ?? [] } : undefined,
     }),
-    [instanceKey, ownerId, roles, members, me, myRoleIds],
+    [instanceKey, ownerId, roles, members, emojis, me, myRoleIds],
   );
 
   const rows = useMemo(() => {
@@ -110,8 +118,8 @@ export const MessageList = forwardRef<
         out.push({ kind: "day", key: `day-${date.toDateString()}`, date });
         prev = null;
       }
-      if (message.kind === MessageKind.MEMBER_JOINED) {
-        out.push({ kind: "join", key: message.id, message, date });
+      if (message.kind === MessageKind.MEMBER_JOINED || message.kind === MessageKind.AUTO_MOD_ALERT) {
+        out.push({ kind: message.kind === MessageKind.MEMBER_JOINED ? "join" : "automod", key: message.id, message, date });
         // The next message starts a run of its own.
         prev = { author: "", at: date };
         continue;
@@ -219,6 +227,21 @@ export const MessageList = forwardRef<
                   />
                 );
               const author = memberById.get(row.message.authorId)?.user ?? users?.[row.message.authorId];
+              if (row.kind === "automod")
+                return (
+                  <AutoModAlertRow
+                    key={row.key}
+                    message={row.message}
+                    date={row.date}
+                    author={author}
+                    member={memberById.get(row.message.authorId)}
+                    instanceKey={instanceKey}
+                    channelName={inst?.channels[serverId]?.find((c) => c.id === row.message.autoMod?.channelId)?.name}
+                    animate={!initial.current?.has(row.message.id)}
+                    canDelete={manager}
+                    onDelete={() => run(deleteMessage(instanceKey, serverId, channel.id, row.message.id))}
+                  />
+                );
               if (row.kind === "join")
                 return (
                   <JoinRow
@@ -254,7 +277,7 @@ export const MessageList = forwardRef<
                   onEdit={() => setEditing(row.message.id)}
                   onCancelEdit={() => setEditing(null)}
                   onSave={async (content) => {
-                    await run(editMessage(instanceKey, serverId, channel.id, row.message.id, content));
+                    await run(editMessage(instanceKey, serverId, channel.id, row.message.id, encodeEmoji(content, emojis)));
                     setEditing(null);
                   }}
                   onDelete={() => run(deleteMessage(instanceKey, serverId, channel.id, row.message.id))}
@@ -442,7 +465,7 @@ const CHAT: MarkdownExtension = { remarkPlugins: [remarkMentions], components: {
 /** A message's text, mentions and all; in compact display its first paragraph runs on after the name. */
 export function MessageBody({ content, display, className }: { content: string; display: MessageDisplay; className?: string }) {
   return (
-    <Markdown className={cn("chat", display === "compact" && "inline-first", className)} extension={CHAT}>
+    <Markdown className={cn("chat", display === "compact" && "inline-first", onlyEmoji(content) && "jumbo", className)} extension={CHAT}>
       {content}
     </Markdown>
   );
@@ -504,7 +527,7 @@ function MessageRow({
     >
       <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey}>
         {editing ? (
-          <EditBox initial={message.content} onCancel={onCancelEdit} onSave={onSave} />
+          <EditBox initial={message.content.replace(EMOJI_TOKEN, ":$2:")} onCancel={onCancelEdit} onSave={onSave} />
         ) : (
           <>
             <MessageBody content={message.content} display={display} />
@@ -574,6 +597,139 @@ function MessageRow({
                 </ToolButton>
               )}
             </>
+          )}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+/** The words in `text` that set a rule off, marked. */
+function marked(text: string, matched: string[]): ReactNode {
+  const words = matched.filter((m) => m && !/^\d+ pings$/.test(m)).sort((a, b) => b.length - a.length);
+  if (!words.length) return text;
+  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return text.split(new RegExp(`(${escaped.join("|")})`, "gi")).map((part, n) =>
+    n % 2 ? (
+      <mark key={n} className="rounded bg-destructive/20 px-0.5 text-destructive">
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
+
+const TRIGGER_LABEL: Record<number, string> = {
+  [AutoModTrigger.KEYWORDS]: "blocked words",
+  [AutoModTrigger.MENTION_SPAM]: "mention spam",
+  [AutoModTrigger.LINKS]: "a link",
+};
+
+/** What AutoMod caught, for the mods in the alert channel: who, where, what it said and what was done. */
+function AutoModAlertRow({
+  message,
+  date,
+  author,
+  member,
+  instanceKey,
+  channelName,
+  animate,
+  canDelete,
+  onDelete,
+}: {
+  message: Message;
+  date: Date;
+  author: User | undefined;
+  member: Member | undefined;
+  instanceKey: string;
+  channelName: string | undefined;
+  animate: boolean;
+  canDelete: boolean;
+  onDelete: () => Promise<void>;
+}) {
+  const alert = message.autoMod;
+  const color = useRoleColor(member);
+  const [confirming, setConfirming] = useState(false);
+  if (!alert) return null;
+  return (
+    <motion.div
+      layout="position"
+      {...(animate ? enter : {})}
+      exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
+      transition={{ type: "spring", stiffness: 500, damping: 34 }}
+      className="message-row group relative flex gap-3 px-4 py-1.5"
+    >
+      <span className="w-10 shrink-0 pt-1">
+        <motion.span
+          initial={animate ? { scale: 0, rotate: -30 } : false}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: "spring", stiffness: 500, damping: 14, delay: 0.1 }}
+          className="grid size-10 place-items-center rounded-full bg-gradient-to-br from-amber-400 to-rose-500 text-white shadow-md"
+        >
+          <ShieldAlertIcon className="size-5" />
+        </motion.span>
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+          <span className="font-extrabold">AutoMod</span>
+          <span className="rounded bg-primary/15 px-1 text-[0.6rem] font-extrabold text-primary uppercase">Bot</span>
+          <time className="text-xs text-muted-foreground" dateTime={date.toISOString()} title={formatFull(date)}>
+            {formatStamp(date)}
+          </time>
+        </p>
+        <div className="mt-1 overflow-hidden rounded-2xl border border-l-4 border-l-amber-500 bg-card/70 p-3">
+          <p className="text-sm">
+            {alert.blocked ? "Blocked a message from " : "Flagged a message from "}
+            <ProfilePopover instanceKey={instanceKey} user={author} member={member}>
+              <button type="button" className="inline-flex align-bottom font-bold hover:underline">
+                <RoleName id={message.authorId} name={member?.nickname || displayName(author)} color={color} />
+              </button>
+            </ProfilePopover>
+            {channelName && (
+              <>
+                {" "}
+                in <b>#{channelName}</b>
+              </>
+            )}{" "}
+            for {TRIGGER_LABEL[alert.trigger] ?? "breaking a rule"}.
+          </p>
+          <blockquote className="mt-2 max-h-40 overflow-y-auto rounded-xl bg-muted/60 px-3 py-2 text-sm break-words whitespace-pre-wrap text-muted-foreground">
+            {marked(alert.content, alert.matched)}
+          </blockquote>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-bold">
+              <ShieldIcon className="size-3" /> {alert.ruleName}
+            </span>
+            {alert.matched.map((m) => (
+              <code key={m} className="rounded-md bg-destructive/10 px-1.5 py-0.5 text-destructive">
+                {m}
+              </code>
+            ))}
+            {alert.timedOutSeconds > 0 && (
+              <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-bold text-amber-600 dark:text-amber-400">
+                <TimerIcon className="size-3" /> Timed out for {formatDuration(alert.timedOutSeconds)}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      {canDelete && (
+        <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
+          {confirming ? (
+            <span className="flex items-center gap-0.5">
+              <span className="px-2 text-xs font-bold text-destructive">Delete?</span>
+              <ToolButton label="Delete" danger onClick={() => onDelete().catch(() => setConfirming(false))}>
+                <CheckIcon />
+              </ToolButton>
+              <ToolButton label="Keep" onClick={() => setConfirming(false)}>
+                <XIcon />
+              </ToolButton>
+            </span>
+          ) : (
+            <ToolButton label="Delete" danger onClick={() => setConfirming(true)}>
+              <Trash2Icon />
+            </ToolButton>
           )}
         </div>
       )}
@@ -802,6 +958,8 @@ function PendingRow({
   onRetry: () => void;
   onDismiss: () => void;
 }) {
+  // A message AutoMod stopped: why, without a retry that would only be stopped again.
+  const blocked = pending.failed?.startsWith("AutoMod: ") ? pending.failed.slice("AutoMod: ".length) : null;
   return (
     <motion.div
       layout="position"
@@ -812,8 +970,32 @@ function PendingRow({
       className={cn("message-row flex gap-3 px-4", first && "first", display === "compact" && "compact")}
     >
       <MessageLine display={display} first={first} author={me} member={member} status="sending…">
-        <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive")} />
-        {pending.failed && (
+        <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive", blocked && "line-through decoration-destructive/50")} />
+        {blocked ? (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ type: "spring", stiffness: 500, damping: 26 }}
+            className="mt-1.5 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs"
+          >
+            <motion.span animate={{ rotate: [0, -12, 12, -6, 0] }} transition={{ duration: 0.6, delay: 0.15 }}>
+              <ShieldAlertIcon className="size-4 text-amber-600 dark:text-amber-400" />
+            </motion.span>
+            <span className="min-w-0 flex-1">
+              <b>AutoMod didn't send this.</b> <span className="text-muted-foreground first-letter:uppercase">{blocked}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => void navigator.clipboard?.writeText(pending.content)}
+              className="inline-flex items-center gap-1 font-bold text-primary hover:underline"
+            >
+              <CopyIcon className="size-3" /> Copy text
+            </button>
+            <button type="button" onClick={onDismiss} className="font-bold text-muted-foreground hover:underline">
+              Dismiss
+            </button>
+          </motion.div>
+        ) : pending.failed && (
           <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
             <span className="text-destructive first-letter:uppercase">{pending.failed}.</span>
             <button type="button" onClick={onRetry} className="inline-flex items-center gap-1 font-bold text-primary hover:underline">

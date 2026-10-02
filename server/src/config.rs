@@ -107,6 +107,8 @@ pub struct Limits {
     pub storage_bytes: Option<i64>,
     /// FUWA_LIMIT_ATTACHMENT_STORAGE: uploaded files per server, e.g. `10GB`.
     pub attachment_bytes: Option<i64>,
+    /// FUWA_LIMIT_EMOJIS: custom emoji per server.
+    pub emojis: Option<i64>,
     /// FUWA_LIMIT_PICTURE_UPLOAD: the largest avatar, banner or server icon one
     /// upload may be, e.g. `8MiB`.
     pub picture_upload_bytes: Option<i64>,
@@ -119,6 +121,7 @@ impl Limits {
             || self.channels.is_some()
             || self.storage_bytes.is_some()
             || self.attachment_bytes.is_some()
+            || self.emojis.is_some()
             || self.picture_upload_bytes.is_some()
     }
 }
@@ -230,6 +233,7 @@ impl Config {
             channels: count("FUWA_LIMIT_CHANNELS")?,
             storage_bytes: bytes("FUWA_LIMIT_STORAGE")?,
             attachment_bytes: bytes("FUWA_LIMIT_ATTACHMENT_STORAGE")?,
+            emojis: count("FUWA_LIMIT_EMOJIS")?,
             picture_upload_bytes: bytes("FUWA_LIMIT_PICTURE_UPLOAD")?,
         };
 

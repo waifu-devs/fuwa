@@ -3,8 +3,10 @@ import { createGrpcWebTransport } from "@connectrpc/connect-web";
 import { AccountService } from "@/gen/fuwa/v1/account_pb";
 import { AdminService } from "@/gen/fuwa/v1/admin_pb";
 import { AuthService } from "@/gen/fuwa/v1/auth_pb";
+import { AutoModService } from "@/gen/fuwa/v1/automod_pb";
 import { ChannelService } from "@/gen/fuwa/v1/channel_pb";
 import { DirectMessageService } from "@/gen/fuwa/v1/dm_pb";
+import { EmojiService } from "@/gen/fuwa/v1/emoji_pb";
 import { EventService } from "@/gen/fuwa/v1/event_pb";
 import { InviteService } from "@/gen/fuwa/v1/invite_pb";
 import { JoinService } from "@/gen/fuwa/v1/join_pb";
@@ -29,6 +31,8 @@ export type Api = {
   invites: Client<typeof InviteService>;
   join: Client<typeof JoinService>;
   dms: Client<typeof DirectMessageService>;
+  automod: Client<typeof AutoModService>;
+  emojis: Client<typeof EmojiService>;
 };
 
 /**
@@ -57,5 +61,7 @@ export function makeApi(url: string, token: () => string | null): Api {
     invites: createClient(InviteService, transport),
     join: createClient(JoinService, transport),
     dms: createClient(DirectMessageService, transport),
+    automod: createClient(AutoModService, transport),
+    emojis: createClient(EmojiService, transport),
   };
 }

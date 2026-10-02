@@ -75,6 +75,8 @@ struct Clients {
     roles: pb::role_service_client::RoleServiceClient<Channel>,
     invites: pb::invite_service_client::InviteServiceClient<Channel>,
     join: pb::join_service_client::JoinServiceClient<Channel>,
+    automod: pb::auto_mod_service_client::AutoModServiceClient<Channel>,
+    emojis: pb::emoji_service_client::EmojiServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -91,7 +93,9 @@ async fn clients(instance: &Instance) -> Clients {
         media: pb::media_service_client::MediaServiceClient::new(channel.clone()),
         roles: pb::role_service_client::RoleServiceClient::new(channel.clone()),
         invites: pb::invite_service_client::InviteServiceClient::new(channel.clone()),
-        join: pb::join_service_client::JoinServiceClient::new(channel),
+        join: pb::join_service_client::JoinServiceClient::new(channel.clone()),
+        automod: pb::auto_mod_service_client::AutoModServiceClient::new(channel.clone()),
+        emojis: pb::emoji_service_client::EmojiServiceClient::new(channel),
     }
 }
 
@@ -4008,5 +4012,362 @@ async fn rules_and_applications() {
     assert!(form.rules.is_empty());
     assert_eq!(form.questions.len(), 2);
     drop(c);
+    instance.stop().await;
+}
+
+async fn save_rule(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    rule: pb::AutoModRule,
+) -> Result<pb::AutoModRule, tonic::Status> {
+    c.automod
+        .save_auto_mod_rule(authed(token, pb::SaveAutoModRuleRequest { server_id: server_id.into(), rule: Some(rule) }))
+        .await
+        .map(|r| r.into_inner().rule.unwrap())
+}
+
+fn act(kind: pb::AutoModActionKind) -> pb::AutoModAction {
+    pb::AutoModAction { kind: kind as i32, ..Default::default() }
+}
+
+#[tokio::test]
+async fn automod_catches_messages() {
+    use pb::{AutoModActionKind as Kind, AutoModTrigger as Trigger};
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (member, member_user, _) = sign_up(&mut c, "member").await;
+    let server = create_server(&mut c, &owner, "Guarded", true).await;
+    join(&mut c, &member, &server.id).await;
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.r#type == pb::ChannelType::Text as i32)
+        .unwrap();
+    let mods = new_channel(&mut c, &owner, &server.id, "mod-log", pb::ChannelType::Text).await;
+
+    // Only managers see or change the rules.
+    let denied = save_rule(
+        &mut c,
+        &member,
+        &server.id,
+        pb::AutoModRule {
+            trigger: Trigger::Keywords as i32,
+            keywords: vec!["x".into()],
+            actions: vec![act(Kind::Block)],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+
+    // A rule needs something to look for and something to do.
+    let empty = save_rule(
+        &mut c,
+        &owner,
+        &server.id,
+        pb::AutoModRule { trigger: Trigger::Keywords as i32, ..Default::default() },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(empty.code(), Code::InvalidArgument);
+
+    let words = save_rule(
+        &mut c,
+        &owner,
+        &server.id,
+        pb::AutoModRule {
+            enabled: true,
+            trigger: Trigger::Keywords as i32,
+            keywords: vec!["Badword".into(), "*scam*".into(), "badword".into()],
+            allowed: vec!["scampi".into()],
+            actions: vec![
+                pb::AutoModAction { kind: Kind::Block as i32, message: "Keep it kind.".into(), ..Default::default() },
+                pb::AutoModAction { kind: Kind::Alert as i32, channel_id: mods.id.clone(), ..Default::default() },
+            ],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(words.name, "Blocked words");
+    assert_eq!(words.keywords, ["badword", "*scam*"]);
+
+    // Caught: not sent, the author is told why, and the moderators hear about it.
+    let blocked = send(&mut c, &member, &server.id, &general.id, "what a BADWORD").await.unwrap_err();
+    assert_eq!(blocked.code(), Code::PermissionDenied);
+    assert_eq!(blocked.message(), "AutoMod: Keep it kind.");
+    assert!(messages(&mut c, &owner, &server.id, &general.id).await.iter().all(|m| !m.content.contains("BADWORD")));
+    let alerts = messages(&mut c, &owner, &server.id, &mods.id).await;
+    let alert = alerts.last().unwrap();
+    assert_eq!(alert.kind, pb::MessageKind::AutoModAlert as i32);
+    assert_eq!(alert.author_id, member_user.id);
+    assert!(alert.content.is_empty());
+    let details = alert.auto_mod.as_ref().unwrap();
+    assert_eq!(
+        (details.content.as_str(), details.matched.as_slice(), details.blocked),
+        ("what a BADWORD", &["badword".to_string()][..], true)
+    );
+    assert_eq!(details.channel_id, general.id);
+
+    // Allowed words and other words pass; the owner is never stopped.
+    send(&mut c, &member, &server.id, &general.id, "garlic scampi tonight").await.unwrap();
+    send(&mut c, &owner, &server.id, &general.id, "badword, as the owner").await.unwrap();
+
+    // Edits are checked too.
+    let sent = send(&mut c, &member, &server.id, &general.id, "hello").await.unwrap();
+    let edit = c
+        .messages
+        .update_message(authed(
+            &member,
+            pb::UpdateMessageRequest {
+                server_id: server.id.clone(),
+                message_id: sent.id.clone(),
+                content: "a scammer!".into(),
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(edit.code(), Code::PermissionDenied);
+
+    // Exempt channels are left alone.
+    let lounge = new_channel(&mut c, &owner, &server.id, "lounge", pb::ChannelType::Text).await;
+    save_rule(
+        &mut c,
+        &owner,
+        &server.id,
+        pb::AutoModRule { exempt_channel_ids: vec![lounge.id.clone()], ..words.clone() },
+    )
+    .await
+    .unwrap();
+    send(&mut c, &member, &server.id, &lounge.id, "badword in the lounge").await.unwrap();
+
+    // Mention spam times people out; there's one such rule per server.
+    let spam = pb::AutoModRule {
+        enabled: true,
+        trigger: Trigger::MentionSpam as i32,
+        mention_limit: 2,
+        actions: vec![pb::AutoModAction { kind: Kind::TimeOut as i32, duration_seconds: 600, ..Default::default() }],
+        ..Default::default()
+    };
+    save_rule(&mut c, &owner, &server.id, spam.clone()).await.unwrap();
+    assert_eq!(save_rule(&mut c, &owner, &server.id, spam).await.unwrap_err().code(), Code::FailedPrecondition);
+    send(&mut c, &member, &server.id, &general.id, "@a @b @c").await.unwrap();
+    let timed_out = send(&mut c, &member, &server.id, &general.id, "hi").await.unwrap_err();
+    assert!(timed_out.message().contains("timed out"), "{}", timed_out.message());
+    let log =
+        audit_log(&mut c, &owner, pb::ListAuditLogRequest { server_id: server.id.clone(), ..Default::default() }).await;
+    let entry = log.entries.iter().find(|e| e.action == pb::AuditAction::AutoModTimeOut as i32).unwrap();
+    assert_eq!((entry.target_id.as_str(), entry.reason.as_str()), (member_user.id.as_str(), "Mention spam"));
+    assert!(log.entries.iter().any(|e| e.action == pb::AuditAction::AutoModRuleCreate as i32));
+
+    // Trying a rule out sends nothing.
+    let tried = c
+        .automod
+        .test_auto_mod_rule(authed(
+            &owner,
+            pb::TestAutoModRuleRequest {
+                server_id: server.id.clone(),
+                rule: Some(pb::AutoModRule {
+                    trigger: Trigger::Links as i32,
+                    allowed: vec!["waifu.dev".into()],
+                    ..Default::default()
+                }),
+                content: "see https://waifu.dev and https://evil.example".into(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(tried.matched);
+    assert_eq!(tried.matches, ["evil.example"]);
+
+    let rules = c
+        .automod
+        .list_auto_mod_rules(authed(&owner, pb::ListAutoModRulesRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .rules;
+    assert_eq!(rules.len(), 2);
+    c.automod
+        .delete_auto_mod_rule(authed(
+            &owner,
+            pb::DeleteAutoModRuleRequest { server_id: server.id.clone(), rule_id: words.id.clone() },
+        ))
+        .await
+        .unwrap();
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn custom_emoji_and_the_welcome_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_LIMIT_EMOJIS", "2")]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (member, _, _) = sign_up(&mut c, "member").await;
+    let server = create_server(&mut c, &owner, "Emotes", true).await;
+    join(&mut c, &member, &server.id).await;
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &member,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let create = |name: &str, url: &str| pb::CreateEmojiRequest {
+        server_id: server.id.clone(),
+        name: name.into(),
+        url: url.into(),
+    };
+    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, png(300, 1)).await;
+    // Members without Manage emoji can't add any, and only uploads made for emoji work.
+    let theirs = upload(&mut c, &instance, &member, pb::MediaPurpose::Emoji, png(300, 2)).await;
+    assert_eq!(
+        c.emojis.create_emoji(authed(&member, create("nope", &theirs))).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    assert_eq!(
+        c.emojis.create_emoji(authed(&owner, create("outside", "https://example.com/x.png"))).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+    let icon = upload(&mut c, &instance, &owner, pb::MediaPurpose::ServerIcon, png(300, 3)).await;
+    assert_eq!(
+        c.emojis.create_emoji(authed(&owner, create("icon", &icon))).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    assert_eq!(
+        c.emojis.create_emoji(authed(&owner, create("bad name!", &picture))).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+
+    let wave =
+        c.emojis.create_emoji(authed(&owner, create(":wave:", &picture))).await.unwrap().into_inner().emoji.unwrap();
+    assert_eq!((wave.name.as_str(), wave.size, wave.animated), ("wave", 300, false));
+    let event = next_event(&mut stream).await;
+    let Some(pb::event::Payload::EmojisUpdated(updated)) = event.payload else { panic!("{event:?}") };
+    assert_eq!(updated.emojis.len(), 1);
+
+    let second = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, png(200, 4)).await;
+    assert_eq!(
+        c.emojis.create_emoji(authed(&owner, create("WAVE", &second))).await.unwrap_err().code(),
+        Code::AlreadyExists
+    );
+    let blob =
+        c.emojis.create_emoji(authed(&owner, create("blob", &second))).await.unwrap().into_inner().emoji.unwrap();
+    let third = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, png(100, 5)).await;
+    assert_eq!(
+        c.emojis.create_emoji(authed(&owner, create("third", &third))).await.unwrap_err().code(),
+        Code::ResourceExhausted
+    );
+
+    let used = usage(&mut c, &owner, &server.id).await;
+    assert_eq!((used.emojis, used.attachments, used.attachment_bytes), (2, 2, 500));
+
+    let renamed = c
+        .emojis
+        .update_emoji(authed(
+            &owner,
+            pb::UpdateEmojiRequest { server_id: server.id.clone(), emoji_id: blob.id.clone(), name: "blobcat".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .emoji
+        .unwrap();
+    assert_eq!(renamed.name, "blobcat");
+    c.emojis
+        .delete_emoji(authed(
+            &owner,
+            pb::DeleteEmojiRequest { server_id: server.id.clone(), emoji_id: blob.id.clone() },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(fetch(&instance, &second).await.0, reqwest::StatusCode::NOT_FOUND);
+    let listed = c
+        .emojis
+        .list_emojis(authed(&member, pb::ListEmojisRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .emojis;
+    assert_eq!(listed.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["wave"]);
+    let used = usage(&mut c, &owner, &server.id).await;
+    assert_eq!((used.emojis, used.attachment_bytes), (1, 300));
+
+    // The welcome screen: managers set it, members see the channels they can.
+    let channels = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels;
+    let general = channels.iter().find(|ch| ch.r#type == pb::ChannelType::Text as i32).unwrap().clone();
+    let secret = new_channel(&mut c, &owner, &server.id, "secret", pb::ChannelType::Text).await;
+    let everyone = server.id.clone();
+    set_permissions(
+        &mut c,
+        &owner,
+        &server.id,
+        &secret.id,
+        vec![overwrite(&everyone, pb::OverwriteTarget::Role, &[], &[pb::Permission::ViewChannels])],
+    )
+    .await
+    .unwrap();
+    let welcome = pb::WelcomeScreen {
+        enabled: true,
+        description: "  Hi **there**  ".into(),
+        channels: vec![
+            pb::WelcomeChannel {
+                channel_id: general.id.clone(),
+                description: "Say hi".into(),
+                emoji: format!("<:wave:{}>", wave.id),
+            },
+            pb::WelcomeChannel { channel_id: secret.id.clone(), description: "Shh".into(), emoji: "🤫".into() },
+        ],
+    };
+    let set =
+        |w: pb::WelcomeScreen| pb::SetWelcomeScreenRequest { server_id: server.id.clone(), welcome_screen: Some(w) };
+    assert_eq!(
+        c.join.set_welcome_screen(authed(&member, set(welcome.clone()))).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    let mut wrong = welcome.clone();
+    wrong.channels[1].emoji = "<:gone:01ARZ3NDEKTSV4RRFFQ69G5FAV>".into();
+    assert_eq!(c.join.set_welcome_screen(authed(&owner, set(wrong))).await.unwrap_err().code(), Code::InvalidArgument);
+    let saved =
+        c.join.set_welcome_screen(authed(&owner, set(welcome))).await.unwrap().into_inner().welcome_screen.unwrap();
+    assert_eq!(saved.description, "Hi **there**");
+    let got = |token: &str| {
+        let mut join = c.join.clone();
+        let request = authed(token, pb::GetWelcomeScreenRequest { server_id: server.id.clone() });
+        async move { join.get_welcome_screen(request).await.unwrap().into_inner().welcome_screen.unwrap() }
+    };
+    assert_eq!(got(&member).await.channels.len(), 1);
+    assert_eq!(got(&owner).await.channels.len(), 2);
+    let server_now = c
+        .servers
+        .get_server(authed(&member, pb::GetServerRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert!(server_now.has_welcome_screen);
     instance.stop().await;
 }

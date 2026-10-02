@@ -1,5 +1,12 @@
 import {
   ArrowDownUpIcon,
+  BotIcon,
+  FrownIcon,
+  PartyPopperIcon,
+  ShieldAlertIcon,
+  ShieldCheckIcon,
+  SmileIcon,
+  SmilePlusIcon,
   ArrowRightIcon,
   ChevronDownIcon,
   ClipboardListIcon,
@@ -74,6 +81,14 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.APPLICATION_APPROVE]: { label: "Applications let in", icon: UserCheckIcon, tint: "bg-emerald-500/15 text-emerald-500" },
   [AuditAction.APPLICATION_REJECT]: { label: "Applications turned down", icon: UserXIcon, tint: "bg-destructive/15 text-destructive" },
   [AuditAction.JOIN_FORM_UPDATE]: { label: "Rules and questions", icon: ClipboardListIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.WELCOME_SCREEN_UPDATE]: { label: "Welcome screen", icon: PartyPopperIcon, tint: "bg-pink-500/15 text-pink-500" },
+  [AuditAction.AUTO_MOD_RULE_CREATE]: { label: "New AutoMod rules", icon: ShieldCheckIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.AUTO_MOD_RULE_UPDATE]: { label: "AutoMod changes", icon: ShieldAlertIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.AUTO_MOD_RULE_DELETE]: { label: "Deleted AutoMod rules", icon: ShieldXIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.AUTO_MOD_TIME_OUT]: { label: "AutoMod time-outs", icon: BotIcon, tint: "bg-amber-500/15 text-amber-500" },
+  [AuditAction.EMOJI_CREATE]: { label: "New emoji", icon: SmilePlusIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.EMOJI_UPDATE]: { label: "Renamed emoji", icon: SmileIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.EMOJI_DELETE]: { label: "Deleted emoji", icon: FrownIcon, tint: "bg-destructive/15 text-destructive" },
 };
 
 const FIELD: Record<string, string> = {
@@ -103,12 +118,22 @@ const FIELD: Record<string, string> = {
   linked_only: "waifu.dev accounts only",
   rules: "Rules",
   questions: "Questions",
+  enabled: "On",
+  channels: "Channels",
+  keywords: "Words",
+  allowed: "Allowed",
+  mention_limit: "Ping limit",
+  actions: "Actions",
 };
 
 /** Entries for things made or removed show just the one side of each change. */
 const ONE_SIDE: Partial<Record<AuditAction, "before" | "after">> = {
   [AuditAction.INVITE_CREATE]: "after",
   [AuditAction.INVITE_DELETE]: "before",
+  [AuditAction.AUTO_MOD_RULE_CREATE]: "after",
+  [AuditAction.AUTO_MOD_RULE_DELETE]: "before",
+  [AuditAction.EMOJI_CREATE]: "after",
+  [AuditAction.EMOJI_DELETE]: "before",
 };
 
 /** Ranks from before roles, as entries from back then keep them. */
@@ -343,7 +368,7 @@ function Entry({
 
 /** A value from the log, in words. */
 function value(field: string, raw: string, users: Record<string, User>, channels: Channel[], entry: AuditEntry): string {
-  if (field === "discoverable") return raw === "true" ? "Yes" : "No";
+  if (field === "discoverable" || field === "enabled") return raw === "true" ? "Yes" : "No";
   if (field === "role") return OLD_RANK[raw] ?? (raw ? entry.roleName : "None");
   if (field === "hoist" || field === "mentionable") return raw === "true" ? "Yes" : "No";
   if (field === "color") return raw || "None";
@@ -509,6 +534,51 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
       if (questions && !rules) return <>{actor} changed the questions</>;
       return <>{actor} changed the rules and questions</>;
     }
+    case AuditAction.WELCOME_SCREEN_UPDATE: {
+      const on = change("enabled");
+      if (on && entry.changes.length === 1)
+        return on.after === "true" ? <>{actor} turned on the welcome screen</> : <>{actor} turned off the welcome screen</>;
+      return <>{actor} changed the welcome screen</>;
+    }
+    case AuditAction.AUTO_MOD_RULE_CREATE:
+      return <>{actor} added the AutoMod rule <b>{change("name")?.after}</b></>;
+    case AuditAction.AUTO_MOD_RULE_UPDATE: {
+      const on = change("enabled");
+      const name = <b>{change("name")?.after || "a rule"}</b>;
+      if (on && entry.changes.filter((c) => c.field !== "name").length === 1)
+        return on.after === "true" ? <>{actor} turned on the AutoMod rule {name}</> : <>{actor} paused the AutoMod rule {name}</>;
+      return <>{actor} changed the AutoMod rule {name}</>;
+    }
+    case AuditAction.AUTO_MOD_RULE_DELETE:
+      return <>{actor} deleted the AutoMod rule <b>{change("name")?.before}</b></>;
+    case AuditAction.AUTO_MOD_TIME_OUT: {
+      const until = change("timed_out_until");
+      const seconds = until ? Math.round((Number(until.after) - toDate(entry.createdAt).getTime()) / 1000) : 0;
+      return (
+        <>
+          <b>AutoMod</b> timed out {target}
+          {seconds > 0 && ` for ${formatDuration(seconds)}`}
+          {entry.channelName && (
+            <>
+              {" "}
+              in <b>#{entry.channelName}</b>
+            </>
+          )}
+        </>
+      );
+    }
+    case AuditAction.EMOJI_CREATE:
+      return <>{actor} added the emoji <b>:{change("name")?.after}:</b></>;
+    case AuditAction.EMOJI_UPDATE: {
+      const renamed = change("name");
+      return (
+        <>
+          {actor} renamed <b>:{renamed?.before}:</b> to <b>:{renamed?.after}:</b>
+        </>
+      );
+    }
+    case AuditAction.EMOJI_DELETE:
+      return <>{actor} deleted the emoji <b>:{change("name")?.before}:</b></>;
     default:
       return <>{actor} did something</>;
   }

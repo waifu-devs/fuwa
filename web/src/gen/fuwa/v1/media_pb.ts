@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/media.proto.
  */
 export const file_fuwa_v1_media: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL21lZGlhLnByb3RvEgdmdXdhLnYxIkQKBU1lZGlhEgoKAmlkGAEgASgJEgsKA3VybBgCIAEoCRIUCgxjb250ZW50X3R5cGUYAyABKAkSDAoEc2l6ZRgEIAEoAyJhChNDcmVhdGVVcGxvYWRSZXF1ZXN0EiYKB3B1cnBvc2UYASABKA4yFS5mdXdhLnYxLk1lZGlhUHVycG9zZRIUCgxjb250ZW50X3R5cGUYAiABKAkSDAoEc2l6ZRgDIAEoAyJ5ChRDcmVhdGVVcGxvYWRSZXNwb25zZRISCgp1cGxvYWRfdXJsGAEgASgJEi4KCmV4cGlyZXNfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEh0KBW1lZGlhGAMgASgLMg4uZnV3YS52MS5NZWRpYSqAAQoMTWVkaWFQdXJwb3NlEh0KGU1FRElBX1BVUlBPU0VfVU5TUEVDSUZJRUQQABIYChRNRURJQV9QVVJQT1NFX0FWQVRBUhABEhgKFE1FRElBX1BVUlBPU0VfQkFOTkVSEAISHQoZTUVESUFfUFVSUE9TRV9TRVJWRVJfSUNPThADMlsKDE1lZGlhU2VydmljZRJLCgxDcmVhdGVVcGxvYWQSHC5mdXdhLnYxLkNyZWF0ZVVwbG9hZFJlcXVlc3QaHS5mdXdhLnYxLkNyZWF0ZVVwbG9hZFJlc3BvbnNlYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("ChNmdXdhL3YxL21lZGlhLnByb3RvEgdmdXdhLnYxIkQKBU1lZGlhEgoKAmlkGAEgASgJEgsKA3VybBgCIAEoCRIUCgxjb250ZW50X3R5cGUYAyABKAkSDAoEc2l6ZRgEIAEoAyJhChNDcmVhdGVVcGxvYWRSZXF1ZXN0EiYKB3B1cnBvc2UYASABKA4yFS5mdXdhLnYxLk1lZGlhUHVycG9zZRIUCgxjb250ZW50X3R5cGUYAiABKAkSDAoEc2l6ZRgDIAEoAyJ5ChRDcmVhdGVVcGxvYWRSZXNwb25zZRISCgp1cGxvYWRfdXJsGAEgASgJEi4KCmV4cGlyZXNfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEh0KBW1lZGlhGAMgASgLMg4uZnV3YS52MS5NZWRpYSqZAQoMTWVkaWFQdXJwb3NlEh0KGU1FRElBX1BVUlBPU0VfVU5TUEVDSUZJRUQQABIYChRNRURJQV9QVVJQT1NFX0FWQVRBUhABEhgKFE1FRElBX1BVUlBPU0VfQkFOTkVSEAISHQoZTUVESUFfUFVSUE9TRV9TRVJWRVJfSUNPThADEhcKE01FRElBX1BVUlBPU0VfRU1PSkkQBDJbCgxNZWRpYVNlcnZpY2USSwoMQ3JlYXRlVXBsb2FkEhwuZnV3YS52MS5DcmVhdGVVcGxvYWRSZXF1ZXN0Gh0uZnV3YS52MS5DcmVhdGVVcGxvYWRSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * A stored file.
@@ -140,6 +140,13 @@ export enum MediaPurpose {
    * @generated from enum value: MEDIA_PURPOSE_SERVER_ICON = 3;
    */
   SERVER_ICON = 3,
+
+  /**
+   * A server's custom emoji.
+   *
+   * @generated from enum value: MEDIA_PURPOSE_EMOJI = 4;
+   */
+  EMOJI = 4,
 }
 
 /**
@@ -149,8 +156,8 @@ export const MediaPurposeSchema: GenEnum<MediaPurpose> = /*@__PURE__*/
   enumDesc(file_fuwa_v1_media, 0);
 
 /**
- * Pictures people upload to this instance: profile pictures, profile banners
- * and server icons.
+ * Pictures people upload to this instance: profile pictures, profile banners,
+ * server icons and custom emoji.
  *
  * An upload takes two steps. CreateUpload checks the file and reserves a
  * place for it; then an HTTP PUT of the file's bytes to `upload_url` stores

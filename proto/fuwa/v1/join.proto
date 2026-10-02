@@ -33,6 +33,29 @@ service JoinService {
   rpc ListApplications(ListApplicationsRequest) returns (ListApplicationsResponse);
   // Lets an applicant in, or turns them down. KICK_MEMBERS.
   rpc ReviewApplication(ReviewApplicationRequest) returns (ReviewApplicationResponse);
+
+  // The welcome screen, for members. Channels the caller can't see are left
+  // out; managers (MANAGE_SERVER) get it whole, turned on or not.
+  rpc GetWelcomeScreen(GetWelcomeScreenRequest) returns (GetWelcomeScreenResponse);
+  // Changes the welcome screen. MANAGE_SERVER.
+  rpc SetWelcomeScreen(SetWelcomeScreenRequest) returns (SetWelcomeScreenResponse);
+}
+
+message GetWelcomeScreenRequest {
+  string server_id = 1;
+}
+
+message GetWelcomeScreenResponse {
+  WelcomeScreen welcome_screen = 1;
+}
+
+message SetWelcomeScreenRequest {
+  string server_id = 1;
+  WelcomeScreen welcome_screen = 2;
+}
+
+message SetWelcomeScreenResponse {
+  WelcomeScreen welcome_screen = 1;
 }
 
 message GetJoinFormRequest {

@@ -64,6 +64,18 @@
     permissions (`permissions::TALK`) until they agree; an approved
     applicant agreed when they applied. Applications are seen only by
     members who can kick (`events::shown_to`).
+    The welcome screen (`server.welcome`, JSON) is served by `JoinService`
+    too: members get only the channels they can see. Custom emoji live in
+    the server file (`emojis`, `api/emoji.rs`); their pictures are uploads
+    (`MEDIA_PURPOSE_EMOJI`) counted in the server's attachments, and every
+    change sends the whole list (`EmojisUpdated`). Messages write them
+    `<:name:id>` (`<a:name:id>` when they move).
+  - `automod.rs`: what an AutoMod rule catches (words with `*` wildcards,
+    pings, links to sites not allowed); `api/automod.rs` keeps the rules
+    (`automod_rules`, one protobuf blob each) and `review` runs them inside
+    the write that sends or edits a message: it blocks (an error starting
+    "AutoMod: "), posts an alert message (`MESSAGE_KIND_AUTO_MOD_ALERT`) and
+    times the author out. People with Manage Server are never caught.
   - `permissions.rs`: roles and permissions. `Rules::access` works out what a
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's
@@ -190,8 +202,8 @@
   - `src/components/settings/account/`: the "Your account" pages (profile,
     server profiles, devices, two-step sign-in, server notifications, data).
   - `src/components/settings/server/`: server settings pages beyond Overview
-    and Access (rules and questions, roles, channels and their permissions,
-    invites, applications, members, bans, audit log, ownership), shown by `dialogs/ServerSettingsDialog.tsx`,
+    and Access (rules and questions, welcome screen, roles, channels and their permissions,
+    emoji, invites, AutoMod, applications, members, bans, audit log, ownership), shown by `dialogs/ServerSettingsDialog.tsx`,
     which also says which pages your permissions open (`useServerSettingsTabs`).
   - Invites: `dialogs/InviteDialog.tsx` makes and copies a link (from the
     server menu or a channel), `pages/InvitePage.tsx` is where a link lands
@@ -201,7 +213,8 @@
     Browse cards and invite pages (Join, Apply to join, waiting, waifu.dev
     only), `ApplyDialog.tsx` the application, `Rules.tsx` the rules sheet a
     new member agrees to (the composer shows it until they do), and
-    `Applied.tsx` the applications waiting in the rail. Those are kept in
+    `Applied.tsx` the applications waiting in the rail. `Welcome.tsx` greets
+    new members once with the welcome screen (remembered in this browser). Those are kept in
     this browser (`src/lib/applied.ts`) and `AppliedWatcher` asks the
     instance how they went. Reviewers use `settings/server/Applications.tsx`;
     owners write rules and questions in `settings/server/JoinFormEditor.tsx`.
@@ -252,7 +265,8 @@
   one event payload and keeps the usage totals in step: members and channels in
   the `usage` row, message totals through `servers::add_usage`. Invites are the
   exception: their codes are secrets, so making or revoking one writes only an
-  audit entry, never an event.
+  audit entry, never an event. AutoMod rules are the same: members mustn't
+  see the words a rule looks for.
 - Writes can run more than once (after a clash), so the closure given to
   `ServerDb::write` or `db::write` does nothing outside its transaction. Reads
   inside a write aren't checked for clashes, only rows written: a check that
