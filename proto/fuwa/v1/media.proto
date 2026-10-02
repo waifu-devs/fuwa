@@ -4,8 +4,8 @@ package fuwa.v1;
 
 import "google/protobuf/timestamp.proto";
 
-// Pictures people upload to this instance: profile pictures, profile banners
-// and server icons.
+// Pictures people upload to this instance: profile pictures, profile banners,
+// server icons and custom emoji.
 //
 // An upload takes two steps. CreateUpload checks the file and reserves a
 // place for it; then an HTTP PUT of the file's bytes to `upload_url` stores
@@ -24,6 +24,8 @@ enum MediaPurpose {
   MEDIA_PURPOSE_AVATAR = 1;
   MEDIA_PURPOSE_BANNER = 2;
   MEDIA_PURPOSE_SERVER_ICON = 3;
+  // A server's custom emoji.
+  MEDIA_PURPOSE_EMOJI = 4;
 }
 
 // A stored file.

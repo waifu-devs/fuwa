@@ -456,6 +456,20 @@ body {
 .markdown.chat > * + * { margin-top: 0.3em; }
 .markdown.chat pre { margin-block: 0.4em; }
 
+/* A server's own emoji sit in the line like a letter; a message of only emoji draws them big, and they pop in. */
+.markdown .emoji { height: 1.375em; width: auto; max-width: 2.75em; vertical-align: -0.3em; margin-inline: 0.05em; }
+.markdown.chat.jumbo { font-size: 2.25em; line-height: 1.25; }
+.markdown.chat.jumbo .emoji { height: 1.2em; max-width: 2.4em; vertical-align: -0.2em; }
+@keyframes jumbo-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: none; }
+}
+.landed .markdown.chat.jumbo > p { display: inline-block; transform-origin: left bottom; animation: jumbo-pop 0.45s cubic-bezier(0.3, 1.5, 0.5, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .landed .markdown.chat.jumbo > p { animation: none; }
+}
+
 /* A sent message glows once when the server confirms it. */
 @keyframes landed {
   from { box-shadow: inset 3px 0 0 var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); }

@@ -13,6 +13,7 @@ import {
   IdCardIcon,
   LockIcon,
   MegaphoneIcon,
+  PartyPopperIcon,
   PlusIcon,
   ScrollTextIcon,
   SettingsIcon,
@@ -30,6 +31,7 @@ import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { InviteDialog } from "@/components/dialogs/InviteDialog";
 import { ServerSettingsDialog, useServerSettingsTabs } from "@/components/dialogs/ServerSettingsDialog";
 import { RulesDialog } from "@/components/join/Rules";
+import { WelcomeGate } from "@/components/join/Welcome";
 import { useLayout } from "@/components/Shell";
 import { Count, SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
@@ -133,6 +135,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   const leave = useAction(leaveServer);
   const developer = usePrefs((p) => p.developerMode);
   const [reading, setReading] = useState(false);
+  const [welcoming, setWelcoming] = useState(false);
   // People waiting to be let in, for whoever can let them in.
   const reviews = !!server?.applications && has(access, Permission.KICK_MEMBERS);
   const waiting = inst?.applications[serverId]?.length ?? 0;
@@ -201,6 +204,11 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
           {server?.hasRules && (
             <DropdownMenuItem onSelect={() => setReading(true)}>
               <ScrollTextIcon /> Server rules
+            </DropdownMenuItem>
+          )}
+          {server?.hasWelcomeScreen && (
+            <DropdownMenuItem onSelect={() => setWelcoming(true)}>
+              <PartyPopperIcon /> Welcome screen
             </DropdownMenuItem>
           )}
           <ServerNotificationItems instanceKey={instanceKey} serverId={serverId} />
@@ -338,6 +346,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
         serverId={serverId}
         parentId={creating?.parentId}
       />
+      {server && <WelcomeGate instanceKey={instanceKey} server={server} open={welcoming} onOpenChange={setWelcoming} />}
       {server && <RulesDialog open={reading} onOpenChange={setReading} instanceKey={instanceKey} server={server} agree={access.pending} />}
       {server && (
         <ServerSettingsDialog

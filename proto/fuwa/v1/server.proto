@@ -265,6 +265,18 @@ enum AuditAction {
   AUDIT_ACTION_APPLICATION_REJECT = 22;
   // The rules or questions changed.
   AUDIT_ACTION_JOIN_FORM_UPDATE = 23;
+  AUDIT_ACTION_WELCOME_SCREEN_UPDATE = 24;
+  // AutoMod actions have the rule's id as their target; the change names it.
+  AUDIT_ACTION_AUTO_MOD_RULE_CREATE = 25;
+  AUDIT_ACTION_AUTO_MOD_RULE_UPDATE = 26;
+  AUDIT_ACTION_AUTO_MOD_RULE_DELETE = 27;
+  // AutoMod timed someone out: they're both actor and target, and the
+  // reason names the rule.
+  AUDIT_ACTION_AUTO_MOD_TIME_OUT = 28;
+  // Emoji actions have the emoji's id as their target; the change names it.
+  AUDIT_ACTION_EMOJI_CREATE = 29;
+  AUDIT_ACTION_EMOJI_UPDATE = 30;
+  AUDIT_ACTION_EMOJI_DELETE = 31;
 }
 
 // One thing someone did with a moderator's or manager's permission.

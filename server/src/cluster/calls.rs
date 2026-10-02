@@ -130,6 +130,16 @@ impl App {
         purpose: pb::MediaPurpose,
         url: &str,
     ) -> Result<Option<String>> {
+        Ok(self.check_upload(account_id, purpose, url).await?.map(|upload| upload.id))
+    }
+
+    /// [`check_picture`](Self::check_picture), telling the upload's size and type too.
+    pub async fn check_upload(
+        &self,
+        account_id: &str,
+        purpose: pb::MediaPurpose,
+        url: &str,
+    ) -> Result<Option<pb::Media>> {
         let Some(id) = media::id_in_url(url) else { return Ok(None) };
         if let Link::Shard(link) = &self.link {
             let request = cpb::CheckPictureRequest {
@@ -137,8 +147,13 @@ impl App {
                 purpose: purpose as i32,
                 url: url.to_string(),
             };
-            let id = link.ask(request, |mut d, r| async move { d.check_picture(r).await }).await?.media_id;
-            return Ok(Some(id).filter(|id| !id.is_empty()));
+            let checked = link.ask(request, |mut d, r| async move { d.check_picture(r).await }).await?;
+            return Ok(Some(checked).filter(|c| !c.media_id.is_empty()).map(|c| pb::Media {
+                id: c.media_id,
+                url: url.to_string(),
+                content_type: c.content_type,
+                size: c.size,
+            }));
         }
         let Some(row) = self.node()?.media(&id).await? else { return Ok(None) };
         if row.account_id != account_id || row.purpose != purpose {
@@ -147,7 +162,7 @@ impl App {
         if !row.stored {
             return Err(Error::FailedPrecondition("that picture hasn't finished uploading".into()));
         }
-        Ok(Some(id))
+        Ok(Some(pb::Media { id, url: url.to_string(), content_type: row.content_type, size: row.size }))
     }
 
     /// Marks a checked upload as used. A failure only means it may be swept
@@ -171,7 +186,7 @@ impl App {
 
     /// Deletes the picture a change replaced, if it was one of this
     /// instance's uploads and belonged to what changed: the account's own
-    /// avatar or banner, or the server's icon.
+    /// avatar or banner, or the server's icon or emoji.
     pub async fn drop_picture(&self, old_url: &str, new_url: &str, owner: PictureOwner<'_>) {
         if old_url == new_url {
             return;
@@ -199,7 +214,8 @@ impl App {
         let belongs = match owner {
             PictureOwner::Account(account_id, purpose) => row.account_id == account_id && row.purpose == purpose,
             PictureOwner::Server(server_id) => {
-                row.purpose == pb::MediaPurpose::ServerIcon && row.server_id.as_deref() == Some(server_id)
+                matches!(row.purpose, pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji)
+                    && row.server_id.as_deref() == Some(server_id)
             }
         };
         if belongs && let Err(err) = self.delete_media(&[id]).await {

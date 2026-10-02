@@ -23,8 +23,9 @@ use crate::node::NodeDb;
 use crate::pb;
 use crate::pb::{
     account_service_server::AccountServiceServer, admin_service_server::AdminServiceServer,
-    auth_service_server::AuthServiceServer, channel_service_server::ChannelServiceServer,
-    direct_message_service_server::DirectMessageServiceServer, event_service_server::EventServiceServer,
+    auth_service_server::AuthServiceServer, auto_mod_service_server::AutoModServiceServer,
+    channel_service_server::ChannelServiceServer, direct_message_service_server::DirectMessageServiceServer,
+    emoji_service_server::EmojiServiceServer, event_service_server::EventServiceServer,
     invite_service_server::InviteServiceServer, join_service_server::JoinServiceServer,
     media_service_server::MediaServiceServer, message_service_server::MessageServiceServer,
     node_service_server::NodeServiceServer, role_service_server::RoleServiceServer,
@@ -284,6 +285,8 @@ impl App {
             .add_service(RoleServiceServer::new(api.clone()))
             .add_service(InviteServiceServer::new(api.clone()))
             .add_service(JoinServiceServer::new(api.clone()))
+            .add_service(AutoModServiceServer::new(api.clone()))
+            .add_service(EmojiServiceServer::new(api.clone()))
             .add_service(EventServiceServer::new(api.clone()))
             .add_service(MediaServiceServer::new(api.clone()))
             .add_service(DirectMessageServiceServer::new(api.clone()))

@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// A server's custom emoji. Members write them as <:name:id>; every change
+// goes out to members as EmojisUpdated.
+service EmojiService {
+  // The server's emoji, oldest first. Any member.
+  rpc ListEmojis(ListEmojisRequest) returns (ListEmojisResponse);
+  // Adds an emoji from a picture the caller uploaded for it
+  // (MEDIA_PURPOSE_EMOJI). MANAGE_EMOJI. Counts against the server's emoji
+  // and attachment caps.
+  rpc CreateEmoji(CreateEmojiRequest) returns (CreateEmojiResponse);
+  // Renames one. MANAGE_EMOJI.
+  rpc UpdateEmoji(UpdateEmojiRequest) returns (UpdateEmojiResponse);
+  // Deletes one and its picture. MANAGE_EMOJI. Messages that used it show
+  // its name instead.
+  rpc DeleteEmoji(DeleteEmojiRequest) returns (DeleteEmojiResponse);
+}
+
+message ListEmojisRequest {
+  string server_id = 1;
+}
+
+message ListEmojisResponse {
+  repeated Emoji emojis = 1;
+}
+
+message CreateEmojiRequest {
+  string server_id = 1;
+  string name = 2;
+  string url = 3;
+}
+
+message CreateEmojiResponse {
+  Emoji emoji = 1;
+}
+
+message UpdateEmojiRequest {
+  string server_id = 1;
+  string emoji_id = 2;
+  string name = 3;
+}
+
+message UpdateEmojiResponse {
+  Emoji emoji = 1;
+}
+
+message DeleteEmojiRequest {
+  string server_id = 1;
+  string emoji_id = 2;
+}
+
+message DeleteEmojiResponse {}

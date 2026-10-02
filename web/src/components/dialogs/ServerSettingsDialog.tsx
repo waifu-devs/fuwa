@@ -4,6 +4,7 @@ import {
   BellIcon,
   ChartColumnIcon,
   BadgeCheckIcon,
+  BotIcon,
   CheckIcon,
   ChevronDownIcon,
   ClipboardListIcon,
@@ -20,9 +21,11 @@ import {
   LinkIcon,
   LoaderCircleIcon,
   LockIcon,
+  PartyPopperIcon,
   ScrollTextIcon,
   SettingsIcon,
   ShieldIcon,
+  SmilePlusIcon,
   Trash2Icon,
   TriangleAlertIcon,
   UsersIcon,
@@ -39,6 +42,9 @@ import { PictureField } from "@/components/PictureField";
 import { joinLine } from "@/components/chat/MessageList";
 import { Applications } from "@/components/settings/server/Applications";
 import { AuditLog } from "@/components/settings/server/AuditLog";
+import { AutoMod } from "@/components/settings/server/AutoMod";
+import { Emoji } from "@/components/settings/server/Emoji";
+import { WelcomeScreenEditor } from "@/components/settings/server/WelcomeScreenEditor";
 import { JoinFormEditor } from "@/components/settings/server/JoinFormEditor";
 import { ServerDoor } from "@/components/join/ServerDoor";
 import { useFuwa } from "@/fuwa/store";
@@ -74,10 +80,12 @@ const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boole
   overview: (a) => has(a, Permission.MANAGE_SERVER),
   access: (a) => has(a, Permission.MANAGE_SERVER),
   "join-form": (a) => has(a, Permission.MANAGE_SERVER),
+  welcome: (a) => has(a, Permission.MANAGE_SERVER),
   invites: (a) =>
     has(a, Permission.MANAGE_SERVER) || has(a, Permission.CREATE_INVITE) || [...a.channels.values()].some((bits) => bits & bit(Permission.CREATE_INVITE)),
   roles: (a) => has(a, Permission.MANAGE_ROLES),
   channels: (a) => [...a.channels.values()].some((bits) => bits & (bit(Permission.MANAGE_CHANNELS) | bit(Permission.MANAGE_ROLES))),
+  emoji: (a) => has(a, Permission.MANAGE_EMOJI),
   usage: (a, admin) => admin || has(a, Permission.MANAGE_SERVER),
   limits: (_, admin) => admin,
   applications: (a) => has(a, Permission.KICK_MEMBERS),
@@ -86,6 +94,7 @@ const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boole
       has(a, p),
     ),
   bans: (a) => has(a, Permission.BAN_MEMBERS),
+  automod: (a) => has(a, Permission.MANAGE_SERVER),
   "audit-log": (a) => has(a, Permission.VIEW_AUDIT_LOG),
   ownership: (a) => a.owner,
   danger: (a, admin) => a.owner || admin,
@@ -164,6 +173,18 @@ export function ServerSettingsDialog({
       ],
     },
     {
+      id: "welcome",
+      label: "Welcome screen",
+      icon: PartyPopperIcon,
+      description: "What new members see first: a few words and channels to start in.",
+      keywords: "welcome onboarding new members greet suggested channels",
+      settings: [
+        { id: "welcome-enabled", label: "Show a welcome screen" },
+        { id: "welcome-description", label: "Welcome message", keywords: "description" },
+        { id: "welcome-channels", label: "Suggested channels", keywords: "start here" },
+      ],
+    },
+    {
       id: "invites",
       label: "Invites",
       icon: LinkIcon,
@@ -192,6 +213,13 @@ export function ServerSettingsDialog({
         { id: "channel-permissions", label: "Channel permissions", keywords: "private hidden access roles" },
       ],
     },
+    {
+      id: "emoji",
+      label: "Emoji",
+      icon: SmilePlusIcon,
+      description: "The server's own emoji. Everyone here can use them as :name:.",
+      keywords: "emoji emote custom sticker upload",
+    },
     { id: "usage", label: "Usage", icon: ChartColumnIcon, description: "What the server holds, against its caps.", keywords: "storage members messages" },
     {
       id: "limits",
@@ -212,6 +240,13 @@ export function ServerSettingsDialog({
     },
     { id: "members", label: "Members", icon: UsersIcon, description: "Roles, nicknames, time-outs, kicks and bans.", keywords: "admin role kick ban timeout nickname" },
     { id: "bans", label: "Bans", icon: GavelIcon, description: "Who's kept out, and why.", keywords: "unban banned" },
+    {
+      id: "automod",
+      label: "AutoMod",
+      icon: BotIcon,
+      description: "Rules that catch messages as they're sent: blocked words, mention spam and links.",
+      keywords: "automod auto moderation filter blocked words banned words swear profanity spam mentions pings raid links urls block alert time out",
+    },
     { id: "audit-log", label: "Audit log", icon: ScrollTextIcon, description: "Every change people made here.", keywords: "history log moderation" },
   ].filter((s) => can(s.id));
   const people = peopleSections.length ? [{ label: "People", sections: peopleSections }] : [];
@@ -233,6 +268,9 @@ export function ServerSettingsDialog({
       {tab === "overview" && can("overview") && <Overview instanceKey={instanceKey} server={server} />}
       {tab === "access" && can("access") && <Access instanceKey={instanceKey} server={server} />}
       {tab === "join-form" && can("join-form") && <JoinFormEditor instanceKey={instanceKey} server={server} onOpenAccess={() => setTab("access")} />}
+      {tab === "welcome" && can("welcome") && <WelcomeScreenEditor instanceKey={instanceKey} server={server} />}
+      {tab === "emoji" && can("emoji") && <Emoji instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "automod" && can("automod") && <AutoMod instanceKey={instanceKey} serverId={server.id} />}
       {tab === "invites" && can("invites") && <Invites instanceKey={instanceKey} serverId={server.id} />}
       {tab === "roles" && can("roles") && <Roles instanceKey={instanceKey} serverId={server.id} initial={target} />}
       {tab === "channels" && can("channels") && <Channels instanceKey={instanceKey} serverId={server.id} initial={target} />}
@@ -646,6 +684,7 @@ function Usage({ instanceKey, serverId }: { instanceKey: string; serverId: strin
     { label: "Messages", value: Number(u.messages), sub: `${Number(u.messagesSent).toLocaleString()} sent all time` },
     { label: "Storage", value: Number(u.storageBytes), limit: l?.storageBytes, bytes: true },
     { label: "Attachments", value: Number(u.attachmentBytes), limit: l?.attachmentBytes, bytes: true, sub: `${Number(u.attachments)} files` },
+    { label: "Emoji", value: Number(u.emojis), limit: l?.emojis },
     { label: "Events", value: Number(u.events), sub: "in the server's log" },
   ];
   return (
@@ -687,12 +726,13 @@ function Usage({ instanceKey, serverId }: { instanceKey: string; serverId: strin
 }
 
 type Caps = Omit<ServerLimits, "$typeName">;
-const CAP_FIELDS = ["members", "channels", "storageBytes", "attachmentBytes"] as const;
+const CAP_FIELDS = ["members", "channels", "storageBytes", "attachmentBytes", "emojis"] as const;
 const caps = (l: ServerLimits | undefined): Caps => ({
   members: l?.members,
   channels: l?.channels,
   storageBytes: l?.storageBytes,
   attachmentBytes: l?.attachmentBytes,
+  emojis: l?.emojis,
 });
 
 /** Instance admins: this server's own caps, over the instance defaults. */
@@ -734,6 +774,7 @@ function Limits({ instanceKey, serverId }: { instanceKey: string; serverId: stri
         <Cap label="Channels" value={draft.channels} onChange={set("channels")} placeholder={fallback("channels")} />
         <Cap label="Storage" bytes value={draft.storageBytes} onChange={set("storageBytes")} placeholder={fallback("storageBytes", true)} />
         <Cap label="Files" bytes value={draft.attachmentBytes} onChange={set("attachmentBytes")} placeholder={fallback("attachmentBytes", true)} />
+        <Cap label="Emoji" value={draft.emojis} onChange={set("emojis")} placeholder={fallback("emojis")} />
       </div>
       <SaveBar
         count={changed}

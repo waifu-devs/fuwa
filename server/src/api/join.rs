@@ -18,6 +18,10 @@ const MAX_QUESTIONS: usize = 5;
 const MAX_PROMPT: usize = 200;
 const MAX_LINE_ANSWER: usize = 300;
 const MAX_PARAGRAPH_ANSWER: usize = 1000;
+/// As Discord's welcome screen has it.
+const MAX_WELCOME_CHANNELS: usize = 5;
+const MAX_WELCOME: usize = 300;
+const MAX_WELCOME_CHANNEL: usize = 60;
 
 /// A form as it may be saved: trimmed, within its limits, nothing blank.
 fn checked_form(form: pb::JoinForm) -> Result<pb::JoinForm> {
@@ -67,8 +71,105 @@ fn checked_answers(
         .collect()
 }
 
+/// A welcome screen as it may be saved: its channels real and once each,
+/// its emoji Unicode or the server's own.
+async fn checked_welcome(
+    conn: &turso::Connection,
+    server_id: &str,
+    welcome: pb::WelcomeScreen,
+) -> Result<pb::WelcomeScreen> {
+    let description = text("the welcome", &welcome.description, 0, MAX_WELCOME)?;
+    if welcome.channels.len() > MAX_WELCOME_CHANNELS {
+        return Err(Error::invalid(format!("a welcome screen suggests up to {MAX_WELCOME_CHANNELS} channels")));
+    }
+    let emojis = store::load_emojis(conn, server_id).await?;
+    let mut channels: Vec<pb::WelcomeChannel> = Vec::new();
+    for item in welcome.channels {
+        let channel =
+            store::load_channel(conn, server_id, &item.channel_id).await?.ok_or(Error::NotFound("channel"))?;
+        if channel.r#type == pb::ChannelType::Category as i32 {
+            return Err(Error::invalid("suggest channels, not categories"));
+        }
+        if channels.iter().any(|c| c.channel_id == channel.id) {
+            return Err(Error::invalid(format!("#{} is on the welcome screen twice", channel.name)));
+        }
+        let emoji = item.emoji.trim().to_string();
+        let custom = emoji.strip_prefix("<:").and_then(|rest| rest.strip_suffix('>')).and_then(|r| r.rsplit_once(':'));
+        let fine = match custom {
+            Some((_, id)) => emojis.iter().any(|e| e.id == id),
+            None => emoji.chars().count() <= 16 && !emoji.chars().any(|c| c.is_ascii_alphanumeric() || c == '<'),
+        };
+        if !fine {
+            return Err(Error::invalid("welcome emoji are a Unicode emoji or one of the server's own"));
+        }
+        channels.push(pb::WelcomeChannel {
+            channel_id: channel.id,
+            description: text("a channel's note", &item.description, 0, MAX_WELCOME_CHANNEL)?,
+            emoji,
+        });
+    }
+    if welcome.enabled && description.is_empty() && channels.is_empty() {
+        return Err(Error::invalid("say hello or suggest a channel before turning the welcome screen on"));
+    }
+    Ok(pb::WelcomeScreen { enabled: welcome.enabled, description, channels })
+}
+
 #[tonic::async_trait]
 impl JoinService for Api {
+    async fn get_welcome_screen(
+        &self,
+        request: Request<pb::GetWelcomeScreenRequest>,
+    ) -> Result<Response<pb::GetWelcomeScreenResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let Seat { sdb, access, .. } = self.membership(&account, &request.get_ref().server_id).await?;
+                let mut welcome = store::load_welcome(&sdb.read()?).await?;
+                if !access.has(Permission::ManageServer) {
+                    if !welcome.enabled {
+                        welcome = pb::WelcomeScreen::default();
+                    }
+                    welcome.channels.retain(|c| access.can_see(&c.channel_id));
+                }
+                Ok(pb::GetWelcomeScreenResponse { welcome_screen: Some(welcome) })
+            }
+            .await,
+        )
+    }
+
+    async fn set_welcome_screen(
+        &self,
+        request: Request<pb::SetWelcomeScreenRequest>,
+    ) -> Result<Response<pb::SetWelcomeScreenResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let req = request.into_inner();
+                let sdb = self.with(&account, &req.server_id, Permission::ManageServer).await?.sdb;
+                let draft = req.welcome_screen.unwrap_or_default();
+                let (welcome, server) = sdb
+                    .write(&account.id, async |conn, events| {
+                        let welcome = checked_welcome(conn, &sdb.id, draft.clone()).await?;
+                        let before = store::load_welcome(conn).await?;
+                        store::save_welcome(conn, &welcome).await?;
+                        if before != welcome {
+                            let entry = Audit::new(pb::AuditAction::WelcomeScreenUpdate, "")
+                                .change("enabled", before.enabled, welcome.enabled)
+                                .change("channels", before.channels.len(), welcome.channels.len());
+                            store::audit(conn, &account.id, entry).await?;
+                        }
+                        let server = store::load_server(conn).await?;
+                        events.push(Payload::ServerUpdated(pb::ServerUpdated { server: Some(server.clone()) }));
+                        Ok((welcome, server))
+                    })
+                    .await?;
+                self.app.server_changed(&server).await;
+                Ok(pb::SetWelcomeScreenResponse { welcome_screen: Some(welcome) })
+            }
+            .await,
+        )
+    }
+
     async fn get_join_form(
         &self,
         request: Request<pb::GetJoinFormRequest>,

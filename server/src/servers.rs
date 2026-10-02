@@ -32,6 +32,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0005_roles.sql"),
     include_str!("../migrations/server/0006_invites.sql"),
     include_str!("../migrations/server/0007_join.sql"),
+    include_str!("../migrations/server/0008_automod_emoji_welcome.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -386,7 +387,7 @@ impl ServerDb {
             "SELECT u.members, u.channels, u.messages + c.messages, u.messages_sent + c.messages_sent,
                     u.message_bytes + c.message_bytes, u.attachments + c.attachments,
                     u.attachment_bytes + c.attachment_bytes, (SELECT coalesce(max(sequence), 0) FROM events),
-                    max(u.updated_at, c.at)
+                    max(u.updated_at, c.at), u.emojis
              FROM usage u,
                   (SELECT coalesce(sum(messages), 0) messages, coalesce(sum(messages_sent), 0) messages_sent,
                           coalesce(sum(message_bytes), 0) message_bytes, coalesce(sum(attachments), 0) attachments,
@@ -408,7 +409,7 @@ impl ServerDb {
         let conn = self.read()?;
         query_one(
             &conn,
-            "SELECT members, channels, storage_bytes, attachment_bytes FROM limits WHERE id = 1",
+            "SELECT members, channels, storage_bytes, attachment_bytes, emojis FROM limits WHERE id = 1",
             (),
             |r| {
                 Ok(pb::ServerLimits {
@@ -416,6 +417,7 @@ impl ServerDb {
                     channels: r.get(1)?,
                     storage_bytes: r.get(2)?,
                     attachment_bytes: r.get(3)?,
+                    emojis: r.get(4)?,
                 })
             },
         )
@@ -431,8 +433,8 @@ impl ServerDb {
     pub async fn set_limits(&self, limits: &pb::ServerLimits) -> Result<()> {
         db::write(&self.db, async |conn| {
             conn.execute(
-                "UPDATE limits SET members = ?1, channels = ?2, storage_bytes = ?3, attachment_bytes = ?4 WHERE id = 1",
-                (limits.members, limits.channels, limits.storage_bytes, limits.attachment_bytes),
+                "UPDATE limits SET members = ?1, channels = ?2, storage_bytes = ?3, attachment_bytes = ?4, emojis = ?5 WHERE id = 1",
+                (limits.members, limits.channels, limits.storage_bytes, limits.attachment_bytes, limits.emojis),
             )
             .await?;
             Ok(())
@@ -447,6 +449,7 @@ pub fn effective_limits(own: pb::ServerLimits, defaults: &config::Limits) -> pb:
         channels: own.channels.or(defaults.channels),
         storage_bytes: own.storage_bytes.or(defaults.storage_bytes),
         attachment_bytes: own.attachment_bytes.or(defaults.attachment_bytes),
+        emojis: own.emojis.or(defaults.emojis),
     }
 }
 
@@ -483,6 +486,7 @@ fn usage_row(r: &Row) -> turso::Result<pb::ServerUsage> {
         events: r.get(7)?,
         storage_bytes: 0,
         updated_at: Some(timestamp(r.get(8)?)),
+        emojis: r.get(9)?,
     })
 }
 
@@ -490,7 +494,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
     query_one(
         conn,
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
-                default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]'
+                default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -510,6 +514,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 applications: r.get(12)?,
                 linked_only: r.get(13)?,
                 has_rules: r.get(14)?,
+                has_welcome_screen: from_json::<StoredWelcome>(&r.get::<String>(15)?, "welcome screen").enabled,
             })
         },
     )
@@ -1062,6 +1067,96 @@ struct StoredQuestion {
     paragraph: bool,
     #[serde(default)]
     required: bool,
+}
+
+/// The welcome screen as the server's file keeps it.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct StoredWelcome {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    channels: Vec<StoredWelcomeChannel>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredWelcomeChannel {
+    channel_id: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    emoji: String,
+}
+
+/// The server's welcome screen, whole.
+pub async fn load_welcome(conn: &Connection) -> Result<pb::WelcomeScreen> {
+    let text = query_one(conn, "SELECT welcome FROM server", (), |r| r.get::<String>(0))
+        .await?
+        .ok_or_else(|| Error::internal("server row missing"))?;
+    let stored: StoredWelcome = from_json(&text, "welcome screen");
+    Ok(pb::WelcomeScreen {
+        enabled: stored.enabled,
+        description: stored.description,
+        channels: stored
+            .channels
+            .into_iter()
+            .map(|c| pb::WelcomeChannel { channel_id: c.channel_id, description: c.description, emoji: c.emoji })
+            .collect(),
+    })
+}
+
+/// Replaces the welcome screen, inside a write.
+pub async fn save_welcome(conn: &Connection, welcome: &pb::WelcomeScreen) -> Result<()> {
+    let stored = StoredWelcome {
+        enabled: welcome.enabled,
+        description: welcome.description.clone(),
+        channels: welcome
+            .channels
+            .iter()
+            .map(|c| StoredWelcomeChannel {
+                channel_id: c.channel_id.clone(),
+                description: c.description.clone(),
+                emoji: c.emoji.clone(),
+            })
+            .collect(),
+    };
+    conn.execute("UPDATE server SET welcome = ?1, updated_at = ?2", (to_json(&stored)?, now_ms())).await?;
+    Ok(())
+}
+
+// ───────────────────────── Emoji and AutoMod ─────────────────────────
+
+const EMOJI_COLUMNS: &str = "id, name, url, animated, creator_id, size, created_at";
+
+fn emoji_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Emoji> + '_ {
+    move |r| {
+        Ok(pb::Emoji {
+            id: r.get(0)?,
+            server_id: server_id.to_string(),
+            name: r.get(1)?,
+            url: r.get(2)?,
+            animated: r.get(3)?,
+            creator_id: r.get(4)?,
+            size: r.get(5)?,
+            created_at: Some(timestamp(r.get(6)?)),
+        })
+    }
+}
+
+/// The server's emoji, oldest first.
+pub async fn load_emojis(conn: &Connection, server_id: &str) -> Result<Vec<pb::Emoji>> {
+    query_all(conn, &format!("SELECT {EMOJI_COLUMNS} FROM emojis ORDER BY created_at, id"), (), emoji_row(server_id))
+        .await
+}
+
+/// The server's AutoMod rules, oldest first.
+pub async fn load_automod(conn: &Connection) -> Result<Vec<pb::AutoModRule>> {
+    query_all(conn, "SELECT rule FROM automod_rules ORDER BY created_at, id", (), |r| r.get::<Vec<u8>>(0))
+        .await?
+        .into_iter()
+        .map(|bytes| Ok(pb::AutoModRule::decode(bytes.as_slice())?))
+        .collect()
 }
 
 /// An answer as an application keeps it, with the question as it was asked.

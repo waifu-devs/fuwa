@@ -22,6 +22,7 @@ pub const FIELDS: &[&str] = &[
     "default_limits.channels",
     "default_limits.storage_bytes",
     "default_limits.attachment_bytes",
+    "default_limits.emojis",
     "picture_upload_bytes",
     "telemetry",
     "web",
@@ -127,6 +128,7 @@ impl Settings {
                 channels: limits.channels,
                 storage_bytes: limits.storage_bytes,
                 attachment_bytes: limits.attachment_bytes,
+                emojis: limits.emojis,
             }),
             telemetry: self.telemetry,
             web: self.web,
@@ -171,6 +173,7 @@ impl Settings {
             "default_limits.channels" => Value::from(limits.channels),
             "default_limits.storage_bytes" => Value::from(limits.storage_bytes),
             "default_limits.attachment_bytes" => Value::from(limits.attachment_bytes),
+            "default_limits.emojis" => Value::from(limits.emojis),
             "picture_upload_bytes" => Value::from(from.picture_upload_bytes),
             "telemetry" => Value::from(from.telemetry),
             "web" => Value::from(from.web),
@@ -199,6 +202,7 @@ impl Settings {
             "default_limits.channels" => Value::from(limits.channels),
             "default_limits.storage_bytes" => Value::from(limits.storage_bytes),
             "default_limits.attachment_bytes" => Value::from(limits.attachment_bytes),
+            "default_limits.emojis" => Value::from(limits.emojis),
             "picture_upload_bytes" => Value::from(limits.picture_upload_bytes),
             "telemetry" => Value::from(self.telemetry),
             "web" => Value::from(self.web),
@@ -237,6 +241,7 @@ impl Settings {
             "default_limits.channels" => self.limits.channels = cap(field, value)?,
             "default_limits.storage_bytes" => self.limits.storage_bytes = cap(field, value)?,
             "default_limits.attachment_bytes" => self.limits.attachment_bytes = cap(field, value)?,
+            "default_limits.emojis" => self.limits.emojis = cap(field, value)?,
             "picture_upload_bytes" => self.limits.picture_upload_bytes = cap(field, value)?,
             "telemetry" => self.telemetry = flag(field, value)?,
             "web" => self.web = flag(field, value)?,
@@ -418,7 +423,7 @@ mod tests {
         assert!(s.set_json("linked_issuer", &Value::from("http://localhost:4000/")).is_ok());
         assert_eq!(s.linked_issuer, "http://localhost:4000");
         assert!(expand(&["nope".into()]).is_err());
-        assert_eq!(expand(&["default_limits".into()]).unwrap().len(), 4);
+        assert_eq!(expand(&["default_limits".into()]).unwrap().len(), 5);
     }
 
     #[test]

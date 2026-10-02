@@ -20,9 +20,12 @@ impl MediaService for Api {
                 let req = request.into_inner();
                 let purpose = match pb::MediaPurpose::try_from(req.purpose) {
                     Ok(
-                        purpose @ (pb::MediaPurpose::Avatar | pb::MediaPurpose::Banner | pb::MediaPurpose::ServerIcon),
+                        purpose @ (pb::MediaPurpose::Avatar
+                        | pb::MediaPurpose::Banner
+                        | pb::MediaPurpose::ServerIcon
+                        | pb::MediaPurpose::Emoji),
                     ) => purpose,
-                    _ => return Err(Error::invalid("an upload is an avatar, a banner or a server icon")),
+                    _ => return Err(Error::invalid("an upload is an avatar, a banner, a server icon or an emoji")),
                 };
                 if !media::PICTURE_TYPES.contains(&req.content_type.as_str()) {
                     return Err(Error::invalid("pictures can be PNG, JPEG, GIF, WebP or AVIF"));
@@ -78,6 +81,16 @@ impl Api {
         url: &str,
     ) -> Result<Option<String>> {
         self.app.check_picture(&account.id, purpose, url).await
+    }
+
+    /// Like `check_picture`, with the upload's size and type.
+    pub(super) async fn check_upload(
+        &self,
+        account: &Account,
+        purpose: pb::MediaPurpose,
+        url: &str,
+    ) -> Result<Option<pb::Media>> {
+        self.app.check_upload(&account.id, purpose, url).await
     }
 
     /// Marks a checked upload as used.

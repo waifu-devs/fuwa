@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import type {
   Application,
   Channel,
+  Emoji,
   Event,
   Member,
   Message,
@@ -100,6 +101,8 @@ export type InstanceState = {
   members: Record<string, Member[]>;
   /** Per server, highest first; @everyone (whose id is the server's) last. */
   roles: Record<string, Role[]>;
+  /** Per server, its own emoji, oldest first. */
+  emojis: Record<string, Emoji[]>;
   /** Everyone this instance has shown us, by id, so authors resolve even after they leave. */
   users: Record<string, User>;
   /** Per channel, only for channels someone opened. */
@@ -166,6 +169,7 @@ export function emptyInstance(key: string, url: string): InstanceState {
     channels: {},
     members: {},
     roles: {},
+    emojis: {},
     users: {},
     messages: {},
     pending: {},
@@ -266,6 +270,7 @@ export function removeServer(i: InstanceState, serverId: string): InstanceState 
     channels: without(i.channels, serverId),
     members: without(i.members, serverId),
     roles: without(i.roles, serverId),
+    emojis: without(i.emojis, serverId),
     synced: without(i.synced, serverId),
     applications: without(i.applications, serverId),
     messages: keep(i.messages),
@@ -289,12 +294,14 @@ export function applySnapshot(
   channels: Channel[],
   members: Member[],
   roles: Role[],
+  emojis: Emoji[] = [],
 ): InstanceState {
   const next = withChannels(addServer(i, server), server.id, channels);
   return {
     ...next,
     members: { ...next.members, [server.id]: sortMembers(members) },
     roles: { ...next.roles, [server.id]: sortRoles(roles) },
+    emojis: { ...next.emojis, [server.id]: emojis },
     users: withUsers(
       next.users,
       members.map((m) => m.user),
@@ -422,6 +429,8 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
         channels: i.channels[sid] ? { ...i.channels, [sid]: i.channels[sid]!.map(unwrite) } : i.channels,
       };
     }
+    case "emojisUpdated":
+      return { ...i, emojis: { ...i.emojis, [sid]: p.value.emojis } };
     case "applicationUpdated": {
       // Only kept for servers whose list someone opened; the rest load fresh.
       const application = p.value.application;

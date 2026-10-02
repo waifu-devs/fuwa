@@ -37,6 +37,7 @@ export const KNOWN: P[] = [
   P.MENTION_EVERYONE,
   P.MANAGE_MESSAGES,
   P.CREATE_INVITE,
+  P.MANAGE_EMOJI,
 ];
 
 export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), 0);
@@ -71,7 +72,10 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     label: "Administrator",
     about: "Every permission, in every channel, whatever a channel says. Still only over roles and people ranked below. Give it with care.",
   },
-  [P.MANAGE_SERVER]: { label: "Manage server", about: "Change the server's name, icon, description and system messages, and see its usage." },
+  [P.MANAGE_SERVER]: {
+    label: "Manage server",
+    about: "Change the server's name, icon, description, AutoMod and welcome screen, and see its usage. AutoMod leaves them alone.",
+  },
   [P.MANAGE_ROLES]: {
     label: "Manage roles",
     about: "Create and edit roles ranked below their own and hand them out, with only the permissions they have.",
@@ -106,6 +110,7 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     about: "Make invite links that let people join, even when the server isn't in Browse.",
     channel: "Make invite links that open this channel.",
   },
+  [P.MANAGE_EMOJI]: { label: "Manage emoji", about: "Add, rename and delete the server's own emoji." },
 };
 
 export const permissionInfo = (p: P): PermissionInfo => (p === P.UNSPECIFIED ? { label: "", about: "" } : PERMISSIONS[p]);
@@ -115,7 +120,7 @@ export const permissionLabel = (p: P) => permissionInfo(p).label;
 export const PERMISSION_GROUPS: { title: string; permissions: P[] }[] = [
   {
     title: "Server",
-    permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.MANAGE_SERVER, P.VIEW_AUDIT_LOG],
+    permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.MANAGE_EMOJI, P.MANAGE_SERVER, P.VIEW_AUDIT_LOG],
   },
   {
     title: "Membership",

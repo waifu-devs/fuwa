@@ -42,7 +42,7 @@ service DirectoryService {
   rpc CheckPicture(CheckPictureRequest) returns (CheckPictureResponse);
   // Marks a checked picture as used.
   rpc KeepPicture(KeepPictureRequest) returns (KeepPictureResponse);
-  // Deletes the server icon a change replaced.
+  // Deletes the server icon or emoji a change replaced.
   rpc DropPicture(DropPictureRequest) returns (DropPictureResponse);
   // How many servers an account owns, for the cap on that.
   rpc CountOwnedServers(CountOwnedServersRequest) returns (CountOwnedServersResponse);
@@ -206,6 +206,9 @@ message CheckPictureRequest {
 message CheckPictureResponse {
   // The picture's id when the link is to one of this instance's uploads.
   string media_id = 1;
+  // Its size in bytes, and its type.
+  int64 size = 2;
+  string content_type = 3;
 }
 
 message KeepPictureRequest {

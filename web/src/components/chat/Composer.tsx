@@ -1,4 +1,4 @@
-import { HourglassIcon, LockIcon, ScrollTextIcon, SendHorizontalIcon, SnailIcon } from "lucide-react";
+import { HourglassIcon, LockIcon, ScrollTextIcon, SendHorizontalIcon, SmileIcon, SnailIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MessageKind, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
@@ -6,6 +6,7 @@ import { run, sendMessage } from "@/fuwa/actions";
 import { useAccess } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { MentionPicker, useMentionPicker } from "@/components/chat/MentionPicker";
+import { EmojiPicker } from "@/components/EmojiPicker";
 import { RulesDialog } from "@/components/join/Rules";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
@@ -110,6 +111,22 @@ export function Composer({
   const picker = useMentionPicker(instanceKey, serverId, channel, box, text, setText);
   const server = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId));
   const [rules, setRules] = useState(false);
+  const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[serverId]);
+
+  /** Puts text at the caret, with a space before it when it would touch a word. */
+  function insert(piece: string) {
+    const el = box.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    const gap = start > 0 && !/\s$/.test(text.slice(0, start)) ? " " : "";
+    const next = text.slice(0, start) + gap + piece + text.slice(end);
+    setText(next);
+    const at = start + gap.length + piece.length;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(at, at);
+    });
+  }
 
   useEffect(() => {
     setText(drafts.get(channelId) ?? "");
@@ -207,6 +224,24 @@ export function Composer({
             </motion.span>
           )}
         </AnimatePresence>
+        <EmojiPicker
+          emojis={emojis}
+          server={server}
+          closeOnPick={false}
+          onPick={(emoji) => insert(emoji.text.startsWith("<") ? `:${emoji.name}:` : emoji.text)}
+        >
+          {(open) => (
+            <motion.button
+              type="button"
+              aria-label="Emoji"
+              whileHover={{ scale: 1.12, rotate: -10 }}
+              whileTap={{ scale: 0.85 }}
+              className={cn("group mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition-colors hover:text-primary", open && "bg-primary/10 text-primary")}
+            >
+              <SmileIcon className="size-[18px]" />
+            </motion.button>
+          )}
+        </EmojiPicker>
         <motion.button
           type="button"
           onClick={send}

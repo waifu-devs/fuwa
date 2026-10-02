@@ -181,6 +181,11 @@ enum Permission {
   PERMISSION_MANAGE_MESSAGES = 16;
   // Make invite links, into the server or into a channel.
   PERMISSION_CREATE_INVITE = 17;
+
+  // Server-wide only.
+
+  // Add, rename and delete the server's custom emoji.
+  PERMISSION_MANAGE_EMOJI = 18;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -253,6 +258,125 @@ message Server {
   bool linked_only = 14;
   // It has rules: new members agree to them before they talk.
   bool has_rules = 15;
+  // It has a welcome screen turned on: new members see it once they're in.
+  bool has_welcome_screen = 16;
+}
+
+// What new members see once they're in: a few words and the channels to
+// start with. Discord calls it the welcome screen.
+message WelcomeScreen {
+  bool enabled = 1;
+  // Inline Markdown, up to 300 characters.
+  string description = 2;
+  // Up to 5, in order. Members only get the ones they can see.
+  repeated WelcomeChannel channels = 3;
+}
+
+message WelcomeChannel {
+  string channel_id = 1;
+  // Why to go there, up to 60 characters.
+  string description = 2;
+  // A Unicode emoji, or one of the server's own written <:name:id>. Empty for none.
+  string emoji = 3;
+}
+
+// A server's own emoji, written in messages as <:name:id>.
+message Emoji {
+  string id = 1;
+  string server_id = 2;
+  // 2 to 32 letters, digits and underscores, unique in the server.
+  string name = 3;
+  // An upload on this instance (MEDIA_PURPOSE_EMOJI).
+  string url = 4;
+  // A GIF that moves.
+  bool animated = 5;
+  // Who added it.
+  string creator_id = 6;
+  // The picture's size, counted in the server's attachment usage.
+  int64 size = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+// ============================================================================
+// AutoMod
+// ============================================================================
+
+// What sets off an AutoMod rule.
+enum AutoModTrigger {
+  AUTO_MOD_TRIGGER_UNSPECIFIED = 0;
+  // Words or phrases in a message.
+  AUTO_MOD_TRIGGER_KEYWORDS = 1;
+  // Too many people, roles, @everyone or @here pinged in one message.
+  AUTO_MOD_TRIGGER_MENTION_SPAM = 2;
+  // Links to sites the server doesn't allow.
+  AUTO_MOD_TRIGGER_LINKS = 3;
+}
+
+enum AutoModActionKind {
+  AUTO_MOD_ACTION_KIND_UNSPECIFIED = 0;
+  // The message isn't sent; its author is told why.
+  AUTO_MOD_ACTION_KIND_BLOCK = 1;
+  // An alert goes to a channel for moderators, with what was written.
+  AUTO_MOD_ACTION_KIND_ALERT = 2;
+  // The author is timed out.
+  AUTO_MOD_ACTION_KIND_TIME_OUT = 3;
+}
+
+message AutoModAction {
+  AutoModActionKind kind = 1;
+  // BLOCK: what the author is told, up to 150 characters. Empty for the usual words.
+  string message = 2;
+  // ALERT: where alerts go, a text channel.
+  string channel_id = 3;
+  // TIME_OUT: for how long, 60 seconds to 28 days.
+  int32 duration_seconds = 4;
+}
+
+// One of a server's AutoMod rules. It checks every message sent or edited
+// by members who don't manage the server, outside the channels and roles it
+// leaves out, and does each of its actions when the message sets it off.
+message AutoModRule {
+  string id = 1;
+  string server_id = 2;
+  string name = 3;
+  bool enabled = 4;
+  AutoModTrigger trigger = 5;
+  // KEYWORDS: up to 1000 words or phrases, matched whole and ignoring case.
+  // A * at the start or end matches any letters there: "*cat" matches
+  // "bobcat", "cat*" matches "catapult" and "*cat*" matches anywhere.
+  repeated string keywords = 6;
+  // KEYWORDS: words that never set it off, even when a keyword matches them.
+  // LINKS: sites (and their subdomains) people can link to.
+  repeated string allowed = 7;
+  // MENTION_SPAM: the most pings one message may carry, 1 to 50.
+  int32 mention_limit = 8;
+  // At least one.
+  repeated AutoModAction actions = 9;
+  // Members with any of these roles, and messages in these channels (or
+  // channels in these categories), are left alone.
+  repeated string exempt_role_ids = 10;
+  repeated string exempt_channel_ids = 11;
+  // Who made it.
+  string creator_id = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+}
+
+// What an AutoMod alert tells moderators.
+message AutoModAlert {
+  string rule_id = 1;
+  string rule_name = 2;
+  AutoModTrigger trigger = 3;
+  // Where the message was sent.
+  string channel_id = 4;
+  // What it said.
+  string content = 5;
+  // What set the rule off: the words or links, or how many pings.
+  repeated string matched = 6;
+  // It wasn't sent.
+  bool blocked = 7;
+  // Its author was timed out for this long. Zero when they weren't.
+  int32 timed_out_seconds = 8;
 }
 
 // What people read and answer on their way into a server.
@@ -353,6 +477,9 @@ enum MessageKind {
   MESSAGE_KIND_UNSPECIFIED = 0;
   // The author joined the server. Posted in its system channel, with no text.
   MESSAGE_KIND_MEMBER_JOINED = 1;
+  // AutoMod caught a message by the author. Posted in the rule's alert
+  // channel, with no text; what happened is in `auto_mod`.
+  MESSAGE_KIND_AUTO_MOD_ALERT = 2;
 }
 
 message Message {
@@ -374,6 +501,8 @@ message Message {
   // The roles it pings: written as <@&role id>, and mentionable or written
   // by someone who can mention everyone.
   repeated string mention_role_ids = 13;
+  // For MESSAGE_KIND_AUTO_MOD_ALERT.
+  AutoModAlert auto_mod = 14;
 }
 
 message Attachment {
@@ -450,6 +579,8 @@ message ServerUsage {
   // Size of the server's database on disk, write-ahead log included.
   int64 storage_bytes = 10;
   google.protobuf.Timestamp updated_at = 11;
+  // Custom emoji. Their pictures count in attachments and attachment_bytes.
+  int64 emojis = 12;
 }
 
 // Caps on a community server. An unset field means unlimited.
@@ -458,6 +589,7 @@ message ServerLimits {
   optional int64 channels = 2;
   optional int64 storage_bytes = 3;
   optional int64 attachment_bytes = 4;
+  optional int64 emojis = 5;
 }
 
 // ============================================================================
@@ -494,6 +626,7 @@ message Event {
     RoleUpdated role_updated = 23;
     RoleDeleted role_deleted = 24;
     ApplicationUpdated application_updated = 25;
+    EmojisUpdated emojis_updated = 26;
   }
 }
 
@@ -565,6 +698,12 @@ message RoleCreated {
 // who can kick members get these. Closed applications carry no answers.
 message ApplicationUpdated {
   Application application = 1;
+}
+
+// The server's emoji changed: one was added, renamed or deleted. Carries
+// every emoji the server has now.
+message EmojisUpdated {
+  repeated Emoji emojis = 1;
 }
 
 message RoleUpdated {

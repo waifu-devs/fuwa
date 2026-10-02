@@ -3,8 +3,10 @@
 mod account;
 mod admin;
 mod auth;
+mod automod;
 mod channels;
 mod dms;
+mod emoji;
 mod events;
 mod invites;
 mod join;
