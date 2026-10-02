@@ -903,6 +903,32 @@ async fn browsers_can_call_over_grpc_web() {
 
 /// Bytes 18 and 19 of a database file: 2 for plain SQLite (WAL), 255 for
 /// Turso's concurrent-writer mode (MVCC).
+// Stopping (say, for a deploy) tells open streams to follow again, rather than
+// ending them as if they were done, which clients would take as final.
+#[tokio::test]
+async fn streams_are_told_to_reconnect_when_the_instance_stops() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (token, _, _) = sign_up(&mut c, "juan").await;
+    let server = create_server(&mut c, &token, "Den", false).await;
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &token,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: server.id, after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(stream.next().await.unwrap().unwrap().ready.is_some());
+
+    instance.app.shutdown.cancel();
+    let ended = stream.next().await.unwrap().unwrap_err();
+    assert_eq!(ended.code(), Code::Unavailable);
+    instance.serving.await.unwrap();
+}
+
 fn file_mode(path: &Path) -> [u8; 2] {
     let file = std::fs::read(path).unwrap();
     [file[18], file[19]]
