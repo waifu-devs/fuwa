@@ -314,8 +314,14 @@ async fn each_part_restores_its_own_files_but_not_deleted_servers() {
         assert!(refused.to_string().contains("FUWA_RESTORE=if-empty"), "{refused}");
     }
     assert!(!new_directory.join("node.db").exists());
-    // A shard nobody has seen before starts empty.
+    // A shard nobody has seen before starts empty, and so does one whose
+    // volume has replicated before (it just holds no servers).
     prepare(&config, store, &dir.path().join("new-three"), Some(&key()), Part::Shard("shard-3")).await.unwrap();
+    let been_here = dir.path().join("been-here");
+    std::fs::create_dir_all(been_here.join("replica")).unwrap();
+    std::fs::write(been_here.join("replica").join("writer"), "someone").unwrap();
+    prepare(&config, store, &been_here, Some(&key()), Part::Shard("shard-1")).await.unwrap();
+    assert!(!been_here.join("servers").exists());
 
     // Told to, the directory gets accounts and pictures, each shard its servers.
     let config = ReplicaConfig { restore: Restore::IfEmpty, ..config };

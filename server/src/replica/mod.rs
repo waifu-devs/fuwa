@@ -941,7 +941,9 @@ pub async fn prepare(
             format!("holds an instance but {} has no node.db", data.display())
         }
         Part::Shard(shard) => {
-            if has_server_files(&data.join("servers"))? {
+            // A volume that replicated before isn't new, even with no servers on
+            // it: skip asking the replica about every server on each start.
+            if has_server_files(&data.join("servers"))? || data.join("replica").join("writer").exists() {
                 return Ok(());
             }
             let held = held_by(store, shard).await.map_err(unreachable)?.len();
