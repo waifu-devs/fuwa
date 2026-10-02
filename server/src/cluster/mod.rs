@@ -151,6 +151,17 @@ fn check_shard_id(id: &str) -> std::result::Result<(), String> {
     if valid { Ok(()) } else { Err(format!("must be 1 to 64 of a-z, 0-9, - and _, got {id:?}")) }
 }
 
+/// Whether a name is one of the files a server's database is made of, as
+/// named in servers/: `<id>.db`, or a file kept beside it. Anything else
+/// (and any path) isn't.
+pub fn is_server_file(name: &str) -> bool {
+    crate::servers::SIDECARS.iter().any(|suffix| {
+        name.strip_suffix(suffix)
+            .and_then(|db| db.strip_suffix(".db"))
+            .is_some_and(|id| crate::id::parse_id("server", id).is_ok_and(|parsed| parsed == id))
+    })
+}
+
 /// A shard's name: FUWA_SHARD_ID, else the one kept in its data directory
 /// (made up on first start).
 pub fn shard_id(config: &ClusterConfig, data_path: &Path) -> Result<String> {
@@ -324,6 +335,25 @@ mod tests {
     }
 
     const KEY: &str = "0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn server_files_by_name() {
+        let id = "01J9Z3K8X2V5W7Q4R6T8Y0B2C4";
+        assert!(is_server_file(&format!("{id}.db")));
+        assert!(is_server_file(&format!("{id}.db-log")));
+        assert!(is_server_file(&format!("{id}.db-wal")));
+        for name in [
+            "node.db".to_string(),
+            format!("{id}.db-journal"),
+            format!("{}.db", id.to_lowercase()),
+            format!("../{id}.db"),
+            format!("x/{id}.db"),
+            format!("{id}.txt"),
+            ".db".to_string(),
+        ] {
+            assert!(!is_server_file(&name), "{name}");
+        }
+    }
 
     #[test]
     fn one_process_by_default() {

@@ -80,13 +80,18 @@ async fn start_app(config: Config, listener: TcpListener, addr: SocketAddr) -> P
 }
 
 async fn start_shard(dir: &Path, name: &str, directory: &Part) -> Part {
+    start_shard_with(dir, name, directory, &[]).await
+}
+
+async fn start_shard_with(dir: &Path, name: &str, directory: &Part, more: &[(&str, String)]) -> Part {
     let (listener, addr) = listen().await;
-    let vars = [
+    let mut vars = vec![
         ("FUWA_ROLE", "shard".to_string()),
         ("FUWA_SHARD_ID", name.to_string()),
         ("FUWA_DIRECTORY_URL", directory.url()),
         ("FUWA_INTERNAL_URL", format!("http://{addr}")),
     ];
+    vars.extend(more.iter().cloned());
     start_app(config(dir, &vars), listener, addr).await
 }
 
@@ -108,12 +113,16 @@ async fn start_cluster(root: &Path, vars: &[(&str, String)]) -> Cluster {
         start_shard(&root.join("shard-a"), "a", &directory).await,
         start_shard(&root.join("shard-b"), "b", &directory).await,
     ];
-    let gateway_vars = [("FUWA_ROLE", "gateway".to_string()), ("FUWA_DIRECTORY_URL", directory.url())];
-    let gateway = Gateway::new(config(&root.join("gateway"), &gateway_vars)).unwrap();
+    let (gateway, _gateway) = start_gateway(&root.join("gateway"), &directory, gateway_listener, gateway_addr);
+    Cluster { directory, shards, gateway, _gateway }
+}
+
+fn start_gateway(dir: &Path, directory: &Part, listener: TcpListener, addr: SocketAddr) -> (Part, Arc<Gateway>) {
+    let vars = [("FUWA_ROLE", "gateway".to_string()), ("FUWA_DIRECTORY_URL", directory.url())];
+    let gateway = Gateway::new(config(dir, &vars)).unwrap();
     let shutdown = gateway.shutdown();
-    let serving = serve(gateway_listener, gateway.router(), shutdown.clone());
-    let part = Part { app: None, addr: gateway_addr, shutdown, serving };
-    Cluster { directory, shards, gateway: part, _gateway: gateway }
+    let serving = serve(listener, gateway.router(), shutdown.clone());
+    (Part { app: None, addr, shutdown, serving }, gateway)
 }
 
 impl Cluster {
@@ -622,4 +631,70 @@ async fn shards_come_and_go() {
     assert_eq!(shown.server.unwrap().id, on_b.id);
 
     cluster.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_process_splits_in_place() {
+    let root = tempfile::tempdir().unwrap();
+    let one = root.path().join("one");
+    // Encrypted, as fuwa.chat is: the files move as they are.
+    let encrypted = [("FUWA_ENCRYPTION_KEY", "ab".repeat(32))];
+
+    // An instance that ran as one process, with servers and messages.
+    let (listener, addr) = listen().await;
+    let single = start_app(config(&one, &encrypted), listener, addr).await;
+    let mut c = clients(&single).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let first = create_server(&mut c, &juan, "First").await;
+    let second = create_server(&mut c, &juan, "Second").await;
+    let channel = general(&mut c, &juan, &first.id).await;
+    send(&mut c, &juan, &first.id, &channel.id, "from before the split").await;
+    drop(c);
+    single.stop().await;
+
+    // Its folder becomes the directory's, and the first shard to start takes
+    // the servers; the next gets none of them.
+    let (gateway_listener, gateway_addr) = listen().await;
+    let (listener, addr) = listen().await;
+    let directory_vars = [
+        ("FUWA_ROLE", "directory".to_string()),
+        ("FUWA_PUBLIC_URL", format!("http://{gateway_addr}")),
+        encrypted[0].clone(),
+    ];
+    let directory = start_app(config(&one, &directory_vars), listener, addr).await;
+    let a = start_shard_with(&root.path().join("shard-a"), "a", &directory, &encrypted).await;
+    let b = start_shard_with(&root.path().join("shard-b"), "b", &directory, &encrypted).await;
+    for server in [&first, &second] {
+        assert!(a.app().servers.holds(&server.id) && !b.app().servers.holds(&server.id));
+        assert_eq!(directory.app().index.placement(&server.id).as_deref(), Some("a"));
+        let file = format!("{}.db", server.id);
+        assert!(!one.join("servers").join(&file).exists());
+        assert!(one.join("handed-over").join(&file).exists(), "the directory keeps its copy out of the way");
+    }
+    assert!(!one.join("servers-promised-to").exists());
+    assert!(!root.path().join("shard-a/incoming-servers").exists());
+
+    // Through a gateway it's the same instance: the same session, servers and messages.
+    let (gateway, _gateway) = start_gateway(&root.path().join("gateway"), &directory, gateway_listener, gateway_addr);
+    let mut c = clients(&gateway).await;
+    let mine = c.servers.list_servers(authed(&juan, pb::ListServersRequest {})).await.unwrap().into_inner().servers;
+    assert_eq!(
+        mine.iter().map(|s| s.id.as_str()).collect::<HashSet<_>>(),
+        HashSet::from([first.id.as_str(), second.id.as_str()])
+    );
+    let request =
+        pb::ListMessagesRequest { server_id: first.id.clone(), channel_id: channel.id.clone(), ..Default::default() };
+    let listed = c.messages.list_messages(authed(&juan, request)).await.unwrap().into_inner();
+    assert!(listed.messages.iter().any(|m| m.content == "from before the split"));
+    send(&mut c, &juan, &first.id, &channel.id, "after").await;
+
+    // Starting again, the shard has nothing more to take and keeps what it has.
+    a.stop().await;
+    let a = start_shard_with(&root.path().join("shard-a"), "a", &directory, &encrypted).await;
+    assert!(a.app().servers.holds(&first.id) && a.app().servers.holds(&second.id));
+
+    gateway.stop().await;
+    a.stop().await;
+    b.stop().await;
+    directory.stop().await;
 }

@@ -1,6 +1,6 @@
 //! The running instance: its state, its HTTP router, and serving it.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -92,6 +92,7 @@ impl App {
                 (Some(node), Some(media), servers, link)
             }
             Role::Shard => {
+                crate::cluster::shard::take_servers(&config).await?;
                 let servers = Servers::open(&config.data_path, key, hub.clone(), true).await?;
                 (None, None, servers, Link::Shard(Box::new(crate::cluster::shard::Link::new(&config)?)))
             }
@@ -312,8 +313,10 @@ pub fn cors(source: Arc<impl HasSettings>) -> CorsLayer {
 /// Opens the instance (or this process's part of it) and serves it until
 /// Ctrl-C or SIGTERM.
 pub async fn run(config: Config) -> std::result::Result<(), String> {
-    let address: SocketAddr = format!("{}:{}", config.host, config.port)
-        .parse()
+    let host = config.host.trim().trim_start_matches('[').trim_end_matches(']');
+    let address = host
+        .parse::<IpAddr>()
+        .map(|ip| SocketAddr::new(ip, config.port))
         .map_err(|_| format!("FUWA_HOST {:?} isn't an IP address to listen on", config.host))?;
     if config.cluster.role == Role::Gateway {
         return crate::cluster::gateway::run(config, address).await;

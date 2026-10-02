@@ -12,7 +12,7 @@ use crate::pb;
 pub struct Config {
     /// Where node.db and the servers/ directory live. FUWA_DATA_PATH, default ~/.fuwa.
     pub data_path: PathBuf,
-    /// FUWA_HOST, default 0.0.0.0.
+    /// FUWA_HOST, default 0.0.0.0. `::` listens on IPv6 and IPv4 both.
     pub host: String,
     /// FUWA_PORT, else PORT (as Railway and similar hosts set it), default 8080.
     pub port: u16,

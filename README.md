@@ -98,7 +98,7 @@ the log filter are read only from the environment.
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `FUWA_DATA_PATH` | `~/.fuwa` (`/data` in Docker) | Where the databases live |
-| `FUWA_HOST` | `0.0.0.0` | Address to listen on |
+| `FUWA_HOST` | `0.0.0.0` | Address to listen on (`::` for IPv6 and IPv4 both) |
 | `FUWA_PORT` | `PORT`, else `8080` | Port to listen on |
 | `FUWA_PUBLIC_URL` | `http://localhost:<port>` | The URL clients reach this instance on; uploaded pictures are linked through it |
 | `FUWA_NODE_NAME` | `Fuwa` | The instance's display name |
@@ -266,8 +266,14 @@ fuwa_part --name gateway -p 8080:8080 -e FUWA_ROLE=gateway \
 ```
 
 Turning a single-process instance into a split one: its data folder becomes
-the directory's (its `servers/` folder can stay there and be served by a shard
-started on that same folder, or be moved to shards' folders).
+the directory's, and the first shard to start takes its community servers. The
+directory sends that shard every file in its `servers/` folder, the shard
+checks each copy and starts with them, and the directory moves its own copies
+to `handed-over/` (delete that folder once everything looks right). No other
+shard gets any of them, and nothing has to be copied by hand, which matters
+where each part has a disk of its own (Railway, Kubernetes, Fly.io). fuwa.chat's
+Railway config ([`.railway/railway.ts`](.railway/railway.ts)) splits this way
+when its `SPLIT` setting is turned on.
 
 While a shard is down, its servers answer "unavailable" and live streams
 following them end, so clients reconnect once it's back; everything else keeps

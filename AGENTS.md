@@ -82,7 +82,10 @@
     answer the internal protocol; `gateway.rs` routes client calls (by
     service, and by the `server_id` in field 1 for server-scoped ones) and
     merges live streams. `require_key` and `WithKey` are the only places the
-    cluster key is checked and sent.
+    cluster key is checked and sent. A directory whose folder still has a
+    single process's `servers/` hands them to the first shard that asks
+    (`TakeServers`, then `HandedOver`; `shard::take_servers` runs before a
+    shard opens its servers), keeping its copies in `handed-over/`.
   - `web.rs`: serves the embedded web app (feature `web`, from `web/dist`), with
     `index.html` for any path the API doesn't answer so deep links work.
   - `tests/api.rs`: end-to-end tests against a running instance; `tests/web.rs`
@@ -155,13 +158,15 @@
     says about itself.
 - `.railway/railway.ts`: fuwa.chat, the instance Waifu Devs hosts, in its own
   Railway project ("fuwa"): the published image, a volume at `/data`, the
-  domain. Every merge to master redeploys it onto the new image (the `Deploy
-  fuwa.chat` job in `publish.yml`); with a volume attached, Railway stops the
-  old deployment before starting the new one, so each deploy briefly drops
-  connections. A pull request that touches it gets a plan comment and merging
+  domain. Its `SPLIT` setting turns it into a directory (on that volume),
+  shards (a volume each) and gateway replicas; shards can be added, never
+  removed. Every merge to master redeploys each service it declares onto the
+  new image (the `Deploy fuwa.chat` job in `publish.yml`); with a volume
+  attached, Railway stops the old deployment before starting the new one, so
+  each deploy briefly drops connections. A pull request that touches it gets a plan comment and merging
   applies it (`.github/workflows/railway-config.yml`); the root `package.json`
   exists only for this. The encryption key is a shared variable set by hand and
-  must never change. Don't edit the project in Railway's dashboard between a
+  must never change; so is the cluster key, which can. Don't edit the project in Railway's dashboard between a
   plan and its apply, or the apply refuses.
 
 ## Rules
