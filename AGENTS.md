@@ -7,6 +7,14 @@
 - `proto/fuwa/cluster/v1/`: the internal protocol between the parts of a split
   instance (`cpb` in Rust). Never for clients: it isn't in the reflection
   descriptor set or `web/src/gen`.
+- `e2ee/`: `fuwa-e2ee`, the end-to-end encryption for direct messages (MLS,
+  RFC 9420, through OpenMLS), shared by every client and the server. Without
+  features it only reads MLS message headers (`wire`), which is all the server
+  uses; the `client` feature is a whole device (`Device`: keys, groups,
+  encrypting, safety numbers). The design is in `docs/e2ee.md`.
+- `e2ee-wasm/`: `fuwa-e2ee` for the web app, as WebAssembly. `pnpm wasm` (in
+  `web/`) builds it into `web/src/e2ee/pkg` (not committed); the wasm-bindgen
+  crate and CLI versions must match.
 - `server/`: the Rust server (`fuwa` binary, `fuwa_server` library).
   - `app.rs`: shared state, the HTTP router (gRPC, gRPC-Web, CORS, health), serving.
   - `api/`: one file per gRPC service, all implemented on `Api`.
@@ -17,6 +25,17 @@
     can't sign in until it's turned back on. What belongs to a person but not to
     one server lives here; a server file keeps only a copy of what its members
     see (name, avatar, status) in its `users` table.
+  - `dms.rs`: direct messages (`dms.db`, on the directory): each device's
+    public signature key and key packages (one-use, plus a last-resort one),
+    each conversation's records in one order (MLS commits and messages, all
+    ciphertext), its latest GroupInfo and the welcomes waiting for new
+    devices. A record is taken only for the conversation's current epoch (the
+    `UPDATE ... WHERE epoch = ?` decides races), and a commit moves the epoch
+    on. Devices belong to sessions: signing out (or the session ending) drops
+    the device, and the hourly sweep clears any left over. `api/dms.rs`
+    (`DirectMessageService`) checks what the server can see (who sends, the
+    group id, epoch and content type in the MLS header, that key packages
+    name the account and device they claim) and never decrypts anything.
   - `twofactor.rs`: TOTP codes (RFC 6238) and backup codes for two-step sign-in.
   - `linked.rs`: signing in with waifu.dev (linked accounts): the instance is an
     OpenAuth client whose client ID is its public URL. `AuthService`'s
@@ -102,6 +121,17 @@
   - `src/components/`, `src/pages/`: the UI. Routes are
     `/<instance>/<server>/<channel>`, where `<instance>` is the host (or, in
     streamer mode, a local alias like `/~waifu-devs`, see `lib/streamer.ts`).
+  - `src/e2ee/`: encrypted direct messages in the browser. `engine.ts` is one
+    device per signed-in account and instance (`DmEngine`): it registers the
+    device, keeps key packages topped up, reads each conversation's records
+    in order, adds and removes devices before sending, and joins by itself
+    when nobody added it. `vault.ts` keeps the device's state and what it has
+    read in IndexedDB (plaintext never goes back to the instance, and can't be
+    decrypted twice, so this is the only copy); one tab works at a time (Web
+    Locks) and tells the others. Signing out wipes the vault.
+    `src/fuwa/dms.ts` are the actions; the screens are in `components/dm/`
+    (`DmList`, `DmView`, `EncryptionDialog` with the safety number), routed at
+    `/<instance>/dm/<conversation>`.
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
     an instance or a server live on that instance instead.
@@ -248,6 +278,12 @@
   in `cluster/calls.rs`, never `app.node()` or `app.index` directly. Handlers
   without one run on the directory. A new server-scoped request keeps `server_id` as field 1, and a
   new RPC gets a line in `gateway::route`; `every_call_is_routed` checks both.
+- Direct messages are end-to-end encrypted, always: no off switch, no
+  server-side copy of keys or plaintext, nothing about their content in logs,
+  events, exports or the usage signal. The server checks only what it can
+  see in the clear (`docs/e2ee.md` lists it). A new kind of direct-message
+  content goes in `DirectMessageContent` (inside the encryption), never as a
+  new server field.
 - Releases: set the version in `server/Cargo.toml`, merge, then push the tag
   `v<version>`. `Publish image` tags the image (`0.2.0`, `0.2`; `latest`
   follows master) for x86 and ARM, and `Release` makes the GitHub release with
@@ -255,5 +291,5 @@
   `docs/self-hosting.md` in step with anything self-hosters set up (variables,
   ports, image tags, the proxy).
 - Before pushing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
-  `cargo test`, and `buf lint`; for `web/`, `pnpm build` then
+  `cargo test`, and `buf lint`; for `web/`, `pnpm wasm` and `pnpm build`, then
   `cargo test --features web`.

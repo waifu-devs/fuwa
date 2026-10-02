@@ -102,9 +102,17 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: web
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: wasm32-unknown-unknown
+      # The version e2ee-wasm/Cargo.toml pins.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - run: pnpm run wasm
+        working-directory: web
       - run: pnpm run build
         working-directory: web
-      - uses: dtolnay/rust-toolchain@1.99.0
       - run: cargo build --release --locked --features web --bin fuwa
       - shell: bash
         run: |

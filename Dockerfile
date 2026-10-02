@@ -7,6 +7,23 @@
 # between builds (a time, a random value, an absolute path) goes in the binary.
 # To move to a newer base, change the tag and its digest together.
 
+# The encryption the web client's direct messages use (e2ee-wasm), as WebAssembly.
+FROM rust:1.99.0-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0 AS wasm
+WORKDIR /src
+# wasm-bindgen at the version e2ee-wasm/Cargo.toml pins.
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo install wasm-bindgen-cli --version 0.2.129 --locked
+COPY Cargo.toml Cargo.lock rustfmt.toml ./
+COPY e2ee e2ee
+COPY e2ee-wasm e2ee-wasm
+# The server is in the workspace too; its manifest is enough here.
+COPY server/Cargo.toml server/
+RUN mkdir -p server/src \
+    && echo 'fn main() {}' > server/src/main.rs \
+    && touch server/src/lib.rs \
+    && cargo build --locked -p fuwa-e2ee-wasm --target wasm32-unknown-unknown --profile wasm \
+    && wasm-bindgen --target web --out-dir /pkg target/wasm32-unknown-unknown/wasm/fuwa_e2ee_wasm.wasm
+
 # The web client, which the server carries inside its binary.
 FROM node:22.23.3-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS web
 WORKDIR /src/web
@@ -14,6 +31,7 @@ RUN npm install --global pnpm@10.33.0
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web ./
+COPY --from=wasm /pkg src/e2ee/pkg
 RUN pnpm run build
 
 FROM rust:1.99.0-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0 AS build
@@ -26,9 +44,12 @@ ENV SOURCE_DATE_EPOCH=0
 COPY Cargo.toml Cargo.lock rustfmt.toml ./
 COPY server/Cargo.toml server/build.rs server/
 COPY proto proto
-RUN mkdir -p server/src \
+# The server reads direct messages' headers with e2ee; e2ee-wasm only needs to be there for the workspace.
+COPY e2ee e2ee
+COPY e2ee-wasm/Cargo.toml e2ee-wasm/
+RUN mkdir -p server/src e2ee-wasm/src \
     && echo 'fn main() {}' > server/src/main.rs \
-    && touch server/src/lib.rs \
+    && touch server/src/lib.rs e2ee-wasm/src/lib.rs \
     && cargo build --release --locked --features web --bin fuwa \
     && rm -rf server/src
 
