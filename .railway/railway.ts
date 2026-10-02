@@ -28,8 +28,9 @@ export default defineRailway((ctx) => {
   const data = volume("fuwa-data", { region: REGION, sizeMB: 5000 });
 
   const fuwa = service("fuwa", {
-    // The image every merge to master publishes. Railway redeploys onto a new one as
-    // soon as it notices it, which can take a few hours.
+    // The image every merge to master publishes; the publish workflow redeploys fuwa
+    // onto it right away. Auto updates are the fallback: Railway takes a new image as
+    // soon as it notices one, which can take a few hours.
     source: image("ghcr.io/waifu-devs/fuwa:latest", {
       autoUpdates: { type: "patch", schedule: ANYTIME },
     }),

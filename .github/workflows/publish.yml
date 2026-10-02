@@ -1,10 +1,10 @@
 name: Publish image
 
-# Every merge to master publishes ghcr.io/waifu-devs/fuwa:latest (and :sha-<commit>),
-# and every release tag (v1.2.3) publishes :1.2.3 and :1.2 too, the tags
-# self-hosters pin to. Each image runs on x86 and ARM machines alike and comes
-# with a signed record of the commit and workflow that built it. Anyone can
-# check that record:
+# Every merge to master publishes ghcr.io/waifu-devs/fuwa:latest (and :sha-<commit>)
+# and redeploys fuwa.chat onto it, and every release tag (v1.2.3) publishes :1.2.3
+# and :1.2 too, the tags self-hosters pin to. Each image runs on x86 and ARM
+# machines alike and comes with a signed record of the commit and workflow that
+# built it. Anyone can check that record:
 #   gh attestation verify oci://ghcr.io/waifu-devs/fuwa:latest --repo waifu-devs/fuwa
 on:
   push:
@@ -119,3 +119,22 @@ jobs:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.index.outputs.digest }}
           push-to-registry: true
+
+  # fuwa.chat runs :latest (.railway/railway.ts), and Railway's own check for a new
+  # image can take hours, so tell it now. RAILWAY_TOKEN is the project token for the
+  # "fuwa" project's production environment.
+  deploy:
+    name: Deploy fuwa.chat
+    needs: tags
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions: {}
+    concurrency: deploy-fuwa-chat
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # --from-source pulls :latest again; a plain redeploy would rerun the old image.
+      - run: npx --yes @railway/cli@5.63.1 redeploy --service fuwa --from-source --yes
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

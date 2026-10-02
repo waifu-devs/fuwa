@@ -155,7 +155,10 @@
     says about itself.
 - `.railway/railway.ts`: fuwa.chat, the instance Waifu Devs hosts, in its own
   Railway project ("fuwa"): the published image, a volume at `/data`, the
-  domain. A pull request that touches it gets a plan comment and merging
+  domain. Every merge to master redeploys it onto the new image (the `Deploy
+  fuwa.chat` job in `publish.yml`); with a volume attached, Railway stops the
+  old deployment before starting the new one, so each deploy briefly drops
+  connections. A pull request that touches it gets a plan comment and merging
   applies it (`.github/workflows/railway-config.yml`); the root `package.json`
   exists only for this. The encryption key is a shared variable set by hand and
   must never change. Don't edit the project in Railway's dashboard between a
