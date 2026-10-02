@@ -7,10 +7,16 @@ on:
   pull_request:
   push:
     branches: [master]
+  # Actions > Reproducible build > Run workflow.
+  workflow_dispatch:
 
 jobs:
   twice:
     name: Same commit, same binary
+    # Slow (two from-scratch builds, about 10 minutes), so it's off on pull requests
+    # and pushes for now and only runs when started by hand. Delete this line to
+    # turn it back on.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

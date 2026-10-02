@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [master]
+  # Actions > CI > Run workflow runs everything, the slow jobs included.
+  workflow_dispatch:
 
 jobs:
   server:
@@ -71,6 +73,9 @@ jobs:
 
   docker:
     name: Docker image
+    # Slow (about 8 minutes), so it's off on pull requests and pushes for now and
+    # only runs when CI is started by hand. Delete this line to turn it back on.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

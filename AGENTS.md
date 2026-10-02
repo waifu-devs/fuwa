@@ -154,7 +154,9 @@
   `web/src/components/motion.tsx` (`SwapText`, `Count`, `CountUp`) so the app
   moves alike everywhere, and keep it working with reduced motion.
 - Builds are reproducible: the same commit gives the same binary, byte for
-  byte, and the `Reproducible build` workflow fails a change that breaks this.
+  byte, and the `Reproducible build` workflow fails a change that breaks this
+  (it's slow, so for now it only runs when started by hand from Actions; run it
+  on any change to the Dockerfile, `build.rs` or dependencies).
   Nothing that differs between builds goes in the binary: no build time, no
   random value, no absolute path (the commit is fine, it's in `FUWA_COMMIT`
   from `build.rs`). Keep rust-embed's `deterministic-timestamps` and the
