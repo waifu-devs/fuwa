@@ -66,8 +66,8 @@ pub struct Totals {
 }
 
 pub async fn collect(app: &App) -> Result<Signal> {
-    let accounts = app.node.account_counts().await?;
-    let (servers, discoverable_servers) = app.servers.count();
+    let accounts = app.node()?.account_counts().await?;
+    let (servers, discoverable_servers) = app.index.count();
     let mut totals = Totals {
         accounts: accounts.total,
         accounts_active_1d: accounts.active_1d,
@@ -76,9 +76,8 @@ pub async fn collect(app: &App) -> Result<Signal> {
         discoverable_servers,
         ..Totals::default()
     };
-    for id in app.servers.ids() {
-        let Ok(sdb) = app.servers.get(&id).await else { continue };
-        let usage = sdb.usage().await?;
+    for described in app.describe_servers(&[]).await? {
+        let Some(usage) = described.usage else { continue };
         totals.members += usage.members;
         totals.channels += usage.channels;
         totals.messages += usage.messages;
@@ -93,7 +92,7 @@ pub async fn collect(app: &App) -> Result<Signal> {
     let settings = app.settings();
     Ok(Signal {
         schema: SCHEMA,
-        install_id: app.node.install_id().await?,
+        install_id: app.node()?.install_id().await?,
         sent_at: now_ms(),
         hosting: if config.telemetry.hosted { "hosted" } else { "self_hosted" },
         version: crate::VERSION,

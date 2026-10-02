@@ -10,7 +10,7 @@ use http::{HeaderMap, Method, StatusCode, Uri};
 use tower_http::compression::predicate::{NotForContentType, Predicate};
 use tower_http::compression::{CompressionLayer, DefaultPredicate};
 
-use crate::app::App;
+use crate::app::HasSettings;
 
 #[cfg(feature = "web")]
 mod embedded {
@@ -78,21 +78,22 @@ mod embedded {
 /// built in and switched on (checked per request, so admins can switch it
 /// live), otherwise a short note at `/` and 404 elsewhere. Scripts and styles
 /// go out gzipped; fonts and images are compressed already.
-pub fn handler(app: Arc<App>) -> MethodRouter {
+pub fn handler(source: Arc<impl HasSettings>) -> MethodRouter {
     let compress = DefaultPredicate::new().and(NotForContentType::const_new("font/"));
     axum::routing::any(move |method: Method, uri: Uri, headers: HeaderMap| {
-        let app = app.clone();
+        let source = source.clone();
         async move {
             if method != Method::GET && method != Method::HEAD {
                 return (StatusCode::NOT_FOUND, "not found\n").into_response();
             }
+            let settings = source.settings();
             #[cfg(feature = "web")]
-            if app.settings().web {
+            if settings.web {
                 return embedded::serve(uri, headers).await;
             }
             let _ = &headers;
             if uri.path() == "/" {
-                let info = app.node_info();
+                let info = crate::app::node_info(&settings, None);
                 return format!(
                     "{} is a fuwa instance (fuwa {}).\nConnect to it from a fuwa client with {}\n",
                     info.name, info.version, info.public_url

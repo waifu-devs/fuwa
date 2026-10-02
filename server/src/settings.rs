@@ -69,6 +69,18 @@ impl Settings {
         settings
     }
 
+    /// The settings another part of a split instance sent: every field taken
+    /// from it, falling back to this process's own default where one doesn't read.
+    pub fn from_pb(config: &Config, from: &pb::InstanceSettings) -> Self {
+        let mut settings = Self::defaults(config);
+        for field in FIELDS {
+            if let Err(err) = settings.set_from_pb(field, from) {
+                tracing::warn!(setting = %field, error = %err, "ignoring a setting the directory sent");
+            }
+        }
+        settings
+    }
+
     /// Whether a browser on `origin` may call the API.
     pub fn allows_origin(&self, origin: &[u8]) -> bool {
         self.allowed_origins.iter().any(|allowed| allowed == "*" || allowed.as_bytes() == origin)
@@ -301,6 +313,20 @@ mod tests {
         assert_eq!(settings.local_accounts, LocalAccounts::Closed);
         assert!(!settings.telemetry);
         assert_eq!(Settings::defaults(&config()).name, "Env name");
+    }
+
+    #[test]
+    fn settings_survive_the_trip_to_another_part() {
+        let stored = vec![
+            ("name".to_string(), "\"Set here\"".to_string()),
+            ("allowed_origins".to_string(), "[\"https://app.example.com\"]".to_string()),
+            ("server_creation".to_string(), "\"admins\"".to_string()),
+            ("default_limits.storage_bytes".to_string(), "5000".to_string()),
+            ("picture_upload_bytes".to_string(), "1000".to_string()),
+            ("web".to_string(), "false".to_string()),
+        ];
+        let settings = Settings::load(&config(), &stored);
+        assert_eq!(Settings::from_pb(&config(), &settings.to_pb()), settings);
     }
 
     #[test]

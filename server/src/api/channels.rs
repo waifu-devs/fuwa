@@ -318,7 +318,7 @@ impl ChannelService for Api {
             })
             .await?;
             if let Some(server) = server {
-                self.app.servers.index_server(server);
+                self.app.server_changed(&server).await;
             }
             self.forget_notifications(&sdb.id, Some(&req.channel_id), None).await;
             Ok(pb::DeleteChannelResponse {})

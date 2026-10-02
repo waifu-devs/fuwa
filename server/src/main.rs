@@ -20,6 +20,8 @@ see https://github.com/waifu-devs/fuwa#configuration. The most common:
   FUWA_PUBLIC_URL       the URL clients reach this instance on
   FUWA_LOCAL_ACCOUNTS   open | closed | off (default open)
   FUWA_TELEMETRY        on | off: the anonymous daily usage signal (default on)
+  FUWA_ROLE             all | gateway | directory | shard: run one part of a
+                        split instance (default all, everything in one process)
 ";
 
 #[tokio::main]

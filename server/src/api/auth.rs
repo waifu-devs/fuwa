@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 use crate::id::millis;
 use crate::node::{Account, ProfileChange};
 use crate::pb::{self, auth_service_server::AuthService};
-use crate::servers::{self as store, Payload};
+
 use crate::twofactor;
 
 /// What someone whose account was turned off hears when they sign in.
@@ -26,9 +26,9 @@ impl Api {
             text("display_name", &req.display_name, 1, 64)?
         };
         let hash = auth::hash_password(req.password).await?;
-        let account = self.app.node.create_local_account(&username, &display_name, &hash).await?;
+        let account = self.app.node()?.create_local_account(&username, &display_name, &hash).await?;
         let token = auth::new_token();
-        self.app.node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
+        self.app.node()?.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
         tracing::info!(account = %account.id, admin = account.admin, "account created");
         Ok(pb::SignUpResponse { token, user: Some(account.user()), admin: account.admin })
     }
@@ -39,7 +39,7 @@ impl Api {
         }
         let username = req.username.trim().to_lowercase();
         self.app.limiter.check(&username)?;
-        let found = self.app.node.local_account_by_username(&username).await?;
+        let found = self.app.node()?.local_account_by_username(&username).await?;
         let (account, hash) = match found {
             Some((account, hash)) => (Some(account), Some(hash)),
             None => (None, None),
@@ -55,11 +55,11 @@ impl Api {
         }
         if account.two_factor {
             let ticket = auth::new_token();
-            self.app.node.create_ticket(&auth::hash_token(&ticket), &account.id).await?;
+            self.app.node()?.create_ticket(&auth::hash_token(&ticket), &account.id).await?;
             return Ok(pb::SignInResponse { two_factor_ticket: ticket, ..Default::default() });
         }
         let token = auth::new_token();
-        self.app.node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
+        self.app.node()?.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
         Ok(pb::SignInResponse {
             token,
             user: Some(account.user()),
@@ -75,26 +75,26 @@ impl Api {
         user_agent: &str,
     ) -> Result<pb::VerifyTwoFactorResponse> {
         let ticket_hash = auth::hash_token(req.ticket.trim());
-        let Some(account_id) = self.app.node.ticket_account(&ticket_hash).await? else {
+        let Some(account_id) = self.app.node()?.ticket_account(&ticket_hash).await? else {
             return Err(Error::FailedPrecondition("this sign-in ran out; enter your password again".into()));
         };
         let guesses = format!("two-factor:{account_id}");
         self.app.limiter.check(&guesses)?;
-        if !twofactor::check(&self.app.node, &account_id, &req.code).await? {
+        if !twofactor::check(self.app.node()?, &account_id, &req.code).await? {
             self.app.limiter.failed(&guesses);
-            self.app.node.ticket_failed(&ticket_hash).await?;
+            self.app.node()?.ticket_failed(&ticket_hash).await?;
             return Err(Error::denied("that code didn't work"));
         }
         self.app.limiter.succeeded(&guesses);
-        if !self.app.node.take_ticket(&ticket_hash).await? {
+        if !self.app.node()?.take_ticket(&ticket_hash).await? {
             return Err(Error::FailedPrecondition("this sign-in ran out; enter your password again".into()));
         }
-        let account = self.app.node.account(&account_id).await?.ok_or(Error::Unauthenticated)?;
+        let account = self.app.node()?.account(&account_id).await?.ok_or(Error::Unauthenticated)?;
         if account.disabled {
             return Err(Error::denied(DISABLED));
         }
         let token = auth::new_token();
-        self.app.node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
+        self.app.node()?.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
         Ok(pb::VerifyTwoFactorResponse { token, user: Some(account.user()), admin: account.admin })
     }
 
@@ -110,7 +110,9 @@ impl Api {
         let avatar_url = req.avatar_url.as_deref().map(|value| url("avatar_url", value)).transpose()?;
         let banner_url = req.banner_url.as_deref().map(|value| url("banner_url", value)).transpose()?;
         let old_banner = match &banner_url {
-            Some(_) => self.app.node.profile(&account.id).await?.map(|profile| profile.banner_url).unwrap_or_default(),
+            Some(_) => {
+                self.app.node()?.profile(&account.id).await?.map(|profile| profile.banner_url).unwrap_or_default()
+            }
             None => String::new(),
         };
         let new_avatar = match avatar_url.as_deref().filter(|url| *url != account.avatar_url) {
@@ -139,7 +141,7 @@ impl Api {
         let old_avatar = account.avatar_url.clone();
         self.keep_picture(new_avatar.as_deref(), None).await;
         self.keep_picture(new_banner.as_deref(), None).await;
-        let account = self.app.node.update_profile(&account.id, &change).await?;
+        let account = self.app.node()?.update_profile(&account.id, &change).await?;
         if let Some(avatar) = &avatar_url {
             self.drop_picture(&old_avatar, avatar, PictureOwner::Account(&account.id, pb::MediaPurpose::Avatar)).await;
         }
@@ -147,35 +149,19 @@ impl Api {
             self.drop_picture(&old_banner, banner, PictureOwner::Account(&account.id, pb::MediaPurpose::Banner)).await;
         }
         let user = account.user();
-        let profile = self.app.node.profile(&account.id).await?.ok_or(Error::NotFound("account"))?;
+        let profile = self.app.node()?.profile(&account.id).await?.ok_or(Error::NotFound("account"))?;
         if !shows_everywhere {
             return Ok((user, profile));
         }
         // Every server the account belongs to keeps its own copy of the profile.
-        for server_id in self.app.servers.joined_ids(&account.id) {
-            let Ok(sdb) = self.app.servers.get(&server_id).await else { continue };
-            let updated = sdb
-                .write(&account.id, async |conn, events| {
-                    store::upsert_user(conn, &user).await?;
-                    if let Some(member) = store::member(conn, &sdb.id, &user.id).await? {
-                        events.push(Payload::MemberUpdated(pb::MemberUpdated { member: Some(member) }));
-                    }
-                    Ok(())
-                })
-                .await;
-            if let Err(err) = updated {
-                tracing::warn!(server = %server_id, error = %err, "couldn't update a member's profile");
-            }
-        }
+        self.app.update_user(&user, self.app.index.joined_ids(&account.id)).await;
         Ok((user, profile))
     }
 
     /// Whether `viewer` may see `user_id`'s profile: their own, someone they
     /// share a server with, or anyone for an instance admin.
     fn can_see_profile(&self, viewer: &Account, user_id: &str) -> bool {
-        viewer.id == user_id
-            || viewer.admin
-            || self.app.servers.joined_ids(&viewer.id).iter().any(|server| self.app.servers.is_member(user_id, server))
+        viewer.id == user_id || viewer.admin || self.app.index.share_a_server(&viewer.id, user_id)
     }
 }
 
@@ -203,7 +189,7 @@ impl AuthService for Api {
         respond(
             async {
                 if let Viewer::Account { token_hash, .. } = self.viewer(request.metadata()).await? {
-                    self.app.node.delete_session(&token_hash).await?;
+                    self.app.node()?.delete_session(&token_hash).await?;
                 }
                 Ok(pb::SignOutResponse {})
             }
@@ -246,7 +232,7 @@ impl AuthService for Api {
                 if !self.can_see_profile(&account, user_id) {
                     return Err(Error::NotFound("profile"));
                 }
-                let profile = self.app.node.profile(user_id).await?.ok_or(Error::NotFound("profile"))?;
+                let profile = self.app.node()?.profile(user_id).await?.ok_or(Error::NotFound("profile"))?;
                 Ok(pb::GetProfileResponse { profile: Some(profile) })
             }
             .await,
@@ -264,7 +250,7 @@ impl AuthService for Api {
                     return Err(Error::denied("sign in to change a password"));
                 };
                 let req = request.into_inner();
-                let current = self.app.node.password_hash(&account.id).await?;
+                let current = self.app.node()?.password_hash(&account.id).await?;
                 if current.is_none() {
                     return Err(Error::FailedPrecondition(
                         "this account signs in through waifu.dev, not with a password".into(),
@@ -275,7 +261,7 @@ impl AuthService for Api {
                 }
                 auth::validate_password(&req.new_password)?;
                 let hash = auth::hash_password(req.new_password).await?;
-                self.app.node.set_password(&account.id, &hash, &token_hash).await?;
+                self.app.node()?.set_password(&account.id, &hash, &token_hash).await?;
                 Ok(pb::ChangePasswordResponse {})
             }
             .await,

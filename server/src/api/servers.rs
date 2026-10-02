@@ -73,7 +73,7 @@ impl ServerService for Api {
                     _ => {}
                 }
                 if let Some(limit) = self.app.settings().limits.servers_per_account
-                    && self.app.servers.owned_count(&account.id) >= limit
+                    && self.app.owned_count(&account.id).await? >= limit
                 {
                     return Err(Error::ResourceExhausted(format!("an account can own at most {limit} servers here")));
                 }
@@ -85,7 +85,7 @@ impl ServerService for Api {
                     discoverable: req.discoverable,
                 };
                 let icon = self.check_picture(&account, pb::MediaPurpose::ServerIcon, &new.icon_url).await?;
-                let server = self.app.servers.create(&account.user(), new).await?;
+                let server = self.app.create_server(&account.user(), new).await?;
                 self.keep_picture(icon.as_deref(), Some(&server.id)).await;
                 tracing::info!(server = %server.id, owner = %account.id, "server created");
                 Ok(pb::CreateServerResponse { server: Some(server) })
@@ -103,7 +103,10 @@ impl ServerService for Api {
                 let account = self.account(request.metadata()).await?;
                 let sdb = self.app.servers.get(&request.get_ref().server_id).await?;
                 let server = sdb.server().await?;
-                if !server.discoverable && !self.app.servers.is_member(&account.id, &sdb.id) && !account.admin {
+                if !server.discoverable
+                    && !account.admin
+                    && store::member(&sdb.read()?, &sdb.id, &account.id).await?.is_none()
+                {
                     return Err(Error::NotFound("server"));
                 }
                 Ok(pb::GetServerResponse { server: Some(server) })
@@ -119,7 +122,7 @@ impl ServerService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                Ok(pb::ListServersResponse { servers: self.app.servers.joined(&account.id) })
+                Ok(pb::ListServersResponse { servers: self.app.index.joined(&account.id) })
             }
             .await,
         )
@@ -132,7 +135,7 @@ impl ServerService for Api {
         respond(
             async {
                 self.account(request.metadata()).await?;
-                Ok(pb::DiscoverServersResponse { servers: self.app.servers.discoverable() })
+                Ok(pb::DiscoverServersResponse { servers: self.app.index.discoverable() })
             }
             .await,
         )
@@ -210,7 +213,7 @@ impl ServerService for Api {
                         Ok(server)
                     })
                     .await?;
-                self.app.servers.index_server(server.clone());
+                self.app.server_changed(&server).await;
                 self.drop_picture(&old_icon, &server.icon_url, PictureOwner::Server(&server.id)).await;
                 Ok(pb::UpdateServerResponse { server: Some(server) })
             }
@@ -236,7 +239,7 @@ impl ServerService for Api {
                     return Err(Error::denied("only the server's owner can delete it"));
                 }
                 self.app.servers.delete(&sdb.id, &actor).await?;
-                self.forget_notifications(&sdb.id, None, None).await;
+                self.app.server_gone(&sdb.id).await;
                 tracing::info!(server = %sdb.id, by = %actor, "server deleted");
                 Ok(pb::DeleteServerResponse {})
             }
@@ -283,8 +286,8 @@ impl ServerService for Api {
                         Ok(member)
                     })
                     .await?;
-                self.app.servers.index_join(&account.id, &sdb.id);
-                Ok(pb::JoinServerResponse { server: self.app.servers.summary(&sdb.id), member: Some(member) })
+                self.app.membership_changed(&account.id, &sdb.id, true).await;
+                Ok(pb::JoinServerResponse { server: Some(sdb.server().await?), member: Some(member) })
             }
             .await,
         )
@@ -309,7 +312,7 @@ impl ServerService for Api {
                     Ok(())
                 })
                 .await?;
-                self.app.servers.index_leave(&account.id, &sdb.id);
+                self.app.membership_changed(&account.id, &sdb.id, false).await;
                 self.forget_notifications(&sdb.id, None, Some(&account.id)).await;
                 Ok(pb::LeaveServerResponse {})
             }
@@ -489,7 +492,7 @@ impl ServerService for Api {
                     Ok(())
                 })
                 .await?;
-                self.app.servers.index_leave(&req.user_id, &sdb.id);
+                self.app.membership_changed(&req.user_id, &sdb.id, false).await;
                 self.forget_notifications(&sdb.id, None, Some(&req.user_id)).await;
                 tracing::info!(server = %sdb.id, user = %req.user_id, by = %account.id, "member kicked");
                 Ok(pb::KickMemberResponse {})
@@ -575,7 +578,7 @@ impl ServerService for Api {
                     sdb.write(&account.id, ban).await?
                 };
                 if was_member {
-                    self.app.servers.index_leave(&req.user_id, &sdb.id);
+                    self.app.membership_changed(&req.user_id, &sdb.id, false).await;
                     self.forget_notifications(&sdb.id, None, Some(&req.user_id)).await;
                 }
                 tracing::info!(server = %sdb.id, user = %req.user_id, by = %account.id, deleted, "member banned");
@@ -705,7 +708,7 @@ impl ServerService for Api {
                     return Err(Error::invalid("you already own it"));
                 }
                 if let Some(limit) = self.app.settings().limits.servers_per_account
-                    && self.app.servers.owned_count(&req.user_id) >= limit
+                    && self.app.owned_count(&req.user_id).await? >= limit
                 {
                     return Err(Error::ResourceExhausted(format!(
                         "they already own {limit} servers, the most an account can here"
@@ -745,7 +748,7 @@ impl ServerService for Api {
                         Ok(server)
                     })
                     .await?;
-                self.app.servers.index_server(server.clone());
+                self.app.server_changed(&server).await;
                 tracing::info!(server = %sdb.id, from = %account.id, to = %req.user_id, "ownership handed on");
                 Ok(pb::TransferOwnershipResponse { server: Some(server) })
             }

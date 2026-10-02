@@ -69,7 +69,11 @@ pub fn bearer(metadata: &MetadataMap) -> Option<&str> {
 }
 
 pub async fn authenticate(node: &NodeDb, admin_token: Option<&str>, metadata: &MetadataMap) -> Result<Viewer> {
-    let token = bearer(metadata).ok_or(Error::Unauthenticated)?;
+    authenticate_token(node, admin_token, bearer(metadata).ok_or(Error::Unauthenticated)?).await
+}
+
+/// Who a bearer token belongs to: the operator, or a signed-in account.
+pub async fn authenticate_token(node: &NodeDb, admin_token: Option<&str>, token: &str) -> Result<Viewer> {
     if let Some(admin_token) = admin_token
         && constant_time_eq(token.as_bytes(), admin_token.as_bytes())
     {
@@ -102,7 +106,7 @@ pub fn hash_token(token: &str) -> String {
     Sha256::digest(token.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 

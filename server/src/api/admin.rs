@@ -30,7 +30,7 @@ impl Api {
 
     fn account_summary_pb(&self, summary: AccountSummary) -> pb::AccountSummary {
         let account = &summary.account;
-        let servers = self.app.servers.joined_ids(&account.id).len();
+        let servers = self.app.index.joined_ids(&account.id).len();
         pb::AccountSummary {
             user: Some(account.user()),
             admin: account.admin,
@@ -42,7 +42,7 @@ impl Api {
             last_seen_at: Some(timestamp(account.last_seen_at)),
             sessions: summary.sessions as i32,
             servers: servers as i32,
-            servers_owned: self.app.servers.owned_count(&account.id) as i32,
+            servers_owned: self.app.index.owned_count(&account.id) as i32,
         }
     }
 }
@@ -66,7 +66,8 @@ impl Api {
     /// how the process was started.
     async fn instance_config(&self) -> Result<pb::InstanceConfig> {
         let config = &self.app.config;
-        let mut overridden: Vec<String> = self.app.node.settings().await?.into_iter().map(|(field, _)| field).collect();
+        let mut overridden: Vec<String> =
+            self.app.node()?.settings().await?.into_iter().map(|(field, _)| field).collect();
         overridden.retain(|field| settings::FIELDS.contains(&field.as_str()));
         Ok(pb::InstanceConfig {
             settings: Some(self.app.settings().to_pb()),
@@ -139,8 +140,8 @@ impl AdminService for Api {
                     ));
                 }
 
-                self.app.node.save_settings(&store, &reset).await?;
-                self.app.replace_settings(Settings::load(&self.app.config, &self.app.node.settings().await?));
+                self.app.node()?.save_settings(&store, &reset).await?;
+                self.app.replace_settings(Settings::load(&self.app.config, &self.app.node()?.settings().await?));
                 tracing::info!(changed = ?update, reset = ?reset, "instance settings updated");
                 Ok(pb::UpdateSettingsResponse { config: Some(self.instance_config().await?) })
             }
@@ -155,15 +156,12 @@ impl AdminService for Api {
         respond(
             async {
                 self.require_instance_admin(request.metadata()).await?;
-                let mut server_usage = Vec::new();
-                for id in self.app.servers.ids() {
-                    let sdb = self.app.servers.get(&id).await?;
-                    server_usage.push(sdb.usage().await?);
-                }
+                let server_usage: Vec<pb::ServerUsage> =
+                    self.app.describe_servers(&[]).await?.into_iter().filter_map(|server| server.usage).collect();
                 let defaults = &self.app.settings().limits;
-                let (pictures, picture_bytes) = self.app.node.picture_totals().await?;
+                let (pictures, picture_bytes) = self.app.node()?.picture_totals().await?;
                 Ok(pb::GetNodeUsageResponse {
-                    accounts: self.app.node.account_counts().await?.total,
+                    accounts: self.app.node()?.account_counts().await?.total,
                     servers: server_usage.len() as i64,
                     server_usage,
                     default_limits: Some(effective_limits(pb::ServerLimits::default(), defaults)),
@@ -209,8 +207,9 @@ impl AdminService for Api {
                     _ => AccountFilter::All,
                 };
                 let limit = if req.limit <= 0 { 50 } else { i64::from(req.limit.min(200)) };
-                let (found, has_more) = self.app.node.list_accounts(&req.query, filter, &req.before_id, limit).await?;
-                let totals = self.app.node.account_totals().await?;
+                let (found, has_more) =
+                    self.app.node()?.list_accounts(&req.query, filter, &req.before_id, limit).await?;
+                let totals = self.app.node()?.account_totals().await?;
                 Ok(pb::ListAccountsResponse {
                     accounts: found.into_iter().map(|summary| self.account_summary_pb(summary)).collect(),
                     has_more,
@@ -239,20 +238,20 @@ impl AdminService for Api {
                     ));
                 }
                 let reason = text("reason", &req.reason, 0, 512)?;
-                self.app.node.account(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
+                self.app.node()?.account(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
                 // Taking admin away comes before turning off, and turning on before making admin.
                 if req.admin == Some(false) {
-                    self.app.node.set_admin(&req.account_id, false).await?;
+                    self.app.node()?.set_admin(&req.account_id, false).await?;
                 }
                 if let Some(disabled) = req.disabled {
-                    self.app.node.set_disabled(&req.account_id, disabled, &reason).await?;
+                    self.app.node()?.set_disabled(&req.account_id, disabled, &reason).await?;
                 }
                 if req.admin == Some(true) {
-                    self.app.node.set_admin(&req.account_id, true).await?;
+                    self.app.node()?.set_admin(&req.account_id, true).await?;
                 }
                 let by = viewer.account().map(|a| a.id.clone()).unwrap_or_else(|_| "operator".into());
                 tracing::info!(account = %req.account_id, admin = ?req.admin, disabled = ?req.disabled, by = %by, "account updated by an admin");
-                let summary = self.app.node.account_summary(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
+                let summary = self.app.node()?.account_summary(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
                 Ok(pb::UpdateAccountResponse { account: Some(self.account_summary_pb(summary)) })
             }
             .await,
@@ -270,13 +269,13 @@ impl AdminService for Api {
                 if viewer.account().is_ok_and(|me| me.id == req.account_id) {
                     return Err(Error::FailedPrecondition("change your own password from your account settings".into()));
                 }
-                let account = self.app.node.account(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
+                let account = self.app.node()?.account(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
                 if !account.has_password() {
                     return Err(Error::FailedPrecondition("only standalone accounts have a password here".into()));
                 }
                 let password = auth::temporary_password();
                 let hash = auth::hash_password(password.clone()).await?;
-                self.app.node.reset_password(&account.id, &hash, req.turn_off_two_factor).await?;
+                self.app.node()?.reset_password(&account.id, &hash, req.turn_off_two_factor).await?;
                 tracing::info!(account = %account.id, two_factor_off = req.turn_off_two_factor, "password reset by an admin");
                 Ok(pb::ResetAccountPasswordResponse { password })
             }
@@ -294,19 +293,17 @@ impl AdminService for Api {
                 let me = viewer.account().map(|a| a.id.clone()).unwrap_or_default();
                 let defaults = self.app.settings().limits.clone();
                 let mut servers = Vec::new();
-                for id in self.app.servers.ids() {
-                    // A server deleted while listing is simply left out.
-                    let Ok(sdb) = self.app.servers.get(&id).await else { continue };
-                    let server = sdb.server().await?;
-                    let owner = match self.app.node.account(&server.owner_id).await? {
+                for described in self.app.describe_servers(&[]).await? {
+                    let Some(server) = described.server else { continue };
+                    let owner = match self.app.node()?.account(&server.owner_id).await? {
                         Some(account) => Some(account.user()),
-                        None => crate::servers::user(&sdb.read()?, &server.owner_id).await?,
+                        None => described.owner,
                     };
                     servers.push(pb::InstanceServer {
                         owner,
-                        usage: Some(sdb.usage().await?),
-                        limits: Some(sdb.limits(&defaults).await?),
-                        member: !me.is_empty() && self.app.servers.is_member(&me, &id),
+                        usage: described.usage,
+                        limits: Some(effective_limits(described.own_limits.unwrap_or_default(), &defaults)),
+                        member: !me.is_empty() && self.app.index.is_member(&me, &server.id),
                         server: Some(server),
                     });
                 }
@@ -385,7 +382,7 @@ impl AdminService for Api {
                 let next = request.into_inner().announcement.unwrap_or_default();
                 let body = text("announcement.text", &next.text, 0, 300)?;
                 if body.is_empty() {
-                    self.app.node.set_announcement(None).await?;
+                    self.app.node()?.set_announcement(None).await?;
                     self.app.replace_announcement(None);
                     tracing::info!("announcement taken down");
                     return Ok(pb::SetAnnouncementResponse { announcement: None });
@@ -399,14 +396,14 @@ impl AdminService for Api {
                     _ => pb::AnnouncementTone::Info,
                 };
                 // The same text keeps its id, so people who closed it don't see it again.
-                let current = self.app.node.announcement().await?;
+                let current = self.app.node()?.announcement().await?;
                 let (id, created_at) = match current {
                     Some(current) if current.text == body => (current.id, current.created_at),
                     _ => (new_id(), Some(timestamp(now_ms()))),
                 };
                 let announcement =
                     pb::Announcement { id, text: body, tone: tone as i32, created_at, ends_at: next.ends_at };
-                self.app.node.set_announcement(Some(&announcement)).await?;
+                self.app.node()?.set_announcement(Some(&announcement)).await?;
                 self.app.replace_announcement(Some(announcement.clone()));
                 tracing::info!(id = %announcement.id, "announcement put up");
                 Ok(pb::SetAnnouncementResponse { announcement: Some(announcement) })

@@ -172,13 +172,22 @@ pub fn routes(app: Arc<App>) -> Router {
         )
 }
 
+/// node.db and the store. The routes are only served where pictures are kept.
+fn kept(app: &App) -> (&crate::node::NodeDb, &Store) {
+    match (app.node(), app.media()) {
+        (Ok(node), Ok(media)) => (node, media),
+        _ => unreachable!("picture routes are only served where pictures are kept"),
+    }
+}
+
 fn plain(status: StatusCode, message: &str) -> Response {
     (status, format!("{message}\n")).into_response()
 }
 
 async fn serve(app: Arc<App>, id: String, headers: HeaderMap) -> Response {
     let Some(id) = parse_id(&id) else { return plain(StatusCode::NOT_FOUND, "not found") };
-    let row = match app.node.media(&id).await {
+    let (node, media) = kept(&app);
+    let row = match node.media(&id).await {
         Ok(Some(row)) if row.stored => row,
         Ok(_) => return plain(StatusCode::NOT_FOUND, "not found"),
         Err(err) => {
@@ -192,7 +201,7 @@ async fn serve(app: Arc<App>, id: String, headers: HeaderMap) -> Response {
     let mut response = if fresh {
         StatusCode::NOT_MODIFIED.into_response()
     } else {
-        match tokio::fs::File::open(app.media.path(&id)).await {
+        match tokio::fs::File::open(media.path(&id)).await {
             Ok(file) => Response::new(Body::from_stream(tokio_util::io::ReaderStream::new(file))),
             Err(_) => return plain(StatusCode::NOT_FOUND, "not found"),
         }
@@ -215,7 +224,8 @@ async fn serve(app: Arc<App>, id: String, headers: HeaderMap) -> Response {
 
 async fn upload(app: Arc<App>, token: String, body: Body) -> Response {
     let hash = crate::auth::hash_token(&token);
-    let row = match app.node.start_upload(&hash, now_ms(), now_ms() + RECEIVE_TTL_MS).await {
+    let (node, media) = kept(&app);
+    let row = match node.start_upload(&hash, now_ms(), now_ms() + RECEIVE_TTL_MS).await {
         Ok(Some(row)) => row,
         Ok(None) => {
             return plain(StatusCode::NOT_FOUND, "this upload link has been used or ran out; start the upload again");
@@ -225,7 +235,7 @@ async fn upload(app: Arc<App>, token: String, body: Body) -> Response {
             return plain(StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server");
         }
     };
-    let temp = app.media.incoming.join(&row.id);
+    let temp = media.incoming.join(&row.id);
     let received =
         tokio::time::timeout(Duration::from_millis(RECEIVE_TTL_MS as u64), receive(&app, &row, &temp, body)).await;
     let failure = match received {
@@ -234,7 +244,7 @@ async fn upload(app: Arc<App>, token: String, body: Body) -> Response {
         Err(_) => (StatusCode::REQUEST_TIMEOUT, "the upload took too long".to_string()),
     };
     let _ = tokio::fs::remove_file(&temp).await;
-    if let Err(err) = app.node.delete_media(std::slice::from_ref(&row.id)).await {
+    if let Err(err) = node.delete_media(std::slice::from_ref(&row.id)).await {
         tracing::warn!(media = %row.id, error = %err, "couldn't drop a failed upload");
     }
     plain(failure.0, &failure.1)
@@ -272,9 +282,10 @@ async fn receive(app: &App, row: &MediaRow, temp: &Path, body: Body) -> std::res
     })?;
     file.sync_all().await.map_err(broken)?;
     drop(file);
-    tokio::fs::rename(temp, app.media.path(&row.id)).await.map_err(broken)?;
-    app.node.finish_upload(&row.id, content_type, now_ms()).await.map_err(|err| {
-        app.media.remove(&row.id);
+    let (node, media) = kept(app);
+    tokio::fs::rename(temp, media.path(&row.id)).await.map_err(broken)?;
+    node.finish_upload(&row.id, content_type, now_ms()).await.map_err(|err| {
+        media.remove(&row.id);
         tracing::error!(media = %row.id, error = %err, "couldn't record an upload");
         (StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string())
     })

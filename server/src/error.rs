@@ -1,5 +1,8 @@
 use tonic::{Code, Status};
 
+/// Set on the answer to a request that reached the wrong shard.
+pub const MISROUTED: &str = "fuwa-misrouted";
+
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Everything a request can fail with. Internal errors are logged and reach the
@@ -22,6 +25,16 @@ pub enum Error {
     ResourceExhausted(String),
     #[error("the server is busy; try again")]
     Busy,
+    /// A part of a split instance this needs is down.
+    #[error("{0}")]
+    Unavailable(String),
+    /// A request for a server this shard doesn't hold; the gateway looks up
+    /// where it is now and tries again.
+    #[error("that server is on another shard")]
+    Misrouted,
+    /// What another part of a split instance answered, passed on as it is.
+    #[error("{}", .0.message())]
+    Remote(Status),
     #[error("database: {0}")]
     Database(#[from] turso::Error),
     #[error("io: {0}")]
@@ -44,6 +57,18 @@ impl Error {
     }
 }
 
+impl From<Status> for Error {
+    /// An answer from another part of a split instance. Failing to reach it at
+    /// all (a transport error, which carries its cause) reads as that part being down.
+    fn from(status: Status) -> Self {
+        if std::error::Error::source(&status).is_some() {
+            tracing::warn!(error = %status, "a part of this instance didn't answer");
+            return Self::Unavailable("part of this instance is unreachable right now; try again soon".into());
+        }
+        Self::Remote(status)
+    }
+}
+
 impl From<prost::DecodeError> for Error {
     fn from(err: prost::DecodeError) -> Self {
         Self::Internal(format!("decoding stored protobuf: {err}"))
@@ -60,7 +85,13 @@ impl From<Error> for Status {
             Error::PermissionDenied(_) => Code::PermissionDenied,
             Error::FailedPrecondition(_) => Code::FailedPrecondition,
             Error::ResourceExhausted(_) => Code::ResourceExhausted,
-            Error::Busy => Code::Unavailable,
+            Error::Busy | Error::Unavailable(_) => Code::Unavailable,
+            Error::Misrouted => {
+                let mut status = Status::unavailable(err.to_string());
+                status.metadata_mut().insert(MISROUTED, "1".parse().expect("a valid header value"));
+                return status;
+            }
+            Error::Remote(status) => return status.clone(),
             Error::Database(_) | Error::Io(_) | Error::Internal(_) => {
                 tracing::error!(error = %err, "request failed");
                 return Status::internal("something went wrong on the server");

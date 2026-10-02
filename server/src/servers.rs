@@ -2,10 +2,10 @@
 //!
 //! A server's file holds everything about it (profile, members, channels,
 //! messages, its event log, usage counters and caps), so a server can be backed
-//! up or moved by copying one file. The instance keeps an in-memory index of
-//! every server and who belongs where, rebuilt from the files at startup.
+//! up or moved by copying one file. The directory's index of every server and
+//! who belongs where (see [`crate::cluster::index`]) is built from the files.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use turso::{Connection, Database, Row};
 
 use crate::config;
+use crate::cpb;
 use crate::db::{self, EncryptionKey, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::hub::Hub;
@@ -496,21 +497,16 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
     .ok_or_else(|| Error::internal("server row missing"))
 }
 
-/// Every community server on the instance.
+/// The community servers whose files this process keeps: all of them, or a
+/// shard's share in a split instance.
 pub struct Servers {
     dir: PathBuf,
     trash: PathBuf,
     key: Option<EncryptionKey>,
     hub: Arc<Hub>,
-    open: Mutex<HashMap<String, Arc<ServerDb>>>,
-    index: RwLock<Index>,
-}
-
-#[derive(Default)]
-struct Index {
-    servers: HashMap<String, pb::Server>,
-    /// Account id to the ids of the servers it's a member of.
-    memberships: HashMap<String, BTreeSet<String>>,
+    open: RwLock<HashMap<String, Arc<ServerDb>>>,
+    /// Part of a split instance, where a server not here may be on another shard.
+    split: bool,
 }
 
 /// What a new server starts with.
@@ -522,13 +518,24 @@ pub struct NewServer {
 }
 
 impl Servers {
+    /// No servers, for a process that keeps none.
+    pub fn none(hub: Arc<Hub>) -> Self {
+        Self {
+            dir: PathBuf::new(),
+            trash: PathBuf::new(),
+            key: None,
+            hub,
+            open: RwLock::new(HashMap::new()),
+            split: true,
+        }
+    }
+
     /// Opens every server under `<data>/servers/`, bringing each schema up to date.
-    pub async fn open(data_path: &Path, key: Option<EncryptionKey>, hub: Arc<Hub>) -> Result<Self> {
+    pub async fn open(data_path: &Path, key: Option<EncryptionKey>, hub: Arc<Hub>, split: bool) -> Result<Self> {
         let dir = data_path.join("servers");
         let trash = data_path.join("deleted");
         std::fs::create_dir_all(&dir)?;
-        let servers =
-            Self { dir, trash, key, hub, open: Mutex::new(HashMap::new()), index: RwLock::new(Index::default()) };
+        let servers = Self { dir, trash, key, hub, open: RwLock::new(HashMap::new()), split };
 
         let mut entries: Vec<PathBuf> = std::fs::read_dir(&servers.dir)?
             .filter_map(|entry| entry.ok().map(|e| e.path()))
@@ -550,20 +557,11 @@ impl Servers {
     async fn load(&self, id: &str, path: &Path) -> Result<()> {
         let sdb = Arc::new(self.open_file(id, path).await?);
         sdb.fold_usage().await?;
-        let conn = sdb.read()?;
-        let server = load_server(&conn).await?;
+        let server = sdb.server().await?;
         if server.id != id {
             return Err(Error::internal(format!("file is named {id} but holds server {}", server.id)));
         }
-        let members = query_all(&conn, "SELECT user_id FROM members", (), |r| r.get::<String>(0)).await?;
-        {
-            let mut index = self.index.write().unwrap_or_else(|p| p.into_inner());
-            for member in members {
-                index.memberships.entry(member).or_default().insert(id.to_string());
-            }
-            index.servers.insert(id.to_string(), server);
-        }
-        self.open.lock().await.insert(id.to_string(), sdb);
+        self.write().insert(id.to_string(), sdb);
         Ok(())
     }
 
@@ -581,23 +579,58 @@ impl Servers {
         })
     }
 
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, HashMap<String, Arc<ServerDb>>> {
+        self.open.read().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn write(&self) -> std::sync::RwLockWriteGuard<'_, HashMap<String, Arc<ServerDb>>> {
+        self.open.write().unwrap_or_else(|p| p.into_inner())
+    }
+
     fn path(&self, id: &str) -> PathBuf {
         self.dir.join(format!("{id}.db"))
     }
 
-    /// An open server by id, as a client sent it.
+    /// A server by id, as a client sent it.
     pub async fn get(&self, id: &str) -> Result<Arc<ServerDb>> {
         let id = parse_id("server_id", id)?;
-        if !self.index.read().unwrap_or_else(|p| p.into_inner()).servers.contains_key(&id) {
-            return Err(Error::NotFound("server"));
+        match self.read().get(&id) {
+            Some(sdb) => Ok(sdb.clone()),
+            None if self.split => Err(Error::Misrouted),
+            None => Err(Error::NotFound("server")),
         }
-        let mut open = self.open.lock().await;
-        if let Some(sdb) = open.get(&id) {
-            return Ok(sdb.clone());
+    }
+
+    /// Whether this process keeps the server's file.
+    pub fn holds(&self, id: &str) -> bool {
+        self.read().contains_key(id)
+    }
+
+    /// Every server here and who's in it, as the directory's index takes them.
+    pub async fn entries(&self) -> Result<Vec<cpb::ServerEntry>> {
+        let mut entries = Vec::new();
+        for sdb in self.all() {
+            let conn = sdb.read()?;
+            let server = load_server(&conn).await?;
+            let member_ids = query_all(&conn, "SELECT user_id FROM members", (), |r| r.get::<String>(0)).await?;
+            entries.push(cpb::ServerEntry { server: Some(server), member_ids });
         }
-        let sdb = Arc::new(self.open_file(&id, &self.path(&id)).await?);
-        open.insert(id, sdb.clone());
-        Ok(sdb)
+        Ok(entries)
+    }
+
+    /// Every server here, in id order.
+    pub fn all(&self) -> Vec<Arc<ServerDb>> {
+        let mut all: Vec<Arc<ServerDb>> = self.read().values().cloned().collect();
+        all.sort_by(|a, b| a.id.cmp(&b.id));
+        all
+    }
+
+    pub fn len(&self) -> usize {
+        self.read().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.read().is_empty()
     }
 
     /// Creates a server owned by `owner`, with a #general channel.
@@ -649,12 +682,7 @@ impl Servers {
                 return Err(err);
             }
         };
-        {
-            let mut index = self.index.write().unwrap_or_else(|p| p.into_inner());
-            index.servers.insert(id.clone(), server.clone());
-            index.memberships.entry(owner.id.clone()).or_default().insert(id.clone());
-        }
-        self.open.lock().await.insert(id, sdb);
+        self.write().insert(id, sdb);
         Ok(server)
     }
 
@@ -663,14 +691,7 @@ impl Servers {
     pub async fn delete(&self, id: &str, actor_id: &str) -> Result<()> {
         let sdb = self.get(id).await?;
         let id = sdb.id.clone();
-        {
-            let mut index = self.index.write().unwrap_or_else(|p| p.into_inner());
-            index.servers.remove(&id);
-            for servers in index.memberships.values_mut() {
-                servers.remove(&id);
-            }
-        }
-        self.open.lock().await.remove(&id);
+        self.write().remove(&id);
         {
             // Wait out any write in flight, then settle the logs into the main file.
             let _alone = sdb.gate.write().await;
@@ -693,79 +714,6 @@ impl Servers {
             payload: Some(Payload::ServerDeleted(pb::ServerDeleted {})),
         }]);
         Ok(())
-    }
-
-    pub fn summary(&self, id: &str) -> Option<pb::Server> {
-        self.index.read().unwrap_or_else(|p| p.into_inner()).servers.get(id).cloned()
-    }
-
-    /// Records a server's new profile after a committed change.
-    pub fn index_server(&self, server: pb::Server) {
-        let mut index = self.index.write().unwrap_or_else(|p| p.into_inner());
-        if index.servers.contains_key(&server.id) {
-            index.servers.insert(server.id.clone(), server);
-        }
-    }
-
-    pub fn index_join(&self, account_id: &str, server_id: &str) {
-        let mut index = self.index.write().unwrap_or_else(|p| p.into_inner());
-        index.memberships.entry(account_id.to_string()).or_default().insert(server_id.to_string());
-        if let Some(server) = index.servers.get_mut(server_id) {
-            server.member_count += 1;
-        }
-    }
-
-    pub fn index_leave(&self, account_id: &str, server_id: &str) {
-        let mut index = self.index.write().unwrap_or_else(|p| p.into_inner());
-        if let Some(servers) = index.memberships.get_mut(account_id) {
-            servers.remove(server_id);
-        }
-        if let Some(server) = index.servers.get_mut(server_id) {
-            server.member_count = (server.member_count - 1).max(0);
-        }
-    }
-
-    /// Ids of the servers an account is a member of.
-    pub fn joined_ids(&self, account_id: &str) -> Vec<String> {
-        let index = self.index.read().unwrap_or_else(|p| p.into_inner());
-        index.memberships.get(account_id).map(|ids| ids.iter().cloned().collect()).unwrap_or_default()
-    }
-
-    /// The servers an account is a member of, oldest first.
-    pub fn joined(&self, account_id: &str) -> Vec<pb::Server> {
-        let index = self.index.read().unwrap_or_else(|p| p.into_inner());
-        let Some(ids) = index.memberships.get(account_id) else { return vec![] };
-        ids.iter().filter_map(|id| index.servers.get(id).cloned()).collect()
-    }
-
-    pub fn is_member(&self, account_id: &str, server_id: &str) -> bool {
-        let index = self.index.read().unwrap_or_else(|p| p.into_inner());
-        index.memberships.get(account_id).is_some_and(|ids| ids.contains(server_id))
-    }
-
-    /// Discoverable servers, busiest first.
-    pub fn discoverable(&self) -> Vec<pb::Server> {
-        let index = self.index.read().unwrap_or_else(|p| p.into_inner());
-        let mut servers: Vec<pb::Server> = index.servers.values().filter(|s| s.discoverable).cloned().collect();
-        servers.sort_by(|a, b| b.member_count.cmp(&a.member_count).then_with(|| a.id.cmp(&b.id)));
-        servers
-    }
-
-    pub fn owned_count(&self, account_id: &str) -> i64 {
-        let index = self.index.read().unwrap_or_else(|p| p.into_inner());
-        index.servers.values().filter(|s| s.owner_id == account_id).count() as i64
-    }
-
-    pub fn ids(&self) -> Vec<String> {
-        let index = self.index.read().unwrap_or_else(|p| p.into_inner());
-        let mut ids: Vec<String> = index.servers.keys().cloned().collect();
-        ids.sort();
-        ids
-    }
-
-    pub fn count(&self) -> (i64, i64) {
-        let index = self.index.read().unwrap_or_else(|p| p.into_inner());
-        (index.servers.len() as i64, index.servers.values().filter(|s| s.discoverable).count() as i64)
     }
 }
 

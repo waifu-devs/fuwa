@@ -18,6 +18,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0003_accounts.sql"),
     include_str!("../migrations/node/0004_admin.sql"),
     include_str!("../migrations/node/0005_media.sql"),
+    include_str!("../migrations/node/0006_cluster.sql"),
 ];
 
 /// How long a session lasts after sign-in.
@@ -715,6 +716,63 @@ impl NodeDb {
                 (server_id, channel_id, account_id),
             )
             .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    // ───────────────────────── Split instances ─────────────────────────
+
+    /// Every shard that has registered, and where it was.
+    pub async fn shards(&self) -> Result<Vec<(String, String)>> {
+        let conn = self.read()?;
+        query_all(&conn, "SELECT id, url FROM shards ORDER BY id", (), |r| Ok((r.get(0)?, r.get(1)?))).await
+    }
+
+    /// Which shard holds each server.
+    pub async fn placements(&self) -> Result<Vec<(String, String)>> {
+        let conn = self.read()?;
+        query_all(&conn, "SELECT server_id, shard_id FROM placements", (), |r| Ok((r.get(0)?, r.get(1)?))).await
+    }
+
+    /// Records a shard's registration: where it is and every server it holds,
+    /// which is all it holds.
+    pub async fn register_shard(&self, shard_id: &str, url: &str, server_ids: &[String]) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "INSERT INTO shards (id, url, registered_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (id) DO UPDATE SET url = excluded.url, registered_at = excluded.registered_at",
+                (shard_id, url, now_ms()),
+            )
+            .await?;
+            conn.execute("DELETE FROM placements WHERE shard_id = ?1", [shard_id]).await?;
+            for id in server_ids {
+                conn.execute(
+                    "INSERT INTO placements (server_id, shard_id) VALUES (?1, ?2)
+                     ON CONFLICT (server_id) DO UPDATE SET shard_id = excluded.shard_id",
+                    (id.as_str(), shard_id),
+                )
+                .await?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// Records where a new server went, or (with `None`) that it's gone.
+    pub async fn place(&self, server_id: &str, shard_id: Option<&str>) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            match shard_id {
+                Some(shard_id) => {
+                    conn.execute(
+                        "INSERT INTO placements (server_id, shard_id) VALUES (?1, ?2)
+                         ON CONFLICT (server_id) DO UPDATE SET shard_id = excluded.shard_id",
+                        (server_id, shard_id),
+                    )
+                    .await?
+                }
+                None => conn.execute("DELETE FROM placements WHERE server_id = ?1", [server_id]).await?,
+            };
             Ok(())
         })
         .await

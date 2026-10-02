@@ -18,6 +18,10 @@ like, hosted or self-hosted, over the same protocol.
 - **One app for every instance.** Each instance serves the fuwa web app at its
   own address. The app keeps a list of the instances you've added, hosted or
   self-hosted, and shows all their servers side by side.
+- **One binary, split when you need to.** By default one process does
+  everything. The same binary can run as gateways, a directory and shards
+  instead, to spread a big instance across machines (see
+  [Scaling out](#scaling-out)).
 
 ## Self-host
 
@@ -164,6 +168,66 @@ To back up, copy the directory (or stop the server and copy single files). To
 bring back a deleted server, move its file from `deleted/` into `servers/` as
 `<id>.db` and restart. A server file dropped into `servers/` is picked up at
 startup.
+
+### Scaling out
+
+One `fuwa` process runs a whole instance, and that's the right choice until
+one machine isn't enough. Then the same binary runs as separate parts, chosen
+with `FUWA_ROLE`:
+
+- **Directory** (one): keeps `node.db` (accounts, sessions, settings) and the
+  uploaded pictures, and knows which shard holds each community server.
+- **Shards** (one or more): each keeps some of the community servers' files and
+  sends their live events. New servers go to the shard holding the fewest.
+- **Gateways** (one or more): what clients connect to. They keep nothing, serve
+  the web app, and pass each call to the directory or to the shard holding its
+  server. A client's one live stream can follow servers on several shards; the
+  gateway merges them.
+
+Put your public address (and TLS) in front of the gateways, and keep the
+directory and shards on a private network. They answer only calls carrying
+the cluster key, apart from `/healthz`.
+
+| Variable | For | What it does |
+| --- | --- | --- |
+| `FUWA_ROLE` | every part | `all` (the default: everything in one process), `gateway`, `directory` or `shard` |
+| `FUWA_CLUSTER_KEY` | every part | A shared secret of 32+ characters (`openssl rand -hex 32`), the same on every part |
+| `FUWA_DIRECTORY_URL` | gateways, shards | Where the directory is, like `http://directory:8080` |
+| `FUWA_INTERNAL_URL` | shards | Where gateways and the directory reach this shard, like `http://shard-1:8080` |
+| `FUWA_SHARD_ID` | shards | The shard's name (a-z, 0-9, `-`, `_`). Defaults to one made up on first start and kept in its data folder as `shard-id` |
+
+The other variables work as above, read by the part that uses them: set
+`FUWA_PUBLIC_URL` (the gateways' address), the admin token, accounts, limits
+and telemetry on the directory, which shares its settings with every other
+part as they change. Give the directory and each shard their own data folder.
+If you use `FUWA_ENCRYPTION_KEY`, set the same one on the directory and every
+shard, so server files can move between shards. Every part answers `/healthz`.
+
+```sh
+docker network create fuwa
+KEY=$(openssl rand -hex 32)
+fuwa_part() { docker run -d --network fuwa -e FUWA_CLUSTER_KEY=$KEY "$@" ghcr.io/waifu-devs/fuwa; }
+fuwa_part --name directory -v directory:/data -e FUWA_ROLE=directory \
+  -e FUWA_PUBLIC_URL=https://chat.example.com
+fuwa_part --name shard-1 -v shard-1:/data -e FUWA_ROLE=shard \
+  -e FUWA_DIRECTORY_URL=http://directory:8080 -e FUWA_INTERNAL_URL=http://shard-1:8080
+fuwa_part --name gateway -p 8080:8080 -e FUWA_ROLE=gateway \
+  -e FUWA_DIRECTORY_URL=http://directory:8080
+```
+
+Turning a single-process instance into a split one: its data folder becomes
+the directory's (its `servers/` folder can stay there and be served by a shard
+started on that same folder, or be moved to shards' folders).
+
+While a shard is down, its servers answer "unavailable" and live streams
+following them end, so clients reconnect once it's back; everything else keeps
+working. Deleting an account and exporting someone's data are refused until
+every shard is up, so nothing is left out. To move a server to another shard,
+stop both, move its files (`<id>.db` and any `<id>.db-log` or `-wal` beside
+it) from one `servers/` folder to the other, and start them; the directory
+learns where it went when the shard starts. Shards check sessions with the directory and remember the answer for a
+few seconds, so a signed-out device can keep reading for up to five seconds
+(its live streams end at the next heartbeat check).
 
 ### The anonymous usage signal
 
