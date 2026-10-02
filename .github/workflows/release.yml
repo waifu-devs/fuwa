@@ -82,7 +82,7 @@ jobs:
             runner: macos-latest
             file: aarch64-macos
             exe: ""
-          - name: Windows (x86)
+          - name: Windows (x64)
             runner: windows-latest
             file: x86_64-windows
             exe: .exe
