@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { discover, joinServer, run } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
+import { BuildLabel } from "@/components/BuildLabel";
 import { Connect } from "@/components/Connect";
 import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
@@ -106,7 +107,7 @@ function Browse({ instanceKey }: { instanceKey: string }) {
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="flex items-center gap-2 text-sm font-bold text-muted-foreground">
-              <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · <Private text={instanceKey} /> · fuwa {inst.node?.version}
+              <ConnDot state={inst.connection} /> {connectionLabel(inst.connection)} · <Private text={instanceKey} /> · <BuildLabel node={inst.node} />
             </p>
             <h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">
               Welcome to <SwapText className="gradient-text">{inst.node?.name ?? address}</SwapText>

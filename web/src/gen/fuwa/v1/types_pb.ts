@@ -12,7 +12,7 @@ import type { Message as Message$1 } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/types.proto.
  */
 export const file_fuwa_v1_types: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL3R5cGVzLnByb3RvEgdmdXdhLnYxIs8BCgROb2RlEgwKBG5hbWUYASABKAkSDwoHdmVyc2lvbhgCIAEoCRISCgpwdWJsaWNfdXJsGAMgASgJEiIKBGF1dGgYBCABKAsyFC5mdXdhLnYxLkF1dGhNZXRob2RzEjAKD3NlcnZlcl9jcmVhdGlvbhgFIAEoDjIXLmZ1d2EudjEuU2VydmVyQ3JlYXRpb24SEQoJdGVsZW1ldHJ5GAYgASgIEisKDGFubm91bmNlbWVudBgHIAEoCzIVLmZ1d2EudjEuQW5ub3VuY2VtZW50Iq4BCgxBbm5vdW5jZW1lbnQSCgoCaWQYASABKAkSDAoEdGV4dBgCIAEoCRInCgR0b25lGAMgASgOMhkuZnV3YS52MS5Bbm5vdW5jZW1lbnRUb25lEi4KCmNyZWF0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEisKB2VuZHNfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wImoKC0F1dGhNZXRob2RzEhUKDWxvY2FsX3NpZ25faW4YASABKAgSFQoNbG9jYWxfc2lnbl91cBgCIAEoCBIWCg5saW5rZWRfc2lnbl9pbhgDIAEoCBIVCg1saW5rZWRfaXNzdWVyGAQgASgJIrkBCgRVc2VyEgoKAmlkGAEgASgJEhAKCHVzZXJuYW1lGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRISCgphdmF0YXJfdXJsGAQgASgJEiIKBGtpbmQYBSABKA4yFC5mdXdhLnYxLkFjY291bnRLaW5kEg4KBnN0YXR1cxgGIAEoCRI1ChFzdGF0dXNfZXhwaXJlc19hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAitQEKB1Byb2ZpbGUSGwoEdXNlchgBIAEoCzINLmZ1d2EudjEuVXNlchIQCghwcm9ub3VucxgCIAEoCRILCgNiaW8YAyABKAkSEgoKYmFubmVyX3VybBgEIAEoCRIZCgxhY2NlbnRfY29sb3IYBSABKAVIAIgBARIuCgpjcmVhdGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIPCg1fYWNjZW50X2NvbG9yItEBCgZNZW1iZXISEQoJc2VydmVyX2lkGAEgASgJEhsKBHVzZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISEAoIbmlja25hbWUYAyABKAkSIQoEcm9sZRgEIAEoDjITLmZ1d2EudjEuTWVtYmVyUm9sZRItCglqb2luZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjMKD3RpbWVkX291dF91bnRpbBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAivQIKBlNlcnZlchIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEhAKCGljb25fdXJsGAQgASgJEhAKCG93bmVyX2lkGAUgASgJEhQKDGRpc2NvdmVyYWJsZRgGIAEoCBIUCgxtZW1iZXJfY291bnQYByABKAMSLgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKdXBkYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASOQoVZGVmYXVsdF9ub3RpZmljYXRpb25zGAogASgOMhouZnV3YS52MS5Ob3RpZmljYXRpb25MZXZlbBIZChFzeXN0ZW1fY2hhbm5lbF9pZBgLIAEoCSKIAgoHQ2hhbm5lbBIKCgJpZBgBIAEoCRIRCglzZXJ2ZXJfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIiCgR0eXBlGAQgASgOMhQuZnV3YS52MS5DaGFubmVsVHlwZRIRCglwYXJlbnRfaWQYBSABKAkSDQoFdG9waWMYBiABKAkSEAoIcG9zaXRpb24YByABKAUSLgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKdXBkYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASGAoQc2xvd21vZGVfc2Vjb25kcxgKIAEoBSLCAgoHTWVzc2FnZRIKCgJpZBgBIAEoCRIRCglzZXJ2ZXJfaWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCRIRCglhdXRob3JfaWQYBCABKAkSDwoHY29udGVudBgFIAEoCRIoCgthdHRhY2htZW50cxgGIAMoCzITLmZ1d2EudjEuQXR0YWNobWVudBIeCgZlbWJlZHMYByADKAsyDi5mdXdhLnYxLkVtYmVkEhMKC3JlcGx5X3RvX2lkGAggASgJEi4KCmNyZWF0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KCWVkaXRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASIgoEa2luZBgLIAEoDjIULmZ1d2EudjEuTWVzc2FnZUtpbmQiWwoKQXR0YWNobWVudBIKCgJpZBgBIAEoCRIQCghmaWxlbmFtZRgCIAEoCRIUCgxjb250ZW50X3R5cGUYAyABKAkSDAoEc2l6ZRgEIAEoAxILCgN1cmwYBSABKAkilgEKBUVtYmVkEg0KBXRpdGxlGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJEgsKA3VybBgDIAEoCRINCgVjb2xvchgEIAEoBRIjCgZmaWVsZHMYBSADKAsyEy5mdXdhLnYxLkVtYmVkRmllbGQSFQoNdGh1bWJuYWlsX3VybBgGIAEoCRIRCglpbWFnZV91cmwYByABKAkiOQoKRW1iZWRGaWVsZBIMCgRuYW1lGAEgASgJEg0KBXZhbHVlGAIgASgJEg4KBmlubGluZRgDIAEoCCLDAQoUTm90aWZpY2F0aW9uU2V0dGluZ3MSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSKQoFbGV2ZWwYAyABKA4yGi5mdXdhLnYxLk5vdGlmaWNhdGlvbkxldmVsEg0KBW11dGVkGAQgASgIEi8KC211dGVkX3VudGlsGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIZChFzdXBwcmVzc19ldmVyeW9uZRgGIAEoCCKJAgoLU2VydmVyVXNhZ2USEQoJc2VydmVyX2lkGAEgASgJEg8KB21lbWJlcnMYAiABKAMSEAoIY2hhbm5lbHMYAyABKAMSEAoIbWVzc2FnZXMYBCABKAMSFQoNbWVzc2FnZXNfc2VudBgFIAEoAxIVCg1tZXNzYWdlX2J5dGVzGAYgASgDEhMKC2F0dGFjaG1lbnRzGAcgASgDEhgKEGF0dGFjaG1lbnRfYnl0ZXMYCCABKAMSDgoGZXZlbnRzGAkgASgDEhUKDXN0b3JhZ2VfYnl0ZXMYCiABKAMSLgoKdXBkYXRlZF9hdBgLIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAitgEKDFNlcnZlckxpbWl0cxIUCgdtZW1iZXJzGAEgASgDSACIAQESFQoIY2hhbm5lbHMYAiABKANIAYgBARIaCg1zdG9yYWdlX2J5dGVzGAMgASgDSAKIAQESHQoQYXR0YWNobWVudF9ieXRlcxgEIAEoA0gDiAEBQgoKCF9tZW1iZXJzQgsKCV9jaGFubmVsc0IQCg5fc3RvcmFnZV9ieXRlc0ITChFfYXR0YWNobWVudF9ieXRlcyLdBQoFRXZlbnQSCgoCaWQYASABKAkSEQoJc2VydmVyX2lkGAIgASgJEhAKCHNlcXVlbmNlGAMgASgDEhAKCGFjdG9yX2lkGAQgASgJEi4KCmNyZWF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDnNlcnZlcl91cGRhdGVkGAogASgLMhYuZnV3YS52MS5TZXJ2ZXJVcGRhdGVkSAASMAoOc2VydmVyX2RlbGV0ZWQYCyABKAsyFi5mdXdhLnYxLlNlcnZlckRlbGV0ZWRIABIyCg9jaGFubmVsX2NyZWF0ZWQYDCABKAsyFy5mdXdhLnYxLkNoYW5uZWxDcmVhdGVkSAASMgoPY2hhbm5lbF91cGRhdGVkGA0gASgLMhcuZnV3YS52MS5DaGFubmVsVXBkYXRlZEgAEjIKD2NoYW5uZWxfZGVsZXRlZBgOIAEoCzIXLmZ1d2EudjEuQ2hhbm5lbERlbGV0ZWRIABIyCg9tZXNzYWdlX2NyZWF0ZWQYDyABKAsyFy5mdXdhLnYxLk1lc3NhZ2VDcmVhdGVkSAASMgoPbWVzc2FnZV91cGRhdGVkGBAgASgLMhcuZnV3YS52MS5NZXNzYWdlVXBkYXRlZEgAEjIKD21lc3NhZ2VfZGVsZXRlZBgRIAEoCzIXLmZ1d2EudjEuTWVzc2FnZURlbGV0ZWRIABIuCg1tZW1iZXJfam9pbmVkGBIgASgLMhUuZnV3YS52MS5NZW1iZXJKb2luZWRIABIwCg5tZW1iZXJfdXBkYXRlZBgTIAEoCzIWLmZ1d2EudjEuTWVtYmVyVXBkYXRlZEgAEioKC21lbWJlcl9sZWZ0GBQgASgLMhMuZnV3YS52MS5NZW1iZXJMZWZ0SAASLAoMdXNlcl91cGRhdGVkGBUgASgLMhQuZnV3YS52MS5Vc2VyVXBkYXRlZEgAQgkKB3BheWxvYWQiMAoNU2VydmVyVXBkYXRlZBIfCgZzZXJ2ZXIYASABKAsyDy5mdXdhLnYxLlNlcnZlciIPCg1TZXJ2ZXJEZWxldGVkIjMKDkNoYW5uZWxDcmVhdGVkEiEKB2NoYW5uZWwYASABKAsyEC5mdXdhLnYxLkNoYW5uZWwiMwoOQ2hhbm5lbFVwZGF0ZWQSIQoHY2hhbm5lbBgBIAEoCzIQLmZ1d2EudjEuQ2hhbm5lbCIkCg5DaGFubmVsRGVsZXRlZBISCgpjaGFubmVsX2lkGAEgASgJIjMKDk1lc3NhZ2VDcmVhdGVkEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiMwoOTWVzc2FnZVVwZGF0ZWQSIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZSI4Cg5NZXNzYWdlRGVsZXRlZBISCgpjaGFubmVsX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkiLwoMTWVtYmVySm9pbmVkEh8KBm1lbWJlchgBIAEoCzIPLmZ1d2EudjEuTWVtYmVyIjAKDU1lbWJlclVwZGF0ZWQSHwoGbWVtYmVyGAEgASgLMg8uZnV3YS52MS5NZW1iZXIiQwoKTWVtYmVyTGVmdBIPCgd1c2VyX2lkGAEgASgJEiQKBnJlYXNvbhgCIAEoDjIULmZ1d2EudjEuTGVhdmVSZWFzb24iKgoLVXNlclVwZGF0ZWQSGwoEdXNlchgBIAEoCzINLmZ1d2EudjEuVXNlciqQAQoQQW5ub3VuY2VtZW50VG9uZRIhCh1BTk5PVU5DRU1FTlRfVE9ORV9VTlNQRUNJRklFRBAAEhoKFkFOTk9VTkNFTUVOVF9UT05FX0lORk8QARIdChlBTk5PVU5DRU1FTlRfVE9ORV9XQVJOSU5HEAISHgoaQU5OT1VOQ0VNRU5UX1RPTkVfQ1JJVElDQUwQAyqJAQoOU2VydmVyQ3JlYXRpb24SHwobU0VSVkVSX0NSRUFUSU9OX1VOU1BFQ0lGSUVEEAASHAoYU0VSVkVSX0NSRUFUSU9OX0VWRVJZT05FEAESGgoWU0VSVkVSX0NSRUFUSU9OX0FETUlOUxACEhwKGFNFUlZFUl9DUkVBVElPTl9ESVNBQkxFRBADKlwKC0FjY291bnRLaW5kEhwKGEFDQ09VTlRfS0lORF9VTlNQRUNJRklFRBAAEhYKEkFDQ09VTlRfS0lORF9MT0NBTBABEhcKE0FDQ09VTlRfS0lORF9MSU5LRUQQAipvCgpNZW1iZXJSb2xlEhsKF01FTUJFUl9ST0xFX1VOU1BFQ0lGSUVEEAASFgoSTUVNQkVSX1JPTEVfTUVNQkVSEAESFQoRTUVNQkVSX1JPTEVfQURNSU4QAhIVChFNRU1CRVJfUk9MRV9PV05FUhADKq0BCgtDaGFubmVsVHlwZRIcChhDSEFOTkVMX1RZUEVfVU5TUEVDSUZJRUQQABIVChFDSEFOTkVMX1RZUEVfVEVYVBABEhYKEkNIQU5ORUxfVFlQRV9WT0lDRRACEh0KGUNIQU5ORUxfVFlQRV9BTk5PVU5DRU1FTlQQAxIXChNDSEFOTkVMX1RZUEVfVEhSRUFEEAQSGQoVQ0hBTk5FTF9UWVBFX0NBVEVHT1JZEAUqSwoLTWVzc2FnZUtpbmQSHAoYTUVTU0FHRV9LSU5EX1VOU1BFQ0lGSUVEEAASHgoaTUVTU0FHRV9LSU5EX01FTUJFUl9KT0lORUQQASqUAQoRTm90aWZpY2F0aW9uTGV2ZWwSIgoeTk9USUZJQ0FUSU9OX0xFVkVMX1VOU1BFQ0lGSUVEEAASGgoWTk9USUZJQ0FUSU9OX0xFVkVMX0FMTBABEh8KG05PVElGSUNBVElPTl9MRVZFTF9NRU5USU9OUxACEh4KGk5PVElGSUNBVElPTl9MRVZFTF9OT1RISU5HEAMqdAoLTGVhdmVSZWFzb24SHAoYTEVBVkVfUkVBU09OX1VOU1BFQ0lGSUVEEAASFQoRTEVBVkVfUkVBU09OX0xFRlQQARIXChNMRUFWRV9SRUFTT05fS0lDS0VEEAISFwoTTEVBVkVfUkVBU09OX0JBTk5FRBADYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("ChNmdXdhL3YxL3R5cGVzLnByb3RvEgdmdXdhLnYxIu4BCgROb2RlEgwKBG5hbWUYASABKAkSDwoHdmVyc2lvbhgCIAEoCRISCgpwdWJsaWNfdXJsGAMgASgJEiIKBGF1dGgYBCABKAsyFC5mdXdhLnYxLkF1dGhNZXRob2RzEjAKD3NlcnZlcl9jcmVhdGlvbhgFIAEoDjIXLmZ1d2EudjEuU2VydmVyQ3JlYXRpb24SEQoJdGVsZW1ldHJ5GAYgASgIEisKDGFubm91bmNlbWVudBgHIAEoCzIVLmZ1d2EudjEuQW5ub3VuY2VtZW50Eh0KBWJ1aWxkGAggASgLMg4uZnV3YS52MS5CdWlsZCI4CgVCdWlsZBIPCgd2ZXJzaW9uGAEgASgJEg4KBmNvbW1pdBgCIAEoCRIOCgZzb3VyY2UYAyABKAkirgEKDEFubm91bmNlbWVudBIKCgJpZBgBIAEoCRIMCgR0ZXh0GAIgASgJEicKBHRvbmUYAyABKA4yGS5mdXdhLnYxLkFubm91bmNlbWVudFRvbmUSLgoKY3JlYXRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKwoHZW5kc19hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiagoLQXV0aE1ldGhvZHMSFQoNbG9jYWxfc2lnbl9pbhgBIAEoCBIVCg1sb2NhbF9zaWduX3VwGAIgASgIEhYKDmxpbmtlZF9zaWduX2luGAMgASgIEhUKDWxpbmtlZF9pc3N1ZXIYBCABKAkiuQEKBFVzZXISCgoCaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJEhIKCmF2YXRhcl91cmwYBCABKAkSIgoEa2luZBgFIAEoDjIULmZ1d2EudjEuQWNjb3VudEtpbmQSDgoGc3RhdHVzGAYgASgJEjUKEXN0YXR1c19leHBpcmVzX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCK1AQoHUHJvZmlsZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEhAKCHByb25vdW5zGAIgASgJEgsKA2JpbxgDIAEoCRISCgpiYW5uZXJfdXJsGAQgASgJEhkKDGFjY2VudF9jb2xvchgFIAEoBUgAiAEBEi4KCmNyZWF0ZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQg8KDV9hY2NlbnRfY29sb3Ii0QEKBk1lbWJlchIRCglzZXJ2ZXJfaWQYASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchIQCghuaWNrbmFtZRgDIAEoCRIhCgRyb2xlGAQgASgOMhMuZnV3YS52MS5NZW1iZXJSb2xlEi0KCWpvaW5lZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMwoPdGltZWRfb3V0X3VudGlsGAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCK9AgoGU2VydmVyEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEwoLZGVzY3JpcHRpb24YAyABKAkSEAoIaWNvbl91cmwYBCABKAkSEAoIb3duZXJfaWQYBSABKAkSFAoMZGlzY292ZXJhYmxlGAYgASgIEhQKDG1lbWJlcl9jb3VudBgHIAEoAxIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI5ChVkZWZhdWx0X25vdGlmaWNhdGlvbnMYCiABKA4yGi5mdXdhLnYxLk5vdGlmaWNhdGlvbkxldmVsEhkKEXN5c3RlbV9jaGFubmVsX2lkGAsgASgJIogCCgdDaGFubmVsEgoKAmlkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEiIKBHR5cGUYBCABKA4yFC5mdXdhLnYxLkNoYW5uZWxUeXBlEhEKCXBhcmVudF9pZBgFIAEoCRINCgV0b3BpYxgGIAEoCRIQCghwb3NpdGlvbhgHIAEoBRIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIYChBzbG93bW9kZV9zZWNvbmRzGAogASgFIsICCgdNZXNzYWdlEgoKAmlkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRISCgpjaGFubmVsX2lkGAMgASgJEhEKCWF1dGhvcl9pZBgEIAEoCRIPCgdjb250ZW50GAUgASgJEigKC2F0dGFjaG1lbnRzGAYgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgHIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYCCABKAkSLgoKY3JlYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLQoJZWRpdGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIiCgRraW5kGAsgASgOMhQuZnV3YS52MS5NZXNzYWdlS2luZCJbCgpBdHRhY2htZW50EgoKAmlkGAEgASgJEhAKCGZpbGVuYW1lGAIgASgJEhQKDGNvbnRlbnRfdHlwZRgDIAEoCRIMCgRzaXplGAQgASgDEgsKA3VybBgFIAEoCSKWAQoFRW1iZWQSDQoFdGl0bGUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSCwoDdXJsGAMgASgJEg0KBWNvbG9yGAQgASgFEiMKBmZpZWxkcxgFIAMoCzITLmZ1d2EudjEuRW1iZWRGaWVsZBIVCg10aHVtYm5haWxfdXJsGAYgASgJEhEKCWltYWdlX3VybBgHIAEoCSI5CgpFbWJlZEZpZWxkEgwKBG5hbWUYASABKAkSDQoFdmFsdWUYAiABKAkSDgoGaW5saW5lGAMgASgIIsMBChROb3RpZmljYXRpb25TZXR0aW5ncxIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIpCgVsZXZlbBgDIAEoDjIaLmZ1d2EudjEuTm90aWZpY2F0aW9uTGV2ZWwSDQoFbXV0ZWQYBCABKAgSLwoLbXV0ZWRfdW50aWwYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhkKEXN1cHByZXNzX2V2ZXJ5b25lGAYgASgIIokCCgtTZXJ2ZXJVc2FnZRIRCglzZXJ2ZXJfaWQYASABKAkSDwoHbWVtYmVycxgCIAEoAxIQCghjaGFubmVscxgDIAEoAxIQCghtZXNzYWdlcxgEIAEoAxIVCg1tZXNzYWdlc19zZW50GAUgASgDEhUKDW1lc3NhZ2VfYnl0ZXMYBiABKAMSEwoLYXR0YWNobWVudHMYByABKAMSGAoQYXR0YWNobWVudF9ieXRlcxgIIAEoAxIOCgZldmVudHMYCSABKAMSFQoNc3RvcmFnZV9ieXRlcxgKIAEoAxIuCgp1cGRhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCK2AQoMU2VydmVyTGltaXRzEhQKB21lbWJlcnMYASABKANIAIgBARIVCghjaGFubmVscxgCIAEoA0gBiAEBEhoKDXN0b3JhZ2VfYnl0ZXMYAyABKANIAogBARIdChBhdHRhY2htZW50X2J5dGVzGAQgASgDSAOIAQFCCgoIX21lbWJlcnNCCwoJX2NoYW5uZWxzQhAKDl9zdG9yYWdlX2J5dGVzQhMKEV9hdHRhY2htZW50X2J5dGVzIt0FCgVFdmVudBIKCgJpZBgBIAEoCRIRCglzZXJ2ZXJfaWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAMSEAoIYWN0b3JfaWQYBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoOc2VydmVyX3VwZGF0ZWQYCiABKAsyFi5mdXdhLnYxLlNlcnZlclVwZGF0ZWRIABIwCg5zZXJ2ZXJfZGVsZXRlZBgLIAEoCzIWLmZ1d2EudjEuU2VydmVyRGVsZXRlZEgAEjIKD2NoYW5uZWxfY3JlYXRlZBgMIAEoCzIXLmZ1d2EudjEuQ2hhbm5lbENyZWF0ZWRIABIyCg9jaGFubmVsX3VwZGF0ZWQYDSABKAsyFy5mdXdhLnYxLkNoYW5uZWxVcGRhdGVkSAASMgoPY2hhbm5lbF9kZWxldGVkGA4gASgLMhcuZnV3YS52MS5DaGFubmVsRGVsZXRlZEgAEjIKD21lc3NhZ2VfY3JlYXRlZBgPIAEoCzIXLmZ1d2EudjEuTWVzc2FnZUNyZWF0ZWRIABIyCg9tZXNzYWdlX3VwZGF0ZWQYECABKAsyFy5mdXdhLnYxLk1lc3NhZ2VVcGRhdGVkSAASMgoPbWVzc2FnZV9kZWxldGVkGBEgASgLMhcuZnV3YS52MS5NZXNzYWdlRGVsZXRlZEgAEi4KDW1lbWJlcl9qb2luZWQYEiABKAsyFS5mdXdhLnYxLk1lbWJlckpvaW5lZEgAEjAKDm1lbWJlcl91cGRhdGVkGBMgASgLMhYuZnV3YS52MS5NZW1iZXJVcGRhdGVkSAASKgoLbWVtYmVyX2xlZnQYFCABKAsyEy5mdXdhLnYxLk1lbWJlckxlZnRIABIsCgx1c2VyX3VwZGF0ZWQYFSABKAsyFC5mdXdhLnYxLlVzZXJVcGRhdGVkSABCCQoHcGF5bG9hZCIwCg1TZXJ2ZXJVcGRhdGVkEh8KBnNlcnZlchgBIAEoCzIPLmZ1d2EudjEuU2VydmVyIg8KDVNlcnZlckRlbGV0ZWQiMwoOQ2hhbm5lbENyZWF0ZWQSIQoHY2hhbm5lbBgBIAEoCzIQLmZ1d2EudjEuQ2hhbm5lbCIzCg5DaGFubmVsVXBkYXRlZBIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIiQKDkNoYW5uZWxEZWxldGVkEhIKCmNoYW5uZWxfaWQYASABKAkiMwoOTWVzc2FnZUNyZWF0ZWQSIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZSIzCg5NZXNzYWdlVXBkYXRlZBIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIjgKDk1lc3NhZ2VEZWxldGVkEhIKCmNoYW5uZWxfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCSIvCgxNZW1iZXJKb2luZWQSHwoGbWVtYmVyGAEgASgLMg8uZnV3YS52MS5NZW1iZXIiMAoNTWVtYmVyVXBkYXRlZBIfCgZtZW1iZXIYASABKAsyDy5mdXdhLnYxLk1lbWJlciJDCgpNZW1iZXJMZWZ0Eg8KB3VzZXJfaWQYASABKAkSJAoGcmVhc29uGAIgASgOMhQuZnV3YS52MS5MZWF2ZVJlYXNvbiIqCgtVc2VyVXBkYXRlZBIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyKpABChBBbm5vdW5jZW1lbnRUb25lEiEKHUFOTk9VTkNFTUVOVF9UT05FX1VOU1BFQ0lGSUVEEAASGgoWQU5OT1VOQ0VNRU5UX1RPTkVfSU5GTxABEh0KGUFOTk9VTkNFTUVOVF9UT05FX1dBUk5JTkcQAhIeChpBTk5PVU5DRU1FTlRfVE9ORV9DUklUSUNBTBADKokBCg5TZXJ2ZXJDcmVhdGlvbhIfChtTRVJWRVJfQ1JFQVRJT05fVU5TUEVDSUZJRUQQABIcChhTRVJWRVJfQ1JFQVRJT05fRVZFUllPTkUQARIaChZTRVJWRVJfQ1JFQVRJT05fQURNSU5TEAISHAoYU0VSVkVSX0NSRUFUSU9OX0RJU0FCTEVEEAMqXAoLQWNjb3VudEtpbmQSHAoYQUNDT1VOVF9LSU5EX1VOU1BFQ0lGSUVEEAASFgoSQUNDT1VOVF9LSU5EX0xPQ0FMEAESFwoTQUNDT1VOVF9LSU5EX0xJTktFRBACKm8KCk1lbWJlclJvbGUSGwoXTUVNQkVSX1JPTEVfVU5TUEVDSUZJRUQQABIWChJNRU1CRVJfUk9MRV9NRU1CRVIQARIVChFNRU1CRVJfUk9MRV9BRE1JThACEhUKEU1FTUJFUl9ST0xFX09XTkVSEAMqrQEKC0NoYW5uZWxUeXBlEhwKGENIQU5ORUxfVFlQRV9VTlNQRUNJRklFRBAAEhUKEUNIQU5ORUxfVFlQRV9URVhUEAESFgoSQ0hBTk5FTF9UWVBFX1ZPSUNFEAISHQoZQ0hBTk5FTF9UWVBFX0FOTk9VTkNFTUVOVBADEhcKE0NIQU5ORUxfVFlQRV9USFJFQUQQBBIZChVDSEFOTkVMX1RZUEVfQ0FURUdPUlkQBSpLCgtNZXNzYWdlS2luZBIcChhNRVNTQUdFX0tJTkRfVU5TUEVDSUZJRUQQABIeChpNRVNTQUdFX0tJTkRfTUVNQkVSX0pPSU5FRBABKpQBChFOb3RpZmljYXRpb25MZXZlbBIiCh5OT1RJRklDQVRJT05fTEVWRUxfVU5TUEVDSUZJRUQQABIaChZOT1RJRklDQVRJT05fTEVWRUxfQUxMEAESHwobTk9USUZJQ0FUSU9OX0xFVkVMX01FTlRJT05TEAISHgoaTk9USUZJQ0FUSU9OX0xFVkVMX05PVEhJTkcQAyp0CgtMZWF2ZVJlYXNvbhIcChhMRUFWRV9SRUFTT05fVU5TUEVDSUZJRUQQABIVChFMRUFWRV9SRUFTT05fTEVGVBABEhcKE0xFQVZFX1JFQVNPTl9LSUNLRUQQAhIXChNMRUFWRV9SRUFTT05fQkFOTkVEEANiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
  * A fuwa instance: one running fuwa server. It hosts any number of community
@@ -61,6 +61,13 @@ export type Node = Message$1<"fuwa.v1.Node"> & {
    * @generated from field: fuwa.v1.Announcement announcement = 7;
    */
   announcement?: Announcement | undefined;
+
+  /**
+   * The build the instance says it runs.
+   *
+   * @generated from field: fuwa.v1.Build build = 8;
+   */
+  build?: Build | undefined;
 };
 
 /**
@@ -69,6 +76,44 @@ export type Node = Message$1<"fuwa.v1.Node"> & {
  */
 export const NodeSchema: GenMessage<Node> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_types, 0);
+
+/**
+ * What a fuwa binary was built from. The instance reports this about itself,
+ * so it's a claim, not proof: clients show it as plain text, never as a sign
+ * the server is verified.
+ *
+ * @generated from message fuwa.v1.Build
+ */
+export type Build = Message$1<"fuwa.v1.Build"> & {
+  /**
+   * Same as Node.version, such as "0.4.2".
+   *
+   * @generated from field: string version = 1;
+   */
+  version: string;
+
+  /**
+   * The full git commit the binary was built from. Empty when the builder
+   * didn't know it.
+   *
+   * @generated from field: string commit = 2;
+   */
+  commit: string;
+
+  /**
+   * Where the source lives, such as "https://github.com/waifu-devs/fuwa".
+   *
+   * @generated from field: string source = 3;
+   */
+  source: string;
+};
+
+/**
+ * Describes the message fuwa.v1.Build.
+ * Use `create(BuildSchema)` to create a new message.
+ */
+export const BuildSchema: GenMessage<Build> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_types, 1);
 
 /**
  * A notice from an instance's admins, shown on every client, signed in or not.
@@ -113,7 +158,7 @@ export type Announcement = Message$1<"fuwa.v1.Announcement"> & {
  * Use `create(AnnouncementSchema)` to create a new message.
  */
 export const AnnouncementSchema: GenMessage<Announcement> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 1);
+  messageDesc(file_fuwa_v1_types, 2);
 
 /**
  * Which kinds of account this instance accepts. The operator switches each on or off.
@@ -155,7 +200,7 @@ export type AuthMethods = Message$1<"fuwa.v1.AuthMethods"> & {
  * Use `create(AuthMethodsSchema)` to create a new message.
  */
 export const AuthMethodsSchema: GenMessage<AuthMethods> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 2);
+  messageDesc(file_fuwa_v1_types, 3);
 
 /**
  * A person's public profile.
@@ -207,7 +252,7 @@ export type User = Message$1<"fuwa.v1.User"> & {
  * Use `create(UserSchema)` to create a new message.
  */
 export const UserSchema: GenMessage<User> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 3);
+  messageDesc(file_fuwa_v1_types, 4);
 
 /**
  * Everything a person shows about themselves on an instance, beyond what
@@ -258,7 +303,7 @@ export type Profile = Message$1<"fuwa.v1.Profile"> & {
  * Use `create(ProfileSchema)` to create a new message.
  */
 export const ProfileSchema: GenMessage<Profile> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 4);
+  messageDesc(file_fuwa_v1_types, 5);
 
 /**
  * @generated from message fuwa.v1.Member
@@ -303,7 +348,7 @@ export type Member = Message$1<"fuwa.v1.Member"> & {
  * Use `create(MemberSchema)` to create a new message.
  */
 export const MemberSchema: GenMessage<Member> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 5);
+  messageDesc(file_fuwa_v1_types, 6);
 
 /**
  * A community server. Each one lives in its own database file on its instance.
@@ -379,7 +424,7 @@ export type Server = Message$1<"fuwa.v1.Server"> & {
  * Use `create(ServerSchema)` to create a new message.
  */
 export const ServerSchema: GenMessage<Server> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 6);
+  messageDesc(file_fuwa_v1_types, 7);
 
 /**
  * @generated from message fuwa.v1.Channel
@@ -446,7 +491,7 @@ export type Channel = Message$1<"fuwa.v1.Channel"> & {
  * Use `create(ChannelSchema)` to create a new message.
  */
 export const ChannelSchema: GenMessage<Channel> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 7);
+  messageDesc(file_fuwa_v1_types, 8);
 
 /**
  * @generated from message fuwa.v1.Message
@@ -515,7 +560,7 @@ export type Message = Message$1<"fuwa.v1.Message"> & {
  * Use `create(MessageSchema)` to create a new message.
  */
 export const MessageSchema: GenMessage<Message> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 8);
+  messageDesc(file_fuwa_v1_types, 9);
 
 /**
  * @generated from message fuwa.v1.Attachment
@@ -552,7 +597,7 @@ export type Attachment = Message$1<"fuwa.v1.Attachment"> & {
  * Use `create(AttachmentSchema)` to create a new message.
  */
 export const AttachmentSchema: GenMessage<Attachment> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 9);
+  messageDesc(file_fuwa_v1_types, 10);
 
 /**
  * @generated from message fuwa.v1.Embed
@@ -599,7 +644,7 @@ export type Embed = Message$1<"fuwa.v1.Embed"> & {
  * Use `create(EmbedSchema)` to create a new message.
  */
 export const EmbedSchema: GenMessage<Embed> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 10);
+  messageDesc(file_fuwa_v1_types, 11);
 
 /**
  * @generated from message fuwa.v1.EmbedField
@@ -626,7 +671,7 @@ export type EmbedField = Message$1<"fuwa.v1.EmbedField"> & {
  * Use `create(EmbedFieldSchema)` to create a new message.
  */
 export const EmbedFieldSchema: GenMessage<EmbedField> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 11);
+  messageDesc(file_fuwa_v1_types, 12);
 
 /**
  * How one server, or one channel in it, reaches a person. Kept on the
@@ -678,7 +723,7 @@ export type NotificationSettings = Message$1<"fuwa.v1.NotificationSettings"> & {
  * Use `create(NotificationSettingsSchema)` to create a new message.
  */
 export const NotificationSettingsSchema: GenMessage<NotificationSettings> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 12);
+  messageDesc(file_fuwa_v1_types, 13);
 
 /**
  * What a community server uses. Counts are current totals unless named as
@@ -756,7 +801,7 @@ export type ServerUsage = Message$1<"fuwa.v1.ServerUsage"> & {
  * Use `create(ServerUsageSchema)` to create a new message.
  */
 export const ServerUsageSchema: GenMessage<ServerUsage> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 13);
+  messageDesc(file_fuwa_v1_types, 14);
 
 /**
  * Caps on a community server. An unset field means unlimited.
@@ -790,7 +835,7 @@ export type ServerLimits = Message$1<"fuwa.v1.ServerLimits"> & {
  * Use `create(ServerLimitsSchema)` to create a new message.
  */
 export const ServerLimitsSchema: GenMessage<ServerLimits> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 14);
+  messageDesc(file_fuwa_v1_types, 15);
 
 /**
  * Everything that changes in a community server is recorded as an event in its
@@ -910,7 +955,7 @@ export type Event = Message$1<"fuwa.v1.Event"> & {
  * Use `create(EventSchema)` to create a new message.
  */
 export const EventSchema: GenMessage<Event> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 15);
+  messageDesc(file_fuwa_v1_types, 16);
 
 /**
  * @generated from message fuwa.v1.ServerUpdated
@@ -927,7 +972,7 @@ export type ServerUpdated = Message$1<"fuwa.v1.ServerUpdated"> & {
  * Use `create(ServerUpdatedSchema)` to create a new message.
  */
 export const ServerUpdatedSchema: GenMessage<ServerUpdated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 16);
+  messageDesc(file_fuwa_v1_types, 17);
 
 /**
  * @generated from message fuwa.v1.ServerDeleted
@@ -940,7 +985,7 @@ export type ServerDeleted = Message$1<"fuwa.v1.ServerDeleted"> & {
  * Use `create(ServerDeletedSchema)` to create a new message.
  */
 export const ServerDeletedSchema: GenMessage<ServerDeleted> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 17);
+  messageDesc(file_fuwa_v1_types, 18);
 
 /**
  * @generated from message fuwa.v1.ChannelCreated
@@ -957,7 +1002,7 @@ export type ChannelCreated = Message$1<"fuwa.v1.ChannelCreated"> & {
  * Use `create(ChannelCreatedSchema)` to create a new message.
  */
 export const ChannelCreatedSchema: GenMessage<ChannelCreated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 18);
+  messageDesc(file_fuwa_v1_types, 19);
 
 /**
  * @generated from message fuwa.v1.ChannelUpdated
@@ -974,7 +1019,7 @@ export type ChannelUpdated = Message$1<"fuwa.v1.ChannelUpdated"> & {
  * Use `create(ChannelUpdatedSchema)` to create a new message.
  */
 export const ChannelUpdatedSchema: GenMessage<ChannelUpdated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 19);
+  messageDesc(file_fuwa_v1_types, 20);
 
 /**
  * @generated from message fuwa.v1.ChannelDeleted
@@ -991,7 +1036,7 @@ export type ChannelDeleted = Message$1<"fuwa.v1.ChannelDeleted"> & {
  * Use `create(ChannelDeletedSchema)` to create a new message.
  */
 export const ChannelDeletedSchema: GenMessage<ChannelDeleted> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 20);
+  messageDesc(file_fuwa_v1_types, 21);
 
 /**
  * @generated from message fuwa.v1.MessageCreated
@@ -1008,7 +1053,7 @@ export type MessageCreated = Message$1<"fuwa.v1.MessageCreated"> & {
  * Use `create(MessageCreatedSchema)` to create a new message.
  */
 export const MessageCreatedSchema: GenMessage<MessageCreated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 21);
+  messageDesc(file_fuwa_v1_types, 22);
 
 /**
  * @generated from message fuwa.v1.MessageUpdated
@@ -1025,7 +1070,7 @@ export type MessageUpdated = Message$1<"fuwa.v1.MessageUpdated"> & {
  * Use `create(MessageUpdatedSchema)` to create a new message.
  */
 export const MessageUpdatedSchema: GenMessage<MessageUpdated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 22);
+  messageDesc(file_fuwa_v1_types, 23);
 
 /**
  * @generated from message fuwa.v1.MessageDeleted
@@ -1047,7 +1092,7 @@ export type MessageDeleted = Message$1<"fuwa.v1.MessageDeleted"> & {
  * Use `create(MessageDeletedSchema)` to create a new message.
  */
 export const MessageDeletedSchema: GenMessage<MessageDeleted> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 23);
+  messageDesc(file_fuwa_v1_types, 24);
 
 /**
  * @generated from message fuwa.v1.MemberJoined
@@ -1064,7 +1109,7 @@ export type MemberJoined = Message$1<"fuwa.v1.MemberJoined"> & {
  * Use `create(MemberJoinedSchema)` to create a new message.
  */
 export const MemberJoinedSchema: GenMessage<MemberJoined> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 24);
+  messageDesc(file_fuwa_v1_types, 25);
 
 /**
  * @generated from message fuwa.v1.MemberUpdated
@@ -1081,7 +1126,7 @@ export type MemberUpdated = Message$1<"fuwa.v1.MemberUpdated"> & {
  * Use `create(MemberUpdatedSchema)` to create a new message.
  */
 export const MemberUpdatedSchema: GenMessage<MemberUpdated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 25);
+  messageDesc(file_fuwa_v1_types, 26);
 
 /**
  * @generated from message fuwa.v1.MemberLeft
@@ -1103,7 +1148,7 @@ export type MemberLeft = Message$1<"fuwa.v1.MemberLeft"> & {
  * Use `create(MemberLeftSchema)` to create a new message.
  */
 export const MemberLeftSchema: GenMessage<MemberLeft> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 26);
+  messageDesc(file_fuwa_v1_types, 27);
 
 /**
  * Someone who was a member changed how they look, such as when their account
@@ -1123,7 +1168,7 @@ export type UserUpdated = Message$1<"fuwa.v1.UserUpdated"> & {
  * Use `create(UserUpdatedSchema)` to create a new message.
  */
 export const UserUpdatedSchema: GenMessage<UserUpdated> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_types, 27);
+  messageDesc(file_fuwa_v1_types, 28);
 
 /**
  * @generated from enum fuwa.v1.AnnouncementTone
