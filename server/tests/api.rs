@@ -4982,3 +4982,96 @@ async fn picture_uploads_have_caps_by_default() {
 
     instance.stop().await;
 }
+
+#[tokio::test]
+async fn webhooks_stay_out_of_channels_their_managers_cannot_see() {
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let server = create_server(&mut c, &owner, "Hooks", true).await;
+    let sid = server.id.clone();
+    join(&mut c, &mika, &sid).await;
+    let hooks = create_role(&mut c, &owner, &sid, "Hooks", &[P::ManageWebhooks]).await.unwrap();
+    give_role(&mut c, &owner, &sid, &mika_user.id, &hooks.id).await.unwrap();
+    let open = new_channel(&mut c, &owner, &sid, "open", pb::ChannelType::Text).await;
+    let secret = new_channel(&mut c, &owner, &sid, "secret", pb::ChannelType::Text).await;
+    set_permissions(
+        &mut c,
+        &owner,
+        &sid,
+        &secret.id,
+        vec![overwrite(&sid, pb::OverwriteTarget::Role, &[], &[P::ViewChannels])],
+    )
+    .await
+    .unwrap();
+    let create = |token: &str, channel_id: &str| {
+        authed(
+            token,
+            pb::CreateWebhookRequest {
+                server_id: sid.clone(),
+                channel_id: channel_id.into(),
+                name: "Hook".into(),
+                ..Default::default()
+            },
+        )
+    };
+    let hidden = c.webhooks.create_webhook(create(&owner, &secret.id)).await.unwrap().into_inner().webhook.unwrap();
+
+    // Someone managing webhooks who can't see the channel can't find it there…
+    let listed = c
+        .webhooks
+        .list_webhooks(authed(&mika, pb::ListWebhooksRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .webhooks;
+    assert!(listed.is_empty(), "{listed:?}");
+    let refused = c.webhooks.create_webhook(create(&mika, &secret.id)).await.unwrap_err();
+    assert_eq!(refused.code(), Code::NotFound);
+    let token = c
+        .webhooks
+        .reset_webhook_token(authed(
+            &mika,
+            pb::ResetWebhookTokenRequest { server_id: sid.clone(), webhook_id: hidden.id.clone() },
+        ))
+        .await;
+    assert_eq!(token.unwrap_err().code(), Code::NotFound);
+    let deleted = c
+        .webhooks
+        .delete_webhook(authed(
+            &mika,
+            pb::DeleteWebhookRequest { server_id: sid.clone(), webhook_id: hidden.id.clone() },
+        ))
+        .await;
+    assert_eq!(deleted.unwrap_err().code(), Code::NotFound);
+
+    // …nor move one of theirs into it.
+    let theirs = c.webhooks.create_webhook(create(&mika, &open.id)).await.unwrap().into_inner().webhook.unwrap();
+    let moved = c
+        .webhooks
+        .update_webhook(authed(
+            &mika,
+            pb::UpdateWebhookRequest {
+                server_id: sid.clone(),
+                webhook_id: theirs.id.clone(),
+                channel_id: secret.id.clone(),
+                name: "Hook".into(),
+                ..Default::default()
+            },
+        ))
+        .await;
+    assert_eq!(moved.unwrap_err().code(), Code::NotFound);
+    let all = c
+        .webhooks
+        .list_webhooks(authed(&owner, pb::ListWebhooksRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .webhooks;
+    assert_eq!(all.len(), 2, "the owner sees both");
+
+    instance.stop().await;
+}
