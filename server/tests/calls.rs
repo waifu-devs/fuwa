@@ -898,10 +898,17 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     watching.answer(&c.calls.join_voice(authed(&juan, request)).await.unwrap().into_inner().answer);
 
     // Until asked, a viewer gets the smallest size, starting on a keyframe.
+    // A bigger one may come first, when its first frames reach the media
+    // part before the smallest's do (the viewer sees something rather than
+    // nothing); it moves to the smallest on that size's next keyframe.
     talk(&mut filming, &mut watching, Duration::from_secs(3)).await;
     assert!(watching.seen.len() > 10, "the camera came through: {}", watching.seen.len());
     assert!(watching.seen[0].2, "it starts on a keyframe");
-    assert!(watching.sizes_seen(0).iter().all(|s| s == "l"), "{:?}", watching.sizes_seen(0));
+    let sizes = watching.sizes_seen(0);
+    let small = sizes.iter().position(|s| s == "l").expect("the smallest size came");
+    assert!(watching.seen[small].2, "the move to the smallest is on a keyframe");
+    assert!(sizes[small..].iter().all(|s| s == "l"), "{sizes:?}");
+    assert!(small < 30, "and it came soon: {sizes:?}");
     let mid = watching.seen[0].0.to_string();
     assert!(watching.heard.len() > 10, "and the sound");
 
@@ -982,6 +989,9 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     }
     assert!(suppressed, "Mika's camera shows as not allowed");
     watching.say(serde_json::json!({ "type": "layers", "layers": { &mid: "h" } }));
+    // The media part hears of it a moment after the voice state changes,
+    // and frames already on their way still land.
+    talk(&mut filming, &mut watching, Duration::from_millis(500)).await;
     let (seen, heard) = (watching.seen.len(), watching.heard.len());
     talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
     assert_eq!(watching.seen.len(), seen, "no camera without VIDEO");
