@@ -186,7 +186,7 @@ impl App {
 
     /// Deletes the picture a change replaced, if it was one of this
     /// instance's uploads and belonged to what changed: the account's own
-    /// avatar or banner, or the server's icon or emoji.
+    /// avatar or banner, or the server's icon, emoji or webhook pictures.
     pub async fn drop_picture(&self, old_url: &str, new_url: &str, owner: PictureOwner<'_>) {
         if old_url == new_url {
             return;
@@ -214,7 +214,7 @@ impl App {
         let belongs = match owner {
             PictureOwner::Account(account_id, purpose) => row.account_id == account_id && row.purpose == purpose,
             PictureOwner::Server(server_id) => {
-                matches!(row.purpose, pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji)
+                matches!(row.purpose, pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji | pb::MediaPurpose::Avatar)
                     && row.server_id.as_deref() == Some(server_id)
             }
         };

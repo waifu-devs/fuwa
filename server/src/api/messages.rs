@@ -29,6 +29,8 @@ struct Extras {
     mention_role_ids: Vec<String>,
     #[prost(message, optional, tag = "5")]
     auto_mod: Option<pb::AutoModAlert>,
+    #[prost(message, optional, tag = "6")]
+    webhook: Option<pb::MessageWebhook>,
 }
 
 impl Extras {
@@ -39,6 +41,7 @@ impl Extras {
             mentions_everyone: message.mentions_everyone,
             mention_role_ids: message.mention_role_ids.clone(),
             auto_mod: message.auto_mod.clone(),
+            webhook: message.webhook.clone(),
         };
         (extras != Extras::default()).then(|| extras.encode_to_vec())
     }
@@ -127,6 +130,7 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 mentions_everyone: false,
                 mention_role_ids: vec![],
                 auto_mod: None,
+                webhook: None,
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -147,6 +151,7 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
         message.mentions_everyone = extras.mentions_everyone;
         message.mention_role_ids = extras.mention_role_ids;
         message.auto_mod = extras.auto_mod;
+        message.webhook = extras.webhook;
     }
     Ok(message)
 }
@@ -253,6 +258,68 @@ async fn check_slowmode(conn: &turso::Connection, channel: &pb::Channel, user_id
             Err(err) => Err(err),
         },
     }
+}
+
+/// What a webhook posts: text and embeds, under a name and picture.
+#[derive(Clone)]
+pub struct WebhookMessage {
+    pub content: String,
+    pub embeds: Vec<pb::Embed>,
+    pub author: pb::MessageWebhook,
+}
+
+/// Checks a webhook's post as a member's message is checked.
+pub(super) fn check_webhook_message(post: &mut WebhookMessage) -> Result<()> {
+    check_content(&post.content, !post.embeds.is_empty())?;
+    check_extras(&mut [], &post.embeds)?;
+    for embed in &mut post.embeds {
+        embed.url = url("embed url", &embed.url)?;
+        embed.thumbnail_url = url("embed thumbnail", &embed.thumbnail_url)?;
+        embed.image_url = url("embed image", &embed.image_url)?;
+    }
+    Ok(())
+}
+
+/// Stores a webhook's message in `channel`, inside a write, and sends its
+/// event. Webhooks ping nobody but the people they name.
+pub(super) async fn insert_webhook_message(
+    conn: &turso::Connection,
+    server_id: &str,
+    channel_id: &str,
+    post: WebhookMessage,
+    now: i64,
+    events: &mut Vec<Payload>,
+) -> Result<pb::Message> {
+    let message = pb::Message {
+        id: new_id(),
+        server_id: server_id.to_string(),
+        channel_id: channel_id.to_string(),
+        author_id: post.author.webhook_id.clone(),
+        content: post.content,
+        embeds: post.embeds,
+        created_at: Some(timestamp(now)),
+        webhook: Some(post.author),
+        ..Default::default()
+    };
+    let size = message.content.len() as i64;
+    conn.execute(
+        "INSERT INTO messages (id, channel_id, author_id, content, size, extras, attachment_count, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)",
+        (
+            message.id.as_str(),
+            message.channel_id.as_str(),
+            message.author_id.as_str(),
+            message.content.as_str(),
+            size,
+            Extras::of(&message),
+            now,
+        ),
+    )
+    .await?;
+    store::add_usage(conn, UsageChange { messages: 1, messages_sent: 1, message_bytes: size, ..Default::default() })
+        .await?;
+    events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
+    Ok(message)
 }
 
 /// Stores a message that isn't a plain one (it has no text of its own),
@@ -376,6 +443,7 @@ impl MessageService for Api {
                         mentions_everyone,
                         mention_role_ids,
                         auto_mod: None,
+                        webhook: None,
                     };
                     let extras = Extras::of(&message);
                     let size = message.content.len() as i64;

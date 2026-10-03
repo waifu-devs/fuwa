@@ -70,6 +70,16 @@
     (`MEDIA_PURPOSE_EMOJI`) counted in the server's attachments, and every
     change sends the whole list (`EmojisUpdated`). Messages write them
     `<:name:id>` (`<a:name:id>` when they move).
+  - `webhooks.rs`: posting through a webhook over plain HTTP
+    (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
+    body), with each webhook's 30-a-minute limit (counted only for posts
+    with the right token). Served where servers are kept; gateways pass these
+    on to the shard holding the server (`Gateway::pass_to_shard`).
+    `api/webhooks.rs` keeps the webhooks (`webhooks`, in the server file,
+    tokens in the clear like invite codes; changes are audit-only) and posts
+    the message (`execute_webhook`): its `author_id` is the webhook's id and
+    `Message.webhook` carries the name and picture it posted under. Webhook
+    messages never ping @everyone, @here or roles, and nobody can edit them.
   - `automod.rs`: what an AutoMod rule catches (words with `*` wildcards,
     pings, links to sites not allowed); `api/automod.rs` keeps the rules
     (`automod_rules`, one protobuf blob each) and `review` runs them inside

@@ -29,7 +29,7 @@ use crate::pb::{
     invite_service_server::InviteServiceServer, join_service_server::JoinServiceServer,
     media_service_server::MediaServiceServer, message_service_server::MessageServiceServer,
     node_service_server::NodeServiceServer, role_service_server::RoleServiceServer,
-    server_service_server::ServerServiceServer,
+    server_service_server::ServerServiceServer, webhook_service_server::WebhookServiceServer,
 };
 use crate::replica::Replica;
 use crate::servers::Servers;
@@ -287,6 +287,7 @@ impl App {
             .add_service(JoinServiceServer::new(api.clone()))
             .add_service(AutoModServiceServer::new(api.clone()))
             .add_service(EmojiServiceServer::new(api.clone()))
+            .add_service(WebhookServiceServer::new(api.clone()))
             .add_service(EventServiceServer::new(api.clone()))
             .add_service(MediaServiceServer::new(api.clone()))
             .add_service(DirectMessageServiceServer::new(api.clone()))
@@ -306,6 +307,9 @@ impl App {
             grpc.into_axum_router().layer(tonic_web::GrpcWebLayer::new()).route("/healthz", get(|| async { "ok" }));
         if self.node.is_some() {
             router = router.merge(crate::media::routes(self.clone()));
+        }
+        if matches!(self.link, Link::Alone | Link::Shard(_)) {
+            router = router.merge(crate::webhooks::routes(self.clone()));
         }
         if !self.config.cluster.is_split() {
             // The web app (when it's on) answers every other GET, so its own addresses work on reload.

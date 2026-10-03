@@ -1095,3 +1095,34 @@ export const setWelcomeScreen = (key: string, serverId: string, welcomeScreen: W
     });
     return saved;
   });
+
+// ───────────────────────── Webhooks ─────────────────────────
+
+export const listWebhooks = (key: string, serverId: string) => call((signal) => api(key).webhooks.listWebhooks({ serverId }, { signal }));
+
+export const createWebhook = (key: string, serverId: string, channelId: string, name: string, avatarUrl = "") =>
+  call((signal) => api(key).webhooks.createWebhook({ serverId, channelId, name, avatarUrl }, { signal })).pipe(Effect.map((r) => r.webhook!));
+
+export const updateWebhook = (key: string, serverId: string, webhookId: string, change: { name: string; avatarUrl: string; channelId: string }) =>
+  call((signal) => api(key).webhooks.updateWebhook({ serverId, webhookId, ...change }, { signal })).pipe(Effect.map((r) => r.webhook!));
+
+export const resetWebhookToken = (key: string, serverId: string, webhookId: string) =>
+  call((signal) => api(key).webhooks.resetWebhookToken({ serverId, webhookId }, { signal })).pipe(Effect.map((r) => r.webhook!));
+
+export const deleteWebhook = (key: string, serverId: string, webhookId: string) =>
+  call((signal) => api(key).webhooks.deleteWebhook({ serverId, webhookId }, { signal })).pipe(Effect.as(true));
+
+/** Where other apps post to reach a webhook. */
+export const webhookUrl = (instanceUrl: string, w: { serverId: string; id: string; token: string }) =>
+  `${instanceUrl.replace(/\/+$/, "")}/webhooks/${w.serverId}/${w.id}/${w.token}`;
+
+/** Posts through a webhook the way other apps do, to try it. */
+export const testWebhook = (url: string, content: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content }) });
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { message?: string } | null)?.message ?? `the webhook answered ${res.status}`);
+      return true;
+    },
+    catch: (err) => toFuwaError(err),
+  });

@@ -29,6 +29,7 @@ import {
   Trash2Icon,
   TriangleAlertIcon,
   UsersIcon,
+  WebhookIcon,
   XIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -44,6 +45,7 @@ import { Applications } from "@/components/settings/server/Applications";
 import { AuditLog } from "@/components/settings/server/AuditLog";
 import { AutoMod } from "@/components/settings/server/AutoMod";
 import { Emoji } from "@/components/settings/server/Emoji";
+import { Webhooks } from "@/components/settings/server/Webhooks";
 import { WelcomeScreenEditor } from "@/components/settings/server/WelcomeScreenEditor";
 import { JoinFormEditor } from "@/components/settings/server/JoinFormEditor";
 import { ServerDoor } from "@/components/join/ServerDoor";
@@ -86,6 +88,7 @@ const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boole
   roles: (a) => has(a, Permission.MANAGE_ROLES),
   channels: (a) => [...a.channels.values()].some((bits) => bits & (bit(Permission.MANAGE_CHANNELS) | bit(Permission.MANAGE_ROLES))),
   emoji: (a) => has(a, Permission.MANAGE_EMOJI),
+  integrations: (a) => has(a, Permission.MANAGE_WEBHOOKS),
   usage: (a, admin) => admin || has(a, Permission.MANAGE_SERVER),
   limits: (_, admin) => admin,
   applications: (a) => has(a, Permission.KICK_MEMBERS),
@@ -220,6 +223,14 @@ export function ServerSettingsDialog({
       description: "The server's own emoji. Everyone here can use them as :name:.",
       keywords: "emoji emote custom sticker upload",
     },
+    {
+      id: "integrations",
+      label: "Integrations",
+      icon: WebhookIcon,
+      description: "Webhooks: addresses other apps post messages to, each into one channel.",
+      keywords: "webhook webhooks integration apps bot ci github feed rss alerts post api discord",
+      settings: [{ id: "webhooks", label: "Webhooks", keywords: "address url token" }],
+    },
     { id: "usage", label: "Usage", icon: ChartColumnIcon, description: "What the server holds, against its caps.", keywords: "storage members messages" },
     {
       id: "limits",
@@ -270,6 +281,7 @@ export function ServerSettingsDialog({
       {tab === "join-form" && can("join-form") && <JoinFormEditor instanceKey={instanceKey} server={server} onOpenAccess={() => setTab("access")} />}
       {tab === "welcome" && can("welcome") && <WelcomeScreenEditor instanceKey={instanceKey} server={server} />}
       {tab === "emoji" && can("emoji") && <Emoji instanceKey={instanceKey} serverId={server.id} />}
+      {tab === "integrations" && can("integrations") && <Webhooks instanceKey={instanceKey} serverId={server.id} />}
       {tab === "automod" && can("automod") && <AutoMod instanceKey={instanceKey} serverId={server.id} />}
       {tab === "invites" && can("invites") && <Invites instanceKey={instanceKey} serverId={server.id} />}
       {tab === "roles" && can("roles") && <Roles instanceKey={instanceKey} serverId={server.id} initial={target} />}
