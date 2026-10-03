@@ -1368,8 +1368,9 @@ impl NodeDb {
                 return Err(Error::ResourceExhausted("finish the uploads you started first".into()));
             }
             conn.execute(
-                "INSERT INTO media (id, account_id, purpose, content_type, size, upload_hash, created_at, expires_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO media (id, account_id, purpose, content_type, size, upload_hash, created_at, expires_at,
+                                    server_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 (
                     row.id.as_str(),
                     row.account_id.as_str(),
@@ -1379,6 +1380,7 @@ impl NodeDb {
                     upload_hash,
                     now,
                     expires_at,
+                    row.server_id.as_deref(),
                 ),
             )
             .await?;
@@ -1431,13 +1433,14 @@ impl NodeDb {
     }
 
     /// Marks a picture as in use, so it isn't swept; a server's pictures
-    /// also note their server. Whatever used it first owns it: an account's
-    /// avatar set as a webhook's picture stays the account's, and an emoji
-    /// added to a second server stays the first's (and where it's kept).
+    /// also note their server. One uploaded for a server is that server's;
+    /// otherwise whatever used it first owns it: an account's avatar set as a
+    /// webhook's picture stays the account's, and an emoji added to a second
+    /// server stays the first's (and where it's kept).
     pub async fn use_media(&self, id: &str, server_id: Option<&str>) -> Result<()> {
         db::write(&self.db, async |conn| {
             conn.execute(
-                "UPDATE media SET server_id = CASE WHEN used_at IS NULL THEN ?3 ELSE server_id END,
+                "UPDATE media SET server_id = CASE WHEN used_at IS NULL THEN coalesce(server_id, ?3) ELSE server_id END,
                                   used_at = coalesce(used_at, ?2) WHERE id = ?1",
                 (id, now_ms(), server_id),
             )

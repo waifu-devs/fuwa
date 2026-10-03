@@ -609,7 +609,8 @@ impl DirectoryService for Internal {
     ) -> Result<Response<cpb::CheckPictureResponse>, Status> {
         let req = request.into_inner();
         let purpose = pb::MediaPurpose::try_from(req.purpose).unwrap_or(pb::MediaPurpose::Unspecified);
-        respond(self.app.check_upload(&req.account_id, purpose, &req.url).await.map(|upload| {
+        let server = Some(req.server_id.as_str()).filter(|id| !id.is_empty());
+        respond(self.app.check_upload(&req.account_id, purpose, &req.url, server).await.map(|upload| {
             let upload = upload.unwrap_or_default();
             cpb::CheckPictureResponse { media_id: upload.id, size: upload.size, content_type: upload.content_type }
         }))
@@ -666,6 +667,27 @@ impl DirectoryService for Internal {
             super::pictures::kept_here(&self.app, &req.server_id)
                 .await
                 .map(|media_ids| cpb::ServerPicturesResponse { media_ids }),
+        )
+    }
+
+    async fn start_server_upload(
+        &self,
+        request: Request<cpb::StartServerUploadRequest>,
+    ) -> Result<Response<cpb::StartServerUploadResponse>, Status> {
+        let req = request.into_inner();
+        respond(super::pictures::start_upload(&self.app, &req.upload_hash, &req.server_id).await)
+    }
+
+    async fn finish_server_upload(
+        &self,
+        request: Request<cpb::FinishServerUploadRequest>,
+    ) -> Result<Response<cpb::FinishServerUploadResponse>, Status> {
+        let req = request.into_inner();
+        let kind = Some(req.content_type.as_str()).filter(|kind| !kind.is_empty());
+        respond(
+            super::pictures::finish_upload(&self.app, &req.media_id, &req.server_id, kind, req.size)
+                .await
+                .map(|()| cpb::FinishServerUploadResponse {}),
         )
     }
 

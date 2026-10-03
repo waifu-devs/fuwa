@@ -303,18 +303,20 @@ const PUT_FAILURES: Record<number, Code> = {
 };
 
 /**
- * Uploads a picture (an avatar, a banner or a server icon) and resolves to
- * its link, ready to set. `progress` hears how much has gone, from 0 to 1.
- * The bytes go to the instance's own address, whatever name it gave the link.
+ * Uploads a picture (an avatar, a banner, or a server's icon, emoji or
+ * webhook picture, given `serverId`) and resolves to its link, ready to set.
+ * `progress` hears how much has gone, from 0 to 1. The bytes go to the
+ * instance's own address, whatever name it gave the link; a server's
+ * pictures go on to its region from there.
  */
-export const uploadPicture = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent: number) => void) =>
+export const uploadPicture = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent: number) => void, serverId = "") =>
   Effect.gen(function* () {
     reportUsage("upload.picture");
     const { uploadUrl, media } = yield* call((signal) =>
-      api(key).media.createUpload({ purpose, contentType: file.type, size: BigInt(file.size) }, { signal }),
+      api(key).media.createUpload({ purpose, contentType: file.type, size: BigInt(file.size), serverId }, { signal }),
     );
-    const token = uploadUrl.slice(uploadUrl.lastIndexOf("/") + 1);
-    const target = `${engine(key).url.replace(/\/+$/, "")}/media/upload/${token}`;
+    const path = URL.canParse(uploadUrl) ? new URL(uploadUrl).pathname : `/media/upload/${uploadUrl.slice(uploadUrl.lastIndexOf("/") + 1)}`;
+    const target = `${engine(key).url.replace(/\/+$/, "")}${path}`;
     yield* Effect.async<void, FuwaError>((resume) => {
       const xhr = new XMLHttpRequest();
       xhr.open("PUT", target);

@@ -64,7 +64,7 @@ export function Emoji({ instanceKey, serverId }: { instanceKey: string; serverId
     const update = (patch: Partial<Pending>) => setPending((list) => list.map((p) => (p.key === key ? { ...p, ...patch } : p)));
     try {
       const picture = await emojiPicture(file);
-      const url = await run(uploadPicture(instanceKey, MediaPurpose.EMOJI, picture, (sent) => update({ sent: sent * 0.9 })));
+      const url = await run(uploadPicture(instanceKey, MediaPurpose.EMOJI, picture, (sent) => update({ sent: sent * 0.9 }), serverId));
       await run(createEmoji(instanceKey, serverId, name, url));
       update({ sent: 1 });
       setTimeout(() => setPending((list) => list.filter((p) => p.key !== key)), 500);

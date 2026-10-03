@@ -74,7 +74,7 @@ impl EmojiService for Api {
                 let sdb = self.with(&account, &req.server_id, Permission::ManageEmoji).await?.sdb;
                 let name = checked_name(&req.name)?;
                 let upload = self
-                    .check_upload(&account, pb::MediaPurpose::Emoji, req.url.trim())
+                    .check_upload(&account, pb::MediaPurpose::Emoji, req.url.trim(), Some(&sdb.id))
                     .await?
                     .ok_or_else(|| Error::invalid("upload the emoji's picture to this fuwa server first"))?;
                 let limits = sdb.limits(&self.app.settings().limits).await?;

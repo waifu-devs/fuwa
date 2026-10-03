@@ -90,6 +90,7 @@ impl Api {
     async fn webhook_picture(
         &self,
         account: &crate::node::Account,
+        server_id: &str,
         url: &str,
         current: &str,
     ) -> Result<(String, Option<String>)> {
@@ -98,7 +99,7 @@ impl Api {
             return Ok((url.to_string(), None));
         }
         let upload = self
-            .check_upload(account, pb::MediaPurpose::Avatar, url)
+            .check_upload(account, pb::MediaPurpose::Avatar, url, Some(server_id))
             .await?
             .ok_or_else(|| Error::invalid("upload the webhook's picture to this fuwa server first"))?;
         Ok((upload.url, Some(upload.id)))
@@ -144,7 +145,7 @@ impl WebhookService for Api {
                 let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageWebhooks).await?;
                 seen_channel(&access, &req.channel_id)?;
                 let name = text("name", &req.name, 1, 80)?;
-                let (avatar_url, upload) = self.webhook_picture(&account, &req.avatar_url, "").await?;
+                let (avatar_url, upload) = self.webhook_picture(&account, &sdb.id, &req.avatar_url, "").await?;
                 let webhook = sdb
                     .write(&account.id, async |conn, _events| {
                         let channel = postable(conn, &sdb.id, &req.channel_id).await?;
@@ -209,7 +210,8 @@ impl WebhookService for Api {
                 if !req.channel_id.is_empty() {
                     seen_channel(&access, &req.channel_id)?;
                 }
-                let (avatar_url, upload) = self.webhook_picture(&account, &req.avatar_url, &current.avatar_url).await?;
+                let (avatar_url, upload) =
+                    self.webhook_picture(&account, &sdb.id, &req.avatar_url, &current.avatar_url).await?;
                 let (before, after) = sdb
                     .write(&account.id, async |conn, _events| {
                         let before = seen_webhook(conn, &sdb.id, &req.webhook_id, &access).await?;

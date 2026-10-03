@@ -135,17 +135,20 @@ impl App {
         }
     }
 
-    /// Checks a picture link about to be set. A link to one of this
-    /// instance's uploads must be to one the caller uploaded, for this
-    /// purpose, and stored; its id comes back so `keep_picture` can mark it
-    /// used once the change is saved. Any other link passes as it is.
+    /// Checks a picture link about to be set, for `server_id`'s icon, emoji
+    /// or webhook or else for the account. A link to one of this instance's
+    /// uploads must be to one the caller uploaded, for this purpose (and, if
+    /// it was uploaded for a server, for this one), and stored; its id comes
+    /// back so `keep_picture` can mark it used once the change is saved. Any
+    /// other link passes as it is.
     pub async fn check_picture(
         &self,
         account_id: &str,
         purpose: pb::MediaPurpose,
         url: &str,
+        server_id: Option<&str>,
     ) -> Result<Option<String>> {
-        Ok(self.check_upload(account_id, purpose, url).await?.map(|upload| upload.id))
+        Ok(self.check_upload(account_id, purpose, url, server_id).await?.map(|upload| upload.id))
     }
 
     /// [`check_picture`](Self::check_picture), telling the upload's size and type too.
@@ -154,6 +157,7 @@ impl App {
         account_id: &str,
         purpose: pb::MediaPurpose,
         url: &str,
+        server_id: Option<&str>,
     ) -> Result<Option<pb::Media>> {
         let Some(id) = media::id_in_url(url) else { return Ok(None) };
         if let Link::Shard(link) = &self.link {
@@ -161,6 +165,7 @@ impl App {
                 account_id: account_id.to_string(),
                 purpose: purpose as i32,
                 url: url.to_string(),
+                server_id: server_id.unwrap_or_default().to_string(),
             };
             let checked = link.ask(request, |mut d, r| async move { d.check_picture(r).await }).await?;
             return Ok(Some(checked).filter(|c| !c.media_id.is_empty()).map(|c| pb::Media {
@@ -173,6 +178,11 @@ impl App {
         let Some(row) = self.node()?.media(&id).await? else { return Ok(None) };
         if row.account_id != account_id || row.purpose != purpose {
             return Err(Error::denied("upload that picture yourself to use it here"));
+        }
+        // An upload made for a server is only ever that server's (it may be
+        // kept in that server's region).
+        if !row.used && row.server_id.is_some() && row.server_id.as_deref() != server_id {
+            return Err(Error::denied("that picture was uploaded for another server; upload it here"));
         }
         if !row.stored {
             return Err(Error::FailedPrecondition("that picture hasn't finished uploading".into()));

@@ -289,11 +289,18 @@ impl Gateway {
                 }),
             )
             .route(
-                // A server's pictures, once its shard keeps them.
+                // A server's pictures, which its shard keeps, and uploads of them.
                 "/media/servers/{server_id}/{*rest}",
-                get(move |UrlPath((server_id, _)): UrlPath<(String, String)>, request: Request| {
+                any(move |UrlPath((server_id, _)): UrlPath<(String, String)>, request: Request| {
                     let gateway = server_pictures.clone();
-                    async move { gateway.pass_to_shard(&server_id, request).await }
+                    async move {
+                        match request.method() {
+                            &http::Method::GET | &http::Method::HEAD => {
+                                gateway.pass_to_shard(&server_id, request).await
+                            }
+                            _ => gateway.upload_to_shard(&server_id, request).await,
+                        }
+                    }
                 }),
             )
             .route(
@@ -451,6 +458,22 @@ impl Gateway {
                     .into_response();
             }
             refresh = true;
+        }
+    }
+
+    /// Streams an upload on to the shard holding its server. Like any
+    /// upload it gets one try: a server moving meanwhile turns it away.
+    async fn upload_to_shard(&self, server_id: &str, request: Request) -> Response {
+        if parse_id("server_id", server_id).is_err() {
+            return (StatusCode::NOT_FOUND, "not found\n").into_response();
+        }
+        match self.shard_for(server_id, false).await {
+            Ok(channel) => self.pass(channel, request).await,
+            Err(status) if status.code() == tonic::Code::NotFound => {
+                (StatusCode::NOT_FOUND, "not found\n").into_response()
+            }
+            Err(_) => (StatusCode::BAD_GATEWAY, "part of this instance is unreachable right now; try again soon\n")
+                .into_response(),
         }
     }
 

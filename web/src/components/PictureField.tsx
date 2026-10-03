@@ -41,6 +41,7 @@ export function PictureField({
   disabled = false,
   compact = false,
   id,
+  serverId,
 }: {
   instanceKey: string;
   kind: PictureKind;
@@ -52,6 +53,8 @@ export function PictureField({
   /** Just the picture, with a camera badge: for tight spots like making a server. */
   compact?: boolean;
   id?: string;
+  /** The server it's for: its icon, or one of its webhooks' pictures. */
+  serverId?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const inputId = useId();
@@ -91,7 +94,7 @@ export function PictureField({
       live = false;
     };
     try {
-      const url = await run(uploadPicture(instanceKey, PURPOSE[kind], picture, (sent) => live && setUpload((u) => u && { ...u, sent })));
+      const url = await run(uploadPicture(instanceKey, PURPOSE[kind], picture, (sent) => live && setUpload((u) => u && { ...u, sent }), serverId));
       if (!live) return;
       setUpload((u) => u && { ...u, sent: 1, done: true });
       onChange(url);

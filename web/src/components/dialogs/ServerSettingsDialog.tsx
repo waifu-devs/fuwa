@@ -389,6 +389,7 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
             <PictureField
               instanceKey={instanceKey}
               kind="icon"
+              serverId={server.id}
               value={iconUrl}
               onChange={setIconUrl}
               fallback={
