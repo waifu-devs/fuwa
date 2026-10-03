@@ -135,7 +135,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 28] = [
+pub const PATHS: [&str; 29] = [
     "name",
     "public_url",
     "allowed_origins",
@@ -164,6 +164,7 @@ pub const PATHS: [&str; 28] = [
     "ice_urls",
     "turn_secret",
     "automod_providers",
+    "automod_checks_per_day",
 ];
 
 /// A default cap, or `None` for one that isn't there.
@@ -187,6 +188,7 @@ pub fn cap(s: &pb::InstanceSettings, path: &str) -> Option<i64> {
         "picture_upload_bytes" => s.picture_upload_bytes,
         "picture_upload_bytes_per_day" => s.picture_upload_bytes_per_day,
         "call_recordings_keep_days" => s.call_recordings_keep_days,
+        "automod_checks_per_day" => s.automod_checks_per_day,
         _ => limit(s, path),
     }
 }
@@ -198,6 +200,7 @@ pub fn set_cap(s: &mut pb::InstanceSettings, path: &str, value: Option<i64>) {
         "picture_upload_bytes" => &mut s.picture_upload_bytes,
         "picture_upload_bytes_per_day" => &mut s.picture_upload_bytes_per_day,
         "call_recordings_keep_days" => &mut s.call_recordings_keep_days,
+        "automod_checks_per_day" => &mut s.automod_checks_per_day,
         _ => {
             let l = s.default_limits.get_or_insert_with(Default::default);
             match path {

@@ -764,15 +764,60 @@ impl InstanceSettingsView {
             .flex_col()
             .gap(px(14.0))
             .child(intro)
-            .child(div().flex().justify_end().child(self.reset_badge(
-                &["automod_providers"],
-                &providers_default,
-                p,
-                cx,
-            )))
+            .child(self.daily_checks(p, window, cx))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .child(div().flex_1().font_weight(FontWeight::EXTRA_BOLD).child("Providers"))
+                    .child(self.reset_badge(&["automod_providers"], &providers_default, p, cx)),
+            )
             .child(cards)
             .child(add)
             .into_any_element()
+    }
+
+    /// How many times a day each server's smart filter may ask, as on the web.
+    fn daily_checks(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let default = self
+            .config
+            .as_ref()
+            .and_then(|c| c.defaults.as_ref())
+            .and_then(|d| d.automod_checks_per_day)
+            .map_or_else(|| "no limit".to_owned(), |n| format!("{} a day", admin::count_label(Some(n))));
+        let hint = emphasized(
+            &[
+                (
+                    "How many messages each server's smart filter may send to its provider in a day (UTC), so one \
+                     busy server can't run up your bill. Once a server uses them, its messages ",
+                    false,
+                ),
+                ("go through the smart filter unchecked", true),
+                (
+                    " until midnight UTC, like when the provider is down: blocking every message instead would stop \
+                     a busy server talking. Its own rules still apply.",
+                    false,
+                ),
+            ],
+            p,
+        );
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(div().text_sm().text_color(p.muted_foreground).child(hint))
+            .child(self.cap("automod_checks_per_day", "Up to", false, p, window, cx));
+        self.setting(
+            "automod-checks-per-day",
+            "Checks per server per day",
+            None,
+            &["automod_checks_per_day"],
+            &default,
+            1,
+            body,
+            p,
+            cx,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
