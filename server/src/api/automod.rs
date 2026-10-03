@@ -113,6 +113,9 @@ async fn checked_rule(conn: &turso::Connection, server_id: &str, rule: pb::AutoM
                 ) {
                     return Err(Error::invalid("alerts go in a text channel"));
                 }
+                if channel.shared.as_ref().is_some_and(|s| !s.home) {
+                    return Err(Error::invalid("alerts can't go in a channel shared from another server"));
+                }
                 pb::AutoModAction { kind: action.kind, channel_id: channel.id, ..Default::default() }
             }
             Kind::TimeOut => {

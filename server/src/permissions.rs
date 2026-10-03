@@ -274,6 +274,22 @@ impl Rules {
 }
 
 impl Access {
+    /// Someone from a guest server in a shared channel, as the home server
+    /// sees them: no permissions of its own anywhere, and at most what the
+    /// connection allows in its one channel. Their own server has already
+    /// checked what they may do there.
+    pub fn guest(channel_id: &str, allowed: Bits) -> Self {
+        Access {
+            owner: false,
+            server: 0,
+            rank: 0,
+            channels: HashMap::from([(channel_id.to_string(), allowed | bit(P::ViewChannels))]),
+            pending: false,
+            locked: false,
+            timed_out: false,
+        }
+    }
+
     pub fn has(&self, p: P) -> bool {
         self.server & bit(p) != 0
     }

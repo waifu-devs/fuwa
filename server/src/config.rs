@@ -60,6 +60,9 @@ pub struct Config {
     /// FUWA_CALL_RECORDINGS: on (default) | off. Recording voice channels on
     /// the server, for people with RECORD.
     pub call_recordings: bool,
+    /// FUWA_SHARED_CHANNELS: on (default) | off. Servers sharing channels
+    /// with each other.
+    pub shared_channels: bool,
     /// FUWA_ICE_URLS: STUN and TURN servers apps reach the media part
     /// through (comma-separated stun:, turn: and turns: URLs). None by default.
     pub ice_urls: Vec<String>,
@@ -353,6 +356,11 @@ impl Config {
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_CALL_RECORDINGS must be on or off, got {other:?}")),
         };
+        let shared_channels = match get("FUWA_SHARED_CHANNELS").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_SHARED_CHANNELS must be on or off, got {other:?}")),
+        };
         let list = |key: &str| -> Vec<String> {
             get(key).unwrap_or_default().split(',').map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).collect()
         };
@@ -435,6 +443,7 @@ impl Config {
             cluster,
             calls,
             call_recordings,
+            shared_channels,
             ice_urls,
             turn_secret: get("FUWA_TURN_SECRET").map(|s| s.trim().to_string()).unwrap_or_default(),
             media,

@@ -17,12 +17,14 @@ mod messages;
 mod node;
 mod roles;
 mod servers;
+mod shared;
 mod sso;
 mod webhooks;
 
 pub(crate) use account::export_server;
 pub use calls::{spawn_voice_guard, spawn_voice_sweeper};
 pub use media::PictureOwner;
+pub use shared::{shared_call, spawn_shared_fanout};
 pub use sso::note_lapses;
 pub use webhooks::{WebhookPost, execute_webhook, verify_webhook};
 

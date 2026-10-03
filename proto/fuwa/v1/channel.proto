@@ -3,6 +3,7 @@ syntax = "proto3";
 package fuwa.v1;
 
 import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
 
 // Channels in a community server. Members see the ones VIEW_CHANNELS lets
 // them; MANAGE_CHANNELS changes them, MANAGE_ROLES their permissions.
@@ -100,3 +101,189 @@ message SetChannelPermissionsRequest {
 message SetChannelPermissionsResponse {
   Channel channel = 1;
 }
+
+// Channels shared between community servers on this instance, like Slack
+// Connect. One server, the channel's home, keeps the channel and everything
+// said in it; each guest server shows it as a channel of its own and keeps
+// none of it. Sharing takes both sides' admins: the home makes a code, a
+// guest's admins accept it, and the home's admins approve. docs/shared-channels.md
+// has the design.
+service SharedChannelService {
+  // Home: a code another server's admins use to show one of this server's
+  // channels there. MANAGE_SERVER, and MANAGE_CHANNELS in the channel.
+  rpc CreateShareCode(CreateShareCodeRequest) returns (CreateShareCodeResponse);
+  // Home: stops a code working. MANAGE_SERVER.
+  rpc DeleteShareCode(DeleteShareCodeRequest) returns (DeleteShareCodeResponse);
+  // Guest: where a code leads, shown before accepting. MANAGE_SERVER.
+  rpc PreviewShare(PreviewShareRequest) returns (PreviewShareResponse);
+  // Guest: asks to show the channel in this server. The home's admins
+  // approve it before it appears. MANAGE_SERVER.
+  rpc AcceptShare(AcceptShareRequest) returns (AcceptShareResponse);
+  // Home: approves or turns down a server's request. MANAGE_SERVER, and
+  // MANAGE_CHANNELS in the channel.
+  rpc ReviewShare(ReviewShareRequest) returns (ReviewShareResponse);
+  // The server's shared channels, both ways, with requests waiting, codes
+  // and people kept out. MANAGE_SERVER.
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
+  // Home: what a guest server's people may do in the channel. MANAGE_SERVER,
+  // and MANAGE_CHANNELS in the channel.
+  rpc UpdateConnection(UpdateConnectionRequest) returns (UpdateConnectionResponse);
+  // Either side ends a connection, or withdraws or turns down a request. The
+  // guest's channel goes away; the messages stay with the home. MANAGE_SERVER.
+  rpc Disconnect(DisconnectRequest) returns (DisconnectResponse);
+  // Home: keeps one person from another server out of the channel, or lets
+  // them back. KICK_MEMBERS.
+  rpc BlockFromChannel(BlockFromChannelRequest) returns (BlockFromChannelResponse);
+}
+
+// A connection between a channel and a server it's shown in, from one
+// side's point of view.
+message SharedConnection {
+  // The same on both sides.
+  string id = 1;
+  // This server is the channel's home.
+  bool home = 2;
+  // The channel here: the home's channel, or the guest's own (empty until
+  // the home approves).
+  string channel_id = 3;
+  // The channel's name at its home.
+  string home_channel_name = 4;
+  // The server on the other end.
+  SharedServer server = 5;
+  SharedConnectionState state = 6;
+  // What the guest server's people may do in the channel, at most: some of
+  // SEND_MESSAGES, EMBED_LINKS and ATTACH_FILES. VIEW_CHANNELS always.
+  repeated Permission allowed = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+enum SharedConnectionState {
+  SHARED_CONNECTION_STATE_UNSPECIFIED = 0;
+  // The guest's admins accepted a code; the home's haven't approved yet.
+  SHARED_CONNECTION_STATE_WAITING = 1;
+  // Shown in both servers.
+  SHARED_CONNECTION_STATE_ACTIVE = 2;
+}
+
+// A code to share a channel. It names the home server, so any server on the
+// instance can look it up.
+message ShareCode {
+  string code = 1;
+  string channel_id = 2;
+  string channel_name = 3;
+  string creator_id = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp expires_at = 6;
+}
+
+// Someone from another server kept out of one of this server's shared channels.
+message ChannelBlock {
+  string channel_id = 1;
+  User user = 2;
+  // The server they're from.
+  SharedServer server = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message CreateShareCodeRequest {
+  string server_id = 1;
+  string channel_id = 2;
+}
+
+message CreateShareCodeResponse {
+  ShareCode code = 1;
+}
+
+message DeleteShareCodeRequest {
+  string server_id = 1;
+  string code = 2;
+}
+
+message DeleteShareCodeResponse {}
+
+message PreviewShareRequest {
+  // The server that would show the channel.
+  string server_id = 1;
+  string code = 2;
+}
+
+// What admins see before accepting a code: whose channel it is, where what
+// their people write there is kept, and what the home server sees.
+message PreviewShareResponse {
+  SharedServer home_server = 1;
+  string channel_name = 2;
+  string channel_topic = 3;
+  // Where the channel's messages are kept: the home server's region, when
+  // the instance has more than one. Empty otherwise.
+  string region = 4;
+  // Hosts outside the instance that see the text of messages there (the home
+  // server's AutoMod providers), so admins know before accepting.
+  repeated string checked_by = 5;
+  // What their people may do there, at most.
+  repeated Permission allowed = 6;
+  google.protobuf.Timestamp expires_at = 7;
+  // How many servers it's shown in already, besides its home.
+  int32 guest_count = 8;
+}
+
+message AcceptShareRequest {
+  string server_id = 1;
+  string code = 2;
+  // The channel's name here, once approved. Empty for the home's name.
+  string name = 3;
+  // The category it goes in here. Empty for none.
+  string parent_id = 4;
+}
+
+message AcceptShareResponse {
+  SharedConnection connection = 1;
+}
+
+message ReviewShareRequest {
+  string server_id = 1;
+  string connection_id = 2;
+  bool approve = 3;
+}
+
+message ReviewShareResponse {
+  // Unset when turned down.
+  SharedConnection connection = 1;
+}
+
+message ListConnectionsRequest {
+  string server_id = 1;
+}
+
+message ListConnectionsResponse {
+  repeated SharedConnection connections = 1;
+  // Codes that still work, newest first.
+  repeated ShareCode codes = 2;
+  repeated ChannelBlock blocks = 3;
+}
+
+message UpdateConnectionRequest {
+  string server_id = 1;
+  string connection_id = 2;
+  repeated Permission allowed = 3;
+}
+
+message UpdateConnectionResponse {
+  SharedConnection connection = 1;
+}
+
+message DisconnectRequest {
+  string server_id = 1;
+  string connection_id = 2;
+}
+
+message DisconnectResponse {}
+
+message BlockFromChannelRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  string user_id = 3;
+  // False lets them back.
+  bool blocked = 4;
+}
+
+message BlockFromChannelResponse {}

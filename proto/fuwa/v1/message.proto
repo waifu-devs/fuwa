@@ -12,7 +12,9 @@ service MessageService {
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
   // Authors edit their own messages.
   rpc UpdateMessage(UpdateMessageRequest) returns (UpdateMessageResponse);
-  // Authors delete their own messages; owners and admins delete any.
+  // Authors delete their own messages; owners and admins delete any. In a
+  // channel shared from another server, MANAGE_MESSAGES deletes only this
+  // server's members' messages; the home server's moderators delete any.
   rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
 }
 
@@ -32,6 +34,9 @@ message SendMessageResponse {
 message GetMessageRequest {
   string server_id = 1;
   string message_id = 2;
+  // The channel it's in. Needed for a message in a channel shared from
+  // another server, which this server doesn't hold.
+  string channel_id = 3;
 }
 
 message GetMessageResponse {
@@ -62,6 +67,9 @@ message UpdateMessageRequest {
   string server_id = 1;
   string message_id = 2;
   string content = 3;
+  // The channel it's in. Needed for a message in a channel shared from
+  // another server, which this server doesn't hold.
+  string channel_id = 4;
 }
 
 message UpdateMessageResponse {
@@ -71,6 +79,9 @@ message UpdateMessageResponse {
 message DeleteMessageRequest {
   string server_id = 1;
   string message_id = 2;
+  // The channel it's in. Needed for a message in a channel shared from
+  // another server, which this server doesn't hold.
+  string channel_id = 3;
 }
 
 message DeleteMessageResponse {}

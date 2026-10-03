@@ -98,6 +98,7 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.EmojiService"
         | "fuwa.v1.WebhookService"
         | "fuwa.v1.CallService"
+        | "fuwa.v1.SharedChannelService"
         | "fuwa.v1.SsoService" => Target::Shard,
         _ => Target::Unknown,
     }

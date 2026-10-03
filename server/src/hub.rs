@@ -17,6 +17,9 @@ pub struct Hub {
     /// Sees every event of every server, followed or not (calls use it to
     /// hang up whoever just lost their place).
     tap: Mutex<Option<mpsc::UnboundedSender<Arc<pb::Event>>>>,
+    /// Sees every event too, for passing what happens in shared channels on
+    /// to the servers that show them (`api::spawn_shared_fanout`).
+    shared: Mutex<Option<mpsc::UnboundedSender<Arc<pb::Event>>>>,
 }
 
 impl Hub {
@@ -32,16 +35,28 @@ impl Hub {
         rx
     }
 
+    /// Every event published from now on, for shared channels. One at a time,
+    /// like [`tap`](Self::tap).
+    pub fn shared_tap(&self) -> mpsc::UnboundedReceiver<Arc<pb::Event>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *self.shared.lock().unwrap_or_else(|p| p.into_inner()) = Some(tx);
+        rx
+    }
+
     /// Sends events to everyone following their server. Callers publish in commit
     /// order, so subscribers see each server's events in sequence.
     pub fn publish(&self, events: impl IntoIterator<Item = pb::Event>) {
         let mut channels = self.channels.lock().unwrap_or_else(|p| p.into_inner());
         let mut tap = self.tap.lock().unwrap_or_else(|p| p.into_inner());
+        let mut shared = self.shared.lock().unwrap_or_else(|p| p.into_inner());
         for event in events {
             let server_id = event.server_id.clone();
             let event = Arc::new(event);
             if tap.as_ref().is_some_and(|t| t.send(event.clone()).is_err()) {
                 *tap = None;
+            }
+            if shared.as_ref().is_some_and(|t| t.send(event.clone()).is_err()) {
+                *shared = None;
             }
             let idle = match channels.get(&server_id) {
                 None => continue,

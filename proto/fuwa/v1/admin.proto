@@ -102,6 +102,10 @@ message InstanceSettings {
   SsoAccounts sso_accounts = 15;
   // The provider for sso_accounts. Its client secret is never sent back.
   IdentityProvider sso_provider = 16;
+  // Servers may share channels with each other (SharedChannelService).
+  // Turning it off stops new codes and requests; channels already shared
+  // stay shared until either side ends them. FUWA_SHARED_CHANNELS.
+  bool shared_channels = 30;
 }
 
 // Whether accounts that sign in through the instance's identity provider work.
