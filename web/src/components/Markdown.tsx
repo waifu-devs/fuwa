@@ -20,14 +20,25 @@ import { cn } from "@/lib/utils";
 
 type AnchorProps = ComponentProps<"a"> & { node?: unknown };
 
+/** Where a link really goes, read as the browser would: "//host" and "/path" included. */
+function resolve(href: string): URL | null {
+  try {
+    const url = new URL(href, location.href);
+    return ["http:", "https:", "mailto:"].includes(url.protocol) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Links leaving the site open in a new tab and don't pass on ranking or the
  * referrer. A link whose URL was dropped as unsafe is just its text.
  */
 function Anchor({ node: _node, href, ...props }: AnchorProps) {
-  if (!href) return <span>{props.children}</span>;
-  const external = /^https?:\/\//i.test(href);
-  return <a href={href} {...(external ? { rel: "nofollow ugc noopener noreferrer", target: "_blank" } : {})} {...props} />;
+  const url = href ? resolve(href) : null;
+  if (!url) return <span>{props.children}</span>;
+  const external = url.origin !== location.origin;
+  return <a href={url.href} {...(external ? { rel: "nofollow ugc noopener noreferrer", target: "_blank" } : {})} {...props} />;
 }
 
 const blockComponents: Components = {

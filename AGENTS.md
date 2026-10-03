@@ -130,6 +130,15 @@
     reserved with `MediaService.CreateUpload` (`api/media.rs`) and checks its
     bytes really are the picture type it claims; `GET /media/<id>` serves it.
     Pictures nothing uses are swept hourly and at startup.
+  - `outside.rs`: pictures from other sites. No client ever loads a picture
+    from anywhere but a fuwa instance, since that site would learn the
+    reader's IP address: any picture link that isn't an upload (embed images,
+    webhook post avatars, the waifu.dev picture) is rewritten when stored, with
+    `App::picture_link`, to `/media/outside/<hmac>?url=...`, which the instance
+    fetches itself (public addresses only, pictures only, 8 MB, cached). The
+    key is from FUWA_CLUSTER_KEY when split, else node.db's `meta`. New
+    fields that hold a picture link go through `picture_link` too; the web
+    app's `lib/shown.ts` hides any that don't.
   - `migrations/node`, `migrations/server`: SQL applied in order, tracked in
     `PRAGMA user_version`. Never edit a migration that has shipped; add a new file
     and list it in `MIGRATIONS`.

@@ -19,6 +19,7 @@ pub mod id;
 pub mod linked;
 pub mod media;
 pub mod node;
+pub mod outside;
 pub mod permissions;
 pub mod replica;
 pub mod servers;

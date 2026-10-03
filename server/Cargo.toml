@@ -49,6 +49,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 turso = "0.7.2"
 ulid = "1"
+url = "2"
 
 [features]
 # Embed the web client (web/dist, built with `pnpm build` in web/) and serve it on /.
