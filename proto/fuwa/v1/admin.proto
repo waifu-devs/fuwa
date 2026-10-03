@@ -119,6 +119,10 @@ message InstanceSettings {
   // Moderation providers servers' AutoMod can use, one entry for each kind
   // fuwa knows. Their API keys are never sent back.
   repeated AutoModProviderSettings automod_providers = 25;
+  // Servers may share channels with each other (SharedChannelService).
+  // Turning it off stops new codes and requests; channels already shared
+  // stay shared until either side ends them. FUWA_SHARED_CHANNELS.
+  bool shared_channels = 30;
 }
 
 // One moderation provider, as the instance's admins set it up: one fuwa

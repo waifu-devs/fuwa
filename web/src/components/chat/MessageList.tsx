@@ -12,6 +12,7 @@ import {
   SparklesIcon,
   TimerIcon,
   Trash2Icon,
+  UserXIcon,
   XIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -36,9 +37,10 @@ import {
   type Member,
   type Message,
   type MessageWebhook,
+  type SharedServer,
   type User,
 } from "@/gen/fuwa/v1/types_pb";
-import { deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
+import { blockFromChannel, deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
 import { useAccess, useRoles } from "@/fuwa/hooks";
 import { useFuwa, type PendingMessage } from "@/fuwa/store";
 import { sendsMessage } from "@/components/chat/Composer";
@@ -51,12 +53,14 @@ import { UserAvatar } from "@/components/Icons";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { Embeds } from "@/components/chat/Embeds";
 import { AppBadge } from "@/components/AppBadge";
+import { ServerTag, SharedNote } from "@/components/chat/Shared";
 import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
 import { comboLabel } from "@/lib/keybinds";
 import { pingsUser, useNotificationSettings } from "@/lib/notifications";
-import { hasIn } from "@/lib/permissions";
+import { has, hasIn } from "@/lib/permissions";
+import { foreignServer } from "@/lib/shared";
 import { usePrefs, type Clock, type MessageDisplay } from "@/lib/prefs";
-import { copy } from "@/lib/ui";
+import { copy, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 /** Messages from one person closer together than this share a header. */
@@ -104,6 +108,8 @@ type RowActions = {
   wave: (username: string) => Promise<void>;
   retry: (pending: PendingMessage) => void;
   dismiss: (nonce: string) => void;
+  /** At a shared channel's home: keeps someone from another server out of it. */
+  keepOut: (userId: string, name: string) => Promise<void>;
 };
 
 export const MessageList = forwardRef<
@@ -122,6 +128,10 @@ export const MessageList = forwardRef<
   const access = useAccess(instanceKey, serverId);
   const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
   const canSend = hasIn(access, channel.id, Permission.SEND_MESSAGES);
+  // In a shared channel each side moderates its own people: a guest's moderators can't delete the home's, and
+  // only the home keeps someone from another server out.
+  const guestSide = !!channel.shared && !channel.shared.home;
+  const keepsOut = !!channel.shared?.home && has(access, Permission.KICK_MEMBERS);
   const roles = useRoles(instanceKey, serverId);
   const items = state?.items ?? EMPTY;
   const [editing, setEditing] = useState<string | null>(null);
@@ -171,8 +181,12 @@ export const MessageList = forwardRef<
         run(sendMessage(instanceKey, serverId, channel.id, p.content)).catch(() => {});
       },
       dismiss: (nonce) => dismissPending(instanceKey, channel.id, nonce),
+      keepOut: async (userId, name) => {
+        await run(blockFromChannel(instanceKey, serverId, channel.id, userId, true));
+        toast(`${name} can't see #${channel.name} anymore`);
+      },
     }),
-    [instanceKey, serverId, channel.id, emojis],
+    [instanceKey, serverId, channel.id, channel.name, emojis],
   );
 
   const rows = useMemo(() => {
@@ -344,9 +358,12 @@ export const MessageList = forwardRef<
                     clock={clock}
                   />
                 );
+              const from = foreignServer(row.message, serverId);
               return (
                 <MessageRow
                   key={row.key}
+                  from={from}
+                  canKeepOut={keepsOut && !!from}
                   message={row.message}
                   first={row.first}
                   display={display}
@@ -357,7 +374,7 @@ export const MessageList = forwardRef<
                   mine={row.message.authorId === meId}
                   mentionsMe={pingsUser(me, myRoleIds ?? EMPTY, row.message, suppressEveryone)}
                   instanceKey={instanceKey}
-                  canDelete={manager || row.message.authorId === meId}
+                  canDelete={row.message.authorId === meId || (manager && !(guestSide && from))}
                   animate={!initial.current?.has(row.message.id)}
                   editing={editing === row.message.id}
                   actions={actions}
@@ -414,6 +431,7 @@ function Beginning({ channel }: { channel: Channel }) {
       <p className="mt-1 text-muted-foreground">
         This is the start of #{channel.name}.{channel.topic ? ` ${channel.topic}` : ""}
       </p>
+      <SharedNote channel={channel} />
     </motion.div>
   );
 }
@@ -470,12 +488,15 @@ export function MessageLine({
   status,
   instanceKey,
   app = false,
+  from,
   children,
 }: {
   display: MessageDisplay;
   first: boolean;
   author: User | undefined;
   member: Member | undefined;
+  /** In a shared channel, the server the author is from when it isn't this one. */
+  from?: SharedServer | null;
   /** Posted by an app through a webhook: marked, with no profile to open. */
   app?: boolean;
   /** When it was sent; missing while it's still sending. */
@@ -511,6 +532,7 @@ export function MessageLine({
             </button>,
           )}
         </span>
+        {from && <ServerTag server={from} className="mr-1.5" />}
         {children}
       </div>
     );
@@ -537,6 +559,7 @@ export function MessageLine({
                 <AuthorName user={author} member={member} app={app} />
               </button>,
             )}
+            {from && <ServerTag server={from} className="self-center" />}
             {date ? (
               <time className="shrink-0 text-xs text-muted-foreground" dateTime={date.toISOString()} title={formatFull(date)}>
                 {formatStamp(date)}
@@ -568,6 +591,8 @@ type Redraw = { clock: Clock };
 
 const MessageRow = memo(function MessageRow({
   message,
+  from,
+  canKeepOut,
   first,
   display,
   developer,
@@ -583,6 +608,9 @@ const MessageRow = memo(function MessageRow({
   actions,
 }: Redraw & {
   message: Message;
+  from: SharedServer | null;
+  /** At a shared channel's home, with Kick Members: this author is from another server and can be kept out. */
+  canKeepOut: boolean;
   first: boolean;
   display: MessageDisplay;
   developer: boolean;
@@ -597,7 +625,7 @@ const MessageRow = memo(function MessageRow({
   editing: boolean;
   actions: RowActions;
 }) {
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<"delete" | "keep-out" | false>(false);
   const [copied, setCopied] = useState(false);
   const edited = !!message.editedAt;
   return (
@@ -613,7 +641,7 @@ const MessageRow = memo(function MessageRow({
         animate && mine && "landed",
       )}
     >
-      <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey} app={!!message.webhook}>
+      <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey} app={!!message.webhook} from={from}>
         {editing ? (
           <EditBox initial={message.content.replace(EMOJI_TOKEN, ":$2:")} onCancel={actions.cancelEdit} onSave={(content) => actions.save(message.id, content)} />
         ) : (
@@ -639,11 +667,20 @@ const MessageRow = memo(function MessageRow({
               transition={{ type: "spring", stiffness: 600, damping: 32 }}
               className="flex items-center gap-0.5"
             >
-              <span className="px-2 text-xs font-bold text-destructive">Delete?</span>
-              <ToolButton label="Delete" danger onClick={() => actions.remove(message.id).catch(() => setConfirming(false))}>
+              <span className="px-2 text-xs font-bold text-destructive">{confirming === "keep-out" ? `Keep ${displayName(author)} out?` : "Delete?"}</span>
+              <ToolButton
+                label={confirming === "keep-out" ? "Keep out of this channel" : "Delete"}
+                danger
+                onClick={() =>
+                  (confirming === "keep-out" ? actions.keepOut(message.authorId, displayName(author)) : actions.remove(message.id)).catch((err: Error) => {
+                    if (confirming === "keep-out") toast(err.message);
+                    setConfirming(false);
+                  })
+                }
+              >
                 <CheckIcon />
               </ToolButton>
-              <ToolButton label="Keep" onClick={() => setConfirming(false)}>
+              <ToolButton label="Cancel" onClick={() => setConfirming(false)}>
                 <XIcon />
               </ToolButton>
             </motion.span>
@@ -680,8 +717,13 @@ const MessageRow = memo(function MessageRow({
                   <PencilIcon />
                 </ToolButton>
               )}
+              {canKeepOut && (
+                <ToolButton label="Keep out of this channel" danger onClick={() => setConfirming("keep-out")}>
+                  <UserXIcon />
+                </ToolButton>
+              )}
               {canDelete && (
-                <ToolButton label="Delete" danger onClick={() => setConfirming(true)}>
+                <ToolButton label="Delete" danger onClick={() => setConfirming("delete")}>
                   <Trash2Icon />
                 </ToolButton>
               )}

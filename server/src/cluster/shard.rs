@@ -647,4 +647,9 @@ impl ShardService for Internal {
                 .map(|invite| cpb::DescribeInviteResponse { invite: Some(invite) }),
         )
     }
+
+    async fn shared(&self, request: Request<cpb::SharedRequest>) -> Result<Response<cpb::SharedResponse>, Status> {
+        let call = request.into_inner().call.ok_or_else(|| Status::invalid_argument("call is required"))?;
+        respond(crate::api::shared_call(&self.app, call).await.map(|reply| cpb::SharedResponse { reply: Some(reply) }))
+    }
 }

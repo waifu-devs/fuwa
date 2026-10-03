@@ -33,6 +33,7 @@ import {
   UsersIcon,
   WebhookIcon,
   XIcon,
+  type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
@@ -48,6 +49,10 @@ import { AuditLog } from "@/components/settings/server/AuditLog";
 import { AutoMod } from "@/components/settings/server/AutoMod";
 import { Emoji } from "@/components/settings/server/Emoji";
 import { Webhooks } from "@/components/settings/server/Webhooks";
+import { SharedChannels } from "@/components/settings/server/SharedChannels";
+import { SharedGlyph } from "@/components/chat/Shared";
+import { SharedConnectionState } from "@/gen/fuwa/v1/channel_pb";
+import { listConnections } from "@/fuwa/actions";
 import { SingleSignOn } from "@/components/settings/server/SingleSignOn";
 import { ServerAgents } from "@/components/settings/server/ServerAgents";
 import { WelcomeScreenEditor } from "@/components/settings/server/WelcomeScreenEditor";
@@ -106,6 +111,14 @@ export function ServerSettingsDialog({
   const can = (id: string) => allowed.includes(id);
   const access = useAccess(instanceKey, server.id);
   const waiting = useFuwa((s) => s.instances[instanceKey]?.applications[server.id]?.length ?? 0);
+  // Other servers asking to show one of this server's channels, for the menu's badge.
+  const sharedRequests = useFuwa(
+    (s) => s.instances[instanceKey]?.shared[server.id]?.connections.filter((c) => c.home && c.state === SharedConnectionState.WAITING).length ?? 0,
+  );
+  const managesShared = allowed.includes("shared");
+  useEffect(() => {
+    if (open && managesShared) run(listConnections(instanceKey, server.id)).catch(() => {});
+  }, [open, managesShared, instanceKey, server.id]);
   const [tab, setTab] = useState(initialTab);
   useEffect(() => {
     if (open) setTab(initialTab);
@@ -224,6 +237,14 @@ export function ServerSettingsDialog({
         { id: "webhooks", label: "Webhooks", keywords: "address url token" },
       ],
     },
+    {
+      id: "shared",
+      label: "Shared channels",
+      icon: SharedGlyph as unknown as LucideIcon,
+      badge: sharedRequests,
+      description: "Channels shown in another server, or from one. Messages stay with the server the channel comes from.",
+      keywords: "share connect slack connect other server guest home code external partner",
+    },
     { id: "usage", label: "Usage", icon: ChartColumnIcon, description: "What the server holds, against its caps.", keywords: "storage members messages" },
     {
       id: "limits",
@@ -281,6 +302,7 @@ export function ServerSettingsDialog({
           {has(access, Permission.MANAGE_WEBHOOKS) && <Webhooks instanceKey={instanceKey} serverId={server.id} />}
         </div>
       )}
+      {tab === "shared" && can("shared") && <SharedChannels instanceKey={instanceKey} serverId={server.id} />}
       {tab === "automod" && can("automod") && <AutoMod instanceKey={instanceKey} serverId={server.id} />}
       {tab === "invites" && can("invites") && <Invites instanceKey={instanceKey} serverId={server.id} />}
       {tab === "roles" && can("roles") && <Roles instanceKey={instanceKey} serverId={server.id} initial={target} />}
