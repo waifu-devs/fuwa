@@ -5313,3 +5313,18 @@ async fn channel_overwrites_and_moves_respect_rank_and_reach() {
 
     instance.stop().await;
 }
+
+#[tokio::test]
+async fn https_instances_ask_browsers_to_keep_to_https() {
+    let dir = tempfile::tempdir().unwrap();
+    let plain = start(dir.path(), &[]).await;
+    let home = reqwest::get(format!("http://{}/", plain.addr)).await.unwrap();
+    assert!(home.headers().get("strict-transport-security").is_none());
+    plain.stop().await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let https = start(dir.path(), &[("FUWA_PUBLIC_URL", "https://chat.example.com")]).await;
+    let home = reqwest::get(format!("http://{}/", https.addr)).await.unwrap();
+    assert_eq!(home.headers()["strict-transport-security"], "max-age=63072000");
+    https.stop().await;
+}
