@@ -128,18 +128,258 @@ fn fingerprint(p: &pb::AutoModProviderSettings) -> (String, bool, String, String
     )
 }
 
-/// The settings that differ between a draft and what's saved, as the API names them.
-/// Only the ones the desktop shows so far.
-pub fn changed(draft: &pb::InstanceSettings, saved: &pb::InstanceSettings) -> Vec<String> {
-    let mut out = Vec::new();
-    if draft.telemetry != saved.telemetry {
-        out.push("telemetry".to_owned());
+/// A list of addresses as typed, one per line: blank lines don't count.
+fn lines(list: &[String]) -> Vec<&str> {
+    list.iter().map(|o| o.trim()).filter(|o| !o.is_empty()).collect()
+}
+
+/// Every setting the desktop changes, as the API names it, in the web's order.
+pub const PATHS: [&str; 28] = [
+    "name",
+    "public_url",
+    "allowed_origins",
+    "local_accounts",
+    "linked_accounts",
+    "linked_issuer",
+    "sso_accounts",
+    "sso_provider",
+    "server_creation",
+    "agent_creation",
+    "shared_channels",
+    "servers_per_account",
+    "default_limits.members",
+    "default_limits.channels",
+    "default_limits.storage_bytes",
+    "default_limits.attachment_bytes",
+    "default_limits.emojis",
+    "default_limits.recording_bytes",
+    "picture_upload_bytes",
+    "picture_upload_bytes_per_day",
+    "telemetry",
+    "web",
+    "calls",
+    "call_recordings",
+    "call_recordings_keep_days",
+    "ice_urls",
+    "turn_secret",
+    "automod_providers",
+];
+
+/// A default cap, or `None` for one that isn't there.
+fn limit(s: &pb::InstanceSettings, path: &str) -> Option<i64> {
+    let l = s.default_limits.as_ref()?;
+    match path {
+        "default_limits.members" => l.members,
+        "default_limits.channels" => l.channels,
+        "default_limits.storage_bytes" => l.storage_bytes,
+        "default_limits.attachment_bytes" => l.attachment_bytes,
+        "default_limits.emojis" => l.emojis,
+        "default_limits.recording_bytes" => l.recording_bytes,
+        _ => None,
     }
+}
+
+/// The cap a path names, for the pages that switch caps on and off.
+pub fn cap(s: &pb::InstanceSettings, path: &str) -> Option<i64> {
+    match path {
+        "servers_per_account" => s.servers_per_account,
+        "picture_upload_bytes" => s.picture_upload_bytes,
+        "picture_upload_bytes_per_day" => s.picture_upload_bytes_per_day,
+        "call_recordings_keep_days" => s.call_recordings_keep_days,
+        _ => limit(s, path),
+    }
+}
+
+/// Sets the cap a path names (`None` is no limit).
+pub fn set_cap(s: &mut pb::InstanceSettings, path: &str, value: Option<i64>) {
+    let slot = match path {
+        "servers_per_account" => &mut s.servers_per_account,
+        "picture_upload_bytes" => &mut s.picture_upload_bytes,
+        "picture_upload_bytes_per_day" => &mut s.picture_upload_bytes_per_day,
+        "call_recordings_keep_days" => &mut s.call_recordings_keep_days,
+        _ => {
+            let l = s.default_limits.get_or_insert_with(Default::default);
+            match path {
+                "default_limits.members" => &mut l.members,
+                "default_limits.channels" => &mut l.channels,
+                "default_limits.storage_bytes" => &mut l.storage_bytes,
+                "default_limits.attachment_bytes" => &mut l.attachment_bytes,
+                "default_limits.emojis" => &mut l.emojis,
+                "default_limits.recording_bytes" => &mut l.recording_bytes,
+                _ => return,
+            }
+        }
+    };
+    *slot = value;
+}
+
+/// Whether one setting differs between two drafts, read as the web reads it
+/// (trimmed text, blank lines dropped).
+fn differs(a: &pb::InstanceSettings, b: &pb::InstanceSettings, path: &str) -> bool {
     let prints = |s: &pb::InstanceSettings| s.automod_providers.iter().map(fingerprint).collect::<Vec<_>>();
-    if prints(draft) != prints(saved) {
-        out.push("automod_providers".to_owned());
+    match path {
+        "name" => a.name.trim() != b.name.trim(),
+        "public_url" => a.public_url.trim() != b.public_url.trim(),
+        "allowed_origins" => lines(&a.allowed_origins) != lines(&b.allowed_origins),
+        "local_accounts" => a.local_accounts != b.local_accounts,
+        "linked_accounts" => a.linked_accounts != b.linked_accounts,
+        "linked_issuer" => a.linked_issuer.trim().trim_end_matches('/') != b.linked_issuer.trim().trim_end_matches('/'),
+        "sso_accounts" => a.sso_accounts != b.sso_accounts,
+        "sso_provider" => a.sso_provider != b.sso_provider,
+        "server_creation" => a.server_creation != b.server_creation,
+        "agent_creation" => a.agent_creation != b.agent_creation,
+        "shared_channels" => a.shared_channels != b.shared_channels,
+        "telemetry" => a.telemetry != b.telemetry,
+        "web" => a.web != b.web,
+        "calls" => a.calls != b.calls,
+        "call_recordings" => a.call_recordings != b.call_recordings,
+        "ice_urls" => lines(&a.ice_urls) != lines(&b.ice_urls),
+        "turn_secret" => a.turn_secret.trim() != b.turn_secret.trim(),
+        "automod_providers" => prints(a) != prints(b),
+        _ => cap(a, path) != cap(b, path),
     }
-    out
+}
+
+/// The settings that differ between a draft and what's saved, as the API names them.
+pub fn changed(draft: &pb::InstanceSettings, saved: &pb::InstanceSettings) -> Vec<String> {
+    PATHS.iter().filter(|p| differs(draft, saved, p)).map(|p| (*p).to_owned()).collect()
+}
+
+/// Copies one setting from a draft into fresh settings, to keep an edit that wasn't saved.
+pub fn copy_field(into: &mut pb::InstanceSettings, from: &pb::InstanceSettings, path: &str) {
+    match path {
+        "name" => into.name = from.name.clone(),
+        "public_url" => into.public_url = from.public_url.clone(),
+        "allowed_origins" => into.allowed_origins = from.allowed_origins.clone(),
+        "local_accounts" => into.local_accounts = from.local_accounts,
+        "linked_accounts" => into.linked_accounts = from.linked_accounts,
+        "linked_issuer" => into.linked_issuer = from.linked_issuer.clone(),
+        "sso_accounts" => into.sso_accounts = from.sso_accounts,
+        "sso_provider" => into.sso_provider = from.sso_provider.clone(),
+        "server_creation" => into.server_creation = from.server_creation,
+        "agent_creation" => into.agent_creation = from.agent_creation,
+        "shared_channels" => into.shared_channels = from.shared_channels,
+        "telemetry" => into.telemetry = from.telemetry,
+        "web" => into.web = from.web,
+        "calls" => into.calls = from.calls,
+        "call_recordings" => into.call_recordings = from.call_recordings,
+        "ice_urls" => into.ice_urls = from.ice_urls.clone(),
+        "turn_secret" => into.turn_secret = from.turn_secret.clone(),
+        "automod_providers" => into.automod_providers = from.automod_providers.clone(),
+        _ => set_cap(into, path, cap(from, path)),
+    }
+}
+
+/// Whether a sign-in provider can send people back to this address: https, or http on this computer.
+/// The web's `canReturnTo`.
+pub fn can_return_to(url: &str) -> bool {
+    let url = url.trim();
+    if host_of(url).is_some() {
+        return true;
+    }
+    let Some(rest) = url.strip_prefix("http://") else { return false };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = match authority.strip_prefix('[') {
+        Some(v6) => format!("[{}]", v6.split(']').next().unwrap_or_default()),
+        None => authority.split(':').next().unwrap_or_default().to_owned(),
+    };
+    ["localhost", "127.0.0.1", "[::1]"].contains(&host.to_ascii_lowercase().as_str())
+}
+
+/// Whether an identity provider is filled in enough to sign people in. The web's `providerReady`.
+pub fn provider_ready(p: Option<&pb::IdentityProvider>) -> bool {
+    let Some(p) = p.filter(|p| !p.name.trim().is_empty()) else { return false };
+    if p.protocol == pb::SsoProtocol::Oidc as i32 {
+        return p.oidc.as_ref().is_some_and(|o| {
+            !o.issuer.trim().is_empty()
+                && !o.client_id.trim().is_empty()
+                && (!o.client_secret.is_empty() || o.client_secret_set)
+        });
+    }
+    if p.protocol == pb::SsoProtocol::Saml as i32 {
+        return p.saml.as_ref().is_some_and(|s| {
+            !s.entity_id.trim().is_empty()
+                && !s.sso_url.trim().is_empty()
+                && s.certificates.contains("BEGIN CERTIFICATE")
+        });
+    }
+    false
+}
+
+/// Whether signing in with waifu.dev would work with these settings: on, with an https public address.
+pub fn linked_works(s: &pb::InstanceSettings) -> bool {
+    s.linked_accounts != pb::LinkedAccounts::Off as i32 && can_return_to(&s.public_url)
+}
+
+/// Whether single sign-on would work with these settings: on, set up, with an https public address.
+pub fn sso_works(s: &pb::InstanceSettings) -> bool {
+    (s.sso_accounts == pb::SsoAccounts::Open as i32 || s.sso_accounts == pb::SsoAccounts::Closed as i32)
+        && provider_ready(s.sso_provider.as_ref())
+        && can_return_to(&s.public_url)
+}
+
+/// The units a size cap is typed in.
+pub const UNITS: [(&str, i64); 3] = [("MB", 1 << 20), ("GB", 1 << 30), ("TB", 1 << 40)];
+
+/// A size as a number and the unit it reads best in (GB when there's none), as the web's `splitBytes`.
+pub fn split_bytes(bytes: Option<i64>) -> (String, usize) {
+    let Some(n) = bytes else { return (String::new(), 1) };
+    let unit = (0..UNITS.len())
+        .rev()
+        .find(|&u| {
+            let hundredths = n as f64 / UNITS[u].1 as f64 * 100.0;
+            n >= UNITS[u].1 && hundredths.fract() == 0.0
+        })
+        .unwrap_or(0);
+    let amount = (n as f64 / UNITS[unit].1 as f64 * 100.0).round() / 100.0;
+    (format!("{amount}"), unit)
+}
+
+/// What's typed in a cap's box as a number (in `unit` for sizes), or `None` while it isn't one.
+pub fn parse_cap(text: &str, unit: Option<usize>) -> Option<i64> {
+    let n: f64 = text.trim().parse().ok()?;
+    if !n.is_finite() || n < 0.0 {
+        return None;
+    }
+    let factor = unit.map_or(1, |u| UNITS[u.min(UNITS.len() - 1)].1);
+    let value = (n * factor as f64).round();
+    (value <= i64::MAX as f64).then_some(value as i64)
+}
+
+/// A size in words, like the web's `formatBytes`.
+pub fn format_bytes(bytes: i64) -> String {
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let units = ["KB", "MB", "GB", "TB"];
+    let (mut value, mut unit) = (bytes as f64 / 1024.0, 0);
+    while value >= 1024.0 && unit < units.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if value >= 10.0 { format!("{value:.0} {}", units[unit]) } else { format!("{value:.1} {}", units[unit]) }
+}
+
+/// A count cap in words: "no limit" when it's off.
+pub fn count_label(n: Option<i64>) -> String {
+    n.map_or_else(|| "no limit".to_owned(), group_digits)
+}
+
+/// A size cap in words: "no limit" when it's off.
+pub fn size_label(n: Option<i64>) -> String {
+    n.map_or_else(|| "no limit".to_owned(), format_bytes)
+}
+
+fn group_digits(n: i64) -> String {
+    let digits = n.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    if n < 0 { format!("-{out}") } else { out }
 }
 
 /// A label's id as words: "self_harm" reads "Self harm".
@@ -250,15 +490,76 @@ mod tests {
     fn changes_are_named_like_the_api() {
         let saved = pb::InstanceSettings {
             automod_providers: vec![pb::AutoModProviderSettings { id: "typesafe-jev".into(), ..Default::default() }],
+            allowed_origins: vec!["https://a.example".into()],
             ..Default::default()
         };
         let mut draft = saved.clone();
         assert!(changed(&draft, &saved).is_empty());
         draft.automod_providers[0].header = "  ".into();
+        draft.allowed_origins.push("  ".into());
+        draft.name = "  ".into();
         assert!(changed(&draft, &saved).is_empty(), "blanks aren't changes");
         draft.automod_providers[0].enabled = true;
         draft.telemetry = true;
-        assert_eq!(changed(&draft, &saved), ["telemetry", "automod_providers"]);
+        set_cap(&mut draft, "default_limits.emojis", Some(50));
+        assert_eq!(changed(&draft, &saved), ["default_limits.emojis", "telemetry", "automod_providers"]);
+
+        // A save keeps the edits it didn't send.
+        let mut fresh = saved.clone();
+        for path in changed(&draft, &saved) {
+            copy_field(&mut fresh, &draft, &path);
+        }
+        assert!(changed(&fresh, &draft).is_empty());
         assert_eq!(label_name("self_harm"), "Self harm");
+    }
+
+    #[test]
+    fn sign_ins_come_back_only_to_https_or_this_computer() {
+        for good in ["https://fuwa.example", "http://localhost:5173/", "http://127.0.0.1", "http://[::1]:8080"] {
+            assert!(can_return_to(good), "{good}");
+        }
+        for bad in ["http://fuwa.example", "http://localhost.example", "", "fuwa.example"] {
+            assert!(!can_return_to(bad), "{bad}");
+        }
+        let mut s = pb::InstanceSettings {
+            linked_accounts: pb::LinkedAccounts::Open as i32,
+            public_url: "http://fuwa.example".into(),
+            ..Default::default()
+        };
+        assert!(!linked_works(&s));
+        s.public_url = "https://fuwa.example".into();
+        assert!(linked_works(&s));
+        assert!(!sso_works(&s), "no provider yet");
+        s.sso_accounts = pb::SsoAccounts::Open as i32;
+        s.sso_provider = Some(pb::IdentityProvider {
+            protocol: pb::SsoProtocol::Oidc as i32,
+            name: "Acme".into(),
+            oidc: Some(pb::OidcProvider {
+                issuer: "https://id.acme.example".into(),
+                client_id: "fuwa".into(),
+                client_secret_set: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert!(sso_works(&s));
+    }
+
+    #[test]
+    fn caps_read_like_the_web() {
+        assert_eq!(split_bytes(None), (String::new(), 1));
+        assert_eq!(split_bytes(Some(5 << 30)), ("5".to_owned(), 1));
+        assert_eq!(split_bytes(Some(512 << 20)), ("512".to_owned(), 0));
+        assert_eq!(split_bytes(Some(3 << 40)), ("3".to_owned(), 2));
+        assert_eq!(split_bytes(Some(1536 << 20)), ("1.5".to_owned(), 1));
+        assert_eq!(parse_cap("1.5", Some(1)), Some(1536 << 20));
+        assert_eq!(parse_cap(" 250 ", None), Some(250));
+        for bad in ["", "-1", "ten", "NaN"] {
+            assert_eq!(parse_cap(bad, None), None, "{bad}");
+        }
+        assert_eq!(count_label(Some(1_234_567)), "1,234,567");
+        assert_eq!(size_label(Some(5 << 30)), "5.0 GB");
+        assert_eq!(size_label(Some(25 << 30)), "25 GB");
+        assert_eq!(size_label(None), "no limit");
     }
 }

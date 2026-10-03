@@ -1,6 +1,7 @@
 //! An instance's settings, for its admins, full screen like a server's:
-//! the anonymous usage signal and the moderation services servers' AutoMod
-//! can ask, as in the web app's `InstanceSettingsDialog.tsx`. Each setting
+//! its name and address, sign-ups, caps, the anonymous usage signal, calls
+//! and the moderation services servers' AutoMod can ask, as in the web app's
+//! `InstanceSettingsDialog.tsx`. Each setting
 //! starts from the operator's environment; what's changed here is stored on
 //! the instance, and "Back to the default" puts it back.
 
@@ -8,7 +9,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+mod calls;
+mod controls;
+mod general;
+mod limits;
+mod signups;
+
+use gpui_kit::component::input::{Input, InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, InteractiveElement as _, IntoElement,
@@ -22,6 +29,9 @@ use crate::core::instance_admin::{self as admin, MAX_CUSTOM};
 use crate::pb;
 use crate::ui::motion;
 use crate::ui::server_settings::{amber, chip, pill, save_bar, shimmer_rows, spinner, switch};
+
+/// What stands in for an address in streamer mode, as on the web.
+const HIDDEN_ADDRESS: &str = "address hidden";
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{error_line, icon, pal, soft_button};
 
@@ -31,35 +41,83 @@ pub enum InstanceSettingsEvent {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Page {
+    General,
+    SignUps,
+    Limits,
     Privacy,
+    Calls,
     Moderation,
 }
 
 impl Page {
     fn label(self) -> &'static str {
         match self {
+            Page::General => "General",
+            Page::SignUps => "Sign-ups",
+            Page::Limits => "Limits",
             Page::Privacy => "Privacy",
+            Page::Calls => "Calls",
             Page::Moderation => "Moderation",
         }
     }
 
     fn glyph(self) -> &'static str {
         match self {
+            Page::General => "sliders-horizontal",
+            Page::SignUps => "user-plus",
+            Page::Limits => "gauge",
             Page::Privacy => "shield-check",
+            Page::Calls => "audio-lines",
             Page::Moderation => "shield-alert",
         }
     }
 
     fn about(self) -> &'static str {
         match self {
+            Page::General => "What everyone here gets. Changes apply right away.",
+            Page::SignUps => "Who can join this instance and what they can make.",
+            Page::Limits => "Caps every server starts with.",
             Page::Privacy => "What this instance tells Waifu Devs.",
+            Page::Calls => "Voice channels and calls in direct messages.",
             Page::Moderation => "Services servers' AutoMod can ask about messages.",
         }
     }
 }
 
 /// The instance group, in the web's order.
-const PAGES: [Page; 2] = [Page::Privacy, Page::Moderation];
+const PAGES: [Page; 6] = [Page::General, Page::SignUps, Page::Limits, Page::Privacy, Page::Calls, Page::Moderation];
+
+type GetText = fn(&pb::InstanceSettings) -> String;
+type SetText = fn(&mut pb::InstanceSettings, String);
+
+/// Settings typed in one line: (path, placeholder, read, write).
+const TEXTS: [(&str, &str, GetText, SetText); 4] = [
+    ("name", "", |s| s.name.clone(), |s, v| s.name = v.chars().take(64).collect()),
+    ("public_url", "https://chat.example.com", |s| s.public_url.clone(), |s, v| s.public_url = v),
+    ("linked_issuer", signups::WAIFU_DEV_ISSUER, |s| s.linked_issuer.clone(), |s, v| s.linked_issuer = v),
+    ("turn_secret", "No TURN secret", |s| s.turn_secret.clone(), |s, v| s.turn_secret = v),
+];
+
+/// Lists typed one per line: (path, placeholder, read, write).
+const AREAS: [(&str, &str, GetText, SetText); 2] = [
+    (
+        "allowed_origins",
+        "https://fuwa.waifu.dev\nhttps://chat.example.com",
+        |s| s.allowed_origins.iter().filter(|o| *o != "*").cloned().collect::<Vec<_>>().join("\n"),
+        |s, v| s.allowed_origins = v.lines().map(|o| o.trim().to_owned()).filter(|o| !o.is_empty()).collect(),
+    ),
+    (
+        "ice_urls",
+        "stun:stun.example.com:3478\nturn:turn.example.com:3478?transport=udp",
+        |s| s.ice_urls.join("\n"),
+        |s, v| s.ice_urls = v.split('\n').map(str::to_owned).collect(),
+    ),
+];
+
+/// A list as the instance reads it: trimmed, blank lines dropped.
+fn kept(text: &str) -> Vec<&str> {
+    text.lines().map(str::trim).filter(|l| !l.is_empty()).collect()
+}
 
 /// What the usage signal counts, as on the web.
 const SIGNAL: [&str; 5] = [
@@ -101,8 +159,15 @@ pub struct InstanceSettingsView {
     fields: Vec<Fields>,
     next_slot: u64,
     tried: HashMap<u64, Tried>,
+    /// The boxes settings are typed in, by path; they last as long as the view.
+    texts: HashMap<&'static str, Entity<InputState>>,
+    areas: HashMap<&'static str, Entity<TextareaState>>,
+    caps: HashMap<&'static str, Entity<InputState>>,
+    /// The unit each size cap is typed in.
+    units: HashMap<&'static str, usize>,
     bar: Option<AnyElement>,
     _subscriptions: Vec<Subscription>,
+    _boxes: Vec<Subscription>,
 }
 
 impl EventEmitter<InstanceSettingsEvent> for InstanceSettingsView {}
@@ -122,7 +187,7 @@ impl InstanceSettingsView {
         let mut view = Self {
             core,
             key,
-            page: Page::Privacy,
+            page: Page::General,
             config: None,
             draft: None,
             load_error: None,
@@ -131,9 +196,15 @@ impl InstanceSettingsView {
             fields: Vec::new(),
             next_slot: 0,
             tried: HashMap::new(),
+            texts: HashMap::new(),
+            areas: HashMap::new(),
+            caps: HashMap::new(),
+            units: HashMap::new(),
             bar: None,
             _subscriptions: Vec::new(),
+            _boxes: Vec::new(),
         };
+        view.make_boxes(window, cx);
         view.load(window, cx);
         view
     }
@@ -163,6 +234,7 @@ impl InstanceSettingsView {
                     this.draft = config.settings.clone();
                     this.config = Some(config);
                     this.refill(window, cx);
+                    this.sync_boxes(window, cx);
                 }
                 Err(problem) => this.load_error = Some(problem.message),
             }
@@ -215,11 +287,8 @@ impl InstanceSettingsView {
                     Ok(config) => {
                         let mut fresh = config.settings.clone().unwrap_or_default();
                         if let Some(draft) = &this.draft {
-                            if pending.iter().any(|p| p == "telemetry") {
-                                fresh.telemetry = draft.telemetry;
-                            }
-                            if pending.iter().any(|p| p == "automod_providers") {
-                                fresh.automod_providers = draft.automod_providers.clone();
+                            for path in &pending {
+                                admin::copy_field(&mut fresh, draft, path);
                             }
                         }
                         let providers_from_saved = !pending.iter().any(|p| p == "automod_providers");
@@ -229,6 +298,7 @@ impl InstanceSettingsView {
                             // Saved keys come back as hints, and new ones get their ids.
                             this.refill(window, cx);
                         }
+                        this.sync_boxes(window, cx);
                     }
                     Err(problem) => this.error = Some(problem.message),
                 }
@@ -242,6 +312,7 @@ impl InstanceSettingsView {
         self.draft = self.saved().cloned();
         self.error = None;
         self.refill(window, cx);
+        self.sync_boxes(window, cx);
         cx.notify();
     }
 
@@ -317,6 +388,124 @@ impl InstanceSettingsView {
         fields
     }
 
+    /// The boxes for settings typed as text, each writing to the draft as it changes.
+    fn make_boxes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let hide = self.core.prefs().streamer_mode;
+        for (path, placeholder, get, set) in TEXTS {
+            let masked = path == "turn_secret" || (hide && path == "public_url");
+            let state = cx.new(|cx| {
+                let s = InputState::new(window, cx).placeholder(placeholder);
+                if masked { s.masked(true) } else { s }
+            });
+            let sub = cx.subscribe(&state, move |this: &mut Self, state, e: &InputEvent, cx| {
+                if matches!(e, InputEvent::Change) {
+                    let value = state.read(cx).value().to_string();
+                    if this.draft.as_ref().is_some_and(|d| get(d) != value) {
+                        this.patch(cx, |d| set(d, value));
+                    }
+                }
+            });
+            self.texts.insert(path, state);
+            self._boxes.push(sub);
+        }
+        for (path, placeholder, get, set) in AREAS {
+            let state = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8).placeholder(placeholder));
+            let sub = cx.subscribe(&state, move |this: &mut Self, state, e: &InputEvent, cx| {
+                if matches!(e, InputEvent::Change) {
+                    let value = state.read(cx).value().to_string();
+                    if this.draft.as_ref().is_some_and(|d| get(d) != value) {
+                        this.patch(cx, |d| set(d, value));
+                    }
+                }
+            });
+            self.areas.insert(path, state);
+            self._boxes.push(sub);
+        }
+        for (path, bytes) in limits::CAPS {
+            let state = cx.new(|cx| InputState::new(window, cx));
+            let sub = cx.subscribe(&state, move |this: &mut Self, state, e: &InputEvent, cx| {
+                if !matches!(e, InputEvent::Change) {
+                    return;
+                }
+                let unit = bytes.then(|| this.units.get(path).copied().unwrap_or(1));
+                let Some(value) = admin::parse_cap(&state.read(cx).value(), unit) else { return };
+                // A cap that's off stays off while its box is filled in.
+                if this.draft.as_ref().and_then(|d| admin::cap(d, path)).is_some_and(|now| now != value) {
+                    this.patch(cx, |d| admin::set_cap(d, path, Some(value)));
+                }
+            });
+            self.caps.insert(path, state);
+            self.units.insert(path, 1);
+            self._boxes.push(sub);
+        }
+    }
+
+    /// Puts the draft into the boxes that don't already say it (after loading, a save or a discard),
+    /// leaving what's typed alone where it means the same.
+    fn sync_boxes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(draft) = self.draft.clone() else { return };
+        for (path, _, get, _) in TEXTS {
+            let Some(state) = self.texts.get(path) else { continue };
+            let want = get(&draft);
+            if state.read(cx).value().as_ref() != want {
+                state.update(cx, |s, cx| s.set_value(want, window, cx));
+            }
+        }
+        for (path, _, get, _) in AREAS {
+            let Some(state) = self.areas.get(path) else { continue };
+            let want = get(&draft);
+            if path == "allowed_origins" && draft.allowed_origins.iter().any(|o| o == "*") {
+                continue;
+            }
+            if kept(&state.read(cx).value()) != kept(&want) {
+                state.update(cx, |s, cx| s.set_value(want, window, cx));
+            }
+        }
+        for (path, bytes) in limits::CAPS {
+            let Some(state) = self.caps.get(path).cloned() else { continue };
+            let value = admin::cap(&draft, path);
+            let unit = bytes.then(|| self.units.get(path).copied().unwrap_or(1));
+            if value.is_none() || admin::parse_cap(&state.read(cx).value(), unit) == value {
+                continue;
+            }
+            let (text, unit) =
+                if bytes { admin::split_bytes(value) } else { (value.map(|v| v.to_string()).unwrap_or_default(), 1) };
+            self.units.insert(path, unit);
+            state.update(cx, |s, cx| s.set_value(text, window, cx));
+        }
+    }
+
+    /// Turns a cap on (with what's typed, or 100, or 1 GB) or off.
+    fn switch_cap(&mut self, path: &'static str, bytes: bool, on: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if !on {
+            self.patch(cx, |d| admin::set_cap(d, path, None));
+            return;
+        }
+        let Some(state) = self.caps.get(path).cloned() else { return };
+        let unit = bytes.then(|| self.units.get(path).copied().unwrap_or(1));
+        let value = match admin::parse_cap(&state.read(cx).value(), unit) {
+            Some(v) => v,
+            None => {
+                let (text, v) = if bytes { ("1", admin::UNITS[1].1) } else { ("100", 100) };
+                self.units.insert(path, 1);
+                state.update(cx, |s, cx| s.set_value(text, window, cx));
+                v
+            }
+        };
+        self.patch(cx, |d| admin::set_cap(d, path, Some(value)));
+        state.update(cx, |s, cx| s.focus(window, cx));
+    }
+
+    /// Reads a size cap's number in another unit.
+    fn pick_unit(&mut self, path: &'static str, unit: usize, cx: &mut Context<Self>) {
+        self.units.insert(path, unit);
+        let typed = self.caps.get(path).map(|s| s.read(cx).value().to_string()).unwrap_or_default();
+        match admin::parse_cap(&typed, Some(unit)) {
+            Some(value) => self.patch(cx, |d| admin::set_cap(d, path, Some(value))),
+            None => cx.notify(),
+        }
+    }
+
     fn add_custom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let customs =
             self.draft.as_ref().map_or(0, |d| d.automod_providers.iter().filter(|p| admin::is_custom(p)).count());
@@ -372,44 +561,6 @@ impl InstanceSettingsView {
         cx.notify();
     }
 
-    /// "Changed" and the way back to the default, for settings stored on the instance.
-    fn reset_badge(&self, path: &'static str, default: &str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        if !self.overridden(path) {
-            return div().into_any_element();
-        }
-        let saving = self.saving;
-        motion::rise(
-            div().flex_none().flex().items_center().gap(px(6.0)).child(pill("CHANGED", p.primary.into())).child(
-                div()
-                    .id(SharedString::from(format!("instance-reset-{path}")))
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .px(px(8.0))
-                    .h(px(26.0))
-                    .rounded_full()
-                    .text_xs()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(p.muted_foreground)
-                    .cursor_pointer()
-                    .hover({
-                        let (bg, fg) = (alpha(p.primary, 0.1), p.foreground);
-                        move |s| s.bg(bg).text_color(fg)
-                    })
-                    .when(saving, |el| el.opacity(0.5))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.commit(Vec::new(), vec![path.to_owned()], window, cx)
-                    }))
-                    .child(icon("rotate-ccw").size(px(13.0)))
-                    .child(format!("Back to the default: {default}")),
-            ),
-            SharedString::from(format!("instance-changed-{path}")),
-            Duration::ZERO,
-            -4.0,
-        )
-        .into_any_element()
-    }
-
     fn privacy_page(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let (Some(draft), Some(defaults)) =
             (self.draft.as_ref(), self.config.as_ref().and_then(|c| c.defaults.as_ref()))
@@ -446,7 +597,7 @@ impl InstanceSettingsView {
                     .child(
                         div().flex_1().font_weight(FontWeight::EXTRA_BOLD).child("Anonymous usage signal and reports"),
                     )
-                    .child(self.reset_badge("telemetry", default, p, cx)),
+                    .child(self.reset_badge(&["telemetry"], default, p, cx)),
             )
             .child(
                 div()
@@ -613,7 +764,12 @@ impl InstanceSettingsView {
             .flex_col()
             .gap(px(14.0))
             .child(intro)
-            .child(div().flex().justify_end().child(self.reset_badge("automod_providers", &providers_default, p, cx)))
+            .child(div().flex().justify_end().child(self.reset_badge(
+                &["automod_providers"],
+                &providers_default,
+                p,
+                cx,
+            )))
             .child(cards)
             .child(add)
             .into_any_element()
@@ -1125,6 +1281,10 @@ impl Render for InstanceSettingsView {
             shimmer_rows(3, &p).into_any_element()
         } else {
             match page {
+                Page::General => self.general_page(&p, window, cx),
+                Page::SignUps => self.signups_page(&p, window, cx),
+                Page::Limits => self.limits_page(&p, window, cx),
+                Page::Calls => self.calls_page(&p, window, cx),
                 Page::Privacy => self.privacy_page(&p, cx),
                 Page::Moderation => self.moderation_page(&p, window, cx),
             }
