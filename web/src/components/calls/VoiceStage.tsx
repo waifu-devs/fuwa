@@ -7,7 +7,6 @@ import { useCalls, useInVoice } from "@/calls/state";
 import { useAccess, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { CopyId } from "@/components/CopyId";
-import { hue } from "@/components/Icons";
 import { SPRING, SwapText } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
@@ -16,14 +15,15 @@ import { displayName, isAgent, memberName } from "@/lib/format";
 import { hasIn } from "@/lib/permissions";
 import { setTitle } from "@/lib/notify";
 import { cn } from "@/lib/utils";
-import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceAvatar, VoiceFlags } from "./parts";
+import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceFlags } from "./parts";
+import { CameraButton, PopOutButton, TileMedia } from "./Video";
 import { useVoiceIn } from "./VoiceUsers";
 
 /**
  * A voice channel, open: everyone in it as a tile that glows while they
- * talk, and the controls for your own place there. Each tile is one
- * person's own stream, the way video will arrive too, so a tile can later
- * pop out into its own window.
+ * talk (their camera, when it's on), and the controls for your own place
+ * there. Each tile is one person's own stream, and pops out into a window
+ * of its own.
  */
 export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: string; serverId: string; channel: Channel }) {
   const inst = useInstance(instanceKey);
@@ -98,6 +98,7 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
           {joined ? (
             <motion.div key="in" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }} transition={SPRING} className="flex items-center gap-2">
               <MuteButtons size="lg" />
+              <CameraButton size="lg" />
               <HangUpButton size="lg" onClick={() => void hangUp(null)} />
             </motion.div>
           ) : (
@@ -141,8 +142,13 @@ function gridFor(n: number) {
 function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey: string; serverId: string; channelId: string; state: VoiceState; index: number }) {
   const user = useFuwa((s) => s.instances[instanceKey]?.users[state.userId]);
   const member = useFuwa((s) => s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === state.userId));
+  const self = useFuwa((s) => s.instances[instanceKey]?.me?.id === state.userId);
+  const joined = useInVoice(instanceKey, channelId);
+  const mine = useCalls((s) => s.selfVideo);
   const speaking = useSpeaking(state.userId);
   const name = member ? memberName(member) : displayName(user);
+  // Your own camera comes from this browser; anyone else's through the call.
+  const videoOn = joined && (self ? mine : state.selfVideo);
   return (
     <motion.li
       layout
@@ -150,20 +156,17 @@ function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey:
       animate={{ opacity: 1, scale: 1, y: 0, transition: { ...SPRING, delay: Math.min(index, 8) * 0.04 } }}
       exit={{ opacity: 0, scale: 0.85, transition: { duration: 0.18 } }}
       transition={SPRING}
+      className="group/tile relative"
     >
       <ParticipantMenu instanceKey={instanceKey} serverId={serverId} channelId={channelId} user={user} state={state}>
         <button
           type="button"
           className={cn(
-            "group relative flex aspect-video w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-3xl border bg-card text-left shadow-sm transition-[box-shadow,border-color] duration-300",
+            "group relative block aspect-video w-full overflow-hidden rounded-3xl border bg-card text-left shadow-sm transition-[box-shadow,border-color] duration-300",
             speaking ? "border-[#3ba55d] shadow-[0_0_0_2px_#3ba55d,0_10px_40px_-10px_rgb(59_165_93/0.6)]" : "hover:border-primary/40",
           )}
         >
-          {/* Their color, softly, behind them. */}
-          <span aria-hidden className="server-gradient absolute inset-0 opacity-25 transition-opacity duration-500 group-hover:opacity-35" style={hue(state.userId)} />
-          <motion.span animate={{ scale: speaking ? 1.06 : 1 }} transition={{ type: "spring", stiffness: 400, damping: 15 }} className="relative">
-            <VoiceAvatar user={user} speaking={speaking} ring={4} className="size-16 text-xl sm:size-20 sm:text-2xl" />
-          </motion.span>
+          <TileMedia userId={state.userId} user={user} videoOn={videoOn} self={self} speaking={speaking} />
           <span className="absolute inset-x-2 bottom-2 flex items-center gap-1.5 rounded-xl bg-background/75 px-2.5 py-1 backdrop-blur">
             <span className="min-w-0 flex-1 truncate text-sm font-bold">{name}</span>
             {isAgent(member?.user ?? user) && <AppBadge agent />}
@@ -171,6 +174,7 @@ function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey:
           </span>
         </button>
       </ParticipantMenu>
+      {joined && <PopOutButton popped={{ instance: instanceKey, userId: state.userId, serverId }} name={name} className="absolute top-2 right-2" />}
     </motion.li>
   );
 }

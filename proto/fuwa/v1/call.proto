@@ -7,16 +7,21 @@ import "google/protobuf/timestamp.proto";
 
 // Voice: talking in a server's voice channels, and calls in direct messages.
 //
-// Sound goes over WebRTC to the instance's media part (an SFU: it passes each
-// person's sound on to everyone else in the call, and never mixes or keeps
-// it). Calls here only arrange that: the app sends a WebRTC offer and gets
+// Sound and cameras go over WebRTC to the instance's media part (an SFU: it
+// passes each person's sound and camera on to everyone else in the call,
+// and never mixes or keeps them). Calls here only arrange that: the app sends a WebRTC offer and gets
 // the media part's answer back. After that, the media part and the app talk
 // over the connection itself: a data channel named "fuwa" carries the offers
 // and answers for people coming and going, as JSON ({"type": "offer" or
 // "answer", "sdp": ...}), and a few notices ({"type": "replaced"} when the
 // same account joined from somewhere else, {"type": "restarting"} when the
 // media part is about to restart and the app should join again at once,
-// {"type": "closed"} when the instance hung it up).
+// {"type": "closed"} when the instance hung it up). The app says which
+// size of each person's camera it wants with {"type": "layers", "layers":
+// {"<mid>": "h" | "m" | "l" | "off"}}, naming the tracks the media part
+// sent it: apps send their camera in three sizes (simulcast, rids "h", "m"
+// and "l", full, half and a quarter), and each viewer gets the one that fits
+// where it shows it, or none while it isn't showing it.
 //
 // Who's in a call is kept in memory, not stored, and each app keeps its
 // place with KeepVoice every 5 seconds; a place nobody kept for 15 seconds
@@ -101,12 +106,17 @@ message JoinVoiceRequest {
   string server_id = 1;
   string channel_id = 2;
   // The app's WebRTC offer, SDP. It sends its microphone (one audio track,
-  // send only) and opens the "fuwa" data channel.
+  // send only), at most one camera (one video track, send only, VP8, in
+  // up to three simulcast sizes) and opens the "fuwa" data channel. The
+  // camera's track can be there with nothing on it yet: others get it once
+  // its first frame arrives.
   string offer = 3;
   bool self_mute = 4;
   bool self_deaf = 5;
   // Rejoin this session instead of starting a new one.
   string session_id = 6;
+  // The camera is on (VIDEO there).
+  bool self_video = 7;
 }
 
 message JoinVoiceResponse {
@@ -133,6 +143,7 @@ message KeepVoiceRequest {
   string channel_id = 3;
   bool self_mute = 4;
   bool self_deaf = 5;
+  bool self_video = 6;
 }
 
 message KeepVoiceResponse {
@@ -212,6 +223,7 @@ message JoinDmCallRequest {
   bool self_mute = 3;
   bool self_deaf = 4;
   string session_id = 5;
+  bool self_video = 6;
 }
 
 message JoinDmCallResponse {
@@ -232,6 +244,7 @@ message KeepDmCallRequest {
   string session_id = 2;
   bool self_mute = 3;
   bool self_deaf = 4;
+  bool self_video = 5;
 }
 
 message KeepDmCallResponse {

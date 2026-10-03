@@ -32,6 +32,8 @@ export type CallsState = {
   /** Muted and deafened stay as you left them, from one call to the next, as Discord does. */
   selfMute: boolean;
   selfDeaf: boolean;
+  /** Your camera is on. Unlike mute, every call starts with it off. */
+  selfVideo: boolean;
   /** Who's talking right now in your call, by user id (you included). */
   speaking: Record<string, boolean>;
   /** Push to talk's key is down. */
@@ -53,7 +55,7 @@ function load(): Pick<CallsState, "selfMute" | "selfDeaf"> {
   }
 }
 
-let state: CallsState = { call: null, speaking: {}, talking: false, declined: {}, ended: null, ...load() };
+let state: CallsState = { call: null, speaking: {}, talking: false, declined: {}, ended: null, selfVideo: false, ...load() };
 const listeners = new Set<() => void>();
 
 export const getCalls = () => state;

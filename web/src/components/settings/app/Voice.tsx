@@ -1,7 +1,9 @@
-import { AudioLinesIcon, CheckIcon, ChevronDownIcon, HeadphonesIcon, KeyboardIcon, MicIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react";
+import { AudioLinesIcon, CheckIcon, ChevronDownIcon, HeadphonesIcon, KeyboardIcon, MicIcon, PlayIcon, SquareIcon, VideoIcon, Volume2Icon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { Mic, micProblem, canPickOutput, audioContext } from "@/calls/audio";
+import { cameraProblem, openCamera } from "@/calls/video";
+import { VideoView } from "@/components/calls/Video";
 import { SPRING } from "@/components/motion";
 import { Choice, Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
@@ -20,14 +22,15 @@ export const VOICE_SETTINGS = [
   { id: "input-mode", label: "Input mode", keywords: "voice activity push to talk ptt" },
   { id: "sensitivity", label: "Sensitivity", keywords: "threshold gate noise" },
   { id: "processing", label: "Processing", keywords: "echo noise suppression gain" },
+  { id: "camera", label: "Camera", keywords: "video webcam mirror preview" },
   { id: "call-sounds", label: "Call sounds", keywords: "ring ringtone join leave" },
 ];
 
 type Device = { id: string; label: string };
 
-/** The microphones and speakers this browser can use. Names show once it's been allowed the microphone. */
+/** The microphones, speakers and cameras this browser can use. Names show once it's been allowed them. */
 function useDevices() {
-  const [devices, setDevices] = useState<{ inputs: Device[]; outputs: Device[] }>({ inputs: [], outputs: [] });
+  const [devices, setDevices] = useState<{ inputs: Device[]; outputs: Device[]; cameras: Device[] }>({ inputs: [], outputs: [], cameras: [] });
   useEffect(() => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
     const read = () =>
@@ -35,8 +38,8 @@ function useDevices() {
         const pick = (kind: MediaDeviceKind) =>
           list
             .filter((d) => d.kind === kind && d.deviceId && d.deviceId !== "default" && d.deviceId !== "communications")
-            .map((d, n) => ({ id: d.deviceId, label: d.label || `${kind === "audioinput" ? "Microphone" : "Speakers"} ${n + 1}` }));
-        setDevices({ inputs: pick("audioinput"), outputs: pick("audiooutput") });
+            .map((d, n) => ({ id: d.deviceId, label: d.label || `${kind === "audioinput" ? "Microphone" : kind === "videoinput" ? "Camera" : "Speakers"} ${n + 1}` }));
+        setDevices({ inputs: pick("audioinput"), outputs: pick("audiooutput"), cameras: pick("videoinput") });
       });
     read();
     navigator.mediaDevices.addEventListener("devicechange", read);
@@ -141,6 +144,64 @@ function MicTest() {
   );
 }
 
+/** Your camera, as others will see it (mirrored for you, if you like), until you stop it. */
+function CameraTest() {
+  const [testing, setTesting] = useState(false);
+  const [track, setTrack] = useState<MediaStreamTrack | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const device = usePrefs((p) => p.videoDevice);
+  const mirror = usePrefs((p) => p.mirrorVideo);
+
+  useEffect(() => {
+    if (!testing) return;
+    let cancelled = false;
+    let opened: MediaStreamTrack | null = null;
+    openCamera()
+      .then((t) => {
+        if (cancelled) return t.stop();
+        opened = t;
+        setTrack(t);
+        setProblem(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setProblem(cameraProblem(err));
+        setTesting(false);
+      });
+    return () => {
+      cancelled = true;
+      opened?.stop();
+      setTrack(null);
+    };
+  }, [testing, device]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="relative aspect-video w-full max-w-md overflow-hidden rounded-2xl border bg-muted">
+        <AnimatePresence>
+          {track ? (
+            <motion.div key="on" initial={{ opacity: 0, scale: 1.04 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="absolute inset-0 bg-black">
+              <VideoView track={track} mirror={mirror} />
+            </motion.div>
+          ) : (
+            <motion.div key="off" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 grid place-items-center text-muted-foreground">
+              <VideoIcon className="size-8" />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" variant={testing ? "secondary" : "default"} className="btn group rounded-xl font-bold" onClick={() => setTesting((t) => !t)}>
+          {testing ? <SquareIcon className="size-3.5" /> : <PlayIcon className="transition-transform group-hover:scale-110" />}
+          {testing ? "Stop" : "Check my camera"}
+        </Button>
+        <Toggle checked={mirror} onChange={(mirrorVideo) => setPrefs({ mirrorVideo })} label="Mirror my camera" hint="Only for you: everyone else sees it the right way round." />
+      </div>
+      {problem && <p className="text-sm text-destructive">{problem}</p>}
+    </div>
+  );
+}
+
 /** A level meter: the bar moves with your voice and turns green while what you say goes out. */
 function Meter({ level, threshold, open }: { level: number; threshold?: number; open: boolean }) {
   return (
@@ -233,6 +294,12 @@ export function Voice() {
         <Toggle checked={p.echoCancellation} onChange={(echoCancellation) => setPrefs({ echoCancellation })} label="Echo cancellation" hint="Keeps your speakers out of your microphone." />
         <Toggle checked={p.noiseSuppression} onChange={(noiseSuppression) => setPrefs({ noiseSuppression })} label="Noise suppression" hint="Softens fans, keyboards and the street." />
         <Toggle checked={p.autoGainControl} onChange={(autoGainControl) => setPrefs({ autoGainControl })} label="Automatic gain" hint="Evens out how loud you are. Off for a studio microphone." />
+      </PrefSetting>
+      <PrefSetting id="camera" title="Camera" keys={["videoDevice", "mirrorVideo"]} delay={0.2}>
+        <div className="flex flex-col gap-4">
+          <DevicePicker icon={VideoIcon} label="Camera" value={p.videoDevice} devices={devices.cameras} onChange={(videoDevice) => setPrefs({ videoDevice })} />
+          <CameraTest />
+        </div>
       </PrefSetting>
       <PrefSetting id="call-sounds" title="Call sounds" keys={["sounds"]} delay={0.2}>
         <SoundRow label="Joining, leaving, mute and deafen" hint="Little cues while you're in a call." on={p.sounds.call} onChange={(call) => setPrefs((x) => ({ sounds: { ...x.sounds, call } }))} preview={() => cue("connect")} />

@@ -1,12 +1,12 @@
 # Calls
 
-Voice channels in community servers and calls in direct messages. Video,
-screen sharing and the desktop app's sound come later; this is how calls
-work now and what those build on.
+Voice channels in community servers and calls in direct messages, with
+sound and cameras. Screen sharing and the desktop app's calls come later;
+this is how calls work now and what those build on.
 
 ## The parts
 
-- **The media part** carries the sound. It's an SFU (a selective forwarding
+- **The media part** carries the sound and cameras. It's an SFU (a selective forwarding
   unit) built on [str0m](https://github.com/algesten/str0m) inside the `fuwa`
   binary (`server/src/rtc.rs`): each app sends its sound to it once and it
   forwards that to everyone else in the call, without decoding or mixing.
@@ -40,7 +40,7 @@ work now and what those build on.
 4. As people come and go, the media part offers the app their tracks over the
    data channel (`{"type":"offer"}`); the app answers. Each track's stream id
    is the participant's account id, so an app can show, mute or turn down
-   each person on their own, and later put each camera in its own window.
+   each person on their own, and put each camera in its own window.
 5. The app keeps its place with `KeepVoice` (or `KeepDmCall`) every 5
    seconds, sending its own mute and deafen. A place nobody keeps for 15
    seconds is let go.
@@ -51,6 +51,50 @@ Without SPEAK, people join and listen but the media part doesn't pass their
 sound on. Losing CONNECT, a time-out, a kick, a ban or the channel going
 away hangs them up the moment it happens (`spawn_voice_guard` watches the
 server's events), and each keep checks again.
+
+## Cameras
+
+Every app's first offer has a place for a camera (a send-only video track)
+with nothing on it. Turning the camera on puts a track there
+(`replaceTrack`) and says `self_video` in the next keep; turning it off takes
+the track away. Neither needs a new offer. The media part passes a camera on only while its
+place says `self_video`, so an app can't film while everyone sees its camera
+off. The media part only offers
+someone's camera to the others once its first frame arrives, so a camera
+nobody turned on costs nobody anything.
+
+Cameras are VP8 (the media part takes only Opus and VP8, so every app can
+show every other's), at up to 720p and 30 frames a second, sent in three
+sizes at once (simulcast): "l" a quarter (150 kbit/s at most), "m" half
+(500 kbit/s) and "h" full (1.5 Mbit/s). Each viewer gets one size of each
+camera: the app says which over the data channel, by the track's mid,
+`{"type":"layers","layers":{"<mid>":"h"|"m"|"l"|"off"}}`, and picks it
+from how tall it shows that camera (`web/src/calls/video.ts`): up to 240
+device pixels "l", up to 480 "m", bigger "h", and "off" when it isn't
+showing it at all. Until it says, a viewer gets "l".
+
+The media part sends the biggest size that isn't bigger than asked among
+the sizes that came lately (a camera short on upload drops "h" first), and
+switches sizes only on a keyframe, which it asks the camera's app for
+(FIR), so the picture never breaks up. Each size may keep its own clock, so
+the media part moves the frames' times on a switch to carry on from the
+last one the viewer got.
+
+VIDEO is a permission of its own, per channel, given wherever SPEAK was
+(migration 0012). Without it, the voice state says `video_suppress`, the
+media part drops the camera's frames, and the app turns the camera off.
+Programs (bridges) never get cameras.
+
+### Pop-out windows and clean feeds
+
+Any tile pops out into a window of its own: that one person's camera, edge
+to edge, at the size the window needs (full 720p for a big window), or their
+avatar on their color while their camera is off. Nothing else shows unless
+the mouse moves: the name, a glow while they talk, filling or fitting the
+window, each remembered. The window's title is `<name> · fuwa camera` and
+it's named per person, so streaming apps (OBS's Window Capture, for one)
+find the same window again and take it as a clean feed of that person.
+Hanging up closes them.
 
 ## Ping
 
@@ -142,16 +186,24 @@ WebRTC's encoded transforms (`RTCRtpScriptTransform`, or Chrome's
 - A sealed frame is the ciphertext and tag, then a 17-byte trailer: a random
   12-byte nonce, the epoch (4 bytes, big endian) and a version byte (1). The
   epoch and version are authenticated with the frame.
+- Camera frames keep their VP8 header in the clear, as other end-to-end
+  encrypted calls do: the first 10 bytes of a keyframe, 3 of any other frame
+  (the first bit says which). That says only whether it's a keyframe and its
+  size, which the media part needs to start each viewer on a keyframe. The
+  header is authenticated with the frame (it's part of the associated data,
+  before the epoch and version), so changing it breaks the frame.
 - A frame that can't be sealed or opened is dropped, never sent or played in
   the clear. A frame from an epoch the app doesn't have yet makes it catch up
   on the conversation and try again.
 
 The desktop app's core (`desktop/src/core/calls.rs`) seals and opens frames
-the same way, checked against a frame the web app sealed.
+of sound the same way, checked against a frame the web app sealed; it has no
+camera yet.
 
 What the server sees of a direct-message call: that it's happening, who's in
-it and since when, their mute and deafen, and the size and timing of the
-sealed frames. Not the sound.
+it and since when, their mute, deafen and camera on or off, the size and
+timing of the sealed frames, and which camera frames are keyframes. Not the
+sound or the pictures.
 
 ## Privacy
 
@@ -166,11 +218,12 @@ expiry and a random name.
 
 ## What the media part accepts
 
-An app's offer may send one track of sound (no video yet), receive the
+An app's offer may send one track of sound and one of camera, receive the
 others' tracks and open the data channel, and nothing else; at most 10
 offers in 10 seconds. Each person's sound is capped at 80 KB a second and
-1500 bytes a frame, far above any Opus voice, and so is each program's. A
-call holds at most 99 people, programs included.
+1500 bytes a frame, far above any Opus voice, and so is each program's.
+Each camera is capped at 1 MB a second, all its sizes together, and 512 KB
+a frame. A call holds at most 99 people, programs included.
 
 ## Hosting the media part
 
@@ -187,11 +240,8 @@ interruption.
 
 ## Next
 
-- **Video and screen sharing**: more tracks per person, simulcast, and
-  keyframe requests (already forwarded).
-- **Pop-out windows** on the desktop app: each participant's camera in its
-  own window, and clean per-person feeds for streaming (OBS). Every track is
-  already its own stream, keyed by account id, so an app can take any one
-  person's.
-- **The desktop app's sound**: str0m as the WebRTC client, cpal for the
-  microphone and speakers, Opus, and the frame encryption it already has.
+- **Screen sharing**: a second video track per person, on the same sizes
+  and keyframe switching as cameras.
+- **The desktop app's calls**: str0m as the WebRTC client, cpal for the
+  microphone and speakers, Opus, the frame encryption it already has, and
+  then cameras, with each person's camera in a native window of its own.

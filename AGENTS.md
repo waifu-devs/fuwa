@@ -168,7 +168,10 @@
     part (`FUWA_ROLE=media`). Programs join voice channels through a
     bridge in `rtc.rs` (`Sfu::bridge` and `Sfu::speak`): no WebRTC, Opus
     frames labelled by speaker, carried by `listen` in `api/calls.rs` across
-    media restarts. Calls in direct messages are end-to-end
+    media restarts. Cameras are simulcast (rids l, m, h): `TrackOut` sends
+    each viewer the size it asked for over the data channel ("layers"),
+    switching on keyframes, and VIDEO gates them (`May` in `rtc.rs`).
+    Calls in direct messages are end-to-end
     encrypted by the apps; the server never holds their keys and only
     forwards sealed frames. Never put a participant's address in a log or an event.
   - `config.rs`: `FUWA_*` environment variables: how the process starts, and

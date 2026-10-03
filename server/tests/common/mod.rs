@@ -7,37 +7,86 @@ use std::time::{Duration, Instant};
 use str0m::change::{SdpAnswer, SdpOffer, SdpPendingOffer};
 use str0m::channel::ChannelId;
 use str0m::format::Codec;
-use str0m::media::{Direction, MediaKind, MediaTime, Mid};
+use str0m::media::{Direction, MediaKind, MediaTime, Mid, Rid, Simulcast, SimulcastLayer};
 use str0m::net::{Protocol, Receive};
 use str0m::{Candidate, Event, Input, Output, Rtc};
 use tokio::net::UdpSocket;
 
+/// The sizes a test camera sends, as browsers do.
+pub const SIZES: [&str; 3] = ["l", "m", "h"];
+
 /// An app's end of a call: its own UDP socket and WebRTC connection,
-/// sending a microphone track and opening the "fuwa" data channel.
+/// sending a microphone track (and a camera, in three sizes, if asked) and
+/// opening the "fuwa" data channel.
 pub struct Peer {
     pub rtc: Rtc,
     socket: UdpSocket,
     mic: Mid,
+    camera: Option<Mid>,
     channel: Option<ChannelId>,
     pending: Option<SdpPendingOffer>,
     /// Sound received, by whose it is (the stream id).
     pub heard: Vec<(Mid, Vec<u8>)>,
+    /// Camera frames received: the track, the frame, and whether it's a keyframe.
+    pub seen: Vec<(Mid, Vec<u8>, bool)>,
     pub signals: Vec<String>,
     sent: u64,
+    filmed: u64,
+    /// Sizes asked for a keyframe.
+    keyframes: Vec<Rid>,
 }
 
 impl Peer {
     pub async fn new() -> (Self, String) {
+        Self::start(false).await
+    }
+
+    /// One that sends a camera too, in three sizes.
+    pub async fn with_camera() -> (Self, String) {
+        Self::start(true).await
+    }
+
+    async fn start(filming: bool) -> (Self, String) {
         let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let mut rtc = Rtc::builder().build(Instant::now());
         rtc.add_local_candidate(Candidate::host(socket.local_addr().unwrap(), "udp").unwrap());
         let mut change = rtc.sdp_api();
         let mic = change.add_media(MediaKind::Audio, Direction::SendOnly, None, None, None);
+        let camera = filming.then(|| {
+            let mut simulcast = Simulcast::new();
+            for size in SIZES {
+                simulcast.add_send_layer(SimulcastLayer::new(size));
+            }
+            change.add_media(MediaKind::Video, Direction::SendOnly, None, None, Some(simulcast))
+        });
         change.add_channel("fuwa".into());
         let (offer, pending) = change.apply().unwrap();
-        let peer =
-            Self { rtc, socket, mic, channel: None, pending: Some(pending), heard: vec![], signals: vec![], sent: 0 };
+        let peer = Self {
+            rtc,
+            socket,
+            mic,
+            camera,
+            channel: None,
+            pending: Some(pending),
+            heard: vec![],
+            seen: vec![],
+            signals: vec![],
+            sent: 0,
+            filmed: 0,
+            keyframes: SIZES.iter().map(|s| Rid::from(*s)).collect(),
+        };
         (peer, offer.to_sdp_string())
+    }
+
+    /// Says something to the media part over the data channel.
+    pub fn say(&mut self, json: serde_json::Value) {
+        let channel = self.channel.expect("the data channel is open");
+        self.rtc.channel(channel).unwrap().write(false, json.to_string().as_bytes()).unwrap();
+    }
+
+    /// The sizes of camera frames seen since `from`, in order (the frames say which they are).
+    pub fn sizes_seen(&self, from: usize) -> Vec<String> {
+        self.seen[from..].iter().map(|(_, frame, _)| String::from_utf8_lossy(&frame[1..2]).to_string()).collect()
     }
 
     pub fn answer(&mut self, sdp: &str) {
@@ -63,6 +112,10 @@ impl Peer {
             };
             if Instant::now() >= next_frame && self.rtc.is_connected() {
                 self.speak();
+                // A camera frame every other sound frame: 25 a second.
+                if self.sent.is_multiple_of(2) {
+                    self.film();
+                }
                 next_frame = Instant::now() + Duration::from_millis(20);
             }
             let wait = timeout.min(next_frame).min(until).saturating_duration_since(Instant::now());
@@ -93,8 +146,39 @@ impl Peer {
                 }
                 self.signals.push(value["type"].as_str().unwrap_or_default().to_string());
             }
+            Event::MediaData(data) if data.params.spec().codec.is_video() => {
+                let keyframe = data.is_keyframe();
+                self.seen.push((data.mid, data.data.to_vec(), keyframe));
+            }
             Event::MediaData(data) => self.heard.push((data.mid, data.data.to_vec())),
+            Event::KeyframeRequest(request) => {
+                if let Some(rid) = request.rid
+                    && !self.keyframes.contains(&rid)
+                {
+                    self.keyframes.push(rid);
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// A frame of each size. Not real VP8, but its first byte says
+    /// keyframe or not as VP8's does, and the next says which size it is.
+    fn film(&mut self) {
+        let Some(camera) = self.camera else { return };
+        let time = MediaTime::new(self.filmed * 3600, str0m::media::Frequency::NINETY_KHZ);
+        self.filmed += 1;
+        for size in SIZES {
+            let rid = Rid::from(size);
+            let keyframe = self.keyframes.contains(&rid);
+            self.keyframes.retain(|r| *r != rid);
+            let Some(writer) = self.rtc.writer(camera) else { return };
+            let Some(pt) = writer.payload_params().find(|p| p.spec().codec == Codec::Vp8).map(|p| p.pt()) else {
+                return;
+            };
+            let mut frame = vec![if keyframe { 0x00 } else { 0x01 }];
+            frame.extend(format!("{size} frame {}", self.filmed).into_bytes());
+            writer.rid(rid).write(pt, Instant::now(), time, frame).unwrap();
         }
     }
 

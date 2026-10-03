@@ -21,7 +21,7 @@ use tonic::{Request, Response, Status};
 
 use crate::config::Config;
 use crate::cpb;
-use crate::rtc::{Bridged, Sfu};
+use crate::rtc::{Bridged, May, Sfu};
 
 struct Internal(Sfu);
 
@@ -33,7 +33,10 @@ impl cpb::media_service_server::MediaService for Internal {
 
     async fn bridge(&self, request: Request<cpb::BridgeRequest>) -> Result<Response<BridgeStream>, Status> {
         let r = request.into_inner();
-        let heard = self.0.bridge(&r.room, &r.participant, &r.session_id, r.may_speak, r.may_hear).await?;
+        let heard = self
+            .0
+            .bridge(&r.room, &r.participant, &r.session_id, May { speak: r.may_speak, hear: r.may_hear, video: false })
+            .await?;
         let events = tokio_stream::wrappers::ReceiverStream::new(heard).map(|bridged| {
             let event = match bridged {
                 Bridged::Frame(h) => cpb::bridge_response::Event::Frame(cpb::HeardFrame {
@@ -56,7 +59,16 @@ impl cpb::media_service_server::MediaService for Internal {
 
     async fn open(&self, request: Request<cpb::OpenRequest>) -> Result<Response<cpb::OpenResponse>, Status> {
         let r = request.into_inner();
-        let answer = self.0.open(&r.room, &r.participant, &r.session_id, &r.offer, r.may_speak, r.may_hear).await?;
+        let answer = self
+            .0
+            .open(
+                &r.room,
+                &r.participant,
+                &r.session_id,
+                &r.offer,
+                May { speak: r.may_speak, hear: r.may_hear, video: r.may_video },
+            )
+            .await?;
         Ok(Response::new(cpb::OpenResponse { answer }))
     }
 
@@ -70,7 +82,10 @@ impl cpb::media_service_server::MediaService for Internal {
     async fn update(&self, request: Request<cpb::UpdateRequest>) -> Result<Response<cpb::UpdateResponse>, Status> {
         let r = request.into_inner();
         let session = (!r.session_id.is_empty()).then_some(r.session_id.as_str());
-        let connected = self.0.update(&r.room, &r.participant, session, r.may_speak, r.may_hear).await?;
+        let connected = self
+            .0
+            .update(&r.room, &r.participant, session, May { speak: r.may_speak, hear: r.may_hear, video: r.may_video })
+            .await?;
         Ok(Response::new(cpb::UpdateResponse { connected }))
     }
 }

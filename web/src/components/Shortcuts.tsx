@@ -5,9 +5,10 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Channel, Server } from "@/gen/fuwa/v1/types_pb";
 import { markServerRead } from "@/fuwa/actions";
-import { toggleDeafen, toggleMute } from "@/calls/engine";
+import { toggleCamera, toggleDeafen, toggleMute } from "@/calls/engine";
 import { watchPushToTalk } from "@/calls/keys";
 import { IncomingCalls } from "@/components/calls/IncomingCalls";
+import { PopOuts } from "@/components/calls/Video";
 import { store, useFuwa, type FuwaState } from "@/fuwa/store";
 import { CHANNEL_ICON, openableChannels } from "@/components/ChannelSidebar";
 import { ServerIcon } from "@/components/Icons";
@@ -158,6 +159,7 @@ export function AppOverlays() {
       toggleMembers: () => runCommand("toggleMembers"),
       toggleMute,
       toggleDeafen,
+      toggleCamera: () => void toggleCamera(),
       // Held down, not pressed: the call listens for it going down and up itself.
       pushToTalk: () => {},
       openSettings: () => (getUi().settings === null ? openSettings() : closeSettings()),
@@ -188,6 +190,7 @@ export function AppOverlays() {
           action.id === "toggleStreamer" ||
           action.id === "toggleMute" ||
           action.id === "toggleDeafen" ||
+          action.id === "toggleCamera" ||
           (action.id === "openSettings" && ui.settings !== null) ||
           (action.id === "shortcuts" && ui.shortcuts) ||
           (action.id === "quickSwitcher" && ui.switcher);
@@ -207,6 +210,7 @@ export function AppOverlays() {
       <ShortcutSheet />
       <QuickSwitcher here={here} />
       <IncomingCalls />
+      <PopOuts />
       <Toaster />
     </>
   );

@@ -21,7 +21,7 @@ pub const fn bit(p: P) -> Bits {
     1 << p as u64
 }
 
-const KNOWN: [P; 23] = [
+const KNOWN: [P; 24] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -45,6 +45,7 @@ const KNOWN: [P; 23] = [
     P::Speak,
     P::MuteMembers,
     P::MoveMembers,
+    P::Video,
 ];
 
 /// Every permission there is.
@@ -70,6 +71,7 @@ pub const CHANNEL: Bits = bit(P::ManageChannels)
     | bit(P::CreateInvite)
     | bit(P::Connect)
     | bit(P::Speak)
+    | bit(P::Video)
     | bit(P::MuteMembers)
     | bit(P::MoveMembers);
 
@@ -81,7 +83,8 @@ pub const EVERYONE: Bits = bit(P::ViewChannels)
     | bit(P::ChangeNickname)
     | bit(P::CreateInvite)
     | bit(P::Connect)
-    | bit(P::Speak);
+    | bit(P::Speak)
+    | bit(P::Video);
 
 /// The Admin role a new server starts with, and that the admins of servers
 /// from before roles were given: what admins could do then.
@@ -104,6 +107,7 @@ pub const ADMIN: Bits = bit(P::ManageServer)
 pub const TALK: Bits = bit(P::SendMessages)
     | bit(P::Connect)
     | bit(P::Speak)
+    | bit(P::Video)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
     | bit(P::MentionEveryone)
@@ -149,6 +153,7 @@ pub fn label(p: P) -> &'static str {
         P::Speak => "Speak",
         P::MuteMembers => "Mute members",
         P::MoveMembers => "Move members",
+        P::Video => "Video",
         P::ManageWebhooks => "Manage webhooks",
     }
 }

@@ -183,19 +183,19 @@ async fn recheck_voice(app: &App, server_id: &str) {
     let sdb = app.servers.get(server_id).await.ok();
     for place in app.voice.list(server_id) {
         let user_id = place.state.user_id.clone();
-        let suppress = match &sdb {
+        let quiet = match &sdb {
             Some(sdb) => may_be_in(sdb, &user_id, &place.state.channel_id).await,
             None => None,
         };
-        match suppress {
+        match quiet {
             None => {
                 if let Some(place) = app.voice.remove(server_id, &user_id, Some(&place.session_id)) {
                     app.media_link.close(&place.room, Some(&user_id), Some(&place.session_id)).await;
                     gone(app, server_id, &place).await;
                 }
             }
-            Some(suppress) if suppress != place.state.suppress => {
-                if let Some(place) = app.voice.update(server_id, &user_id, |p| p.state.suppress = suppress) {
+            Some(quiet) if quiet != Quiet::of(&place.state) => {
+                if let Some(place) = app.voice.update(server_id, &user_id, |p| quiet.apply(&mut p.state)) {
                     app.media_link.update(&place).await;
                     let update = Payload::VoiceStateUpdated(pb::VoiceStateUpdated { state: Some(place.state.clone()) });
                     publish_voice(app, server_id, &user_id, update);
@@ -206,9 +206,35 @@ async fn recheck_voice(app: &App, server_id: &str) {
     }
 }
 
-/// Whether someone may be in a voice channel, and if so whether they're
-/// kept quiet (no SPEAK there).
-async fn may_be_in(sdb: &store::ServerDb, user_id: &str, channel_id: &str) -> Option<bool> {
+/// What someone in a voice channel can't do there for want of a permission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Quiet {
+    /// No SPEAK: nobody hears them.
+    suppress: bool,
+    /// No VIDEO: their camera stays off.
+    video_suppress: bool,
+}
+
+impl Quiet {
+    fn new(access: &crate::permissions::Access, channel_id: &str) -> Self {
+        Self {
+            suppress: !access.has_in(channel_id, pb::Permission::Speak),
+            video_suppress: !access.has_in(channel_id, pb::Permission::Video),
+        }
+    }
+
+    fn of(state: &pb::VoiceState) -> Self {
+        Self { suppress: state.suppress, video_suppress: state.video_suppress }
+    }
+
+    fn apply(self, state: &mut pb::VoiceState) {
+        state.suppress = self.suppress;
+        state.video_suppress = self.video_suppress;
+    }
+}
+
+/// Whether someone may be in a voice channel, and if so what they can't do there.
+async fn may_be_in(sdb: &store::ServerDb, user_id: &str, channel_id: &str) -> Option<Quiet> {
     let conn = sdb.read().ok()?;
     let (member, access) = store::member_access(&conn, &sdb.id, user_id).await.ok()??;
     let channel = store::load_channel(&conn, &sdb.id, channel_id).await.ok()??;
@@ -216,7 +242,7 @@ async fn may_be_in(sdb: &store::ServerDb, user_id: &str, channel_id: &str) -> Op
         && access.can_see(&channel.id)
         && access.require_in(&channel.id, pb::Permission::Connect).is_ok()
         && super::messages::check_not_timed_out(&member).is_ok();
-    may.then(|| !access.has_in(&channel.id, pb::Permission::Speak))
+    may.then(|| Quiet::new(&access, &channel.id))
 }
 
 /// Tells everyone someone left a call.
@@ -339,7 +365,7 @@ impl Api {
         account: &Account,
         server_id: &str,
         channel_id: &str,
-        (self_mute, self_deaf): (bool, bool),
+        (self_mute, self_deaf, self_video): (bool, bool, bool),
         session_id: &str,
     ) -> Result<(String, Place)> {
         self.calls_on()?;
@@ -356,7 +382,7 @@ impl Api {
         };
         let same_channel = before.as_ref().is_some_and(|p| p.state.channel_id == channel.id);
         let (server_mute, server_deaf) = seat.sdb.voice_moderation(&account.id).await?;
-        let state = pb::VoiceState {
+        let mut state = pb::VoiceState {
             user_id: account.id.clone(),
             channel_id: channel.id.clone(),
             self_mute,
@@ -367,9 +393,10 @@ impl Api {
                 Some(p) if same_channel => p.state.joined_at,
                 _ => Some(timestamp(now_ms())),
             },
-            suppress: !seat.access.has_in(&channel.id, pb::Permission::Speak),
+            self_video,
             ..Default::default()
         };
+        Quiet::new(&seat.access, &channel.id).apply(&mut state);
         let place = Place { session_id, room: voice::channel_room(&server_id, &channel.id), state, expires: lease() };
         Ok((server_id, place))
     }
@@ -389,7 +416,7 @@ impl Api {
 
     async fn join_voice(&self, metadata: &MetadataMap, req: pb::JoinVoiceRequest) -> Result<pb::JoinVoiceResponse> {
         let account = self.account(metadata).await?;
-        let selves = (req.self_mute, req.self_deaf);
+        let selves = (req.self_mute, req.self_deaf, req.self_video);
         let (server_id, place) =
             self.voice_place(&account, &req.server_id, &req.channel_id, selves, &req.session_id).await?;
         let answer = self.app.media_link.open(&place, &req.offer).await?;
@@ -399,7 +426,8 @@ impl Api {
 
     async fn listen_voice(&self, metadata: &MetadataMap, req: pb::ListenVoiceRequest) -> Result<ListenStream> {
         let account = self.account(metadata).await?;
-        let selves = (req.self_mute, req.self_deaf);
+        // Programs have no camera.
+        let selves = (req.self_mute, req.self_deaf, false);
         let (server_id, place) =
             self.voice_place(&account, &req.server_id, &req.channel_id, selves, &req.session_id).await?;
         let events = self.app.media_link.bridge(&place).await?;
@@ -470,23 +498,26 @@ impl Api {
                 if before.is_none() {
                     moderation = seat.sdb.voice_moderation(&account.id).await?;
                 }
-                may.then(|| !seat.access.has_in(&channel.id, pb::Permission::Speak))
+                may.then(|| Quiet::new(&seat.access, &channel.id))
             }
             Err(_) => None,
         };
-        let (Some(suppress), true) = (allowed, self.app.settings().calls) else {
+        let (Some(quiet), true) = (allowed, self.app.settings().calls) else {
             self.disconnect(&server_id, &account.id).await;
             return Err(moved_away());
         };
         let place = match before {
             Some(mut place) => {
-                let changed = place.state.self_mute != req.self_mute
+                let may_before = place.may();
+                let changed = Quiet::of(&place.state) != quiet
+                    || place.state.self_mute != req.self_mute
                     || place.state.self_deaf != req.self_deaf
-                    || place.state.suppress != suppress;
-                let may_changed = place.state.suppress != suppress;
+                    || place.state.self_video != req.self_video;
                 place.state.self_mute = req.self_mute;
                 place.state.self_deaf = req.self_deaf;
-                place.state.suppress = suppress;
+                place.state.self_video = req.self_video;
+                quiet.apply(&mut place.state);
+                let may_changed = place.may() != may_before;
                 place.expires = lease();
                 let kept = self.app.voice.update(&server_id, &account.id, |p| *p = place.clone());
                 if kept.is_none() {
@@ -505,17 +536,18 @@ impl Api {
             // This part restarted and forgot them; their connection to the
             // media part never went through here, so the place comes back as it was.
             None => {
-                let state = pb::VoiceState {
+                let mut state = pb::VoiceState {
                     user_id: account.id.clone(),
                     channel_id: channel_id.clone(),
                     self_mute: req.self_mute,
                     self_deaf: req.self_deaf,
+                    self_video: req.self_video,
                     server_mute: moderation.0,
                     server_deaf: moderation.1,
                     joined_at: Some(timestamp(now_ms())),
-                    suppress,
                     ..Default::default()
                 };
+                quiet.apply(&mut state);
                 let place = Place {
                     session_id: req.session_id.clone(),
                     room: voice::channel_room(&server_id, &channel_id),
@@ -623,6 +655,7 @@ impl Api {
             conversation_id: conversation.id.clone(),
             self_mute: req.self_mute,
             self_deaf: req.self_deaf,
+            self_video: req.self_video,
             joined_at: before.as_ref().and_then(|p| p.state.joined_at).or(Some(timestamp(now_ms()))),
             ..Default::default()
         };
@@ -667,9 +700,13 @@ impl Api {
         if before.as_ref().is_some_and(|p| p.session_id != req.session_id) {
             return Err(moved_away());
         }
-        let changed =
-            before.as_ref().is_none_or(|p| p.state.self_mute != req.self_mute || p.state.self_deaf != req.self_deaf);
+        let changed = before.as_ref().is_none_or(|p| {
+            p.state.self_mute != req.self_mute
+                || p.state.self_deaf != req.self_deaf
+                || p.state.self_video != req.self_video
+        });
         let forgotten = before.is_none();
+        let may_before = before.as_ref().map(Place::may);
         let mut place = before.unwrap_or_else(|| Place {
             session_id: req.session_id.clone(),
             room: voice::dm_room(&conversation.id),
@@ -683,10 +720,15 @@ impl Api {
         });
         place.state.self_mute = req.self_mute;
         place.state.self_deaf = req.self_deaf;
+        place.state.self_video = req.self_video;
         place.expires = lease();
         // Forgotten in a restart: only back if still connected to the media part.
         if forgotten && !self.app.media_link.update(&place).await {
             return Err(Error::Unavailable("calls are restarting; join again".into()));
+        }
+        // The camera turned on or off: the media part passes it on only while it's on.
+        if may_before.is_some_and(|may| may != place.may()) {
+            self.app.media_link.update(&place).await;
         }
         self.app.voice.put(&scope, place.clone());
         if changed {

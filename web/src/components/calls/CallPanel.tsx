@@ -11,6 +11,7 @@ import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { ConnectionDetails, PingText, Signal } from "./Connection";
 import { HangUpButton } from "./parts";
+import { CameraButton } from "./Video";
 
 /** How long a call has gone on: 4:07, or 1:02:33. */
 export function clock(seconds: number) {
@@ -95,6 +96,7 @@ function CallPanelBody({ call }: { call: ActiveCall }) {
             {call.status === "connected" && <span className="ml-auto shrink-0 pl-2 tabular-nums">{clock(seconds)}</span>}
           </Link>
         </div>
+        <CameraButton />
         <HangUpButton onClick={() => void hangUp(null)} />
       </div>
       <AnimatePresence initial={false}>

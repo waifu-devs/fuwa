@@ -141,6 +141,8 @@ message OpenRequest {
   string offer = 4;
   bool may_speak = 5;
   bool may_hear = 6;
+  // Whether their camera's frames are passed on.
+  bool may_video = 7;
 }
 
 message OpenResponse {
@@ -164,6 +166,7 @@ message UpdateRequest {
   bool may_hear = 4;
   // Only if it's still this session; empty for whichever.
   string session_id = 5;
+  bool may_video = 6;
 }
 
 message UpdateResponse {

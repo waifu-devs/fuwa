@@ -293,6 +293,7 @@ async fn sound_goes_from_one_to_the_other() {
                 channel_id: voice.id.clone(),
                 self_mute: false,
                 self_deaf: true,
+                ..Default::default()
             },
         ))
         .await
@@ -854,6 +855,124 @@ async fn programs_hear_each_other() {
     assert!(heard.iter().all(|f| f.user_id == one_id));
     assert_eq!(heard[0].opus, b"hello 0");
     assert_eq!(heard[1].timestamp.wrapping_sub(heard[0].timestamp), 960);
+
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
+}
+
+#[tokio::test]
+async fn cameras_come_in_the_size_each_viewer_wants() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_id) = sign_up(&mut c, "mika").await;
+    let request = pb::CreateServerRequest { name: "Cameras".into(), discoverable: true, ..Default::default() };
+    let sid = c.servers.create_server(authed(&juan, request)).await.unwrap().into_inner().server.unwrap().id;
+    let request = pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() };
+    c.servers.join_server(authed(&mika, request)).await.unwrap();
+    let request = pb::CreateChannelRequest {
+        server_id: sid.clone(),
+        name: "Studio".into(),
+        r#type: pb::ChannelType::Voice as i32,
+        ..Default::default()
+    };
+    let voice = c.channels.create_channel(authed(&juan, request)).await.unwrap().into_inner().channel.unwrap();
+
+    // Mika films; Juan only watches.
+    let (mut filming, offer) = Peer::with_camera().await;
+    let request = pb::JoinVoiceRequest {
+        server_id: sid.clone(),
+        channel_id: voice.id.clone(),
+        offer,
+        self_video: true,
+        ..Default::default()
+    };
+    let joined = c.calls.join_voice(authed(&mika, request)).await.unwrap().into_inner();
+    let state = joined.state.unwrap();
+    assert!(state.self_video && !state.video_suppress, "everyone may film by default");
+    filming.answer(&joined.answer);
+    let (mut watching, offer) = Peer::new().await;
+    let request =
+        pb::JoinVoiceRequest { server_id: sid.clone(), channel_id: voice.id.clone(), offer, ..Default::default() };
+    watching.answer(&c.calls.join_voice(authed(&juan, request)).await.unwrap().into_inner().answer);
+
+    // Until asked, a viewer gets the smallest size, starting on a keyframe.
+    talk(&mut filming, &mut watching, Duration::from_secs(3)).await;
+    assert!(watching.seen.len() > 10, "the camera came through: {}", watching.seen.len());
+    assert!(watching.seen[0].2, "it starts on a keyframe");
+    assert!(watching.sizes_seen(0).iter().all(|s| s == "l"), "{:?}", watching.sizes_seen(0));
+    let mid = watching.seen[0].0.to_string();
+    assert!(watching.heard.len() > 10, "and the sound");
+
+    // Shown big: it switches to full size, on a keyframe the media part asks for.
+    watching.say(serde_json::json!({ "type": "layers", "layers": { &mid: "h" } }));
+    let from = watching.seen.len();
+    talk(&mut filming, &mut watching, Duration::from_secs(2)).await;
+    let sizes = watching.sizes_seen(from);
+    let first_big = sizes.iter().position(|s| s == "h").expect("full size came");
+    assert!(watching.seen[from + first_big].2, "the switch is on a keyframe");
+    assert!(sizes[first_big..].iter().all(|s| s == "h"), "{sizes:?}");
+
+    // Not showing it: nothing comes.
+    watching.say(serde_json::json!({ "type": "layers", "layers": { &mid: "off" } }));
+    talk(&mut filming, &mut watching, Duration::from_millis(500)).await;
+    let from = watching.seen.len();
+    talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
+    assert_eq!(watching.seen.len(), from, "a camera nobody shows isn't sent");
+
+    // A camera turned off isn't passed on, even if its app keeps sending.
+    watching.say(serde_json::json!({ "type": "layers", "layers": { &mid: "h" } }));
+    let keep = |self_video| pb::KeepVoiceRequest {
+        server_id: sid.clone(),
+        session_id: joined.session_id.clone(),
+        channel_id: voice.id.clone(),
+        self_video,
+        ..Default::default()
+    };
+    c.calls.keep_voice(authed(&mika, keep(false))).await.unwrap();
+    talk(&mut filming, &mut watching, Duration::from_millis(500)).await;
+    let from = watching.seen.len();
+    talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
+    assert_eq!(watching.seen.len(), from, "no frames while the camera says off");
+    c.calls.keep_voice(authed(&mika, keep(true))).await.unwrap();
+    talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
+    assert!(watching.seen.len() > from + 5, "back once it's on again");
+
+    // A channel that takes VIDEO away stops the camera there, and says so.
+    let everyone = pb::PermissionOverwrite {
+        target_id: sid.clone(),
+        target: pb::OverwriteTarget::Role as i32,
+        deny: vec![pb::Permission::Video as i32],
+        ..Default::default()
+    };
+    let request = pb::SetChannelPermissionsRequest {
+        server_id: sid.clone(),
+        channel_id: voice.id.clone(),
+        overwrites: vec![everyone],
+    };
+    c.channels.set_channel_permissions(authed(&juan, request)).await.unwrap();
+    let mut suppressed = false;
+    for _ in 0..50 {
+        let states = c
+            .calls
+            .list_voice_states(authed(&juan, pb::ListVoiceStatesRequest { server_id: sid.clone() }))
+            .await
+            .unwrap()
+            .into_inner()
+            .states;
+        if states.iter().any(|s| s.user_id == mika_id && s.video_suppress) {
+            suppressed = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(suppressed, "Mika's camera shows as not allowed");
+    watching.say(serde_json::json!({ "type": "layers", "layers": { &mid: "h" } }));
+    let (seen, heard) = (watching.seen.len(), watching.heard.len());
+    talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
+    assert_eq!(watching.seen.len(), seen, "no camera without VIDEO");
+    assert!(watching.heard.len() > heard + 10, "sound still goes");
 
     instance.app.shutdown.cancel();
     instance.serving.await.unwrap();

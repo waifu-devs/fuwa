@@ -43,6 +43,7 @@ export const KNOWN: P[] = [
   P.SPEAK,
   P.MUTE_MEMBERS,
   P.MOVE_MEMBERS,
+  P.VIDEO,
 ];
 
 export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), 0);
@@ -60,6 +61,7 @@ export const CHANNEL: Bits = [
   P.CREATE_INVITE,
   P.CONNECT,
   P.SPEAK,
+  P.VIDEO,
   P.MUTE_MEMBERS,
   P.MOVE_MEMBERS,
 ].reduce((bits, p) => bits | bit(p), 0);
@@ -74,6 +76,7 @@ export const TALK: Bits = [
   P.CHANGE_NICKNAME,
   P.CONNECT,
   P.SPEAK,
+  P.VIDEO,
 ].reduce(
   (bits, p) => bits | bit(p),
   0,
@@ -135,6 +138,11 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     about: "Talk in voice channels. Without it they can join and listen.",
     channel: "Talk in this voice channel. Without it they can join and listen.",
   },
+  [P.VIDEO]: {
+    label: "Video",
+    about: "Turn their camera on in voice channels.",
+    channel: "Turn their camera on in this voice channel.",
+  },
   [P.MUTE_MEMBERS]: {
     label: "Mute members",
     about: "Mute or deafen people ranked below them in voice channels, for everyone.",
@@ -168,7 +176,7 @@ export const PERMISSION_GROUPS: { title: string; permissions: P[] }[] = [
     title: "Text channels",
     permissions: [P.SEND_MESSAGES, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
-  { title: "Voice channels", permissions: [P.CONNECT, P.SPEAK, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
+  { title: "Voice channels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
   { title: "Advanced", permissions: [P.ADMINISTRATOR] },
 ];
 
@@ -179,7 +187,7 @@ export const CHANNEL_GROUPS: { title: string; permissions: P[] }[] = [
     title: "Text",
     permissions: [P.SEND_MESSAGES, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
-  { title: "Voice", permissions: [P.CONNECT, P.SPEAK, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
+  { title: "Voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
 ];
 
 /** What one member can do in one server. */
