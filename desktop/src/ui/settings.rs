@@ -99,7 +99,7 @@ impl SettingsView {
             ),
             Page::Background => (
                 "Background".into(),
-                "A picture and a texture behind the app, under any theme without its own.".into(),
+                "A picture and an effect behind the app, under any theme without its own.".into(),
                 self.background_page(prefs, p, window, cx),
             ),
             Page::Motion => {

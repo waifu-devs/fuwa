@@ -281,9 +281,11 @@
     notifications (clicks come back through a channel), `settings_account.rs`
     the profile and security pages, `settings_look.rs` the Appearance
     (themes, light and dark picks, theme files) and Background pages,
-    `backdrop.rs` what's drawn behind the app (picture, dimming, a texture
-    made here as a PNG or SVG tile and repeated; animated effects are the
-    web's for now), `server_settings.rs` a server's settings
+    `backdrop.rs` what's drawn behind the app (picture, blurred once off the
+    main thread when asked, dimming, a texture made here as a PNG or SVG
+    tile and repeated), `effects.rs` the moving effects (the web's shaders
+    redrawn with shadows, paths and quads, 30 frames a second while the
+    window is in front, one still frame otherwise), `server_settings.rs` a server's settings
     (overview, invites, members, bans, audit log; the server's name opens
     it), `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,

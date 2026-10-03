@@ -5,16 +5,18 @@
 //!
 //! Textures are small tiles made here (noise as PNG, patterns as SVG, the
 //! same ideas as the web app's CSS), drawn once by GPUI and repeated, so a still
-//! backdrop costs a handful of sprites and nothing between frames. The
-//! picture loads through the window's HTTP client, which only fetches from
-//! instances you added.
+//! backdrop costs a handful of sprites and nothing between frames. Animated
+//! effects are `effects.rs`. The picture loads through the window's HTTP
+//! client, which only fetches from instances you added; blurred, it's made
+//! smaller and blurred once off the main thread, then kept.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, Image, ImageFormat, ImgResourceLoader, IntoElement, ObjectFit, ParentElement as _, Resource,
-    SharedString, Styled as _, StyledImage as _, Window, div, img, px,
+    Animation, AnimationExt as _, AnyElement, App, Image, ImageFormat, ImgResourceLoader, IntoElement, ObjectFit,
+    ParentElement as _, RenderImage, Resource, SharedString, Styled as _, StyledImage as _, Window, div, img, px,
 };
 use parking_lot::Mutex;
 
@@ -31,7 +33,21 @@ pub fn layers(b: &Backdrop, p: &Palette, window: &mut Window, cx: &mut App) -> O
     }
     let size = window.viewport_size();
     let (w, h) = (f32::from(size.width), f32::from(size.height));
-    let picture = (!b.image.is_empty()).then(|| picture(&b.image, b.fit, w, h, window, cx));
+    let picture = (!b.image.is_empty()).then(|| picture(&b.image, b.fit, b.blur, w, h, window, cx));
+    let effect = crate::ui::effects::layer(b.effect, b.intensity, b.speed, p, window, cx);
+    // A new effect or texture fades in, as on the web.
+    let fade = |el: AnyElement| {
+        div()
+            .absolute()
+            .inset_0()
+            .child(el)
+            .with_animation(
+                SharedString::from(format!("backdrop-effect|{:?}", b.effect)),
+                Animation::new(Duration::from_millis(600)).with_easing(gpui_kit::ease_out_quint()),
+                |el, t| el.opacity(t),
+            )
+            .into_any_element()
+    };
     Some(
         div()
             .absolute()
@@ -42,14 +58,20 @@ pub fn layers(b: &Backdrop, p: &Palette, window: &mut Window, cx: &mut App) -> O
                 el.child(pic).child(div().absolute().inset_0().bg(alpha(p.background, f32::from(b.dim) / 100.0)))
             })
             .when_some(texture(b.effect, p), |el, (tile, size)| {
-                el.child(tiled(tile, size, size, w, h).opacity(f32::from(b.intensity) / 100.0))
+                el.child(fade(
+                    tiled(tile, size, size, w, h).opacity(f32::from(b.intensity) / 100.0 * 0.9).into_any_element(),
+                ))
             })
+            .when_some(effect, |el, effect| el.child(fade(effect)))
             .into_any_element(),
     )
 }
 
-fn picture(url: &str, fit: Fit, w: f32, h: f32, window: &mut Window, cx: &mut App) -> AnyElement {
+fn picture(url: &str, fit: Fit, blur: u8, w: f32, h: f32, window: &mut Window, cx: &mut App) -> AnyElement {
     let url = SharedString::from(url.to_owned());
+    if blur > 0 {
+        return blurred(url, fit, blur, w, h, window, cx);
+    }
     if fit == Fit::Tile {
         // Repeated at its own size, which is known once it has loaded.
         let resource = Resource::Uri(url.clone().into());
@@ -69,6 +91,165 @@ fn picture(url: &str, fit: Fit, w: f32, h: f32, window: &mut Window, cx: &mut Ap
         .size_full()
         .object_fit(if fit == Fit::Contain { ObjectFit::Contain } else { ObjectFit::Cover })
         .into_any_element()
+}
+
+/// The longest side a blurred picture is made at: blurring hides the detail a bigger one would have.
+const BLURRED_SIDE: f32 = 480.0;
+
+/// The picture blurred by `blur` points. It's made smaller, blurred off the
+/// main thread and kept; until it's ready (or while a resize makes it
+/// again) the last one made for this picture shows, and nothing sharp does.
+fn blurred(url: SharedString, fit: Fit, blur: u8, w: f32, h: f32, window: &mut Window, cx: &mut App) -> AnyElement {
+    struct Made {
+        key: String,
+        working: Option<String>,
+        image: Option<(SharedString, Arc<Image>, f32, f32)>,
+    }
+    static MADE: Mutex<Made> = Mutex::new(Made { key: String::new(), working: None, image: None });
+
+    let resource = Resource::Uri(url.clone().into());
+    let Some(Ok(source)) = window.use_asset::<ImgResourceLoader>(&resource, cx) else {
+        return div().into_any_element();
+    };
+    let s = source.size(0);
+    let (iw, ih) = (i32::from(s.width).max(1) as f32, i32::from(s.height).max(1) as f32);
+    let shrink = (iw.max(ih) / BLURRED_SIDE).max(1.0);
+    let (dw, dh) = ((iw / shrink).round().max(1.0) as usize, (ih / shrink).round().max(1.0) as usize);
+    let scale = window.scale_factor();
+    // How many points one pixel of the smaller picture covers on screen.
+    let shown = match fit {
+        Fit::Cover => (w / dw as f32).max(h / dh as f32),
+        Fit::Contain => (w / dw as f32).min(h / dh as f32),
+        Fit::Tile => iw / scale / dw as f32,
+    };
+    // Three box blurs this wide add up to a Gaussian of about `blur`, like CSS's.
+    let radius = (f32::from(blur) / shown.max(0.01)).round().clamp(1.0, 64.0) as usize;
+    let key = format!("{url}|{dw}x{dh}|{radius}|{}", fit == Fit::Tile);
+
+    let mut made = MADE.lock();
+    if made.key != key && made.working.as_deref() != Some(key.as_str()) {
+        made.working = Some(key.clone());
+        let view = window.current_view();
+        let wrap = fit == Fit::Tile;
+        let work = cx.background_executor().spawn(async move { blur_picture(&source, dw, dh, radius, wrap) });
+        let (url, key) = (url.clone(), key.clone());
+        cx.spawn(async move |cx| {
+            let png = work.await;
+            let mut made = MADE.lock();
+            if made.working.as_deref() == Some(key.as_str()) {
+                made.working = None;
+                if let Some(png) = png {
+                    made.key = key;
+                    let (tw, th) = (iw / scale, ih / scale);
+                    made.image = Some((url, Arc::new(Image::from_bytes(ImageFormat::Png, png)), tw, th));
+                }
+            }
+            drop(made);
+            cx.update(|cx| cx.notify(view));
+        })
+        .detach();
+    }
+    let Some((_, image, tw, th)) = made.image.as_ref().filter(|(u, ..)| *u == url) else {
+        return div().into_any_element();
+    };
+    if fit == Fit::Tile {
+        return tiled(Tile::Image(image.clone()), *tw, *th, w, h).into_any_element();
+    }
+    img(image.clone())
+        .absolute()
+        .inset_0()
+        .size_full()
+        .object_fit(if fit == Fit::Contain { ObjectFit::Contain } else { ObjectFit::Cover })
+        .into_any_element()
+}
+
+/// A loaded picture (BGRA) made `dw` by `dh` and blurred by three box blurs
+/// of `radius`, as a PNG. `wrap` blurs across the edges, so a repeated
+/// picture stays seamless.
+fn blur_picture(source: &RenderImage, dw: usize, dh: usize, radius: usize, wrap: bool) -> Option<Vec<u8>> {
+    let s = source.size(0);
+    let (sw, sh) = (usize::try_from(i32::from(s.width)).ok()?, usize::try_from(i32::from(s.height)).ok()?);
+    let bytes = source.as_bytes(0)?;
+    if sw == 0 || sh == 0 || bytes.len() < sw * sh * 4 {
+        return None;
+    }
+    // Smaller first: each pixel the average of the ones it covers.
+    let mut px = vec![0f32; dw * dh * 4];
+    for y in 0..dh {
+        let (y0, y1) = (y * sh / dh, ((y + 1) * sh / dh).max(y * sh / dh + 1).min(sh));
+        for x in 0..dw {
+            let (x0, x1) = (x * sw / dw, ((x + 1) * sw / dw).max(x * sw / dw + 1).min(sw));
+            let mut sum = [0f32; 4];
+            for row in y0..y1 {
+                for col in x0..x1 {
+                    let at = (row * sw + col) * 4;
+                    for (c, v) in sum.iter_mut().zip(&bytes[at..at + 4]) {
+                        *c += f32::from(*v);
+                    }
+                }
+            }
+            let n = ((y1 - y0) * (x1 - x0)) as f32;
+            let at = (y * dw + x) * 4;
+            for c in 0..4 {
+                px[at + c] = sum[c] / n;
+            }
+        }
+    }
+    let mut line = Vec::new();
+    for _ in 0..3 {
+        box_blur(&mut px, dw, dh, 1, dw, radius, wrap, &mut line);
+        box_blur(&mut px, dh, dw, dw, 1, radius, wrap, &mut line);
+    }
+    let mut rgba = Vec::with_capacity(dw * dh * 4);
+    for p in px.chunks(4) {
+        // BGRA back to RGBA.
+        rgba.extend_from_slice(&[p[2], p[1], p[0], p[3]].map(|v| v.round().clamp(0.0, 255.0) as u8));
+    }
+    Some(png(dw as u32, dh as u32, &rgba))
+}
+
+/// One box blur pass along lines of `len` pixels `step` apart, `lines` of
+/// them `stride` apart, with a running sum so it costs the same at any radius.
+#[allow(clippy::too_many_arguments)]
+fn box_blur(
+    px: &mut [f32],
+    len: usize,
+    lines: usize,
+    step: usize,
+    stride: usize,
+    radius: usize,
+    wrap: bool,
+    line: &mut Vec<f32>,
+) {
+    let r = radius as isize;
+    let n = len as isize;
+    let pick = |i: isize| -> usize { if wrap { i.rem_euclid(n) as usize } else { i.clamp(0, n - 1) as usize } };
+    let width = (2 * radius + 1) as f32;
+    for l in 0..lines {
+        let base = l * stride;
+        line.clear();
+        line.extend((0..len).flat_map(|i| {
+            let at = base + i * step;
+            [px[at * 4], px[at * 4 + 1], px[at * 4 + 2], px[at * 4 + 3]]
+        }));
+        let mut sum = [0f32; 4];
+        for i in -r..=r {
+            let at = pick(i) * 4;
+            for c in 0..4 {
+                sum[c] += line[at + c];
+            }
+        }
+        for i in 0..n {
+            let at = (base + i as usize * step) * 4;
+            for c in 0..4 {
+                px[at + c] = sum[c] / width;
+            }
+            let (out, inn) = (pick(i - r) * 4, pick(i + r + 1) * 4);
+            for c in 0..4 {
+                sum[c] += line[inn + c] - line[out + c];
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -269,6 +450,25 @@ fn rgb_of(c: gpui_kit::Rgba) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blurring_spreads_a_spot_and_keeps_what_is_flat() {
+        let (w, h) = (16usize, 8usize);
+        let mut px = vec![100f32; w * h * 4];
+        let mut line = Vec::new();
+        box_blur(&mut px, w, h, 1, w, 3, false, &mut line);
+        box_blur(&mut px, h, w, w, 1, 3, false, &mut line);
+        assert!(px.iter().all(|v| (v - 100.0).abs() < 1e-3));
+
+        // A spot in a corner, repeated: wrapping carries it across the edge and loses nothing.
+        let mut px = vec![0f32; w * h * 4];
+        px[..4].copy_from_slice(&[255.0; 4]);
+        box_blur(&mut px, w, h, 1, w, 2, true, &mut line);
+        box_blur(&mut px, h, w, w, 1, 2, true, &mut line);
+        let total: f32 = px.iter().step_by(4).sum();
+        assert!((total - 255.0).abs() < 0.01, "{total}");
+        assert!(px[(w - 1) * 4] > 0.0 && px[((h - 1) * w) * 4] > 0.0);
+    }
 
     #[test]
     fn textures_are_svg_tiles_with_the_theme_color_and_nothing_from_elsewhere() {
