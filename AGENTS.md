@@ -378,10 +378,13 @@
     `SetChannelPermissions`; the New button opens the app's new-channel
     dialog and stays in settings),
     `instance_settings.rs` an instance's settings for its admins (the gear
-    by the instance's name; Privacy and Moderation so far, where the
-    providers servers' smart filters ask are set up and tried, over
-    `core/instance_admin.rs`; a cached view like server settings, sharing
-    its `save_bar`, `switch` and chips),
+    by the instance's name; General, Sign-ups, Limits, Privacy, Calls and
+    Moderation, where the providers servers' smart filters ask are set up
+    and tried, over `core/instance_admin.rs`, which names every setting's
+    path and keeps unsaved edits across a save; the pages are built from
+    `instance_settings/controls.rs`, the web's `settings/controls.tsx`:
+    a setting with its default and reset, option cards, caps; a cached view
+    like server settings, sharing its `save_bar`, `switch` and chips),
     `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),
