@@ -364,9 +364,14 @@
     Shader effects are WGSL in `lib/effects/shaders.ts`, run by vgpu in
     `lib/effects/gpu.ts`, which is loaded only when an effect is on (it's
     kept out of the vendor chunk in `vite.config.ts`); CSS stands in without
-    WebGPU. Theme files never make the app load anything: pictures travel
-    inside them and are uploaded on import. Settings pages:
-    `settings/app/Themes.tsx` and `Backgrounds.tsx`.
+    WebGPU. Custom shaders (people's own WGSL `fn shade`) are in
+    `lib/effects/custom.ts` (the prelude, the text checks, the starters);
+    `gpu.ts` compiles and times them before they draw, `lib/effects/status.ts`
+    remembers which ran, were too slow or stopped the GPU, and anything but
+    running shows the shader's fallback. Their editor is
+    `settings/app/ShaderEditor.tsx`. Theme files never make the app load
+    anything: pictures travel inside them and are uploaded on import. Settings
+    pages: `settings/app/Themes.tsx` and `Backgrounds.tsx`.
   - `src/lib/notifications.ts`: how a message reaches you: your settings for
     its channel, then its server (both stored on the instance, so they follow
     you across devices), then this device's Notifications settings. Muted means

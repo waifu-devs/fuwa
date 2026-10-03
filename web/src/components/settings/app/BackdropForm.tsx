@@ -1,4 +1,4 @@
-import { CheckIcon, Grid2x2Icon, ImageOffIcon, ImagePlusIcon, Loader2Icon, Maximize2Icon, Minimize2Icon, Trash2Icon } from "lucide-react";
+import { CheckIcon, CodeXmlIcon, Grid2x2Icon, ImageOffIcon, ImagePlusIcon, Loader2Icon, Maximize2Icon, Minimize2Icon, Trash2Icon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
@@ -6,7 +6,9 @@ import { deleteBackground, keepBackground, listBackgrounds, run, uploadPicture }
 import { SPRING } from "@/components/motion";
 import { Choice } from "@/components/settings/controls";
 import { Slider } from "@/components/ui/slider";
-import { EFFECT_INFO, EFFECTS, isShader, LIMITS, type Backdrop, type Effect } from "@/lib/backdrop";
+import { ShaderEditor } from "@/components/settings/app/ShaderEditor";
+import { CUSTOM, EFFECT_INFO, EFFECTS, isShader, LIMITS, moves, type Backdrop, type Effect } from "@/lib/backdrop";
+import { DEFAULT_SHADER } from "@/lib/effects/custom";
 import { backgroundPicture, PICTURE_TYPES } from "@/lib/pictures";
 import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
@@ -65,7 +67,14 @@ export function BackdropForm({
             : "This browser has no WebGPU, so moving effects use a lighter version drawn with CSS."
         }
       >
-        <EffectGrid value={value.effect} onChange={(effect) => onChange({ effect })} />
+        <EffectGrid
+          value={value.effect}
+          custom={value.shader?.name ?? null}
+          onChange={(effect) => onChange(effect === CUSTOM && !value.shader ? { effect, shader: { ...DEFAULT_SHADER } } : { effect })}
+        />
+        <AnimatePresence initial={false}>
+          {value.effect === CUSTOM && value.shader && <ShaderEditor key="shader" value={value.shader} onChange={(shader) => onChange({ shader })} />}
+        </AnimatePresence>
         <AnimatePresence initial={false}>
           {value.effect !== "none" && (
             <motion.div
@@ -76,7 +85,7 @@ export function BackdropForm({
               className="flex flex-col gap-2 overflow-hidden"
             >
               <Labeled label="Strength" shown={`${value.intensity}%`}><Slider label="Strength" value={value.intensity} min={LIMITS.intensity[0]} max={LIMITS.intensity[1]} format={(n) => `${n}%`} onChange={(intensity) => onChange({ intensity })} className="pt-6" /></Labeled>
-              {isShader(value.effect) && (
+              {moves(value.effect) && (
                 <Labeled label="Speed" shown={value.speed === 0 ? "Still" : `${value.speed}%`}><Slider label="Speed" value={value.speed} min={LIMITS.speed[0]} max={LIMITS.speed[1]} step={10} format={(n) => (n === 0 ? "Still" : `${n}%`)} onChange={(speed) => onChange({ speed })} className="pt-6" /></Labeled>
               )}
             </motion.div>
@@ -115,7 +124,7 @@ function Block({ title, hint, children }: { title: string; hint: string; childre
 }
 
 /** Effect cards, each showing its effect in miniature (the light CSS version, so a grid of them costs nothing). */
-function EffectGrid({ value, onChange }: { value: Effect; onChange: (effect: Effect) => void }) {
+function EffectGrid({ value, custom, onChange }: { value: Effect; custom: string | null; onChange: (effect: Effect) => void }) {
   return (
     <div role="radiogroup" className="grid grid-cols-3 gap-2 sm:grid-cols-5">
       {EFFECTS.map((effect, n) => {
@@ -135,7 +144,12 @@ function EffectGrid({ value, onChange }: { value: Effect; onChange: (effect: Eff
             className={cn("group relative flex flex-col overflow-hidden rounded-xl border text-left transition-colors", active ? "border-primary" : "hover:border-primary/40")}
           >
             <span className="backdrop-layers relative! h-14 bg-background">
-              {effect !== "none" &&
+              {effect === CUSTOM ? (
+                <span className="grid size-full place-items-center overflow-hidden">
+                  <span className={cn("fx-custom-thumb", active && "on")} />
+                  <CodeXmlIcon className="relative size-5 text-primary" />
+                </span>
+              ) : effect !== "none" &&
                 (isShader(effect) ? (
                   <span className={cn("fx-css", `fx-${effect}`, !active && "still")} style={{ opacity: 0.9 }}>
                     {effect === "petals" && Array.from({ length: 14 }, (_, i) => <span key={i} />)}
@@ -145,7 +159,7 @@ function EffectGrid({ value, onChange }: { value: Effect; onChange: (effect: Eff
                 ))}
             </span>
             <span className="flex items-center justify-between gap-1 px-2 py-1.5 text-xs font-bold">
-              {EFFECT_INFO[effect].name}
+              <span className="truncate">{effect === CUSTOM && custom ? custom : EFFECT_INFO[effect].name}</span>
               {active && (
                 <motion.span layoutId="effect-check" transition={SPRING} className="grid size-4 place-items-center rounded-full bg-primary text-primary-foreground">
                   <CheckIcon className="size-3" />

@@ -931,3 +931,23 @@ body[data-settings-open] #root { scale: 0.94; filter: blur(3px); opacity: 0.4; }
 @keyframes arrange-pop { from { scale: 0.92; } }
 @keyframes arrange-ping { from { opacity: 0.6; scale: 1; } to { opacity: 0; scale: 1.06; } }
 @keyframes arrange-landed { from { opacity: 0.22; } to { opacity: 0; } }
+
+/* Custom shaders: the code editor's colors, and the Custom card's moving thumbnail (lib/effects/custom.ts). */
+.shader-code {
+  --wgsl-number: color-mix(in oklch, var(--primary) 35%, #e8962e);
+  --wgsl-type: color-mix(in oklch, var(--primary) 35%, #1fa898);
+  tab-size: 2;
+}
+.fx-custom-thumb {
+  position: absolute;
+  inset: -40%;
+  background:
+    radial-gradient(circle at 30% 35%, color-mix(in srgb, var(--primary) 70%, transparent), transparent 45%),
+    radial-gradient(circle at 70% 65%, color-mix(in oklch, var(--primary) 60%, #7c5cff), transparent 50%),
+    conic-gradient(from 0deg, color-mix(in srgb, var(--primary) 25%, transparent), transparent, color-mix(in srgb, var(--primary) 25%, transparent));
+  animation: fx-custom-spin 9s linear infinite;
+  animation-play-state: paused;
+}
+.fx-custom-thumb.on { animation-play-state: running; }
+@keyframes fx-custom-spin { to { transform: rotate(1turn); } }
+:root[data-reduce-motion] .fx-custom-thumb { animation: none; }

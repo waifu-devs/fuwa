@@ -82,10 +82,11 @@ theme, and a custom theme may bring its own, used while it's on screen.
 | `fit` | `cover`, `contain`, `tile` | `cover` |
 | `dim` | 0 to 90: how much the theme's background covers the picture, in % | 35 |
 | `blur` | 0 to 24, in pixels | 0 |
-| `effect` | `none`, `aurora`, `petals`, `stars`, `waves`, `grain`, `paper`, `dots`, `grid` | `none` |
+| `effect` | `none`, `aurora`, `petals`, `stars`, `waves`, `custom`, `grain`, `paper`, `dots`, `grid` | `none` |
 | `intensity` | 0 to 100, % | 70 |
 | `speed` | 0 to 200, % of normal (0 is still) | 100 |
 | `panels` | 20 to 100: how solid the chat is over it, % (the rail and sidebars are 20 points more) | 35 |
+| `shader` | a custom shader (below), drawn when `effect` is `custom`, or `null` | `null` |
 
 Layers, back to front: the page's `background`, the picture (with `fit` and
 `blur`), `background` again at `dim`, the effect, then the app with its
@@ -112,6 +113,61 @@ own version of the same effects with GPUI's shapes (`desktop/src/ui/effects.rs`:
 soft shadows for light, paths for petals and waves, small quads for stars),
 at the same 30 frames a second, still while its window is behind others.
 
+## Custom shaders
+
+People can write their own effect (Settings, Background, Custom; or a
+custom theme's own backdrop), and a theme file carries it. A shader is:
+
+| Field | Values | Default |
+| --- | --- | --- |
+| `name` | up to 32 characters, shown on the effect card | `My shader` |
+| `code` | WGSL, at most 16 KB (UTF-8), defining `fn shade(uv: vec2f) -> vec4f` | |
+| `fallback` | `none`, `aurora`, `petals`, `stars`, `waves`: what shows where the shader can't run | `aurora` |
+
+`shade` is called for every pixel and returns a color and how much of it
+covers what's behind (straight alpha, 0 to 1). The app puts it between its
+own prelude and entry point (`web/src/lib/effects/custom.ts`, `fullSource`),
+which apply the strength (`intensity`) and premultiply. Everything it can
+read:
+
+| Input | What it is |
+| --- | --- |
+| `uv` | the pixel, 0 to 1 across and down; (0, 0) is the top left |
+| `fuwa.time` | seconds (`f32`), scaled by `speed`; still with reduced motion |
+| `fuwa.res` | the size drawn, in pixels (`vec2f`) |
+| `fuwa.pointer` | the pointer in `uv`'s units (`vec2f`), eased (about 1/7 s); starts at (0.5, 0.5), outside 0..1 when it's off the canvas |
+| `fuwa.primary`, `fuwa.accent`, `fuwa.background`, `fuwa.foreground` | the theme's primary, the primary turned 48° in hue, its background and its text (`vec4f`, alpha 1) |
+| `fuwa.intensity` | the strength, 0 to 1 (already applied) |
+| `hash21(p)`, `noise(p)`, `fbm(p)` | a random number, value noise and four octaves of it, 0 to 1 |
+
+The uniform is `struct Fuwa { primary, accent, background, foreground: vec4f, res, pointer: vec2f, time, intensity: f32 }`
+at group 0, binding 0. Apps must give exactly these inputs, so a shader draws the same everywhere.
+
+What keeps a shader to these inputs, in every app:
+
+- **Checked as text first** (`shaderProblem`): with comments left out, no `@`
+  at all (no bindings, no entry points of its own, so no textures, buffers or
+  samplers), no `enable`, `requires` or `diagnostic`, nothing that looks like
+  a link (`scheme://`), and a `fn shade(`. Control characters other than tabs
+  and line ends are dropped on read. WGSL has no way to load anything, so
+  this is all a shader can reach.
+- **Compiled before it draws.** One that doesn't compile never draws; the
+  editor shows the compiler's errors at the shader's own lines and keeps the
+  last version that worked.
+- **Timed.** Its first frames are timed at three quarters, half and a third
+  of the resolution until one takes at most 20 ms on the GPU; if none does,
+  it's too slow for the device. While it runs it's timed every two seconds,
+  and three slow samples in a row (over 40 ms) drop it a step or stop it.
+- **Remembered when it hangs.** Before its first frames the app notes it as
+  being tried (the web app's `fuwa:shaders-trying`) and clears the note once
+  they come back. A frame that hasn't come back in 2.5 s, a GPU lost while it
+  draws, or a note left from last time (the tab died) means it stopped the
+  GPU: it isn't run again until it's changed or someone asks to try again.
+
+In every one of these cases, and where there's no WebGPU, the backdrop shows
+the shader's `fallback` instead, and Settings says why. Custom shaders run at
+most 30 frames a second like the built-in ones, and stop the same way.
+
 ## Theme files
 
 A theme travels as a JSON file named `<name>.fuwa-theme.json`:
@@ -132,7 +188,8 @@ A theme travels as a JSON file named `<name>.fuwa-theme.json`:
     "effect": "petals",
     "intensity": 60,
     "speed": 100,
-    "panels": 80
+    "panels": 80,
+    "shader": null
   }
 }
 ```
@@ -144,6 +201,10 @@ A theme travels as a JSON file named `<name>.fuwa-theme.json`:
 - `image` is the picture itself, as a `data:` URL (PNG, JPEG, GIF, WebP or
   AVIF, at most 12 MB). Importing uploads it to the instance in use. Links
   are never followed: a file with an `http(s)` image imports without it.
+- `shader` is optional (`null` or missing: none). A theme with a shader
+  usually sets `effect` to `custom`; a `custom` effect without a shader reads
+  as `none`. A shader that fails the text checks is kept (so it can be fixed)
+  but never run, and importing it says so.
 - Readers ignore keys they don't know, clamp numbers to the ranges above and
   fall back to defaults for anything else, so a file can't break an app or
   make it load anything from anywhere. `version` is 1; a newer one is read as

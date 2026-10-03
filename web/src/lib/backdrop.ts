@@ -8,15 +8,21 @@
  * shown only while that instance is one the app trusts (lib/shown.ts).
  */
 
+import { sanitizeShader, type CustomShader } from "@/lib/effects/custom";
+
 /** Effects drawn on the GPU (with a CSS stand-in where WebGPU isn't available). */
 export const SHADER_EFFECTS = ["aurora", "petals", "stars", "waves"] as const;
 /** Still textures, plain CSS. */
 export const TEXTURE_EFFECTS = ["grain", "paper", "dots", "grid"] as const;
-export const EFFECTS = ["none", ...SHADER_EFFECTS, ...TEXTURE_EFFECTS] as const;
+/** A shader someone wrote (lib/effects/custom.ts), kept in the backdrop's `shader`. */
+export const CUSTOM = "custom";
+export const EFFECTS = ["none", ...SHADER_EFFECTS, CUSTOM, ...TEXTURE_EFFECTS] as const;
 export type Effect = (typeof EFFECTS)[number];
 export type ShaderEffect = (typeof SHADER_EFFECTS)[number];
 
 export const isShader = (effect: Effect): effect is ShaderEffect => (SHADER_EFFECTS as readonly string[]).includes(effect);
+/** Effects that move (built-in shaders and custom ones), so they have a speed. */
+export const moves = (effect: Effect) => isShader(effect) || effect === CUSTOM;
 
 export const EFFECT_INFO: Record<Effect, { name: string; hint: string }> = {
   none: { name: "None", hint: "Just the theme." },
@@ -24,6 +30,7 @@ export const EFFECT_INFO: Record<Effect, { name: string; hint: string }> = {
   petals: { name: "Petals", hint: "Blossoms drifting down." },
   stars: { name: "Starfield", hint: "Twinkling stars, gently drifting." },
   waves: { name: "Waves", hint: "Soft layered waves rolling by." },
+  custom: { name: "Custom", hint: "A shader you write, or one a theme brought." },
   grain: { name: "Film grain", hint: "A fine, still noise." },
   paper: { name: "Paper", hint: "Warm fibers like washi paper." },
   dots: { name: "Dots", hint: "A tidy dot pattern." },
@@ -47,6 +54,8 @@ export type Backdrop = {
   speed: number;
   /** How solid the chat is over a backdrop, in percent (the sidebars are 20 points more). */
   panels: number;
+  /** The shader drawn when `effect` is "custom", kept even while another effect is picked. */
+  shader: CustomShader | null;
 };
 
 export const DEFAULT_BACKDROP: Backdrop = {
@@ -58,6 +67,7 @@ export const DEFAULT_BACKDROP: Backdrop = {
   intensity: 70,
   speed: 100,
   panels: 35,
+  shader: null,
 };
 
 export const LIMITS = {
@@ -86,15 +96,18 @@ export function isMediaLink(url: unknown): url is string {
 export function sanitizeBackdrop(value: unknown): Backdrop {
   const b = (value && typeof value === "object" ? value : {}) as Partial<Record<keyof Backdrop, unknown>>;
   const d = DEFAULT_BACKDROP;
+  const shader = sanitizeShader(b.shader);
+  const effect = (EFFECTS as readonly unknown[]).includes(b.effect) ? (b.effect as Effect) : "none";
   return {
     image: isMediaLink(b.image) ? b.image : "",
     fit: b.fit === "contain" || b.fit === "tile" ? b.fit : "cover",
     dim: clamp(b.dim, LIMITS.dim, d.dim),
     blur: clamp(b.blur, LIMITS.blur, d.blur),
-    effect: (EFFECTS as readonly unknown[]).includes(b.effect) ? (b.effect as Effect) : "none",
+    effect: effect === CUSTOM && !shader ? "none" : effect,
     intensity: clamp(b.intensity, LIMITS.intensity, d.intensity),
     speed: clamp(b.speed, LIMITS.speed, d.speed),
     panels: clamp(b.panels, LIMITS.panels, d.panels),
+    shader,
   };
 }
 
