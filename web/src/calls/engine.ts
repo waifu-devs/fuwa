@@ -6,18 +6,20 @@ import { dmEngine } from "@/e2ee/engine";
 import { toFuwaError, type FuwaError } from "@/fuwa/errors";
 import { engine } from "@/fuwa/sync";
 import { store } from "@/fuwa/store";
-import { getPrefs } from "@/lib/prefs";
+import { getPrefs, subscribePrefs } from "@/lib/prefs";
 import { cue } from "@/lib/sounds";
 import { toast } from "@/lib/ui";
 import { Mic, micProblem, Speakers } from "./audio";
 import { canEncryptCalls, encryptedConfig, FrameCrypto } from "./frames";
 import { watchQuality } from "./quality";
 import { getCalls, sameTarget, setCalls, type CallTarget } from "./state";
+import { cameraProblem, clearRemoteVideos, ENCODINGS, getVideos, onWantsChange, openCamera, setLocalVideo, setRemoteVideo, wanted } from "./video";
 
 /**
  * This browser's call: one RTCPeerConnection to the instance's media
- * server, sending your microphone and getting one track per other person
- * (each track's stream id is their user id, so each voice is its own).
+ * server, sending your microphone (and camera, while it's on) and getting
+ * each other person's as tracks of their own (each track's stream id is
+ * their user id, so each voice and camera is theirs).
  *
  * Joining goes through the instance (JoinVoice or JoinDmCall), which keeps
  * your place in the call and hands the media server your offer. After that
@@ -36,7 +38,10 @@ const KEEP_MS = 5_000;
 const GRACE_MS = 2_500;
 const CHANNEL = "fuwa";
 
-type Signal = { type: "offer" | "answer"; sdp: string } | { type: "replaced" | "restarting" | "closed" };
+type Signal =
+  | { type: "offer" | "answer"; sdp: string }
+  | { type: "replaced" | "restarting" | "closed" }
+  | { type: "layers"; layers: Record<string, string> };
 
 /** Asks a voice place or call to end without waiting for the answer: when the page goes away. */
 function leaveOnUnload(url: string, token: string | null, target: CallTarget, sessionId: string) {
@@ -59,6 +64,13 @@ class Session {
   private pc: RTCPeerConnection | null = null;
   private channel: RTCDataChannel | null = null;
   private mic: Mic | null = null;
+  private camera: MediaStreamTrack | null = null;
+  private video: RTCRtpTransceiver | null = null;
+  private layersTimer: ReturnType<typeof setTimeout> | null = null;
+  private unwant: (() => void) | null = null;
+  private unprefs: (() => void) | null = null;
+  /** The channel doesn't allow cameras (no VIDEO there). */
+  videoSuppressed = false;
   private speakers: Speakers;
   private frames: FrameCrypto | null = null;
   private sessionId = "";
@@ -112,6 +124,14 @@ class Session {
     }
     this.applyMute();
     this.unwatch = watchQuality(() => this.pc);
+    this.unwant = onWantsChange(() => this.sayLayers());
+    // Another camera picked in settings while yours is on: switch to it.
+    let device = getPrefs().videoDevice;
+    this.unprefs = subscribePrefs(() => {
+      if (getPrefs().videoDevice === device) return;
+      device = getPrefs().videoDevice;
+      if (this.camera) void this.reopenCamera();
+    });
     await this.connect();
     this.keeper = setInterval(() => void this.keep(), KEEP_MS);
   }
@@ -175,24 +195,33 @@ class Session {
     const transceiver = pc.addTransceiver(track, { direction: "sendonly", streams: [new MediaStream([track])] });
     this.frames?.send(transceiver.sender, this.me);
     preferOpus(transceiver);
+    // The camera's place is there from the start, empty until it's on, so
+    // turning it on and off never needs a new offer. Nobody gets it until
+    // its first frame.
+    const video = pc.addTransceiver("video", { direction: "sendonly", sendEncodings: ENCODINGS.map((e) => ({ ...e })) });
+    this.video = video;
+    this.frames?.send(video.sender, this.me, "video");
+    preferVp8(video);
+    if (this.camera) void video.sender.replaceTrack(this.camera).catch(() => {});
     const channel = pc.createDataChannel(CHANNEL, { ordered: true });
     this.channel = channel;
     channel.onmessage = (e) => void this.onSignal(pc, e.data);
+    channel.onopen = () => this.sayLayers();
     pc.ontrack = (e) => {
       const userId = e.streams[0]?.id;
       if (!userId) return;
-      this.frames?.receive(e.receiver, userId);
       const stream = e.streams[0]!;
-      this.speakers.add(userId, stream);
+      stream.onremovetrack = (ev) => this.trackGone(userId, stream, ev.track);
+      if (e.track.kind === "video") {
+        this.frames?.receive(e.receiver, userId, "video");
+        setRemoteVideo(userId, { track: e.track, mid: e.transceiver.mid ?? "" });
+        this.sayLayers();
+        return;
+      }
+      this.frames?.receive(e.receiver, userId);
+      this.speakers.add(userId, new MediaStream([e.track]));
       if (!this.heard.has(userId) && getCalls().call?.status === "connected") cue("someoneJoined");
       this.heard.add(userId);
-      stream.onremovetrack = () => {
-        if (stream.getTracks().length) return;
-        this.speakers.remove(userId);
-        this.heard.delete(userId);
-        this.setSpeaking(userId, false);
-        if (getCalls().call?.status === "connected") cue("someoneLeft");
-      };
     };
     pc.onconnectionstatechange = () => {
       if (pc !== this.pc || this.stopped) return;
@@ -214,16 +243,78 @@ class Session {
     await pc.setLocalDescription(offer);
     await gathered(pc);
     if (attempt !== this.attempt || this.stopped) return;
-    const { selfMute, selfDeaf } = getCalls();
+    const { selfMute, selfDeaf, selfVideo } = getCalls();
     const sdp = pc.localDescription?.sdp ?? offer.sdp ?? "";
     const t = this.target;
     const joined =
       t.kind === "voice"
-        ? await this.api.calls.joinVoice({ serverId: t.serverId, channelId: t.channelId, offer: sdp, selfMute, selfDeaf, sessionId: this.sessionId })
-        : await this.api.calls.joinDmCall({ conversationId: t.conversationId, offer: sdp, selfMute, selfDeaf, sessionId: this.sessionId });
+        ? await this.api.calls.joinVoice({ serverId: t.serverId, channelId: t.channelId, offer: sdp, selfMute, selfDeaf, selfVideo, sessionId: this.sessionId })
+        : await this.api.calls.joinDmCall({ conversationId: t.conversationId, offer: sdp, selfMute, selfDeaf, selfVideo, sessionId: this.sessionId });
     if (attempt !== this.attempt || this.stopped) return;
     this.sessionId = joined.sessionId;
+    this.videoSuppressed = !!joined.state?.videoSuppress;
     await pc.setRemoteDescription({ type: "answer", sdp: joined.answer });
+  }
+
+  /** Someone's sound or camera went away: they left, or turned it off for good. */
+  private trackGone(userId: string, stream: MediaStream, track: MediaStreamTrack) {
+    if (track.kind === "video") {
+      if (getVideos().remote[userId]?.track === track) setRemoteVideo(userId, null);
+      return;
+    }
+    if (stream.getAudioTracks().length) return;
+    this.speakers.remove(userId);
+    this.heard.delete(userId);
+    this.setSpeaking(userId, false);
+    if (getCalls().call?.status === "connected") cue("someoneLeft");
+  }
+
+  /**
+   * Tells the media server which size of each camera this browser shows,
+   * a moment after anything changes, so a burst of resizes is one message.
+   */
+  private sayLayers() {
+    if (this.layersTimer) return;
+    this.layersTimer = setTimeout(() => {
+      this.layersTimer = null;
+      const layers: Record<string, string> = {};
+      for (const [userId, video] of Object.entries(getVideos().remote)) if (video.mid) layers[video.mid] = wanted(userId);
+      if (Object.keys(layers).length) this.say({ type: "layers", layers });
+    }, 120);
+  }
+
+  private async reopenCamera() {
+    try {
+      const track = await openCamera();
+      if (this.stopped || !this.camera) return track.stop();
+      this.camera.stop();
+      this.camera = track;
+      track.onended = () => {
+        if (this.camera === track) void setCamera(false);
+      };
+      setLocalVideo(track);
+      await this.video?.sender.replaceTrack(track).catch(() => {});
+    } catch (err) {
+      toast(cameraProblem(err));
+    }
+  }
+
+  /** Turns your camera on or off, without a new offer: its place in the connection stays. */
+  async setCamera(on: boolean) {
+    if (on && !this.camera) {
+      const track = await openCamera();
+      if (this.stopped || !getCalls().selfVideo) return track.stop();
+      this.camera = track;
+      // Unplugged, or taken away in the browser's own controls.
+      track.onended = () => {
+        if (this.camera === track) void setCamera(false);
+      };
+    } else if (!on && this.camera) {
+      this.camera.stop();
+      this.camera = null;
+    }
+    setLocalVideo(this.camera);
+    await this.video?.sender.replaceTrack(this.camera).catch(() => {});
   }
 
   private async onSignal(pc: RTCPeerConnection, data: unknown) {
@@ -243,6 +334,8 @@ class Session {
         this.say({ type: "answer", sdp: pc.localDescription?.sdp ?? answer.sdp ?? "" });
         break;
       }
+      case "layers":
+        break;
       case "restarting":
         // A deploy: join the media server that takes over, keeping the place.
         this.reconnect(true);
@@ -286,13 +379,19 @@ class Session {
   /** Keeps the place in the call, and tells the instance how you sound. */
   async keep() {
     if (this.stopped || !this.sessionId) return;
-    const { selfMute, selfDeaf } = getCalls();
+    const { selfMute, selfDeaf, selfVideo } = getCalls();
     const t = this.target;
     try {
       if (t.kind === "voice") {
-        await this.api.calls.keepVoice({ serverId: t.serverId, channelId: t.channelId, sessionId: this.sessionId, selfMute, selfDeaf });
+        const kept = await this.api.calls.keepVoice({ serverId: t.serverId, channelId: t.channelId, sessionId: this.sessionId, selfMute, selfDeaf, selfVideo });
+        this.videoSuppressed = !!kept.state?.videoSuppress;
+        // The channel took VIDEO away meanwhile.
+        if (this.videoSuppressed && getCalls().selfVideo) {
+          toast("You can't have your camera on in this channel any more.");
+          void setCamera(false);
+        }
       } else {
-        await this.api.calls.keepDmCall({ conversationId: t.conversationId, sessionId: this.sessionId, selfMute, selfDeaf });
+        await this.api.calls.keepDmCall({ conversationId: t.conversationId, sessionId: this.sessionId, selfMute, selfDeaf, selfVideo });
       }
     } catch (err) {
       const e = toFuwaError(err);
@@ -304,6 +403,8 @@ class Session {
   private teardown() {
     for (const id of [...this.heard]) this.speakers.remove(id);
     this.heard.clear();
+    clearRemoteVideos();
+    this.video = null;
     this.channel?.close();
     this.pc?.close();
     this.channel = null;
@@ -317,9 +418,15 @@ class Session {
     if (this.keeper) clearInterval(this.keeper);
     if (this.secretPoll) clearInterval(this.secretPoll);
     this.unwatch?.();
+    this.unwant?.();
+    this.unprefs?.();
+    if (this.layersTimer) clearTimeout(this.layersTimer);
     if (this.broken) clearTimeout(this.broken);
     this.teardown();
     this.mic?.close();
+    this.camera?.stop();
+    this.camera = null;
+    setLocalVideo(null);
     this.speakers.close();
     this.frames?.close();
     if (!tell || !this.sessionId) return;
@@ -372,6 +479,21 @@ function preferOpus(transceiver: RTCRtpTransceiver) {
   }
 }
 
+/** VP8 first: the media server takes only Opus and VP8, so every app can show every camera. */
+function preferVp8(transceiver: RTCRtpTransceiver) {
+  const codecs = typeof RTCRtpSender !== "undefined" ? RTCRtpSender.getCapabilities?.("video")?.codecs : undefined;
+  if (!codecs || !transceiver.setCodecPreferences) return;
+  const vp8 = codecs.filter((c) => c.mimeType.toLowerCase() === "video/vp8");
+  // Resending lost packets and forward error correction ride along.
+  const helpers = codecs.filter((c) => ["video/rtx", "video/red", "video/ulpfec"].includes(c.mimeType.toLowerCase()));
+  if (!vp8.length) return;
+  try {
+    transceiver.setCodecPreferences([...vp8, ...helpers]);
+  } catch {
+    // The browser's own order is fine.
+  }
+}
+
 /** A track of silence, for joining to listen when there's no microphone. */
 function silentTrack(): MediaStreamTrack {
   const ctx = new AudioContext();
@@ -389,7 +511,7 @@ export async function joinCall(target: CallTarget) {
   if (session) await hangUp(null);
   const s = new Session(target);
   session = s;
-  setCalls(() => ({ call: { target, status: "connecting", since: null, problem: null }, speaking: {}, ended: null }));
+  setCalls(() => ({ call: { target, status: "connecting", since: null, problem: null }, speaking: {}, ended: null, selfVideo: false }));
   try {
     await s.start();
   } catch (err) {
@@ -405,7 +527,7 @@ export async function hangUp(why: string | null, tell = true) {
   const s = session;
   if (!s) return;
   session = null;
-  setCalls(() => ({ call: null, speaking: {}, ended: why }));
+  setCalls(() => ({ call: null, speaking: {}, ended: why, selfVideo: false }));
   cue("disconnect");
   if (why) toast(why);
   await s.stop(tell);
@@ -429,6 +551,24 @@ export function toggleDeafen() {
   session?.applyMute();
   void session?.keep();
 }
+
+/** Turns your camera on or off in the call you're in. */
+export async function setCamera(on: boolean) {
+  const s = session;
+  if (!s || getCalls().selfVideo === on) return;
+  if (on && s.videoSuppressed) return void toast("You can't turn your camera on in this channel.");
+  setCalls(() => ({ selfVideo: on }));
+  try {
+    await s.setCamera(on);
+    cue(on ? "unmute" : "mute");
+  } catch (err) {
+    setCalls(() => ({ selfVideo: false }));
+    toast(cameraProblem(err));
+  }
+  void s.keep();
+}
+
+export const toggleCamera = () => setCamera(!getCalls().selfVideo);
 
 /** Push to talk's key went down or up. */
 export function setPushing(down: boolean) {

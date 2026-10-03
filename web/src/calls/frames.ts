@@ -4,7 +4,7 @@
  * Chrome's encoded streams.
  */
 
-type Options = { direction: "send" | "recv"; sender: string };
+type Options = { direction: "send" | "recv"; sender: string; kind: "audio" | "video" };
 
 declare const RTCRtpScriptTransform: { new (worker: Worker, options: Options): unknown } | undefined;
 
@@ -49,14 +49,14 @@ export class FrameCrypto {
     this.worker.postMessage({ type: "stream", readable, writable, options }, [readable as never, writable as never]);
   }
 
-  /** Seals what you send, as `me`. */
-  send(sender: RTCRtpSender, me: string) {
-    this.attach(sender, { direction: "send", sender: me });
+  /** Seals what you send, as `me`: sound, or your camera. */
+  send(sender: RTCRtpSender, me: string, kind: "audio" | "video" = "audio") {
+    this.attach(sender, { direction: "send", sender: me, kind });
   }
 
   /** Opens what someone sends. */
-  receive(receiver: RTCRtpReceiver, from: string) {
-    this.attach(receiver, { direction: "recv", sender: from });
+  receive(receiver: RTCRtpReceiver, from: string, kind: "audio" | "video" = "audio") {
+    this.attach(receiver, { direction: "recv", sender: from, kind });
   }
 
   close() {

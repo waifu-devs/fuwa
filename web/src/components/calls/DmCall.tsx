@@ -12,6 +12,7 @@ import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { clock } from "./CallPanel";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceAvatar } from "./parts";
+import { CameraButton, PopOutButton, TileMedia } from "./Video";
 
 /** The call going on in a conversation, if there is one. */
 export const useDmCall = (instanceKey: string, conversationId: string) => useFuwa((s) => s.instances[instanceKey]?.dms.calls[conversationId]);
@@ -56,6 +57,10 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
   const partner = conversation.users.find((u) => u.id !== me.id);
   const partnerIn = !!partner && here.has(partner.id);
   const startedBy = conversation.users.find((u) => u.id === call?.startedBy);
+  const mine = useCalls((s) => s.selfVideo);
+  // Cameras come through only while you're in the call.
+  const filming = new Set(inCall ? (call?.participants ?? []).filter((p) => p.selfVideo && p.userId !== me.id).map((p) => p.userId) : []);
+  if (inCall && mine) filming.add(me.id);
 
   let line: string;
   if (!inCall) line = `${displayName(startedBy ?? partner)} started a call`;
@@ -75,11 +80,28 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
           className="shrink-0 overflow-hidden border-b bg-[linear-gradient(180deg,color-mix(in_srgb,#3ba55d_14%,var(--background)),var(--background))]"
         >
           <div className="flex flex-col items-center gap-3 px-4 py-5">
-            <div className="flex items-center gap-6 sm:gap-10">
-              {conversation.users.map((u) => (
-                <Person key={u.id} instanceKey={instanceKey} user={u} here={here.has(u.id)} ringing={inCall && !here.has(u.id)} />
-              ))}
-            </div>
+            <AnimatePresence mode="popLayout" initial={false}>
+              {filming.size ? (
+                <motion.div
+                  key="cameras"
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  transition={SPRING}
+                  className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2"
+                >
+                  {conversation.users.map((u) => (
+                    <Camera key={u.id} instanceKey={instanceKey} user={u} self={u.id === me.id} here={here.has(u.id)} videoOn={filming.has(u.id)} />
+                  ))}
+                </motion.div>
+              ) : (
+                <motion.div key="people" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-6 sm:gap-10">
+                  {conversation.users.map((u) => (
+                    <Person key={u.id} instanceKey={instanceKey} user={u} here={here.has(u.id)} ringing={inCall && !here.has(u.id)} />
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
             <p className="flex items-center gap-1.5 text-sm font-bold text-muted-foreground tabular-nums">
               <LockKeyholeIcon className="size-3.5" aria-label="End-to-end encrypted" />
               {line}
@@ -87,6 +109,7 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
             {inCall ? (
               <div className="flex items-center gap-2">
                 <MuteButtons size="lg" />
+                <CameraButton size="lg" />
                 <HangUpButton size="lg" label="Hang up" onClick={() => void hangUp(null)} />
               </div>
             ) : (
@@ -120,5 +143,29 @@ function Person({ instanceKey, user, here, ringing }: { instanceKey: string; use
         </motion.span>
       </button>
     </ParticipantMenu>
+  );
+}
+
+/** One of you in a call where a camera is on: a tile, with your camera or your avatar. */
+function Camera({ instanceKey, user, self, here, videoOn }: { instanceKey: string; user: User; self: boolean; here: boolean; videoOn: boolean }) {
+  const speaking = useSpeaking(user.id);
+  const name = displayName(user);
+  return (
+    <div className={cn("group/tile relative transition-opacity", !here && "opacity-50")}>
+      <ParticipantMenu instanceKey={instanceKey} user={user}>
+        <button
+          type="button"
+          aria-label={name}
+          className={cn(
+            "group relative block aspect-video w-full overflow-hidden rounded-2xl border bg-card shadow-sm transition-[box-shadow,border-color] duration-300",
+            speaking ? "border-[#3ba55d] shadow-[0_0_0_2px_#3ba55d,0_10px_40px_-10px_rgb(59_165_93/0.6)]" : "hover:border-primary/40",
+          )}
+        >
+          <TileMedia userId={user.id} user={user} videoOn={videoOn} self={self} speaking={speaking} avatarClass="size-14 text-lg sm:size-16 sm:text-xl" />
+          <span className="absolute bottom-2 left-2 max-w-[80%] truncate rounded-lg bg-background/75 px-2 py-0.5 text-xs font-bold backdrop-blur">{name}</span>
+        </button>
+      </ParticipantMenu>
+      {here && <PopOutButton popped={{ instance: instanceKey, userId: user.id }} name={name} className="absolute top-2 right-2" />}
+    </div>
   );
 }

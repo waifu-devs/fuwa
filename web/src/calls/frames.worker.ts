@@ -13,10 +13,17 @@
  * A sealed frame is the ciphertext with its tag, then a trailer the
  * receiver reads first: the 12-byte nonce, the epoch (4 bytes, big endian)
  * and a version byte. The trailer is authenticated along with the frame.
+ *
+ * Camera frames (VP8) keep their first few bytes in the clear, as other
+ * end-to-end encrypted calls do: 10 for a keyframe, 3 otherwise, which say
+ * only whether it's a keyframe and its size, so the media server can start
+ * each viewer on a keyframe. They're authenticated too: changing them
+ * breaks the frame.
  */
 
 type Direction = "send" | "recv";
-type Options = { direction: Direction; sender: string };
+type Kind = "audio" | "video";
+type Options = { direction: Direction; sender: string; kind?: Kind };
 type Frame = { data: ArrayBuffer };
 
 const VERSION = 1;
@@ -54,26 +61,48 @@ function keyFor(epoch: number, sender: string): Promise<CryptoKey> | null {
   return key;
 }
 
-async function seal(frame: Frame, sender: string): Promise<boolean> {
+/** How many bytes at the start of a frame stay in the clear: a VP8 frame's header. */
+function clearBytes(bytes: Uint8Array, kind: Kind | undefined): number {
+  if (kind !== "video" || !bytes.length) return 0;
+  // VP8's first bit is 0 on a keyframe.
+  return Math.min(bytes.length, (bytes[0]! & 1) === 0 ? 10 : 3);
+}
+
+/** What the tag covers besides the ciphertext: the clear header, then the epoch and version. */
+function associated(header: Uint8Array, trailer: Uint8Array): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(header.length + 5);
+  out.set(header, 0);
+  out.set(trailer.subarray(12), header.length);
+  return out;
+}
+
+async function seal(frame: Frame, options: Options): Promise<boolean> {
   if (current < 0) return false;
-  const key = keyFor(current, sender);
+  const key = keyFor(current, options.sender);
   if (!key) return false;
+  const bytes = new Uint8Array(frame.data);
+  const header = bytes.subarray(0, clearBytes(bytes, options.kind));
   const trailer = new Uint8Array(TRAILER);
   const nonce = crypto.getRandomValues(new Uint8Array(12));
   trailer.set(nonce, 0);
   new DataView(trailer.buffer).setUint32(12, current);
   trailer[16] = VERSION;
-  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: trailer.subarray(12) }, await key, frame.data));
-  const out = new Uint8Array(sealed.length + TRAILER);
-  out.set(sealed, 0);
-  out.set(trailer, sealed.length);
+  const additionalData = header.length ? associated(header, trailer) : trailer.subarray(12);
+  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData }, await key, bytes.subarray(header.length)));
+  const out = new Uint8Array(header.length + sealed.length + TRAILER);
+  out.set(header, 0);
+  out.set(sealed, header.length);
+  out.set(trailer, header.length + sealed.length);
   frame.data = out.buffer;
   return true;
 }
 
-async function open(frame: Frame, sender: string): Promise<boolean> {
+async function open(frame: Frame, options: Options): Promise<boolean> {
+  const sender = options.sender;
   const bytes = new Uint8Array(frame.data);
   if (bytes.length <= TRAILER + 16 || bytes[bytes.length - 1] !== VERSION) return false;
+  const header = bytes.subarray(0, clearBytes(bytes, options.kind));
+  if (bytes.length <= header.length + TRAILER + 16) return false;
   const trailer = bytes.subarray(bytes.length - TRAILER);
   const epoch = new DataView(trailer.buffer, trailer.byteOffset).getUint32(12);
   const key = keyFor(epoch, sender);
@@ -85,12 +114,18 @@ async function open(frame: Frame, sender: string): Promise<boolean> {
     return false;
   }
   try {
-    const plain = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: trailer.slice(0, 12), additionalData: trailer.slice(12) },
-      await key,
-      bytes.subarray(0, bytes.length - TRAILER),
+    const additionalData = header.length ? associated(header, trailer) : trailer.slice(12);
+    const plain = new Uint8Array(
+      await crypto.subtle.decrypt({ name: "AES-GCM", iv: trailer.slice(0, 12), additionalData }, await key, bytes.subarray(header.length, bytes.length - TRAILER)),
     );
-    frame.data = plain;
+    if (!header.length) {
+      frame.data = plain.buffer;
+      return true;
+    }
+    const out = new Uint8Array(header.length + plain.length);
+    out.set(header, 0);
+    out.set(plain, header.length);
+    frame.data = out.buffer;
     return true;
   } catch {
     return false;
@@ -104,7 +139,7 @@ function pipe(readable: ReadableStream<Frame>, writable: WritableStream<Frame>, 
       new TransformStream<Frame, Frame>({
         async transform(frame, controller) {
           // A frame that can't be sealed or opened is dropped: never sent in the clear, never played as noise.
-          if (await work(frame, options.sender)) controller.enqueue(frame);
+          if (await work(frame, options)) controller.enqueue(frame);
         },
       }),
     )

@@ -95,10 +95,10 @@ const APP: SettingsSection[] = [
   },
   {
     id: "voice",
-    label: "Voice & audio",
+    label: "Voice & video",
     icon: AudioLinesIcon,
-    description: "Your microphone and speakers in calls, on this device.",
-    keywords: "call microphone mic speakers headset audio",
+    description: "Your microphone, speakers and camera in calls, on this device.",
+    keywords: "call microphone mic speakers headset audio camera video webcam",
     settings: VOICE_SETTINGS,
   },
   {

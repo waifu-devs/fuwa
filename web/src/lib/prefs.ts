@@ -17,6 +17,8 @@ export type NotifyFor = "mentions" | "all";
 export type Sound = "message" | "mention" | "join" | "call" | "ring";
 /** How your microphone decides when you're talking. */
 export type InputMode = "voice" | "ptt";
+/** Popped-out cameras: fill the window (cropping the edges) or fit in it whole. */
+export type PopoutFit = "cover" | "contain";
 /** Where role colors show: on names, as a dot beside them, or not at all. */
 export type RoleColors = "names" | "beside" | "off";
 
@@ -73,6 +75,14 @@ export type Prefs = {
   autoGainControl: boolean;
   /** How loud each person is for you, in percent, by "instance/user id". Missing means 100. */
   userVolumes: Record<string, number>;
+  /** The camera, this browser's device id; "" is the system default. */
+  videoDevice: string;
+  /** Your own camera shows mirrored to you, as a mirror would (others always see it the right way round). */
+  mirrorVideo: boolean;
+  /** Popped-out cameras: the name under the picture, a glow while they talk, and filling the window or fitting in it. */
+  popoutName: boolean;
+  popoutGlow: boolean;
+  popoutFit: PopoutFit;
 };
 
 const systemDark = () => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -116,6 +126,11 @@ export const DEFAULT_PREFS: Prefs = {
   noiseSuppression: true,
   autoGainControl: true,
   userVolumes: {},
+  videoDevice: "",
+  mirrorVideo: true,
+  popoutName: true,
+  popoutGlow: true,
+  popoutFit: "cover",
 };
 
 /** The defaults on this device: the theme starts light or dark like the system. */
@@ -167,6 +182,8 @@ function sanitize(p: Prefs): Prefs {
     volume: clamp(p.volume, 0, 100, d.volume),
     inputDevice: typeof p.inputDevice === "string" ? p.inputDevice : "",
     outputDevice: typeof p.outputDevice === "string" ? p.outputDevice : "",
+    videoDevice: typeof p.videoDevice === "string" ? p.videoDevice : "",
+    popoutFit: oneOf(p.popoutFit, ["cover", "contain"], d.popoutFit),
     inputVolume: clamp(p.inputVolume, 0, 200, d.inputVolume),
     outputVolume: clamp(p.outputVolume, 0, 200, d.outputVolume),
     inputMode: oneOf(p.inputMode, ["voice", "ptt"], d.inputMode),

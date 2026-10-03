@@ -50,7 +50,7 @@ const constraints = (p: Prefs): MediaTrackConstraints => ({
 export function micProblem(err: unknown): string {
   const name = err instanceof DOMException ? err.name : "";
   if (name === "NotAllowedError" || name === "SecurityError") return "Your browser blocks the microphone for fuwa. Allow it in the site's settings.";
-  if (name === "NotFoundError" || name === "OverconstrainedError") return "No microphone found. Plug one in, or pick another in Voice & audio.";
+  if (name === "NotFoundError" || name === "OverconstrainedError") return "No microphone found. Plug one in, or pick another in Voice & video.";
   if (name === "NotReadableError") return "Another app is using the microphone.";
   if (typeof navigator !== "undefined" && !navigator.mediaDevices) return "This page can't use a microphone (it needs https).";
   return "The microphone didn't start.";
