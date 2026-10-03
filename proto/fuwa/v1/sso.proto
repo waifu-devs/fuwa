@@ -1,0 +1,197 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// Single sign-on for one community server: its managers point it at their
+// organization's identity provider (OpenID Connect or SAML 2.0), and once
+// it's required, people sign in through that provider to join and, every
+// recheck_days, to keep seeing the server. Members who haven't (or whose
+// sign-in ran out) stay members but see no channels until they sign in
+// again; the owner and agents never need to. Off until a manager sets it up.
+//
+// Signing in takes three calls, like AuthService's linked sign-in.
+// StartServerSso returns the provider's sign-in page; the provider sends the
+// browser back to this instance (/sso/servers/<server id>/...), which checks
+// who signed in and sends the browser on to
+//   <public URL>/auth/sso/done#server=<server id>&state=<state>&code=<code>
+// whose page hands it to the app that started it (GetServerSsoSignIn says
+// which) and FinishServerSso records the sign-in.
+//
+// The instance's own sign-in can use a provider too: InstanceSettings'
+// sso_accounts and sso_provider, and AuthService's Start/Get/FinishSsoSignIn.
+service SsoService {
+  // The server's provider (its secret left out), what to tell the provider
+  // about this server, and how many members have signed in. MANAGE_SERVER.
+  rpc GetServerSso(GetServerSsoRequest) returns (GetServerSsoResponse);
+  // Sets up, changes or removes the provider, requires it or not, and sets
+  // how often members sign in again. MANAGE_SERVER. Changing which provider
+  // it is (its protocol, issuer or entity ID) forgets every sign-in and
+  // stops requiring it until it's turned on again. Requiring it takes a
+  // manager who signed in through it themselves (or the owner), so nobody
+  // locks themselves out.
+  rpc UpdateServerSso(UpdateServerSsoRequest) returns (UpdateServerSsoResponse);
+  // Where to send the browser to sign in through the server's provider. Any
+  // signed-in account may, member or not: it's how people get in.
+  rpc StartServerSso(StartServerSsoRequest) returns (StartServerSsoResponse);
+  // Which app a sign-in that came back to this instance belongs to, so the
+  // page it lands on can hand it on when another fuwa app started it.
+  rpc GetServerSsoSignIn(GetServerSsoSignInRequest) returns (GetServerSsoSignInResponse);
+  // Records a finished sign-in for the account that started it.
+  rpc FinishServerSso(FinishServerSsoRequest) returns (FinishServerSsoResponse);
+}
+
+enum SsoProtocol {
+  // No provider set up.
+  SSO_PROTOCOL_UNSPECIFIED = 0;
+  // OpenID Connect: the code flow with PKCE and a client secret.
+  SSO_PROTOCOL_OIDC = 1;
+  // SAML 2.0: a signed response or assertion, posted back to this instance.
+  SSO_PROTOCOL_SAML = 2;
+}
+
+// An identity provider people sign in through.
+message IdentityProvider {
+  SsoProtocol protocol = 1;
+  // What sign-in buttons call it, like "Acme" in "Continue with Acme". 1 to
+  // 40 characters.
+  string name = 2;
+  // For SSO_PROTOCOL_OIDC.
+  OidcProvider oidc = 3;
+  // For SSO_PROTOCOL_SAML.
+  SamlProvider saml = 4;
+  // Only people whose email is on one of these domains get in, like
+  // "acme.com". Empty lets in anyone the provider signs in.
+  repeated string email_domains = 5;
+}
+
+message OidcProvider {
+  // The issuer, like https://login.acme.com. Its
+  // /.well-known/openid-configuration says where everything else is.
+  string issuer = 1;
+  string client_id = 2;
+  // Write-only: never sent back. Leaving it empty in an update keeps the
+  // one set before.
+  string client_secret = 3;
+  // Whether a client secret is set.
+  bool client_secret_set = 4;
+  // Scopes asked for besides "openid email profile", space-separated.
+  string extra_scopes = 5;
+}
+
+message SamlProvider {
+  // The provider's entity ID: the Issuer its responses carry.
+  string entity_id = 1;
+  // Where people sign in (its SingleSignOnService for the HTTP-Redirect binding).
+  string sso_url = 2;
+  // The provider's signing certificates, PEM. Responses must be signed by
+  // one of them, with RSA or ECDSA over SHA-256 or stronger.
+  string certificates = 3;
+}
+
+// What the identity provider needs to know about this instance or server.
+message ServiceProvider {
+  // OpenID Connect: the redirect URI to allow.
+  string oidc_redirect_uri = 1;
+  // SAML: this side's entity ID (also where its metadata is).
+  string saml_entity_id = 2;
+  // SAML: the Assertion Consumer Service, which takes HTTP-POST.
+  string saml_acs_url = 3;
+}
+
+// Who signed in, as the provider said.
+message SsoIdentity {
+  // The provider's id for them: OIDC's sub, SAML's NameID.
+  string subject = 1;
+  string email = 2;
+  string name = 3;
+  google.protobuf.Timestamp signed_in_at = 4;
+}
+
+message ServerSso {
+  // Unset protocol when none is set up.
+  IdentityProvider provider = 1;
+  // People must sign in through it to join and stay.
+  bool required = 2;
+  // How many days a sign-in lasts before members sign in again; 0 for forever.
+  int32 recheck_days = 3;
+  ServiceProvider service_provider = 4;
+  // Members who've signed in and haven't run out.
+  int64 signed_in_members = 5;
+}
+
+message GetServerSsoRequest {
+  string server_id = 1;
+}
+
+message GetServerSsoResponse {
+  ServerSso sso = 1;
+  // The caller's own sign-in, if they have one.
+  SsoIdentity mine = 2;
+}
+
+message UpdateServerSsoRequest {
+  string server_id = 1;
+  // Replaces the provider. An empty client_secret keeps the one set before.
+  IdentityProvider provider = 2;
+  // Removes the provider (and so stops requiring it); provider is ignored.
+  bool remove_provider = 3;
+  optional bool required = 4;
+  // 0 to 365.
+  optional int32 recheck_days = 5;
+}
+
+message UpdateServerSsoResponse {
+  ServerSso sso = 1;
+}
+
+message StartServerSsoRequest {
+  string server_id = 1;
+  // The origin of the app signing in, like https://chat.example.com. The
+  // sign-in ends at <return_origin>/auth/sso/done.
+  string return_origin = 2;
+  // The SHA-256 (hex) of a random secret the app keeps until
+  // FinishServerSso, so only the app that started a sign-in can finish it.
+  string secret_hash = 3;
+  // For someone who isn't a member of a server that isn't in Browse: the
+  // invite they came with.
+  string invite_code = 4;
+}
+
+message StartServerSsoResponse {
+  // Where to send the browser: the provider's sign-in page.
+  string authorize_url = 1;
+  // Comes back with the code; good for ten minutes.
+  string state = 2;
+}
+
+message GetServerSsoSignInRequest {
+  string server_id = 1;
+  string state = 2;
+}
+
+message GetServerSsoSignInResponse {
+  // The app that started the sign-in.
+  string return_origin = 1;
+  string server_name = 2;
+  // The provider's name.
+  string provider_name = 3;
+}
+
+message FinishServerSsoRequest {
+  string server_id = 1;
+  string state = 2;
+  // The code the instance sent the browser on with.
+  string code = 3;
+  // The secret whose hash started the sign-in.
+  string secret = 4;
+}
+
+message FinishServerSsoResponse {
+  SsoIdentity identity = 1;
+  // The caller's membership, now that they've signed in; unset for someone
+  // who hasn't joined yet.
+  Member member = 2;
+}

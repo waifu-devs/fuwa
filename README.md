@@ -115,6 +115,7 @@ the log filter are read only from the environment.
 | `FUWA_LOCAL_ACCOUNTS` | `open` | Standalone accounts: `open` (anyone can sign up), `closed` (existing accounts only), `off` |
 | `FUWA_LINKED_ACCOUNTS` | `open` | Signing in with waifu.dev: `open` (anyone with a waifu.dev account gets one here), `closed` (existing linked accounts only), `off` |
 | `FUWA_LINKED_ISSUER` | `https://api.waifu.dev` | The OpenAuth issuer linked accounts sign in with |
+| `FUWA_SSO_ACCOUNTS` | `off` | Single sign-on through the identity provider set up in instance settings: `open`, `closed` (existing SSO accounts only), `off` |
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
 | `FUWA_AGENT_CREATION` | `everyone` | Who can make agents (accounts programs drive): `everyone`, `admins`, `off` |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |
@@ -167,12 +168,72 @@ How it goes:
 
 The callback page is served even with `FUWA_WEB=off`, so apps on other
 addresses can still sign in to the instance. Turning standalone accounts off
-needs waifu.dev sign-in working first, and the other way around, so there's
-always a way in.
+needs waifu.dev sign-in (or single sign-on) working first, and the other way
+around, so there's always a way in.
 
 A community server can take waifu.dev accounts only (Access, in its settings):
 people with an account made on the instance can't join or apply there, though
 members who are already in stay.
+
+### Single sign-on (SAML and OpenID Connect)
+
+An organization's identity provider (Okta, Microsoft Entra ID, Google
+Workspace, Keycloak, Authentik...) can sign people in at two levels, each off
+until someone sets it up, with the same settings form for both:
+
+- **The instance**: an admin picks OpenID Connect or SAML 2.0 under instance
+  settings, Single sign-on, and opens SSO accounts (`FUWA_SSO_ACCOUNTS` is only
+  the default). People get a "Continue with <name>" button, and an account
+  here the first time. **Test sign-in** checks the saved provider without
+  signing anyone in.
+- **One community server**: its managers (Manage Server) set up a provider
+  under the server's settings, Single sign-on. Once it's required, people sign
+  in through it to join (or apply), and again every 7, 30 or 90 days (or never)
+  to keep seeing the server. Members whose sign-in is missing or ran out stay
+  members but see no channels until they sign in; the owner and agents never
+  need to. A manager signs in through it themselves before requiring it, so
+  nobody locks themselves out, and changing which provider it is forgets every
+  sign-in and stops requiring it.
+
+Both can list email domains: only people whose verified email is on one of
+them get in. The settings page shows what to tell the provider (the OIDC
+redirect URI, or the SAML entity ID, which is also the metadata URL, and the
+Assertion Consumer Service). Everything comes back to this instance's public
+address, so `FUWA_PUBLIC_URL` has to be its https address (or `http://localhost`
+while testing):
+
+| | Instance | Server |
+| --- | --- | --- |
+| OIDC redirect URI | `/sso/instance/oidc` | `/sso/servers/<id>/oidc` |
+| SAML ACS (HTTP-POST) | `/sso/instance/saml` | `/sso/servers/<id>/saml` |
+| SAML metadata, entity ID | `/sso/instance/saml/metadata` | `/sso/servers/<id>/saml/metadata` |
+
+What's checked:
+
+- OpenID Connect: the code flow with PKCE (S256), `state` and `nonce`; the ID
+  token's signature against the provider's JWKS (RS, PS, ES256/384 or EdDSA;
+  `none` and shared-secret HS algorithms are refused), its issuer, audience,
+  expiry and nonce, with three minutes of clock skew. An explicit
+  `email_verified: false` doesn't count as a verified email.
+- SAML 2.0: the response or the assertion must be signed (RSA or ECDSA over
+  SHA-256 or stronger, exclusive canonicalization, by one of the configured
+  certificates). Only the signed element is read, IDs must be unique and there
+  must be exactly one assertion, so signature wrapping doesn't work.
+  Destination, issuer, audience, NotBefore/NotOnOrAfter (three minutes of
+  skew), InResponseTo and the bearer confirmation's recipient are checked, each
+  answer works once, and encrypted assertions are refused. The NameID is the
+  subject; `email`/`mail` and `displayName`/`name` attributes (or their
+  claims-URI forms) fill in the rest.
+- The provider's answer lands on the instance, which checks it and sends the
+  browser on to `/auth/sso/done` with a one-time code in the URL fragment, so
+  it never reaches a server log. The app that started the sign-in finishes it
+  with that code and a secret only it holds. Redirects only ever go to the
+  instance's own public URL, never one taken from the request. No client
+  addresses are kept or logged.
+- A server's provider is reached (OIDC discovery, JWKS, token) only over
+  https, and never at a private, loopback or link-local address, even through
+  DNS. The instance's own provider may be on a private network, since only
+  its admins set it.
 
 ### Pictures
 

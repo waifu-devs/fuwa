@@ -1,10 +1,12 @@
-import { ArrowRightIcon, CheckIcon, ClipboardPenIcon, HourglassIcon, LoaderCircleIcon, LockIcon } from "lucide-react";
+import { ArrowRightIcon, BuildingIcon, CheckIcon, ClipboardPenIcon, HourglassIcon, LoaderCircleIcon, LockIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AccountKind, ApplicationStatus, type Server } from "@/gen/fuwa/v1/types_pb";
-import { joinServer, withdrawApplication } from "@/fuwa/actions";
+import { joinServer, startServerSso, withdrawApplication } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
+import { ProviderButton } from "@/components/Connect";
 import { ApplyDialog } from "@/components/join/ApplyDialog";
+import { signedInForServer } from "@/lib/sso";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/lib/ui";
@@ -13,8 +15,10 @@ import { cn } from "@/lib/utils";
 /**
  * The one way into a server, as Browse cards and invite pages show it: Join,
  * Apply to join, or where your application stands. Servers for waifu.dev
- * accounts only say so to accounts made on this instance. Once you're in, it
- * opens the server.
+ * accounts only say so to accounts made on this instance. Servers that
+ * require single sign-on send you through their provider first, which joins
+ * on the way back (or comes back here to apply). Once you're in, it opens
+ * the server.
  */
 export function JoinButton({
   instanceKey,
@@ -40,6 +44,7 @@ export function JoinButton({
   const applied = inst?.applied[server.id];
   const local = inst?.me && inst.me.kind !== AccountKind.LINKED;
   const join = useAction(joinServer);
+  const sso = useAction(startServerSso);
   const withdraw = useAction(withdrawApplication);
   const [joined, setJoined] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -60,6 +65,8 @@ export function JoinButton({
         ? "linked-only"
         : applied?.status === ApplicationStatus.PENDING
           ? "waiting"
+          : server.ssoRequired && !signedInForServer(instanceKey, server.id)
+            ? "sso"
           : server.applications
             ? "apply"
             : "join";
@@ -87,7 +94,29 @@ export function JoinButton({
         <LockIcon /> waifu.dev accounts only
       </Button>
     );
-    note = "Only people who sign in with waifu.dev can join. You signed in with an account made here.";
+    note =
+      inst?.me?.kind === AccountKind.SSO
+        ? "Only people who sign in with waifu.dev can join. You signed in with single sign-on."
+        : "Only people who sign in with waifu.dev can join. You signed in with an account made here.";
+  } else if (kind === "sso") {
+    const name = server.ssoName || "your organization";
+    button = (
+      <ProviderButton
+        name={name}
+        label={server.applications ? `Sign in to apply` : `Join with ${name}`}
+        icon={<BuildingIcon className="size-5 transition-transform duration-500 group-hover:-translate-y-0.5 group-hover:scale-110" />}
+        onGo={() =>
+          sso.go(instanceKey, server.id, {
+            join: !server.applications,
+            inviteCode,
+            next: server.applications ? window.location.pathname : null,
+          })
+        }
+        error={null}
+        testId="sso-join"
+      />
+    );
+    note = `${server.name} lets in people who sign in with ${name}.`;
   } else if (kind === "waiting") {
     button = (
       <span className={cn("flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500/15 px-4 text-sm font-bold text-amber-600 dark:text-amber-400", tall)}>
@@ -146,7 +175,7 @@ export function JoinButton({
     );
   }
 
-  const error = join.error ?? withdraw.error;
+  const error = join.error ?? withdraw.error ?? sso.error;
   return (
     <div className="flex flex-col gap-2">
       <AnimatePresence mode="popLayout" initial={false}>

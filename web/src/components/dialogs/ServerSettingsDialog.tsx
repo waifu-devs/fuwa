@@ -5,6 +5,7 @@ import {
   ChartColumnIcon,
   BadgeCheckIcon,
   BotIcon,
+  BuildingIcon,
   CheckIcon,
   ChevronDownIcon,
   ClipboardListIcon,
@@ -46,6 +47,7 @@ import { AuditLog } from "@/components/settings/server/AuditLog";
 import { AutoMod } from "@/components/settings/server/AutoMod";
 import { Emoji } from "@/components/settings/server/Emoji";
 import { Webhooks } from "@/components/settings/server/Webhooks";
+import { SingleSignOn } from "@/components/settings/server/SingleSignOn";
 import { ServerAgents } from "@/components/settings/server/ServerAgents";
 import { WelcomeScreenEditor } from "@/components/settings/server/WelcomeScreenEditor";
 import { JoinFormEditor } from "@/components/settings/server/JoinFormEditor";
@@ -82,6 +84,7 @@ import { SettingsScreen } from "@/components/settings/SettingsScreen";
 const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boolean> = {
   overview: (a) => has(a, Permission.MANAGE_SERVER),
   access: (a) => has(a, Permission.MANAGE_SERVER),
+  sso: (a) => has(a, Permission.MANAGE_SERVER),
   "join-form": (a) => has(a, Permission.MANAGE_SERVER),
   welcome: (a) => has(a, Permission.MANAGE_SERVER),
   invites: (a) =>
@@ -164,6 +167,19 @@ export function ServerSettingsDialog({
         { id: "applications", label: "Apply to join", keywords: "applications review approve screening vetting questions" },
         { id: "linked-only", label: "waifu.dev accounts only", keywords: "linked verified account sign in" },
         { id: "account-age", label: "Minimum account age", keywords: "new accounts spam raid verification" },
+      ],
+    },
+    {
+      id: "sso",
+      label: "Single sign-on",
+      icon: BuildingIcon,
+      description: "Members sign in through your organization's identity provider to join and to stay.",
+      keywords: "sso saml oidc openid okta entra azure google workspace keycloak authentik identity provider organization company",
+      settings: [
+        { id: "sso-protocol", label: "Identity provider", keywords: "saml oidc openid" },
+        { id: "sso-required", label: "Require single sign-on", keywords: "sso members join" },
+        { id: "sso-recheck", label: "Sign in again", keywords: "sso recheck expire days" },
+        { id: "sso-domains", label: "Email domains", keywords: "sso allowed" },
       ],
     },
     {
@@ -283,6 +299,7 @@ export function ServerSettingsDialog({
     >
       {tab === "overview" && can("overview") && <Overview instanceKey={instanceKey} server={server} />}
       {tab === "access" && can("access") && <Access instanceKey={instanceKey} server={server} />}
+      {tab === "sso" && can("sso") && <SingleSignOn instanceKey={instanceKey} server={server} />}
       {tab === "join-form" && can("join-form") && <JoinFormEditor instanceKey={instanceKey} server={server} onOpenAccess={() => setTab("access")} />}
       {tab === "welcome" && can("welcome") && <WelcomeScreenEditor instanceKey={instanceKey} server={server} />}
       {tab === "emoji" && can("emoji") && <Emoji instanceKey={instanceKey} serverId={server.id} />}

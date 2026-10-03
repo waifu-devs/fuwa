@@ -8,6 +8,7 @@ use crate::id::millis;
 use crate::linked;
 use crate::node::{Account, LinkedSignIn, NewLinkedAccount, ProfileChange};
 use crate::pb::{self, auth_service_server::AuthService};
+use crate::sso;
 
 use crate::twofactor;
 
@@ -170,6 +171,7 @@ impl Api {
                     .collect();
                 let avatar_url = identity.picture.as_deref().and_then(|picture| url("avatar_url", picture).ok());
                 node.create_linked_account(&NewLinkedAccount {
+                    kind: pb::AccountKind::Linked,
                     issuer: &sign_in.issuer,
                     subject: &identity.sub,
                     username_base: &base,
@@ -186,6 +188,102 @@ impl Api {
         node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
         tracing::info!(account = %account.id, created, admin = account.admin, "signed in with waifu.dev");
         Ok(pb::FinishLinkedSignInResponse { token, user: Some(account.user()), admin: account.admin, created })
+    }
+
+    /// The first step of signing in through the instance's identity
+    /// provider: where to send the browser. A test needs an instance admin.
+    async fn start_sso(
+        &self,
+        req: pb::StartSsoSignInRequest,
+        viewer: Option<Viewer>,
+    ) -> Result<pb::StartSsoSignInResponse> {
+        let settings = self.app.settings();
+        if req.test {
+            if !viewer.as_ref().is_some_and(Viewer::is_instance_admin) {
+                return Err(Error::denied("only instance admins can test single sign-on"));
+            }
+        } else if !settings.sso_sign_in() {
+            return Err(Error::FailedPrecondition("this instance doesn't use single sign-on".into()));
+        }
+        let endpoints = sso::Endpoints::new(&settings.public_url, &sso::Scope::Instance);
+        let (authorize_url, sign_in) =
+            sso::start(&settings.sso_provider, &endpoints, &req.return_origin, &req.secret_hash, "", req.test).await?;
+        self.app.node()?.create_sso_sign_in(&sign_in).await?;
+        Ok(pb::StartSsoSignInResponse { authorize_url, state: sign_in.state })
+    }
+
+    /// The last step: the code for a session, and an account for someone new.
+    async fn finish_sso(
+        &self,
+        req: pb::FinishSsoSignInRequest,
+        user_agent: &str,
+    ) -> Result<pb::FinishSsoSignInResponse> {
+        let node = self.app.node()?;
+        let ran_out = || Error::FailedPrecondition("this sign-in ran out; start again".into());
+        let sign_in = node.sso_sign_in(req.state.trim()).await?.ok_or_else(ran_out)?;
+        let identity = sso::check_finish(&sign_in, &req.code, &req.secret)?;
+        if !node.take_sso_sign_in(&sign_in.state).await? {
+            return Err(ran_out());
+        }
+        let now = crate::id::now_ms();
+        if sign_in.test {
+            tracing::info!("an instance admin tested single sign-on");
+            return Ok(pb::FinishSsoSignInResponse { identity: Some(identity.to_pb(now)), ..Default::default() });
+        }
+        let settings = self.app.settings();
+        if !settings.sso_sign_in() || settings.sso_provider.key() != sign_in.provider_key {
+            return Err(Error::FailedPrecondition(
+                "single sign-on changed while you were signing in; start again".into(),
+            ));
+        }
+        let issuer = sign_in.provider_key.as_str();
+        let (account, created) = match node.linked_account(issuer, &identity.subject).await? {
+            Some(account) => (account, false),
+            None => {
+                if !settings.sso_sign_up() {
+                    return Err(Error::FailedPrecondition("this instance isn't taking new sign-ups".into()));
+                }
+                let preferred = [
+                    identity.username.as_str(),
+                    identity.email.split('@').next().unwrap_or_default(),
+                    identity.name.as_str(),
+                ]
+                .into_iter()
+                .find(|name| !name.trim().is_empty())
+                .unwrap_or_default();
+                let base = linked::username_base(preferred);
+                let display_name: String = [identity.name.trim(), identity.username.trim(), &base]
+                    .into_iter()
+                    .find(|name| !name.is_empty())
+                    .unwrap_or_default()
+                    .chars()
+                    .take(64)
+                    .collect();
+                let avatar_url = identity.picture.as_deref().and_then(|picture| url("avatar_url", picture).ok());
+                node.create_linked_account(&NewLinkedAccount {
+                    kind: pb::AccountKind::Sso,
+                    issuer,
+                    subject: &identity.subject,
+                    username_base: &base,
+                    display_name: &display_name,
+                    avatar_url: avatar_url.as_deref().unwrap_or_default(),
+                })
+                .await?
+            }
+        };
+        if account.disabled {
+            return Err(Error::denied(DISABLED));
+        }
+        let token = auth::new_token();
+        node.create_session(&account.id, &auth::hash_token(&token), user_agent).await?;
+        tracing::info!(account = %account.id, created, admin = account.admin, "signed in with single sign-on");
+        Ok(pb::FinishSsoSignInResponse {
+            token,
+            user: Some(account.user()),
+            admin: account.admin,
+            created,
+            identity: Some(identity.to_pb(now)),
+        })
     }
 
     pub(super) async fn apply_profile(
@@ -362,6 +460,46 @@ impl AuthService for Api {
         respond(self.finish_linked(request.into_inner(), &user_agent).await)
     }
 
+    async fn start_sso_sign_in(
+        &self,
+        request: Request<pb::StartSsoSignInRequest>,
+    ) -> Result<Response<pb::StartSsoSignInResponse>, Status> {
+        let viewer = if request.get_ref().test { Some(self.viewer(request.metadata()).await) } else { None };
+        respond(
+            async {
+                let viewer = viewer.transpose()?;
+                self.start_sso(request.into_inner(), viewer).await
+            }
+            .await,
+        )
+    }
+
+    async fn get_sso_sign_in(
+        &self,
+        request: Request<pb::GetSsoSignInRequest>,
+    ) -> Result<Response<pb::GetSsoSignInResponse>, Status> {
+        respond(
+            async {
+                let state = request.get_ref().state.trim();
+                let sign_in = self.app.node()?.sso_sign_in(state).await?.ok_or(Error::NotFound("sign-in"))?;
+                Ok(pb::GetSsoSignInResponse {
+                    return_origin: sign_in.return_origin,
+                    provider_name: self.app.settings().sso_provider.name.clone(),
+                    test: sign_in.test,
+                })
+            }
+            .await,
+        )
+    }
+
+    async fn finish_sso_sign_in(
+        &self,
+        request: Request<pb::FinishSsoSignInRequest>,
+    ) -> Result<Response<pb::FinishSsoSignInResponse>, Status> {
+        let user_agent = auth::user_agent(request.metadata());
+        respond(self.finish_sso(request.into_inner(), &user_agent).await)
+    }
+
     async fn change_password(
         &self,
         request: Request<pb::ChangePasswordRequest>,
@@ -376,7 +514,7 @@ impl AuthService for Api {
                 let current = self.app.node()?.password_hash(&account.id).await?;
                 if current.is_none() {
                     return Err(Error::FailedPrecondition(
-                        "this account signs in through waifu.dev, not with a password".into(),
+                        "this account signs in through waifu.dev or single sign-on, not with a password".into(),
                     ));
                 }
                 if !auth::verify_password(req.current_password, current).await? {

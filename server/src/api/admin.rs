@@ -81,6 +81,9 @@ impl Api {
                 hosted: config.telemetry.hosted,
                 version: crate::VERSION.into(),
             }),
+            sso_service_provider: Some(
+                crate::sso::Endpoints::new(&self.app.settings().public_url, &crate::sso::Scope::Instance).to_pb(),
+            ),
         })
     }
 }
@@ -138,15 +141,28 @@ impl AdminService for Api {
                 for field in &reset {
                     after_reset.set_from_pb(field, &Settings::defaults(&self.app.config).to_pb())?;
                 }
-                // There's always a way in: standalone accounts, or waifu.dev sign-in that works.
-                if (touches("local_accounts") || touches("linked_accounts") || touches("public_url"))
+                if (touches("sso_accounts") || touches("sso_provider")) && after_reset.sso_accounts.sign_in() {
+                    after_reset.sso_provider.ready().map_err(|_| {
+                        Error::FailedPrecondition(
+                            "set up the identity provider (with its client secret) before turning single sign-on on".into(),
+                        )
+                    })?;
+                }
+                // There's always a way in: standalone accounts, or waifu.dev or
+                // single sign-on that works.
+                if (touches("local_accounts")
+                    || touches("linked_accounts")
+                    || touches("public_url")
+                    || touches("sso_accounts")
+                    || touches("sso_provider"))
                     && !after_reset.local_accounts.sign_in()
                     && !after_reset.linked_sign_in()
+                    && !after_reset.sso_sign_in()
                 {
                     return Err(Error::FailedPrecondition(if after_reset.linked_accounts.sign_in() {
                         "with standalone accounts off, signing in with waifu.dev has to work, and it needs an https public URL".into()
                     } else {
-                        "turning both kinds of account off would leave no way to sign in to this instance".into()
+                        "turning every kind of account off would leave no way to sign in to this instance".into()
                     }));
                 }
 

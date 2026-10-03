@@ -545,6 +545,18 @@ async fn a_split_instance_works_like_one() {
     let wrong = format!("{}/webhooks/{}/{}/{}", cluster.gateway.url(), on_b.id, hook.id, "x".repeat(64));
     assert_eq!(http.post(&wrong).body("{}").send().await.unwrap().status(), 404);
 
+    // Identity providers come back to the shard holding a server (or the
+    // directory, for the instance's own sign-in) through a gateway.
+    let metadata = format!("{}/sso/servers/{}/saml/metadata", cluster.gateway.url(), on_b.id);
+    let metadata = http.get(&metadata).send().await.unwrap();
+    assert_eq!(metadata.status(), 200);
+    assert!(metadata.text().await.unwrap().contains(&format!("/sso/servers/{}/saml", on_b.id)));
+    let instance = http.get(format!("{}/sso/instance/saml/metadata", cluster.gateway.url())).send().await.unwrap();
+    assert_eq!(instance.status(), 200);
+    let stray =
+        http.get(format!("{}/sso/servers/{}/oidc?state=nope", cluster.gateway.url(), on_b.id)).send().await.unwrap();
+    assert_eq!(stray.status(), 400, "a sign-in nobody started");
+
     // Agents are made on the directory and added on the shard holding the
     // server, which asks the directory for them.
     let request = pb::CreateAgentRequest { username: "relay".into(), display_name: "Relay".into() };

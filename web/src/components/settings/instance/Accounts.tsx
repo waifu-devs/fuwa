@@ -13,8 +13,7 @@ import {
   ShieldCheckIcon,
   ShieldIcon,
   ShieldOffIcon,
-  UsersIcon,
-} from "lucide-react";
+  UsersIcon, BuildingIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { AccountFilter, type AccountSummary, type AccountTotals, type ListAccountsResponse } from "@/gen/fuwa/v1/admin_pb";
@@ -323,6 +322,11 @@ function AccountRow({
             {a.user?.kind === AccountKind.LINKED && (
               <span className="shrink-0 text-muted-foreground" title="Signs in through waifu.dev">
                 <Link2Icon className="size-3.5" />
+              </span>
+            )}
+            {a.user?.kind === AccountKind.SSO && (
+              <span className="shrink-0 text-muted-foreground" title="Signs in with single sign-on">
+                <BuildingIcon className="size-3.5" />
               </span>
             )}
           </p>

@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
+  BuildingIcon,
   Flower2Icon,
   KeyRoundIcon,
   LoaderCircleIcon,
@@ -10,9 +11,9 @@ import {
   SparklesIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { Node } from "@/gen/fuwa/v1/types_pb";
-import { probe, run, signIn, signUp, startLinkedSignIn, verifyTwoFactor } from "@/fuwa/actions";
+import { probe, run, signIn, signUp, startLinkedSignIn, startSsoSignIn, verifyTwoFactor } from "@/fuwa/actions";
 import { useAction } from "@/fuwa/hooks";
 import { instanceKey } from "@/fuwa/saved";
 import { AutoHeight } from "@/components/animate-ui/primitives/effects/auto-height";
@@ -190,6 +191,7 @@ export function Account({
   const canSignUp = !!methods?.localSignUp;
   const canSignIn = !!methods?.localSignIn;
   const linked = !!methods?.linkedSignIn;
+  const sso = !!methods?.ssoSignIn;
   const [tab, setTab] = useState(canSignIn ? "sign-in" : "sign-up");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -239,8 +241,11 @@ export function Account({
     return (
       <div className="flex flex-col gap-4">
         <Header url={url} node={node} onBack={onBack} />
-        {linked ? (
-          <LinkedButton url={url} node={node} returnTo={returnTo} />
+        {linked || sso ? (
+          <>
+            {sso && <SsoButton url={url} node={node} returnTo={returnTo} />}
+            {linked && <LinkedButton url={url} node={node} returnTo={returnTo} />}
+          </>
         ) : (
           <p className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
             This server isn't taking sign-ins right now. Ask its admin about it.
@@ -253,9 +258,10 @@ export function Account({
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <Header url={url} node={node} onBack={onBack} />
-      {linked && (
+      {(linked || sso) && (
         <>
-          <LinkedButton url={url} node={node} returnTo={returnTo} />
+          {sso && <SsoButton url={url} node={node} returnTo={returnTo} />}
+          {linked && <LinkedButton url={url} node={node} returnTo={returnTo} />}
           <div className="flex items-center gap-3 text-xs font-bold text-muted-foreground uppercase">
             <span className="h-px flex-1 bg-border" /> or with a password here <span className="h-px flex-1 bg-border" />
           </div>
@@ -489,13 +495,61 @@ function TwoFactorStep({
  */
 function LinkedButton({ url, node, returnTo }: { url: string; node: Node; returnTo?: string }) {
   const start = useAction(startLinkedSignIn);
-  const [leaving, setLeaving] = useState(false);
   const issuer = issuerName(node.auth?.linkedIssuer);
+  return (
+    <ProviderButton
+      name={issuer}
+      icon={<Flower2Icon className="size-5 transition-transform duration-500 group-hover:rotate-[72deg] group-hover:scale-110" />}
+      onGo={() => start.go(url, returnTo ?? null)}
+      error={start.error}
+      closed={!node.auth?.linkedSignUp}
+    />
+  );
+}
+
+/**
+ * "Continue with Acme": single sign-on through the identity provider this
+ * instance's admins set up, making an account here for someone new while
+ * the instance takes them. Comes back to /auth/sso/done.
+ */
+function SsoButton({ url, node, returnTo }: { url: string; node: Node; returnTo?: string }) {
+  const start = useAction(startSsoSignIn);
+  return (
+    <ProviderButton
+      name={node.auth?.ssoName || "your organization"}
+      icon={<BuildingIcon className="size-5 transition-transform duration-500 group-hover:-translate-y-0.5 group-hover:scale-110" />}
+      onGo={() => start.go(url, returnTo ?? null)}
+      error={start.error}
+      closed={!node.auth?.ssoSignUp}
+      testId="sso-sign-in"
+    />
+  );
+}
+
+/** One "Continue with ..." button: a shine on hover, the icon spinning while the browser leaves. */
+export function ProviderButton({
+  name,
+  icon,
+  onGo,
+  error,
+  closed,
+  testId,
+  label,
+}: {
+  name: string;
+  icon: ReactNode;
+  onGo: () => Promise<unknown>;
+  error: string | null;
+  closed?: boolean;
+  testId?: string;
+  label?: string;
+}) {
+  const [leaving, setLeaving] = useState(false);
 
   async function go() {
     setLeaving(true);
     // On success the browser is already on its way out.
-    if (!(await start.go(url, returnTo ?? null))) setLeaving(false);
+    if (!(await onGo())) setLeaving(false);
   }
 
   return (
@@ -504,6 +558,7 @@ function LinkedButton({ url, node, returnTo }: { url: string; node: Node; return
         type="button"
         onClick={go}
         disabled={leaving}
+        data-testid={testId}
         whileHover={{ y: -2 }}
         whileTap={{ scale: 0.97 }}
         transition={{ type: "spring", stiffness: 500, damping: 26 }}
@@ -518,7 +573,7 @@ function LinkedButton({ url, node, returnTo }: { url: string; node: Node; return
           transition={leaving ? { repeat: Infinity, duration: 1.2, ease: "linear" } : { type: "spring", stiffness: 300, damping: 18 }}
           className="grid place-items-center text-primary"
         >
-          <Flower2Icon className="size-5 transition-transform duration-500 group-hover:rotate-[72deg] group-hover:scale-110" />
+          {icon}
         </motion.span>
         <AnimatePresence mode="wait" initial={false}>
           <motion.span
@@ -529,24 +584,24 @@ function LinkedButton({ url, node, returnTo }: { url: string; node: Node; return
             transition={{ duration: 0.18 }}
             className="min-w-0 truncate"
           >
-            {leaving ? `Off to ${issuer}…` : `Continue with ${issuer}`}
+            {leaving ? `Off to ${name}…` : (label ?? `Continue with ${name}`)}
           </motion.span>
         </AnimatePresence>
         <ArrowRightIcon className={cn("size-4 transition group-hover:translate-x-1", leaving && "translate-x-2 opacity-0")} />
       </motion.button>
       <AnimatePresence>
-        {start.error ? (
+        {error ? (
           <motion.p
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             className="text-center text-sm text-destructive first-letter:uppercase"
           >
-            {start.error}
+            {error}
           </motion.p>
-        ) : !node.auth?.linkedSignUp ? (
+        ) : closed ? (
           <p className="text-center text-xs text-muted-foreground">
-            For people who already have a {issuer} account here. New ones aren't being made right now.
+            For people who already have a {name} account here. New ones aren't being made right now.
           </p>
         ) : null}
       </AnimatePresence>

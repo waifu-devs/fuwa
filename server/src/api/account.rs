@@ -441,6 +441,7 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
             "id": account.id,
             "kind": match account.kind {
                 pb::AccountKind::Agent => "agent",
+                pb::AccountKind::Sso => "single sign-on",
                 _ if account.has_password() => "standalone",
                 _ => "linked",
             },

@@ -4,6 +4,8 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { SsoIdentity } from "./sso_pb";
+import { file_fuwa_v1_sso } from "./sso_pb";
 import type { Profile, User } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
@@ -14,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/auth.proto.
  */
 export const file_fuwa_v1_auth: GenFile = /*@__PURE__*/
-  fileDesc("ChJmdXdhL3YxL2F1dGgucHJvdG8SB2Z1d2EudjEiSQoNU2lnblVwUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkiSwoOU2lnblVwUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCCIzCg1TaWduSW5SZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhAKCHBhc3N3b3JkGAIgASgJImYKDlNpZ25JblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEhsKBHVzZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISDQoFYWRtaW4YAyABKAgSGQoRdHdvX2ZhY3Rvcl90aWNrZXQYBCABKAkiNgoWVmVyaWZ5VHdvRmFjdG9yUmVxdWVzdBIOCgZ0aWNrZXQYASABKAkSDAoEY29kZRgCIAEoCSJUChdWZXJpZnlUd29GYWN0b3JSZXNwb25zZRINCgV0b2tlbhgBIAEoCRIbCgR1c2VyGAIgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAMgASgIIhAKDlNpZ25PdXRSZXF1ZXN0IhEKD1NpZ25PdXRSZXNwb25zZSIOCgxHZXRNZVJlcXVlc3QiOwoNR2V0TWVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAIgASgIItMCChRVcGRhdGVQcm9maWxlUmVxdWVzdBIZCgxkaXNwbGF5X25hbWUYASABKAlIAIgBARIXCgphdmF0YXJfdXJsGAIgASgJSAGIAQESFQoIcHJvbm91bnMYAyABKAlIAogBARIQCgNiaW8YBCABKAlIA4gBARIXCgpiYW5uZXJfdXJsGAUgASgJSASIAQESGQoMYWNjZW50X2NvbG9yGAYgASgFSAWIAQESEwoGc3RhdHVzGAcgASgJSAaIAQESNQoRc3RhdHVzX2V4cGlyZXNfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQg8KDV9kaXNwbGF5X25hbWVCDQoLX2F2YXRhcl91cmxCCwoJX3Byb25vdW5zQgYKBF9iaW9CDQoLX2Jhbm5lcl91cmxCDwoNX2FjY2VudF9jb2xvckIJCgdfc3RhdHVzIlcKFVVwZGF0ZVByb2ZpbGVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEiEKB3Byb2ZpbGUYAiABKAsyEC5mdXdhLnYxLlByb2ZpbGUiJAoRR2V0UHJvZmlsZVJlcXVlc3QSDwoHdXNlcl9pZBgBIAEoCSI3ChJHZXRQcm9maWxlUmVzcG9uc2USIQoHcHJvZmlsZRgBIAEoCzIQLmZ1d2EudjEuUHJvZmlsZSJHChVDaGFuZ2VQYXNzd29yZFJlcXVlc3QSGAoQY3VycmVudF9wYXNzd29yZBgBIAEoCRIUCgxuZXdfcGFzc3dvcmQYAiABKAkiGAoWQ2hhbmdlUGFzc3dvcmRSZXNwb25zZSJGChhTdGFydExpbmtlZFNpZ25JblJlcXVlc3QSFQoNcmV0dXJuX29yaWdpbhgBIAEoCRITCgtzZWNyZXRfaGFzaBgCIAEoCSJBChlTdGFydExpbmtlZFNpZ25JblJlc3BvbnNlEhUKDWF1dGhvcml6ZV91cmwYASABKAkSDQoFc3RhdGUYAiABKAkiJwoWR2V0TGlua2VkU2lnbkluUmVxdWVzdBINCgVzdGF0ZRgBIAEoCSIwChdHZXRMaW5rZWRTaWduSW5SZXNwb25zZRIVCg1yZXR1cm5fb3JpZ2luGAEgASgJIkgKGUZpbmlzaExpbmtlZFNpZ25JblJlcXVlc3QSDQoFc3RhdGUYASABKAkSDAoEY29kZRgCIAEoCRIOCgZzZWNyZXQYAyABKAkiaAoaRmluaXNoTGlua2VkU2lnbkluUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCBIPCgdjcmVhdGVkGAQgASgIMsoGCgtBdXRoU2VydmljZRI5CgZTaWduVXASFi5mdXdhLnYxLlNpZ25VcFJlcXVlc3QaFy5mdXdhLnYxLlNpZ25VcFJlc3BvbnNlEjkKBlNpZ25JbhIWLmZ1d2EudjEuU2lnbkluUmVxdWVzdBoXLmZ1d2EudjEuU2lnbkluUmVzcG9uc2USVAoPVmVyaWZ5VHdvRmFjdG9yEh8uZnV3YS52MS5WZXJpZnlUd29GYWN0b3JSZXF1ZXN0GiAuZnV3YS52MS5WZXJpZnlUd29GYWN0b3JSZXNwb25zZRI8CgdTaWduT3V0EhcuZnV3YS52MS5TaWduT3V0UmVxdWVzdBoYLmZ1d2EudjEuU2lnbk91dFJlc3BvbnNlEjYKBUdldE1lEhUuZnV3YS52MS5HZXRNZVJlcXVlc3QaFi5mdXdhLnYxLkdldE1lUmVzcG9uc2USTgoNVXBkYXRlUHJvZmlsZRIdLmZ1d2EudjEuVXBkYXRlUHJvZmlsZVJlcXVlc3QaHi5mdXdhLnYxLlVwZGF0ZVByb2ZpbGVSZXNwb25zZRJFCgpHZXRQcm9maWxlEhouZnV3YS52MS5HZXRQcm9maWxlUmVxdWVzdBobLmZ1d2EudjEuR2V0UHJvZmlsZVJlc3BvbnNlElEKDkNoYW5nZVBhc3N3b3JkEh4uZnV3YS52MS5DaGFuZ2VQYXNzd29yZFJlcXVlc3QaHy5mdXdhLnYxLkNoYW5nZVBhc3N3b3JkUmVzcG9uc2USWgoRU3RhcnRMaW5rZWRTaWduSW4SIS5mdXdhLnYxLlN0YXJ0TGlua2VkU2lnbkluUmVxdWVzdBoiLmZ1d2EudjEuU3RhcnRMaW5rZWRTaWduSW5SZXNwb25zZRJUCg9HZXRMaW5rZWRTaWduSW4SHy5mdXdhLnYxLkdldExpbmtlZFNpZ25JblJlcXVlc3QaIC5mdXdhLnYxLkdldExpbmtlZFNpZ25JblJlc3BvbnNlEl0KEkZpbmlzaExpbmtlZFNpZ25JbhIiLmZ1d2EudjEuRmluaXNoTGlua2VkU2lnbkluUmVxdWVzdBojLmZ1d2EudjEuRmluaXNoTGlua2VkU2lnbkluUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChJmdXdhL3YxL2F1dGgucHJvdG8SB2Z1d2EudjEiSQoNU2lnblVwUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkiSwoOU2lnblVwUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCCIzCg1TaWduSW5SZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhAKCHBhc3N3b3JkGAIgASgJImYKDlNpZ25JblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEhsKBHVzZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISDQoFYWRtaW4YAyABKAgSGQoRdHdvX2ZhY3Rvcl90aWNrZXQYBCABKAkiNgoWVmVyaWZ5VHdvRmFjdG9yUmVxdWVzdBIOCgZ0aWNrZXQYASABKAkSDAoEY29kZRgCIAEoCSJUChdWZXJpZnlUd29GYWN0b3JSZXNwb25zZRINCgV0b2tlbhgBIAEoCRIbCgR1c2VyGAIgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAMgASgIIhAKDlNpZ25PdXRSZXF1ZXN0IhEKD1NpZ25PdXRSZXNwb25zZSIOCgxHZXRNZVJlcXVlc3QiOwoNR2V0TWVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAIgASgIItMCChRVcGRhdGVQcm9maWxlUmVxdWVzdBIZCgxkaXNwbGF5X25hbWUYASABKAlIAIgBARIXCgphdmF0YXJfdXJsGAIgASgJSAGIAQESFQoIcHJvbm91bnMYAyABKAlIAogBARIQCgNiaW8YBCABKAlIA4gBARIXCgpiYW5uZXJfdXJsGAUgASgJSASIAQESGQoMYWNjZW50X2NvbG9yGAYgASgFSAWIAQESEwoGc3RhdHVzGAcgASgJSAaIAQESNQoRc3RhdHVzX2V4cGlyZXNfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQg8KDV9kaXNwbGF5X25hbWVCDQoLX2F2YXRhcl91cmxCCwoJX3Byb25vdW5zQgYKBF9iaW9CDQoLX2Jhbm5lcl91cmxCDwoNX2FjY2VudF9jb2xvckIJCgdfc3RhdHVzIlcKFVVwZGF0ZVByb2ZpbGVSZXNwb25zZRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEiEKB3Byb2ZpbGUYAiABKAsyEC5mdXdhLnYxLlByb2ZpbGUiJAoRR2V0UHJvZmlsZVJlcXVlc3QSDwoHdXNlcl9pZBgBIAEoCSI3ChJHZXRQcm9maWxlUmVzcG9uc2USIQoHcHJvZmlsZRgBIAEoCzIQLmZ1d2EudjEuUHJvZmlsZSJHChVDaGFuZ2VQYXNzd29yZFJlcXVlc3QSGAoQY3VycmVudF9wYXNzd29yZBgBIAEoCRIUCgxuZXdfcGFzc3dvcmQYAiABKAkiGAoWQ2hhbmdlUGFzc3dvcmRSZXNwb25zZSJGChhTdGFydExpbmtlZFNpZ25JblJlcXVlc3QSFQoNcmV0dXJuX29yaWdpbhgBIAEoCRITCgtzZWNyZXRfaGFzaBgCIAEoCSJBChlTdGFydExpbmtlZFNpZ25JblJlc3BvbnNlEhUKDWF1dGhvcml6ZV91cmwYASABKAkSDQoFc3RhdGUYAiABKAkiJwoWR2V0TGlua2VkU2lnbkluUmVxdWVzdBINCgVzdGF0ZRgBIAEoCSIwChdHZXRMaW5rZWRTaWduSW5SZXNwb25zZRIVCg1yZXR1cm5fb3JpZ2luGAEgASgJIkgKGUZpbmlzaExpbmtlZFNpZ25JblJlcXVlc3QSDQoFc3RhdGUYASABKAkSDAoEY29kZRgCIAEoCRIOCgZzZWNyZXQYAyABKAkiaAoaRmluaXNoTGlua2VkU2lnbkluUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCBIPCgdjcmVhdGVkGAQgASgIIlEKFVN0YXJ0U3NvU2lnbkluUmVxdWVzdBIVCg1yZXR1cm5fb3JpZ2luGAEgASgJEhMKC3NlY3JldF9oYXNoGAIgASgJEgwKBHRlc3QYAyABKAgiPgoWU3RhcnRTc29TaWduSW5SZXNwb25zZRIVCg1hdXRob3JpemVfdXJsGAEgASgJEg0KBXN0YXRlGAIgASgJIiQKE0dldFNzb1NpZ25JblJlcXVlc3QSDQoFc3RhdGUYASABKAkiUgoUR2V0U3NvU2lnbkluUmVzcG9uc2USFQoNcmV0dXJuX29yaWdpbhgBIAEoCRIVCg1wcm92aWRlcl9uYW1lGAIgASgJEgwKBHRlc3QYAyABKAgiRQoWRmluaXNoU3NvU2lnbkluUmVxdWVzdBINCgVzdGF0ZRgBIAEoCRIMCgRjb2RlGAIgASgJEg4KBnNlY3JldBgDIAEoCSKNAQoXRmluaXNoU3NvU2lnbkluUmVzcG9uc2USDQoFdG9rZW4YASABKAkSGwoEdXNlchgCIAEoCzINLmZ1d2EudjEuVXNlchINCgVhZG1pbhgDIAEoCBIPCgdjcmVhdGVkGAQgASgIEiYKCGlkZW50aXR5GAUgASgLMhQuZnV3YS52MS5Tc29JZGVudGl0eTLACAoLQXV0aFNlcnZpY2USOQoGU2lnblVwEhYuZnV3YS52MS5TaWduVXBSZXF1ZXN0GhcuZnV3YS52MS5TaWduVXBSZXNwb25zZRI5CgZTaWduSW4SFi5mdXdhLnYxLlNpZ25JblJlcXVlc3QaFy5mdXdhLnYxLlNpZ25JblJlc3BvbnNlElQKD1ZlcmlmeVR3b0ZhY3RvchIfLmZ1d2EudjEuVmVyaWZ5VHdvRmFjdG9yUmVxdWVzdBogLmZ1d2EudjEuVmVyaWZ5VHdvRmFjdG9yUmVzcG9uc2USPAoHU2lnbk91dBIXLmZ1d2EudjEuU2lnbk91dFJlcXVlc3QaGC5mdXdhLnYxLlNpZ25PdXRSZXNwb25zZRI2CgVHZXRNZRIVLmZ1d2EudjEuR2V0TWVSZXF1ZXN0GhYuZnV3YS52MS5HZXRNZVJlc3BvbnNlEk4KDVVwZGF0ZVByb2ZpbGUSHS5mdXdhLnYxLlVwZGF0ZVByb2ZpbGVSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVQcm9maWxlUmVzcG9uc2USRQoKR2V0UHJvZmlsZRIaLmZ1d2EudjEuR2V0UHJvZmlsZVJlcXVlc3QaGy5mdXdhLnYxLkdldFByb2ZpbGVSZXNwb25zZRJRCg5DaGFuZ2VQYXNzd29yZBIeLmZ1d2EudjEuQ2hhbmdlUGFzc3dvcmRSZXF1ZXN0Gh8uZnV3YS52MS5DaGFuZ2VQYXNzd29yZFJlc3BvbnNlEloKEVN0YXJ0TGlua2VkU2lnbkluEiEuZnV3YS52MS5TdGFydExpbmtlZFNpZ25JblJlcXVlc3QaIi5mdXdhLnYxLlN0YXJ0TGlua2VkU2lnbkluUmVzcG9uc2USVAoPR2V0TGlua2VkU2lnbkluEh8uZnV3YS52MS5HZXRMaW5rZWRTaWduSW5SZXF1ZXN0GiAuZnV3YS52MS5HZXRMaW5rZWRTaWduSW5SZXNwb25zZRJdChJGaW5pc2hMaW5rZWRTaWduSW4SIi5mdXdhLnYxLkZpbmlzaExpbmtlZFNpZ25JblJlcXVlc3QaIy5mdXdhLnYxLkZpbmlzaExpbmtlZFNpZ25JblJlc3BvbnNlElEKDlN0YXJ0U3NvU2lnbkluEh4uZnV3YS52MS5TdGFydFNzb1NpZ25JblJlcXVlc3QaHy5mdXdhLnYxLlN0YXJ0U3NvU2lnbkluUmVzcG9uc2USSwoMR2V0U3NvU2lnbkluEhwuZnV3YS52MS5HZXRTc29TaWduSW5SZXF1ZXN0Gh0uZnV3YS52MS5HZXRTc29TaWduSW5SZXNwb25zZRJUCg9GaW5pc2hTc29TaWduSW4SHy5mdXdhLnYxLkZpbmlzaFNzb1NpZ25JblJlcXVlc3QaIC5mdXdhLnYxLkZpbmlzaFNzb1NpZ25JblJlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_sso, file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.SignUpRequest
@@ -548,6 +550,175 @@ export const FinishLinkedSignInResponseSchema: GenMessage<FinishLinkedSignInResp
   messageDesc(file_fuwa_v1_auth, 21);
 
 /**
+ * @generated from message fuwa.v1.StartSsoSignInRequest
+ */
+export type StartSsoSignInRequest = Message<"fuwa.v1.StartSsoSignInRequest"> & {
+  /**
+   * The origin of the app signing in. The sign-in ends at
+   * <return_origin>/auth/sso/done.
+   *
+   * @generated from field: string return_origin = 1;
+   */
+  returnOrigin: string;
+
+  /**
+   * The SHA-256 (hex) of a random secret the app keeps until FinishSsoSignIn.
+   *
+   * @generated from field: string secret_hash = 2;
+   */
+  secretHash: string;
+
+  /**
+   * An instance admin checking the provider: works while sso_accounts is
+   * off, and signs nobody in.
+   *
+   * @generated from field: bool test = 3;
+   */
+  test: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.StartSsoSignInRequest.
+ * Use `create(StartSsoSignInRequestSchema)` to create a new message.
+ */
+export const StartSsoSignInRequestSchema: GenMessage<StartSsoSignInRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 22);
+
+/**
+ * @generated from message fuwa.v1.StartSsoSignInResponse
+ */
+export type StartSsoSignInResponse = Message<"fuwa.v1.StartSsoSignInResponse"> & {
+  /**
+   * @generated from field: string authorize_url = 1;
+   */
+  authorizeUrl: string;
+
+  /**
+   * @generated from field: string state = 2;
+   */
+  state: string;
+};
+
+/**
+ * Describes the message fuwa.v1.StartSsoSignInResponse.
+ * Use `create(StartSsoSignInResponseSchema)` to create a new message.
+ */
+export const StartSsoSignInResponseSchema: GenMessage<StartSsoSignInResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 23);
+
+/**
+ * @generated from message fuwa.v1.GetSsoSignInRequest
+ */
+export type GetSsoSignInRequest = Message<"fuwa.v1.GetSsoSignInRequest"> & {
+  /**
+   * @generated from field: string state = 1;
+   */
+  state: string;
+};
+
+/**
+ * Describes the message fuwa.v1.GetSsoSignInRequest.
+ * Use `create(GetSsoSignInRequestSchema)` to create a new message.
+ */
+export const GetSsoSignInRequestSchema: GenMessage<GetSsoSignInRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 24);
+
+/**
+ * @generated from message fuwa.v1.GetSsoSignInResponse
+ */
+export type GetSsoSignInResponse = Message<"fuwa.v1.GetSsoSignInResponse"> & {
+  /**
+   * @generated from field: string return_origin = 1;
+   */
+  returnOrigin: string;
+
+  /**
+   * @generated from field: string provider_name = 2;
+   */
+  providerName: string;
+
+  /**
+   * @generated from field: bool test = 3;
+   */
+  test: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.GetSsoSignInResponse.
+ * Use `create(GetSsoSignInResponseSchema)` to create a new message.
+ */
+export const GetSsoSignInResponseSchema: GenMessage<GetSsoSignInResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 25);
+
+/**
+ * @generated from message fuwa.v1.FinishSsoSignInRequest
+ */
+export type FinishSsoSignInRequest = Message<"fuwa.v1.FinishSsoSignInRequest"> & {
+  /**
+   * @generated from field: string state = 1;
+   */
+  state: string;
+
+  /**
+   * @generated from field: string code = 2;
+   */
+  code: string;
+
+  /**
+   * @generated from field: string secret = 3;
+   */
+  secret: string;
+};
+
+/**
+ * Describes the message fuwa.v1.FinishSsoSignInRequest.
+ * Use `create(FinishSsoSignInRequestSchema)` to create a new message.
+ */
+export const FinishSsoSignInRequestSchema: GenMessage<FinishSsoSignInRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 26);
+
+/**
+ * @generated from message fuwa.v1.FinishSsoSignInResponse
+ */
+export type FinishSsoSignInResponse = Message<"fuwa.v1.FinishSsoSignInResponse"> & {
+  /**
+   * Empty for a test.
+   *
+   * @generated from field: string token = 1;
+   */
+  token: string;
+
+  /**
+   * @generated from field: fuwa.v1.User user = 2;
+   */
+  user?: User | undefined;
+
+  /**
+   * @generated from field: bool admin = 3;
+   */
+  admin: boolean;
+
+  /**
+   * @generated from field: bool created = 4;
+   */
+  created: boolean;
+
+  /**
+   * Who the provider signed in.
+   *
+   * @generated from field: fuwa.v1.SsoIdentity identity = 5;
+   */
+  identity?: SsoIdentity | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.FinishSsoSignInResponse.
+ * Use `create(FinishSsoSignInResponseSchema)` to create a new message.
+ */
+export const FinishSsoSignInResponseSchema: GenMessage<FinishSsoSignInResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_auth, 27);
+
+/**
  * Accounts on this instance. Signing up or in returns a session token, which
  * every other call sends as `authorization: Bearer <token>`.
  *
@@ -661,6 +832,39 @@ export const AuthService: GenService<{
     methodKind: "unary";
     input: typeof FinishLinkedSignInRequestSchema;
     output: typeof FinishLinkedSignInResponseSchema;
+  },
+  /**
+   * Single sign-on through the identity provider the instance's admins set
+   * up (InstanceSettings.sso_provider), in three calls too. The provider
+   * sends the browser back to this instance (/sso/instance/...), which checks
+   * who signed in and sends it on to
+   *   <public URL>/auth/sso/done#state=<state>&code=<code>
+   * and FinishSsoSignIn trades the code for a session. Someone new gets an
+   * account here while SSO sign-ups are open. With `test`, an instance admin
+   * checks the provider works: Finish says who signed in and changes nothing.
+   *
+   * @generated from rpc fuwa.v1.AuthService.StartSsoSignIn
+   */
+  startSsoSignIn: {
+    methodKind: "unary";
+    input: typeof StartSsoSignInRequestSchema;
+    output: typeof StartSsoSignInResponseSchema;
+  },
+  /**
+   * @generated from rpc fuwa.v1.AuthService.GetSsoSignIn
+   */
+  getSsoSignIn: {
+    methodKind: "unary";
+    input: typeof GetSsoSignInRequestSchema;
+    output: typeof GetSsoSignInResponseSchema;
+  },
+  /**
+   * @generated from rpc fuwa.v1.AuthService.FinishSsoSignIn
+   */
+  finishSsoSignIn: {
+    methodKind: "unary";
+    input: typeof FinishSsoSignInRequestSchema;
+    output: typeof FinishSsoSignInResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_auth, 0);

@@ -35,6 +35,9 @@ pub struct Config {
     /// FUWA_LINKED_ISSUER, default https://api.waifu.dev: the OpenAuth issuer
     /// linked accounts sign in with.
     pub linked_issuer: String,
+    /// FUWA_SSO_ACCOUNTS: open | closed | off (default). Signing in through
+    /// the identity provider admins set up in the app (single sign-on).
+    pub sso_accounts: Accounts,
     /// FUWA_SERVER_CREATION: everyone (default) | admins | off.
     pub server_creation: pb::ServerCreation,
     /// FUWA_AGENT_CREATION: who may make agents (bot accounts): everyone
@@ -192,6 +195,10 @@ impl Config {
         };
         let local_accounts = accounts("FUWA_LOCAL_ACCOUNTS")?;
         let linked_accounts = accounts("FUWA_LINKED_ACCOUNTS")?;
+        let sso_accounts = match get("FUWA_SSO_ACCOUNTS") {
+            None => Accounts::Off,
+            Some(_) => accounts("FUWA_SSO_ACCOUNTS")?,
+        };
         let linked_issuer = get("FUWA_LINKED_ISSUER")
             .map(|url| url.trim().trim_end_matches('/').to_string())
             .unwrap_or_else(|| DEFAULT_LINKED_ISSUER.into());
@@ -293,6 +300,7 @@ impl Config {
             local_accounts,
             linked_accounts,
             linked_issuer,
+            sso_accounts,
             server_creation,
             agent_creation,
             admin_token,
@@ -421,6 +429,7 @@ mod tests {
         assert_eq!(config.public_url, "http://localhost:8080");
         assert_eq!(config.local_accounts, Accounts::Open);
         assert_eq!(config.linked_accounts, Accounts::Open);
+        assert_eq!(config.sso_accounts, Accounts::Off);
         assert_eq!(config.linked_issuer, "https://api.waifu.dev");
         assert_eq!(config.server_creation, pb::ServerCreation::Everyone);
         assert_eq!(config.agent_creation, pb::AgentCreation::Everyone);

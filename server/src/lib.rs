@@ -23,6 +23,7 @@ pub mod permissions;
 pub mod replica;
 pub mod servers;
 pub mod settings;
+pub mod sso;
 pub mod telemetry;
 pub mod twofactor;
 pub mod web;

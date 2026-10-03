@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package fuwa.v1;
 
+import "fuwa/v1/sso.proto";
 import "fuwa/v1/types.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
@@ -80,6 +81,22 @@ message InstanceSettings {
   // Who may make agents (bot accounts). Agents already made keep working.
   // FUWA_AGENT_CREATION.
   AgentCreation agent_creation = 13;
+  // Signing in through an identity provider the admins set up (single
+  // sign-on). Off unless changed. FUWA_SSO_ACCOUNTS.
+  SsoAccounts sso_accounts = 14;
+  // The provider for sso_accounts. Its client secret is never sent back.
+  IdentityProvider sso_provider = 15;
+}
+
+// Whether accounts that sign in through the instance's identity provider work.
+enum SsoAccounts {
+  SSO_ACCOUNTS_UNSPECIFIED = 0;
+  // Anyone the provider signs in gets an account here.
+  SSO_ACCOUNTS_OPEN = 1;
+  // Only people who already have such an account can sign in.
+  SSO_ACCOUNTS_CLOSED = 2;
+  // No single sign-on.
+  SSO_ACCOUNTS_OFF = 3;
 }
 
 // Whether standalone accounts (a username and password kept on the instance) work.
@@ -131,6 +148,8 @@ message InstanceConfig {
   // "name" or "default_limits.members".
   repeated string overridden = 3;
   StartupSettings startup = 4;
+  // What to tell the identity provider about this instance.
+  ServiceProvider sso_service_provider = 5;
 }
 
 message GetSettingsRequest {}

@@ -180,6 +180,9 @@ pub struct Access {
     channels: HashMap<String, Bits>,
     /// Hasn't agreed to the server's rules yet, so can't talk.
     pub pending: bool,
+    /// Hasn't signed in through the server's single sign-on (or it ran
+    /// out), so sees no channels and can do nothing until they do.
+    pub locked: bool,
 }
 
 impl Rules {
@@ -209,7 +212,7 @@ impl Rules {
         for parent in holders {
             channels.insert(parent, bit(P::ViewChannels));
         }
-        Access { owner, server, rank, channels, pending: false }
+        Access { owner, server, rank, channels, pending: false, locked: false }
     }
 
     /// Permissions in a channel: its category's overwrites, then its own. In
@@ -254,9 +257,23 @@ impl Access {
         }
     }
 
-    /// Why they can't do `p`: the rules they haven't agreed to, or a missing permission.
+    /// Shuts out a member who has to sign in through the server's single
+    /// sign-on first: no channels, no permissions. The owner never is.
+    pub fn lock_out(&mut self) {
+        if self.owner {
+            return;
+        }
+        self.locked = true;
+        self.server = 0;
+        self.channels.clear();
+    }
+
+    /// Why they can't do `p`: single sign-on, the rules they haven't agreed
+    /// to, or a missing permission.
     fn refuse(&self, p: P) -> Error {
-        if self.pending && TALK & bit(p) != 0 {
+        if self.locked {
+            Error::FailedPrecondition("sign in through this server's single sign-on first".into())
+        } else if self.pending && TALK & bit(p) != 0 {
             Error::FailedPrecondition("agree to this server's rules first".into())
         } else {
             missing(p)

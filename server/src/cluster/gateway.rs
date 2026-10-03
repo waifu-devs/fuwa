@@ -86,7 +86,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.JoinService"
         | "fuwa.v1.AutoModService"
         | "fuwa.v1.EmojiService"
-        | "fuwa.v1.WebhookService" => Target::Shard,
+        | "fuwa.v1.WebhookService"
+        | "fuwa.v1.SsoService" => Target::Shard,
         _ => Target::Unknown,
     }
 }
@@ -233,6 +234,8 @@ impl Gateway {
 
         let media = self.clone();
         let webhooks = self.clone();
+        let sso_servers = self.clone();
+        let sso_instance = self.clone();
         let health = self.clone();
         let http = Router::new()
             .route(
@@ -252,6 +255,20 @@ impl Gateway {
                 any(move |UrlPath((server_id, _)): UrlPath<(String, String)>, request: Request| {
                     let gateway = webhooks.clone();
                     async move { gateway.pass_to_shard(&server_id, request).await }
+                }),
+            )
+            .route(
+                "/sso/servers/{server_id}/{*rest}",
+                any(move |UrlPath((server_id, _)): UrlPath<(String, String)>, request: Request| {
+                    let gateway = sso_servers.clone();
+                    async move { gateway.pass_to_shard(&server_id, request).await }
+                }),
+            )
+            .route(
+                "/sso/instance/{*rest}",
+                any(move |request: Request| {
+                    let gateway = sso_instance.clone();
+                    async move { gateway.pass(gateway.directory_channel.clone(), request).await }
                 }),
             )
             .route(

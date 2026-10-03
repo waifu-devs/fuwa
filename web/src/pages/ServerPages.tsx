@@ -5,6 +5,7 @@ import { ChannelType, Permission } from "@/gen/fuwa/v1/types_pb";
 import { useAccess, useInstance } from "@/fuwa/hooks";
 import { ChannelView } from "@/components/chat/ChannelView";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
+import { SsoGate, useSsoLocked } from "@/components/join/SsoGate";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { has } from "@/lib/permissions";
@@ -15,10 +16,12 @@ export function ServerIndex({ instanceKey, serverId }: { instanceKey: string; se
   const access = useAccess(instanceKey, serverId);
   const [creating, setCreating] = useState(false);
   const { compact, setNavOpen } = useLayout();
+  const locked = useSsoLocked(instanceKey, serverId);
   // Signed out (the session ended, or an admin turned the account off): the instance's page asks to sign in.
   if (!inst || inst.connection === "signed-out") return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
   const server = inst.servers.find((s) => s.id === serverId);
   if (!server && inst.connection === "live") return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
+  if (server && locked) return <SsoGate instanceKey={instanceKey} server={server} />;
   const first = inst.channels[serverId]?.find((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT);
   if (first) return <Navigate to="/$instance/$server/$channel" params={{ instance: instanceKey, server: serverId, channel: first.id }} replace />;
   if (!inst.synced[serverId]) return <div className="shimmer m-4 h-10 rounded-xl opacity-40" />;

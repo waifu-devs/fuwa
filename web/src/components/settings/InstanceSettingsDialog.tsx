@@ -16,6 +16,7 @@ import {
   SlidersHorizontalIcon,
   UserPlusIcon,
   BotIcon,
+  BuildingIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -23,11 +24,12 @@ import {
   InstanceSettingsSchema,
   LinkedAccounts,
   LocalAccounts,
+  SsoAccounts,
   type InstanceConfig,
   type InstanceSettings,
 } from "@/gen/fuwa/v1/admin_pb";
 import { AccountKind, AgentCreation, ServerCreation, ServerLimitsSchema } from "@/gen/fuwa/v1/types_pb";
-import { getSettings, run, updateSettings } from "@/fuwa/actions";
+import { getSettings, run, startSsoSignIn, updateSettings } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,6 +39,9 @@ import { canReturnTo, WAIFU_DEV_ISSUER } from "@/lib/linked";
 import { HIDDEN_ADDRESS } from "@/lib/streamer";
 import { cn } from "@/lib/utils";
 import { Cap, Choice, SaveBar, Setting, SPRING, Toggle } from "./controls";
+import { fullProvider, IdentityProviderForm, providerFingerprint } from "./IdentityProviderForm";
+import { providerReady } from "@/lib/sso";
+import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { Accounts } from "./instance/Accounts";
 import { Announcement } from "./instance/Announcement";
 import { Servers } from "./instance/Servers";
@@ -50,6 +55,8 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "local_accounts", get: (s) => s.localAccounts },
   { path: "linked_accounts", get: (s) => s.linkedAccounts },
   { path: "linked_issuer", get: (s) => s.linkedIssuer.trim().replace(/\/+$/, "") },
+  { path: "sso_accounts", get: (s) => s.ssoAccounts },
+  { path: "sso_provider", get: (s) => providerFingerprint(s.ssoProvider) },
   { path: "server_creation", get: (s) => s.serverCreation },
   { path: "agent_creation", get: (s) => s.agentCreation },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
@@ -89,6 +96,7 @@ export function InstanceSettingsDialog({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState("general");
   const save = useAction(updateSettings);
+  const test = useAction(startSsoSignIn);
   const privateField = usePrivateField();
 
   useEffect(() => {
@@ -143,7 +151,12 @@ export function InstanceSettingsDialog({
 
   const name = inst?.node?.name ?? instanceKey;
   const loading = !config || !draft || !defaults;
-  const hasPasswordHere = inst?.me?.kind !== AccountKind.LINKED;
+  const hasPasswordHere = inst?.me?.kind === AccountKind.LOCAL;
+  const patchProvider = (fn: (p: IdentityProvider) => void) =>
+    patch((d) => {
+      d.ssoProvider = fullProvider(d.ssoProvider);
+      fn(d.ssoProvider);
+    });
 
   return (
     <SettingsScreen
@@ -181,6 +194,19 @@ export function InstanceSettingsDialog({
                 { id: "server-creation", label: "Who can create servers" },
                 { id: "servers-per-account", label: "Servers per account" },
                 { id: "agent-creation", label: "Who can make agents", keywords: "bots integrations" },
+              ],
+            },
+            {
+              id: "sso",
+              label: "Single sign-on",
+              icon: BuildingIcon,
+              description: "Let people sign in here through your organization's identity provider.",
+              keywords: "sso saml oidc openid okta entra azure google workspace keycloak authentik identity provider",
+              settings: [
+                { id: "sso-accounts", label: "Single sign-on accounts", keywords: "sso sign up" },
+                { id: "sso-protocol", label: "Identity provider", keywords: "saml oidc openid" },
+                { id: "sso-domains", label: "Email domains", keywords: "sso allowed" },
+                { id: "sso-test", label: "Test sign-in", keywords: "sso check" },
               ],
             },
             {
@@ -330,14 +356,14 @@ export function InstanceSettingsDialog({
                       hint: "No standalone accounts.",
                       icon: <LockIcon className="size-4" />,
                       disabled:
-                        draft.localAccounts === LocalAccounts.OFF || linkedWorks(draft)
+                        draft.localAccounts === LocalAccounts.OFF || linkedWorks(draft) || ssoWorks(draft)
                           ? undefined
-                          : "Needs waifu.dev sign-in working first.",
+                          : "Needs waifu.dev sign-in or single sign-on working first.",
                     },
                   ]}
                 />
                 <Notice show={draft.localAccounts === LocalAccounts.OFF && saved?.localAccounts !== LocalAccounts.OFF && hasPasswordHere}>
-                  You sign in here with a password. Once you sign out, you'll need a waifu.dev account here to get back in.
+                  You sign in here with a password. Once you sign out, you'll need another way in here to get back in.
                 </Notice>
               </Setting>
               <Setting
@@ -360,7 +386,7 @@ export function InstanceSettingsDialog({
                       hint: "No waifu.dev sign-in.",
                       icon: <LockIcon className="size-4" />,
                       disabled:
-                        draft.linkedAccounts === LinkedAccounts.OFF || draft.localAccounts !== LocalAccounts.OFF
+                        draft.linkedAccounts === LinkedAccounts.OFF || draft.localAccounts !== LocalAccounts.OFF || ssoWorks(draft)
                           ? undefined
                           : "Needs standalone accounts on first.",
                     },
@@ -434,6 +460,67 @@ export function InstanceSettingsDialog({
                   ]}
                 />
               </Setting>
+            </>
+          )}
+          {tab === "sso" && (
+            <>
+              <Setting
+                id="sso-accounts"
+                title="Single sign-on accounts"
+                hint="People sign in through the identity provider below, and get an account here the first time."
+                defaultLabel={ACCOUNTS_LABEL[defaults.ssoAccounts]}
+                {...resetter("sso_accounts")}
+              >
+                <Choice
+                  value={draft.ssoAccounts === SsoAccounts.UNSPECIFIED ? SsoAccounts.OFF : draft.ssoAccounts}
+                  onChange={(v) => patch((d) => (d.ssoAccounts = v))}
+                  options={[
+                    {
+                      value: SsoAccounts.OPEN,
+                      label: "Open",
+                      hint: "Anyone the provider lets in.",
+                      icon: <BuildingIcon className="size-4" />,
+                      disabled: providerReady(draft.ssoProvider) ? undefined : "Set up the identity provider first.",
+                    },
+                    {
+                      value: SsoAccounts.CLOSED,
+                      label: "Closed",
+                      hint: "Accounts made before only.",
+                      icon: <DoorClosedIcon className="size-4" />,
+                      disabled: providerReady(draft.ssoProvider) ? undefined : "Set up the identity provider first.",
+                    },
+                    {
+                      value: SsoAccounts.OFF,
+                      label: "Off",
+                      hint: "No single sign-on.",
+                      icon: <LockIcon className="size-4" />,
+                      disabled:
+                        draft.ssoAccounts === SsoAccounts.OFF || draft.localAccounts !== LocalAccounts.OFF || linkedWorks(draft)
+                          ? undefined
+                          : "Needs another way in first.",
+                    },
+                  ]}
+                />
+                <Notice show={draft.ssoAccounts !== SsoAccounts.OFF && draft.ssoAccounts !== SsoAccounts.UNSPECIFIED && !canReturnTo(draft.publicUrl)}>
+                  Identity providers send people back to this instance's public address, which has to be https. Set it under General.
+                </Notice>
+              </Setting>
+              <IdentityProviderForm
+                value={fullProvider(draft.ssoProvider)}
+                onChange={patchProvider}
+                serviceProvider={config.ssoServiceProvider}
+                offHint="No provider set up."
+                test={{
+                  onTest: () => void test.go(inst!.url, window.location.pathname, { key: instanceKey }),
+                  pending: test.pending,
+                  error: test.error,
+                  blocked: changed.includes("sso_provider")
+                    ? "Save first; the test uses the saved provider."
+                    : !providerReady(saved?.ssoProvider)
+                      ? "Fill it in and save first."
+                      : undefined,
+                }}
+              />
             </>
           )}
           {tab === "limits" && (
@@ -527,6 +614,10 @@ const ACCOUNTS_LABEL: Record<number, string> = {
 /** Whether waifu.dev sign-in would work with these settings: on, with an https public address. */
 const linkedWorks = (s: InstanceSettings) => s.linkedAccounts !== LinkedAccounts.OFF && canReturnTo(s.publicUrl);
 
+/** Whether single sign-on would work with these settings: on, set up, with an https public address. */
+const ssoWorks = (s: InstanceSettings) =>
+  (s.ssoAccounts === SsoAccounts.OPEN || s.ssoAccounts === SsoAccounts.CLOSED) && providerReady(s.ssoProvider) && canReturnTo(s.publicUrl);
+
 /** A heads-up under a setting, sliding in while it applies. */
 function Notice({ show, children }: { show: boolean; children: ReactNode }) {
   return (
@@ -579,6 +670,12 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "linked_issuer":
         into.linkedIssuer = from.linkedIssuer;
+        break;
+      case "sso_accounts":
+        into.ssoAccounts = from.ssoAccounts;
+        break;
+      case "sso_provider":
+        into.ssoProvider = fullProvider(from.ssoProvider);
         break;
       case "server_creation":
         into.serverCreation = from.serverCreation;

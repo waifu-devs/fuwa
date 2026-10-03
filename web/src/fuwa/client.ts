@@ -16,6 +16,7 @@ import { MessageService } from "@/gen/fuwa/v1/message_pb";
 import { NodeService } from "@/gen/fuwa/v1/node_pb";
 import { RoleService } from "@/gen/fuwa/v1/role_pb";
 import { ServerService } from "@/gen/fuwa/v1/server_pb";
+import { SsoService } from "@/gen/fuwa/v1/sso_pb";
 import { WebhookService } from "@/gen/fuwa/v1/webhook_pb";
 
 /** Typed clients for every fuwa service on one instance. */
@@ -37,6 +38,7 @@ export type Api = {
   emojis: Client<typeof EmojiService>;
   webhooks: Client<typeof WebhookService>;
   agents: Client<typeof AgentService>;
+  sso: Client<typeof SsoService>;
 };
 
 /**
@@ -69,5 +71,6 @@ export function makeApi(url: string, token: () => string | null): Api {
     emojis: createClient(EmojiService, transport),
     webhooks: createClient(WebhookService, transport),
     agents: createClient(AgentService, transport),
+    sso: createClient(SsoService, transport),
   };
 }

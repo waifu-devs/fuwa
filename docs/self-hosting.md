@@ -204,8 +204,10 @@ The cog next to the instance's name opens the instance settings, where an admin
 can change, without restarting:
 
 - the name and public address,
-- who can make an account: standalone accounts and waifu.dev sign-in, each
-  open, closed to new people, or off,
+- who can make an account: standalone accounts, waifu.dev sign-in and single
+  sign-on through your organization's identity provider (SAML or OpenID
+  Connect, see [the README](../README.md#single-sign-on-saml-and-openid-connect)),
+  each open, closed to new people, or off,
 - who can create servers, and default limits for each one,
 - the anonymous usage signal (see
   [the README](../README.md#the-anonymous-usage-signal)), on by default,
