@@ -1,23 +1,17 @@
-import { SettingsIcon, TvMinimalPlayIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { SettingsIcon } from "lucide-react";
 import { useFuwa } from "@/fuwa/store";
 import { ConnDot, UserAvatar, connectionLabel } from "@/components/Icons";
 import { MuteButtons } from "@/components/calls/parts";
-import { SPRING, SwapText } from "@/components/motion";
+import { SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { displayName, shownStatus } from "@/lib/format";
-import { comboLabel, actionById, bindingOf } from "@/lib/keybinds";
 import { useNow } from "@/lib/notifications";
-import { setPrefs, usePrefs } from "@/lib/prefs";
 import { openSettings } from "@/lib/ui";
-import { cn } from "@/lib/utils";
 
 /** You, on this instance, at the bottom of the sidebar. */
 export function UserPanel({ instanceKey }: { instanceKey: string }) {
   const me = useFuwa((s) => s.instances[instanceKey]?.me);
   const connection = useFuwa((s) => s.instances[instanceKey]?.connection ?? "connecting");
-  const streamer = usePrefs((p) => p.streamer);
-  const streamerKey = usePrefs((p) => bindingOf(actionById("toggleStreamer")!, p));
   const now = useNow(60_000);
   if (!me) return null;
   return (
@@ -51,34 +45,6 @@ export function UserPanel({ instanceKey }: { instanceKey: string }) {
         </span>
       </button>
       <MuteButtons />
-      <button
-        type="button"
-        onClick={() => setPrefs({ streamer: !streamer })}
-        aria-pressed={streamer}
-        aria-label={streamer ? "Turn off streamer mode" : "Turn on streamer mode"}
-        title={`${streamer ? "Turn off" : "Turn on"} streamer mode${streamerKey ? ` (${comboLabel(streamerKey)})` : ""}`}
-        className={cn(
-          "group relative grid size-8 place-items-center rounded-lg transition hover:bg-muted active:scale-90",
-          streamer ? "text-primary" : "text-muted-foreground hover:text-foreground",
-        )}
-      >
-        <motion.span key={String(streamer)} initial={{ scale: 0.6, rotate: -15 }} animate={{ scale: 1, rotate: 0 }} transition={SPRING}>
-          <TvMinimalPlayIcon className="size-[18px]" />
-        </motion.span>
-        <AnimatePresence>
-          {streamer && (
-            <motion.span
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0 }}
-              transition={{ type: "spring", stiffness: 600, damping: 16 }}
-              className="absolute top-1.5 right-1.5 size-2 rounded-full bg-destructive ring-2 ring-card"
-            >
-              <span className="absolute inset-0 animate-ping rounded-full bg-destructive" />
-            </motion.span>
-          )}
-        </AnimatePresence>
-      </button>
       <button
         type="button"
         onClick={() => openSettings()}
