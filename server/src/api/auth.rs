@@ -39,7 +39,7 @@ impl Api {
             return Err(Error::FailedPrecondition("this instance doesn't use standalone accounts".into()));
         }
         let username = req.username.trim().to_lowercase();
-        self.app.limiter.check(&username)?;
+        self.app.limiter.attempt(&username)?;
         let found = self.app.node()?.local_account_by_username(&username).await?;
         let (account, hash) = match found {
             Some((account, hash)) => (Some(account), Some(hash)),
@@ -47,7 +47,6 @@ impl Api {
         };
         let valid = auth::verify_password(req.password, hash).await?;
         let Some(account) = account.filter(|_| valid) else {
-            self.app.limiter.failed(&username);
             return Err(Error::Unauthenticated);
         };
         self.app.limiter.succeeded(&username);
@@ -76,14 +75,12 @@ impl Api {
         user_agent: &str,
     ) -> Result<pb::VerifyTwoFactorResponse> {
         let ticket_hash = auth::hash_token(req.ticket.trim());
-        let Some(account_id) = self.app.node()?.ticket_account(&ticket_hash).await? else {
+        let Some(account_id) = self.app.node()?.try_ticket(&ticket_hash).await? else {
             return Err(Error::FailedPrecondition("this sign-in ran out; enter your password again".into()));
         };
         let guesses = format!("two-factor:{account_id}");
-        self.app.limiter.check(&guesses)?;
+        self.app.limiter.attempt(&guesses)?;
         if !twofactor::check(self.app.node()?, &account_id, &req.code).await? {
-            self.app.limiter.failed(&guesses);
-            self.app.node()?.ticket_failed(&ticket_hash).await?;
             return Err(Error::denied("that code didn't work"));
         }
         self.app.limiter.succeeded(&guesses);
@@ -110,7 +107,7 @@ impl Api {
                 "signing in with waifu.dev needs this instance's public URL to be https; an admin can change it".into(),
             )
         })?;
-        let return_origin = linked::return_origin(&req.return_origin)?;
+        let return_origin = linked::return_origin(&req.return_origin, &settings.public_url, &settings.allowed_origins)?;
         let secret_hash = req.secret_hash.trim().to_ascii_lowercase();
         if secret_hash.len() != 64 || !secret_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(Error::invalid("secret_hash must be a SHA-256 in hex"));
@@ -395,9 +392,12 @@ impl AuthService for Api {
                         "this account signs in through waifu.dev, not with a password".into(),
                     ));
                 }
+                let guesses = format!("password:{}", account.id);
+                self.app.limiter.attempt(&guesses)?;
                 if !auth::verify_password(req.current_password, current).await? {
                     return Err(Error::denied("the current password is wrong"));
                 }
+                self.app.limiter.succeeded(&guesses);
                 auth::validate_password(&req.new_password)?;
                 let hash = auth::hash_password(req.new_password).await?;
                 self.app.node()?.set_password(&account.id, &hash, &token_hash).await?;

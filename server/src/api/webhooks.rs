@@ -7,12 +7,13 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 use super::messages::{WebhookMessage, check_webhook_message, insert_webhook_message};
-use super::{Api, PictureOwner, respond, text, users};
+use super::{Api, PictureOwner, Seat, respond, text, users};
 use crate::app::App;
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::pb::{self, Permission, webhook_service_server::WebhookService};
+use crate::permissions::Access;
 use crate::servers::{self as store, Audit, load_channel};
 
 /// Most webhooks one server can have, as Discord allows per channel.
@@ -57,6 +58,21 @@ async fn load_webhook(conn: &turso::Connection, server_id: &str, id: &str) -> Re
         .ok_or(Error::NotFound("webhook"))
 }
 
+/// A webhook someone managing them may touch: one posting in a channel they
+/// can see. The rest don't exist for them.
+async fn seen_webhook(conn: &turso::Connection, server_id: &str, id: &str, access: &Access) -> Result<pb::Webhook> {
+    let webhook = load_webhook(conn, server_id, id).await?;
+    if !access.can_see(&webhook.channel_id) {
+        return Err(Error::NotFound("webhook"));
+    }
+    Ok(webhook)
+}
+
+/// Refuses a channel the caller can't see, as not there at all.
+fn seen_channel(access: &Access, channel_id: &str) -> Result<()> {
+    if access.can_see(channel_id) { Ok(()) } else { Err(Error::NotFound("channel")) }
+}
+
 /// A channel webhooks can post in: a text or announcement channel of the server.
 async fn postable(conn: &turso::Connection, server_id: &str, channel_id: &str) -> Result<pb::Channel> {
     let channel = load_channel(conn, server_id, channel_id).await?.ok_or(Error::NotFound("channel"))?;
@@ -95,15 +111,17 @@ impl WebhookService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let sdb = self.with(&account, &request.get_ref().server_id, Permission::ManageWebhooks).await?.sdb;
+                let Seat { sdb, access, .. } =
+                    self.with(&account, &request.get_ref().server_id, Permission::ManageWebhooks).await?;
                 let conn = sdb.read()?;
-                let webhooks = query_all(
+                let mut webhooks = query_all(
                     &conn,
                     &format!("SELECT {WEBHOOK_COLUMNS} FROM webhooks ORDER BY id"),
                     (),
                     webhook_row(&sdb.id),
                 )
                 .await?;
+                webhooks.retain(|webhook| access.can_see(&webhook.channel_id));
                 let creators =
                     users(&conn, &webhooks.iter().map(|w| w.creator_id.as_str()).collect::<Vec<_>>()).await?;
                 Ok(pb::ListWebhooksResponse { webhooks, creators })
@@ -120,7 +138,8 @@ impl WebhookService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let sdb = self.with(&account, &req.server_id, Permission::ManageWebhooks).await?.sdb;
+                let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageWebhooks).await?;
+                seen_channel(&access, &req.channel_id)?;
                 let name = text("name", &req.name, 1, 80)?;
                 let (avatar_url, upload) = self.webhook_picture(&account, &req.avatar_url, "").await?;
                 let webhook = sdb
@@ -181,13 +200,16 @@ impl WebhookService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let sdb = self.with(&account, &req.server_id, Permission::ManageWebhooks).await?.sdb;
+                let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageWebhooks).await?;
                 let name = text("name", &req.name, 1, 80)?;
-                let current = load_webhook(&sdb.read()?, &sdb.id, &req.webhook_id).await?;
+                let current = seen_webhook(&sdb.read()?, &sdb.id, &req.webhook_id, &access).await?;
+                if !req.channel_id.is_empty() {
+                    seen_channel(&access, &req.channel_id)?;
+                }
                 let (avatar_url, upload) = self.webhook_picture(&account, &req.avatar_url, &current.avatar_url).await?;
                 let (before, after) = sdb
                     .write(&account.id, async |conn, _events| {
-                        let before = load_webhook(conn, &sdb.id, &req.webhook_id).await?;
+                        let before = seen_webhook(conn, &sdb.id, &req.webhook_id, &access).await?;
                         let channel_id = if req.channel_id.is_empty() { &before.channel_id } else { &req.channel_id };
                         let channel = postable(conn, &sdb.id, channel_id).await?;
                         conn.execute(
@@ -228,10 +250,10 @@ impl WebhookService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let sdb = self.with(&account, &req.server_id, Permission::ManageWebhooks).await?.sdb;
+                let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageWebhooks).await?;
                 let webhook = sdb
                     .write(&account.id, async |conn, _events| {
-                        let mut webhook = load_webhook(conn, &sdb.id, &req.webhook_id).await?;
+                        let mut webhook = seen_webhook(conn, &sdb.id, &req.webhook_id, &access).await?;
                         webhook.token = new_token();
                         conn.execute(
                             "UPDATE webhooks SET token = ?2 WHERE id = ?1",
@@ -260,10 +282,10 @@ impl WebhookService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let sdb = self.with(&account, &req.server_id, Permission::ManageWebhooks).await?.sdb;
+                let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageWebhooks).await?;
                 let webhook = sdb
                     .write(&account.id, async |conn, _events| {
-                        let webhook = load_webhook(conn, &sdb.id, &req.webhook_id).await?;
+                        let webhook = seen_webhook(conn, &sdb.id, &req.webhook_id, &access).await?;
                         conn.execute("DELETE FROM webhooks WHERE id = ?1", [webhook.id.as_str()]).await?;
                         let channel = load_channel(conn, &sdb.id, &webhook.channel_id).await?.unwrap_or_default();
                         let entry = Audit::new(pb::AuditAction::WebhookDelete, &webhook.id)

@@ -192,6 +192,11 @@ impl ChannelService for Api {
                         let kind = pb::ChannelType::try_from(current.r#type).unwrap_or(pb::ChannelType::Text);
                         let name = req.name.as_deref().map(|v| channel_name(v, kind)).transpose()?;
                         if let Some(parent_id) = &req.parent_id {
+                            // Moving a channel changes which overwrites apply to it, so it
+                            // takes Manage Channels for the whole server, not only here.
+                            if *parent_id != current.parent_id {
+                                access.require(Permission::ManageChannels)?;
+                            }
                             if kind == pb::ChannelType::Category && !parent_id.is_empty() {
                                 return Err(Error::invalid("categories can't sit inside other channels"));
                             }
@@ -438,6 +443,33 @@ impl ChannelService for Api {
                         });
                         if !access.may_change(changed, have) {
                             return Err(Error::denied("you can only change permissions you have in this channel"));
+                        }
+                        // And only for roles and members below them (@everyone and
+                        // their own are always theirs to change).
+                        for o in old.iter().chain(&wanted) {
+                            if find(&old, &o.target_id) == find(&wanted, &o.target_id)
+                                || o.target_id == account.id
+                                || (!o.member && o.target_id == sdb.id)
+                            {
+                                continue;
+                            }
+                            let below = if o.member {
+                                match store::member_access(conn, &sdb.id, &o.target_id).await? {
+                                    Some((_, theirs)) => access.outranks(&theirs),
+                                    // Gone from the server: their overwrite is only clutter.
+                                    None => true,
+                                }
+                            } else {
+                                match permissions::role(conn, &sdb.id, &o.target_id).await? {
+                                    Some(role) => access.above(i64::from(role.position)),
+                                    None => true,
+                                }
+                            };
+                            if !below {
+                                return Err(Error::denied(
+                                    "you can only change permissions for roles and members below your highest role",
+                                ));
+                            }
                         }
                         conn.execute("DELETE FROM channel_overwrites WHERE channel_id = ?1", [before.id.as_str()]).await?;
                         for o in &wanted {

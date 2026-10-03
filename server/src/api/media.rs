@@ -54,7 +54,15 @@ impl MediaService for Api {
                 };
                 let token = auth::new_token();
                 let expires_at = now_ms() + media::UPLOAD_TTL_MS;
-                self.app.node()?.reserve_media(&row, &auth::hash_token(&token), expires_at).await?;
+                self.app
+                    .node()?
+                    .reserve_media(
+                        &row,
+                        &auth::hash_token(&token),
+                        expires_at,
+                        settings.limits.picture_upload_bytes_per_day,
+                    )
+                    .await?;
                 let base = &settings.public_url;
                 Ok(pb::CreateUploadResponse {
                     upload_url: format!("{base}/media/upload/{token}"),

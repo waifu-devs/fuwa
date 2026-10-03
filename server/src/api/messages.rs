@@ -616,6 +616,7 @@ impl MessageService for Api {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
                 let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
+                access.require_not_timed_out()?;
                 sdb.write(&account.id, async |conn, events| {
                     let message = load_message(conn, &sdb.id, &req.message_id)
                         .await?

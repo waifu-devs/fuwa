@@ -1026,6 +1026,9 @@ pub async fn member_access(
     if member.pending {
         access.hold_back();
     }
+    if member.timed_out_until.as_ref().is_some_and(|until| millis(until) > now_ms()) {
+        access.time_out();
+    }
     Ok(Some((member, access)))
 }
 

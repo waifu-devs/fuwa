@@ -55,7 +55,10 @@
     and password changes don't apply to them. The web app's side is
     `web/src/lib/linked.ts`, the "Continue with waifu.dev" button in
     `Connect.tsx` and the callback page (`pages/LinkedCallback.tsx`), which also
-    hands sign-ins started by a fuwa app on another address back to it.
+    hands sign-ins started by a fuwa app on another address back to it. Only
+    apps the instance trusts get sign-ins back (`linked::return_origin`): its
+    own address, loopback (desktop apps), and origins listed by name in
+    `allowed_origins`.
   - `servers.rs`: community servers, one Turso file each under `servers/`: the
     ones this process keeps (all of them, or a shard's share). Every change goes through
     `ServerDb::write`, which appends events to the server's log in the same
@@ -100,7 +103,9 @@
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's
     (@everyone, then the member's roles together, then the member). No View
-    Channels in a channel means no permissions there at all. `Access` also
+    Channels in a channel means no permissions there at all. A member who's
+    timed out keeps only View Channels until it ends (`Access::time_out`), so
+    they read and can only leave or agree to the rules. `Access` also
     knows rank (the member's highest role; the owner above everything) for
     `outranks`, `above` and `may_change`.
   - `db.rs`: Turso helpers: opening, `user_version` migrations, transactions.
@@ -398,7 +403,9 @@
   never plays a sound or shows a notification.
 - Timestamps are unix milliseconds in the database, `google.protobuf.Timestamp` on
   the wire. Ids are ULIDs (`id::new_id`).
-- Limits are unlimited unless configured. Never hardcode a usage cap.
+- Limits are unlimited unless configured. Never hardcode a usage cap; that
+  includes picture uploads (a size per picture and bytes per account per day),
+  which admins can turn on in instance settings.
 - Everything about an instance or a server must be configurable from the
   client. A new operator switch is a field in `InstanceSettings` (with its
   `FUWA_*` default) and a control in the app's settings, not only an

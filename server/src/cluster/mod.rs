@@ -68,7 +68,7 @@ impl Role {
 }
 
 /// How this process fits into a split instance.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClusterConfig {
     /// FUWA_ROLE: all (default) | gateway | directory | shard | media.
     pub role: Role,
@@ -85,6 +85,19 @@ pub struct ClusterConfig {
     /// How long a call waits for another part that's restarting: [`RIDE_OUT`]
     /// (tests make it shorter).
     pub ride_out: Duration,
+}
+
+impl std::fmt::Debug for ClusterConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClusterConfig")
+            .field("role", &self.role)
+            .field("key", &crate::config::Secret(&self.key))
+            .field("directory_url", &self.directory_url)
+            .field("shard_id", &self.shard_id)
+            .field("internal_url", &self.internal_url)
+            .field("ride_out", &self.ride_out)
+            .finish()
+    }
 }
 
 impl ClusterConfig {

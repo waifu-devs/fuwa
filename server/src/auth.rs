@@ -165,39 +165,40 @@ pub fn validate_password(password: &str) -> Result<()> {
     Ok(())
 }
 
-/// Slows down password guessing: after too many failures for one username in a
+/// Slows down password guessing: after too many attempts for one key in a
 /// window, further attempts are refused until the window passes.
+///
+/// Each attempt is counted before it's checked, under one lock, so guesses
+/// sent all at once can't slip past the count while the first ones are still
+/// being checked. A right answer clears the count.
 #[derive(Default)]
 pub struct SignInLimiter {
-    failures: Mutex<HashMap<String, (u32, i64)>>,
+    attempts: Mutex<HashMap<String, (u32, i64)>>,
 }
 
-const MAX_FAILURES: u32 = 10;
+const MAX_ATTEMPTS: u32 = 10;
 const WINDOW_MS: i64 = 15 * 60 * 1000;
 
 impl SignInLimiter {
-    pub fn check(&self, username: &str) -> Result<()> {
-        let failures = self.failures.lock().unwrap_or_else(|p| p.into_inner());
-        match failures.get(username) {
-            Some((count, since)) if *count >= MAX_FAILURES && now_ms() - since < WINDOW_MS => {
-                Err(Error::ResourceExhausted(
-                    "too many failed sign-ins for this account; try again in a few minutes".into(),
-                ))
-            }
-            _ => Ok(()),
-        }
-    }
-
-    pub fn failed(&self, username: &str) {
-        let mut failures = self.failures.lock().unwrap_or_else(|p| p.into_inner());
+    /// Counts an attempt for `key`, or refuses it when there have been too
+    /// many in the window.
+    pub fn attempt(&self, key: &str) -> Result<()> {
+        let mut attempts = self.attempts.lock().unwrap_or_else(|p| p.into_inner());
         let now = now_ms();
-        failures.retain(|_, (_, since)| now - *since < WINDOW_MS);
-        let entry = failures.entry(username.to_string()).or_insert((0, now));
+        attempts.retain(|_, (_, since)| now - *since < WINDOW_MS);
+        let entry = attempts.entry(key.to_string()).or_insert((0, now));
+        if entry.0 >= MAX_ATTEMPTS {
+            return Err(Error::ResourceExhausted(
+                "too many failed sign-ins for this account; try again in a few minutes".into(),
+            ));
+        }
         entry.0 += 1;
+        Ok(())
     }
 
-    pub fn succeeded(&self, username: &str) {
-        self.failures.lock().unwrap_or_else(|p| p.into_inner()).remove(username);
+    /// Clears the count after a right answer.
+    pub fn succeeded(&self, key: &str) {
+        self.attempts.lock().unwrap_or_else(|p| p.into_inner()).remove(key);
     }
 }
 
@@ -223,15 +224,27 @@ mod tests {
     }
 
     #[test]
-    fn limiter_blocks_after_repeated_failures() {
+    fn limiter_blocks_after_repeated_attempts() {
         let limiter = SignInLimiter::default();
-        for _ in 0..MAX_FAILURES {
-            limiter.check("juan").unwrap();
-            limiter.failed("juan");
+        for _ in 0..MAX_ATTEMPTS {
+            limiter.attempt("juan").unwrap();
         }
-        assert!(limiter.check("juan").is_err());
-        assert!(limiter.check("someone").is_ok());
+        assert!(limiter.attempt("juan").is_err());
+        assert!(limiter.attempt("someone").is_ok());
         limiter.succeeded("juan");
-        assert!(limiter.check("juan").is_ok());
+        assert!(limiter.attempt("juan").is_ok());
+    }
+
+    #[test]
+    fn limiter_counts_attempts_made_at_once() {
+        let limiter = std::sync::Arc::new(SignInLimiter::default());
+        let threads: Vec<_> = (0..64)
+            .map(|_| {
+                let limiter = limiter.clone();
+                std::thread::spawn(move || limiter.attempt("juan").is_ok())
+            })
+            .collect();
+        let let_through = threads.into_iter().map(|t| t.join().unwrap()).filter(|ok| *ok).count();
+        assert_eq!(let_through, MAX_ATTEMPTS as usize);
     }
 }

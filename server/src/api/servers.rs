@@ -811,7 +811,12 @@ impl ServerService for Api {
                 }
                 let server = sdb
                     .write(&account.id, async |conn, events| {
-                        store::member(conn, &sdb.id, &req.user_id).await?.ok_or(Error::NotFound("member"))?;
+                        let member =
+                            store::member(conn, &sdb.id, &req.user_id).await?.ok_or(Error::NotFound("member"))?;
+                        // Agents never own servers; someone has to answer for one.
+                        if member.user.is_some_and(|user| user.kind == pb::AccountKind::Agent as i32) {
+                            return Err(Error::FailedPrecondition("agents can't own servers".into()));
+                        }
                         let now = now_ms();
                         conn.execute(
                             "UPDATE server SET owner_id = ?1, updated_at = ?2 WHERE owner_id = ?3",
