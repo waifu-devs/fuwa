@@ -17,16 +17,23 @@ use gpui_kit::{
 };
 
 use crate::core::config::Density;
-use crate::core::store::{Connection, user_name};
+use crate::core::store::{Connection, InstanceState, user_name};
 use crate::core::vault::ItemKind;
 use crate::pb;
-use crate::ui::app::{Dialog, FuwaApp, Nav, Target};
+use crate::ui::app::{Dialog, FuwaApp, Menu, Nav, Target};
+use crate::ui::mentions::{Look, Pick, SCHEME, mention_links};
 use crate::ui::motion;
 use crate::ui::text::{clock, images_as_links, ms_of, when};
 use crate::ui::theme::{Palette, alpha, mix};
 use crate::ui::widgets::{
-    avatar, card, conn_dot, error_line, fuwa_mark, icon, icon_button, pal, primary_button, soft_button,
+    avatar, card, conn_dot, error_line, fuwa_mark, icon, icon_button, icon_button_in, pal, primary_button, soft_button,
 };
+
+/// Why you can't write here, and what would let you.
+pub struct Blocked {
+    pub text: String,
+    pub action: Option<(&'static str, Dialog)>,
+}
 
 /// Messages from the same person this close together sit under one header.
 const GROUP_MS: i64 = 7 * 60 * 1000;
@@ -59,7 +66,15 @@ pub struct Msg {
     pub user: Option<pb::User>,
     pub name: String,
     pub color: Option<Hsla>,
+    /// What was written, as it's edited.
     pub content: String,
+    /// What's drawn: Markdown with mentions as links and pictures as links.
+    pub shown: String,
+    /// It pings you: by name, a role of yours, or @everyone.
+    pub mentions_me: bool,
+    pub editing: bool,
+    /// Yours, or you may manage messages here.
+    pub can_delete: bool,
     pub at: i64,
     pub edited: bool,
     pub head: bool,
@@ -85,7 +100,9 @@ impl Row {
             Row::Older { loading } => ("older", loading).hash(h),
             Row::Start { title, .. } => ("start", title).hash(h),
             Row::Note { id, text, .. } => (id, text).hash(h),
-            Row::Msg(m) => (&m.id, &m.content, m.edited, m.head, m.pending, &m.failed, &m.name).hash(h),
+            Row::Msg(m) => {
+                (&m.id, &m.shown, m.edited, m.head, m.pending, &m.failed, &m.name, m.editing, m.mentions_me).hash(h)
+            }
         }
     }
 }
@@ -100,6 +117,9 @@ impl FuwaApp {
                 let mut rows = Vec::new();
                 let Some(loaded) = i.messages.get(&channel) else { return rows };
                 let name = i.channel(&server, &channel).map(|c| c.name.clone()).unwrap_or_default();
+                let look = Look::of(i, &server);
+                let manage = i.access(&server).has_in(&channel, pb::Permission::ManageMessages);
+                let suppress = i.effective_notifications(&server, &channel, 0).suppress_everyone;
                 if loaded.has_more {
                     rows.push(Row::Older { loading: loaded.loading });
                 } else {
@@ -118,12 +138,22 @@ impl FuwaApp {
                         });
                         continue;
                     }
+                    if m.kind == pb::MessageKind::AutoModAlert as i32 {
+                        if let Some(alert) = &m.auto_mod {
+                            rows.push(Row::Msg(Box::new(auto_mod_row(i, &server, m, alert, manage))));
+                        }
+                        continue;
+                    }
                     rows.push(Row::Msg(Box::new(Msg {
                         id: m.id.clone(),
                         user: i.users.get(&m.author_id).cloned(),
                         name: i.display_name(Some(&server), &m.author_id),
                         color: i.name_color(&server, &m.author_id).map(|c| rgb(c).into()),
                         content: m.content.clone(),
+                        shown: images_as_links(&mention_links(&m.content, &look)),
+                        mentions_me: i.pings_me(&server, m, suppress),
+                        editing: self.editing.as_deref() == Some(m.id.as_str()),
+                        can_delete: m.author_id == me || manage,
                         at: ms_of(m.created_at.as_ref()),
                         edited: m.edited_at.is_some(),
                         head: true,
@@ -141,6 +171,10 @@ impl FuwaApp {
                         name: i.display_name(Some(&server), &me),
                         color: i.name_color(&server, &me).map(|c| rgb(c).into()),
                         content: p.content.clone(),
+                        shown: images_as_links(&mention_links(&p.content, &look)),
+                        mentions_me: false,
+                        editing: false,
+                        can_delete: false,
                         at: p.created_at_ms,
                         edited: false,
                         head: true,
@@ -178,6 +212,10 @@ impl FuwaApp {
                             name,
                             color: None,
                             content: item.content.clone(),
+                            shown: images_as_links(&item.content),
+                            mentions_me: false,
+                            editing: self.editing.as_deref() == Some(item.seq.to_string().as_str()),
+                            can_delete: item.sender_id == me_id,
                             at: item.at,
                             edited: item.edited_at > 0,
                             head: true,
@@ -194,6 +232,10 @@ impl FuwaApp {
                             name,
                             color: None,
                             content: "This message can't be opened on this device.".into(),
+                            shown: String::new(),
+                            mentions_me: false,
+                            editing: false,
+                            can_delete: item.sender_id == me_id,
                             at: item.at,
                             edited: false,
                             head: true,
@@ -236,6 +278,10 @@ impl FuwaApp {
                         name: me.as_ref().map(user_name).unwrap_or_default(),
                         color: None,
                         content: text.clone(),
+                        shown: images_as_links(text),
+                        mentions_me: false,
+                        editing: false,
+                        can_delete: false,
                         at: crate::core::dms::now_ms(),
                         edited: false,
                         head: true,
@@ -361,6 +407,21 @@ impl FuwaApp {
                 )
             })
             .when(channel.topic.is_empty(), |el| el.child(div().flex_1()))
+            .child({
+                let muted = self.core.shared.read(|s| {
+                    s.instance(key).is_some_and(|i| i.is_muted(server, &channel.id, crate::core::dms::now_ms()))
+                });
+                let menu =
+                    Menu::Channel { key: key.to_owned(), server: server.to_owned(), channel: channel.id.clone() };
+                let open = self.menu.as_ref() == Some(&menu);
+                icon_button("bell", if muted { "bell-off" } else { "bell" }, &p)
+                    .when(open || muted, |el| el.text_color(p.primary))
+                    .when(open, |el| el.bg(alpha(p.primary, 0.12)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.menu = if this.menu.as_ref() == Some(&menu) { None } else { Some(menu.clone()) };
+                        cx.notify();
+                    }))
+            })
             .child(
                 icon_button("members-toggle", "users", &p)
                     .when(self.members_open, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
@@ -370,6 +431,25 @@ impl FuwaApp {
                     })),
             );
 
+        let blocked = self.core.shared.read(|s| {
+            let i = s.instance(key)?;
+            let access = i.access(server);
+            if access.pending {
+                return Some(Blocked {
+                    text: "Agree to this server's rules to start talking.".into(),
+                    action: Some(("Read the rules", Dialog::Rules { key: key.to_owned(), server: server.to_owned() })),
+                });
+            }
+            let now = crate::core::dms::now_ms();
+            if let Some(until) = i.my_member(server).and_then(|m| m.timed_out_until.as_ref()).map(|t| ms_of(Some(t)))
+                && until > now
+                && !access.owner
+            {
+                return Some(Blocked { text: format!("You're timed out until {}.", clock(until)), action: None });
+            }
+            (!access.has_in(&channel.id, pb::Permission::SendMessages))
+                .then(|| Blocked { text: "You can't send messages in this channel.".into(), action: None })
+        });
         let column = div()
             .flex_1()
             .min_w_0()
@@ -378,11 +458,14 @@ impl FuwaApp {
             .flex_col()
             .child(header)
             .child(self.message_list(window, cx))
-            .child(self.composer_bar(None, window, cx));
+            .child(self.composer_bar(blocked, window, cx));
 
-        let mut view = div().size_full().flex().child(column);
+        let mut view = div().size_full().relative().flex().child(column);
         if self.members_open {
             view = view.child(self.members_panel(key, server, window, cx));
+        }
+        if let Some(Menu::Channel { key, server, channel }) = self.menu.clone() {
+            view = view.child(self.bell_menu(&key, &server, &channel, window, cx));
         }
         view.into_any_element()
     }
@@ -390,9 +473,17 @@ impl FuwaApp {
     fn message_list(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let rows = self.rows.clone();
-        let fresh = Rc::new(self.fresh.clone());
-        let this = cx.entity().downgrade();
-        let compact = self.prefs.density == Density::Compact;
+        let ctx = Rc::new(RowCtx {
+            fresh: self.fresh.clone(),
+            this: cx.entity().downgrade(),
+            compact: self.prefs.density == Density::Compact,
+            edit_box: self.edit_box.clone(),
+            key: self.target().map(|t| t.key().to_owned()).unwrap_or_default(),
+            server: match self.target() {
+                Some(Target::Channel { server, .. }) => Some(server),
+                _ => None,
+            },
+        });
         let target = self.list.target.clone().unwrap_or_default();
         let loading = rows.is_empty();
         div().flex_1().min_h_0().relative().child(if loading {
@@ -402,7 +493,7 @@ impl FuwaApp {
                 SharedString::from(format!("list|{target}")),
                 self.scroller.clone(),
                 move |ix, _window, cx| match rows.get(ix) {
-                    Some(row) => render_row(row, ix, &fresh, &this, compact, cx),
+                    Some(row) => render_row(row, ix, &ctx, cx),
                     None => div().into_any_element(),
                 },
             )
@@ -419,7 +510,7 @@ impl FuwaApp {
     /// adds a line. `blocked` says why you can't send here, if you can't.
     fn composer_bar(
         &mut self,
-        blocked: Option<String>,
+        blocked: Option<Blocked>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -428,31 +519,42 @@ impl FuwaApp {
         let typed = !self.composer.read(cx).value().trim().is_empty();
         let ring = motion::follow("composer-ring", if focused { 1.0 } else { 0.0 }, window, cx);
         let ready = motion::follow("composer-send", if typed { 1.0 } else { 0.0 }, window, cx);
-        if let Some(reason) = blocked {
+        if let Some(blocked) = blocked {
             return div()
                 .flex_none()
                 .px(px(20.0))
                 .pb(px(20.0))
-                .child(
+                .child(motion::rise(
                     div()
                         .flex()
                         .items_center()
                         .gap(px(10.0))
                         .px(px(16.0))
-                        .py(px(14.0))
+                        .py(px(10.0))
+                        .min_h(px(52.0))
                         .rounded(px(16.0))
                         .bg(alpha(p.muted_foreground, 0.1))
                         .text_sm()
                         .text_color(p.muted_foreground)
                         .child(icon("lock").size(px(16.0)))
-                        .child(reason),
-                )
+                        .child(div().flex_1().child(blocked.text))
+                        .when_some(blocked.action, |el, (label, dialog)| {
+                            el.child(primary_button("blocked-action", label, &p).h(px(34.0)).text_sm().on_click(
+                                cx.listener(move |this, _, window, cx| this.open_dialog(dialog.clone(), window, cx)),
+                            ))
+                        }),
+                    "composer-blocked",
+                    Duration::ZERO,
+                    8.0,
+                ))
                 .into_any_element();
         }
         div()
             .flex_none()
+            .relative()
             .px(px(20.0))
             .pb(px(20.0))
+            .when_some(self.picker.clone(), |el, picker| el.child(self.picker_list(picker, &p, cx)))
             .child(
                 div()
                     .flex()
@@ -491,6 +593,83 @@ impl FuwaApp {
                     ),
             )
             .into_any_element()
+    }
+
+    /// The @ list, floating over the composer: people, roles, @everyone.
+    fn picker_list(&self, picker: crate::ui::app::Picker, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let hl = alpha(p.primary, 0.14);
+        let hover = alpha(p.primary, 0.08);
+        let mut list = div().flex().flex_col().p(px(6.0)).child(
+            div()
+                .px(px(10.0))
+                .pt(px(6.0))
+                .pb(px(4.0))
+                .text_size(px(11.0))
+                .font_weight(FontWeight::EXTRA_BOLD)
+                .text_color(p.muted_foreground)
+                .child("MENTION"),
+        );
+        for (n, pick) in picker.options.iter().enumerate() {
+            let active = n == picker.active;
+            let (lead, name, sub): (AnyElement, String, String) = match pick {
+                Pick::Member { user, name } => {
+                    (avatar(Some(user), 24.0, p).into_any_element(), name.clone(), format!("@{}", user.username))
+                }
+                Pick::Role { name, color, .. } => (
+                    div()
+                        .size(px(24.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .size(px(12.0))
+                                .rounded_full()
+                                .bg(color.map(|c| Hsla::from(rgb(c))).unwrap_or(p.muted_foreground.into())),
+                        )
+                        .into_any_element(),
+                    format!("@{name}"),
+                    "Role".into(),
+                ),
+                Pick::Everyone(which) => (
+                    div()
+                        .size(px(24.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(p.primary)
+                        .child(icon("at-sign").size(px(16.0)))
+                        .into_any_element(),
+                    format!("@{which}"),
+                    if *which == "everyone" { "Everyone in the channel".into() } else { "Everyone online".into() },
+                ),
+            };
+            let pick = pick.clone();
+            list = list.child(
+                div()
+                    .id(SharedString::from(format!("pick|{}", pick.id())))
+                    .h(px(38.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .rounded(px(10.0))
+                    .cursor_pointer()
+                    .when(active, |el| el.bg(hl))
+                    .when(!active, |el| el.hover(move |s| s.bg(hover)))
+                    .on_click(cx.listener(move |this, _, window, cx| this.pick_mention(pick.clone(), window, cx)))
+                    .child(lead)
+                    .child(div().font_weight(FontWeight::BOLD).text_sm().child(name))
+                    .child(div().flex_1())
+                    .child(div().text_xs().text_color(p.muted_foreground).child(sub)),
+            );
+        }
+        div().absolute().left(px(20.0)).right(px(20.0)).bottom(gpui_kit::relative(1.0)).child(motion::rise(
+            card(p).mb(px(-12.0)).child(list),
+            SharedString::from(format!("picker-{}", picker.start)),
+            Duration::ZERO,
+            10.0,
+        ))
     }
 
     fn members_panel(
@@ -545,10 +724,14 @@ impl FuwaApp {
                     .gap(px(10.0))
                     .rounded(px(12.0))
                     .hover(move |s| s.bg(hover))
-                    .when(!mine, |el| {
-                        el.cursor_pointer().on_click(cx.listener(move |this, _, window, cx| {
-                            this.message_person(k.clone(), uid.clone(), window, cx)
-                        }))
+                    .cursor_pointer()
+                    .on_click({
+                        let server = server.to_owned();
+                        cx.listener(move |this, _, window, cx| {
+                            let dialog =
+                                Dialog::Profile { key: k.clone(), user_id: uid.clone(), server: Some(server.clone()) };
+                            this.open_dialog(dialog, window, cx)
+                        })
                     })
                     .child(avatar(Some(&user), 32.0, &p))
                     .child(
@@ -567,7 +750,7 @@ impl FuwaApp {
                                 .opacity(0.0)
                                 .group_hover("member", |s| s.opacity(1.0))
                                 .text_color(p.primary)
-                                .child(icon("lock").size(px(14.0))),
+                                .child(icon("chevron-right").size(px(14.0))),
                         )
                     }),
                 SharedString::from(format!("member-in|{}", user.id)),
@@ -692,7 +875,8 @@ impl FuwaApp {
             Some("Joining the conversation on this device…".to_owned())
         } else {
             blocked
-        };
+        }
+        .map(|text| Blocked { text, action: None });
         div()
             .size_full()
             .flex()
@@ -860,19 +1044,22 @@ fn group(rows: &mut [Row]) {
     }
 }
 
-fn render_row(
-    row: &Row,
-    ix: usize,
-    fresh: &Rc<std::collections::HashMap<String, Instant>>,
-    this: &WeakEntity<FuwaApp>,
+/// What every row of the open list needs from the window.
+struct RowCtx {
+    fresh: std::collections::HashMap<String, Instant>,
+    this: WeakEntity<FuwaApp>,
     compact: bool,
-    cx: &mut App,
-) -> AnyElement {
+    edit_box: gpui_kit::Entity<gpui_kit::component::input::TextareaState>,
+    key: String,
+    server: Option<String>,
+}
+
+fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElement {
     let p = pal(cx);
-    let is_fresh = fresh.contains_key(&row.id());
+    let is_fresh = ctx.fresh.contains_key(&row.id());
     let el: AnyElement = match row {
         Row::Older { loading } => {
-            let this = this.clone();
+            let this = ctx.this.clone();
             div()
                 .flex()
                 .justify_center()
@@ -916,7 +1103,7 @@ fn render_row(
             .child(div().w(px(40.0)).flex().justify_center().child(icon(glyph).size(px(16.0)).text_color(p.primary)))
             .child(text.clone())
             .into_any_element(),
-        Row::Msg(m) => message(m, &p, this, compact),
+        Row::Msg(m) => message(m, &p, ctx, cx),
     };
     if is_fresh {
         motion::rise(div().child(el), SharedString::from(format!("rise|{}|{ix}", row.id())), Duration::ZERO, 14.0)
@@ -926,21 +1113,73 @@ fn render_row(
     }
 }
 
-fn message(m: &Msg, p: &Palette, this: &WeakEntity<FuwaApp>, compact: bool) -> AnyElement {
+/// Opens someone's card from a message: their name, their picture, or a mention.
+fn open_profile(ctx: &RowCtx, user_id: String, window: &mut Window, cx: &mut App) {
+    open_card(&ctx.this, &ctx.key, ctx.server.clone(), user_id, window, cx);
+}
+
+fn open_card(
+    this: &WeakEntity<FuwaApp>,
+    key: &str,
+    server: Option<String>,
+    user_id: String,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let key = key.to_owned();
+    let _ = this.update(cx, |this, cx| {
+        this.open_dialog(Dialog::Profile { key, user_id, server }, window, cx);
+    });
+}
+
+fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement {
+    let compact = ctx.compact;
     let hover = alpha(p.foreground, if p.dark { 0.035 } else { 0.03 });
     let gutter = if compact { 0.0 } else { 56.0 };
-    let content: AnyElement = if m.unreadable {
+    let content: AnyElement = if m.editing {
+        edit_box(m, p, ctx).into_any_element()
+    } else if m.unreadable {
         div().italic().text_color(p.muted_foreground).child(m.content.clone()).into_any_element()
     } else {
-        TextView::markdown(SharedString::from(format!("md|{}", m.id)), images_as_links(&m.content))
+        let (this, key, server) = (ctx.this.clone(), ctx.key.clone(), ctx.server.clone());
+        TextView::markdown(SharedString::from(format!("md|{}", m.id)), m.shown.clone())
             .selectable(true)
             .style(TextViewStyle { paragraph_gap: gpui_kit::rems(0.35), ..TextViewStyle::default() })
+            .on_link_click(move |url, _, window, cx| match url.strip_prefix(SCHEME) {
+                Some(mention) => {
+                    let Some(username) = mention.strip_prefix("user/") else { return };
+                    let found = this.upgrade().and_then(|app| {
+                        let server = server.clone()?;
+                        app.read(cx).core.shared.read(|s| {
+                            s.instance(&key)?
+                                .members
+                                .get(&server)?
+                                .iter()
+                                .filter_map(|m| m.user.as_ref())
+                                .find(|u| u.username.eq_ignore_ascii_case(username))
+                                .map(|u| u.id.clone())
+                        })
+                    });
+                    if let Some(id) = found {
+                        open_card(&this, &key, server.clone(), id, window, cx);
+                    }
+                }
+                None => cx.open_url(url),
+            })
             .w_full()
             .into_any_element()
     };
+    let author = m.user.as_ref().map(|u| u.id.clone());
     let name = div()
+        .id(SharedString::from(format!("name|{}", m.id)))
         .font_weight(FontWeight::EXTRA_BOLD)
         .text_color(m.color.unwrap_or(p.foreground.into()))
+        .cursor_pointer()
+        .hover(|s| s.underline())
+        .when_some(author.clone(), |el, id| {
+            let ctx = ctx.clone();
+            el.on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
+        })
         .child(m.name.clone());
     let time = div().text_xs().text_color(p.muted_foreground).child(when(m.at));
     let mut body = div().flex_1().min_w_0().flex().flex_col();
@@ -953,10 +1192,12 @@ fn message(m: &Msg, p: &Palette, this: &WeakEntity<FuwaApp>, compact: bool) -> A
             .items_baseline()
             .gap(px(6.0))
             .child(div().flex_1().min_w_0().when(m.pending && m.failed.is_none(), |el| el.opacity(0.55)).child(content))
-            .when(m.edited, |el| el.child(div().text_xs().text_color(p.muted_foreground).child("(edited)"))),
+            .when(m.edited && !m.editing, |el| {
+                el.child(div().text_xs().text_color(p.muted_foreground).child("(edited)"))
+            }),
     );
     if let Some(reason) = &m.failed {
-        let (retry, dismiss) = (this.clone(), this.clone());
+        let (retry, dismiss) = (ctx.this.clone(), ctx.this.clone());
         let nonce = m.nonce;
         body = body.child(
             div()
@@ -998,7 +1239,18 @@ fn message(m: &Msg, p: &Palette, this: &WeakEntity<FuwaApp>, compact: bool) -> A
     let left: AnyElement = if compact {
         div().into_any_element()
     } else if m.head {
-        div().w(px(gutter)).flex_none().pt(px(2.0)).child(avatar(m.user.as_ref(), 40.0, p)).into_any_element()
+        div()
+            .id(SharedString::from(format!("face|{}", m.id)))
+            .w(px(gutter))
+            .flex_none()
+            .pt(px(2.0))
+            .cursor_pointer()
+            .when_some(author, |el, id| {
+                let ctx = ctx.clone();
+                el.on_click(move |_, window, cx| open_profile(&ctx, id.clone(), window, cx))
+            })
+            .child(avatar(m.user.as_ref(), 40.0, p))
+            .into_any_element()
     } else {
         div()
             .w(px(gutter))
@@ -1012,8 +1264,9 @@ fn message(m: &Msg, p: &Palette, this: &WeakEntity<FuwaApp>, compact: bool) -> A
             .into_any_element()
     };
 
-    let actions = (m.mine && !m.pending && !m.unreadable).then(|| {
-        let this = this.clone();
+    let can_edit = m.mine && !m.pending && !m.unreadable && !m.editing;
+    let can_delete = m.can_delete && !m.pending && !m.editing;
+    let actions = (can_edit || can_delete).then(|| {
         let id = m.id.clone();
         div()
             .absolute()
@@ -1022,15 +1275,40 @@ fn message(m: &Msg, p: &Palette, this: &WeakEntity<FuwaApp>, compact: bool) -> A
             .opacity(0.0)
             .group_hover("msg", |s| s.opacity(1.0))
             .flex()
-            .rounded(px(10.0))
+            .p(px(2.0))
+            .gap(px(2.0))
+            .rounded(px(12.0))
             .bg(p.card)
             .border_1()
             .border_color(p.border)
-            .child(icon_button(SharedString::from(format!("del|{id}")), "trash", p).on_click(move |_, _, cx| {
-                let _ = this.update(cx, |this, cx| this.delete(id.clone(), cx));
-            }))
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: alpha(p.foreground, 0.08),
+                offset: gpui_kit::point(px(0.0), px(4.0)),
+                blur_radius: px(12.0),
+                spread_radius: px(-4.0),
+                inset: false,
+            }])
+            .when(can_edit, |el| {
+                let (this, id) = (ctx.this.clone(), id.clone());
+                el.child(icon_button(SharedString::from(format!("edit|{id}")), "pencil", p).on_click(
+                    move |_, window, cx| {
+                        let _ = this.update(cx, |this, cx| this.start_edit(id.clone(), window, cx));
+                    },
+                ))
+            })
+            .when(can_delete, |el| {
+                let this = ctx.this.clone();
+                el.child(icon_button_in(SharedString::from(format!("del|{id}")), "trash-2", p, p.destructive).on_click(
+                    move |_, _, cx| {
+                        let _ = this.update(cx, |this, cx| this.delete(id.clone(), cx));
+                    },
+                ))
+            })
     });
 
+    let ping = alpha(p.primary, if p.dark { 0.12 } else { 0.09 });
+    let ping_hover = alpha(p.primary, if p.dark { 0.16 } else { 0.13 });
+    let bar = p.primary;
     div()
         .id(SharedString::from(format!("msg|{}", m.id)))
         .group("msg")
@@ -1041,12 +1319,80 @@ fn message(m: &Msg, p: &Palette, this: &WeakEntity<FuwaApp>, compact: bool) -> A
         .rounded(px(10.0))
         .when(m.head, |el| el.mt(px(if compact { 4.0 } else { 10.0 })))
         .py(px(if compact { 1.0 } else { 3.0 }))
-        .hover(move |s| s.bg(hover))
+        .map(|el| {
+            if m.mentions_me {
+                el.bg(ping).hover(move |s| s.bg(ping_hover))
+            } else if m.editing {
+                el.bg(hover)
+            } else {
+                el.hover(move |s| s.bg(hover))
+            }
+        })
+        .when(m.mentions_me, |el| {
+            el.child(div().absolute().left_0().top(px(4.0)).bottom(px(4.0)).w(px(3.0)).rounded_full().bg(bar))
+        })
         .child(left)
         .when(compact && m.head, |el| el.gap(px(8.0)))
         .child(body)
         .when_some(actions, |el, a| el.child(a))
         .into_any_element()
+}
+
+/// Editing in place: Enter saves, Escape stops.
+fn edit_box(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>) -> impl IntoElement {
+    let (save, cancel) = (ctx.this.clone(), ctx.this.clone());
+    let link = |id: &str, label: &'static str, p: &Palette| {
+        div()
+            .id(SharedString::from(format!("{id}|{}", m.id)))
+            .text_color(p.primary)
+            .font_weight(FontWeight::BOLD)
+            .cursor_pointer()
+            .hover(|s| s.underline())
+            .child(label)
+    };
+    motion::rise(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .py(px(4.0))
+            .child(
+                div()
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .rounded(px(12.0))
+                    .bg(p.card)
+                    .border_1()
+                    .border_color(p.primary)
+                    .shadow(vec![gpui_kit::BoxShadow {
+                        color: alpha(p.primary, 0.2),
+                        offset: gpui_kit::point(px(0.0), px(6.0)),
+                        blur_radius: px(18.0),
+                        spread_radius: px(-8.0),
+                        inset: false,
+                    }])
+                    .child(Textarea::new(&ctx.edit_box).appearance(false)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_xs()
+                    .text_color(p.muted_foreground)
+                    .child("Escape to")
+                    .child(link("cancel", "cancel", p).on_click(move |_, window, cx| {
+                        let _ = cancel.update(cx, |this, cx| this.cancel_edit(window, cx));
+                    }))
+                    .child("· Enter to")
+                    .child(link("save", "save", p).on_click(move |_, window, cx| {
+                        let _ = save.update(cx, |this, cx| this.save_edit(window, cx));
+                    })),
+            ),
+        SharedString::from(format!("editing|{}", m.id)),
+        Duration::ZERO,
+        6.0,
+    )
 }
 
 /// Home, with nothing open: the cloud bobbing, and what lives here.
@@ -1104,4 +1450,59 @@ fn empty_state(p: &Palette, glyph: &str, title: &str, body: &str) -> impl IntoEl
         )
         .child(div().text_lg().font_weight(FontWeight::EXTRA_BOLD).child(title.to_owned()))
         .when(!body.is_empty(), |el| el.child(div().text_color(p.muted_foreground).child(body.to_owned())))
+}
+
+/// What AutoMod caught, posted in its alert channel for moderators.
+fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::AutoModAlert, manage: bool) -> Msg {
+    let why = match pb::AutoModTrigger::try_from(alert.trigger) {
+        Ok(pb::AutoModTrigger::Keywords) => "blocked words",
+        Ok(pb::AutoModTrigger::MentionSpam) => "mention spam",
+        Ok(pb::AutoModTrigger::Links) => "a link",
+        _ => "breaking a rule",
+    };
+    let what = if alert.blocked { "Blocked" } else { "Flagged" };
+    let place = i.channel(server, &alert.channel_id).map(|c| format!(" in **#{}**", c.name)).unwrap_or_default();
+    let quote: String = alert.content.lines().map(|l| format!("> {l}\n")).collect();
+    let mut text = format!(
+        "{what} a message from **{}**{place} for {why}.\n\n{quote}",
+        i.display_name(Some(server), &m.author_id)
+    );
+    if !alert.matched.is_empty() {
+        text.push_str(&format!(
+            "\nMatched: {}",
+            alert.matched.iter().map(|w| format!("`{w}`")).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if alert.timed_out_seconds > 0 {
+        text.push_str(&format!("\n\nTimed out for {}.", span(i64::from(alert.timed_out_seconds))));
+    }
+    Msg {
+        id: m.id.clone(),
+        user: None,
+        name: "AutoMod".into(),
+        color: Some(rgb(0xf59e0b).into()),
+        content: text.clone(),
+        shown: text,
+        mentions_me: false,
+        editing: false,
+        can_delete: manage,
+        at: ms_of(m.created_at.as_ref()),
+        edited: false,
+        head: true,
+        mine: false,
+        pending: false,
+        failed: None,
+        nonce: 0,
+        unreadable: false,
+    }
+}
+
+fn span(seconds: i64) -> String {
+    let (n, unit) = match seconds {
+        s if s >= 86_400 => (s / 86_400, "day"),
+        s if s >= 3_600 => (s / 3_600, "hour"),
+        s if s >= 60 => (s / 60, "minute"),
+        s => (s, "second"),
+    };
+    format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
 }

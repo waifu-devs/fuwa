@@ -126,51 +126,14 @@ jobs:
           name: fuwa-${{ matrix.file }}
           path: dist/*
 
-  # The desktop app (desktop/), its own workspace. A desktop build that failed
-  # is left out of the release rather than holding the server back.
+  # The desktop app (desktop/), its own workspace: an installer for each
+  # system and the bare program, made by desktop.yml. A desktop build that
+  # failed is left out of the release rather than holding the server back.
   desktop:
-    name: Desktop app, ${{ matrix.name }}
     needs: version
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux (x64)
-            runner: ubuntu-latest
-            file: x86_64-linux
-            exe: ""
-          - name: macOS (Apple silicon)
-            runner: macos-latest
-            file: aarch64-macos
-            exe: ""
-          - name: Windows (x64)
-            runner: windows-latest
-            file: x86_64-windows
-            exe: .exe
-    runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        shell: bash
-        working-directory: desktop
-    steps:
-      - uses: actions/checkout@v4
-      - name: What GPUI needs on Linux
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
-            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release --locked --bin fuwa-desktop
-      - run: |
-          mkdir dist
-          cp "target/release/fuwa-desktop${{ matrix.exe }}" "dist/fuwa-desktop-$VERSION-${{ matrix.file }}${{ matrix.exe }}"
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: fuwa-desktop-${{ matrix.file }}
-          path: desktop/dist/*
+    uses: ./.github/workflows/desktop.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
 
   release:
     name: Make the release
@@ -203,7 +166,7 @@ jobs:
           docker run -d --name fuwa -p 8080:8080 -v fuwa:/data ghcr.io/$REPO:$VERSION
           \`\`\`
 
-          Or download the binary for your machine below. The desktop app is the \`fuwa-desktop\` file for your computer. The [self-hosting guide](https://github.com/$REPO/blob/$GITHUB_REF_NAME/docs/self-hosting.md) walks through both.
+          Or download the binary for your machine below. For the desktop app, take the installer for your computer: the \`.deb\` or \`.AppImage\` on Linux, the \`.dmg\` on macOS, or \`-setup.exe\` on Windows (the bare \`fuwa-desktop\` files run without installing). They aren't signed yet, so macOS and Windows ask before the first launch. The [self-hosting guide](https://github.com/$REPO/blob/$GITHUB_REF_NAME/docs/self-hosting.md) walks through both.
 
           Check a download is an official build:
 
