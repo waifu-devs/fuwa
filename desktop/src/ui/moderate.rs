@@ -17,7 +17,7 @@ use crate::core::moderation::{Action, timed_out_until};
 use crate::pb::Permission as P;
 use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha, mix};
+use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::widgets::{avatar, icon, labeled, pal, soft_button};
 
 /// Discord's time-out lengths.
@@ -99,7 +99,7 @@ impl FuwaApp {
                     .id(SharedString::from(format!("mod-{label}")))
                     .flex_1()
                     .h(px(34.0))
-                    .rounded(px(10.0))
+                    .rounded(corner(10.0))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -156,7 +156,7 @@ impl FuwaApp {
             .items_center()
             .gap(px(12.0))
             .p(px(12.0))
-            .rounded(px(16.0))
+            .rounded(corner(16.0))
             .bg(alpha(p.muted_foreground, 0.08))
             .child(avatar(user.as_ref(), 40.0, &p))
             .child(

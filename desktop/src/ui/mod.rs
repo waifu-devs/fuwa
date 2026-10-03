@@ -4,6 +4,7 @@
 pub mod app;
 mod arrange;
 mod assets;
+mod backdrop;
 mod chat;
 mod compose;
 mod connect;
@@ -23,6 +24,7 @@ mod rail;
 mod server_settings;
 mod settings;
 mod settings_account;
+mod settings_look;
 mod sidebar;
 pub mod text;
 pub mod theme;

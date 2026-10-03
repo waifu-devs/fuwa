@@ -25,7 +25,7 @@ use crate::ui::members::{MembersEvent, MembersView};
 use crate::ui::mentions::{Look, Pick, SCHEME, mention_links};
 use crate::ui::motion;
 use crate::ui::text::{clock, images_as_links, ms_of, when};
-use crate::ui::theme::{Palette, alpha, mix};
+use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::widgets::{
     app_badge, avatar, card, conn_dot, error_line, fuwa_mark, icon, icon_button, icon_button_in, is_agent, pal,
     primary_button, soft_button,
@@ -477,7 +477,7 @@ impl FuwaApp {
             Nav::Home { dm: None } => home_splash(&p, window).into_any_element(),
             Nav::Instance { key } => self.instance_page(&key, window, cx),
         };
-        div().flex_1().h_full().min_w_0().flex().bg(p.background).child(body)
+        div().flex_1().h_full().min_w_0().flex().bg(p.chat_surface).child(body)
     }
 
     // ───────────────────────── A channel ─────────────────────────
@@ -649,7 +649,7 @@ impl FuwaApp {
                         .px(px(16.0))
                         .py(px(10.0))
                         .min_h(px(52.0))
-                        .rounded(px(16.0))
+                        .rounded(corner(16.0))
                         .bg(alpha(p.muted_foreground, 0.1))
                         .text_sm()
                         .text_color(p.muted_foreground)
@@ -681,7 +681,7 @@ impl FuwaApp {
                     .pl(px(16.0))
                     .pr(px(8.0))
                     .py(px(8.0))
-                    .rounded(px(18.0))
+                    .rounded(corner(18.0))
                     .bg(p.card)
                     .border_1()
                     .border_color(mix(p.border, p.primary, ring))
@@ -699,7 +699,7 @@ impl FuwaApp {
                             .id("send")
                             .size(px(36.0))
                             .flex_none()
-                            .rounded(px(12.0))
+                            .rounded(corner(12.0))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -777,7 +777,7 @@ impl FuwaApp {
                     .flex()
                     .items_center()
                     .gap(px(10.0))
-                    .rounded(px(10.0))
+                    .rounded(corner(10.0))
                     .cursor_pointer()
                     .when(active, |el| el.bg(hl))
                     .when(!active, |el| el.hover(move |s| s.bg(hover)))
@@ -888,7 +888,7 @@ impl FuwaApp {
                     .gap(px(6.0))
                     .px(px(12.0))
                     .h(px(32.0))
-                    .rounded(px(10.0))
+                    .rounded(corner(10.0))
                     .cursor_pointer()
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
@@ -986,7 +986,7 @@ impl FuwaApp {
                     .child(
                         div()
                             .size(px(64.0))
-                            .rounded(px(20.0))
+                            .rounded(corner(20.0))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -1019,7 +1019,7 @@ impl FuwaApp {
                         .gap(px(10.0))
                         .px(px(14.0))
                         .py(px(10.0))
-                        .rounded(px(12.0))
+                        .rounded(corner(12.0))
                         .bg(alpha(p.primary, 0.1))
                         .child(icon("megaphone").size(px(16.0)).text_color(p.primary))
                         .child(div().text_sm().child(text)),
@@ -1353,7 +1353,7 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
             .flex()
             .p(px(2.0))
             .gap(px(2.0))
-            .rounded(px(12.0))
+            .rounded(corner(12.0))
             .bg(p.card)
             .border_1()
             .border_color(p.border)
@@ -1392,7 +1392,7 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
         .flex()
         .px(px(16.0))
         .mx(px(4.0))
-        .rounded(px(10.0))
+        .rounded(corner(10.0))
         .when(m.head, |el| el.mt(px(if compact { 4.0 } else { 10.0 })))
         .py(px(if compact { 1.0 } else { 3.0 }))
         .map(|el| {
@@ -1436,7 +1436,7 @@ fn edit_box(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>) -> impl IntoElement {
                 div()
                     .px(px(12.0))
                     .py(px(8.0))
-                    .rounded(px(12.0))
+                    .rounded(corner(12.0))
                     .bg(p.card)
                     .border_1()
                     .border_color(p.primary)

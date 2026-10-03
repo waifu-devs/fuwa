@@ -19,7 +19,7 @@ use crate::pb;
 use crate::ui::motion;
 use crate::ui::settings::SettingsView;
 use crate::ui::text::{ms_of, when};
-use crate::ui::theme::{Palette, alpha};
+use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{avatar, error_line, icon, labeled, primary_button, soft_button};
 
 /// What the account pages hold while they're open.
@@ -252,7 +252,7 @@ impl SettingsView {
                 div()
                     .px(px(12.0))
                     .py(px(10.0))
-                    .rounded(px(12.0))
+                    .rounded(corner(12.0))
                     .bg(p.card)
                     .border_1()
                     .border_color(p.border)
@@ -387,7 +387,7 @@ impl SettingsView {
                 .items_center()
                 .gap(px(12.0))
                 .p(px(16.0))
-                .rounded(px(16.0))
+                .rounded(corner(16.0))
                 .bg(p.secondary)
                 .child(icon("link").size(px(18.0)).text_color(p.primary))
                 .child(
@@ -459,14 +459,14 @@ impl SettingsView {
                             .items_center()
                             .gap(px(14.0))
                             .p(px(14.0))
-                            .rounded(px(16.0))
+                            .rounded(corner(16.0))
                             .bg(p.card)
                             .border_1()
                             .border_color(if session.current { p.primary } else { p.border })
                             .child(
                                 div()
                                     .size(px(40.0))
-                                    .rounded(px(12.0))
+                                    .rounded(corner(12.0))
                                     .flex()
                                     .items_center()
                                     .justify_center()
@@ -605,7 +605,7 @@ fn section(title: &str, body: impl IntoElement, p: &Palette) -> impl IntoElement
 fn signed_out(p: &Palette) -> impl IntoElement {
     div()
         .p(px(18.0))
-        .rounded(px(16.0))
+        .rounded(corner(16.0))
         .bg(p.secondary)
         .text_color(p.muted_foreground)
         .child("Sign in to an instance first. Your account lives there.")

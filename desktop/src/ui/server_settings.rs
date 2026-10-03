@@ -24,7 +24,7 @@ use crate::core::store::user_name;
 use crate::pb::{self, AuditAction as A, Permission as P};
 use crate::ui::moderate::{duration, stamp};
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha, mix};
+use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::widgets::{
     app_badge, avatar, error_line, icon, icon_button, icon_button_in, is_agent, labeled, pal, primary_button,
     server_icon, soft_button,
@@ -586,7 +586,7 @@ impl ServerSettingsView {
                                 div()
                                     .size(px(40.0))
                                     .flex_none()
-                                    .rounded(px(12.0))
+                                    .rounded(corner(12.0))
                                     .flex()
                                     .items_center()
                                     .justify_center()
@@ -984,7 +984,7 @@ impl ServerSettingsView {
                     .relative()
                     .size(px(36.0))
                     .flex_none()
-                    .rounded(px(12.0))
+                    .rounded(corner(12.0))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1022,7 +1022,7 @@ impl ServerSettingsView {
                 )
             });
         let mut item = div()
-            .rounded(px(16.0))
+            .rounded(corner(16.0))
             .border_1()
             .border_color(if open { alpha(p.primary, 0.4) } else { p.border.into() })
             .bg(if open { alpha(p.muted_foreground, 0.06) } else { p.card.into() })
@@ -1163,7 +1163,7 @@ impl Render for ServerSettingsView {
                         .flex()
                         .items_center()
                         .gap(px(10.0))
-                        .rounded(px(10.0))
+                        .rounded(corner(10.0))
                         .cursor_pointer()
                         .text_color(if on { p.foreground } else { p.muted_foreground })
                         .when(on, |el| el.font_weight(FontWeight::BOLD))
@@ -1189,7 +1189,7 @@ impl Render for ServerSettingsView {
                     .right_0()
                     .top(px(at))
                     .h(px(38.0))
-                    .rounded(px(10.0))
+                    .rounded(corner(10.0))
                     .bg(alpha(p.primary, 0.16)),
             )
             .child(menu);
@@ -1297,7 +1297,15 @@ fn amber(p: &Palette) -> Hsla {
 
 /// A card-like row in a list.
 fn row(p: &Palette) -> gpui_kit::Div {
-    div().flex().items_center().gap(px(12.0)).p(px(12.0)).rounded(px(16.0)).bg(p.card).border_1().border_color(p.border)
+    div()
+        .flex()
+        .items_center()
+        .gap(px(12.0))
+        .p(px(12.0))
+        .rounded(corner(16.0))
+        .bg(p.card)
+        .border_1()
+        .border_color(p.border)
 }
 
 fn pill(text: &str, color: Hsla) -> gpui_kit::Div {
@@ -1324,7 +1332,7 @@ fn shimmer_rows(n: usize, p: &Palette) -> impl IntoElement {
     use gpui_kit::{Animation, AnimationExt as _};
     let base = alpha(p.muted_foreground, 0.1);
     div().flex().flex_col().gap(px(8.0)).children((0..n).map(move |k| {
-        div().h(px(58.0)).rounded(px(16.0)).bg(base).with_animation(
+        div().h(px(58.0)).rounded(corner(16.0)).bg(base).with_animation(
             SharedString::from(format!("shimmer-{k}")),
             Animation::new(Duration::from_millis(1200)).repeat(),
             move |el, t| el.opacity(0.5 + 0.5 * ((t + k as f32 * 0.15) * std::f32::consts::TAU).sin().abs()),

@@ -14,7 +14,7 @@ use crate::ui::app::{FuwaApp, Target};
 use crate::ui::chat::emoji_glyph;
 use crate::ui::emoji::{self, Choice};
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha};
+use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{card, icon, icon_button};
 
 impl FuwaApp {
@@ -95,7 +95,7 @@ impl FuwaApp {
         }
         let body = card(p)
             .w(px(340.0))
-            .rounded(px(18.0))
+            .rounded(corner(18.0))
             .overflow_hidden()
             .child(
                 div()
@@ -125,7 +125,7 @@ impl FuwaApp {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(10.0))
+            .rounded(corner(10.0))
             .cursor_pointer()
             .hover(move |s| s.bg(hover))
             .active(|s| s.top(px(1.0)))

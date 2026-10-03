@@ -15,7 +15,7 @@ use crate::core::dms::now_ms;
 use crate::pb::{self, NotificationLevel as Level};
 use crate::ui::app::FuwaApp;
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha};
+use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{card, icon, pal};
 
 const LEVELS: [(Level, &str); 3] =
@@ -225,7 +225,7 @@ impl FuwaApp {
             .flex()
             .items_center()
             .gap(px(10.0))
-            .rounded(px(10.0))
+            .rounded(corner(10.0))
             .cursor_pointer()
             .text_sm()
             .when(on, |el| el.text_color(p.primary).font_weight(FontWeight::BOLD))
@@ -284,7 +284,7 @@ fn note(text: &str, p: &Palette) -> impl IntoElement {
         .my(px(4.0))
         .px(px(10.0))
         .py(px(8.0))
-        .rounded(px(10.0))
+        .rounded(corner(10.0))
         .bg(alpha(p.primary, 0.1))
         .text_xs()
         .text_color(p.primary)
@@ -311,7 +311,7 @@ fn float(body: gpui_kit::Div, id: &'static str, right: f32, p: &Palette, cx: &mu
                 .top(px(52.0))
                 .right(px(right))
                 .on_click(|_, _, cx| cx.stop_propagation())
-                .child(motion::rise(card(p).rounded(px(16.0)).child(body), id, Duration::ZERO, -8.0)),
+                .child(motion::rise(card(p).rounded(corner(16.0)).child(body), id, Duration::ZERO, -8.0)),
         )
         .into_any_element()
 }
@@ -334,7 +334,7 @@ fn float_left(body: gpui_kit::Div, id: &'static str, p: &Palette, cx: &mut Conte
                 .top(px(52.0))
                 .left(px(crate::ui::rail::RAIL + 8.0))
                 .on_click(|_, _, cx| cx.stop_propagation())
-                .child(motion::rise(card(p).rounded(px(16.0)).child(body), id, Duration::ZERO, -8.0)),
+                .child(motion::rise(card(p).rounded(corner(16.0)).child(body), id, Duration::ZERO, -8.0)),
         )
         .into_any_element()
 }

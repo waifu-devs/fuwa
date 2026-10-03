@@ -244,6 +244,11 @@
     the web's `ssoLocked`, and the UI names the provider's host, which sees
     the person's IP address, before opening it),
     `config.rs` (saved instances and the app's settings; no tokens),
+    `themes.rs` (`docs/themes.md` in Rust: the five built-in themes,
+    `deriveTokens`, made and imported themes, backdrops and theme files,
+    everything read from a file or settings checked and clamped; a picture is
+    only ever a `/media/` link on an instance), `backgrounds.rs` (background
+    pictures kept on an instance, and their bytes for exporting a theme),
     `secrets.rs` (session tokens and the vault key in the system keychain,
     named per data folder, with a 0600 file only where there's no keychain;
     vault files are sealed with XChaCha20-Poly1305 under that key), `permissions.rs`
@@ -271,7 +276,11 @@
     place (and the keys they take first), `mentions.rs` finds mentions and
     makes them links, `menus.rs` the bell menus, `notify.rs` the system
     notifications (clicks come back through a channel), `settings_account.rs`
-    the profile and security pages, `server_settings.rs` a server's settings
+    the profile and security pages, `settings_look.rs` the Appearance
+    (themes, light and dark picks, theme files) and Background pages,
+    `backdrop.rs` what's drawn behind the app (picture, dimming, a texture
+    made here as a PNG or SVG tile and repeated; animated effects are the
+    web's for now), `server_settings.rs` a server's settings
     (overview, invites, members, bans, audit log; the server's name opens
     it), `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
@@ -285,7 +294,9 @@
     whose links open only for http(s) and mailto. `motion.rs` is how things move (springs,
     rises, glides, all settling at once with reduced motion; `ambient` loops
     run only while the window is in front); `theme.rs` is
-    the web app's palettes and the bundled font (M PLUS Rounded 1c, whose
+    the theme on screen as a palette (with the surfaces `docs/themes.md`
+    gives, see-through over a backdrop), `corner()` for corners that follow
+    the theme's radius, and the bundled font (M PLUS Rounded 1c, whose
     files name the family "Rounded Mplus 1c"). `perf.rs` is the frame and
     memory meter: `FUWA_DESKTOP_PERF=1` logs startup, frames a second, frame
     build times and memory (debug level logs every frame). The whole window

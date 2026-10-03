@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::core::secrets::Secrets;
+use crate::core::themes::{self, Backdrop, Theme};
 use crate::core::vault::write_json;
 
 /// Where the app keeps its files.
@@ -101,16 +102,6 @@ pub fn store_instances(paths: &Paths, secrets: &Secrets, list: &[SavedInstance])
     }
 }
 
-/// Light, dark, or whatever the system uses.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ThemeChoice {
-    #[default]
-    System,
-    Light,
-    Dark,
-}
-
 /// Whether things move: as the system says, or always calm.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -135,7 +126,16 @@ pub enum Density {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
-    pub theme: ThemeChoice,
+    /// The theme's id (built in, or one of `custom_themes`) when not following the system.
+    pub theme: String,
+    /// Light or dark like the system, with a theme for each.
+    pub follow_system: bool,
+    pub light_theme: String,
+    pub dark_theme: String,
+    /// Themes made or imported on this computer.
+    pub custom_themes: Vec<Theme>,
+    /// The picture and effect behind the app, under themes that don't bring their own.
+    pub backdrop: Backdrop,
     pub motion: MotionChoice,
     pub density: Density,
     /// Hides instance addresses and your username, for streaming or sharing your screen.
@@ -163,7 +163,12 @@ pub enum NotifyFor {
 impl Default for Prefs {
     fn default() -> Self {
         Self {
-            theme: ThemeChoice::System,
+            theme: "sakura".into(),
+            follow_system: true,
+            light_theme: "sakura".into(),
+            dark_theme: "yoru".into(),
+            custom_themes: Vec::new(),
+            backdrop: Backdrop::default(),
             motion: MotionChoice::System,
             density: Density::Cozy,
             streamer_mode: false,
@@ -176,7 +181,59 @@ impl Default for Prefs {
 }
 
 pub fn load_prefs(paths: &Paths) -> Prefs {
-    read(&paths.settings()).unwrap_or_default()
+    let mut prefs: Prefs = read(&paths.settings()).unwrap_or_default();
+    prefs.tidy();
+    prefs
+}
+
+impl Prefs {
+    /// Settings from an older app, or edited by hand, made into ones this app can show.
+    pub fn tidy(&mut self) {
+        // Before themes, the choice was light, dark, or the system's.
+        match self.theme.as_str() {
+            "system" => (self.theme, self.follow_system) = ("sakura".into(), true),
+            "light" => (self.theme, self.follow_system) = ("sakura".into(), false),
+            "dark" => (self.theme, self.follow_system) = ("yoru".into(), false),
+            _ => {}
+        }
+        self.custom_themes = themes::sanitize_custom(std::mem::take(&mut self.custom_themes));
+        let known =
+            |id: &str| themes::builtins().iter().any(|t| t.id == id) || self.custom_themes.iter().any(|t| t.id == id);
+        if !known(&self.theme) {
+            self.theme = "sakura".into();
+        }
+        if !known(&self.light_theme) {
+            self.light_theme = "sakura".into();
+        }
+        if !known(&self.dark_theme) {
+            self.dark_theme = "yoru".into();
+        }
+    }
+
+    /// Every theme there is to pick: the built-in ones, then the ones made here.
+    pub fn all_themes(&self) -> Vec<Theme> {
+        let mut all = themes::builtins();
+        all.extend(self.custom_themes.iter().cloned());
+        all
+    }
+
+    pub fn theme_by_id(&self, id: &str) -> Theme {
+        let all = self.all_themes();
+        all.iter().find(|t| t.id == id).cloned().unwrap_or_else(|| all[0].clone())
+    }
+
+    /// The theme on screen, given whether the system is dark.
+    pub fn active_theme(&self, system_dark: bool) -> Theme {
+        if !self.follow_system {
+            return self.theme_by_id(&self.theme);
+        }
+        self.theme_by_id(if system_dark { &self.dark_theme } else { &self.light_theme })
+    }
+
+    /// What's behind the app: the theme's own backdrop, or the app's.
+    pub fn active_backdrop(&self, theme: &Theme) -> Backdrop {
+        theme.backdrop.clone().unwrap_or_else(|| self.backdrop.clone())
+    }
 }
 
 pub fn store_prefs(paths: &Paths, prefs: &Prefs) {
@@ -221,11 +278,16 @@ mod tests {
         let moved = load_instances(&paths, &secrets);
         assert_eq!(moved[0].token.as_deref(), Some("o"));
         assert!(!std::fs::read_to_string(home.path().join("config/instances.json")).unwrap().contains("\"o\""));
-        let prefs = Prefs { theme: ThemeChoice::Dark, streamer_mode: true, ..Prefs::default() };
+        let prefs = Prefs { theme: "matcha".into(), follow_system: false, streamer_mode: true, ..Prefs::default() };
         store_prefs(&paths, &prefs);
         assert_eq!(load_prefs(&paths), prefs);
-        // Settings from a newer app keep what this one knows.
-        std::fs::write(home.path().join("config/settings.json"), r#"{"theme":"light","shiny":true}"#).unwrap();
-        assert_eq!(load_prefs(&paths).theme, ThemeChoice::Light);
+        // Settings from a newer app keep what this one knows; an older one's light or dark becomes a theme.
+        std::fs::write(home.path().join("config/settings.json"), r#"{"theme":"dark","shiny":true}"#).unwrap();
+        let old = load_prefs(&paths);
+        assert_eq!((old.theme.as_str(), old.follow_system), ("yoru", false));
+        // A made theme that's gone falls back to a built-in one.
+        std::fs::write(home.path().join("config/settings.json"), r#"{"theme":"custom-gone1","follow_system":false}"#)
+            .unwrap();
+        assert_eq!(load_prefs(&paths).active_theme(true).id, "sakura");
     }
 }

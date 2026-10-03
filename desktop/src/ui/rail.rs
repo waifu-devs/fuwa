@@ -15,7 +15,7 @@ use crate::core::store::Connection;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
 use crate::ui::motion;
-use crate::ui::theme::{alpha, mix};
+use crate::ui::theme::{alpha, corner, mix};
 use crate::ui::widgets::{badge, conn_dot, fuwa_mark, icon, initials, pal, server_icon};
 
 pub const RAIL: f32 = 76.0;
@@ -120,7 +120,7 @@ impl FuwaApp {
             .cursor_pointer()
             .hover({
                 let (bg, fg) = (p.success, p.card);
-                move |s| s.bg(bg).text_color(fg).rounded(px(16.0))
+                move |s| s.bg(bg).text_color(fg).rounded(corner(16.0))
             })
             .active(|s| s.top(px(1.0)))
             .on_click(cx.listener(|this, _, window, cx| this.open_connect(true, window, cx)))
@@ -138,7 +138,7 @@ impl FuwaApp {
             .cursor_pointer()
             .hover({
                 let (bg, fg) = (alpha(p.primary, 0.16), p.primary);
-                move |s| s.bg(bg).text_color(fg).rounded(px(16.0))
+                move |s| s.bg(bg).text_color(fg).rounded(corner(16.0))
             })
             .active(|s| s.top(px(1.0)))
             .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)))
@@ -150,7 +150,7 @@ impl FuwaApp {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(p.rail)
+            .bg(p.rail_surface)
             .child(div().id("rail-scroll").flex_1().overflow_y_scroll().child(list.child(add)))
             .child(div().flex().justify_center().py(px(12.0)).child(settings))
     }
@@ -224,7 +224,7 @@ impl FuwaApp {
                             div()
                                 .px(px(10.0))
                                 .py(px(5.0))
-                                .rounded(px(8.0))
+                                .rounded(corner(8.0))
                                 .bg(p.card)
                                 .border_1()
                                 .border_color(p.border)
@@ -257,7 +257,7 @@ impl FuwaApp {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(14.0))
+            .rounded(corner(14.0))
             .bg(if active { p.primary.into() } else { mix(p.card, p.primary, 0.12) })
             .text_color(if active { p.primary_foreground } else { p.primary })
             .font_weight(FontWeight::EXTRA_BOLD)
