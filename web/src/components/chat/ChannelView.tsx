@@ -3,7 +3,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef } from "react";
 import { Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { focusChannel } from "@/fuwa/actions";
-import { useAccess, useInstance } from "@/fuwa/hooks";
+import { useAccess } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
 import { CHANNEL_ICON } from "@/components/ChannelSidebar";
 import { Composer } from "@/components/chat/Composer";
 import { MemberList } from "@/components/chat/MemberList";
@@ -21,7 +22,6 @@ import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 
 export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: string; serverId: string; channel: Channel }) {
-  const inst = useInstance(instanceKey);
   const access = useAccess(instanceKey, serverId);
   const unslowed = hasIn(access, channel.id, Permission.MANAGE_MESSAGES) || hasIn(access, channel.id, Permission.MANAGE_CHANNELS);
   const list = useRef<MessageListHandle>(null);
@@ -34,13 +34,13 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
     return () => focusChannel(null, null);
   }, [instanceKey, channel.id]);
 
-  const serverName = inst?.servers.find((s) => s.id === serverId)?.name;
+  const serverName = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.name);
   useEffect(() => {
     setTitle(`#${channel.name} · ${serverName ?? "fuwa"}`);
   }, [channel.name, serverName]);
   useEffect(() => () => setTitle("fuwa"), []);
 
-  const connection = inst?.connection ?? "connecting";
+  const connection = useFuwa((s) => s.instances[instanceKey]?.connection ?? "connecting");
 
   return (
     <div className="flex h-full min-h-0">
@@ -136,17 +136,17 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
       <AnimatePresence initial={false}>
         {membersOpen &&
           (docked ? (
+            // The panel takes its width at once and slides in on the compositor: growing its width every frame would
+            // lay the whole message list out again each frame.
             <motion.aside
               key="members"
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 240, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
+              initial={{ x: 32, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 32, opacity: 0 }}
               transition={{ type: "spring", stiffness: 400, damping: 40 }}
-              className="surface-side h-full shrink-0 overflow-hidden border-l"
+              className="surface-side h-full w-60 shrink-0 overflow-hidden border-l"
             >
-              <div className="h-full w-60">
-                <MemberList instanceKey={instanceKey} serverId={serverId} />
-              </div>
+              <MemberList instanceKey={instanceKey} serverId={serverId} />
             </motion.aside>
           ) : (
             <motion.div key="members-sheet" className="absolute inset-0 z-30 flex justify-end" initial="closed" animate="open" exit="closed">

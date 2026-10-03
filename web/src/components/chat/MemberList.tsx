@@ -1,8 +1,9 @@
 import { CrownIcon, HourglassIcon } from "lucide-react";
-import { AnimatePresence, LayoutGroup, motion } from "motion/react";
-import { useMemo } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Member, Role } from "@/gen/fuwa/v1/types_pb";
-import { useInstance, useRoles } from "@/fuwa/hooks";
+import { useRoles } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
 import { RoleDot } from "@/components/chat/mentions";
 import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
@@ -20,89 +21,200 @@ const EMPTY: Member[] = [];
 
 type Section = { id: string; role: Role | null; members: Member[] };
 
+/** One line of the list: a section's heading or a member, at its place from the top. */
+type Item =
+  | { kind: "heading"; key: string; top: number; section: Section }
+  | { kind: "member"; key: string; top: number; member: Member };
+
+/** Lines drawn past the edges, so a quick scroll doesn't show blank space. */
+const OVERSCAN = 8;
+/** Space between sections (the old `mb-4`). */
+const SECTION_GAP = 16;
+
 /**
  * Everyone in the server, under their highest role that's shown apart
  * (hoisted), then everyone else. Someone given or losing a role glides to
  * their new place.
+ *
+ * Servers can have thousands of members, so only the lines in view are
+ * drawn: every line has the same height (measured from the first one drawn,
+ * so it follows the density setting), and each sits at its place with a
+ * transform that eases when the place changes.
  */
 export function MemberList({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
-  const inst = useInstance(instanceKey);
   const now = useNow(60_000);
-  const members = inst?.members[serverId] ?? EMPTY;
+  const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? EMPTY);
+  const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id);
+  const ownerId = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.ownerId);
   const roles = useRoles(instanceKey, serverId);
-  const ownerId = inst?.servers.find((s) => s.id === serverId)?.ownerId;
   const sections = useMemo(() => {
     const byRole = new Map<string, Member[]>();
     const rest: Member[] = [];
     for (const m of members) {
       const role = hoistedRole(roles, m);
-      if (role) byRole.set(role.id, [...(byRole.get(role.id) ?? []), m]);
-      else rest.push(m);
+      if (role) {
+        const list = byRole.get(role.id);
+        if (list) list.push(m);
+        else byRole.set(role.id, [m]);
+      } else rest.push(m);
     }
     const out: Section[] = roles.filter((r) => byRole.has(r.id)).map((r) => ({ id: r.id, role: r, members: byRole.get(r.id)! }));
     if (rest.length) out.push({ id: "members", role: null, members: rest });
     return out;
   }, [members, roles]);
+
+  // Line heights, measured once drawn (and again if the density or text size changes).
+  const [heights, setHeights] = useState({ heading: 20, member: 48 });
+  const measure = useCallback((kind: "heading" | "member", el: HTMLElement | null) => {
+    if (!el) return;
+    const h = el.offsetHeight;
+    if (h > 0) setHeights((cur) => (cur[kind] === h ? cur : { ...cur, [kind]: h }));
+  }, []);
+
+  const { items, total } = useMemo(() => {
+    const out: Item[] = [];
+    let top = 0;
+    sections.forEach((section, n) => {
+      if (n > 0) top += SECTION_GAP;
+      out.push({ kind: "heading", key: `heading-${section.id}`, top, section });
+      top += heights.heading + 4;
+      for (const m of section.members) {
+        out.push({ kind: "member", key: `member-${m.user?.id}`, top, member: m });
+        top += heights.member;
+      }
+    });
+    return { items: out, total: top };
+  }, [sections, heights]);
+
+  // The part of the list in view.
+  const scroller = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState({ top: 0, height: 800 });
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const update = () => setView((v) => (v.top === el.scrollTop && v.height === el.clientHeight ? v : { top: el.scrollTop, height: el.clientHeight }));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const onScroll = useCallback(() => {
+    const el = scroller.current;
+    if (el) setView({ top: el.scrollTop, height: el.clientHeight });
+  }, []);
+  const from = view.top - OVERSCAN * heights.member;
+  const to = view.top + view.height + OVERSCAN * heights.member;
+  const shown = items.filter((item) => item.top + heights.member >= from && item.top <= to);
+
+  // Only people who just joined slide in; lines scrolled into view just appear.
+  const known = useRef<Set<string> | null>(null);
+  const joined = useMemo(() => {
+    const ids = new Set(members.map((m) => m.user?.id ?? ""));
+    const fresh = known.current ? new Set([...ids].filter((id) => !known.current!.has(id))) : new Set<string>();
+    return { ids, fresh };
+  }, [members]);
+  useEffect(() => {
+    known.current = joined.ids;
+  }, [joined]);
+
+  let measuredHeading = false;
+  let measuredMember = false;
   return (
-    <div className="scroll-thin h-full overflow-y-auto px-2 py-4">
-      <LayoutGroup id={`members-${serverId}`}>
-      <AnimatePresence initial={false}>
-      {sections.map((section) => (
-        <motion.section
-          key={section.id}
-          layout="position"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, height: 0 }}
-          transition={{ type: "spring", stiffness: 500, damping: 36 }}
-          className="mb-4"
-        >
-          <h3 className="mb-1 flex items-center gap-1.5 px-2 text-xs font-bold tracking-wide text-muted-foreground uppercase">
-            {section.role && <RoleDot role={section.role} className="size-2" />}
-            <span className="truncate">{section.role?.name ?? "Members"}</span> — <Count value={section.members.length} />
-          </h3>
-          <ul>
-            <AnimatePresence initial={false}>
-              {section.members.map((m, n) => (
-                <motion.li
-                  key={m.user?.id}
-                  layoutId={`member-${serverId}-${m.user?.id}`}
-                  initial={{ opacity: 0, x: 16 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 16 }}
-                  transition={{ type: "spring", stiffness: 500, damping: 36, delay: Math.min(n, 12) * 0.015 }}
-                  className="row-y group flex items-center gap-1 rounded-lg px-2 transition hover:bg-muted/70"
-                >
-                  <ProfilePopover instanceKey={instanceKey} user={m.user} member={m} side="left">
-                    <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
-                      <UserAvatar user={m.user} className="size-8 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:scale-105 group-active:scale-95" />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-1">
-                          <RoleName id={m.user?.id ?? ""} name={memberName(m)} color={colorOf(roles, m)} className="text-sm" />
-                          {m.user?.id === ownerId && <CrownIcon aria-label="Owner" className="size-3 shrink-0 text-amber-400" />}
-                          {isAgent(m.user) && <AppBadge agent />}
-                          <TimedOutMark member={m} now={now} />
-                        </span>
-                        <MemberSubtitle member={m} me={m.user?.id === inst?.me?.id} now={now} />
-                      </span>
-                    </button>
-                  </ProfilePopover>
-                  {m.user && (
-                    <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                      <CopyId id={m.user.id} what="user ID" />
-                    </span>
-                  )}
-                </motion.li>
-              ))}
-            </AnimatePresence>
-          </ul>
-        </motion.section>
-      ))}
-      </AnimatePresence>
-      </LayoutGroup>
+    <div ref={scroller} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto px-2 py-4">
+      <div className="relative" style={{ height: total }}>
+        <AnimatePresence initial={false} custom={joined.ids} presenceAffectsLayout={false}>
+          {shown.map((item) => {
+            const first = item.kind === "heading" ? !measuredHeading && (measuredHeading = true) : !measuredMember && (measuredMember = true);
+            return (
+              <div
+                key={item.key}
+                ref={first ? (el) => measure(item.kind, el) : undefined}
+                className="member-line absolute inset-x-0 top-0"
+                style={{ transform: `translateY(${item.top}px)` }}
+              >
+                {item.kind === "heading" ? (
+                  <SectionHeading section={item.section} />
+                ) : (
+                  <MemberRow
+                    instanceKey={instanceKey}
+                    member={item.member}
+                    roles={roles}
+                    owner={item.member.user?.id === ownerId}
+                    me={item.member.user?.id === meId}
+                    now={now}
+                    enter={joined.fresh.has(item.member.user?.id ?? "")}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
+
+function SectionHeading({ section }: { section: Section }) {
+  return (
+    <h3 className="flex items-center gap-1.5 px-2 text-xs font-bold tracking-wide text-muted-foreground uppercase">
+      {section.role && <RoleDot role={section.role} className="size-2" />}
+      <span className="truncate">{section.role?.name ?? "Members"}</span> — <Count value={section.members.length} />
+    </h3>
+  );
+}
+
+const MemberRow = memo(function MemberRow({
+  instanceKey,
+  member: m,
+  roles,
+  owner,
+  me,
+  now,
+  enter,
+}: {
+  instanceKey: string;
+  member: Member;
+  roles: Role[];
+  owner: boolean;
+  me: boolean;
+  now: number;
+  enter: boolean;
+}) {
+  return (
+    <motion.div
+      initial={enter ? { opacity: 0, x: 16 } : false}
+      animate={{ opacity: 1, x: 0 }}
+      exit="exit"
+      variants={{
+        // Someone who left slides out; a line that only scrolled out of view goes at once.
+        exit: (present: Set<string>) =>
+          present.has(m.user?.id ?? "") ? { opacity: 1, transition: { duration: 0 } } : { opacity: 0, x: 16 },
+      }}
+      transition={{ type: "spring", stiffness: 500, damping: 36 }}
+      className="row-y group flex items-center gap-1 rounded-lg px-2 transition hover:bg-muted/70"
+    >
+      <ProfilePopover instanceKey={instanceKey} user={m.user} member={m} side="left">
+        <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+          <UserAvatar user={m.user} className="size-8 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:scale-105 group-active:scale-95" />
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1">
+              <RoleName id={m.user?.id ?? ""} name={memberName(m)} color={colorOf(roles, m)} className="text-sm" />
+              {owner && <CrownIcon aria-label="Owner" className="size-3 shrink-0 text-amber-400" />}
+              {isAgent(m.user) && <AppBadge agent />}
+              <TimedOutMark member={m} now={now} />
+            </span>
+            <MemberSubtitle member={m} me={me} now={now} />
+          </span>
+        </button>
+      </ProfilePopover>
+      {m.user && (
+        <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <CopyId id={m.user.id} what="user ID" />
+        </span>
+      )}
+    </motion.div>
+  );
+});
 
 /** An hourglass by the names of members who are timed out. */
 function TimedOutMark({ member, now }: { member: Member; now: number }) {

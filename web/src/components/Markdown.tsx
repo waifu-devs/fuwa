@@ -1,5 +1,5 @@
-import type { ComponentProps } from "react";
-import ReactMarkdown, { type Components, type Options } from "react-markdown";
+import { memo, type ComponentProps, type ReactElement } from "react";
+import renderMarkdown, { type Components, type Options } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -45,34 +45,89 @@ const blockComponents: Components = {
 /** Extra syntax for one kind of text, like mentions in chat: more remark plugins and the elements they make. */
 export type MarkdownExtension = { remarkPlugins: NonNullable<Options["remarkPlugins"]>; components: Record<string, unknown> };
 
-/** Block Markdown: paragraphs, lists, quotes, code blocks. A single newline is a line break. */
-export function Markdown({ children, className, extension }: { children: string; className?: string; extension?: MarkdownExtension }) {
-  return (
-    <div className={cn("markdown", className)}>
-      <ReactMarkdown
-        remarkPlugins={extension ? [remarkGfm, remarkBreaks, ...extension.remarkPlugins] : [remarkGfm, remarkBreaks]}
-        components={extension ? ({ ...blockComponents, ...extension.components } as Components) : blockComponents}
-      >
-        {children}
-      </ReactMarkdown>
-    </div>
-  );
+/*
+ * Parsing is the expensive part (a chat channel parses every message it
+ * shows), and the same text always makes the same elements, so they're kept:
+ * a channel opened again, or a message list re-rendering for a new arrival,
+ * reuses them. react-markdown's `Markdown` has no hooks, so it can be called
+ * as a plain function; what it returns are ordinary React elements, and the
+ * components inside them (links, mentions) still render live.
+ */
+const CACHE_SIZE = 2000;
+const caches = new Map<string, Map<string, ReactElement>>();
+
+function cached(kind: string, text: string, make: () => ReactElement): ReactElement {
+  let cache = caches.get(kind);
+  if (!cache) caches.set(kind, (cache = new Map()));
+  const hit = cache.get(text);
+  if (hit) {
+    // Most recently used goes last, so the oldest is first to go.
+    cache.delete(text);
+    cache.set(text, hit);
+    return hit;
+  }
+  const made = make();
+  cache.set(text, made);
+  if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
+  return made;
 }
+
+const BLOCK_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkBreaks];
+const extensionIds = new WeakMap<MarkdownExtension, string>();
+let extensions = 0;
+const extensionOptions = (extension: MarkdownExtension): Options => ({
+  remarkPlugins: [...BLOCK_PLUGINS, ...extension.remarkPlugins],
+  components: { ...blockComponents, ...extension.components } as Components,
+});
+const extensionKey = (extension: MarkdownExtension) => {
+  let id = extensionIds.get(extension);
+  if (!id) extensionIds.set(extension, (id = `block:${++extensions}`));
+  return id;
+};
+
+/** Block Markdown: paragraphs, lists, quotes, code blocks. A single newline is a line break. */
+export const Markdown = memo(function Markdown({
+  children,
+  className,
+  extension,
+}: {
+  children: string;
+  className?: string;
+  extension?: MarkdownExtension;
+}) {
+  const content = extension
+    ? cached(extensionKey(extension), children, () => renderMarkdown({ ...extensionOptions(extension), children }))
+    : cached("block", children, () => renderMarkdown({ remarkPlugins: BLOCK_PLUGINS, components: blockComponents, children }));
+  return <div className={cn("markdown", className)}>{content}</div>;
+});
 
 const INLINE = ["em", "strong", "del", "code", "a"];
 const INLINE_NO_LINKS = INLINE.filter((tag) => tag !== "a");
+const INLINE_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm];
+const INLINE_COMPONENTS: Components = { a: Anchor };
 
 /**
  * Markdown for one-line text: bold, italics, strikethrough, code and links.
  * Anything block-level is flattened to its text. Pass `links={false}` inside
  * something that is already a link.
  */
-export function InlineMarkdown({ children, className, links = true }: { children: string; className?: string; links?: boolean }) {
-  return (
-    <span className={cn("markdown-inline", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} allowedElements={links ? INLINE : INLINE_NO_LINKS} unwrapDisallowed components={{ a: Anchor }}>
-        {children}
-      </ReactMarkdown>
-    </span>
+export const InlineMarkdown = memo(function InlineMarkdown({
+  children,
+  className,
+  links = true,
+}: {
+  children: string;
+  className?: string;
+  links?: boolean;
+}) {
+  const content = cached(links ? "inline" : "inline-no-links", children, () =>
+    renderMarkdown({
+      remarkPlugins: INLINE_PLUGINS,
+      allowedElements: links ? INLINE : INLINE_NO_LINKS,
+      unwrapDisallowed: true,
+      components: INLINE_COMPONENTS,
+      children,
+    }),
   );
-}
+  return <span className={cn("markdown-inline", className)}>{content}</span>;
+});
