@@ -25,7 +25,7 @@ const fields = async (name) =>
 const { projectToken } = await gql(`{ projectToken { projectId environmentId } }`);
 console.log("environment", projectToken.environmentId);
 
-for (const type of ["UpdateServiceEdgeConfigInput", "EnableServiceCdnInput", "ServiceEdgeConfig", "EdgeConfig"]) {
+for (const type of ["EdgeConfigInput", "EdgeCachingConfigInput", "EdgeCachingConfig", "UpdateServiceEdgeRulesInput", "EdgeHtmlCaching", "EdgeCachingMode", "EdgePurgeOnDeploy"]) {
   try {
     console.log(type, JSON.stringify(await fields(type)));
   } catch (err) {
@@ -34,7 +34,8 @@ for (const type of ["UpdateServiceEdgeConfigInput", "EnableServiceCdnInput", "Se
 }
 try {
   const mutation = await fields("Mutation");
-  console.log("mutations", JSON.stringify(mutation?.fields?.map((f) => f.name).filter((n) => /edge|cdn|waf|rule/i.test(n))));
+  const args = await gql(`{ __type(name: "Mutation") { fields { name args { name type { name kind ofType { name kind ofType { name kind } } } } type { name kind ofType { name } } } } }`);
+  console.log("mutations", JSON.stringify(args.__type.fields.filter((f) => /edge|cdn/i.test(f.name))));
 } catch (err) {
   console.log("mutations unavailable:", String(err).slice(0, 300));
 }
@@ -43,7 +44,7 @@ const { project } = await gql(`query($id: String!) { project(id: $id) { services
 for (const { node } of project.services.edges.filter(({ node }) => SERVICES.includes(node.name))) {
   try {
     const { serviceInstance } = await gql(
-      `query($e: String!, $s: String!) { serviceInstance(environmentId: $e, serviceId: $s) { edgeConfig { id enabled caching { mode defaultTtlSeconds htmlCaching purgeOnDeploy } } } }`,
+      `query($e: String!, $s: String!) { serviceInstance(environmentId: $e, serviceId: $s) { edgeConfig { id enabled edgeRules overrides caching { mode defaultTtlSeconds htmlCaching purgeOnDeploy staleWhileRevalidate { enabled } } } } }`,
       { e: projectToken.environmentId, s: node.id },
     );
     console.log(node.name, JSON.stringify(serviceInstance.edgeConfig));
