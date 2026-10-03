@@ -447,7 +447,10 @@ On Linux it needs the usual GPUI libraries (`libxkbcommon-dev`,
 `libxkbcommon-x11-dev`, `libwayland-dev`, `libvulkan-dev`, `libx11-xcb-dev`,
 `libfontconfig-dev`). `FUWA_DESKTOP_HOME=<folder>` keeps its instances, settings
 and encrypted messages in one folder instead, to run a second copy signed in as
-someone else. Releases attach a `fuwa-desktop` build for each system.
+someone else. Releases attach an installer for each system (`.deb` and
+AppImage, `.dmg`, `-setup.exe`) and the bare `fuwa-desktop` program; to make
+the installers yourself, `cargo install cargo-packager --locked` and then
+`cargo build --release && cargo packager --release` in `desktop/`.
 
 See [AGENTS.md](AGENTS.md) for how the code is laid out.
 

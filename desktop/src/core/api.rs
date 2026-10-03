@@ -92,6 +92,8 @@ clients! {
     roles => pb::role_service_client::RoleServiceClient<Transport>,
     invites => pb::invite_service_client::InviteServiceClient<Transport>,
     dms => pb::direct_message_service_client::DirectMessageServiceClient<Transport>,
+    media => pb::media_service_client::MediaServiceClient<Transport>,
+    join => pb::join_service_client::JoinServiceClient<Transport>,
 }
 
 impl Api {

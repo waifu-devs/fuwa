@@ -107,8 +107,20 @@ pub struct Prefs {
     pub streamer_mode: bool,
     /// Text size, as a multiple of the normal size.
     pub text_scale: f32,
-    /// A little card for messages that arrive while you're looking elsewhere.
+    /// Notifications for messages that arrive while you're looking elsewhere:
+    /// a card in the window, or the system's own while it's in the background.
     pub notifications: bool,
+    /// Which messages notify you in servers whose settings don't say.
+    pub notify_for: NotifyFor,
+}
+
+/// Which messages notify you, where a server's settings leave it to this computer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum NotifyFor {
+    #[default]
+    Mentions,
+    All,
 }
 
 impl Default for Prefs {
@@ -120,6 +132,7 @@ impl Default for Prefs {
             streamer_mode: false,
             text_scale: 1.0,
             notifications: true,
+            notify_for: NotifyFor::Mentions,
         }
     }
 }

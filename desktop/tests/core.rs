@@ -119,8 +119,68 @@ fn two_people_talk_in_a_server_and_in_private() {
         s.instance(&key).unwrap().messages[&general].items.iter().any(|m| m.content == "hello from the desktop")
     });
     assert_eq!(bob.shared.read(|s| s.instance(&key).unwrap().unread.get(&general).copied()), Some(1));
-    let notice = futures::executor::block_on(async { notices.recv().await }).unwrap();
-    assert!(matches!(notice, Notice::Message { ref body, .. } if body == "hello from the desktop"), "{notice:?}");
+    // By default only mentions notify.
+    assert!(notices.try_recv().is_err(), "a plain message notified");
+    let bob_name = bob.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().username);
+    let ping = format!("hey @{bob_name}, look");
+    {
+        let (core, key, sid, cid, text) =
+            (alice.clone(), key.clone(), server.id.clone(), general.clone(), ping.clone());
+        wait(&alice, async move { core.send_message(&key, &sid, &cid, &text).await }).unwrap();
+    }
+    until(&bob, "Alice's mention", |s| {
+        s.instance(&key).unwrap().messages[&general].items.iter().any(|m| m.content == ping)
+    });
+    let notice = notices.try_recv().expect("the mention notified");
+    assert!(matches!(notice, Notice::Message { ref body, mention: true, .. } if *body == ping), "{notice:?}");
+
+    // Alice edits it; Bob sees the edit.
+    let id = bob.shared.read(|s| {
+        s.instance(&key).unwrap().messages[&general].items.iter().find(|m| m.content == ping).unwrap().id.clone()
+    });
+    {
+        let (core, key, sid) = (alice.clone(), key.clone(), server.id.clone());
+        wait(&alice, async move { core.edit_message(&key, &sid, &id, "hey, look (edited)").await }).unwrap();
+    }
+    until(&bob, "the edit", |s| {
+        s.instance(&key).unwrap().messages[&general]
+            .items
+            .iter()
+            .any(|m| m.content == "hey, look (edited)" && m.edited_at.is_some())
+    });
+
+    // Bob mutes the channel on the instance: no unread count on the server, and no notification.
+    {
+        let (core, key, sid, cid) = (bob.clone(), key.clone(), server.id.clone(), general.clone());
+        let patch = fuwa_desktop::core::account::NotificationPatch { mute_until: Some(None), ..Default::default() };
+        wait(&bob, async move { core.update_notifications(&key, &sid, &cid, patch).await }).unwrap();
+    }
+    assert_eq!(bob.shared.read(|s| s.instance(&key).unwrap().server_unread(&server.id)), 0);
+    {
+        let (core, key, sid, cid, text) =
+            (alice.clone(), key.clone(), server.id.clone(), general.clone(), ping.clone());
+        wait(&alice, async move { core.send_message(&key, &sid, &cid, &text).await }).unwrap();
+    }
+    until(&bob, "the muted mention", |s| {
+        s.instance(&key).unwrap().messages[&general].items.iter().filter(|m| m.content == ping).count() == 1
+            && s.instance(&key).unwrap().unread.get(&general).copied() == Some(3)
+    });
+    assert!(notices.try_recv().is_err(), "a muted channel notified");
+    // It's kept on the instance, so it follows Bob to his other devices.
+    bob.shared.instance(&key, |i| i.notifications.clear());
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move {
+            core.refresh_notifications(&key).await;
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+    }
+    assert!(bob.shared.read(|s| s.instance(&key).unwrap().is_muted(
+        &server.id,
+        &general,
+        fuwa_desktop::core::dms::now_ms()
+    )));
     bob.set_focus(Some(Focus { instance: key.clone(), channel: general.clone() }));
     assert_eq!(bob.shared.read(|s| s.instance(&key).unwrap().unread.get(&general).copied()), None);
 

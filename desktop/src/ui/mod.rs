@@ -4,11 +4,16 @@
 pub mod app;
 mod assets;
 mod chat;
+mod compose;
 mod connect;
+mod mentions;
+mod menus;
 mod motion;
+mod notify;
 mod overlay;
 mod rail;
 mod settings;
+mod settings_account;
 mod sidebar;
 pub mod text;
 pub mod theme;

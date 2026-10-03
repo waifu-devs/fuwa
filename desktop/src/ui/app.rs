@@ -69,11 +69,58 @@ impl Target {
 /// Something floating in the middle of the window, waiting for an answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Dialog {
-    CreateServer { key: String },
-    JoinInvite { key: String },
-    Invite { link: Option<String>, server: String },
-    Safety { key: String, conversation: String },
-    LeaveServer { key: String, server: String },
+    CreateServer {
+        key: String,
+    },
+    JoinInvite {
+        key: String,
+    },
+    Invite {
+        link: Option<String>,
+        server: String,
+    },
+    Safety {
+        key: String,
+        conversation: String,
+    },
+    LeaveServer {
+        key: String,
+        server: String,
+    },
+    /// Someone's card: their picture, names, pronouns and bio.
+    Profile {
+        key: String,
+        user_id: String,
+        server: Option<String>,
+    },
+    /// A new channel, or a category with `category`, under `parent` (or at the top).
+    CreateChannel {
+        key: String,
+        server: String,
+        parent: String,
+        category: bool,
+    },
+    /// A server's rules, to agree to before talking.
+    Rules {
+        key: String,
+        server: String,
+    },
+}
+
+/// A small menu hanging under a bell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Menu {
+    Channel { key: String, server: String, channel: String },
+    Server { key: String, server: String },
+}
+
+/// The @ list while someone types a mention.
+#[derive(Debug, Clone, Default)]
+pub struct Picker {
+    /// Where the `@` is in the composer, in bytes.
+    pub start: usize,
+    pub options: Vec<crate::ui::mentions::Pick>,
+    pub active: usize,
 }
 
 pub struct Toast {
@@ -124,6 +171,19 @@ pub struct FuwaApp {
     pub copied: Option<Instant>,
     /// The window's own focus, so its shortcuts work when no field has it.
     pub focus: gpui_kit::FocusHandle,
+    /// The message being edited in the open list (an id, or a private message's sequence).
+    pub editing: Option<String>,
+    pub edit_box: Entity<TextareaState>,
+    pub picker: Option<Picker>,
+    /// Where the @ list was closed with Escape, so it stays closed for that mention.
+    pub picker_dismissed: Option<usize>,
+    /// Roles picked from the @ list by name, sent as their tokens.
+    pub picked_roles: Vec<(String, String)>,
+    pub menu: Option<Menu>,
+    /// The profile the open card shows, once it arrives.
+    pub profile: Option<crate::pb::Profile>,
+    /// The rules the rules dialog shows, once they arrive.
+    pub rules: Option<Vec<String>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -131,6 +191,7 @@ impl FuwaApp {
     pub fn new(core: Arc<Core>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let prefs = core.prefs();
         let composer = cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 10).submit_on_enter(true));
+        let edit_box = cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 10).submit_on_enter(true));
         let dialog_input = cx.new(|cx| InputState::new(window, cx));
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
         let mut subscriptions = vec![
@@ -138,8 +199,17 @@ impl FuwaApp {
                 match event {
                     InputEvent::PressEnter { shift: false, .. } => this.send_now(window, cx),
                     // The send button lights up once there's something to send.
-                    InputEvent::Change | InputEvent::Focus | InputEvent::Blur => cx.notify(),
+                    InputEvent::Change => {
+                        this.update_picker(cx);
+                        cx.notify()
+                    }
+                    InputEvent::Focus | InputEvent::Blur => cx.notify(),
                     _ => {}
+                }
+            }),
+            cx.subscribe_in(&edit_box, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { shift: false, .. } = event {
+                    this.save_edit(window, cx);
                 }
             }),
             cx.subscribe_in(&dialog_input, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
@@ -152,6 +222,16 @@ impl FuwaApp {
                 cx.notify();
             }),
         ];
+        // Keys the text fields would otherwise take: the @ list's arrows, Enter
+        // and Escape, Up to edit your last message, Escape to stop editing.
+        let weak = cx.entity().downgrade();
+        subscriptions.push(cx.intercept_keystrokes(move |event, window, cx| {
+            let _ = weak.update(cx, |this, cx| {
+                if this.intercept(&event.keystroke, window, cx) {
+                    cx.stop_propagation();
+                }
+            });
+        }));
         subscriptions.shrink_to_fit();
 
         // Redraw whenever the store changes.
@@ -176,6 +256,28 @@ impl FuwaApp {
             })
             .detach();
         }
+
+        // A notification clicked while the window was in the background.
+        let mut clicks = crate::ui::notify::clicks();
+        cx.spawn_in(window, async move |this, cx| {
+            use futures::StreamExt as _;
+            while let Some(click) = clicks.next().await {
+                let done = this.update_in(cx, |this, window, cx| {
+                    window.activate_window();
+                    if click.instance.is_empty() {
+                        return;
+                    }
+                    match click.server {
+                        Some(server) => this.open_channel(&click.instance, &server, &click.channel, window, cx),
+                        None => this.navigate(Nav::Home { dm: Some((click.instance, click.channel)) }, window, cx),
+                    }
+                });
+                if done.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
 
         let first = core.shared.read(|s| s.order.first().cloned());
         let mut app = Self {
@@ -204,6 +306,14 @@ impl FuwaApp {
             next_toast: 1,
             copied: None,
             focus: cx.focus_handle(),
+            editing: None,
+            edit_box,
+            picker: None,
+            picker_dismissed: None,
+            picked_roles: Vec::new(),
+            menu: None,
+            profile: None,
+            rules: None,
             _subscriptions: subscriptions,
         };
         if first.is_none() {
@@ -239,9 +349,9 @@ impl FuwaApp {
         cx.notify();
     }
 
-    fn on_notice(&mut self, notice: Notice, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_notice(&mut self, notice: Notice, window: &mut Window, cx: &mut Context<Self>) {
         match notice {
-            Notice::Message { instance, server_id, channel_id, title, body } => {
+            Notice::Message { instance, server_id, channel_id, title, body, mention } => {
                 if !self.prefs.notifications {
                     return;
                 }
@@ -250,9 +360,30 @@ impl FuwaApp {
                     Some(server) => Nav::Server { key: instance.clone(), server: server.clone() },
                     None => Nav::Home { dm: Some((instance.clone(), channel_id.clone())) },
                 };
-                let body = if streamer && server_id.is_none() { "New private message".to_owned() } else { body };
+                let body = if streamer && server_id.is_none() {
+                    "New private message".to_owned()
+                } else if mention && server_id.is_some() {
+                    format!("Mentioned you: {}", crate::ui::notify::plain(&body))
+                } else {
+                    crate::ui::notify::plain(&body)
+                };
+                // In the background, the system's own; in front, a card in the corner.
+                if !window.is_window_active() {
+                    crate::ui::notify::show(
+                        title,
+                        body,
+                        crate::ui::notify::Clicked { instance, server: server_id, channel: channel_id },
+                    );
+                    return;
+                }
                 self.toast(
-                    if server_id.is_some() { "message-circle" } else { "lock" },
+                    if server_id.is_none() {
+                        "lock"
+                    } else if mention {
+                        "at-sign"
+                    } else {
+                        "message-circle"
+                    },
                     title,
                     body,
                     Some(open),
@@ -393,6 +524,11 @@ impl FuwaApp {
                 state.set_placeholder(placeholder, window, cx);
             });
             self.draft_for = id;
+            self.editing = None;
+            self.picker = None;
+            self.picker_dismissed = None;
+            self.picked_roles.clear();
+            self.menu = None;
         }
         let focus = target.as_ref().map(|t| match t {
             Target::Channel { key, channel, .. } => Focus { instance: key.clone(), channel: channel.clone() },
@@ -497,9 +633,11 @@ impl FuwaApp {
         if let Some(id) = &self.draft_for {
             self.drafts.remove(id);
         }
+        self.picker = None;
         let core = self.core.clone();
         match target {
             Target::Channel { key, server, channel } => {
+                let text = self.encode_mentions(&text);
                 self.run(cx, async move { core.send_message(&key, &server, &channel, &text).await }, |_, _, cx| {
                     cx.notify()
                 });
@@ -649,8 +787,35 @@ impl FuwaApp {
         let placeholder = match &dialog {
             Dialog::CreateServer { .. } => "My cozy server",
             Dialog::JoinInvite { .. } => "https://fuwa.chat/invite/hTKzmak",
+            Dialog::CreateChannel { category: false, .. } => "new-channel",
+            Dialog::CreateChannel { category: true, .. } => "Cozy corner",
             _ => "",
         };
+        self.menu = None;
+        self.profile = None;
+        self.rules = None;
+        match &dialog {
+            Dialog::Profile { key, user_id, .. } => {
+                let (core, key, user) = (self.core.clone(), key.clone(), user_id.clone());
+                self.run(cx, async move { core.profile(&key, &user).await }, |this, result, cx| {
+                    if let Ok(profile) = result {
+                        this.profile = Some(profile);
+                    }
+                    cx.notify();
+                });
+            }
+            Dialog::Rules { key, server } => {
+                let (core, key, server) = (self.core.clone(), key.clone(), server.clone());
+                self.run(cx, async move { core.server_rules(&key, &server).await }, |this, result, cx| {
+                    match result {
+                        Ok(rules) => this.rules = Some(rules),
+                        Err(err) => this.dialog_error = Some(err.message),
+                    }
+                    cx.notify();
+                });
+            }
+            _ => {}
+        }
         self.dialog_input.update(cx, |state, cx| {
             state.set_value("", window, cx);
             state.set_placeholder(placeholder, window, cx);
@@ -673,7 +838,10 @@ impl FuwaApp {
             });
         }
         self.dialog = Some(dialog);
-        if matches!(self.dialog, Some(Dialog::CreateServer { .. } | Dialog::JoinInvite { .. })) {
+        if matches!(
+            self.dialog,
+            Some(Dialog::CreateServer { .. } | Dialog::JoinInvite { .. } | Dialog::CreateChannel { .. })
+        ) {
             self.dialog_input.update(cx, |s, cx| s.focus(window, cx));
         } else {
             self.focus.focus(window, cx);
@@ -754,6 +922,62 @@ impl FuwaApp {
                     cx.notify();
                 }
             }
+            Dialog::Profile { key, user_id, .. } => {
+                self.dialog = None;
+                self.message_person(key, user_id, window, cx);
+            }
+            Dialog::CreateChannel { key, server, parent, category } => {
+                if value.is_empty() {
+                    self.dialog_error = Some("Give it a name.".into());
+                    cx.notify();
+                    return;
+                }
+                self.dialog_busy = true;
+                let kind = if category { crate::pb::ChannelType::Category } else { crate::pb::ChannelType::Text };
+                let rx = core.spawn({
+                    let (core, key, server) = (core.clone(), key.clone(), server.clone());
+                    async move { core.create_channel(&key, &server, &value, kind, &parent).await }
+                });
+                cx.spawn_in(window, async move |this, cx| {
+                    let Ok(result) = rx.await else { return };
+                    let _ = this.update_in(cx, |this, window, cx| {
+                        this.dialog_busy = false;
+                        match result {
+                            Ok(channel) => {
+                                this.dialog = None;
+                                if !category {
+                                    this.open_channel(&key, &server, &channel.id, window, cx);
+                                }
+                            }
+                            Err(err) => this.dialog_error = Some(err.message),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
+                cx.notify();
+            }
+            Dialog::Rules { key, server } => {
+                self.dialog_busy = true;
+                self.run(cx, async move { core.agree_to_rules(&key, &server).await }, |this, result, cx| {
+                    this.dialog_busy = false;
+                    match result {
+                        Ok(()) => {
+                            this.dialog = None;
+                            this.toast(
+                                "party-popper",
+                                "Welcome in!".into(),
+                                "You agreed to the rules. Say hi!".into(),
+                                None,
+                                None,
+                                cx,
+                            );
+                        }
+                        Err(err) => this.dialog_error = Some(err.message),
+                    }
+                    cx.notify();
+                });
+            }
         }
     }
 
@@ -783,7 +1007,9 @@ impl FuwaApp {
     }
 
     fn close_overlay(&mut self, _: &CloseOverlay, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialog.is_some() {
+        if self.menu.is_some() {
+            self.menu = None;
+        } else if self.dialog.is_some() {
             self.dialog = None;
         } else if self.settings.is_some() {
             self.settings = None;
@@ -833,6 +1059,13 @@ impl Render for FuwaApp {
         .when_some(self.connect.clone(), |el, connect| {
             el.child(crate::ui::overlay::scrim("connect-scrim", &p).child(connect))
         })
+        .when_some(
+            match self.menu.clone() {
+                Some(Menu::Server { key, server }) => Some(self.server_bell_menu(&key, &server, cx)),
+                _ => None,
+            },
+            |el, menu| el.child(menu),
+        )
         .when_some(self.settings.clone(), |el, settings| el.child(settings))
         .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
         .child(self.render_toasts(window, cx))
