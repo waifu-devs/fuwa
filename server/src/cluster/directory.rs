@@ -647,6 +647,21 @@ impl DirectoryService for Internal {
         }))
     }
 
+    async fn secure_devices(
+        &self,
+        request: Request<cpb::SecureDevicesRequest>,
+    ) -> Result<Response<cpb::SecureDevicesResponse>, Status> {
+        let request = request.into_inner();
+        if request.account_ids.len() > crate::api::MAX_SECURE_MEMBERS {
+            return Err(Error::invalid("too many people to look up at once").into());
+        }
+        let found = self.app.secure_devices(&request.token_hash, &request.account_ids).await?;
+        Ok(Response::new(cpb::SecureDevicesResponse {
+            caller_device_id: found.caller.unwrap_or_default(),
+            devices: found.devices.into_iter().map(|(id, account_id)| cpb::SecureDevice { id, account_id }).collect(),
+        }))
+    }
+
     type TakeServersStream = TakeServersStream;
 
     async fn take_servers(

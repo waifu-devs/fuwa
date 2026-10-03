@@ -23,6 +23,10 @@ like, hosted or self-hosted, over the same protocol.
   device has its own keys, which never leave it; the instance only stores and
   passes along ciphertext, and can't read it even if its operator wanted to.
   There's no off switch. See [docs/e2ee.md](docs/e2ee.md).
+- **Secure channels.** A server's admins can make channels that are end-to-end
+  encrypted the same way: only the people the channel's permissions let in can
+  read them, on their own devices, and the server can't. See
+  [docs/secure-channels.md](docs/secure-channels.md).
 - **Usage tracked, limits optional.** Every server counts its members, channels,
   messages and storage. Limits are off unless the operator sets them.
 - **Live by design.** Every change is an event in the server's log; clients

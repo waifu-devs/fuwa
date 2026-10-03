@@ -53,9 +53,14 @@ any left behind). A session has one device; registering a new key replaces
 the old one.
 
 Each device publishes key packages (`AddKeyPackages`): the public half of
-one-time keys others use to add it to a conversation. Each is handed out
+one-time keys others use to add it to a conversation or a secure channel.
+Anyone who shares a server with it, or has a conversation with it, can claim
+them. Each is handed out
 once (`ClaimKeyPackages`); when a device runs out, its last-resort key package
-is handed out instead until the device tops up. The server checks that a key
+is handed out instead until the device tops up. Someone with no conversation
+with you gets at most 3 single-use ones from each of your devices an hour
+(and 2,000 in all, adding people to secure channels), and last-resort ones
+after that. The server checks that a key
 package names the account and device it's published for.
 
 ### Conversations
@@ -152,6 +157,13 @@ Calls in direct messages are end-to-end encrypted with the same groups: each
 device exports a secret from the conversation's group at its current epoch
 (`Device::export_secret`, label `fuwa call v1`) and seals every frame of
 sound with a key derived from it. See [calls.md](calls.md#direct-messages-are-end-to-end-encrypted).
+
+## Secure channels
+
+Channels in community servers can be end-to-end encrypted with the same
+devices and the same kind of group: one MLS group per channel, holding the
+devices of everyone the channel's permissions let see it. See
+[secure-channels.md](secure-channels.md).
 
 ## Not done yet
 

@@ -39,6 +39,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0012_video.sql"),
     include_str!("../migrations/server/0013_recordings.sql"),
     include_str!("../migrations/server/0014_recording_limits.sql"),
+    include_str!("../migrations/server/0015_secure_channels.sql"),
     include_str!("../migrations/server/0016_region.sql"),
 ];
 

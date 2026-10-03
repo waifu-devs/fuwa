@@ -331,16 +331,23 @@ impl Sfu {
         static CRYPTO: Once = Once::new();
         CRYPTO.call_once(|| str0m::crypto::from_feature_flags().install_process_default());
 
-        let bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port);
-        let udp = UdpSocket::bind(bind)
-            .await
-            .map_err(|err| Error::internal(format!("couldn't listen for calls on UDP {bind}: {err}")))?;
-        // Port 0 picks one (in tests): TCP takes the same number UDP got.
-        let port = udp.local_addr()?.port();
-        let bind = SocketAddr::new(bind.ip(), port);
-        let tcp = TcpListener::bind(bind)
-            .await
-            .map_err(|err| Error::internal(format!("couldn't listen for calls on TCP {bind}: {err}")))?;
+        let any = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port);
+        // Port 0 picks one (in tests): TCP takes the same number UDP got, and
+        // if something else holds that number for TCP, both try another.
+        let mut attempt = 0;
+        let (udp, tcp, port) = loop {
+            attempt += 1;
+            let udp = UdpSocket::bind(any)
+                .await
+                .map_err(|err| Error::internal(format!("couldn't listen for calls on UDP {any}: {err}")))?;
+            let port = udp.local_addr()?.port();
+            let bind = SocketAddr::new(any.ip(), port);
+            match TcpListener::bind(bind).await {
+                Ok(tcp) => break (udp, tcp, port),
+                Err(err) if config.port == 0 && attempt < 10 && err.kind() == std::io::ErrorKind::AddrInUse => {}
+                Err(err) => return Err(Error::internal(format!("couldn't listen for calls on TCP {bind}: {err}"))),
+            }
+        };
         let config = MediaConfig { port, ..config };
         let (commands, receiver) = mpsc::channel(256);
         let (packets, tcp_in) = mpsc::channel(1024);

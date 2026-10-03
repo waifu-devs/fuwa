@@ -18,6 +18,14 @@ use crate::media;
 use crate::pb;
 use crate::servers::NewServer;
 
+/// For a secure channel: the device the caller's session registered, if it
+/// did, and the signed-in devices of the people asked about, as `(device id,
+/// account id)`.
+pub struct SecureDevices {
+    pub caller: Option<String>,
+    pub devices: Vec<(String, String)>,
+}
+
 /// An agent, as adding it to a server needs it.
 pub struct FoundAgent {
     pub account: crate::node::Account,
@@ -273,6 +281,36 @@ impl App {
                 let cluster = &self.config.cluster;
                 let name = super::region_name(&cluster.region, cluster.region_name.as_deref());
                 vec![pb::Region { id: cluster.region.clone(), name, home: true }]
+            }
+        }
+    }
+
+    /// The caller's device and the live devices of `account_ids`, for
+    /// checking a secure channel's commits. Devices live where direct
+    /// messages do, on the directory.
+    pub async fn secure_devices(&self, token_hash: &str, account_ids: &[String]) -> Result<SecureDevices> {
+        match &self.link {
+            Link::Shard(link) => {
+                let request =
+                    cpb::SecureDevicesRequest { token_hash: token_hash.to_string(), account_ids: account_ids.to_vec() };
+                let found = link.ask(request, |mut d, r| async move { d.secure_devices(r).await }).await?;
+                Ok(SecureDevices {
+                    caller: Some(found.caller_device_id).filter(|id| !id.is_empty()),
+                    devices: found.devices.into_iter().map(|d| (d.id, d.account_id)).collect(),
+                })
+            }
+            _ => {
+                let node = self.node()?;
+                let dms = self.dms()?;
+                let caller = match node.session_id(token_hash).await? {
+                    Some(session_id) => dms.session_device(&session_id).await?.map(|device| device.id),
+                    None => None,
+                };
+                let ids: Vec<&str> = account_ids.iter().map(String::as_str).collect();
+                let live = node.live_session_ids(Some(&ids)).await?;
+                let mut devices = dms.devices_of(&ids).await?;
+                devices.retain(|device| live.contains(&device.session_id));
+                Ok(SecureDevices { caller, devices: devices.into_iter().map(|d| (d.id, d.account_id)).collect() })
             }
         }
     }

@@ -5,6 +5,7 @@ import { ChannelType, Permission } from "@/gen/fuwa/v1/types_pb";
 import { useAccess, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { ChannelView } from "@/components/chat/ChannelView";
+import { SecureChannelView } from "@/components/chat/SecureChannelView";
 import { VoiceStage } from "@/components/calls/VoiceStage";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { SsoGate, useSsoLocked } from "@/components/join/SsoGate";
@@ -68,5 +69,6 @@ export function ChannelPage({ instanceKey, serverId, channelId }: { instanceKey:
     return <div className="shimmer m-4 h-10 rounded-xl opacity-40" />;
   }
   if (channel.type === ChannelType.VOICE) return <VoiceStage instanceKey={instanceKey} serverId={serverId} channel={channel} />;
+  if (channel.type === ChannelType.SECURE) return <SecureChannelView instanceKey={instanceKey} serverId={serverId} channel={channel} />;
   return <ChannelView instanceKey={instanceKey} serverId={serverId} channel={channel} />;
 }
