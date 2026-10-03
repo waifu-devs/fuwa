@@ -19,6 +19,7 @@ use crate::core::dms::{Content, now_ms};
 use crate::core::store::Focus;
 use crate::core::{Core, Notice};
 use crate::ui::connect::{ConnectEvent, ConnectView};
+use crate::ui::server_settings::{ServerSettingsEvent, ServerSettingsView};
 use crate::ui::settings::{SettingsEvent, SettingsView};
 use crate::ui::theme::{self, FONT};
 use crate::ui::widgets::pal;
@@ -174,6 +175,7 @@ pub struct FuwaApp {
     pub members_open: bool,
     pub connect: Option<Entity<ConnectView>>,
     pub settings: Option<Entity<SettingsView>>,
+    pub server_settings: Option<Entity<ServerSettingsView>>,
     pub dialog: Option<Dialog>,
     pub dialog_input: Entity<InputState>,
     pub dialog_busy: bool,
@@ -323,6 +325,7 @@ impl FuwaApp {
             members_open: true,
             connect: None,
             settings: None,
+            server_settings: None,
             dialog: None,
             dialog_input,
             dialog_busy: false,
@@ -815,6 +818,34 @@ impl FuwaApp {
         cx.notify();
     }
 
+    /// A server's settings, over everything but dialogs.
+    pub fn open_server_settings(&mut self, key: &str, server: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.menu = None;
+        let core = self.core.clone();
+        let view = cx.new(|cx| ServerSettingsView::new(core, key.to_owned(), server.to_owned(), window, cx));
+        self._subscriptions.push(cx.subscribe_in(
+            &view,
+            window,
+            |this: &mut Self, view, event: &ServerSettingsEvent, window, cx| {
+                match event {
+                    ServerSettingsEvent::Close => this.server_settings = None,
+                    ServerSettingsEvent::Moderate { user_id, action } => {
+                        let (key, server) = {
+                            let v = view.read(cx);
+                            (v.key.clone(), v.server.clone())
+                        };
+                        let dialog = Dialog::Moderate { key, server, user_id: user_id.clone(), action: *action };
+                        this.open_dialog(dialog, window, cx);
+                    }
+                }
+                cx.notify();
+            },
+        ));
+        self.server_settings = Some(view);
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
     pub fn open_dialog(&mut self, dialog: Dialog, window: &mut Window, cx: &mut Context<Self>) {
         let placeholder = match &dialog {
             Dialog::CreateServer { .. } => "My cozy server",
@@ -1158,6 +1189,8 @@ impl FuwaApp {
             self.menu = None;
         } else if self.dialog.is_some() {
             self.dialog = None;
+        } else if self.server_settings.is_some() {
+            self.server_settings = None;
         } else if self.settings.is_some() {
             self.settings = None;
         } else if let Some(connect) = &self.connect {
@@ -1214,6 +1247,7 @@ impl Render for FuwaApp {
             |el, menu| el.child(menu),
         )
         .when_some(self.settings.clone(), |el, settings| el.child(settings))
+        .when_some(self.server_settings.clone(), |el, settings| el.child(settings))
         .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
         .child(self.render_toasts(window, cx))
     }

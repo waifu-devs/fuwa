@@ -1220,7 +1220,7 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
                         open_card(&this, &key, server.clone(), id, window, cx);
                     }
                 }
-                None => cx.open_url(url),
+                None => crate::ui::text::open_link(url, cx),
             })
             .w_full()
             .into_any_element()

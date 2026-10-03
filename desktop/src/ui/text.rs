@@ -75,6 +75,35 @@ pub fn safety_rows(number: &str) -> Vec<String> {
     groups.chunks(4).map(|row| row.join("  ")).collect()
 }
 
+/// Whether a link from someone else's words may be opened: only web pages
+/// and mail. Anything else (`file:`, `smb:`, `ms-*:` and other handlers the
+/// system knows) could run or reach something on this computer or network.
+pub fn safe_link(url: &str) -> bool {
+    let Some((scheme, rest)) = url.split_once(':') else { return false };
+    match scheme.to_ascii_lowercase().as_str() {
+        "http" | "https" => rest.starts_with("//") && rest.len() > 2,
+        "mailto" => !rest.is_empty(),
+        _ => false,
+    }
+}
+
+/// Opens a link someone wrote, when it's safe to.
+pub fn open_link(url: &str, cx: &mut gpui_kit::App) {
+    if safe_link(url) {
+        cx.open_url(url);
+    } else {
+        tracing::warn!(url, "not opening a link that isn't a web page or mail address");
+    }
+}
+
+/// Markdown whose links open only when they're safe, for anything people wrote.
+pub fn markdown(
+    id: impl Into<gpui_kit::ElementId>,
+    source: impl Into<gpui_kit::SharedString>,
+) -> gpui_kit::component::text::TextView {
+    gpui_kit::component::text::TextView::markdown(id, source).on_link_click(|url, _, _, cx| open_link(url, cx))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +123,17 @@ mod tests {
         let rows = safety_rows(&n);
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0], "01234  56789  01234  56789");
+    }
+
+    #[test]
+    fn only_web_and_mail_links_open() {
+        assert!(safe_link("https://fuwa.chat/x"));
+        assert!(safe_link("HTTP://example.com"));
+        assert!(safe_link("mailto:hi@example.com"));
+        for bad in
+            ["file:///etc/passwd", "smb://host/share", "ms-settings:", "javascript:alert(1)", "http:", "notalink"]
+        {
+            assert!(!safe_link(bad), "{bad}");
+        }
     }
 }
