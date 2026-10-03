@@ -180,7 +180,7 @@ fn turn_credential(secret: &str, name: &str, now: i64) -> (String, String) {
     (username, base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes()))
 }
 
-fn ice_servers(urls: &[String], secret: &str) -> Vec<pb::IceServer> {
+fn ice_servers(urls: &[String], secret: &str) -> Result<Vec<pb::IceServer>> {
     let (stun, turn): (Vec<&String>, Vec<&String>) = urls.iter().partition(|u| u.starts_with("stun:"));
     let mut servers = Vec::new();
     if !stun.is_empty() {
@@ -188,16 +188,16 @@ fn ice_servers(urls: &[String], secret: &str) -> Vec<pb::IceServer> {
     }
     if !turn.is_empty() {
         let (username, credential) =
-            if secret.is_empty() { Default::default() } else { turn_credential(secret, &random_name(), now_ms()) };
+            if secret.is_empty() { Default::default() } else { turn_credential(secret, &random_name()?, now_ms()) };
         servers.push(pb::IceServer { urls: turn.into_iter().cloned().collect(), username, credential });
     }
-    servers
+    Ok(servers)
 }
 
-fn random_name() -> String {
+fn random_name() -> Result<String> {
     let mut bytes = [0u8; 12];
-    let _ = getrandom::fill(&mut bytes);
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    getrandom::fill(&mut bytes).map_err(|err| Error::internal(format!("no randomness: {err}")))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 fn moved_away() -> Error {
@@ -570,7 +570,7 @@ impl CallService for Api {
                 let settings = self.app.settings();
                 let enabled = settings.calls && self.app.media_link.is_on();
                 let ice_servers = match enabled {
-                    true => ice_servers(&settings.ice_urls, &settings.turn_secret),
+                    true => ice_servers(&settings.ice_urls, &settings.turn_secret)?,
                     false => vec![],
                 };
                 Ok(pb::GetCallSettingsResponse { enabled, ice_servers })
@@ -653,10 +653,14 @@ mod tests {
         let (username, credential) = turn_credential("north", "acc", 1_000_000);
         assert_eq!(username, format!("{}:acc", 1000 + 60 * 60));
         assert_eq!(credential.len(), 28);
-        let servers = ice_servers(&["stun:a:3478".into(), "turn:b:3478".into()], "north");
+        let servers = ice_servers(&["stun:a:3478".into(), "turn:b:3478".into()], "north").unwrap();
         assert_eq!(servers.len(), 2);
         assert!(servers[0].username.is_empty());
         assert!(!servers[1].credential.is_empty());
-        assert_ne!(servers[1].username, ice_servers(&["turn:b:3478".into()], "north")[0].username, "new each time");
+        assert_ne!(
+            servers[1].username,
+            ice_servers(&["turn:b:3478".into()], "north").unwrap()[0].username,
+            "new each time"
+        );
     }
 }

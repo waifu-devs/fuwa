@@ -35,7 +35,12 @@ export class FrameCrypto {
     this.worker.postMessage({ type: "key", epoch, secret: copy }, [copy.buffer]);
   }
 
+  /** Senders and receivers already set up: Chrome throws on a second createEncodedStreams. */
+  private readonly attached = new WeakSet<object>();
+
   private attach(target: (RTCRtpSender | RTCRtpReceiver) & WithStreams & { transform?: unknown }, options: Options) {
+    if (this.attached.has(target)) return;
+    this.attached.add(target);
     if (scriptTransform()) {
       target.transform = new RTCRtpScriptTransform!(this.worker, options) as RTCRtpSender["transform"];
       return;

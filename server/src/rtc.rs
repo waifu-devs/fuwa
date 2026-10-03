@@ -29,6 +29,7 @@ use str0m::change::{SdpAnswer, SdpOffer, SdpPendingOffer};
 use str0m::channel::{ChannelData, ChannelId};
 use str0m::media::{Direction, KeyframeRequest, KeyframeRequestKind, MediaData, MediaKind, Mid};
 use str0m::net::{Protocol, Receive, TcpType};
+use str0m::rtp::Extension;
 use str0m::{Candidate, Event, IceConnectionState, Input, Output, Rtc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
@@ -858,7 +859,16 @@ impl Engine {
         }
         let offer =
             SdpOffer::from_sdp_string(offer).map_err(|err| Error::invalid(format!("that offer isn't SDP: {err}")))?;
-        let mut rtc = Rtc::builder().set_ice_lite(true).build(now);
+        // No audio level extension: it would tell this server, in the clear,
+        // how loud each packet is, even in end-to-end encrypted calls, and
+        // apps work out who's speaking themselves.
+        let mut rtc = Rtc::builder()
+            .set_ice_lite(true)
+            .clear_extension_map()
+            .set_extension(2, Extension::AbsoluteSendTime)
+            .set_extension(3, Extension::TransportSequenceNumber)
+            .set_extension(4, Extension::RtpMid)
+            .build(now);
         for (proto, addr) in &candidates {
             let candidate = match proto {
                 Protocol::Tcp => Candidate::builder().tcp().host(*addr).tcptype(TcpType::Passive).build(),
