@@ -11,7 +11,9 @@ Voice, more servers per channel and sharing across instances come later.
 - **The home** is the server the channel was made in. Its file holds the
   channel and every message said in it, wherever they were written from, so
   the channel lives in the home's region and under the home's storage limits.
-  Its shard runs every write.
+  Its shard runs every write. On an instance with more than one region, the
+  preview names the home's (`PreviewShareResponse.region`) before the guest's
+  admins ask.
 - **The guest** is the server the channel is shown in. It gets a channel of
   its own (`channel_links` in its file) with its own name, category and
   permission overwrites, and keeps no message from it: reads and writes go to
@@ -126,4 +128,4 @@ admin disconnects them.
 - More than one guest server per channel.
 - Across instances (phase 2): the home instance relays everything, instances
   trust each other through signed instance keys, off by default.
-- The region in the preview, and the desktop app's screens.
+- The desktop app's screens.

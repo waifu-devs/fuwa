@@ -1236,6 +1236,39 @@ async fn servers_live_in_their_region_and_move() {
     assert_eq!(make("mars").await.unwrap_err().code(), Code::InvalidArgument);
     assert_eq!(make("Not A Region").await.unwrap_err().code(), Code::InvalidArgument);
 
+    // A channel shared from Europe says so before a server at home asks for it.
+    let channel = c
+        .channels
+        .clone()
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: in_eu.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .remove(0);
+    let code = c
+        .shared
+        .clone()
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: in_eu.id.clone(), channel_id: channel.id },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let asking = make("").await.unwrap();
+    let preview = c
+        .shared
+        .clone()
+        .preview_share(authed(&juan, pb::PreviewShareRequest { server_id: asking.id.clone(), code }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(preview.region, "eu");
+
     // A server at home, with a message, a recording's files, pictures and a
     // live stream.
     let server = make("").await.unwrap();
