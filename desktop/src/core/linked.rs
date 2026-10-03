@@ -1,4 +1,5 @@
-//! Signing in with waifu.dev from the desktop app.
+//! Signing in with waifu.dev from the desktop app (and, the same way,
+//! through an identity provider: [`crate::core::sso`]).
 //!
 //! The instance runs the sign-in (`AuthService.StartLinkedSignIn`); the app
 //! opens the sign-in page in the browser and listens on this machine
@@ -91,18 +92,15 @@ async fn handle(req: Request<Incoming>, tx: mpsc::Sender<Returned>) -> Result<Re
         url::form_urlencoded::parse(req.uri().query().unwrap_or_default().as_bytes()).into_owned().collect();
     let get = |name: &str| query.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()).unwrap_or_default();
     let response = match req.uri().path() {
-        "/auth/waifu/callback" => page(PAGE),
-        "/auth/waifu/done" => {
+        // Where the instance hands a sign-in back: waifu.dev's, or single sign-on's.
+        "/auth/waifu/callback" | "/auth/sso/done" => page(PAGE),
+        "/returned" => {
             let (code, state) = (get("code"), get("state"));
             let problem = if get("error_description").is_empty() { get("error") } else { get("error_description") };
             let returned = if !code.is_empty() && !state.is_empty() {
                 Returned::Code { code, state }
             } else {
-                Returned::Failed(if problem.is_empty() {
-                    "waifu.dev didn't send a sign-in back.".into()
-                } else {
-                    problem
-                })
+                Returned::Failed(if problem.is_empty() { "The sign-in didn't come back.".into() } else { problem })
             };
             let _ = tx.send(returned).await;
             Response::builder().status(StatusCode::NO_CONTENT).body(Full::new(Bytes::new())).expect("a response")
@@ -146,7 +144,7 @@ const PAGE: &str = r#"<!doctype html>
 <script>
   const params = new URLSearchParams(location.hash.slice(1) || location.search.slice(1));
   history.replaceState(null, "", location.pathname);
-  fetch("/auth/waifu/done?" + params.toString()).then(() => {
+  fetch("/returned?" + params.toString()).then(() => {
     const failed = !params.get("code");
     document.getElementById("mark").textContent = failed ? "!" : "✓";
     document.getElementById("title").textContent = failed ? "That didn't work" : "You're signed in";
@@ -190,9 +188,10 @@ mod tests {
             }
         };
         assert_eq!(get(format!("{origin}/auth/waifu/callback")).await, StatusCode::OK);
+        assert_eq!(get(format!("{origin}/auth/sso/done")).await, StatusCode::OK);
         // Someone else's sign-in is ignored; ours comes through.
-        assert_eq!(get(format!("{origin}/auth/waifu/done?code=x&state=other")).await, StatusCode::NO_CONTENT);
-        assert_eq!(get(format!("{origin}/auth/waifu/done?code=abc&state=mine")).await, StatusCode::NO_CONTENT);
+        assert_eq!(get(format!("{origin}/returned?code=x&state=other")).await, StatusCode::NO_CONTENT);
+        assert_eq!(get(format!("{origin}/returned?code=abc&state=mine")).await, StatusCode::NO_CONTENT);
         assert_eq!(callback.wait("mine").await, Returned::Code { code: "abc".into(), state: "mine".into() });
     }
 

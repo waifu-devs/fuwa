@@ -484,6 +484,9 @@ impl FuwaApp {
 
     fn channel_view(&mut self, key: &str, server: &str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = pal(cx);
+        if let Some(locked) = self.sso_locked(key, server) {
+            return self.sso_gate(key, &locked, &p, window, cx);
+        }
         let channel = self
             .channel_in(key, server)
             .and_then(|id| self.core.shared.read(|s| s.instance(key).and_then(|i| i.channel(server, &id).cloned())));
@@ -1469,6 +1472,152 @@ fn edit_box(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>) -> impl IntoElement {
 }
 
 /// Home, with nothing open: the cloud bobbing, and what lives here.
+impl FuwaApp {
+    /// Where a server's channels were, for a member whose single sign-on is
+    /// missing or ran out: a padlock swinging inside rings that ripple out,
+    /// and the way back in. They stay a member; the channels come back
+    /// through the event stream once they sign in (`SsoGate.tsx` on the web).
+    fn sso_gate(
+        &mut self,
+        key: &str,
+        server: &pb::Server,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let provider = crate::ui::overlay::provider_name(&server.sso_name).to_owned();
+        let days = server.sso_recheck_days;
+        let every = match days {
+            0 => String::new(),
+            1 => " every day".into(),
+            n => format!(" every {n} days"),
+        };
+        let waiting = self.sso_waiting.as_deref() == Some(server.id.as_str());
+        const BADGE: f32 = 80.0;
+        const AREA: f32 = 132.0;
+        let ring = |n: u64| {
+            let el = div().absolute().rounded_full().border_2().border_color(alpha(p.primary, 0.4));
+            motion::ambient(el, SharedString::from(format!("sso-ring-{n}")), Duration::from_millis(2400), window, {
+                move |el, t| {
+                    // Two rings half a beat apart, each growing from the badge and fading out.
+                    let t = (t + n as f32 * 0.5) % 1.0;
+                    let eased = 1.0 - (1.0 - t).powi(3);
+                    let size = BADGE * (1.0 + 0.65 * eased);
+                    let at = (AREA - size) / 2.0;
+                    el.left(px(at)).top(px(at)).size(px(size)).opacity(0.7 * (1.0 - t))
+                }
+            })
+        };
+        let padlock = motion::ambient(
+            icon("lock-keyhole").size(px(36.0)),
+            "sso-swing",
+            Duration::from_millis(3600),
+            window,
+            |el, t| {
+                // A swing on its chain for the first part of each beat, then rest.
+                let k = (t / 0.4).min(1.0);
+                let swing = (k * std::f32::consts::TAU * 2.0).sin() * (1.0 - k) * 0.16;
+                el.rotate(gpui_kit::radians(swing))
+            },
+        );
+        let badge = div()
+            .absolute()
+            .left(px((AREA - BADGE) / 2.0))
+            .top(px((AREA - BADGE) / 2.0))
+            .size(px(BADGE))
+            .rounded(px(28.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            // Solid, so the rings pass behind it rather than through it.
+            .bg(mix(p.background, p.primary, 0.15))
+            .text_color(p.primary)
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: alpha(p.primary, 0.3),
+                offset: gpui_kit::point(px(0.0), px(20.0)),
+                blur_radius: px(40.0),
+                spread_radius: px(-24.0),
+                inset: false,
+            }])
+            .child(padlock);
+        let (k, sid) = (key.to_owned(), server.id.clone());
+        let button = primary_button("sso-gate-sign-in", "", p)
+            .w_full()
+            .when(waiting, |el| el.opacity(0.75))
+            .child(if waiting {
+                motion::ambient(
+                    icon("loader-circle").size(px(18.0)),
+                    "sso-wait",
+                    Duration::from_millis(900),
+                    window,
+                    |el, t| el.rotate(gpui_kit::radians(t * std::f32::consts::TAU)),
+                )
+            } else {
+                icon("building").size(px(18.0)).into_any_element()
+            })
+            .child(if waiting { "Waiting for your browser…".to_owned() } else { format!("Continue with {provider}") })
+            .on_click(cx.listener(move |this, _, _, cx| this.sign_in_server(k.clone(), sid.clone(), cx)));
+        let tag = format!("{key}|{}", server.id);
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p(px(24.0))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(384.0))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(16.0))
+                    .child(motion::rise(
+                        div().relative().size(px(AREA)).child(ring(0)).child(ring(1)).child(badge),
+                        SharedString::from(format!("sso-badge|{tag}")),
+                        Duration::ZERO,
+                        20.0,
+                    ))
+                    .child(motion::rise(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap(px(6.0))
+                            .text_center()
+                            .child(
+                                div()
+                                    .text_xl()
+                                    .font_weight(FontWeight::EXTRA_BOLD)
+                                    .child(format!("Sign in with {provider}")),
+                            )
+                            .child(div().text_sm().text_color(p.muted_foreground).child(format!(
+                                "{} asks members to sign in through {provider}{every}. You're still a member; the channels come back once you do.",
+                                server.name
+                            ))),
+                        SharedString::from(format!("sso-words|{tag}")),
+                        Duration::from_millis(60),
+                        14.0,
+                    ))
+                    .when(!server.sso_host.is_empty(), |el| {
+                        el.child(motion::rise(
+                            div().w_full().child(crate::ui::overlay::host_notice(&server.sso_host, p)),
+                            SharedString::from(format!("sso-host|{tag}")),
+                            Duration::from_millis(150),
+                            8.0,
+                        ))
+                    })
+                    .child(motion::rise(
+                        div().w_full().child(button),
+                        SharedString::from(format!("sso-go|{tag}")),
+                        Duration::from_millis(210),
+                        8.0,
+                    )),
+            )
+            .into_any_element()
+    }
+}
+
 fn home_splash(p: &Palette, window: &Window) -> impl IntoElement {
     let bob = fuwa_mark(96.0, p);
     div()
