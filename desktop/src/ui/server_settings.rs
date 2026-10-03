@@ -1536,6 +1536,13 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::WebhookUpdate => ("webhook", sky),
         A::WebhookDelete => ("unplug", red),
         A::AgentAdd => ("bot", violet),
+        A::ShareCodeCreate | A::SharedChannelRequest => ("link", green),
+        A::ShareCodeDelete => ("link-2-off", red),
+        A::SharedChannelApprove => ("check", green),
+        A::SharedChannelUpdate => ("settings", sky),
+        A::SharedChannelDisconnect => ("unplug", red),
+        A::SharedChannelBlock => ("user-x", red),
+        A::SharedChannelUnblock => ("undo", green),
         A::Unspecified => ("scroll-text", p.muted_foreground.into()),
     }
 }
@@ -1679,6 +1686,7 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
     let actor = who(&entry.actor_id);
     let target = who(&entry.target_id);
     let change = |field: &str| entry.changes.iter().find(|c| c.field == field);
+    let shared_server = || change("server").map(|c| c.after.clone()).unwrap_or_else(|| "another server".into());
     let at = entry.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
     let named_channel = |name: &str| format!("**#{}**", plain(name));
     let channel = match channels.iter().find(|c| c.id == entry.target_id) {
@@ -1799,6 +1807,22 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         A::WebhookUpdate => format!("{actor} changed the webhook **{}**", name_of(true)),
         A::WebhookDelete => format!("{actor} deleted the webhook **{}**", name_of(false)),
         A::AgentAdd => format!("{actor} added the agent {target}"),
+        A::ShareCodeCreate => format!("{actor} made a share code for {}", named_channel(&entry.channel_name)),
+        A::ShareCodeDelete => format!("{actor} deleted a share code for {}", named_channel(&entry.channel_name)),
+        A::SharedChannelRequest => {
+            format!("{actor} asked to show {} from **{}**", named_channel(&entry.channel_name), plain(&shared_server()))
+        }
+        A::SharedChannelApprove => {
+            format!("{actor} shared {} with **{}**", named_channel(&entry.channel_name), plain(&shared_server()))
+        }
+        A::SharedChannelUpdate => {
+            format!("{actor} changed what the other server may do in {}", named_channel(&entry.channel_name))
+        }
+        A::SharedChannelDisconnect => {
+            format!("{actor} ended sharing {} with **{}**", named_channel(&entry.channel_name), plain(&shared_server()))
+        }
+        A::SharedChannelBlock => format!("{actor} kept {target} out of {}", named_channel(&entry.channel_name)),
+        A::SharedChannelUnblock => format!("{actor} let {target} back into {}", named_channel(&entry.channel_name)),
         A::Unspecified => format!("{actor} did something"),
     }
 }

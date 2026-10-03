@@ -459,7 +459,16 @@ pub(super) async fn guest_of(
 fn shown_here(mut message: pb::Message, server_id: &str, link: &LinkRow) -> pb::Message {
     message.server_id = server_id.to_string();
     message.channel_id = link.channel_id.clone().unwrap_or_default();
+    no_pings(&mut message);
     message
+}
+
+/// @everyone, @here and role pings belong to the server they were said in:
+/// the home's roles mean nothing here, and its @everyone isn't this
+/// server's people.
+fn no_pings(message: &mut pb::Message) {
+    message.mentions_everyone = false;
+    message.mention_role_ids.clear();
 }
 
 /// Runs this server's own AutoMod over what one of its people writes in a
@@ -1047,6 +1056,7 @@ async fn guest_events(app: &Arc<App>, sdb: &ServerDb, home: cpb::HomeEvents) -> 
                 | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) }) => {
                     m.server_id = sdb.id.clone();
                     m.channel_id = channel_id.clone();
+                    no_pings(m);
                 }
                 Payload::MessageDeleted(d) => d.channel_id = channel_id.clone(),
                 _ => return None,
@@ -1197,6 +1207,13 @@ fn message_channel(payload: &Payload) -> Option<&str> {
 /// author needn't be in the guest server.
 async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
     let mut event = event.clone();
+    if let Some(
+        Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
+        | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) }),
+    ) = event.payload.as_mut()
+    {
+        no_pings(m);
+    }
     if let Some(
         Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) }),

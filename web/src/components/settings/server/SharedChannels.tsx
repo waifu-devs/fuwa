@@ -611,6 +611,7 @@ function ConnectionActions({
           type="button"
           size="sm"
           disabled={approving}
+          title="Their people will be able to read the channel, past messages included"
           onClick={async () => {
             setApproving(true);
             try {
@@ -930,7 +931,8 @@ function HomeChannelShare({ instanceKey, serverId, channel, guests, loaded, code
             <p className="font-extrabold">Share #{channel.name} with another server</p>
             <p className="text-muted-foreground">
               Give a share code to the other server's admins. They'll see this server's name, #{channel.name} and its topic, and what their people
-              may do, then ask to connect. Nothing is shared until you approve. Messages stay here.
+              may do, then ask to connect. Nothing is shared until you approve. Once you do, their people can read
+              everything said here, past messages included. Messages stay here.
             </p>
           </div>
         </div>

@@ -5583,7 +5583,7 @@ async fn channels_shared_between_servers() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[]).await;
     let mut c = clients(&instance).await;
-    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (juan, juan_user, _) = sign_up(&mut c, "juan").await;
     let (mika, _, _) = sign_up(&mut c, "mika").await;
     let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
     let (sora, sora_user, _) = sign_up(&mut c, "sora").await;
@@ -5697,13 +5697,14 @@ async fn channels_shared_between_servers() {
         .await
         .unwrap()
         .into_inner();
-    send(&mut c, &sora, &home, &dev.id, "hello from home").await.unwrap();
+    send(&mut c, &juan, &home, &dev.id, "@everyone hello from home").await.unwrap();
     let live = next_message(&mut stream).await;
-    assert_eq!(live.content, "hello from home");
+    assert_eq!(live.content, "@everyone hello from home");
+    assert!(!live.mentions_everyone, "the home's @everyone doesn't ping the guest's people");
     assert_eq!(live.channel_id, shown.id);
     assert_eq!(live.server_id, guest);
     let author = live.shared.unwrap();
-    assert_eq!(author.user.unwrap().id, sora_user.id);
+    assert_eq!(author.user.unwrap().id, juan_user.id);
     assert_eq!(author.server.unwrap().name, "Home");
 
     // A guest writes; the message lives only at home.
@@ -5714,13 +5715,14 @@ async fn channels_shared_between_servers() {
     let stored = home_side.iter().find(|m| m.id == hi.id).unwrap();
     assert!(!stored.mentions_everyone, "pings never cross servers");
     assert_eq!(stored.shared.as_ref().unwrap().server.as_ref().unwrap().name, "Guest");
-    assert!(home_side.iter().find(|m| m.content == "hello from home").unwrap().shared.is_none());
+    let from_home = home_side.iter().find(|m| m.content == "@everyone hello from home").unwrap();
+    assert!(from_home.shared.is_none() && from_home.mentions_everyone, "it pings the home's own people");
     let guest_side = messages(&mut c, &rin, &guest, &shown.id).await;
     assert_eq!(
         guest_side.iter().map(|m| m.content.as_str()).collect::<Vec<_>>(),
-        vec!["hello from home", "hi from guest @everyone"]
+        vec!["@everyone hello from home", "hi from guest @everyone"]
     );
-    assert!(guest_side.iter().all(|m| m.channel_id == shown.id && m.shared.is_some()));
+    assert!(guest_side.iter().all(|m| m.channel_id == shown.id && m.shared.is_some() && !m.mentions_everyone));
     assert_eq!(usage(&mut c, &mika, &guest).await.messages, kept_before, "the guest keeps nothing");
 
     // Editing works with or without the channel named; others' messages aren't theirs to touch.
@@ -5741,7 +5743,7 @@ async fn channels_shared_between_servers() {
         .message
         .unwrap();
     assert_eq!(edited.content, "hi from guest");
-    let theirs = guest_side.iter().find(|m| m.content == "hello from home").unwrap().id.clone();
+    let theirs = guest_side.iter().find(|m| m.content == "@everyone hello from home").unwrap().id.clone();
     let not_mine = c
         .messages
         .delete_message(authed(
