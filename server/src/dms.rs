@@ -32,6 +32,9 @@ pub const MAX_KEY_PACKAGES: i64 = 100;
 /// Past that it gets their last-resort key package instead, so nobody can
 /// use up someone else's single-use ones by claiming them over and over.
 pub const STRANGER_CLAIMS_PER_HOUR: u32 = 2000;
+/// And at most this many from any one of those devices an hour, so even one
+/// account can't use up a device's single-use key packages.
+pub const STRANGER_CLAIMS_PER_DEVICE: u32 = 3;
 const HOUR_MS: i64 = 60 * 60 * 1000;
 
 /// How many events a watcher may fall behind before it's cut off and has to
@@ -359,21 +362,29 @@ impl DmDb {
         .await
     }
 
-    /// Hands out one key package per device: the oldest single-use one still
-    /// good, which goes, or else the device's last-resort one.
-    /// How many of `wanted` single-use key packages from strangers' devices
-    /// `account_id` may still take this hour, counting them as taken.
-    pub fn take_stranger_claims(&self, account_id: &str, wanted: usize, now: i64) -> usize {
+    /// Which of strangers' devices `account_id` may still take a single-use
+    /// key package from this hour (within its own budget and each device's),
+    /// counting them as taken. The rest get their last-resort one.
+    pub fn take_stranger_claims<'d>(&self, account_id: &str, device_ids: &[&'d str], now: i64) -> HashSet<&'d str> {
         let mut claims = self.stranger_claims.lock().unwrap_or_else(|p| p.into_inner());
-        if claims.len() > 4096 {
+        if claims.len() > 65_536 {
             claims.retain(|_, (start, _)| now - *start < HOUR_MS);
         }
-        let (start, taken) = claims.entry(account_id.to_string()).or_insert((now, 0));
-        if now - *start >= HOUR_MS {
-            (*start, *taken) = (now, 0);
+        let mut count = |key: String, cap: u32| {
+            let (start, taken) = claims.entry(key).or_insert((now, 0));
+            if now - *start >= HOUR_MS {
+                (*start, *taken) = (now, 0);
+            }
+            (*taken < cap).then(|| *taken += 1).is_some()
+        };
+        let mut allowed = HashSet::new();
+        for &device_id in device_ids {
+            if count(format!("{account_id}/{device_id}"), STRANGER_CLAIMS_PER_DEVICE)
+                && count(account_id.to_string(), STRANGER_CLAIMS_PER_HOUR)
+            {
+                allowed.insert(device_id);
+            }
         }
-        let allowed = (STRANGER_CLAIMS_PER_HOUR.saturating_sub(*taken) as usize).min(wanted);
-        *taken += allowed as u32;
         allowed
     }
 
@@ -977,11 +988,19 @@ mod tests {
     async fn strangers_claims_are_limited_each_hour() {
         let (_dir, dms) = open().await;
         let now = now_ms();
-        assert_eq!(dms.take_stranger_claims("a", 1500, now), 1500);
-        assert_eq!(dms.take_stranger_claims("a", 1500, now + 1), 500);
-        assert_eq!(dms.take_stranger_claims("a", 1, now + 2), 0);
-        assert_eq!(dms.take_stranger_claims("b", 10, now + 2), 10);
-        assert_eq!(dms.take_stranger_claims("a", 10, now + HOUR_MS), 10);
+        let names: Vec<String> = (0..2500).map(|n| format!("d{n}")).collect();
+        let devices: Vec<&str> = names.iter().map(String::as_str).collect();
+        // Each account has its budget an hour...
+        assert_eq!(dms.take_stranger_claims("a", &devices[..1500], now).len(), 1500);
+        assert_eq!(dms.take_stranger_claims("a", &devices[1500..], now + 1).len(), 500);
+        assert!(dms.take_stranger_claims("a", &devices[2400..2401], now + 2).is_empty());
+        // ...and a few from any one device.
+        for n in 0..STRANGER_CLAIMS_PER_DEVICE {
+            assert_eq!(dms.take_stranger_claims("b", &["d0"], now + i64::from(n)).len(), 1);
+        }
+        assert!(dms.take_stranger_claims("b", &["d0"], now + 9).is_empty());
+        assert_eq!(dms.take_stranger_claims("b", &["d1"], now + 9).len(), 1);
+        assert_eq!(dms.take_stranger_claims("a", &devices[..10], now + HOUR_MS).len(), 10);
     }
 
     #[tokio::test]

@@ -86,9 +86,9 @@ the directory for them (`SecureDevices` in the cluster protocol).
 
 Adding someone takes one of their key packages. Anyone who shares a server
 with them can claim them, but an account gets at most 2,000 single-use key
-packages an hour from people it has no conversation with; past that it gets
-their last-resort key package, so nobody can use up someone's single-use
-ones on purpose.
+packages an hour from people it has no conversation with, and at most 3
+from any one of their devices; past that it gets their last-resort key
+package, so nobody can use up someone's single-use ones on purpose.
 
 ### Who's who
 

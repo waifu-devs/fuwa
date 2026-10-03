@@ -268,8 +268,8 @@ impl Api {
             })
             .map(|device| device.id.as_str())
             .collect();
-        let allowed = dms.take_stranger_claims(&account.id, strangers.len(), now_ms());
-        let last_resort_only: HashSet<&str> = strangers[allowed..].iter().copied().collect();
+        let allowed = dms.take_stranger_claims(&account.id, &strangers, now_ms());
+        let last_resort_only: HashSet<&str> = strangers.into_iter().filter(|id| !allowed.contains(id)).collect();
         let claimed = dms.claim_key_packages(&claimable, &last_resort_only).await?;
         Ok(pb::ClaimKeyPackagesResponse {
             key_packages: claimed

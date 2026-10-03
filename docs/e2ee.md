@@ -58,8 +58,9 @@ Anyone who shares a server with it, or has a conversation with it, can claim
 them. Each is handed out
 once (`ClaimKeyPackages`); when a device runs out, its last-resort key package
 is handed out instead until the device tops up. Someone with no conversation
-with you gets at most 2,000 single-use ones an hour (adding people to secure
-channels), and last-resort ones after that. The server checks that a key
+with you gets at most 3 single-use ones from each of your devices an hour
+(and 2,000 in all, adding people to secure channels), and last-resort ones
+after that. The server checks that a key
 package names the account and device it's published for.
 
 ### Conversations
