@@ -634,6 +634,41 @@ impl DirectoryService for Internal {
         Ok(Response::new(cpb::DropPictureResponse {}))
     }
 
+    type SendPictureStream = crate::cluster::pictures::PictureStream;
+
+    async fn send_picture(
+        &self,
+        request: Request<cpb::SendPictureRequest>,
+    ) -> Result<Response<Self::SendPictureStream>, Status> {
+        let req = request.into_inner();
+        let pieces = super::pictures::send(self.app.clone(), req.server_id, req.media_id).await?;
+        Ok(Response::new(Box::pin(tokio_stream::wrappers::ReceiverStream::new(pieces))))
+    }
+
+    async fn forget_picture(
+        &self,
+        request: Request<cpb::ForgetPictureRequest>,
+    ) -> Result<Response<cpb::ForgetPictureResponse>, Status> {
+        let req = request.into_inner();
+        respond(
+            super::pictures::forget(&self.app, &req.server_id, &req.media_id)
+                .await
+                .map(|()| cpb::ForgetPictureResponse {}),
+        )
+    }
+
+    async fn server_pictures(
+        &self,
+        request: Request<cpb::ServerPicturesRequest>,
+    ) -> Result<Response<cpb::ServerPicturesResponse>, Status> {
+        let req = request.into_inner();
+        respond(
+            super::pictures::kept_here(&self.app, &req.server_id)
+                .await
+                .map(|media_ids| cpb::ServerPicturesResponse { media_ids }),
+        )
+    }
+
     async fn count_owned_servers(
         &self,
         request: Request<cpb::CountOwnedServersRequest>,

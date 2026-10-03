@@ -7,8 +7,9 @@
 //!    from the old shard ([`send`]): from then on the old shard takes no
 //!    changes to it (the gateway holds them, as it does over a restart),
 //!    hangs up its calls, finishes its recordings, folds its log into the
-//!    file and sends the file and its recordings, each checked by SHA-256.
-//!    The new shard opens it and replicates it to its own bucket.
+//!    file and sends the file, its recordings and its pictures, each checked
+//!    by SHA-256. The new shard opens it and replicates it to its own bucket,
+//!    and takes any of its pictures the directory still keeps.
 //! 3. It places the server on the new shard (the move is now committed).
 //! 4. It tells the old shard to [`release`] it: its files and its replica's
 //!    copies go, and live streams following it there end, so gateways follow
@@ -258,6 +259,10 @@ pub fn send(app: Arc<App>, server_id: String) -> mpsc::Receiver<Result<cpb::Send
             for (relative, path) in walk(&recordings)? {
                 files.push((format!("recordings/{id}/{relative}"), path));
             }
+            super::pictures::restore_all(&app, &id).await?;
+            for (picture, path) in super::pictures::pictures(&app.config.data_path, &id)? {
+                files.push((super::pictures::name(&id, &picture), path));
+            }
             for (name, path) in files {
                 if !send_file(&tx, &name, &path).await? {
                     return Ok(());
@@ -314,12 +319,24 @@ pub async fn release(app: &App, server_id: &str, keep: bool) -> Result<()> {
         if app.servers.freeze(&id, false) {
             tracing::info!(server = %id, "a move didn't happen; the server takes changes here again");
         }
-        if app.servers.replicate_adopted(&id).await?
-            && let Some(replica) = app.servers.replica()
-        {
+        let adopted = app.servers.replicate_adopted(&id).await?;
+        if adopted && let Some(replica) = app.servers.replica() {
             let data = &app.config.data_path;
             for (relative, path) in walk(&recordings_dir(data, &id))? {
                 replica.store().put_file(&format!("recordings/{id}/{relative}"), &path).await?;
+            }
+            super::pictures::replicate(app, &id).await?;
+        }
+        if adopted {
+            // Pictures it used before servers' shards kept them, or that
+            // couldn't be taken then.
+            match super::pictures::take_all(app, &id).await {
+                Ok(0) => {}
+                Ok(taken) => tracing::info!(server = %id, taken, "took a moved server's pictures from the directory"),
+                Err(err) => {
+                    tracing::warn!(server = %id, error = %err, "couldn't take a moved server's pictures");
+                    crate::reports::server_error("server_picture_take", Some("cluster::moves"));
+                }
             }
         }
         return Ok(());
@@ -334,6 +351,7 @@ pub async fn release(app: &App, server_id: &str, keep: bool) -> Result<()> {
     app.recordings.finish_server(&id).await;
     app.servers.release(&id).await?;
     remove_dir(&recordings_dir(&app.config.data_path, &id))?;
+    remove_dir(&super::pictures::server_dir(&app.config.data_path, &id))?;
     tracing::info!(server = %id, "let go of a server that moved to another shard");
     Ok(())
 }
@@ -478,8 +496,9 @@ async fn receive(
 }
 
 /// Whether a path the old shard sent is one of this server's files:
-/// `servers/<id>.db` (or a file kept beside it) or a recording's
-/// `recordings/<id>/<recording>/<file>`. Never anything else, or anywhere else.
+/// `servers/<id>.db` (or a file kept beside it), a recording's
+/// `recordings/<id>/<recording>/<file>` or a picture's
+/// `server-pictures/<id>/<picture>`. Never anything else, or anywhere else.
 fn moved_path_ok(path: &str, id: &str) -> bool {
     let parts: Vec<&str> = path.split('/').collect();
     match parts.as_slice() {
@@ -490,6 +509,9 @@ fn moved_path_ok(path: &str, id: &str) -> bool {
                 && !file.is_empty()
                 && !file.starts_with('.')
                 && file.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')
+        }
+        [super::pictures::DIR, server, picture] => {
+            *server == id && crate::media::parse_id(picture).is_some_and(|parsed| parsed == *picture)
         }
         _ => false,
     }
@@ -543,6 +565,8 @@ mod tests {
         assert!(moved_path_ok(&format!("servers/{id}.db"), id));
         assert!(moved_path_ok(&format!("servers/{id}.db-log"), id));
         assert!(moved_path_ok(&format!("recordings/{id}/{rec}/{rec}.opus.sealed"), id));
+        let picture = crate::media::new_id();
+        assert!(moved_path_ok(&format!("server-pictures/{id}/{picture}"), id));
         for bad in [
             format!("servers/{rec}.db"),
             "servers/node.db".to_string(),
@@ -554,6 +578,11 @@ mod tests {
             format!("../servers/{id}.db"),
             format!("/servers/{id}.db"),
             "node.db".to_string(),
+            format!("server-pictures/{rec}/{picture}"),
+            format!("server-pictures/{id}/.incoming-{picture}"),
+            format!("server-pictures/{id}/{}", picture.to_uppercase()),
+            format!("server-pictures/{id}/{picture}/x"),
+            format!("media/{picture}"),
         ] {
             assert!(!moved_path_ok(&bad, id), "{bad}");
         }

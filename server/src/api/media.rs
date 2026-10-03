@@ -1,6 +1,7 @@
 use tonic::{Request, Response, Status};
 
 use super::{Api, respond};
+use crate::app::Link;
 use crate::auth;
 use crate::error::{Error, Result};
 use crate::id::{now_ms, timestamp};
@@ -181,9 +182,13 @@ impl Api {
         self.app.check_upload(&account.id, purpose, url).await
     }
 
-    /// Marks a checked upload as used.
+    /// Marks a checked upload as used. On a split instance a server's
+    /// shard then takes the server's pictures (docs/regions.md).
     pub(super) async fn keep_picture(&self, id: Option<&str>, server_id: Option<&str>) {
-        self.app.keep_picture(id, server_id).await
+        self.app.keep_picture(id, server_id).await;
+        if let (Some(id), Some(server_id), Link::Shard(_)) = (id, server_id, &self.app.link) {
+            crate::cluster::pictures::take_soon(self.app.clone(), server_id.to_string(), id.to_string());
+        }
     }
 
     /// Deletes the picture a change replaced, if it belonged to what changed.

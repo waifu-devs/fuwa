@@ -270,7 +270,7 @@ impl Replica {
 
     /// Stops replicating a server that moved to another shard, and deletes
     /// this process's copies of it: everything under its name (and its
-    /// recordings) when nobody else has written it since, as when the new
+    /// recordings and pictures) when nobody else has written it since, as when the new
     /// shard replicates to another region's bucket; else only the
     /// generations not in use, leaving the new shard's.
     pub async fn release(&self, name: &str) {
@@ -285,6 +285,7 @@ impl Replica {
             let mut prefixes = vec![format!("{name}/")];
             if let Some(id) = name.strip_prefix("servers/") {
                 prefixes.push(format!("recordings/{id}/"));
+                prefixes.push(format!("{}/{id}/", crate::cluster::pictures::DIR));
             }
             for prefix in prefixes {
                 for object in self.store.list(&prefix).await? {

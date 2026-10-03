@@ -269,6 +269,17 @@ async fn until(stream: &mut Streaming<pb::SubscribeResponse>, matches: impl Fn(&
 
 /// Retries until a call stops failing as `code`, for changes that take a
 /// moment to reach every part.
+/// Waits for something done in the background.
+async fn wait_for(done: impl Fn() -> bool) {
+    for _ in 0..100 {
+        if done() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(done(), "it didn't happen in time");
+}
+
 async fn eventually<T, F: Future<Output = Result<T, tonic::Status>>>(mut call: impl FnMut() -> F) -> T {
     for _ in 0..100 {
         match call().await {
@@ -499,6 +510,23 @@ async fn a_split_instance_works_like_one() {
     let row = cluster.directory.app().node().unwrap().media(&picture.id).await.unwrap().unwrap();
     assert!(row.used);
     assert_eq!(row.server_id.as_deref(), Some(on_b.id.as_str()));
+    // The server's shard keeps its pictures: the directory lets go of it once
+    // the shard has it, and its link leads there.
+    let on_shard = root.path().join("shard-b").join("server-pictures").join(&on_b.id).join(&picture.id);
+    let at_directory = root.path().join("directory").join("media").join(&picture.id);
+    wait_for(|| on_shard.exists() && !at_directory.exists()).await;
+    assert_eq!(std::fs::read(&on_shard).unwrap(), png);
+    let fetched = http.get(&picture.url).send().await.unwrap();
+    assert_eq!(fetched.status(), 200);
+    assert_eq!(fetched.headers()["content-type"], "image/png");
+    assert_eq!(fetched.headers()["cache-control"], "public, max-age=31536000, immutable");
+    assert_eq!(fetched.bytes().await.unwrap().to_vec(), png);
+    let plain = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+    let redirected = plain.get(&picture.url).send().await.unwrap();
+    assert_eq!(redirected.status(), 308);
+    assert_eq!(redirected.headers()["location"], format!("/media/servers/{}/{}", on_b.id, picture.id).as_str());
+    let elsewhere = format!("{}/media/servers/{}/{}", cluster.gateway.url(), on_a.id, picture.id);
+    assert_eq!(http.get(&elsewhere).send().await.unwrap().status(), 404, "only under its own server");
     let theirs = pb::UpdateServerRequest {
         server_id: on_a.id.clone(),
         icon_url: Some(picture.url.clone()),
@@ -1093,13 +1121,41 @@ async fn servers_live_in_their_region_and_move() {
     assert_eq!(make("mars").await.unwrap_err().code(), Code::InvalidArgument);
     assert_eq!(make("Not A Region").await.unwrap_err().code(), Code::InvalidArgument);
 
-    // A server at home, with a message, a recording's files and a live stream.
+    // A server at home, with a message, a recording's files, pictures and a
+    // live stream.
     let server = make("").await.unwrap();
+    let http = reqwest::Client::new();
+    let upload = |purpose: pb::MediaPurpose, fill: u8| {
+        let (mut media, http, juan) = (c.media.clone(), http.clone(), juan.clone());
+        async move {
+            let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+            png.resize(300, fill);
+            let request =
+                pb::CreateUploadRequest { purpose: purpose as i32, content_type: "image/png".into(), size: 300 };
+            let reserved = media.create_upload(authed(&juan, request)).await.unwrap().into_inner();
+            assert_eq!(http.put(&reserved.upload_url).body(png.clone()).send().await.unwrap().status(), 204);
+            (reserved.media.unwrap(), png)
+        }
+    };
+    let (icon, icon_png) = upload(pb::MediaPurpose::ServerIcon, 1).await;
+    let request = pb::UpdateServerRequest {
+        server_id: server.id.clone(),
+        icon_url: Some(icon.url.clone()),
+        ..Default::default()
+    };
+    c.servers.update_server(authed(&juan, request)).await.unwrap();
+    let shard_a = root.path().join("shard-a");
+    let picture_at = |dir: &Path, id: &str| dir.join("server-pictures").join(&server.id).join(id);
+    wait_for(|| picture_at(&shard_a, &icon.id).exists()).await;
+    wait_for(|| picture_at(&root.path().join("bucket-us"), &icon.id).exists()).await;
+    // An emoji it used before servers' shards kept their pictures: still at
+    // the directory, and taken when the server moves.
+    let (emoji, emoji_png) = upload(pb::MediaPurpose::Emoji, 2).await;
+    cluster.directory.app().node().unwrap().use_media(&emoji.id, Some(&server.id)).await.unwrap();
     let channel = general(&mut c, &juan, &server.id).await;
     send(&mut c, &juan, &server.id, &channel.id, "before").await;
     let recording = format!("recordings/{}/01J9Z3K8X2V5W7Q4R6T8Y0B2C5", server.id);
     let track = "01J9Z3K8X2V5W7Q4R6T8Y0B2C6.opus";
-    let shard_a = root.path().join("shard-a");
     std::fs::create_dir_all(shard_a.join(&recording)).unwrap();
     std::fs::write(shard_a.join(&recording).join(track), b"OggS").unwrap();
     let cursors = vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }];
@@ -1115,6 +1171,9 @@ async fn servers_live_in_their_region_and_move() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(replicated("bucket-us"));
+
+    // A picture its shard lost still goes with it, from the bucket.
+    std::fs::remove_file(picture_at(&shard_a, &icon.id)).unwrap();
 
     // Only admins move servers (the first account is one).
     let (mika, _) = sign_up(&mut c, "mika").await;
@@ -1159,6 +1218,30 @@ async fn servers_live_in_their_region_and_move() {
     assert!(!replicated("bucket-us"), "the old region's bucket doesn't");
     assert!(root.path().join("bucket-eu").join(&recording).join(track).exists());
     assert!(!root.path().join("bucket-us").join(&recording).exists());
+
+    // Its pictures came along too, the emoji from the directory; their links
+    // still work, and lead to the new region.
+    let (bucket_eu, bucket_us) = (root.path().join("bucket-eu"), root.path().join("bucket-us"));
+    let directory_media = root.path().join("directory").join("media");
+    wait_for(|| picture_at(&shard_b, &emoji.id).exists() && !directory_media.join(&emoji.id).exists()).await;
+    for (picture, png) in [(&icon, &icon_png), (&emoji, &emoji_png)] {
+        assert_eq!(&std::fs::read(picture_at(&shard_b, &picture.id)).unwrap(), png);
+        assert!(picture_at(&bucket_eu, &picture.id).exists());
+        assert!(!picture_at(&shard_a, &picture.id).exists() && !picture_at(&bucket_us, &picture.id).exists());
+        assert!(!directory_media.join(&picture.id).exists());
+        let fetched = http.get(&picture.url).send().await.unwrap();
+        assert_eq!(fetched.status(), 200);
+        assert_eq!(&fetched.bytes().await.unwrap().to_vec(), png);
+    }
+    // A shard that loses a picture gets it back from its bucket.
+    std::fs::remove_file(picture_at(&shard_b, &icon.id)).unwrap();
+    assert_eq!(http.get(&icon.url).send().await.unwrap().bytes().await.unwrap().to_vec(), icon_png);
+    // Replacing a picture deletes it, here and in the bucket.
+    let request =
+        pb::UpdateServerRequest { server_id: server.id.clone(), icon_url: Some(String::new()), ..Default::default() };
+    c.servers.update_server(authed(&juan, request)).await.unwrap();
+    assert!(!picture_at(&shard_b, &icon.id).exists() && !picture_at(&bucket_eu, &icon.id).exists());
+    assert_eq!(http.get(&icon.url).send().await.unwrap().status(), 404);
     assert!(cluster.directory.app().node().unwrap().moves().await.unwrap().is_empty(), "the move is over");
 
     cluster.stop().await;

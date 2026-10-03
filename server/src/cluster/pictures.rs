@@ -1,0 +1,379 @@
+//! A split instance's server pictures (icons, emoji, webhooks' pictures)
+//! live with their server, so they're kept in its region (docs/regions.md).
+//!
+//! Uploads arrive at the directory, as every upload does, and are served
+//! there at `/media/<id>` until they're used. Once a server uses one, the
+//! shard holding the server takes it ([`take`]): it copies the file from the
+//! directory (checked by SHA-256) into `<data>/server-pictures/<server>/`
+//! and its own replica (`server-pictures/<server>/<id>` in its bucket), then
+//! the directory forgets its copy. From then on the picture's link
+//! redirects to `/media/servers/<server>/<id>`, which gateways pass to the
+//! shard holding the server, so its link never changes. The pictures go
+//! with the server when it moves, as its recordings do; pictures a server
+//! used before this, or that couldn't be taken, are taken when it moves.
+//!
+//! node.db keeps each picture's row (who uploaded it, its size and type),
+//! as it keeps accounts. One process running everything keeps pictures
+//! where it always did.
+
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::Arc;
+
+use axum::Router;
+use axum::body::Body;
+use axum::extract::Path as UrlPath;
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use futures::Stream;
+use http::{HeaderMap, HeaderValue, StatusCode, header};
+use tokio::sync::mpsc;
+use tonic::Status;
+
+use crate::app::{App, Link};
+use crate::cpb;
+use crate::error::{Error, MISROUTED, Result};
+use crate::id::parse_id;
+use crate::pb;
+
+/// Where a shard keeps its servers' pictures, in its data folder and its bucket.
+pub const DIR: &str = "server-pictures";
+/// How much of a picture goes in one message.
+const PIECE: usize = 1024 * 1024;
+
+pub type PictureStream = Pin<Box<dyn Stream<Item = Result<cpb::SendPictureResponse, Status>> + Send>>;
+
+/// A server's picture's path from the data folder, and its key in the bucket.
+pub fn name(server_id: &str, media_id: &str) -> String {
+    format!("{DIR}/{server_id}/{media_id}")
+}
+
+/// Where a server's pictures are kept on its shard.
+pub fn server_dir(data: &Path, server_id: &str) -> PathBuf {
+    data.join(DIR).join(server_id)
+}
+
+// ─────────────── The shard ───────────────
+
+/// Takes a picture a server here uses from the directory. A picture that
+/// isn't the server's to take (one an account or another server uses), or
+/// was taken already, stays where it is.
+pub async fn take(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncWriteExt;
+
+    let Link::Shard(link) = &app.link else { return Ok(false) };
+    let (server_id, media_id) = (parse_id("server_id", server_id)?, canonical(media_id)?);
+    let data = &app.config.data_path;
+    let dest = data.join(name(&server_id, &media_id));
+    if dest.exists() {
+        return Ok(false);
+    }
+    let request = cpb::SendPictureRequest { media_id: media_id.clone(), server_id: server_id.clone() };
+    let mut stream = match link.directory().send_picture(request).await {
+        Ok(stream) => stream.into_inner(),
+        Err(status) if matches!(status.code(), tonic::Code::NotFound | tonic::Code::FailedPrecondition) => {
+            return Ok(false);
+        }
+        Err(status) => return Err(status.into()),
+    };
+    let dir = server_dir(data, &server_id);
+    std::fs::create_dir_all(&dir)?;
+    let partial = dir.join(format!(".incoming-{media_id}"));
+    let received = async {
+        let mut out = tokio::fs::File::create(&partial).await?;
+        let mut hash = Sha256::new();
+        while let Some(piece) = stream.message().await.map_err(Error::retried)? {
+            out.write_all(&piece.data).await?;
+            hash.update(&piece.data);
+            if piece.sha256.is_empty() {
+                continue;
+            }
+            out.sync_all().await?;
+            if hash.finalize().as_slice() != piece.sha256.as_slice() {
+                return Err(Error::internal(format!("picture {media_id} didn't arrive intact")));
+            }
+            return Ok(());
+        }
+        Err(Error::internal(format!("the directory stopped partway through picture {media_id}")))
+    }
+    .await;
+    if let Err(err) = received {
+        let _ = std::fs::remove_file(&partial);
+        return Err(err);
+    }
+    std::fs::rename(&partial, &dest)?;
+    if let Some(replica) = app.servers.replica()
+        && let Err(err) = replica.store().put_file(&name(&server_id, &media_id), &dest).await
+    {
+        // Kept at the directory until it's backed up here too.
+        let _ = std::fs::remove_file(&dest);
+        return Err(err);
+    }
+    let request = cpb::ForgetPictureRequest { media_id: media_id.clone(), server_id: server_id.clone() };
+    link.ask(request, |mut d, r| async move { d.forget_picture(r).await }).await?;
+    Ok(true)
+}
+
+/// Takes in the background, after a server here started using a picture.
+/// One that fails stays at the directory, served from there, and is taken
+/// when the server next moves.
+pub fn take_soon(app: Arc<App>, server_id: String, media_id: String) {
+    tokio::spawn(async move {
+        if let Err(err) = take(&app, &server_id, &media_id).await {
+            tracing::warn!(server = %server_id, media = %media_id, error = %err, "couldn't take a server's picture");
+            crate::reports::server_error("server_picture_take", Some("cluster::pictures"));
+        }
+    });
+}
+
+/// Takes every picture of a server here that the directory still keeps.
+pub async fn take_all(app: &App, server_id: &str) -> Result<usize> {
+    let Link::Shard(link) = &app.link else { return Ok(0) };
+    let request = cpb::ServerPicturesRequest { server_id: server_id.to_string() };
+    let ids = link.ask(request, |mut d, r| async move { d.server_pictures(r).await }).await?.media_ids;
+    let mut taken = 0;
+    for id in ids {
+        taken += usize::from(take(app, server_id, &id).await?);
+    }
+    Ok(taken)
+}
+
+/// Deletes a server's picture here, and its replica's copy: it was replaced
+/// or removed. One that isn't here is fine.
+pub async fn drop(app: &App, server_id: &str, media_id: &str) {
+    let (Ok(server_id), Ok(media_id)) = (parse_id("server_id", server_id), canonical(media_id)) else { return };
+    let key = name(&server_id, &media_id);
+    match std::fs::remove_file(app.config.data_path.join(&key)) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+            tracing::warn!(media = %media_id, error = %err, "couldn't delete a server's picture");
+        }
+        _ => {}
+    }
+    if let Some(replica) = app.servers.replica()
+        && let Err(err) = replica.store().delete(&key).await
+    {
+        tracing::warn!(media = %media_id, error = %err, "couldn't delete a server's picture from the replica");
+    }
+}
+
+/// Copies a server's pictures here up to the replica: it was just adopted.
+pub async fn replicate(app: &App, server_id: &str) -> Result<()> {
+    let Some(replica) = app.servers.replica() else { return Ok(()) };
+    for (file, path) in pictures(&app.config.data_path, server_id)? {
+        replica.store().put_file(&name(server_id, &file), &path).await?;
+    }
+    Ok(())
+}
+
+/// Fetches any of a server's pictures this shard lost back from its replica,
+/// so a move sends them all.
+pub async fn restore_all(app: &App, server_id: &str) -> Result<()> {
+    let Some(replica) = app.servers.replica() else { return Ok(()) };
+    let prefix = format!("{DIR}/{server_id}/");
+    for object in replica.store().list(&prefix).await? {
+        let Some(id) = object.key.strip_prefix(&prefix).filter(|id| is_id(id)) else { continue };
+        let path = app.config.data_path.join(name(server_id, id));
+        if !path.exists() && !restore(app, &object.key, &path).await {
+            return Err(Error::internal(format!("couldn't fetch picture {id} from the replica")));
+        }
+    }
+    Ok(())
+}
+
+/// A server's pictures here, by id.
+pub fn pictures(data: &Path, server_id: &str) -> Result<Vec<(String, PathBuf)>> {
+    let entries = match std::fs::read_dir(server_dir(data, server_id)) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err.into()),
+    };
+    let mut found = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let Ok(file) = entry.file_name().into_string() else { continue };
+        if entry.file_type()?.is_file() && is_id(&file) {
+            found.push((file, entry.path()));
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
+/// `GET /media/servers/<server>/<id>`, where a picture's link leads once its
+/// server's shard has it.
+pub fn routes(app: Arc<App>) -> Router {
+    Router::new().route(
+        "/media/servers/{server_id}/{id}",
+        get(move |UrlPath((server_id, id)): UrlPath<(String, String)>, headers: HeaderMap| {
+            let app = app.clone();
+            async move { serve(&app, &server_id, &id, &headers).await }
+        }),
+    )
+}
+
+async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Response {
+    let (Ok(server_id), Ok(id)) = (parse_id("server_id", server_id), canonical(id)) else {
+        return plain(StatusCode::NOT_FOUND, "not found");
+    };
+    if !app.servers.holds(&server_id) {
+        let mut response = plain(StatusCode::SERVICE_UNAVAILABLE, "that server is on another shard");
+        response.headers_mut().insert(MISROUTED, HeaderValue::from_static("1"));
+        return response;
+    }
+    let key = name(&server_id, &id);
+    let path = app.config.data_path.join(&key);
+    if !path.exists() && !restore(app, &key, &path).await {
+        return plain(StatusCode::NOT_FOUND, "not found");
+    }
+    let etag = format!("\"{id}\"");
+    let fresh = headers.get(header::IF_NONE_MATCH).is_some_and(|value| value.as_bytes() == etag.as_bytes());
+    let mut response = if fresh {
+        StatusCode::NOT_MODIFIED.into_response()
+    } else {
+        let Ok(bytes) = tokio::fs::read(&path).await else { return plain(StatusCode::NOT_FOUND, "not found") };
+        let Some(kind) = crate::media::sniff(&bytes[..bytes.len().min(16)]) else {
+            return plain(StatusCode::NOT_FOUND, "not found");
+        };
+        let mut response = Response::new(Body::from(bytes));
+        response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(kind));
+        response
+    };
+    crate::media::picture_headers(response.headers_mut(), &etag);
+    response
+}
+
+/// Fetches a picture this shard lost (its disk was replaced) back from its
+/// replica.
+async fn restore(app: &App, key: &str, path: &Path) -> bool {
+    let Some(replica) = app.servers.replica() else { return false };
+    let Some(dir) = path.parent() else { return false };
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let partial = dir.join(format!(".restoring-{}", path.file_name().and_then(|n| n.to_str()).unwrap_or_default()));
+    match replica.store().get_to_file(key, &partial).await {
+        Ok(true) => std::fs::rename(&partial, path).is_ok(),
+        Ok(false) => false,
+        Err(err) => {
+            tracing::warn!(picture = %key, error = %err, "couldn't fetch a server's picture from the replica");
+            let _ = std::fs::remove_file(&partial);
+            false
+        }
+    }
+}
+
+fn plain(status: StatusCode, message: &str) -> Response {
+    (status, format!("{message}\n")).into_response()
+}
+
+// ─────────────── The directory ───────────────
+
+/// Whether the picture is the server's to take: an icon, emoji or webhook
+/// picture it uses, still kept here.
+async fn takeable(app: &App, server_id: &str, media_id: &str) -> Result<crate::media::MediaRow> {
+    let row = app.node()?.media(media_id).await?.ok_or(Error::NotFound("picture"))?;
+    let purpose =
+        matches!(row.purpose, pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji | pb::MediaPurpose::Avatar);
+    if !row.stored || !row.used || !purpose || row.server_id.as_deref() != Some(server_id) {
+        return Err(Error::FailedPrecondition("that picture isn't the server's".into()));
+    }
+    Ok(row)
+}
+
+/// Sends a server's picture to its shard.
+pub async fn send(
+    app: Arc<App>,
+    server_id: String,
+    media_id: String,
+) -> Result<mpsc::Receiver<Result<cpb::SendPictureResponse, Status>>> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncReadExt;
+
+    let media_id = canonical(&media_id)?;
+    takeable(&app, &server_id, &media_id).await?;
+    let mut file = match tokio::fs::File::open(app.media()?.path(&media_id)).await {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Error::FailedPrecondition("that picture was taken already".into()));
+        }
+        Err(err) => return Err(err.into()),
+    };
+    let (tx, rx) = mpsc::channel(4);
+    tokio::spawn(async move {
+        let mut hash = Sha256::new();
+        let mut buffer = vec![0; PIECE];
+        loop {
+            let piece = match file.read(&mut buffer).await {
+                Ok(0) => {
+                    cpb::SendPictureResponse { data: Vec::new(), sha256: std::mem::take(&mut hash).finalize().to_vec() }
+                }
+                Ok(read) => {
+                    hash.update(&buffer[..read]);
+                    cpb::SendPictureResponse { data: buffer[..read].to_vec(), sha256: Vec::new() }
+                }
+                Err(err) => {
+                    let _ = tx.send(Err(Error::from(err).into())).await;
+                    return;
+                }
+            };
+            let last = !piece.sha256.is_empty();
+            if tx.send(Ok(piece)).await.is_err() || last {
+                return;
+            }
+        }
+    });
+    Ok(rx)
+}
+
+/// Deletes the directory's copy of a picture its server's shard has taken.
+pub async fn forget(app: &App, server_id: &str, media_id: &str) -> Result<()> {
+    let media_id = canonical(media_id)?;
+    takeable(app, server_id, &media_id).await?;
+    app.media()?.remove(&media_id);
+    if let Some(replica) = &app.replica {
+        replica.drop_media(std::slice::from_ref(&media_id)).await;
+    }
+    Ok(())
+}
+
+/// A server's pictures still kept here.
+pub async fn kept_here(app: &App, server_id: &str) -> Result<Vec<String>> {
+    let server_id = parse_id("server_id", server_id)?;
+    let media = app.media()?;
+    let ids = app.node()?.server_media(&server_id).await?;
+    Ok(ids.into_iter().filter(|id| media.path(id).exists()).collect())
+}
+
+/// Where a picture's link leads when the directory no longer has it: the
+/// shard holding its server.
+pub fn moved_to(row: &crate::media::MediaRow, app: &App) -> Option<String> {
+    let server_id = row.server_id.as_deref()?;
+    let taken = matches!(app.link, Link::Directory(_)) && !app.media().ok()?.path(&row.id).exists();
+    taken.then(|| format!("/media/servers/{server_id}/{}", row.id))
+}
+
+fn canonical(media_id: &str) -> Result<String> {
+    crate::media::parse_id(media_id)
+        .filter(|id| id == media_id)
+        .ok_or_else(|| Error::invalid("that isn't a picture's id"))
+}
+
+fn is_id(file: &str) -> bool {
+    crate::media::parse_id(file).as_deref() == Some(file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_picture_ids_name_files() {
+        let id = crate::media::new_id();
+        assert!(is_id(&id));
+        assert!(canonical(&id).is_ok());
+        for bad in ["", "..", ".incoming-x", "a/b", &id.to_uppercase()] {
+            assert!(canonical(bad).is_err(), "{bad}");
+        }
+    }
+}

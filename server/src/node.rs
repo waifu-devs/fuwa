@@ -1425,17 +1425,38 @@ impl NodeDb {
         media_by_id(&self.read()?, id).await
     }
 
-    /// Marks a picture as in use, so it isn't swept; server icons also note
-    /// their server.
+    /// Marks a picture as in use, so it isn't swept; a server's pictures
+    /// also note their server. Whatever used it first owns it: an account's
+    /// avatar set as a webhook's picture stays the account's, and an emoji
+    /// added to a second server stays the first's (and where it's kept).
     pub async fn use_media(&self, id: &str, server_id: Option<&str>) -> Result<()> {
         db::write(&self.db, async |conn| {
             conn.execute(
-                "UPDATE media SET used_at = coalesce(used_at, ?2), server_id = coalesce(?3, server_id) WHERE id = ?1",
+                "UPDATE media SET server_id = CASE WHEN used_at IS NULL THEN ?3 ELSE server_id END,
+                                  used_at = coalesce(used_at, ?2) WHERE id = ?1",
                 (id, now_ms(), server_id),
             )
             .await?;
             Ok(())
         })
+        .await
+    }
+
+    /// A server's pictures in use: its icon, emoji and webhooks' pictures.
+    pub async fn server_media(&self, server_id: &str) -> Result<Vec<String>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            "SELECT id FROM media WHERE server_id = ?1 AND stored_at IS NOT NULL AND used_at IS NOT NULL
+             AND purpose IN (?2, ?3, ?4) ORDER BY id",
+            (
+                server_id,
+                pb::MediaPurpose::ServerIcon as i64,
+                pb::MediaPurpose::Emoji as i64,
+                pb::MediaPurpose::Avatar as i64,
+            ),
+            |r| r.get::<String>(0),
+        )
         .await
     }
 

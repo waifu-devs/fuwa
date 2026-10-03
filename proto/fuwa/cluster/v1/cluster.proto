@@ -44,6 +44,15 @@ service DirectoryService {
   rpc KeepPicture(KeepPictureRequest) returns (KeepPictureResponse);
   // Deletes the server icon or emoji a change replaced.
   rpc DropPicture(DropPictureRequest) returns (DropPictureResponse);
+  // Sends a server's picture (its icon, an emoji, a webhook's picture) to
+  // the shard holding the server, which keeps it from then on, piece by
+  // piece and checked by SHA-256. See docs/regions.md.
+  rpc SendPicture(SendPictureRequest) returns (stream SendPictureResponse);
+  // The shard holding the server has the picture now: the directory's copy
+  // (and its replica's) goes, and its link leads to the shard.
+  rpc ForgetPicture(ForgetPictureRequest) returns (ForgetPictureResponse);
+  // A server's pictures the directory still keeps, for its shard to take.
+  rpc ServerPictures(ServerPicturesRequest) returns (ServerPicturesResponse);
   // How many servers an account owns, for the cap on that.
   rpc CountOwnedServers(CountOwnedServersRequest) returns (CountOwnedServersResponse);
   // An agent by username, for adding it to a server.
@@ -85,7 +94,7 @@ service ShardService {
   // server's files from the old one with SendServer, then tells the old one
   // to ReleaseServer. See docs/regions.md.
 
-  // Sends a server's files (its database, then its recordings), each
+  // Sends a server's files (its database, then its recordings and pictures), each
   // checked by SHA-256. From the first piece on, the server takes no more
   // changes here until ReleaseServer.
   rpc SendServer(SendServerRequest) returns (stream SendServerResponse);
@@ -360,6 +369,34 @@ message DropPictureRequest {
 
 message DropPictureResponse {}
 
+message SendPictureRequest {
+  string media_id = 1;
+  string server_id = 2;
+}
+
+// A piece of the picture, in order.
+message SendPictureResponse {
+  bytes data = 1;
+  // Set on the last piece (which may have no data): the SHA-256 of the
+  // whole file.
+  bytes sha256 = 2;
+}
+
+message ForgetPictureRequest {
+  string media_id = 1;
+  string server_id = 2;
+}
+
+message ForgetPictureResponse {}
+
+message ServerPicturesRequest {
+  string server_id = 1;
+}
+
+message ServerPicturesResponse {
+  repeated string media_ids = 1;
+}
+
 message CountOwnedServersRequest {
   string account_id = 1;
 }
@@ -493,7 +530,8 @@ message SendServerRequest {
 // A piece of one file. A file's pieces come in order, one file after another.
 message SendServerResponse {
   // Where it goes, from the data folder: `servers/<id>.db` (or a file kept
-  // beside it), or `recordings/<id>/<recording>/<file>`.
+  // beside it), `recordings/<id>/<recording>/<file>`, or a picture the
+  // server keeps, `server-pictures/<id>/<picture>`.
   string path = 1;
   bytes data = 2;
   // Set on a file's last piece (which may have no data): the SHA-256 of the
