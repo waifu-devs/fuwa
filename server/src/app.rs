@@ -67,6 +67,8 @@ pub struct App {
     pub voice: crate::voice::Voice,
     /// The media part calls' sound goes through.
     pub media_link: crate::voice::MediaLink,
+    /// The voice channels being recorded on the server, where `voice` keeps them.
+    pub recordings: crate::recordings::Recordings,
     /// What links to pictures from other sites are signed with.
     picture_key: crate::outside::Key,
 }
@@ -196,6 +198,7 @@ impl App {
             link,
             replica,
             voice: crate::voice::Voice::default(),
+            recordings: crate::recordings::Recordings::default(),
             media_link,
             picture_key,
         });
@@ -512,6 +515,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     spawn_signal_handler(app.shutdown.clone());
     crate::api::spawn_voice_sweeper(app.clone());
     crate::api::spawn_voice_guard(app.clone());
+    crate::recordings::Recordings::spawn(app.clone());
     if let Some(replica) = &app.replica {
         replica.start();
     }
@@ -521,7 +525,8 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
         .await
         .map_err(|err| format!("server error: {err}"));
-    // The last commits go out before the process does.
+    // Recordings finish their files, and the last commits go out, before the process does.
+    app.recordings.finish_all().await;
     if let Some(replica) = &app.replica {
         replica.close().await;
     }

@@ -31,6 +31,13 @@ pub enum MembersEvent {
     Open { user_id: String },
 }
 
+/// A line in the list: a group's heading, or someone in it.
+enum Item {
+    /// A role shown apart (or "Members" for everyone else), its color and how many are in it.
+    Heading(String, Option<u32>, usize),
+    Member(Row),
+}
+
 struct Row {
     user: pb::User,
     name: String,
@@ -44,7 +51,7 @@ pub struct MembersView {
     core: Arc<Core>,
     pub key: String,
     pub server: String,
-    rows: Rc<Vec<Row>>,
+    rows: Rc<Vec<Item>>,
     digest: u64,
     born: Instant,
 }
@@ -71,38 +78,62 @@ impl MembersView {
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let now = crate::core::dms::now_ms();
         let mut ends: Option<i64> = None;
-        let rows: Vec<Row> = self.core.shared.read(|s| {
+        let rows: Vec<Item> = self.core.shared.read(|s| {
             let Some(i) = s.instance(&self.key) else { return Vec::new() };
             let me = i.me.as_ref().map(|m| m.id.as_str()).unwrap_or_default();
             let roles = i.roles.get(&self.server);
             let Some(members) = i.members.get(&self.server) else { return Vec::new() };
-            members
-                .iter()
-                .filter(|m| !m.pending)
-                .filter_map(|m| {
-                    let user = m.user.clone()?;
-                    // The first of their roles (by rank) that has a colour.
-                    let color = roles.and_then(|roles| {
-                        roles.iter().filter(|r| m.role_ids.contains(&r.id)).find_map(|r| r.color).map(|c| c as u32)
-                    });
-                    let until = crate::core::moderation::timed_out_until(m, now);
-                    if let Some(until) = until {
-                        ends = Some(ends.map_or(until, |e| e.min(until)));
-                    }
-                    Some(Row {
-                        name: if m.nickname.is_empty() { user_name(&user) } else { m.nickname.clone() },
-                        color,
-                        agent: is_agent(Some(&user)),
-                        timed_out: until.is_some(),
-                        mine: user.id == me,
-                        user,
-                    })
+            // Everyone under their highest role that's shown apart, then everyone else.
+            let empty = Vec::new();
+            let ranked = roles.unwrap_or(&empty);
+            let mut groups: Vec<(&pb::Role, Vec<Row>)> =
+                ranked.iter().filter(|r| r.hoist && r.id != self.server).map(|r| (r, Vec::new())).collect();
+            let mut rest: Vec<Row> = Vec::new();
+            let rows = members.iter().filter(|m| !m.pending).filter_map(|m| {
+                let user = m.user.clone()?;
+                // The first of their roles (by rank) that has a colour.
+                let color = roles.and_then(|roles| {
+                    roles.iter().filter(|r| m.role_ids.contains(&r.id)).find_map(|r| r.color).map(|c| c as u32)
+                });
+                let until = crate::core::moderation::timed_out_until(m, now);
+                if let Some(until) = until {
+                    ends = Some(ends.map_or(until, |e| e.min(until)));
+                }
+                Some(Row {
+                    name: if m.nickname.is_empty() { user_name(&user) } else { m.nickname.clone() },
+                    color,
+                    agent: is_agent(Some(&user)),
+                    timed_out: until.is_some(),
+                    mine: user.id == me,
+                    user,
                 })
-                .collect()
+                .map(|row| (m, row))
+            });
+            for (m, row) in rows {
+                match groups.iter_mut().find(|(r, _)| m.role_ids.contains(&r.id)) {
+                    Some((_, list)) => list.push(row),
+                    None => rest.push(row),
+                }
+            }
+            let mut out = Vec::new();
+            for (role, list) in groups.into_iter().filter(|(_, l)| !l.is_empty()) {
+                out.push(Item::Heading(role.name.clone(), role.color.map(|c| c as u32), list.len()));
+                out.extend(list.into_iter().map(Item::Member));
+            }
+            if !rest.is_empty() {
+                out.push(Item::Heading("Members".into(), None, rest.len()));
+                out.extend(rest.into_iter().map(Item::Member));
+            }
+            out
         });
         let mut h = DefaultHasher::new();
-        for r in &rows {
-            (&r.user.id, &r.user.avatar_url, &r.name, r.color, r.agent, r.timed_out, r.mine).hash(&mut h);
+        for item in &rows {
+            match item {
+                Item::Heading(name, color, n) => (name, color, n).hash(&mut h),
+                Item::Member(r) => {
+                    (&r.user.id, &r.user.avatar_url, &r.name, r.color, r.agent, r.timed_out, r.mine).hash(&mut h)
+                }
+            }
         }
         let digest = h.finish();
         // A time-out ending is news too, though nothing else changes.
@@ -136,33 +167,43 @@ impl Render for MembersView {
                 let now_rows = rows.clone();
                 range
                     .filter_map(|n| now_rows.get(n).map(|row| (n, row)))
-                    .map(|(n, row)| member_row(row, n, entering, &p, cx).into_any_element())
+                    .map(|(n, item)| match item {
+                        Item::Heading(name, color, members) => heading(name, *color, *members, n, &p),
+                        Item::Member(row) => member_row(row, n, entering, &p, cx).into_any_element(),
+                    })
                     .collect::<Vec<_>>()
             }),
         )
         .flex_1()
         .px(px(8.0))
+        .pt(px(4.0))
         .pb(px(12.0));
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(p.side_surface)
-            .border_l_1()
-            .border_color(p.border)
-            .child(
-                div()
-                    .flex_none()
-                    .px(px(16.0))
-                    .pt(px(18.0))
-                    .pb(px(6.0))
-                    .text_size(px(11.0))
-                    .font_weight(FontWeight::EXTRA_BOLD)
-                    .text_color(p.muted_foreground)
-                    .child(format!("MEMBERS — {count}")),
-            )
-            .child(list)
+        div().size_full().flex().flex_col().bg(p.side_surface).border_l_1().border_color(p.border).child(list)
     }
+}
+
+/// A group's name over its people, as tall as a row so the list can skip what's out of sight.
+fn heading(
+    name: &str,
+    color: Option<u32>,
+    members: usize,
+    n: usize,
+    p: &crate::ui::theme::Palette,
+) -> gpui_kit::AnyElement {
+    div()
+        .id(SharedString::from(format!("member-heading|{name}|{n}")))
+        .h(px(ROW))
+        .px(px(8.0))
+        .pb(px(6.0))
+        .flex()
+        .items_end()
+        .gap(px(6.0))
+        .text_size(px(11.0))
+        .font_weight(FontWeight::EXTRA_BOLD)
+        .text_color(p.muted_foreground)
+        .when_some(color, |el, c| el.child(div().mb(px(3.0)).size(px(7.0)).rounded_full().bg(rgb(c))))
+        .child(format!("{} — {members}", name.to_uppercase()))
+        .into_any_element()
 }
 
 fn member_row(

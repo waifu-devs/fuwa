@@ -21,6 +21,7 @@ pub mod media;
 pub mod node;
 pub mod outside;
 pub mod permissions;
+pub mod recordings;
 pub mod replica;
 pub mod reports;
 pub mod rtc;

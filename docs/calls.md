@@ -119,8 +119,45 @@ what their own speakers play.
 
 In voice channels it needs RECORD, a permission nobody has by default
 (admins grant it per role or channel); without it the voice state says
-`record_suppress` and the instance clears `self_record`. In direct messages
-either person may. Recording on the server, for voice channels, comes next.
+`record_suppress` and the instance clears `self_record` (and
+`server_record`). In direct messages either person may. Servers made
+before RECORD existed have it on no role, Admin included, so their admins
+grant it themselves; new servers' Admin role starts with it.
+
+### On the server
+
+Voice channels can also be recorded on the server: everyone's sound, a
+track per person. Someone with RECORD says `server_record` in their keep
+(JoinVoice, KeepVoice); everyone sees it in the voice state ("Recording on
+the server" on the channel, a mark by their name, a beep and a note). The
+recording runs while anyone in the channel has it on, and ends when the last
+of them turns it off or leaves. Admins turn it off for the whole instance
+with `FUWA_CALL_RECORDINGS=off` (or the Calls page); `GetCallSettings` says
+whether it's on (`recordings`).
+
+The part keeping the channel's places listens through a bridge on the media
+part, like a program with ListenVoice, as nobody anyone sees, and writes
+each person's frames as they came (never decoded) to their own Ogg Opus
+file, with silence in between where their clock says, so every track starts
+when the recording did, ends when it did, and lines up with the others in
+an editor. A part that stops (a deploy) finishes its files; one that
+crashed has lost at most the last second, and the recording ends where its
+files do. After a restart, the apps' next keep starts a new recording.
+
+Files are under `<data>/recordings/<server>/<recording>/`, and the server's
+file lists them. With `FUWA_ENCRYPTION_KEY` they're sealed: each Ogg page
+is ChaCha20-Poly1305'd under a key derived (HKDF) from the instance's key
+for that file alone, and unsealed as it's downloaded. A split instance's
+replica copies finished ones to its bucket (`recordings/<server>/…`), where
+downloads come from when a shard doesn't have the files. People with RECORD
+in the channel list them (`ListRecordings`, the one going on included),
+download a person's track (`DownloadRecording`, plain Ogg Opus) and delete
+them (`DeleteRecording`); apps also save all of a recording's tracks as one
+.zip. Recordings stay when their server is deleted, alongside its file in
+`deleted/`.
+
+Direct-message calls are never recorded on the server: their sound is
+end-to-end encrypted, so all it could keep is ciphertext.
 
 ### Pop-out windows and clean feeds
 
@@ -278,9 +315,8 @@ interruption.
 
 ## Next
 
-- **Recording on the server** for voice channels, kept in the instance's
-  storage for admins (direct-message calls stay on-device only: the server
-  can't hear them).
+- **Caps on recordings**: how much a server may keep, as a server limit,
+  and recordings older than a set age deleted by themselves.
 - **A shared screen's sound** (a tab's or the whole system's), as a second
   track of sound next to it.
 - **The desktop app's calls**: str0m as the WebRTC client, cpal for the

@@ -130,6 +130,7 @@ class Session {
     const settings = await this.api.calls.getCallSettings({});
     if (!settings.enabled) throw new Error("Calls are switched off on this instance.");
     this.settings = settings;
+    setCalls(() => ({ serverRecordings: settings.recordings }));
     if (this.target.kind === "dm") {
       if (!canEncryptCalls()) throw new Error("This browser can't encrypt calls. Try a recent Chrome, Edge, Firefox or Safari.");
       const dms = dmEngine(this.target.instance);
@@ -277,13 +278,13 @@ class Session {
     await pc.setLocalDescription(offer);
     await gathered(pc);
     if (attempt !== this.attempt || this.stopped) return;
-    const { selfMute, selfDeaf, selfVideo, selfStream, selfRecord } = getCalls();
+    const { selfMute, selfDeaf, selfVideo, selfStream, selfRecord, serverRecord } = getCalls();
     const sdp = pc.localDescription?.sdp ?? offer.sdp ?? "";
     const t = this.target;
     const selves = { selfMute, selfDeaf, selfVideo, selfStream, selfRecord, sessionId: this.sessionId };
     const joined =
       t.kind === "voice"
-        ? await this.api.calls.joinVoice({ serverId: t.serverId, channelId: t.channelId, offer: sdp, ...selves })
+        ? await this.api.calls.joinVoice({ serverId: t.serverId, channelId: t.channelId, offer: sdp, serverRecord, ...selves })
         : await this.api.calls.joinDmCall({ conversationId: t.conversationId, offer: sdp, ...selves });
     if (attempt !== this.attempt || this.stopped) return;
     this.sessionId = joined.sessionId;
@@ -460,12 +461,12 @@ class Session {
   /** Keeps the place in the call, and tells the instance how you sound. */
   async keep() {
     if (this.stopped || !this.sessionId) return;
-    const { selfMute, selfDeaf, selfVideo, selfStream, selfRecord } = getCalls();
+    const { selfMute, selfDeaf, selfVideo, selfStream, selfRecord, serverRecord } = getCalls();
     const selves = { sessionId: this.sessionId, selfMute, selfDeaf, selfVideo, selfStream, selfRecord };
     const t = this.target;
     try {
       if (t.kind === "voice") {
-        const kept = await this.api.calls.keepVoice({ serverId: t.serverId, channelId: t.channelId, ...selves });
+        const kept = await this.api.calls.keepVoice({ serverId: t.serverId, channelId: t.channelId, serverRecord, ...selves });
         this.videoSuppressed = !!kept.state?.videoSuppress;
         // The channel took VIDEO away meanwhile.
         if (this.videoSuppressed && getCalls().selfVideo) {
@@ -480,6 +481,12 @@ class Session {
         if (this.recordSuppressed && getCalls().selfRecord) {
           toast("You can't record in this channel any more.");
           setRecording(false);
+        }
+        // RECORD went away, or the instance stopped recording on the server.
+        if (serverRecord && getCalls().serverRecord && !kept.state?.serverRecord) {
+          if (!this.recordSuppressed) toast("This instance stopped recording voice channels on the server.");
+          else toast("You can't record in this channel any more.");
+          setCalls(() => ({ serverRecord: false }));
         }
       } else {
         await this.api.calls.keepDmCall({ conversationId: t.conversationId, ...selves });
@@ -609,7 +616,7 @@ export async function joinCall(target: CallTarget) {
   const s = new Session(target);
   session = s;
   reportUsage(target.kind === "voice" ? "call.join_voice" : "call.join_dm");
-  setCalls(() => ({ call: { target, status: "connecting", since: null, problem: null }, speaking: {}, ended: null, selfVideo: false, selfStream: false, selfRecord: false }));
+  setCalls(() => ({ call: { target, status: "connecting", since: null, problem: null }, speaking: {}, ended: null, selfVideo: false, selfStream: false, selfRecord: false, serverRecord: false }));
   try {
     await s.start();
   } catch (err) {
@@ -625,7 +632,7 @@ export async function hangUp(why: string | null, tell = true) {
   const s = session;
   if (!s) return;
   session = null;
-  setCalls(() => ({ call: null, speaking: {}, ended: why, selfVideo: false, selfStream: false, selfRecord: false }));
+  setCalls(() => ({ call: null, speaking: {}, ended: why, selfVideo: false, selfStream: false, selfRecord: false, serverRecord: false }));
   cue("disconnect");
   if (why) toast(why);
   await s.stop(tell);
@@ -702,6 +709,24 @@ export function setRecording(on: boolean) {
 }
 
 export const toggleRecording = () => setRecording(!getCalls().selfRecord);
+
+/**
+ * Starts or stops recording the voice channel you're in on the server: it
+ * keeps everyone's sound, a track per person, for the people with Record
+ * there. Everyone in the channel sees it, and hears a beep when it starts.
+ */
+export function setServerRecording(on: boolean) {
+  const s = session;
+  if (!s || s.target.kind !== "voice" || getCalls().serverRecord === on) return;
+  if (on && s.recordSuppressed) return void toast("You can't record in this channel.");
+  if (on && !getCalls().serverRecordings) return void toast("This instance doesn't record voice channels on the server.");
+  setCalls(() => ({ serverRecord: on }));
+  cue(on ? "recording" : "mute");
+  if (!on) toast("Stopped. The recording is in this channel's recordings.");
+  void s.keep();
+}
+
+export const toggleServerRecording = () => setServerRecording(!getCalls().serverRecord);
 
 /** What recordings are saved as, best first: Opus wherever the browser can. */
 const RECORDING_TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"];

@@ -37,6 +37,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0010_voice.sql"),
     include_str!("../migrations/server/0011_sso.sql"),
     include_str!("../migrations/server/0012_video.sql"),
+    include_str!("../migrations/server/0013_recordings.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -167,6 +168,36 @@ pub fn audit_changes(bytes: Option<Vec<u8>>) -> Result<Vec<pb::AuditChange>> {
     Ok(match bytes {
         Some(bytes) => AuditChanges::decode(bytes.as_slice())?.changes,
         None => vec![],
+    })
+}
+
+/// A voice channel recorded on the server, as its server's file keeps it.
+#[derive(Debug, Clone)]
+pub struct RecordingRow {
+    pub id: String,
+    pub channel_id: String,
+    pub started_by: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    /// Its files are sealed with a key from the instance's encryption key.
+    pub sealed: bool,
+    /// JSON: `[{user_id, size_bytes, duration_ms}]`.
+    pub tracks: String,
+    pub size_bytes: i64,
+}
+
+const RECORDING_COLUMNS: &str = "id, channel_id, started_by, started_at, ended_at, sealed, tracks, size_bytes";
+
+fn recording_row(r: &Row) -> turso::Result<RecordingRow> {
+    Ok(RecordingRow {
+        id: r.get(0)?,
+        channel_id: r.get(1)?,
+        started_by: r.get(2)?,
+        started_at: r.get(3)?,
+        ended_at: r.get(4)?,
+        sealed: r.get::<i64>(5)? != 0,
+        tracks: r.get(6)?,
+        size_bytes: r.get(7)?,
     })
 }
 
@@ -466,6 +497,63 @@ impl ServerDb {
             }
             Ok(())
         })
+        .await
+    }
+
+    /// Starts a recording of a voice channel ([`crate::recordings`]).
+    pub async fn add_recording(&self, row: &RecordingRow) -> Result<()> {
+        let row = row.clone();
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "INSERT INTO recordings (id, channel_id, started_by, started_at, sealed) VALUES (?1, ?2, ?3, ?4, ?5)",
+                (row.id.as_str(), row.channel_id.as_str(), row.started_by.as_str(), row.started_at, row.sealed as i64),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Says a recording ended, and what its tracks came to.
+    pub async fn end_recording(&self, id: &str, ended_at: i64, tracks: &str, size_bytes: i64) -> Result<()> {
+        let (id, tracks) = (id.to_owned(), tracks.to_owned());
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "UPDATE recordings SET ended_at = ?2, tracks = ?3, size_bytes = ?4 WHERE id = ?1",
+                (id.as_str(), ended_at, tracks.as_str(), size_bytes),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn delete_recording(&self, id: &str) -> Result<()> {
+        let id = id.to_owned();
+        db::write(&self.db, async |conn| {
+            conn.execute("DELETE FROM recordings WHERE id = ?1", [id.as_str()]).await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn recording(&self, id: &str) -> Result<Option<RecordingRow>> {
+        let conn = self.read()?;
+        query_one(&conn, &format!("SELECT {RECORDING_COLUMNS} FROM recordings WHERE id = ?1"), [id], recording_row)
+            .await
+    }
+
+    /// A channel's recordings, newest first.
+    pub async fn recordings(&self, channel_id: &str, limit: i64) -> Result<Vec<RecordingRow>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            &format!(
+                "SELECT {RECORDING_COLUMNS} FROM recordings WHERE channel_id = ?1 ORDER BY started_at DESC, id DESC LIMIT ?2"
+            ),
+            (channel_id, limit),
+            recording_row,
+        )
         .await
     }
 

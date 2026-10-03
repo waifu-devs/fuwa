@@ -13,7 +13,7 @@ pub const fn bit(p: P) -> Bits {
     1 << (p as u32)
 }
 
-const KNOWN: [P; 19] = [
+pub const KNOWN: [P; 25] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -33,6 +33,12 @@ const KNOWN: [P; 19] = [
     P::CreateInvite,
     P::ManageEmoji,
     P::ManageWebhooks,
+    P::Connect,
+    P::Speak,
+    P::MuteMembers,
+    P::MoveMembers,
+    P::Video,
+    P::Record,
 ];
 
 pub const ALL: Bits = {
@@ -51,10 +57,92 @@ pub const TALK: Bits = bit(P::SendMessages)
     | bit(P::AttachFiles)
     | bit(P::MentionEveryone)
     | bit(P::CreateInvite)
-    | bit(P::ChangeNickname);
+    | bit(P::ChangeNickname)
+    | bit(P::Connect)
+    | bit(P::Speak)
+    | bit(P::Video);
 
-fn from_list(list: &[i32]) -> Bits {
+pub fn from_list(list: &[i32]) -> Bits {
     list.iter().filter_map(|p| P::try_from(*p).ok()).filter(|p| KNOWN.contains(p)).fold(0, |bits, p| bits | bit(p))
+}
+
+/// The permissions in `bits`, as a request lists them.
+pub fn to_list(bits: Bits) -> Vec<i32> {
+    KNOWN.iter().filter(|p| bits & bit(**p) != 0).map(|p| *p as i32).collect()
+}
+
+/// Permissions as the settings pages group them (the web's `PERMISSION_GROUPS`).
+pub const GROUPS: [(&str, &[P]); 5] = [
+    (
+        "Server",
+        &[
+            P::ViewChannels,
+            P::ManageChannels,
+            P::ManageRoles,
+            P::ManageEmoji,
+            P::ManageWebhooks,
+            P::ManageServer,
+            P::ViewAuditLog,
+        ],
+    ),
+    (
+        "Membership",
+        &[P::CreateInvite, P::ChangeNickname, P::ManageNicknames, P::KickMembers, P::BanMembers, P::TimeOutMembers],
+    ),
+    ("Text channels", &[P::SendMessages, P::EmbedLinks, P::AttachFiles, P::MentionEveryone, P::ManageMessages]),
+    ("Voice channels", &[P::Connect, P::Speak, P::Video, P::Record, P::MuteMembers, P::MoveMembers]),
+    ("Advanced", &[P::Administrator]),
+];
+
+/// How a permission reads in the app: its name, and what it lets people do.
+pub fn info(p: P) -> (&'static str, &'static str) {
+    match p {
+        P::Unspecified => ("", ""),
+        P::Administrator => (
+            "Administrator",
+            "Every permission, in every channel, whatever a channel says. Still only over roles and people ranked below. Give it with care.",
+        ),
+        P::ManageServer => (
+            "Manage server",
+            "Change the server's name, icon, description, AutoMod and welcome screen, and see its usage. AutoMod leaves them alone.",
+        ),
+        P::ManageRoles => (
+            "Manage roles",
+            "Create and edit roles ranked below their own and hand them out, with only the permissions they have.",
+        ),
+        P::ViewAuditLog => ("View audit log", "Read the record of every change made in the server."),
+        P::ChangeNickname => ("Change nickname", "Set their own nickname in this server."),
+        P::ManageNicknames => ("Manage nicknames", "Change the nicknames of people ranked below them."),
+        P::KickMembers => ("Kick members", "Remove people ranked below them. They can join again."),
+        P::BanMembers => ("Ban members", "Remove people ranked below them for good, and lift bans."),
+        P::TimeOutMembers => ("Time out members", "Stop people ranked below them from talking for a while."),
+        P::ManageChannels => ("Manage channels", "Create, edit, move and delete channels. Also skips slow mode."),
+        P::ViewChannels => ("View channels", "See channels and read their messages, unless a channel says otherwise."),
+        P::SendMessages => ("Send messages", "Write in channels."),
+        P::EmbedLinks => ("Embed links", "Post links."),
+        P::AttachFiles => ("Attach files", "Upload files and pictures with their messages."),
+        P::MentionEveryone => (
+            "Mention everyone",
+            "Ping everyone with @everyone or @here, and any role, even ones that can't be mentioned.",
+        ),
+        P::ManageMessages => ("Manage messages", "Delete other people's messages. Also skips slow mode."),
+        P::CreateInvite => {
+            ("Create invite", "Make invite links that let people join, even when the server isn't in Browse.")
+        }
+        P::ManageEmoji => ("Manage emoji", "Add, rename and delete the server's own emoji."),
+        P::ManageWebhooks => (
+            "Manage webhooks",
+            "Make, change and delete webhooks, and see their addresses, which let other apps post in any channel.",
+        ),
+        P::Connect => ("Connect", "Join voice channels."),
+        P::Speak => ("Speak", "Talk in voice channels. Without it they can join and listen."),
+        P::Video => ("Video", "Turn their camera on and share their screen in voice channels."),
+        P::Record => {
+            ("Record", "Record voice channels' sound on their own device. Everyone in the channel sees while they do.")
+        }
+        P::MuteMembers => ("Mute members", "Mute or deafen people ranked below them in voice channels, for everyone."),
+        P::MoveMembers => ("Move members", "Disconnect people ranked below them from voice channels."),
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -73,6 +161,16 @@ pub struct Access {
 impl Access {
     pub fn has(&self, p: P) -> bool {
         self.server & bit(p) != 0
+    }
+
+    /// Whether they rank above a role at `position`.
+    pub fn above(&self, position: i32) -> bool {
+        self.owner || self.rank > i64::from(position)
+    }
+
+    /// Whether they may grant or take away `changed`, given what they `have`.
+    pub fn may_change(&self, changed: Bits, have: Bits) -> bool {
+        self.owner || self.has(P::Administrator) || changed & !have == 0
     }
 
     pub fn has_in(&self, channel_id: &str, p: P) -> bool {
@@ -243,5 +341,21 @@ mod tests {
 
         let owner = access_of("S", "me", &roles, &channels, "me", &[], true);
         assert!(owner.owner && owner.has_in("staff", P::SendMessages) && !owner.pending);
+    }
+
+    #[test]
+    fn roles_page_rules() {
+        let bits = bit(P::Speak) | bit(P::Video) | bit(P::ManageRoles);
+        assert_eq!(from_list(&to_list(bits)), bits);
+        assert!(GROUPS.iter().flat_map(|(_, ps)| ps.iter()).all(|p| KNOWN.contains(p)));
+
+        let roles = vec![role("mods", 3, &[P::ManageRoles, P::KickMembers])];
+        let mod_ = access_of("S", "owner", &roles, &[], "me", &["mods".into()], false);
+        assert!(mod_.above(2) && !mod_.above(3), "not their own rank or higher");
+        assert!(mod_.may_change(bit(P::KickMembers), mod_.server));
+        assert!(!mod_.may_change(bit(P::BanMembers), mod_.server), "can't hand out what they lack");
+
+        let owner = access_of("S", "me", &roles, &[], "me", &[], false);
+        assert!(owner.above(99) && owner.may_change(bit(P::Administrator), 0));
     }
 }

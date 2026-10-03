@@ -1410,6 +1410,8 @@ impl FuwaApp {
         }
         self.covers = covers;
         let empty = self.core.shared.read(|s| s.order.is_empty());
+        // Server settings cover the whole window with a solid page.
+        crate::ui::effects::hold(self.server_settings.is_some());
         let behind = crate::ui::backdrop::layers(&theme::backdrop(cx), &p, window, cx);
 
         let base = div()
@@ -1455,7 +1457,13 @@ impl FuwaApp {
             |el, menu| el.child(menu),
         )
         .when_some(self.settings.clone(), |el, settings| el.child(settings))
-        .when_some(self.server_settings.clone(), |el, settings| el.child(settings))
+        .when_some(self.server_settings.clone(), |el, settings| {
+            // Drawn again only when it changes, not on every frame of the window.
+            el.child(
+                gpui_kit::AnyView::from(settings)
+                    .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full()),
+            )
+        })
         .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
         .when_some(self.render_sheet(cx), |el, sheet| el.child(sheet))
         .when_some(self.render_switcher(cx), |el, switcher| el.child(switcher))

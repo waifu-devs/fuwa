@@ -31,6 +31,7 @@ pub const FIELDS: &[&str] = &[
     "telemetry",
     "web",
     "calls",
+    "call_recordings",
     "ice_urls",
     "turn_secret",
 ];
@@ -54,6 +55,7 @@ pub struct Settings {
     pub telemetry: bool,
     pub web: bool,
     pub calls: bool,
+    pub call_recordings: bool,
     pub ice_urls: Vec<String>,
     pub turn_secret: String,
 }
@@ -76,6 +78,7 @@ impl Settings {
             telemetry: config.telemetry.enabled,
             web: config.web,
             calls: config.calls,
+            call_recordings: config.call_recordings,
             ice_urls: config.ice_urls.clone(),
             turn_secret: config.turn_secret.clone(),
         }
@@ -172,6 +175,7 @@ impl Settings {
             picture_upload_bytes: limits.picture_upload_bytes,
             picture_upload_bytes_per_day: limits.picture_upload_bytes_per_day,
             calls: self.calls,
+            call_recordings: self.call_recordings,
             ice_urls: self.ice_urls.clone(),
             turn_secret: self.turn_secret.clone(),
         }
@@ -242,6 +246,7 @@ impl Settings {
             "telemetry" => Value::from(from.telemetry),
             "web" => Value::from(from.web),
             "calls" => Value::from(from.calls),
+            "call_recordings" => Value::from(from.call_recordings),
             "ice_urls" => Value::from(from.ice_urls.clone()),
             "turn_secret" => Value::from(from.turn_secret.clone()),
             other => return Err(unknown(other)),
@@ -284,6 +289,7 @@ impl Settings {
             "telemetry" => Value::from(self.telemetry),
             "web" => Value::from(self.web),
             "calls" => Value::from(self.calls),
+            "call_recordings" => Value::from(self.call_recordings),
             "ice_urls" => Value::from(self.ice_urls.clone()),
             "turn_secret" => Value::from(self.turn_secret.clone()),
             other => return Err(unknown(other)),
@@ -339,6 +345,7 @@ impl Settings {
             "telemetry" => self.telemetry = flag(field, value)?,
             "web" => self.web = flag(field, value)?,
             "calls" => self.calls = flag(field, value)?,
+            "call_recordings" => self.call_recordings = flag(field, value)?,
             "ice_urls" => {
                 let invalid = || Error::invalid("ice_urls must be a list of stun:, turn: or turns: URLs");
                 let list = value.as_array().ok_or_else(invalid)?;

@@ -172,7 +172,13 @@
     each viewer the size it asked for over the data channel ("layers"),
     switching on keyframes, and VIDEO gates them (`May` in `rtc.rs`). An
     app's second video track is its shared screen (`Source::Screen`), sent
-    on a stream named `<account>-screen`.
+    on a stream named `<account>-screen`. `recordings.rs` records voice
+    channels on the server while anyone there has `server_record` on: a
+    bridge per recording, a hand-written Ogg Opus file per speaker (frames
+    untouched, silence between, every track lined up from the start),
+    sealed with ChaCha20-Poly1305 under an HKDF key from
+    FUWA_ENCRYPTION_KEY, rows in the server file's `recordings` table, and
+    the finished files copied to the replica under `recordings/`.
     Calls in direct messages are end-to-end
     encrypted by the apps; the server never holds their keys and only
     forwards sealed frames. Never put a participant's address in a log or an event.
@@ -290,7 +296,8 @@
     ring, over the layout and `ReorderChannels` call in `core/arrange.rs`
     (the web's `lib/arrange.ts`); `members.rs` is the member list, a view of
     its own (cached, so the window's animations don't redraw it) that builds
-    only the rows in sight; `compose.rs` is the @ list and editing in
+    only the rows in sight, grouped under each hoisted role like the web's
+    `MemberList.tsx`; `compose.rs` is the @ list and editing in
     place (and the keys they take first), `mentions.rs` finds mentions and
     makes them links, `menus.rs` the bell menus, `notify.rs` the system
     notifications (clicks come back through a channel), `settings_account.rs`
@@ -302,14 +309,19 @@
     main thread when asked, dimming, a texture made here as a PNG or SVG
     tile and repeated), `effects.rs` the moving effects (the web's shaders
     redrawn with shadows, paths and quads, 30 frames a second while the
-    window is in front, one still frame otherwise), `keys.rs` the
+    window is in front, one still frame otherwise, and none while a
+    full-screen page like server settings covers them), `keys.rs` the
     keyboard shortcuts (one handler on the window, the quick switcher and
     the shortcut sheet) over `core/keybinds.rs` (the web's
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
     in both), `settings_keys.rs` the Keyboard page where they're changed,
     `server_settings.rs` a server's settings
-    (overview, invites, members, bans, audit log; the server's name opens
-    it), `moderate.rs` the time out, kick and ban
+    (overview, invites, roles, members, bans, audit log; the server's name
+    opens it; a cached view, so it redraws only when the server changes),
+    `server_settings/roles.rs` the Roles page (order, color, permissions
+    and members of each role, saved together from a floating bar, over the
+    role calls in `core/server_admin.rs`; you edit only roles below your own
+    and hand out only what you have, as the server checks), `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),
     `emoji_picker.rs` the picker by the composer, `embeds.rs` the cards apps
@@ -384,9 +396,14 @@
     Shader effects are WGSL in `lib/effects/shaders.ts`, run by vgpu in
     `lib/effects/gpu.ts`, which is loaded only when an effect is on (it's
     kept out of the vendor chunk in `vite.config.ts`); CSS stands in without
-    WebGPU. Theme files never make the app load anything: pictures travel
-    inside them and are uploaded on import. Settings pages:
-    `settings/app/Themes.tsx` and `Backgrounds.tsx`.
+    WebGPU. Custom shaders (people's own WGSL `fn shade`) are in
+    `lib/effects/custom.ts` (the prelude, the text checks, the starters);
+    `gpu.ts` compiles and times them before they draw, `lib/effects/status.ts`
+    remembers which ran, were too slow or stopped the GPU, and anything but
+    running shows the shader's fallback. Their editor is
+    `settings/app/ShaderEditor.tsx`. Theme files never make the app load
+    anything: pictures travel inside them and are uploaded on import. Settings
+    pages: `settings/app/Themes.tsx` and `Backgrounds.tsx`.
   - `src/lib/notifications.ts`: how a message reaches you: your settings for
     its channel, then its server (both stored on the instance, so they follow
     you across devices), then this device's Notifications settings. Muted means
@@ -574,7 +591,8 @@
   `docs/self-hosting.md` in step with anything self-hosters set up (variables,
   ports, image tags, the proxy).
 - Before pushing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
-  `cargo test`, and `buf lint`; for `web/`, `pnpm wasm` and `pnpm build`, then
+  `cargo test`, and `buf lint`; for `web/`, `pnpm wasm`, `pnpm build` and `pnpm test`
+  (node's own test runner over `src/**/*.test.ts`), then
   `cargo test --features web`; for `desktop/`, the same three cargo commands
   run inside `desktop/` (`cargo fmt`, not `--all`).
 - The desktop app and the web app are two faces of one client: a feature,

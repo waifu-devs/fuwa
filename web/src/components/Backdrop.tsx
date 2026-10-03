@@ -1,8 +1,10 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { hasBackdrop, isShader, type Backdrop, type Effect, type ShaderEffect } from "@/lib/backdrop";
-import type { Colors, Painter } from "@/lib/effects/gpu";
+import { CUSTOM, hasBackdrop, isShader, type Backdrop, type Effect, type ShaderEffect } from "@/lib/backdrop";
+import { shaderId, type CustomShader } from "@/lib/effects/custom";
+import type { Colors, Painter, Source } from "@/lib/effects/gpu";
+import { useShaderStatus } from "@/lib/effects/status";
 import { activeBackdrop, activeTheme, reduceMotion, usePrefs } from "@/lib/prefs";
 import { shownPicture } from "@/lib/shown";
 import type { ThemeTokens } from "@/lib/themes";
@@ -86,8 +88,10 @@ export function BackdropLayers({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.6, ease: "easeOut" }}
           >
-            {isShader(backdrop.effect) ? (
-              <ShaderLayer effect={backdrop.effect} backdrop={backdrop} tokens={tokens} running={running} still={still} />
+            {backdrop.effect === CUSTOM && backdrop.shader ? (
+              <CustomLayer shader={backdrop.shader} backdrop={backdrop} tokens={tokens} running={running} still={still} />
+            ) : isShader(backdrop.effect) ? (
+              <ShaderLayer source={{ effect: backdrop.effect }} css={backdrop.effect} backdrop={backdrop} tokens={tokens} running={running} still={still} />
             ) : (
               <TextureLayer effect={backdrop.effect} intensity={backdrop.intensity} />
             )}
@@ -134,29 +138,58 @@ function TextureLayer({ effect, intensity }: { effect: Effect; intensity: number
   return <div className={cn("fx-texture", `fx-${effect}`)} style={{ opacity: (intensity / 100) * 0.9 }} />;
 }
 
+type LayerProps = { backdrop: Backdrop; tokens: ThemeTokens; running: boolean; still: boolean };
+
 /**
- * A shader effect: on the GPU where WebGPU works, else its CSS stand-in.
- * The painter is made once per canvas and told about changes; React never
- * renders per frame.
+ * A custom shader, or its fallback where it can't run: no WebGPU, or the
+ * shader is broken, too slow here, or stopped the GPU (lib/effects/status.ts
+ * says which; the painter writes it).
+ */
+function CustomLayer({ shader, ...props }: LayerProps & { shader: CustomShader }) {
+  const status = useShaderStatus(shaderId(shader.code));
+  const [gpu] = useState(() => typeof navigator !== "undefined" && "gpu" in navigator);
+  const fallback = !gpu || (status && status.state !== "running");
+  return (
+    <AnimatePresence initial={false}>
+      <motion.div
+        key={fallback ? `fallback-${shader.fallback}` : "custom"}
+        className="backdrop-effect"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+      >
+        {!fallback ? (
+          <ShaderLayer source={{ custom: shader.code }} css={shader.fallback} {...props} />
+        ) : shader.fallback !== "none" ? (
+          <ShaderLayer source={{ effect: shader.fallback }} css={shader.fallback} {...props} />
+        ) : null}
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+/**
+ * A shader effect: on the GPU where WebGPU works, else the CSS stand-in for
+ * `css` (a custom shader's fallback, for custom ones). The painter is made
+ * once per canvas and told about changes; React never renders per frame.
  */
 function ShaderLayer({
-  effect,
+  source,
+  css,
   backdrop,
   tokens,
   running,
   still,
-}: {
-  effect: ShaderEffect;
-  backdrop: Backdrop;
-  tokens: ThemeTokens;
-  running: boolean;
-  still: boolean;
+}: LayerProps & {
+  source: Source;
+  css: ShaderEffect | "none";
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const painter = useRef<Painter | null>(null);
   const [mode, setMode] = useState<"trying" | "gpu" | "css">(() => (typeof navigator !== "undefined" && "gpu" in navigator ? "trying" : "css"));
   const colors = colorsOf(tokens);
-  const now = { effect, intensity: backdrop.intensity, speed: backdrop.speed, colors, still, running };
+  const now = { source, intensity: backdrop.intensity, speed: backdrop.speed, colors, still, running };
   const latest = useRef(now);
   // Kept current for the effects below (layout effects run before them).
   useLayoutEffect(() => {
@@ -197,7 +230,7 @@ function ShaderLayer({
   }, [mode]);
 
   const c = colors;
-  const key = `${effect}|${backdrop.intensity}|${backdrop.speed}|${still}|${c.c1.join()}|${c.c2.join()}|${c.c3.join()}`;
+  const key = `${"effect" in source ? source.effect : source.custom}|${backdrop.intensity}|${backdrop.speed}|${still}|${c.c1.join()}|${c.c2.join()}|${c.c3.join()}|${c.c4.join()}`;
   useEffect(() => {
     const { running: _, ...options } = latest.current;
     painter.current?.set(options);
@@ -217,12 +250,13 @@ function ShaderLayer({
   }, [still, mode]);
 
   if (mode === "css") {
+    if (css === "none") return null;
     return (
       <div
-        className={cn("fx-css", `fx-${effect}`, (still || backdrop.speed === 0) && "still")}
+        className={cn("fx-css", `fx-${css}`, (still || backdrop.speed === 0) && "still")}
         style={{ opacity: backdrop.intensity / 100, ["--fx-speed" as string]: Math.max(backdrop.speed, 1) / 100 }}
       >
-        {effect === "petals" && PETALS.map((n) => <span key={n} />)}
+        {css === "petals" && PETALS.map((n) => <span key={n} />)}
       </div>
     );
   }
@@ -255,5 +289,5 @@ function turn([r, g, b]: number[], degrees: number): number[] {
 /** The colors effects draw with: the primary, a neighbour of it, and the page. */
 export function colorsOf(tokens: ThemeTokens): Colors {
   const primary = rgb(tokens.primary);
-  return { c1: [...primary, 1], c2: [...turn(primary, 48), 1], c3: [...rgb(tokens.background), 1] };
+  return { c1: [...primary, 1], c2: [...turn(primary, 48), 1], c3: [...rgb(tokens.background), 1], c4: [...rgb(tokens.foreground), 1] };
 }

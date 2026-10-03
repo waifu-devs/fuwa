@@ -3,6 +3,7 @@
 //! Each page shows only to people whose permissions open it, as in the web
 //! app's `ServerSettingsDialog.tsx`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -30,6 +31,8 @@ use crate::ui::widgets::{
     server_icon, soft_button,
 };
 
+mod roles;
+
 pub enum ServerSettingsEvent {
     Close,
     /// Open the moderation dialog over the settings.
@@ -43,6 +46,7 @@ pub enum ServerSettingsEvent {
 enum Page {
     Overview,
     Invites,
+    Roles,
     Members,
     Bans,
     AuditLog,
@@ -53,6 +57,7 @@ impl Page {
         match self {
             Page::Overview => "Overview",
             Page::Invites => "Invites",
+            Page::Roles => "Roles",
             Page::Members => "Members",
             Page::Bans => "Bans",
             Page::AuditLog => "Audit log",
@@ -63,6 +68,7 @@ impl Page {
         match self {
             Page::Overview => "settings",
             Page::Invites => "link",
+            Page::Roles => "shield",
             Page::Members => "users",
             Page::Bans => "gavel",
             Page::AuditLog => "scroll-text",
@@ -73,6 +79,7 @@ impl Page {
         match self {
             Page::Overview => "Its name, picture and a few words, and how it notifies people by default.",
             Page::Invites => "The links that let people in. Revoke one and it stops working at once.",
+            Page::Roles => "Who can do what. Members take the color of their highest role.",
             Page::Members => "Everyone here. Time out, kick or ban the people you rank above.",
             Page::Bans => "Who's kept out, and why.",
             Page::AuditLog => "Every change people made here with their permissions.",
@@ -81,7 +88,7 @@ impl Page {
 }
 
 /// The settings group, then the moderation group, as on the web.
-const SETTINGS: [Page; 2] = [Page::Overview, Page::Invites];
+const SETTINGS: [Page; 3] = [Page::Overview, Page::Invites, Page::Roles];
 const MODERATION: [Page; 3] = [Page::Members, Page::Bans, Page::AuditLog];
 
 /// The pages someone with this access may open.
@@ -98,6 +105,9 @@ fn pages(access: &crate::core::permissions::Access) -> Vec<Page> {
     }
     if invites {
         out.push(Page::Invites);
+    }
+    if access.has(P::ManageRoles) {
+        out.push(Page::Roles);
     }
     if members {
         out.push(Page::Members);
@@ -151,6 +161,7 @@ pub struct ServerSettingsView {
     audit_action: A,
     audit_open: Option<String>,
     copied: Option<(String, Instant)>,
+    roles: roles::Roles,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -162,7 +173,18 @@ impl ServerSettingsView {
         let description =
             cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8).placeholder("What's this server about?"));
         let member_query = cx.new(|cx| InputState::new(window, cx).placeholder("Find someone"));
-        let subscriptions = vec![
+        // The page reads the instance as it draws, so it draws again when that changes.
+        let mut changes = core.changes();
+        cx.spawn_in(window, async move |this, cx| {
+            while changes.changed().await.is_ok() {
+                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+        let (roles, role_subscriptions) = roles::Roles::new(window, cx);
+        let mut subscriptions = vec![
             cx.subscribe(&name, |_: &mut Self, _, e: &InputEvent, cx| {
                 if let InputEvent::Change = e {
                     cx.notify()
@@ -179,6 +201,7 @@ impl ServerSettingsView {
                 }
             }),
         ];
+        subscriptions.extend(role_subscriptions);
         Self {
             core,
             key,
@@ -201,6 +224,7 @@ impl ServerSettingsView {
             audit_action: A::Unspecified,
             audit_open: None,
             copied: None,
+            roles,
             _subscriptions: subscriptions,
         }
     }
@@ -1197,12 +1221,16 @@ impl Render for ServerSettingsView {
         let body = match page {
             Page::Overview => self.overview(&server, &p, window, cx),
             Page::Invites => self.invites_page(&p, cx),
+            Page::Roles => {
+                self.roles.bar = None;
+                self.roles_page(&p, window, cx)
+            }
             Page::Members => self.members_page(&p, cx),
             Page::Bans => self.bans_page(&p, cx),
             Page::AuditLog => self.audit_page(&p, cx),
         };
         let content = div()
-            .w(px(680.0))
+            .w(px(if page == Page::Roles { 860.0 } else { 680.0 }))
             .flex()
             .flex_col()
             .gap(px(6.0))
@@ -1215,8 +1243,7 @@ impl Render for ServerSettingsView {
         motion::fade_in(
             div()
                 .id("server-settings")
-                .absolute()
-                .inset_0()
+                .size_full()
                 .occlude()
                 .flex()
                 .bg(p.background)
@@ -1248,6 +1275,11 @@ impl Render for ServerSettingsView {
                             14.0,
                         )),
                 )
+                .when_some(self.roles.bar.take().filter(|_| page == Page::Roles), |el, bar| {
+                    el.child(
+                        div().absolute().bottom(px(24.0)).left(px(300.0)).right_0().flex().justify_center().child(bar),
+                    )
+                })
                 .child(
                     div()
                         .absolute()
@@ -1784,6 +1816,9 @@ mod tests {
         assert!(pages(&nobody).is_empty());
         let owner = Access { owner: true, server: u32::MAX, ..Access::default() };
         assert_eq!(words("ManageServer"), "Manage server");
-        assert_eq!(pages(&owner), vec![Page::Overview, Page::Invites, Page::Members, Page::Bans, Page::AuditLog]);
+        assert_eq!(
+            pages(&owner),
+            vec![Page::Overview, Page::Invites, Page::Roles, Page::Members, Page::Bans, Page::AuditLog]
+        );
     }
 }

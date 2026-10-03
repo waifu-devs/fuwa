@@ -46,6 +46,8 @@ jobs:
         working-directory: web
       - run: pnpm run build
         working-directory: web
+      - run: pnpm test
+        working-directory: web
       - run: cargo fmt --all --check
       - name: Clippy, API only
         run: cargo clippy --all-targets --locked -- -D warnings

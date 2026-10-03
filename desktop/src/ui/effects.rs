@@ -39,7 +39,7 @@ pub fn layer(
     if !matches!(effect, Effect::Aurora | Effect::Petals | Effect::Stars | Effect::Waves) {
         return None;
     }
-    let running = speed > 0 && window.is_window_active() && !cx.reduce_motion();
+    let running = speed > 0 && window.is_window_active() && !cx.reduce_motion() && !HELD.load(Ordering::Relaxed);
     let time = clock(running, speed);
     if running {
         again(window, cx);
@@ -90,6 +90,14 @@ fn clock(running: bool, speed: u8) -> f32 {
 }
 
 /// Asks the view being drawn for another frame, one frame time from now.
+/// Set while something opaque covers the whole window, so the effect stands still
+/// instead of drawing frames nobody sees.
+static HELD: AtomicBool = AtomicBool::new(false);
+
+pub fn hold(covered: bool) {
+    HELD.store(covered, Ordering::Relaxed);
+}
+
 fn again(window: &Window, cx: &mut App) {
     static WAITING: AtomicBool = AtomicBool::new(false);
     if WAITING.swap(true, Ordering::Relaxed) {
