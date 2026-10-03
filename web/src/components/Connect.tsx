@@ -9,6 +9,7 @@ import {
   ServerIcon as ServerGlyph,
   ShieldCheckIcon,
   SparklesIcon,
+  GlobeIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
@@ -514,15 +515,30 @@ function LinkedButton({ url, node, returnTo }: { url: string; node: Node; return
  */
 function SsoButton({ url, node, returnTo }: { url: string; node: Node; returnTo?: string }) {
   const start = useAction(startSsoSignIn);
+  const host = node.auth?.ssoHost;
   return (
-    <ProviderButton
-      name={node.auth?.ssoName || "your organization"}
-      icon={<BuildingIcon className="size-5 transition-transform duration-500 group-hover:-translate-y-0.5 group-hover:scale-110" />}
-      onGo={() => start.go(url, returnTo ?? null)}
-      error={start.error}
-      closed={!node.auth?.ssoSignUp}
-      testId="sso-sign-in"
-    />
+    <div className="flex flex-col gap-1.5">
+      <ProviderButton
+        name={node.auth?.ssoName || "your organization"}
+        icon={<BuildingIcon className="size-5 transition-transform duration-500 group-hover:-translate-y-0.5 group-hover:scale-110" />}
+        onGo={() => start.go(url, returnTo ?? null)}
+        error={start.error}
+        closed={!node.auth?.ssoSignUp}
+        testId="sso-sign-in"
+      />
+      {host && (
+        <motion.p
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 300, damping: 26, delay: 0.1 }}
+          className="text-center text-xs text-balance text-muted-foreground"
+          data-testid="sso-sign-in-host"
+        >
+          <GlobeIcon className="mr-1 inline size-3.5 -translate-y-px align-middle" />
+          Signs you in at <b className="text-foreground">{host}</b>, which sees your IP address.
+        </motion.p>
+      )}
+    </div>
   );
 }
 

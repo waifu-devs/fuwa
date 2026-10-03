@@ -41,9 +41,10 @@ export default defineConfig({
     assetsInlineLimit: (file) => (/\.woff2?$/.test(file) ? false : undefined),
     chunkSizeWarningLimit: 1500,
     // Libraries in their own file: the app's code changes far more often, and each stays under the limit.
+    // vgpu (WebGPU effects behind the chat) is left out of it: it loads only when someone turns an effect on.
     rolldownOptions: {
       output: {
-        codeSplitting: { groups: [{ name: "vendor", test: /node_modules/ }] },
+        codeSplitting: { groups: [{ name: "vendor", test: /node_modules[\\/](?!\.pnpm[\\/](?:vgpu|@vgpu|wgpu-matrix))(?!(?:vgpu|@vgpu|wgpu-matrix)[\\/])/ }] },
       },
     },
   },

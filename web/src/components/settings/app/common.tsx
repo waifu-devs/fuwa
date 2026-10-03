@@ -1,6 +1,6 @@
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, PlusIcon, SparklesIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { SPRING } from "@/components/motion";
 import { Setting } from "@/components/settings/controls";
 import { keycaps } from "@/lib/keybinds";
@@ -70,8 +70,20 @@ export function Keycaps({ combo, className }: { combo: string; className?: strin
   );
 }
 
-/** Theme cards in their own colors; the check glides to the picked one. */
-export function ThemeGrid({ themes, value, onChange, id }: { themes: Theme[]; value: string; onChange: (id: string) => void; id: string }) {
+/** Theme cards in their own colors; the check glides to the picked one. `onMake` adds a card to make your own. */
+export function ThemeGrid({
+  themes,
+  value,
+  onChange,
+  onMake,
+  id,
+}: {
+  themes: Theme[];
+  value: string;
+  onChange: (id: string, e: MouseEvent) => void;
+  onMake?: () => void;
+  id: string;
+}) {
   return (
     <div role="radiogroup" className="grid gap-3 sm:grid-cols-2">
       {themes.map((theme, n) => {
@@ -87,7 +99,7 @@ export function ThemeGrid({ themes, value, onChange, id }: { themes: Theme[]; va
             animate={{ opacity: 1, y: 0, transition: { ...SPRING, delay: n * 0.04 } }}
             whileHover={{ y: -3 }}
             whileTap={{ scale: 0.97 }}
-            onClick={() => onChange(theme.id)}
+            onClick={(e) => onChange(theme.id, e)}
             style={{ background: t.background, color: t.foreground, borderColor: active ? t.primary : t.border }}
             className={cn("relative flex flex-col gap-3 overflow-hidden rounded-2xl border-2 p-4 text-left", active && "shadow-lg")}
           >
@@ -97,7 +109,10 @@ export function ThemeGrid({ themes, value, onChange, id }: { themes: Theme[]; va
               ))}
             </span>
             <span>
-              <span className="block font-extrabold">{theme.name}</span>
+              <span className="flex items-center gap-1.5 font-extrabold">
+                {theme.name}
+                {!theme.builtin && <SparklesIcon className="size-3.5" style={{ color: t.primary }} aria-label="Yours" />}
+              </span>
               <span className="block text-xs" style={{ color: t["muted-foreground"] }}>
                 {theme.description}
               </span>
@@ -115,6 +130,25 @@ export function ThemeGrid({ themes, value, onChange, id }: { themes: Theme[]; va
           </motion.button>
         );
       })}
+      {onMake && (
+        <motion.button
+          type="button"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0, transition: { ...SPRING, delay: themes.length * 0.04 } }}
+          whileHover={{ y: -3 }}
+          whileTap={{ scale: 0.97 }}
+          onClick={onMake}
+          className="group flex flex-col items-start justify-between gap-3 rounded-2xl border-2 border-dashed p-4 text-left text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+        >
+          <span className="grid size-7 place-items-center rounded-full bg-muted transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+            <PlusIcon className="size-4 transition-transform group-hover:rotate-90" />
+          </span>
+          <span>
+            <span className="block font-extrabold">Make your own</span>
+            <span className="block text-xs">Colors, a background picture, effects.</span>
+          </span>
+        </motion.button>
+      )}
     </div>
   );
 }

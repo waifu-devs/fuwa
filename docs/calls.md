@@ -57,7 +57,9 @@ server's events), and each keep checks again.
 Every app's first offer has a place for a camera (a send-only video track)
 with nothing on it. Turning the camera on puts a track there
 (`replaceTrack`) and says `self_video` in the next keep; turning it off takes
-the track away. Neither needs a new offer. The media part only offers
+the track away. Neither needs a new offer. The media part passes a camera on only while its
+place says `self_video`, so an app can't film while everyone sees its camera
+off. The media part only offers
 someone's camera to the others once its first frame arrives, so a camera
 nobody turned on costs nobody anything.
 

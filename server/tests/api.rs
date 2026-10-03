@@ -2688,6 +2688,64 @@ async fn fetch(instance: &Instance, url: &str) -> (reqwest::StatusCode, reqwest:
 }
 
 #[tokio::test]
+async fn backgrounds_are_kept_listed_and_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_PUBLIC_URL", "https://chat.example.com")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let background = pb::MediaPurpose::Background;
+    let keep = |token: &str, url: &str| authed(token, pb::KeepBackgroundRequest { url: url.into() });
+    let list = async |c: &mut Clients, token: &str| {
+        let listed = c.media.list_backgrounds(authed(token, pb::ListBackgroundsRequest {})).await.unwrap();
+        listed.into_inner().backgrounds.into_iter().map(|m| m.url).collect::<Vec<_>>()
+    };
+
+    // A background is uploaded like any picture, then kept.
+    let first = upload(&mut c, &instance, &juan, background, png(400, 1)).await;
+    let kept = c.media.keep_background(keep(&juan, &first)).await.unwrap().into_inner().media.unwrap();
+    assert_eq!((kept.url.as_str(), kept.content_type.as_str(), kept.size), (first.as_str(), "image/png", 400));
+    let second = upload(&mut c, &instance, &juan, background, png(300, 2)).await;
+    c.media.keep_background(keep(&juan, &second)).await.unwrap();
+    c.media.keep_background(keep(&juan, &second)).await.unwrap();
+    assert_eq!(list(&mut c, &juan).await, [second.clone(), first.clone()], "newest first, once each");
+    assert!(list(&mut c, &mika).await.is_empty());
+
+    // Only your own background uploads can be kept: not someone else's, not
+    // an avatar, not a link elsewhere.
+    let stolen = c.media.keep_background(keep(&mika, &first)).await;
+    assert_eq!(stolen.unwrap_err().code(), Code::PermissionDenied);
+    let avatar = upload(&mut c, &instance, &juan, pb::MediaPurpose::Avatar, png(100, 3)).await;
+    assert_eq!(c.media.keep_background(keep(&juan, &avatar)).await.unwrap_err().code(), Code::PermissionDenied);
+    let elsewhere = c.media.keep_background(keep(&juan, "https://example.com/bg.png")).await;
+    assert_eq!(elsewhere.unwrap_err().code(), Code::InvalidArgument);
+
+    // Kept backgrounds aren't swept; ones never kept are.
+    let loose = upload(&mut c, &instance, &juan, background, png(200, 4)).await;
+    instance.app.sweep_media(fuwa_server::id::now_ms() + fuwa_server::media::UNUSED_TTL_MS + 1).await.unwrap();
+    assert_eq!(fetch(&instance, &loose).await.0, reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(fetch(&instance, &first).await.2, png(400, 1));
+
+    // Deleting one removes it and its file; only its owner can.
+    let theirs = c.media.delete_background(authed(&mika, pb::DeleteBackgroundRequest { url: first.clone() })).await;
+    assert_eq!(theirs.unwrap_err().code(), Code::PermissionDenied);
+    c.media.delete_background(authed(&juan, pb::DeleteBackgroundRequest { url: first.clone() })).await.unwrap();
+    c.media.delete_background(authed(&juan, pb::DeleteBackgroundRequest { url: first.clone() })).await.unwrap();
+    assert_eq!(fetch(&instance, &first).await.0, reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(list(&mut c, &juan).await, std::slice::from_ref(&second));
+
+    // There's a cap on how many one account keeps.
+    for n in 1..fuwa_server::media::MAX_BACKGROUNDS {
+        let url = upload(&mut c, &instance, &mika, background, png(20, n as u8)).await;
+        c.media.keep_background(keep(&mika, &url)).await.unwrap();
+    }
+    let last = upload(&mut c, &instance, &mika, background, png(20, 0)).await;
+    c.media.keep_background(keep(&mika, &last)).await.unwrap();
+    let over = upload(&mut c, &instance, &mika, background, png(21, 0)).await;
+    assert_eq!(c.media.keep_background(keep(&mika, &over)).await.unwrap_err().code(), Code::ResourceExhausted);
+}
+
+#[tokio::test]
 async fn pictures_upload_serve_and_clean_up() {
     let dir = tempfile::tempdir().unwrap();
     let instance =

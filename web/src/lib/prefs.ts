@@ -1,4 +1,6 @@
 import { useSyncExternalStore } from "react";
+import { DEFAULT_BACKDROP, sanitizeBackdrop, type Backdrop } from "@/lib/backdrop";
+import { MAX_CUSTOM_THEMES, sanitizeCustomTheme, type CustomTheme } from "@/lib/theme-file";
 import { applyTheme, BUILTIN_THEMES, isDark, type Theme } from "@/lib/themes";
 
 /**
@@ -30,6 +32,10 @@ export type Prefs = {
   followSystem: boolean;
   lightTheme: string;
   darkTheme: string;
+  /** Themes made, edited or imported on this device. */
+  customThemes: CustomTheme[];
+  /** The picture and effect behind the app, under themes that don't bring their own. */
+  backdrop: Backdrop;
   density: Density;
   messageDisplay: MessageDisplay;
   /** Message text size, in pixels. */
@@ -92,6 +98,8 @@ export const DEFAULT_PREFS: Prefs = {
   followSystem: false,
   lightTheme: "sakura",
   darkTheme: "yoru",
+  customThemes: [],
+  backdrop: DEFAULT_BACKDROP,
   density: "default",
   messageDisplay: "cozy",
   chatFontSize: 15,
@@ -159,13 +167,20 @@ const clamp = (n: unknown, min: number, max: number, fallback: number) =>
   typeof n === "number" && Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
 const oneOf = <T extends string>(value: unknown, options: readonly T[], fallback: T): T =>
   options.includes(value as T) ? (value as T) : fallback;
-const themeId = (id: unknown, fallback: string) => (BUILTIN_THEMES.some((t) => t.id === id) ? (id as string) : fallback);
 
 /** Stored values from an older or hand-edited version fall back to defaults instead of breaking the app. */
 function sanitize(p: Prefs): Prefs {
   const d = DEFAULT_PREFS;
+  const customThemes = (Array.isArray(p.customThemes) ? p.customThemes : [])
+    .map(sanitizeCustomTheme)
+    .filter((t, n, all): t is CustomTheme => !!t && all.findIndex((o) => o?.id === t.id) === n)
+    .slice(0, MAX_CUSTOM_THEMES);
+  const known = (id: unknown) => BUILTIN_THEMES.some((t) => t.id === id) || customThemes.some((t) => t.id === id);
+  const themeId = (id: unknown, fallback: string) => (known(id) ? (id as string) : fallback);
   return {
     ...p,
+    customThemes,
+    backdrop: sanitizeBackdrop(p.backdrop),
     theme: themeId(p.theme, "sakura"),
     lightTheme: themeId(p.lightTheme, d.lightTheme),
     darkTheme: themeId(p.darkTheme, d.darkTheme),
@@ -232,16 +247,46 @@ export function usePrefs<T>(select: (p: Prefs) => T): T {
   return useSyncExternalStore(subscribePrefs, () => select(prefs));
 }
 
-const themeById = (id: string): Theme => BUILTIN_THEMES.find((t) => t.id === id) ?? BUILTIN_THEMES[0]!;
+/** Every theme someone can pick: the built-ins, then their own. */
+export const allThemes = (p: Prefs = prefs): (Theme | CustomTheme)[] => [...BUILTIN_THEMES, ...p.customThemes];
+
+export const themeById = (id: string, p: Prefs = prefs): Theme | CustomTheme =>
+  allThemes(p).find((t) => t.id === id) ?? BUILTIN_THEMES[0]!;
 
 /** The theme on screen now: the picked one, or the light or dark pick when following the system. */
-export function activeTheme(p: Prefs = prefs): Theme {
-  if (!p.followSystem) return themeById(p.theme);
-  return themeById(systemDark() ? p.darkTheme : p.lightTheme);
+export function activeTheme(p: Prefs = prefs): Theme | CustomTheme {
+  if (!p.followSystem) return themeById(p.theme, p);
+  return themeById(systemDark() ? p.darkTheme : p.lightTheme, p);
 }
 
-export const LIGHT_THEMES = BUILTIN_THEMES.filter((t) => !isDark(t));
-export const DARK_THEMES = BUILTIN_THEMES.filter((t) => isDark(t));
+/** What's behind the app now: the theme's own backdrop, or the app's. */
+export function activeBackdrop(p: Prefs = prefs): Backdrop {
+  const theme = activeTheme(p);
+  return ("backdrop" in theme && theme.backdrop) || p.backdrop;
+}
+
+export const lightThemes = (p: Prefs = prefs) => allThemes(p).filter((t) => !isDark(t));
+export const darkThemes = (p: Prefs = prefs) => allThemes(p).filter((t) => isDark(t));
+
+/** Adds or replaces a custom theme. */
+export function saveCustomTheme(theme: CustomTheme) {
+  setPrefs((p) => {
+    const at = p.customThemes.findIndex((t) => t.id === theme.id);
+    const next = { ...theme, updatedAt: Date.now() };
+    const customThemes = at === -1 ? [...p.customThemes, next] : p.customThemes.map((t) => (t.id === theme.id ? next : t));
+    return { customThemes };
+  });
+}
+
+/** Removes a custom theme; anything that used it goes back to the defaults. */
+export function deleteCustomTheme(id: string) {
+  setPrefs((p) => ({
+    customThemes: p.customThemes.filter((t) => t.id !== id),
+    theme: p.theme === id ? DEFAULT_PREFS.theme : p.theme,
+    lightTheme: p.lightTheme === id ? DEFAULT_PREFS.lightTheme : p.lightTheme,
+    darkTheme: p.darkTheme === id ? DEFAULT_PREFS.darkTheme : p.darkTheme,
+  }));
+}
 
 /** Whether motion should calm down, from the setting or, by default, the system. */
 export function reduceMotion(p: Prefs = prefs): boolean {

@@ -49,9 +49,10 @@ impl Place {
         !self.state.server_deaf
     }
 
-    /// Whether the media part should pass their camera on.
+    /// Whether the media part should pass their camera on: only while they
+    /// say it's on, so nobody films while everyone sees their camera off.
     pub fn may_video(&self) -> bool {
-        !self.state.video_suppress
+        self.state.self_video && !self.state.video_suppress
     }
 
     pub fn may(&self) -> May {

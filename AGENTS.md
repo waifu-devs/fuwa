@@ -67,7 +67,10 @@
     `Provider` (stored as JSON: node.db settings' `sso_provider`, or the server
     file's `server.sso`), `Endpoints` (every URL from the public URL, never the
     request), and start/identify/finish over a `sso_sign_ins` table (node.db
-    for the instance, the server file for a server). `oidc.rs` is the code
+    for the instance, the server file for a server). The instance's sign-ins
+    get a row only once the provider answers: until then the state is a
+    signed ticket (`ticket.rs`, under the picture-link key) that carries
+    everything, since anyone may start one. `oidc.rs` is the code
     flow with PKCE and ID token checks against the JWKS; `saml.rs` the
     HTTP-Redirect AuthnRequest and the signed-response checks, over the
     hand-written exclusive C14N in `xml.rs` (fixtures signed by an
@@ -261,7 +264,11 @@
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
     `overlay.rs` draw the parts (a server you're locked out of shows a
-    padlock and "Continue with <provider>" where its channels were); `members.rs` is the member list, a view of
+    padlock and "Continue with <provider>" where its channels were);
+    `arrange.rs` drags channels and categories into order in the sidebar
+    (Manage Channels), with GPUI's drag view, a drop line and a category
+    ring, over the layout and `ReorderChannels` call in `core/arrange.rs`
+    (the web's `lib/arrange.ts`); `members.rs` is the member list, a view of
     its own (cached, so the window's animations don't redraw it) that builds
     only the rows in sight; `compose.rs` is the @ list and editing in
     place (and the keys they take first), `mentions.rs` finds mentions and
@@ -335,6 +342,16 @@
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
     an instance or a server live on that instance instead.
+  - Themes (`docs/themes.md` is the format every app shares): built-ins in
+    `src/lib/themes.ts` (copied from waifu.dev), custom themes and theme files
+    in `lib/theme-file.ts`, the backdrop (picture and effect) in
+    `lib/backdrop.ts`, drawn by `components/Backdrop.tsx` behind `#root`.
+    Shader effects are WGSL in `lib/effects/shaders.ts`, run by vgpu in
+    `lib/effects/gpu.ts`, which is loaded only when an effect is on (it's
+    kept out of the vendor chunk in `vite.config.ts`); CSS stands in without
+    WebGPU. Theme files never make the app load anything: pictures travel
+    inside them and are uploaded on import. Settings pages:
+    `settings/app/Themes.tsx` and `Backgrounds.tsx`.
   - `src/lib/notifications.ts`: how a message reaches you: your settings for
     its channel, then its server (both stored on the instance, so they follow
     you across devices), then this device's Notifications settings. Muted means

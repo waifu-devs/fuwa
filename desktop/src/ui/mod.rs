@@ -2,6 +2,7 @@
 //! methods; everything it shows moves the way the web app does.
 
 pub mod app;
+mod arrange;
 mod assets;
 mod chat;
 mod compose;

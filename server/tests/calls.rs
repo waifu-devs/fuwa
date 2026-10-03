@@ -921,6 +921,24 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
     assert_eq!(watching.seen.len(), from, "a camera nobody shows isn't sent");
 
+    // A camera turned off isn't passed on, even if its app keeps sending.
+    watching.say(serde_json::json!({ "type": "layers", "layers": { &mid: "h" } }));
+    let keep = |self_video| pb::KeepVoiceRequest {
+        server_id: sid.clone(),
+        session_id: joined.session_id.clone(),
+        channel_id: voice.id.clone(),
+        self_video,
+        ..Default::default()
+    };
+    c.calls.keep_voice(authed(&mika, keep(false))).await.unwrap();
+    talk(&mut filming, &mut watching, Duration::from_millis(500)).await;
+    let from = watching.seen.len();
+    talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
+    assert_eq!(watching.seen.len(), from, "no frames while the camera says off");
+    c.calls.keep_voice(authed(&mika, keep(true))).await.unwrap();
+    talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
+    assert!(watching.seen.len() > from + 5, "back once it's on again");
+
     // A channel that takes VIDEO away stops the camera there, and says so.
     let everyone = pb::PermissionOverwrite {
         target_id: sid.clone(),

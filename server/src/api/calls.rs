@@ -508,15 +508,16 @@ impl Api {
         };
         let place = match before {
             Some(mut place) => {
-                let may_changed = Quiet::of(&place.state) != quiet;
-                let changed = place.state.self_mute != req.self_mute
+                let may_before = place.may();
+                let changed = Quiet::of(&place.state) != quiet
+                    || place.state.self_mute != req.self_mute
                     || place.state.self_deaf != req.self_deaf
-                    || place.state.self_video != req.self_video
-                    || may_changed;
+                    || place.state.self_video != req.self_video;
                 place.state.self_mute = req.self_mute;
                 place.state.self_deaf = req.self_deaf;
                 place.state.self_video = req.self_video;
                 quiet.apply(&mut place.state);
+                let may_changed = place.may() != may_before;
                 place.expires = lease();
                 let kept = self.app.voice.update(&server_id, &account.id, |p| *p = place.clone());
                 if kept.is_none() {
@@ -705,6 +706,7 @@ impl Api {
                 || p.state.self_video != req.self_video
         });
         let forgotten = before.is_none();
+        let may_before = before.as_ref().map(Place::may);
         let mut place = before.unwrap_or_else(|| Place {
             session_id: req.session_id.clone(),
             room: voice::dm_room(&conversation.id),
@@ -723,6 +725,10 @@ impl Api {
         // Forgotten in a restart: only back if still connected to the media part.
         if forgotten && !self.app.media_link.update(&place).await {
             return Err(Error::Unavailable("calls are restarting; join again".into()));
+        }
+        // The camera turned on or off: the media part passes it on only while it's on.
+        if may_before.is_some_and(|may| may != place.may()) {
+            self.app.media_link.update(&place).await;
         }
         self.app.voice.put(&scope, place.clone());
         if changed {

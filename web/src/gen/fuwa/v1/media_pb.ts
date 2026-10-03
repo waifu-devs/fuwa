@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/media.proto.
  */
 export const file_fuwa_v1_media: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL21lZGlhLnByb3RvEgdmdXdhLnYxIkQKBU1lZGlhEgoKAmlkGAEgASgJEgsKA3VybBgCIAEoCRIUCgxjb250ZW50X3R5cGUYAyABKAkSDAoEc2l6ZRgEIAEoAyJhChNDcmVhdGVVcGxvYWRSZXF1ZXN0EiYKB3B1cnBvc2UYASABKA4yFS5mdXdhLnYxLk1lZGlhUHVycG9zZRIUCgxjb250ZW50X3R5cGUYAiABKAkSDAoEc2l6ZRgDIAEoAyJ5ChRDcmVhdGVVcGxvYWRSZXNwb25zZRISCgp1cGxvYWRfdXJsGAEgASgJEi4KCmV4cGlyZXNfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEh0KBW1lZGlhGAMgASgLMg4uZnV3YS52MS5NZWRpYSqZAQoMTWVkaWFQdXJwb3NlEh0KGU1FRElBX1BVUlBPU0VfVU5TUEVDSUZJRUQQABIYChRNRURJQV9QVVJQT1NFX0FWQVRBUhABEhgKFE1FRElBX1BVUlBPU0VfQkFOTkVSEAISHQoZTUVESUFfUFVSUE9TRV9TRVJWRVJfSUNPThADEhcKE01FRElBX1BVUlBPU0VfRU1PSkkQBDJbCgxNZWRpYVNlcnZpY2USSwoMQ3JlYXRlVXBsb2FkEhwuZnV3YS52MS5DcmVhdGVVcGxvYWRSZXF1ZXN0Gh0uZnV3YS52MS5DcmVhdGVVcGxvYWRSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("ChNmdXdhL3YxL21lZGlhLnByb3RvEgdmdXdhLnYxIkQKBU1lZGlhEgoKAmlkGAEgASgJEgsKA3VybBgCIAEoCRIUCgxjb250ZW50X3R5cGUYAyABKAkSDAoEc2l6ZRgEIAEoAyJhChNDcmVhdGVVcGxvYWRSZXF1ZXN0EiYKB3B1cnBvc2UYASABKA4yFS5mdXdhLnYxLk1lZGlhUHVycG9zZRIUCgxjb250ZW50X3R5cGUYAiABKAkSDAoEc2l6ZRgDIAEoAyJ5ChRDcmVhdGVVcGxvYWRSZXNwb25zZRISCgp1cGxvYWRfdXJsGAEgASgJEi4KCmV4cGlyZXNfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEh0KBW1lZGlhGAMgASgLMg4uZnV3YS52MS5NZWRpYSIkChVLZWVwQmFja2dyb3VuZFJlcXVlc3QSCwoDdXJsGAEgASgJIjcKFktlZXBCYWNrZ3JvdW5kUmVzcG9uc2USHQoFbWVkaWEYASABKAsyDi5mdXdhLnYxLk1lZGlhIhgKFkxpc3RCYWNrZ3JvdW5kc1JlcXVlc3QiPgoXTGlzdEJhY2tncm91bmRzUmVzcG9uc2USIwoLYmFja2dyb3VuZHMYASADKAsyDi5mdXdhLnYxLk1lZGlhIiYKF0RlbGV0ZUJhY2tncm91bmRSZXF1ZXN0EgsKA3VybBgBIAEoCSIaChhEZWxldGVCYWNrZ3JvdW5kUmVzcG9uc2UqtwEKDE1lZGlhUHVycG9zZRIdChlNRURJQV9QVVJQT1NFX1VOU1BFQ0lGSUVEEAASGAoUTUVESUFfUFVSUE9TRV9BVkFUQVIQARIYChRNRURJQV9QVVJQT1NFX0JBTk5FUhACEh0KGU1FRElBX1BVUlBPU0VfU0VSVkVSX0lDT04QAxIXChNNRURJQV9QVVJQT1NFX0VNT0pJEAQSHAoYTUVESUFfUFVSUE9TRV9CQUNLR1JPVU5EEAUy3QIKDE1lZGlhU2VydmljZRJLCgxDcmVhdGVVcGxvYWQSHC5mdXdhLnYxLkNyZWF0ZVVwbG9hZFJlcXVlc3QaHS5mdXdhLnYxLkNyZWF0ZVVwbG9hZFJlc3BvbnNlElEKDktlZXBCYWNrZ3JvdW5kEh4uZnV3YS52MS5LZWVwQmFja2dyb3VuZFJlcXVlc3QaHy5mdXdhLnYxLktlZXBCYWNrZ3JvdW5kUmVzcG9uc2USVAoPTGlzdEJhY2tncm91bmRzEh8uZnV3YS52MS5MaXN0QmFja2dyb3VuZHNSZXF1ZXN0GiAuZnV3YS52MS5MaXN0QmFja2dyb3VuZHNSZXNwb25zZRJXChBEZWxldGVCYWNrZ3JvdW5kEiAuZnV3YS52MS5EZWxldGVCYWNrZ3JvdW5kUmVxdWVzdBohLmZ1d2EudjEuRGVsZXRlQmFja2dyb3VuZFJlc3BvbnNlYgZwcm90bzM", [file_google_protobuf_timestamp]);
 
 /**
  * A stored file.
@@ -115,6 +115,102 @@ export const CreateUploadResponseSchema: GenMessage<CreateUploadResponse> = /*@_
   messageDesc(file_fuwa_v1_media, 2);
 
 /**
+ * @generated from message fuwa.v1.KeepBackgroundRequest
+ */
+export type KeepBackgroundRequest = Message<"fuwa.v1.KeepBackgroundRequest"> & {
+  /**
+   * The `media.url` of a stored background upload of yours.
+   *
+   * @generated from field: string url = 1;
+   */
+  url: string;
+};
+
+/**
+ * Describes the message fuwa.v1.KeepBackgroundRequest.
+ * Use `create(KeepBackgroundRequestSchema)` to create a new message.
+ */
+export const KeepBackgroundRequestSchema: GenMessage<KeepBackgroundRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_media, 3);
+
+/**
+ * @generated from message fuwa.v1.KeepBackgroundResponse
+ */
+export type KeepBackgroundResponse = Message<"fuwa.v1.KeepBackgroundResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.Media media = 1;
+   */
+  media?: Media | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.KeepBackgroundResponse.
+ * Use `create(KeepBackgroundResponseSchema)` to create a new message.
+ */
+export const KeepBackgroundResponseSchema: GenMessage<KeepBackgroundResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_media, 4);
+
+/**
+ * @generated from message fuwa.v1.ListBackgroundsRequest
+ */
+export type ListBackgroundsRequest = Message<"fuwa.v1.ListBackgroundsRequest"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.ListBackgroundsRequest.
+ * Use `create(ListBackgroundsRequestSchema)` to create a new message.
+ */
+export const ListBackgroundsRequestSchema: GenMessage<ListBackgroundsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_media, 5);
+
+/**
+ * @generated from message fuwa.v1.ListBackgroundsResponse
+ */
+export type ListBackgroundsResponse = Message<"fuwa.v1.ListBackgroundsResponse"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.Media backgrounds = 1;
+   */
+  backgrounds: Media[];
+};
+
+/**
+ * Describes the message fuwa.v1.ListBackgroundsResponse.
+ * Use `create(ListBackgroundsResponseSchema)` to create a new message.
+ */
+export const ListBackgroundsResponseSchema: GenMessage<ListBackgroundsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_media, 6);
+
+/**
+ * @generated from message fuwa.v1.DeleteBackgroundRequest
+ */
+export type DeleteBackgroundRequest = Message<"fuwa.v1.DeleteBackgroundRequest"> & {
+  /**
+   * @generated from field: string url = 1;
+   */
+  url: string;
+};
+
+/**
+ * Describes the message fuwa.v1.DeleteBackgroundRequest.
+ * Use `create(DeleteBackgroundRequestSchema)` to create a new message.
+ */
+export const DeleteBackgroundRequestSchema: GenMessage<DeleteBackgroundRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_media, 7);
+
+/**
+ * @generated from message fuwa.v1.DeleteBackgroundResponse
+ */
+export type DeleteBackgroundResponse = Message<"fuwa.v1.DeleteBackgroundResponse"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.DeleteBackgroundResponse.
+ * Use `create(DeleteBackgroundResponseSchema)` to create a new message.
+ */
+export const DeleteBackgroundResponseSchema: GenMessage<DeleteBackgroundResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_media, 8);
+
+/**
  * What an upload is for. A picture can only be used for what it was uploaded
  * for, and only by the account that uploaded it.
  *
@@ -147,6 +243,13 @@ export enum MediaPurpose {
    * @generated from enum value: MEDIA_PURPOSE_EMOJI = 4;
    */
   EMOJI = 4,
+
+  /**
+   * A picture behind the app, kept with KeepBackground.
+   *
+   * @generated from enum value: MEDIA_PURPOSE_BACKGROUND = 5;
+   */
+  BACKGROUND = 5,
 }
 
 /**
@@ -157,7 +260,7 @@ export const MediaPurposeSchema: GenEnum<MediaPurpose> = /*@__PURE__*/
 
 /**
  * Pictures people upload to this instance: profile pictures, profile banners,
- * server icons and custom emoji.
+ * server icons, custom emoji and app backgrounds.
  *
  * An upload takes two steps. CreateUpload checks the file and reserves a
  * place for it; then an HTTP PUT of the file's bytes to `upload_url` stores
@@ -165,6 +268,11 @@ export const MediaPurposeSchema: GenEnum<MediaPurpose> = /*@__PURE__*/
  * picture is then served at `media.url` to anyone with the link. Setting that
  * URL as an avatar, banner or server icon keeps it; replacing or clearing it
  * deletes the old one. Uploads nothing uses are deleted after a day.
+ *
+ * Backgrounds are pictures people put behind the app (fuwa themes). The app
+ * settings that use them live on the device, so the instance keeps a small
+ * list of each account's backgrounds instead: KeepBackground adds an upload
+ * to it, and DeleteBackground removes one and its file.
  *
  * @generated from service fuwa.v1.MediaService
  */
@@ -176,6 +284,34 @@ export const MediaService: GenService<{
     methodKind: "unary";
     input: typeof CreateUploadRequestSchema;
     output: typeof CreateUploadResponseSchema;
+  },
+  /**
+   * Keeps an uploaded background, so it isn't swept. At most 24 per account.
+   *
+   * @generated from rpc fuwa.v1.MediaService.KeepBackground
+   */
+  keepBackground: {
+    methodKind: "unary";
+    input: typeof KeepBackgroundRequestSchema;
+    output: typeof KeepBackgroundResponseSchema;
+  },
+  /**
+   * Your kept backgrounds, newest first.
+   *
+   * @generated from rpc fuwa.v1.MediaService.ListBackgrounds
+   */
+  listBackgrounds: {
+    methodKind: "unary";
+    input: typeof ListBackgroundsRequestSchema;
+    output: typeof ListBackgroundsResponseSchema;
+  },
+  /**
+   * @generated from rpc fuwa.v1.MediaService.DeleteBackground
+   */
+  deleteBackground: {
+    methodKind: "unary";
+    input: typeof DeleteBackgroundRequestSchema;
+    output: typeof DeleteBackgroundResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_media, 0);
