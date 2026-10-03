@@ -154,8 +154,10 @@ enum Command {
     Update {
         room: String,
         participant: String,
+        session_id: Option<String>,
         may_speak: bool,
         may_hear: bool,
+        reply: oneshot::Sender<bool>,
     },
 }
 
@@ -243,8 +245,20 @@ impl Sfu {
         self.send(command).await
     }
 
-    pub async fn update(&self, room: &str, participant: &str, may_speak: bool, may_hear: bool) -> Result<()> {
-        self.send(Command::Update { room: room.into(), participant: participant.into(), may_speak, may_hear }).await
+    /// Changes whether someone may speak and hear, saying whether they (in
+    /// `session_id`, when given) have a connection here at all.
+    pub async fn update(
+        &self,
+        room: &str,
+        participant: &str,
+        session_id: Option<&str>,
+        may_speak: bool,
+        may_hear: bool,
+    ) -> Result<bool> {
+        let (reply, answer) = oneshot::channel();
+        let (room, participant, session_id) = (room.into(), participant.into(), session_id.map(Into::into));
+        self.send(Command::Update { room, participant, session_id, may_speak, may_hear, reply }).await?;
+        answer.await.map_err(|_| Error::Unavailable("calls are restarting; try again".into()))
     }
 
     async fn send(&self, command: Command) -> Result<()> {
@@ -416,6 +430,46 @@ struct Client {
     outbox: Vec<Signal>,
     /// Being let go: it hangs up at this time, and takes no part meanwhile.
     leaving: Option<Instant>,
+    /// When its recent offers came, to cap renegotiation.
+    offers: VecDeque<Instant>,
+    /// Sound it sent this second: (since, bytes).
+    sent: (Instant, usize),
+}
+
+/// The most an app's offer may be.
+const MAX_SDP: usize = 32 * 1024;
+/// Offers an app may make in [`OFFER_WINDOW`]; more hangs it up.
+const MAX_OFFERS: usize = 10;
+const OFFER_WINDOW: Duration = Duration::from_secs(10);
+/// Sound one person may send a second, far above any Opus voice (510 kbit/s at most).
+const MAX_BYTES_PER_SECOND: usize = 80 * 1024;
+/// The largest frame of sound passed on: Opus frames are 1275 bytes at most,
+/// plus the encryption trailer in direct-message calls.
+const MAX_FRAME: usize = 1500;
+
+/// Whether an app's offer asks for what calls allow: sending one audio
+/// track at most (video comes later), receiving the others' tracks, and the
+/// data channel. Anything else is turned down before it reaches str0m.
+fn offer_allowed(sdp: &str) -> bool {
+    if sdp.len() > MAX_SDP {
+        return false;
+    }
+    let mut sections: Vec<(&str, bool)> = Vec::new();
+    for line in sdp.lines() {
+        if let Some(m) = line.strip_prefix("m=") {
+            sections.push((m.split(' ').next().unwrap_or(""), true));
+        } else if let Some(last) = sections.last_mut()
+            && matches!(line.trim_end(), "a=recvonly" | "a=inactive")
+        {
+            last.1 = false;
+        }
+    }
+    let sending = |kind: &str| sections.iter().filter(|(k, sends)| *k == kind && *sends).count();
+    sections.len() <= MAX_ROOM + 2
+        && sections.iter().all(|(k, _)| matches!(*k, "audio" | "video" | "application"))
+        && sending("audio") <= 1
+        && sending("video") == 0
+        && sections.iter().filter(|(k, _)| *k == "application").count() <= 1
 }
 
 /// What one connection's output means for the others.
@@ -491,6 +545,14 @@ impl Client {
         };
         match signal {
             Signal::Offer { sdp } => {
+                let now = Instant::now();
+                self.offers.retain(|at| now.duration_since(*at) < OFFER_WINDOW);
+                self.offers.push_back(now);
+                if self.offers.len() > MAX_OFFERS || !offer_allowed(&sdp) {
+                    tracing::debug!(client = self.id, "an app's offer asked for too much; hanging it up");
+                    self.rtc.disconnect();
+                    return;
+                }
                 let Ok(offer) = SdpOffer::from_sdp_string(&sdp) else { return };
                 // Ours wins when two offers cross: the app (the polite side)
                 // takes ours back, answers it, and offers again after.
@@ -563,6 +625,8 @@ impl Client {
                 }
             }
             Event::ChannelData(data) if Some(data.id) == self.channel => self.on_signal(data),
+            // One track of sound from each app; anything more it can't send.
+            Event::MediaAdded(added) if added.kind != MediaKind::Audio || !self.tracks_in.is_empty() => {}
             Event::MediaAdded(added) => {
                 let track = Arc::new(TrackIn {
                     origin: self.id,
@@ -574,6 +638,9 @@ impl Client {
                 self.tracks_in.push((track, None));
             }
             Event::MediaData(data) => {
+                if !self.tracks_in.iter().any(|(t, _)| t.mid == data.mid) || !self.within_budget(data.data.len()) {
+                    return;
+                }
                 if !data.contiguous {
                     self.ask_keyframe(data.mid);
                 }
@@ -589,6 +656,19 @@ impl Client {
             }
             _ => {}
         }
+    }
+
+    /// Whether a frame this size fits in what one person may send.
+    fn within_budget(&mut self, len: usize) -> bool {
+        if len > MAX_FRAME {
+            return false;
+        }
+        let now = Instant::now();
+        if now.duration_since(self.sent.0) >= Duration::from_secs(1) {
+            self.sent = (now, 0);
+        }
+        self.sent.1 += len;
+        self.sent.1 <= MAX_BYTES_PER_SECOND
     }
 
     fn ask_keyframe(&mut self, mid: Mid) {
@@ -742,13 +822,17 @@ impl Engine {
                     }
                 }
             }
-            Command::Update { room, participant, may_speak, may_hear } => {
+            Command::Update { room, participant, session_id, may_speak, may_hear, reply } => {
+                let mut connected = false;
                 for client in &mut self.clients {
                     if client.room == room && client.participant == participant {
                         client.may_speak = may_speak;
                         client.may_hear = may_hear;
+                        connected |=
+                            client.leaving.is_none() && session_id.as_ref().is_none_or(|s| *s == client.session_id);
                     }
                 }
+                let _ = reply.send(connected);
             }
         }
     }
@@ -768,6 +852,9 @@ impl Engine {
         let others = self.clients.iter().filter(|c| c.room == room && c.leaving.is_none() && c.rtc.is_alive());
         if others.filter(|c| c.participant != participant).count() >= MAX_ROOM {
             return Err(Error::ResourceExhausted(format!("a call holds at most {MAX_ROOM} people")));
+        }
+        if !offer_allowed(offer) {
+            return Err(Error::invalid("a call sends one track of sound at most"));
         }
         let offer =
             SdpOffer::from_sdp_string(offer).map_err(|err| Error::invalid(format!("that offer isn't SDP: {err}")))?;
@@ -823,6 +910,8 @@ impl Engine {
             may_hear,
             outbox: vec![],
             leaving: None,
+            offers: VecDeque::new(),
+            sent: (now, 0),
         };
         // Everyone else's sound, offered once the data channel is up.
         for other in self.clients.iter().filter(|c| c.room == client.room && c.leaving.is_none()) {
@@ -924,6 +1013,24 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn offers_send_one_track_of_sound_at_most() {
+        let sdp = |sections: &[(&str, &str)]| {
+            let mut s = String::from("v=0\r\n");
+            for (kind, dir) in sections {
+                s += &format!("m={kind} 9 UDP/TLS/RTP/SAVPF 111\r\na={dir}\r\n");
+            }
+            s
+        };
+        assert!(offer_allowed(&sdp(&[("audio", "sendonly"), ("application", "sendrecv")])));
+        assert!(offer_allowed(&sdp(&[("audio", "sendrecv"), ("application", "sendrecv"), ("audio", "recvonly")])));
+        assert!(!offer_allowed(&sdp(&[("audio", "sendonly"), ("audio", "sendrecv")])), "two microphones");
+        assert!(!offer_allowed(&sdp(&[("audio", "sendonly"), ("video", "sendonly")])), "video isn't here yet");
+        assert!(!offer_allowed(&sdp(&[("text", "sendonly")])));
+        assert!(!offer_allowed(&sdp(&vec![("audio", "recvonly"); MAX_ROOM + 3])), "too many");
+        assert!(!offer_allowed(&"a".repeat(MAX_SDP + 1)));
+    }
 
     #[test]
     fn addresses_read_like_people_write_them() {

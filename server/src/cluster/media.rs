@@ -40,8 +40,9 @@ impl cpb::media_service_server::MediaService for Internal {
 
     async fn update(&self, request: Request<cpb::UpdateRequest>) -> Result<Response<cpb::UpdateResponse>, Status> {
         let r = request.into_inner();
-        self.0.update(&r.room, &r.participant, r.may_speak, r.may_hear).await?;
-        Ok(Response::new(cpb::UpdateResponse {}))
+        let session = (!r.session_id.is_empty()).then_some(r.session_id.as_str());
+        let connected = self.0.update(&r.room, &r.participant, session, r.may_speak, r.may_hear).await?;
+        Ok(Response::new(cpb::UpdateResponse { connected }))
     }
 }
 

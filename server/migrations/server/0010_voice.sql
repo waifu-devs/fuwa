@@ -4,3 +4,11 @@
 -- choice they made.
 UPDATE roles SET permissions = permissions | 1048576 | 2097152 WHERE permissions & 2048 = 2048;
 UPDATE roles SET permissions = permissions | 4194304 | 8388608 WHERE permissions & 128 = 128;
+
+-- Server mute and deafen stay with the person, not the call: leaving and
+-- joining again doesn't lift them. A row only while one of them is on.
+CREATE TABLE voice_moderation (
+  user_id TEXT NOT NULL PRIMARY KEY,
+  mute INTEGER NOT NULL DEFAULT 0,
+  deaf INTEGER NOT NULL DEFAULT 0
+);

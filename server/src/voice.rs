@@ -277,12 +277,15 @@ impl MediaLink {
         }
     }
 
-    /// Passes on whether someone may speak and hear.
-    pub async fn update(&self, place: &Place) {
+    /// Passes on whether someone may speak and hear, saying whether their
+    /// place's session has a connection on the media part (false when it
+    /// can't be reached).
+    pub async fn update(&self, place: &Place) -> bool {
         let (room, user_id) = (&place.room, &place.state.user_id);
+        let session = Some(place.session_id.as_str());
         let result = match self {
-            Self::Off(_) => Ok(()),
-            Self::Local(sfu) => sfu.update(room, user_id, place.may_speak(), place.may_hear()).await,
+            Self::Off(_) => Ok(false),
+            Self::Local(sfu) => sfu.update(room, user_id, session, place.may_speak(), place.may_hear()).await,
             Self::Remote(_) => match self.part(room) {
                 Ok(mut client) => client
                     .update(cpb::UpdateRequest {
@@ -290,16 +293,18 @@ impl MediaLink {
                         participant: user_id.clone(),
                         may_speak: place.may_speak(),
                         may_hear: place.may_hear(),
+                        session_id: place.session_id.clone(),
                     })
                     .await
-                    .map(|_| ())
+                    .map(|r| r.into_inner().connected)
                     .map_err(Error::retried),
                 Err(err) => Err(err),
             },
         };
-        if let Err(err) = result {
+        result.unwrap_or_else(|err| {
             tracing::info!(room, error = %err, "couldn't change a call on its media part");
-        }
+            false
+        })
     }
 }
 

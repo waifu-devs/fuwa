@@ -104,7 +104,7 @@ export function CallSettings({
       <Setting
         id="turn-secret"
         title="TURN secret"
-        hint="The shared secret your TURN server (such as coturn with use-auth-secret) checks. Apps get a new password from it for each call, good for two hours, that names no account."
+        hint="The shared secret your TURN server (such as coturn with use-auth-secret) checks. Apps get a new password from it for each call, good for an hour, that names no account."
         delay={0.08}
         defaultLabel={defaults.turnSecret ? "set" : "none"}
         {...resetter("turn_secret")}

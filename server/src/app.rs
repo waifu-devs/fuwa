@@ -468,6 +468,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     }
     spawn_signal_handler(app.shutdown.clone());
     crate::api::spawn_voice_sweeper(app.clone());
+    crate::api::spawn_voice_guard(app.clone());
     if let Some(replica) = &app.replica {
         replica.start();
     }

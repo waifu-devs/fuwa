@@ -24,7 +24,7 @@ use crate::voice::{self, LEASE, Place};
 
 /// How long a TURN credential works. Apps ask for new ones each time they
 /// (re)connect a call, so this only has to outlast one connection setting up.
-const TURN_CREDENTIAL: Duration = Duration::from_secs(2 * 60 * 60);
+const TURN_CREDENTIAL: Duration = Duration::from_secs(60 * 60);
 
 /// Checks for places nobody kept this often.
 const SWEEP: Duration = Duration::from_secs(1);
@@ -47,6 +47,81 @@ pub fn spawn_voice_sweeper(app: Arc<App>) {
             }
         }
     });
+}
+
+/// Hangs up whoever can't be in a voice channel any more the moment it
+/// happens: kicked, banned, left, timed out, or a role or channel change
+/// took CONNECT away (and tells the media part about a change to SPEAK).
+/// KeepVoice checks again every few seconds too, but nobody waits for it.
+pub fn spawn_voice_guard(app: Arc<App>) {
+    let mut events = app.hub.tap();
+    tokio::spawn(async move {
+        loop {
+            let event = tokio::select! {
+                _ = app.shutdown.cancelled() => return,
+                event = events.recv() => match event {
+                    Some(event) => event,
+                    None => return,
+                },
+            };
+            let relevant = matches!(
+                event.payload,
+                Some(
+                    Payload::MemberLeft(_)
+                        | Payload::MemberUpdated(_)
+                        | Payload::RoleUpdated(_)
+                        | Payload::RoleDeleted(_)
+                        | Payload::ChannelUpdated(_)
+                        | Payload::ChannelDeleted(_)
+                        | Payload::ServerDeleted(_)
+                )
+            );
+            if relevant && !app.voice.list(&event.server_id).is_empty() {
+                recheck_voice(&app, &event.server_id).await;
+            }
+        }
+    });
+}
+
+/// Who may still be where they are in a server's voice channels.
+async fn recheck_voice(app: &App, server_id: &str) {
+    let sdb = app.servers.get(server_id).await.ok();
+    for place in app.voice.list(server_id) {
+        let user_id = place.state.user_id.clone();
+        let suppress = match &sdb {
+            Some(sdb) => may_be_in(sdb, &user_id, &place.state.channel_id).await,
+            None => None,
+        };
+        match suppress {
+            None => {
+                if let Some(place) = app.voice.remove(server_id, &user_id, Some(&place.session_id)) {
+                    app.media_link.close(&place.room, Some(&user_id), Some(&place.session_id)).await;
+                    gone(app, server_id, &place).await;
+                }
+            }
+            Some(suppress) if suppress != place.state.suppress => {
+                if let Some(place) = app.voice.update(server_id, &user_id, |p| p.state.suppress = suppress) {
+                    app.media_link.update(&place).await;
+                    let update = Payload::VoiceStateUpdated(pb::VoiceStateUpdated { state: Some(place.state.clone()) });
+                    publish_voice(app, server_id, &user_id, update);
+                }
+            }
+            Some(_) => {}
+        }
+    }
+}
+
+/// Whether someone may be in a voice channel, and if so whether they're
+/// kept quiet (no SPEAK there).
+async fn may_be_in(sdb: &store::ServerDb, user_id: &str, channel_id: &str) -> Option<bool> {
+    let conn = sdb.read().ok()?;
+    let (member, access) = store::member_access(&conn, &sdb.id, user_id).await.ok()??;
+    let channel = store::load_channel(&conn, &sdb.id, channel_id).await.ok()??;
+    let may = channel.r#type == pb::ChannelType::Voice as i32
+        && access.can_see(&channel.id)
+        && access.require_in(&channel.id, pb::Permission::Connect).is_ok()
+        && super::messages::check_not_timed_out(&member).is_ok();
+    may.then(|| !access.has_in(&channel.id, pb::Permission::Speak))
 }
 
 /// Tells everyone someone left a call.
@@ -178,13 +253,14 @@ impl Api {
             _ => req.session_id.clone(),
         };
         let same_channel = before.as_ref().is_some_and(|p| p.state.channel_id == channel.id);
+        let (server_mute, server_deaf) = seat.sdb.voice_moderation(&account.id).await?;
         let state = pb::VoiceState {
             user_id: account.id.clone(),
             channel_id: channel.id.clone(),
             self_mute: req.self_mute,
             self_deaf: req.self_deaf,
-            server_mute: before.as_ref().is_some_and(|p| p.state.server_mute),
-            server_deaf: before.as_ref().is_some_and(|p| p.state.server_deaf),
+            server_mute,
+            server_deaf,
             joined_at: match &before {
                 Some(p) if same_channel => p.state.joined_at,
                 _ => Some(timestamp(now_ms())),
@@ -235,10 +311,14 @@ impl Api {
         }
         // What they may do now: permissions change while people talk.
         let channel_id = before.as_ref().map(|p| p.state.channel_id.clone()).unwrap_or(req.channel_id.clone());
+        let mut moderation = (false, false);
         let allowed = match self.voice_channel(&account, &server_id, &channel_id).await {
             Ok((seat, channel)) => {
                 let may = seat.access.require_in(&channel.id, pb::Permission::Connect).is_ok()
                     && super::messages::check_not_timed_out(&seat.member).is_ok();
+                if before.is_none() {
+                    moderation = seat.sdb.voice_moderation(&account.id).await?;
+                }
                 may.then(|| !seat.access.has_in(&channel.id, pb::Permission::Speak))
             }
             Err(_) => None,
@@ -279,6 +359,8 @@ impl Api {
                     channel_id: channel_id.clone(),
                     self_mute: req.self_mute,
                     self_deaf: req.self_deaf,
+                    server_mute: moderation.0,
+                    server_deaf: moderation.1,
                     joined_at: Some(timestamp(now_ms())),
                     suppress,
                     ..Default::default()
@@ -289,8 +371,12 @@ impl Api {
                     state,
                     expires: lease(),
                 };
+                // Only someone still connected to the media part is still
+                // in the call; anyone else joins again (with their sound).
+                if !self.app.media_link.update(&place).await {
+                    return Err(Error::Unavailable("calls are restarting; join again".into()));
+                }
                 self.app.voice.put(&server_id, place.clone());
-                self.app.media_link.update(&place).await;
                 let update = Payload::VoiceStateUpdated(pb::VoiceStateUpdated { state: Some(place.state.clone()) });
                 publish_voice(&self.app, &server_id, &account.id, update);
                 place
@@ -348,6 +434,9 @@ impl Api {
             self.disconnect(&server_id, &req.user_id).await;
             return Ok(pb::ModerateVoiceResponse {});
         }
+        let (mute, deaf) =
+            (req.server_mute.unwrap_or(place.state.server_mute), req.server_deaf.unwrap_or(place.state.server_deaf));
+        seat.sdb.set_voice_moderation(&req.user_id, mute, deaf).await?;
         let Some(place) = self.app.voice.update(&server_id, &req.user_id, |p| {
             if let Some(mute) = req.server_mute {
                 p.state.server_mute = mute;
@@ -429,6 +518,7 @@ impl Api {
         }
         let changed =
             before.as_ref().is_none_or(|p| p.state.self_mute != req.self_mute || p.state.self_deaf != req.self_deaf);
+        let forgotten = before.is_none();
         let mut place = before.unwrap_or_else(|| Place {
             session_id: req.session_id.clone(),
             room: voice::dm_room(&conversation.id),
@@ -443,6 +533,10 @@ impl Api {
         place.state.self_mute = req.self_mute;
         place.state.self_deaf = req.self_deaf;
         place.expires = lease();
+        // Forgotten in a restart: only back if still connected to the media part.
+        if forgotten && !self.app.media_link.update(&place).await {
+            return Err(Error::Unavailable("calls are restarting; join again".into()));
+        }
         self.app.voice.put(&scope, place.clone());
         if changed {
             publish_dm_call(&self.app, &conversation.id, &conversation.participants);
@@ -557,7 +651,7 @@ mod tests {
     fn turn_credentials_follow_coturn() {
         // coturn checks HMAC-SHA1(secret, "<expiry>:<name>"), base64.
         let (username, credential) = turn_credential("north", "acc", 1_000_000);
-        assert_eq!(username, format!("{}:acc", 1000 + 2 * 60 * 60));
+        assert_eq!(username, format!("{}:acc", 1000 + 60 * 60));
         assert_eq!(credential.len(), 28);
         let servers = ice_servers(&["stun:a:3478".into(), "turn:b:3478".into()], "north");
         assert_eq!(servers.len(), 2);

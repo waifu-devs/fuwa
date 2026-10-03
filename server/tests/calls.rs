@@ -44,6 +44,7 @@ async fn start(dir: &Path) -> Instance {
     let router = app.router();
     let shutdown = app.shutdown.clone();
     fuwa_server::api::spawn_voice_sweeper(app.clone());
+    fuwa_server::api::spawn_voice_guard(app.clone());
     let serving = tokio::spawn(async move {
         axum::serve(listener, router).with_graceful_shutdown(async move { shutdown.cancelled().await }).await.unwrap();
     });
@@ -400,7 +401,40 @@ async fn places_come_back_after_a_restart_and_follow_permissions() {
         .states;
     assert_eq!(states.len(), 1);
 
-    // @everyone loses CONNECT: her next keep hangs her up.
+    // A server mute stays with her: leaving and joining again doesn't lift it.
+    c.calls
+        .moderate_voice(authed(
+            &juan,
+            pb::ModerateVoiceRequest {
+                server_id: sid.clone(),
+                user_id: mika_id.clone(),
+                server_mute: Some(true),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    c.calls
+        .leave_voice(authed(
+            &mika,
+            pb::LeaveVoiceRequest { server_id: sid.clone(), session_id: joined.session_id.clone() },
+        ))
+        .await
+        .unwrap();
+    let (_peer, offer) = Peer::new().await;
+    let joined = c
+        .calls
+        .join_voice(authed(
+            &mika,
+            pb::JoinVoiceRequest { server_id: sid.clone(), channel_id: voice.id.clone(), offer, ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(joined.state.unwrap().server_mute, "still server muted");
+    let keep = pb::KeepVoiceRequest { session_id: joined.session_id.clone(), ..keep };
+
+    // @everyone loses CONNECT: she's hung up right away, and her next keep says so.
     let everyone = c
         .roles
         .list_roles(authed(&juan, pb::ListRolesRequest { server_id: sid.clone() }))
@@ -426,6 +460,23 @@ async fn places_come_back_after_a_restart_and_follow_permissions() {
         ))
         .await
         .unwrap();
+    let hung_up = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let states = c
+                .calls
+                .list_voice_states(authed(&juan, pb::ListVoiceStatesRequest { server_id: sid.clone() }))
+                .await
+                .unwrap()
+                .into_inner()
+                .states;
+            if states.is_empty() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    assert!(hung_up.is_ok(), "losing CONNECT hangs up without waiting for a keep");
     let gone = c.calls.keep_voice(authed(&mika, keep)).await.unwrap_err();
     assert_eq!(gone.code(), Code::FailedPrecondition);
     let (_peer, offer) = Peer::new().await;
