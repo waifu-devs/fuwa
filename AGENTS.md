@@ -182,6 +182,13 @@
     in node.db's `settings` table over the environment's defaults. Read them
     through `app.settings()`, never from `config`, so changes apply at once.
   - `telemetry.rs`: the anonymous usage signal (schema `fuwa.signal.v1`).
+  - `reports.rs`: the hourly anonymous health report (`fuwa.report.v1`): one
+    process-wide collector of errors (panics, `Error::Internal`/`Database`/`Io`
+    answers, named by the gRPC method from `time_calls`), timings in fixed
+    buckets and usage counts, plus what apps send through
+    `NodeService.SendReport` (checked labels, one a minute per account, never
+    kept who). Off with the telemetry switch. The web app's side is
+    `web/src/lib/reports.ts`, the desktop's `desktop/src/core/reports.rs`.
   - `media.rs`: uploaded pictures (avatars, banners, server icons), one file
     each under `media/`, with a row in node.db's `media` table. The HTTP side
     lives here: `PUT /media/upload/<token>` takes the file for an upload

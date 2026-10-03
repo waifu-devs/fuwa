@@ -19,6 +19,7 @@ import { RoleService } from "@/gen/fuwa/v1/role_pb";
 import { ServerService } from "@/gen/fuwa/v1/server_pb";
 import { SsoService } from "@/gen/fuwa/v1/sso_pb";
 import { WebhookService } from "@/gen/fuwa/v1/webhook_pb";
+import { timeCalls } from "@/lib/reports";
 
 /** Typed clients for every fuwa service on one instance. */
 export type Api = {
@@ -54,7 +55,7 @@ export function makeApi(url: string, token: () => string | null): Api {
     if (t) req.header.set("authorization", `Bearer ${t}`);
     return next(req);
   };
-  const transport = createGrpcWebTransport({ baseUrl: url, interceptors: [auth] });
+  const transport = createGrpcWebTransport({ baseUrl: url, interceptors: [auth, timeCalls] });
   return {
     node: createClient(NodeService, transport),
     auth: createClient(AuthService, transport),

@@ -2,6 +2,7 @@ import { Code } from "@connectrpc/connect";
 import { Effect } from "effect";
 import { dmEngine, DmError, type Content } from "@/e2ee/engine";
 import { engine } from "./sync";
+import { reportUsage } from "@/lib/reports";
 import { call, FuwaError, toFuwaError } from "./errors";
 import { store, updateDms, type PendingMessage } from "./store";
 
@@ -45,6 +46,7 @@ const setPending = (key: string, id: string, fn: (list: PendingMessage[]) => Pen
 
 /** Sends a message. It shows at once, faded, until the instance has it; failing leaves it with a retry. */
 export async function sendDm(key: string, id: string, text: string, replyTo = 0) {
+  reportUsage("dm.send");
   const nonce = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
   setPending(key, id, (list) => [...list, { nonce, content: text, createdAt: Date.now(), failed: null }]);
   try {

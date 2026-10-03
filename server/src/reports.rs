@@ -419,9 +419,9 @@ fn take(install_id: Option<String>, hosted: bool, part: &'static str) -> Option<
         dropped: counts.dropped,
     };
     // Steady order, so the log reads the same way each time.
-    report.errors.sort_by(|a, b| b.count.cmp(&a.count));
+    report.errors.sort_by_key(|e| std::cmp::Reverse(e.count));
     report.timings.sort_by(|a, b| a.app.cmp(&b.app).then_with(|| a.metric.cmp(&b.metric)));
-    report.usage.sort_by(|a, b| b.count.cmp(&a.count));
+    report.usage.sort_by_key(|u| std::cmp::Reverse(u.count));
     Some(report)
 }
 

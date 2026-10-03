@@ -8,6 +8,7 @@ import { engine } from "@/fuwa/sync";
 import { store } from "@/fuwa/store";
 import { getPrefs, subscribePrefs } from "@/lib/prefs";
 import { cue } from "@/lib/sounds";
+import { reportTiming, reportUsage } from "@/lib/reports";
 import { toast } from "@/lib/ui";
 import { Mic, micProblem, Speakers } from "./audio";
 import { canEncryptCalls, encryptedConfig, FrameCrypto } from "./frames";
@@ -99,6 +100,8 @@ class Session {
   private secretPoll: ReturnType<typeof setInterval> | null = null;
   private unwatch: (() => void) | null = null;
   private broken: ReturnType<typeof setTimeout> | null = null;
+  /** When joining (or joining again) started, for anonymous reports of how long it takes. */
+  private waitingSince = performance.now();
   private connecting: Promise<void> | null = null;
   private attempt = 0;
   private stopped = false;
@@ -258,6 +261,9 @@ class Session {
         if (this.broken) clearTimeout(this.broken);
         this.broken = null;
         const before = getCalls().call;
+        if (before?.status === "connecting" || before?.status === "reconnecting") {
+          reportTiming(before.status === "connecting" ? "call.connect" : "call.reconnect", performance.now() - this.waitingSince);
+        }
         setCalls((s) => ({ call: s.call && { ...s.call, status: "connected", since: s.call.since ?? Date.now() } }));
         if (before?.status === "connecting") cue("connect");
       } else if (state === "failed") {
@@ -433,6 +439,7 @@ class Session {
     if (this.broken) clearTimeout(this.broken);
     this.broken = null;
     setCalls((s) => ({ call: s.call && { ...s.call, status: "reconnecting" } }));
+    this.waitingSince = performance.now();
     const tryAgain = async (delay: number) => {
       if (this.stopped) return;
       try {
@@ -601,6 +608,7 @@ export async function joinCall(target: CallTarget) {
   if (session) await hangUp(null);
   const s = new Session(target);
   session = s;
+  reportUsage(target.kind === "voice" ? "call.join_voice" : "call.join_dm");
   setCalls(() => ({ call: { target, status: "connecting", since: null, problem: null }, speaking: {}, ended: null, selfVideo: false, selfStream: false, selfRecord: false }));
   try {
     await s.start();
@@ -647,6 +655,7 @@ export async function setCamera(on: boolean) {
   const s = session;
   if (!s || getCalls().selfVideo === on) return;
   if (on && s.videoSuppressed) return void toast("You can't turn your camera on in this channel.");
+  if (on) reportUsage("call.camera");
   setCalls(() => ({ selfVideo: on }));
   try {
     await s.setCamera(on);
@@ -665,6 +674,7 @@ export async function setScreen(on: boolean) {
   const s = session;
   if (!s || getCalls().selfStream === on) return;
   if (on && s.videoSuppressed) return void toast("You can't share your screen in this channel.");
+  if (on) reportUsage("call.screen_share");
   setCalls(() => ({ selfStream: on }));
   try {
     await s.setScreen(on);

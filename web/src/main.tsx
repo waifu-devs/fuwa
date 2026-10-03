@@ -4,7 +4,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AppBackdrop } from "@/components/Backdrop";
 import { refreshOnFocus } from "@/fuwa/actions";
-import { restore } from "@/fuwa/sync";
+import { reportTarget, restore } from "@/fuwa/sync";
+import { startReports } from "@/lib/reports";
 import { watchUnread } from "@/lib/notify";
 import { applyPrefs, usePrefs, watchSystem } from "@/lib/prefs";
 import { router } from "@/router";
@@ -18,6 +19,7 @@ watchSystem();
 restore();
 watchUnread();
 refreshOnFocus();
+startReports(reportTarget);
 
 function App() {
   // Springs and slides calm down to fades when the system asks for less motion, or the Motion setting says so.

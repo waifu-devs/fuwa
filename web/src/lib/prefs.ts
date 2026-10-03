@@ -64,6 +64,8 @@ export type Prefs = {
   /** Extra shortcuts someone added, on top of the defaults. */
   customKeybinds: CustomKeybind[];
   developerMode: boolean;
+  /** Anonymous reports of errors and slow paths, sent to your instance (see lib/reports.ts). */
+  shareReports: boolean;
   /** Voice and audio. Device ids are this browser's; "" is the system default. */
   inputDevice: string;
   outputDevice: string;
@@ -122,6 +124,7 @@ export const DEFAULT_PREFS: Prefs = {
   keybinds: {},
   customKeybinds: [],
   developerMode: false,
+  shareReports: true,
   inputDevice: "",
   outputDevice: "",
   inputVolume: 100,
@@ -208,6 +211,7 @@ function sanitize(p: Prefs): Prefs {
       p.userVolumes && typeof p.userVolumes === "object"
         ? Object.fromEntries(Object.entries(p.userVolumes).filter(([, v]) => typeof v === "number" && v >= 0 && v <= 200))
         : {},
+    shareReports: p.shareReports !== false,
     keybinds: p.keybinds && typeof p.keybinds === "object" ? p.keybinds : {},
     customKeybinds: Array.isArray(p.customKeybinds)
       ? p.customKeybinds.filter((k) => typeof k?.id === "string" && typeof k.action === "string" && typeof k.combo === "string")

@@ -49,7 +49,8 @@ export type Node = Message$1<"fuwa.v1.Node"> & {
   serverCreation: ServerCreation;
 
   /**
-   * Whether this instance sends the anonymous usage signal.
+   * Whether this instance sends the anonymous usage signal and its hourly
+   * report of errors and slow paths. While it's off, apps send no reports.
    *
    * @generated from field: bool telemetry = 6;
    */
