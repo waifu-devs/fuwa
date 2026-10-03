@@ -109,7 +109,7 @@ message InstanceSettings {
   IdentityProvider sso_provider = 16;
   // Moderation providers servers' AutoMod can use, one entry for each kind
   // fuwa knows. Their API keys are never sent back.
-  repeated AutoModProviderSettings automod_providers = 24;
+  repeated AutoModProviderSettings automod_providers = 25;
 }
 
 // One moderation provider, as the instance's admins set it up.
