@@ -28,9 +28,17 @@ async function gql(query, variables = {}) {
   return body.data;
 }
 
+/** JSON with every object's keys sorted: Railway hands the ruleset back in its own key order. */
+const canonical = (value) =>
+  Array.isArray(value)
+    ? `[${value.map(canonical).join(",")}]`
+    : value && typeof value === "object"
+      ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
+      : JSON.stringify(value);
+
 /** A ruleset without the ids Railway gives each rule, to compare with ours. */
 const comparable = (ruleset) =>
-  ruleset && JSON.stringify({ ...ruleset, rules: (ruleset.rules ?? []).map(({ id: _, ...rule }) => rule) });
+  ruleset && canonical({ ...ruleset, rules: (ruleset.rules ?? []).map(({ id: _, ...rule }) => rule) });
 
 const EDGE = `edgeConfig { enabled edgeRules caching { mode htmlCaching defaultTtlSeconds purgeOnDeploy } }`;
 
