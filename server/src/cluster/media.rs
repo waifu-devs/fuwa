@@ -14,6 +14,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::routing::get;
+use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 
 use crate::config::Config;
@@ -44,15 +45,28 @@ impl cpb::media_service_server::MediaService for Internal {
     }
 }
 
+/// A media part's internal API, carrying calls until `calls_stop`.
+pub async fn start(config: &Config, calls_stop: CancellationToken) -> Result<(axum::Router, Sfu), String> {
+    let media = config.media.clone().ok_or("a media part needs FUWA_MEDIA_PORT")?;
+    let sfu = Sfu::start(media, calls_stop).await.map_err(|err| err.to_string())?;
+    let (_, health) = tonic_health::server::health_reporter();
+    let key: Arc<str> = config.cluster.key.as_deref().unwrap_or_default().into();
+    let router = tonic::service::Routes::new(cpb::media_service_server::MediaServiceServer::new(Internal(sfu.clone())))
+        .add_service(health)
+        .into_axum_router()
+        .route("/healthz", get(|| async { "ok" }))
+        .layer(axum::middleware::from_fn_with_state(key, super::require_key));
+    Ok((router, sfu))
+}
+
 /// Serves a media part until Ctrl-C or SIGTERM.
 pub async fn run(config: Config, address: SocketAddr) -> Result<(), String> {
-    let media = config.media.clone().ok_or("a media part needs FUWA_MEDIA_PORT")?;
     let listener =
         tokio::net::TcpListener::bind(address).await.map_err(|err| format!("couldn't listen on {address}: {err}"))?;
-    let shutdown = tokio_util::sync::CancellationToken::new();
+    let shutdown = CancellationToken::new();
     // Calls stop a moment after the API does, so their "restarting" goes out.
-    let calls_stop = tokio_util::sync::CancellationToken::new();
-    let sfu = Sfu::start(media, calls_stop.clone()).await.map_err(|err| err.to_string())?;
+    let calls_stop = CancellationToken::new();
+    let (router, sfu) = start(&config, calls_stop.clone()).await?;
     tracing::info!(
         version = crate::VERSION,
         role = "media",
@@ -62,14 +76,6 @@ pub async fn run(config: Config, address: SocketAddr) -> Result<(), String> {
         "fuwa is up"
     );
     crate::app::spawn_signal_handler(shutdown.clone());
-
-    let (_, health) = tonic_health::server::health_reporter();
-    let key: Arc<str> = config.cluster.key.as_deref().unwrap_or_default().into();
-    let router = tonic::service::Routes::new(cpb::media_service_server::MediaServiceServer::new(Internal(sfu)))
-        .add_service(health)
-        .into_axum_router()
-        .route("/healthz", get(|| async { "ok" }))
-        .layer(axum::middleware::from_fn_with_state(key, super::require_key));
     let stopping = shutdown.clone();
     let served =
         axum::serve(listener, router).with_graceful_shutdown(async move { stopping.cancelled().await }).into_future();

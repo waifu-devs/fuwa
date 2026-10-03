@@ -421,7 +421,7 @@ struct Client {
 /// What one connection's output means for the others.
 enum Propagated {
     TrackOpen(ClientId, Weak<TrackIn>),
-    Media(ClientId, MediaData),
+    Media(ClientId, Box<MediaData>),
     Keyframe(KeyframeRequest, ClientId, Mid),
 }
 
@@ -578,7 +578,7 @@ impl Client {
                     self.ask_keyframe(data.mid);
                 }
                 if self.may_speak && self.leaving.is_none() {
-                    outputs.propagated.push_back(Propagated::Media(self.id, data));
+                    outputs.propagated.push_back(Propagated::Media(self.id, Box::new(data)));
                 }
             }
             Event::KeyframeRequest(request) => {
