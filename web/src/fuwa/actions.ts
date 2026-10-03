@@ -331,6 +331,19 @@ export const uploadPicture = (key: string, purpose: MediaPurpose, file: Blob, pr
     return media!.url;
   });
 
+// ───────────────────────── Backgrounds ─────────────────────────
+
+/** Your backgrounds kept on an instance, newest first. */
+export const listBackgrounds = (key: string) =>
+  call((signal) => api(key).media.listBackgrounds({}, { signal })).pipe(Effect.map((r) => r.backgrounds));
+
+/** Keeps an uploaded background on its instance, so it isn't cleared. */
+export const keepBackground = (key: string, url: string) =>
+  call((signal) => api(key).media.keepBackground({ url }, { signal })).pipe(Effect.map((r) => r.media!));
+
+export const deleteBackground = (key: string, url: string) =>
+  call((signal) => api(key).media.deleteBackground({ url }, { signal })).pipe(Effect.asVoid);
+
 /** Someone's full profile: pronouns, bio, banner. Kept so it shows at once next time. */
 export const loadProfile = (key: string, userId: string) =>
   Effect.gen(function* () {

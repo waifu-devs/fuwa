@@ -8,8 +8,9 @@ import { SPRING } from "@/components/motion";
 import { Choice, Toggle, WithPreview } from "@/components/settings/controls";
 import { Slider } from "@/components/ui/slider";
 import { useInstance } from "@/fuwa/hooks";
-import { DARK_THEMES, LIGHT_THEMES, setPrefs, usePrefs, type MessageDisplay } from "@/lib/prefs";
-import { BUILTIN_THEMES } from "@/lib/themes";
+import { allThemes, darkThemes, lightThemes, setPrefs, usePrefs, type MessageDisplay } from "@/lib/prefs";
+import { clickPoint, switchTheme } from "@/lib/theme-switch";
+import { openSettings } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { PrefSetting, ThemeGrid } from "./common";
 
@@ -18,7 +19,7 @@ export function Appearance({ instanceKey }: { instanceKey?: string }) {
   return (
     <WithPreview preview={<ChatPreview instanceKey={instanceKey} />}>
       <div className="flex flex-col">
-        <PrefSetting id="theme" title="Theme" hint="The colors of the whole app, from the waifu.dev themes." keys={["theme", "followSystem", "lightTheme", "darkTheme"]}>
+        <PrefSetting id="theme" title="Theme" hint="The colors of the whole app: the waifu.dev themes, and any you make." keys={["theme", "followSystem", "lightTheme", "darkTheme"]}>
           <Toggle
             checked={p.followSystem}
             onChange={(followSystem) => setPrefs({ followSystem })}
@@ -30,16 +31,16 @@ export function Appearance({ instanceKey }: { instanceKey?: string }) {
               <motion.div key="system" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={SPRING} className="flex flex-col gap-4">
                 <div>
                   <p className="mb-2 text-xs font-bold tracking-wide text-muted-foreground uppercase">When your system is light</p>
-                  <ThemeGrid id="light" themes={LIGHT_THEMES} value={p.lightTheme} onChange={(lightTheme) => setPrefs({ lightTheme })} />
+                  <ThemeGrid id="light" themes={lightThemes(p)} value={p.lightTheme} onChange={(lightTheme, e) => switchTheme({ lightTheme }, clickPoint(e))} />
                 </div>
                 <div>
                   <p className="mb-2 text-xs font-bold tracking-wide text-muted-foreground uppercase">When it's dark</p>
-                  <ThemeGrid id="dark" themes={DARK_THEMES} value={p.darkTheme} onChange={(darkTheme) => setPrefs({ darkTheme })} />
+                  <ThemeGrid id="dark" themes={darkThemes(p)} value={p.darkTheme} onChange={(darkTheme, e) => switchTheme({ darkTheme }, clickPoint(e))} />
                 </div>
               </motion.div>
             ) : (
               <motion.div key="fixed" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={SPRING}>
-                <ThemeGrid id="fixed" themes={BUILTIN_THEMES} value={p.theme} onChange={(theme) => setPrefs({ theme })} />
+                <ThemeGrid id="fixed" themes={allThemes(p)} value={p.theme} onChange={(theme, e) => switchTheme({ theme }, clickPoint(e))} onMake={() => openSettings("themes")} />
               </motion.div>
             )}
           </AnimatePresence>

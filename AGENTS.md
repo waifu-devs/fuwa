@@ -332,6 +332,16 @@
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
     an instance or a server live on that instance instead.
+  - Themes (`docs/themes.md` is the format every app shares): built-ins in
+    `src/lib/themes.ts` (copied from waifu.dev), custom themes and theme files
+    in `lib/theme-file.ts`, the backdrop (picture and effect) in
+    `lib/backdrop.ts`, drawn by `components/Backdrop.tsx` behind `#root`.
+    Shader effects are WGSL in `lib/effects/shaders.ts`, run by vgpu in
+    `lib/effects/gpu.ts`, which is loaded only when an effect is on (it's
+    kept out of the vendor chunk in `vite.config.ts`); CSS stands in without
+    WebGPU. Theme files never make the app load anything: pictures travel
+    inside them and are uploaded on import. Settings pages:
+    `settings/app/Themes.tsx` and `Backgrounds.tsx`.
   - `src/lib/notifications.ts`: how a message reaches you: your settings for
     its channel, then its server (both stored on the instance, so they follow
     you across devices), then this device's Notifications settings. Muted means

@@ -1420,6 +1420,26 @@ impl NodeDb {
         .await
     }
 
+    /// An account's kept backgrounds, newest first.
+    pub async fn backgrounds(&self, account_id: &str) -> Result<Vec<MediaRow>> {
+        let conn = self.read()?;
+        let ids = query_all(
+            &conn,
+            "SELECT id FROM media WHERE account_id = ?1 AND purpose = ?2 AND used_at IS NOT NULL
+             ORDER BY used_at DESC, id DESC",
+            (account_id, pb::MediaPurpose::Background as i64),
+            |r| r.get::<String>(0),
+        )
+        .await?;
+        let mut rows = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(row) = media_by_id(&conn, &id).await? {
+                rows.push(row);
+            }
+        }
+        Ok(rows)
+    }
+
     pub async fn media_ids(&self) -> Result<HashSet<String>> {
         let conn = self.read()?;
         Ok(query_all(&conn, "SELECT id FROM media", (), |r| r.get::<String>(0)).await?.into_iter().collect())

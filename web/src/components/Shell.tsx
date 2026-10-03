@@ -156,11 +156,19 @@ function Page() {
   );
 }
 
-/** Phones: the list is underneath, the chat slides in over it from the right. */
+/** Phones: the list is underneath, the chat slides in over it from the right (and the list fades away under it). */
 function CompactFrame({ navOpen, nav }: { navOpen: boolean; nav: ReactNode }) {
   return (
     <div className="relative h-full w-full overflow-hidden">
-      <div className="absolute inset-0 flex">{nav}</div>
+      {/* Hidden once the chat covers it: over a backdrop the chat is see-through. */}
+      <motion.div
+        className="absolute inset-0 flex"
+        initial={false}
+        animate={navOpen ? { opacity: 1, visibility: "visible" } : { opacity: 0, transitionEnd: { visibility: "hidden" } }}
+        transition={{ duration: 0.25 }}
+      >
+        {nav}
+      </motion.div>
       <motion.main
         className="surface-chat absolute inset-0 flex flex-col shadow-[-12px_0_40px_-20px_rgb(0_0_0/0.6)]"
         initial={false}

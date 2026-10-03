@@ -18,12 +18,16 @@ import {
   TvMinimalPlayIcon,
   UserRoundIcon,
   AudioLinesIcon,
+  ImageIcon,
+  WandSparklesIcon,
 } from "lucide-react";
 import { useEffect } from "react";
 import { useFuwa } from "@/fuwa/store";
 import { Accessibility } from "@/components/settings/app/Accessibility";
 import { Advanced } from "@/components/settings/app/Advanced";
 import { Appearance } from "@/components/settings/app/Appearance";
+import { Backgrounds } from "@/components/settings/app/Backgrounds";
+import { Themes } from "@/components/settings/app/Themes";
 import { Chat } from "@/components/settings/app/Chat";
 import { KEYBIND_SETTINGS, Keybinds } from "@/components/settings/app/Keybinds";
 import { Notifications } from "@/components/settings/app/Notifications";
@@ -55,6 +59,21 @@ const APP: SettingsSection[] = [
       { id: "chat-font-size", label: "Chat text size", keywords: "font scaling" },
       { id: "zoom", label: "Zoom", keywords: "scale size" },
     ],
+  },
+  {
+    id: "themes",
+    label: "Themes",
+    icon: WandSparklesIcon,
+    description: "Make your own themes, and import and export theme files.",
+    keywords: "custom theme colors import export file editor",
+  },
+  {
+    id: "backdrop",
+    label: "Background",
+    icon: ImageIcon,
+    description: "A picture and an effect behind the app, on this device.",
+    keywords: "wallpaper background picture image effect shader aurora petals stars waves grain texture",
+    settings: [{ id: "backdrop", label: "Background and effect", keywords: "wallpaper picture shader texture" }],
   },
   {
     id: "accessibility",
@@ -260,6 +279,8 @@ export function UserSettings() {
       onSectionChange={setSettingsSection}
     >
       {section === "appearance" && <Appearance instanceKey={key} />}
+      {section === "themes" && <Themes instanceKey={key} />}
+      {section === "backdrop" && <Backgrounds instanceKey={key} />}
       {section === "accessibility" && <Accessibility />}
       {section === "chat" && <Chat />}
       {section === "notifications" && <Notifications />}
