@@ -724,7 +724,6 @@ message VoiceState {
   bool suppress = 9;
 }
 
-
 message ServerUpdated {
   Server server = 1;
 }
