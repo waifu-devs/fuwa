@@ -250,6 +250,15 @@ impl FuwaApp {
         };
         let strong = active || unread > 0;
         let hover = alpha(p.primary, 0.08);
+        // Who's in a voice channel. Joining from the desktop app comes with
+        // its sound (src/core/calls.rs); until then the web app does it.
+        let in_voice = if kind == pb::ChannelType::Voice {
+            self.core.shared.read(|s| {
+                s.instance(key).map(|i| crate::core::calls::in_channel(&i.voice, server, &c.id).len()).unwrap_or(0)
+            })
+        } else {
+            0
+        };
         div()
             .id(SharedString::from(format!("row|{}", c.id)))
             .relative()
@@ -278,6 +287,19 @@ impl FuwaApp {
                     .child(c.name.clone()),
             )
             .when(unread > 0 && !active, |el| el.child(badge(unread, p).border_color(p.sidebar)))
+            .when(in_voice > 0, |el| {
+                el.opacity(1.0).child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(3.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.primary)
+                        .child(icon("users").size(px(13.0)))
+                        .child(in_voice.to_string()),
+                )
+            })
     }
 
     fn dm_sidebar(

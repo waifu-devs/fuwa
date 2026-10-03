@@ -28,6 +28,7 @@ use tonic::Code;
 
 use crate::core::Shared;
 use crate::core::api::{Api, Problem};
+use crate::core::calls;
 use crate::core::vault::{Change, DeviceRef, Item, ItemKind, Note, Vault, sha256_hex};
 use crate::pb;
 use crate::rpc;
@@ -83,6 +84,8 @@ pub struct DmState {
     pub joining: HashSet<String>,
     /// Messages on their way, per conversation.
     pub sending: HashMap<String, Vec<String>>,
+    /// The calls going on, per conversation.
+    pub calls: HashMap<String, pb::DmCall>,
 }
 
 /// Something a person can be told about why sending didn't work.
@@ -317,6 +320,11 @@ impl DmEngine {
                 self.refresh(&c.id).await;
             }
         }
+        // Instances from before calls have none going.
+        let going = rpc!(self.api.calls(), list_dm_calls(pb::ListDmCallsRequest {})).await.map(|r| r.calls);
+        self.update(|s| {
+            s.calls = going.unwrap_or_default().into_iter().map(|c| (c.conversation_id.clone(), c)).collect()
+        });
         Ok(())
     }
 
@@ -361,6 +369,7 @@ impl DmEngine {
                 let this = self.clone();
                 tokio::spawn(async move { this.forget_deleted(&record.conversation_id, record.sequence).await });
             }
+            Payload::CallUpdated(call) => self.update(|s| calls::set_dm_call(&mut s.calls, call)),
         }
     }
 
@@ -733,6 +742,22 @@ impl DmEngine {
     }
 
     // ───────────────────────── What people do ─────────────────────────
+
+    /// The secret a call in this conversation seals its sound with, and the
+    /// epoch it's from (see [`calls::CALL_LABEL`]). When someone's frames
+    /// say they're from a newer epoch than `seen`, this catches up first.
+    pub async fn call_secret(&self, id: &str, seen: Option<u64>) -> Result<(u64, Vec<u8>)> {
+        let mut inner = self.inner.lock().await;
+        if !inner.device.is_member(id) {
+            self.catch_up(&mut inner, id, 0).await?;
+        }
+        let (epoch, secret) = inner.device.export_secret(id, calls::CALL_LABEL, calls::CALL_SECRET_LEN)?;
+        if seen.is_some_and(|seen| seen > epoch) {
+            self.catch_up(&mut inner, id, 0).await?;
+            return Ok(inner.device.export_secret(id, calls::CALL_LABEL, calls::CALL_SECRET_LEN)?);
+        }
+        Ok((epoch, secret))
+    }
 
     /// Gets a conversation ready to write in, saying why it can't be yet.
     pub async fn prepare(self: &Arc<Self>, id: &str) -> Result<()> {

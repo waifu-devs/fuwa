@@ -94,6 +94,7 @@ clients! {
     dms => pb::direct_message_service_client::DirectMessageServiceClient<Transport>,
     media => pb::media_service_client::MediaServiceClient<Transport>,
     join => pb::join_service_client::JoinServiceClient<Transport>,
+    calls => pb::call_service_client::CallServiceClient<Transport>,
 }
 
 impl Api {
