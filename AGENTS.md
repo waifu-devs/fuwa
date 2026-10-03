@@ -258,7 +258,11 @@
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
     `overlay.rs` draw the parts (a server you're locked out of shows a
-    padlock and "Continue with <provider>" where its channels were); `members.rs` is the member list, a view of
+    padlock and "Continue with <provider>" where its channels were);
+    `arrange.rs` drags channels and categories into order in the sidebar
+    (Manage Channels), with GPUI's drag view, a drop line and a category
+    ring, over the layout and `ReorderChannels` call in `core/arrange.rs`
+    (the web's `lib/arrange.ts`); `members.rs` is the member list, a view of
     its own (cached, so the window's animations don't redraw it) that builds
     only the rows in sight; `compose.rs` is the @ list and editing in
     place (and the keys they take first), `mentions.rs` finds mentions and

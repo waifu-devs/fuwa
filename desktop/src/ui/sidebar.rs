@@ -6,18 +6,30 @@ use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    Animation, AnimationExt as _, AnyElement, AppContext as _, Context, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use crate::core::dms::DmStatus;
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Menu, Nav};
+use crate::ui::arrange::{ChannelDrag, Slot};
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha};
 use crate::ui::widgets::{avatar, badge, conn_dot, icon, icon_button, pal, section_label, server_icon};
 
 pub const SIDEBAR: f32 = 248.0;
+/// How long a channel that was just dragged into place glows.
+const LANDED: Duration = Duration::from_millis(700);
+
+/// A channel's icon in the list.
+fn channel_glyph(c: &pb::Channel) -> &'static str {
+    match pb::ChannelType::try_from(c.r#type).unwrap_or(pb::ChannelType::Text) {
+        pb::ChannelType::Voice => "volume-2",
+        pb::ChannelType::Announcement => "megaphone",
+        _ => "hash",
+    }
+}
 const ROW: f32 = 36.0;
 const LABEL: f32 = 34.0;
 
@@ -247,9 +259,45 @@ impl FuwaApp {
         }
         let mut highlight = None;
         let mut n = 0;
+        // Where each row sits, for dragging channels into order (ui/arrange.rs).
+        let mut slots = Vec::new();
+        let dragging = if cx.has_active_drag() { self.dragging.clone() } else { None };
+        let moving = |c: &pb::Channel| {
+            dragging.as_deref().is_some_and(|d| c.id == d || c.parent_id == d && !c.parent_id.is_empty())
+        };
+        let ghost = |c: &pb::Channel, count: usize| ChannelDrag {
+            key: key.to_owned(),
+            server: server_id.to_owned(),
+            id: c.id.clone(),
+            category: is_category(c),
+            name: c.name.clone().into(),
+            glyph: channel_glyph(c),
+            count,
+            width: SIDEBAR - 17.0,
+            grab: 0.0,
+        };
         for (cat, list) in groups {
             if let Some(cat) = cat {
-                let label = section_label(cat.name.clone(), &p).h(px(LABEL)).flex().items_end().pr(px(4.0));
+                slots.push(Slot {
+                    category: true,
+                    id: cat.id.clone(),
+                    parent: String::new(),
+                    top: y,
+                    bottom: y + LABEL,
+                });
+                let label = section_label(cat.name.clone(), &p)
+                    .id(SharedString::from(format!("cat|{}", cat.id)))
+                    .h(px(LABEL))
+                    .flex()
+                    .items_end()
+                    .pr(px(4.0))
+                    .when(moving(cat), |el| el.opacity(0.3))
+                    .when(manage, |el| {
+                        let drag = ghost(cat, list.len());
+                        el.cursor_grab().on_drag(drag, |drag, at, _, cx| {
+                            cx.new(|_| ChannelDrag { grab: f32::from(at.y), ..drag.clone() })
+                        })
+                    });
                 rows = rows.child(if manage {
                     let (key, server, parent) = (key.to_owned(), server_id.to_owned(), cat.id.clone());
                     label
@@ -287,12 +335,43 @@ impl FuwaApp {
                 if active {
                     highlight = Some(y);
                 }
+                slots.push(Slot {
+                    category: false,
+                    id: c.id.clone(),
+                    parent: c.parent_id.clone(),
+                    top: y,
+                    bottom: y + ROW - 2.0,
+                });
                 let quiet = muted.contains(&c.id);
                 let count = if quiet { 0 } else { unread.get(&c.id).copied().unwrap_or(0) };
-                rows = rows.child(motion::rise(
-                    self.channel_row(key, server_id, c, active, count, &p, cx).when(quiet && !active, |el| {
+                let row = self
+                    .channel_row(key, server_id, c, active, count, &p, cx)
+                    .when(quiet && !active, |el| {
                         el.opacity(0.5).child(icon("bell-off").size(px(13.0)).text_color(p.muted_foreground))
-                    }),
+                    })
+                    .when(moving(c), |el| el.opacity(0.3))
+                    .when(manage, |el| {
+                        let drag = ghost(c, 0);
+                        el.on_drag(drag, |drag, at, _, cx| {
+                            cx.new(|_| ChannelDrag { grab: f32::from(at.y), ..drag.clone() })
+                        })
+                    });
+                // Just dropped here: it glows, then settles.
+                let landed = self.landed.as_ref().filter(|(id, at)| *id == c.id && at.elapsed() < LANDED);
+                let row = match landed {
+                    Some((_, at)) => {
+                        let glow = p.primary;
+                        row.with_animation(
+                            SharedString::from(format!("landed|{}|{:?}", c.id, at)),
+                            Animation::new(LANDED).with_easing(gpui_kit::ease_out_quint()),
+                            move |el, t| el.bg(alpha(glow, 0.32 * (1.0 - t))),
+                        )
+                        .into_any_element()
+                    }
+                    None => row.into_any_element(),
+                };
+                rows = rows.child(motion::rise(
+                    div().child(row),
                     SharedString::from(format!("ch|{}|{server_id}|{}", key, c.id)),
                     Duration::from_millis(18 * n),
                     6.0,
@@ -317,7 +396,18 @@ impl FuwaApp {
                 )
                 .child(rows);
         }
-        (header, rows.into_any_element())
+        self.arrange_slots = slots;
+        if !cx.has_active_drag() {
+            self.arrange = None;
+            self.dragging = None;
+        }
+        let marks = self.arrange_marks(key, server_id, window, cx);
+        let list =
+            div().id("channel-list").relative().child(rows).when_some(marks, |el, m| el.child(m)).when(manage, |el| {
+                el.on_drag_move::<ChannelDrag>(cx.listener(|this, event, _, cx| this.drag_moved(event, cx)))
+                    .on_drop::<ChannelDrag>(cx.listener(|this, drag, _, cx| this.drag_dropped(drag, cx)))
+            });
+        (header, list.into_any_element())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -332,11 +422,7 @@ impl FuwaApp {
         cx: &mut Context<Self>,
     ) -> gpui_kit::Stateful<gpui_kit::Div> {
         let kind = pb::ChannelType::try_from(c.r#type).unwrap_or(pb::ChannelType::Text);
-        let (glyph, openable) = match kind {
-            pb::ChannelType::Voice => ("volume-2", false),
-            pb::ChannelType::Announcement => ("megaphone", true),
-            _ => ("hash", true),
-        };
+        let (glyph, openable) = (channel_glyph(c), kind != pb::ChannelType::Voice);
         let strong = active || unread > 0;
         let hover = alpha(p.primary, 0.08);
         // Who's in a voice channel. Joining from the desktop app comes with
