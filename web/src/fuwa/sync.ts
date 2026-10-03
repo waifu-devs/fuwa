@@ -1,8 +1,8 @@
 import { Code } from "@connectrpc/connect";
 import { Effect, Fiber, FiberSet, Schedule, Stream, SubscriptionRef } from "effect";
 import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
-import type { Event } from "@/gen/fuwa/v1/types_pb";
-import { startDms, stopDms, wipeDms } from "@/e2ee/engine";
+import { ChannelType, type Event } from "@/gen/fuwa/v1/types_pb";
+import { dmEngine, startDms, stopDms, wipeDms } from "@/e2ee/engine";
 import { onLiveEvent, onRemoved } from "@/lib/notify";
 import { reportStartup, reportTiming, type ReportTarget } from "@/lib/reports";
 import { makeApi, type Api } from "./client";
@@ -271,6 +271,9 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           return { ...s, instances: { ...s.instances, [key]: next } };
         });
         held.delete(serverId);
+        // Secure channels this device is in may have had news while it was away.
+        const secure = channels.channels.filter((c) => c.type === ChannelType.SECURE).map((c) => c.id);
+        if (secure.length) void dmEngine(key)?.followServer(serverId, secure).catch(() => {});
       }).pipe(
         Effect.catchAll(() =>
           // Left or deleted while loading: stop following it.
@@ -402,6 +405,7 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
             return { ...s, instances: { ...s.instances, [key]: applyEvent(current, event, focus) } };
           });
           onLiveEvent(key, event);
+          dmEngine(key)?.onServerEvent(event);
           const kind = event.payload.case;
           if (kind === "channelCreated" || kind === "channelUpdated" || kind === "channelDeleted") relisting.get(sid)?.push(event);
           if (kind === "sharedChannelsUpdated" && store.get().instances[key]?.shared[sid]) yield* FiberSet.run(snapshots, relistShared(sid));

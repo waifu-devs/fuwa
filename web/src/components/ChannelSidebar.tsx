@@ -1,26 +1,5 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import {
-  BellIcon,
-  BellOffIcon,
-  BellRingIcon,
-  ChartColumnIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  ClipboardListIcon,
-  DoorOpenIcon,
-  FingerprintIcon,
-  HashIcon,
-  IdCardIcon,
-  LockIcon,
-  MegaphoneIcon,
-  PartyPopperIcon,
-  PlusIcon,
-  ScrollTextIcon,
-  SettingsIcon,
-  UserPlusIcon,
-  Volume2Icon,
-  LockKeyholeIcon,
-} from "lucide-react";
+import { BellIcon, BellOffIcon, BellRingIcon, ChartColumnIcon, ChevronDownIcon, ChevronRightIcon, ClipboardListIcon, DoorOpenIcon, FingerprintIcon, HashIcon, IdCardIcon, LockIcon, LockKeyholeIcon, MegaphoneIcon, PartyPopperIcon, PlusIcon, ScrollTextIcon, SettingsIcon, ShieldCheckIcon, UserPlusIcon, Volume2Icon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
@@ -69,6 +48,7 @@ const ServerSettingsDialog = lazyComponent(
 export const CHANNEL_ICON: Partial<Record<ChannelType, typeof HashIcon>> = {
   [ChannelType.ANNOUNCEMENT]: MegaphoneIcon,
   [ChannelType.VOICE]: Volume2Icon,
+  [ChannelType.SECURE]: ShieldCheckIcon,
 };
 
 type Group = { category: Channel | null; channels: Channel[] };
@@ -77,7 +57,7 @@ type Group = { category: Channel | null; channels: Channel[] };
 export const openableChannels = (channels: Channel[]) =>
   groupChannels(channels)
     .flatMap((g) => g.channels)
-    .filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT);
+    .filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT || c.type === ChannelType.SECURE);
 
 export function groupChannels(channels: Channel[]): Group[] {
   const categories = channels.filter((c) => c.type === ChannelType.CATEGORY);
@@ -339,7 +319,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                             ? () => setSettings({ tab: "channels", target: c.id })
                             : undefined
                         }
-                        onInvite={c.type !== ChannelType.VOICE && hasIn(access, c.id, Permission.CREATE_INVITE) ? () => setInviting(c.id) : undefined}
+                        onInvite={c.type !== ChannelType.VOICE && c.type !== ChannelType.SECURE && hasIn(access, c.id, Permission.CREATE_INVITE) ? () => setInviting(c.id) : undefined}
                       />
                     ));
                 if (!group.category) return rows;

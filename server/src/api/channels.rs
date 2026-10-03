@@ -117,6 +117,13 @@ impl ChannelService for Api {
                             ),
                         )
                         .await?;
+                        if kind == pb::ChannelType::Secure {
+                            conn.execute(
+                                "INSERT INTO secure_groups (channel_id, updated_at) VALUES (?1, ?2)",
+                                (channel.id.as_str(), now),
+                            )
+                            .await?;
+                        }
                         conn.execute("UPDATE usage SET channels = channels + 1, updated_at = ?1 WHERE id = 1", [now])
                             .await?;
                         store::audit(
@@ -268,6 +275,7 @@ impl ChannelService for Api {
                 .await?
                 .unwrap_or_default();
                 conn.execute("DELETE FROM messages WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
+                let (secure_messages, secure_bytes) = super::secure::forget_channel(conn, &req.channel_id).await?;
                 conn.execute("DELETE FROM slowmode WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 // Its webhooks go too: they have nowhere left to post.
                 let pictures = query_all(conn, "SELECT avatar_url FROM webhooks WHERE channel_id = ?1 AND avatar_url <> ''", [req.channel_id.as_str()], |r| {
@@ -288,7 +296,7 @@ impl ChannelService for Api {
                 conn.execute("UPDATE usage SET channels = channels - 1, updated_at = ?1 WHERE id = 1", [now_ms()]).await?;
                 store::add_usage(
                     conn,
-                    UsageChange { messages: -messages, message_bytes: -bytes, attachments: -attachments, ..Default::default() },
+                    UsageChange { messages: -messages - secure_messages, message_bytes: -bytes - secure_bytes, attachments: -attachments, ..Default::default() },
                 )
                 .await?;
                 store::audit(conn, &account.id, Audit::new(pb::AuditAction::ChannelDelete, &channel.id).channel(&channel.name))
