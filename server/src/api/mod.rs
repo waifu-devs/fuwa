@@ -4,6 +4,7 @@ mod account;
 mod admin;
 mod auth;
 mod automod;
+mod calls;
 mod channels;
 mod dms;
 mod emoji;
@@ -17,6 +18,7 @@ mod roles;
 mod servers;
 
 pub(crate) use account::export_server;
+pub use calls::spawn_voice_sweeper;
 pub use media::PictureOwner;
 
 use std::sync::Arc;

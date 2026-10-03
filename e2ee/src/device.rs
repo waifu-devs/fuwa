@@ -232,6 +232,16 @@ impl Device {
         Ok(self.load(conversation_id)?.epoch().as_u64())
     }
 
+    /// A secret every device in the conversation's group gets alike at its
+    /// current epoch, and nobody else (MLS's exporter, RFC 9420 section 8.5),
+    /// with that epoch. Calls in direct messages encrypt their sound with it.
+    pub fn export_secret(&self, conversation_id: &str, label: &str, length: usize) -> Result<(u64, Vec<u8>)> {
+        let group = self.load(conversation_id)?;
+        let secret =
+            group.export_secret(self.provider.crypto(), label, conversation_id.as_bytes(), length).map_err(mls)?;
+        Ok((group.epoch().as_u64(), secret))
+    }
+
     /// Whether the device has a commit of its own waiting on the server.
     pub fn has_pending_commit(&self, conversation_id: &str) -> Result<bool> {
         Ok(self.load(conversation_id)?.pending_commit().is_some())

@@ -77,6 +77,14 @@ message InstanceSettings {
   // unless changed. Accounts already linked keep the issuer they came from.
   // FUWA_LINKED_ISSUER.
   string linked_issuer = 12;
+  // Voice channels and direct-message calls. FUWA_CALLS.
+  bool calls = 20;
+  // STUN and TURN servers apps reach the media part through, as stun:,
+  // turn: or turns: URLs. FUWA_ICE_URLS.
+  repeated string ice_urls = 21;
+  // The secret shared with the TURN servers (coturn's static-auth-secret),
+  // which makes each caller a credential that expires. FUWA_TURN_SECRET.
+  string turn_secret = 22;
 }
 
 // Whether standalone accounts (a username and password kept on the instance) work.
@@ -117,6 +125,11 @@ message StartupSettings {
   // FUWA_HOSTING.
   bool hosted = 6;
   string version = 7;
+  // Where the media part takes calls: its UDP and TCP port (FUWA_MEDIA_PORT)
+  // and the addresses it gives apps (FUWA_MEDIA_ADDRESSES), or nothing when
+  // it isn't running in this process (a split instance's media parts).
+  int32 media_port = 20;
+  repeated string media_addresses = 21;
 }
 
 message InstanceConfig {

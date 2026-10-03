@@ -72,6 +72,12 @@ fn route(path: &str) -> Target {
         "fuwa.v1.ServerService" if matches!(method, "CreateServer" | "ListServers" | "DiscoverServers") => {
             Target::Directory
         }
+        // Calls in direct messages are kept where conversations are.
+        "fuwa.v1.CallService"
+            if matches!(method, "GetCallSettings" | "JoinDmCall" | "LeaveDmCall" | "KeepDmCall" | "ListDmCalls") =>
+        {
+            Target::Directory
+        }
         // Only the directory knows which server a code is for.
         "fuwa.v1.InviteService" if method == "GetInvite" => Target::Directory,
         "fuwa.v1.ServerService"
@@ -81,7 +87,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.InviteService"
         | "fuwa.v1.JoinService"
         | "fuwa.v1.AutoModService"
-        | "fuwa.v1.EmojiService" => Target::Shard,
+        | "fuwa.v1.EmojiService"
+        | "fuwa.v1.CallService" => Target::Shard,
         _ => Target::Unknown,
     }
 }

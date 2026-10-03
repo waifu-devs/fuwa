@@ -26,6 +26,9 @@ pub const FIELDS: &[&str] = &[
     "picture_upload_bytes",
     "telemetry",
     "web",
+    "calls",
+    "ice_urls",
+    "turn_secret",
 ];
 
 /// The settings in force.
@@ -42,6 +45,9 @@ pub struct Settings {
     pub limits: Limits,
     pub telemetry: bool,
     pub web: bool,
+    pub calls: bool,
+    pub ice_urls: Vec<String>,
+    pub turn_secret: String,
 }
 
 impl Settings {
@@ -58,6 +64,9 @@ impl Settings {
             limits: config.limits.clone(),
             telemetry: config.telemetry.enabled,
             web: config.web,
+            calls: config.calls,
+            ice_urls: config.ice_urls.clone(),
+            turn_secret: config.turn_secret.clone(),
         }
     }
 
@@ -133,6 +142,9 @@ impl Settings {
             telemetry: self.telemetry,
             web: self.web,
             picture_upload_bytes: limits.picture_upload_bytes,
+            calls: self.calls,
+            ice_urls: self.ice_urls.clone(),
+            turn_secret: self.turn_secret.clone(),
         }
     }
 
@@ -177,6 +189,9 @@ impl Settings {
             "picture_upload_bytes" => Value::from(from.picture_upload_bytes),
             "telemetry" => Value::from(from.telemetry),
             "web" => Value::from(from.web),
+            "calls" => Value::from(from.calls),
+            "ice_urls" => Value::from(from.ice_urls.clone()),
+            "turn_secret" => Value::from(from.turn_secret.clone()),
             other => return Err(unknown(other)),
         };
         self.set_json(field, &value)
@@ -206,6 +221,9 @@ impl Settings {
             "picture_upload_bytes" => Value::from(limits.picture_upload_bytes),
             "telemetry" => Value::from(self.telemetry),
             "web" => Value::from(self.web),
+            "calls" => Value::from(self.calls),
+            "ice_urls" => Value::from(self.ice_urls.clone()),
+            "turn_secret" => Value::from(self.turn_secret.clone()),
             other => return Err(unknown(other)),
         })
     }
@@ -245,6 +263,25 @@ impl Settings {
             "picture_upload_bytes" => self.limits.picture_upload_bytes = cap(field, value)?,
             "telemetry" => self.telemetry = flag(field, value)?,
             "web" => self.web = flag(field, value)?,
+            "calls" => self.calls = flag(field, value)?,
+            "ice_urls" => {
+                let invalid = || Error::invalid("ice_urls must be a list of stun:, turn: or turns: URLs");
+                let list = value.as_array().ok_or_else(invalid)?;
+                let urls = list
+                    .iter()
+                    .map(|v| v.as_str().map(|s| s.trim().to_string()).ok_or_else(invalid))
+                    .collect::<Result<Vec<_>>>()?;
+                let urls: Vec<String> = urls.into_iter().filter(|u| !u.is_empty()).collect();
+                check_ice_urls(&urls).map_err(Error::invalid)?;
+                self.ice_urls = urls;
+            }
+            "turn_secret" => {
+                let secret = value.as_str().ok_or_else(|| Error::invalid("turn_secret must be text"))?.trim();
+                if secret.len() > 256 {
+                    return Err(Error::invalid("turn_secret can be at most 256 characters"));
+                }
+                self.turn_secret = secret.to_string();
+            }
             other => return Err(unknown(other)),
         }
         Ok(())
@@ -268,6 +305,22 @@ pub fn expand(paths: &[String]) -> Result<Vec<String>> {
     fields.sort();
     fields.dedup();
     Ok(fields)
+}
+
+/// STUN and TURN servers, as apps take them: `stun:`, `turn:` or `turns:`
+/// URLs, at most 10.
+pub fn check_ice_urls(urls: &[String]) -> std::result::Result<(), String> {
+    if urls.len() > 10 {
+        return Err("at most 10 STUN or TURN servers".into());
+    }
+    for url in urls {
+        let rest =
+            url.strip_prefix("stun:").or_else(|| url.strip_prefix("turns:")).or_else(|| url.strip_prefix("turn:"));
+        if url.len() > 512 || rest.is_none_or(|rest| rest.is_empty() || rest.contains(char::is_whitespace)) {
+            return Err(format!("{url:?} isn't a stun:, turn: or turns: URL, like turn:turn.example.com:3478"));
+        }
+    }
+    Ok(())
 }
 
 fn unknown(field: &str) -> Error {
@@ -422,6 +475,8 @@ mod tests {
         assert!(s.set_json("linked_issuer", &Value::from("https://id.example.com/?x")).is_err());
         assert!(s.set_json("linked_issuer", &Value::from("http://localhost:4000/")).is_ok());
         assert_eq!(s.linked_issuer, "http://localhost:4000");
+        assert!(s.set_json("ice_urls", &serde_json::json!(["https://turn.example.com"])).is_err());
+        assert!(s.set_json("ice_urls", &serde_json::json!(["turn:turn.example.com:3478?transport=tcp"])).is_ok());
         assert!(expand(&["nope".into()]).is_err());
         assert_eq!(expand(&["default_limits".into()]).unwrap().len(), 5);
     }

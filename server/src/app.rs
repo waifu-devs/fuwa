@@ -61,6 +61,11 @@ pub struct App {
     pub link: Link,
     /// Where this process's databases and pictures are continuously copied.
     pub replica: Option<Arc<Replica>>,
+    /// Who's in the calls this part keeps: its servers' voice channels, and
+    /// direct-message calls where accounts are kept.
+    pub voice: crate::voice::Voice,
+    /// The media part calls' sound goes through.
+    pub media_link: crate::voice::MediaLink,
 }
 
 /// Where the parts this process doesn't run are.
@@ -108,7 +113,7 @@ impl App {
         };
 
         let (node, dms, media, servers, link) = match role {
-            Role::Gateway => return Err(Error::internal("a gateway keeps no data")),
+            Role::Gateway | Role::Media => return Err(Error::internal("this part keeps no data")),
             Role::All | Role::Directory => {
                 let node = NodeDb::open(&config.data_path.join("node.db"), key.as_ref()).await?;
                 if let Some(replica) = &replica {
@@ -162,6 +167,9 @@ impl App {
             _ => {}
         }
 
+        let shutdown = CancellationToken::new();
+        let media_link = media_link(&config, &shutdown).await;
+
         let app = Arc::new(Self {
             config,
             settings: watch::Sender::new(Arc::new(settings)),
@@ -174,9 +182,11 @@ impl App {
             hub,
             limiter: SignInLimiter::default(),
             started: Instant::now(),
-            shutdown: CancellationToken::new(),
+            shutdown,
             link,
             replica,
+            voice: crate::voice::Voice::default(),
+            media_link,
         });
         if app.node.is_some() {
             app.sweep_media(crate::id::now_ms()).await?;
@@ -290,6 +300,7 @@ impl App {
             .add_service(EventServiceServer::new(api.clone()))
             .add_service(MediaServiceServer::new(api.clone()))
             .add_service(DirectMessageServiceServer::new(api.clone()))
+            .add_service(crate::pb::call_service_server::CallServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
             .add_service(reflection);
@@ -318,6 +329,32 @@ impl App {
         // Behind gateways, which serve the web app and answer browsers' CORS.
         let key: Arc<str> = self.config.cluster.key.as_deref().unwrap_or_default().into();
         router.layer(axum::middleware::from_fn_with_state(key, crate::cluster::require_key))
+    }
+}
+
+/// Where calls' sound goes: a media part in this process (when it runs
+/// everything), or the split instance's media parts.
+async fn media_link(config: &Config, shutdown: &CancellationToken) -> crate::voice::MediaLink {
+    use crate::voice::MediaLink;
+    if config.cluster.is_split() {
+        if config.media_urls.is_empty() {
+            return MediaLink::Off("no media part is set up (FUWA_MEDIA_URL)".into());
+        }
+        return match config.cluster.key_value().and_then(|key| MediaLink::remote(&config.media_urls, key)) {
+            Ok(link) => link,
+            Err(err) => MediaLink::Off(err.to_string()),
+        };
+    }
+    let Some(media) = config.media.clone() else {
+        return MediaLink::Off("FUWA_MEDIA_PORT is off".into());
+    };
+    // Calls stop with the rest of the process, after telling apps to join again.
+    match crate::rtc::Sfu::start(media, shutdown.child_token()).await {
+        Ok(sfu) => MediaLink::Local(sfu),
+        Err(err) => {
+            tracing::warn!(error = %err, "calls are off: the media part couldn't start (see FUWA_MEDIA_PORT)");
+            MediaLink::Off(err.to_string())
+        }
     }
 }
 
@@ -387,8 +424,10 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         .parse::<IpAddr>()
         .map(|ip| SocketAddr::new(ip, config.port))
         .map_err(|_| format!("FUWA_HOST {:?} isn't an IP address to listen on", config.host))?;
-    if config.cluster.role == Role::Gateway {
-        return crate::cluster::gateway::run(config, address).await;
+    match config.cluster.role {
+        Role::Gateway => return crate::cluster::gateway::run(config, address).await,
+        Role::Media => return crate::cluster::media::run(config, address).await,
+        _ => {}
     }
     let data_path = config.data_path.clone();
     let listener =
@@ -404,6 +443,11 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         public_url = %app.settings().public_url,
         data = %data_path.display(),
         replica = app.replica.as_ref().map(|r| r.store().describe()).unwrap_or_else(|| "off".into()),
+        calls = %match &app.media_link {
+            crate::voice::MediaLink::Off(why) => format!("off ({why})"),
+            crate::voice::MediaLink::Local(sfu) => format!("port {} at {}", sfu.config().port, sfu.describe().join(", ")),
+            crate::voice::MediaLink::Remote(parts) => format!("{} media part(s)", parts.len()),
+        },
         encrypted = app.config.encryption_key.is_some(),
         servers = app.servers.len(),
         local_accounts = app.settings().local_accounts.as_str(),
@@ -416,6 +460,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         spawn_housekeeping(app.clone());
     }
     spawn_signal_handler(app.shutdown.clone());
+    crate::api::spawn_voice_sweeper(app.clone());
     if let Some(replica) = &app.replica {
         replica.start();
     }

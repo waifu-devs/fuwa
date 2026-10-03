@@ -21,7 +21,7 @@ pub const fn bit(p: P) -> Bits {
     1 << p as u64
 }
 
-const KNOWN: [P; 18] = [
+const KNOWN: [P; 22] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -40,6 +40,10 @@ const KNOWN: [P; 18] = [
     P::ManageMessages,
     P::CreateInvite,
     P::ManageEmoji,
+    P::Connect,
+    P::Speak,
+    P::MuteMembers,
+    P::MoveMembers,
 ];
 
 /// Every permission there is.
@@ -62,7 +66,11 @@ pub const CHANNEL: Bits = bit(P::ManageChannels)
     | bit(P::AttachFiles)
     | bit(P::MentionEveryone)
     | bit(P::ManageMessages)
-    | bit(P::CreateInvite);
+    | bit(P::CreateInvite)
+    | bit(P::Connect)
+    | bit(P::Speak)
+    | bit(P::MuteMembers)
+    | bit(P::MoveMembers);
 
 /// What @everyone can do in a new server.
 pub const EVERYONE: Bits = bit(P::ViewChannels)
@@ -70,7 +78,9 @@ pub const EVERYONE: Bits = bit(P::ViewChannels)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
     | bit(P::ChangeNickname)
-    | bit(P::CreateInvite);
+    | bit(P::CreateInvite)
+    | bit(P::Connect)
+    | bit(P::Speak);
 
 /// The Admin role a new server starts with, and that the admins of servers
 /// from before roles were given: what admins could do then.
@@ -83,11 +93,15 @@ pub const ADMIN: Bits = bit(P::ManageServer)
     | bit(P::KickMembers)
     | bit(P::BanMembers)
     | bit(P::TimeOutMembers)
-    | bit(P::ManageNicknames);
+    | bit(P::ManageNicknames)
+    | bit(P::MuteMembers)
+    | bit(P::MoveMembers);
 
-/// What a member who hasn't agreed to the server's rules yet can't do: talk,
-/// bring people in, or rename themselves.
+/// What a member who hasn't agreed to the server's rules yet can't do: talk
+/// (in text or voice), bring people in, or rename themselves.
 pub const TALK: Bits = bit(P::SendMessages)
+    | bit(P::Connect)
+    | bit(P::Speak)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
     | bit(P::MentionEveryone)
@@ -129,6 +143,10 @@ pub fn label(p: P) -> &'static str {
         P::ManageMessages => "Manage messages",
         P::CreateInvite => "Create invite",
         P::ManageEmoji => "Manage emoji",
+        P::Connect => "Connect",
+        P::Speak => "Speak",
+        P::MuteMembers => "Mute members",
+        P::MoveMembers => "Move members",
     }
 }
 

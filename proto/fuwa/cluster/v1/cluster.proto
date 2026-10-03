@@ -76,6 +76,55 @@ service ShardService {
   rpc DescribeInvite(DescribeInviteRequest) returns (DescribeInviteResponse);
 }
 
+// Run by each media part, which carries calls' sound (WebRTC). The parts
+// that keep who's in each call (shards for voice channels, the directory for
+// direct-message calls) open and close people's connections here. Every
+// call goes to one media part, picked from the call's room name, so everyone
+// in it meets on the same one.
+service MediaService {
+  // Takes someone's WebRTC offer for a room and answers it. Someone already
+  // in the room under the same name is replaced (their app hears so).
+  rpc Open(OpenRequest) returns (OpenResponse);
+  // Hangs someone up, or everyone in a room.
+  rpc Close(CloseRequest) returns (CloseResponse);
+  // Changes whether someone is heard and hears others.
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+}
+
+message OpenRequest {
+  // Such as "s/<server>/<channel>" or "d/<conversation>".
+  string room = 1;
+  // The account; one connection per account per room.
+  string participant = 2;
+  string session_id = 3;
+  string offer = 4;
+  bool may_speak = 5;
+  bool may_hear = 6;
+}
+
+message OpenResponse {
+  string answer = 1;
+}
+
+message CloseRequest {
+  string room = 1;
+  // Empty: everyone in the room.
+  string participant = 2;
+  // Only if it's still this session; empty for whichever.
+  string session_id = 3;
+}
+
+message CloseResponse {}
+
+message UpdateRequest {
+  string room = 1;
+  string participant = 2;
+  bool may_speak = 3;
+  bool may_hear = 4;
+}
+
+message UpdateResponse {}
+
 // An account as the directory knows it.
 message Account {
   string id = 1;
