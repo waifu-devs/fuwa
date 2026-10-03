@@ -345,6 +345,7 @@ async fn instances_sign_people_in_through_openid_connect() {
     let auth = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap().auth.unwrap();
     assert!(auth.sso_sign_in && auth.sso_sign_up);
     assert_eq!(auth.sso_name, "Acme");
+    assert_eq!(auth.sso_host, "127.0.0.1", "apps name the site that sees your address");
 
     // Someone new gets an account; the next time, the same one.
     let started = start_instance_sso(&mut c, None, false).await.unwrap();
@@ -356,6 +357,10 @@ async fn instances_sign_people_in_through_openid_connect() {
     assert_eq!(finish_instance_sso(&mut c, &back, "someone else's").await.unwrap_err().code(), Code::PermissionDenied);
     let first = finish_instance_sso(&mut c, &back, SECRET).await.unwrap();
     assert!(first.created && !first.admin);
+    // Nothing was kept for the sign-in until the provider answered, and its
+    // state works once.
+    let again = landed(&idp.sign_in(&instance, &started.authorize_url, "ana").await);
+    assert!(again["error"].contains("already used"), "{again:?}");
     let user = first.user.unwrap();
     assert_eq!((user.username.as_str(), user.kind), ("ana", pb::AccountKind::Sso as i32));
     assert_eq!(user.display_name, "ana from Acme");

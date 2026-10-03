@@ -208,10 +208,19 @@ impl Api {
         }
         let endpoints = sso::Endpoints::new(&settings.public_url, &sso::Scope::Instance);
         let origin = linked::return_origin(&req.return_origin, &settings.public_url, &settings.allowed_origins)?;
-        sso::starts().start(&[(&format!("instance {}", settings.public_url), sso::MAX_STARTS_INSTANCE)])?;
-        let (authorize_url, sign_in) =
-            sso::start(&settings.sso_provider, &endpoints, &origin, &req.secret_hash, "", req.test).await?;
-        self.app.node()?.create_sso_sign_in(&sign_in).await?;
+        settings.sso_provider.ready()?;
+        // Nothing is kept until the provider answers: the state carries it.
+        let sign_in = sso::ticket::issue(
+            self.app.picture_key(),
+            &settings.sso_provider,
+            &origin,
+            &req.secret_hash,
+            req.test,
+            crate::id::now_ms(),
+            &settings.public_url,
+            &settings.allowed_origins,
+        )?;
+        let authorize_url = sso::authorize(&settings.sso_provider, &endpoints, &sign_in).await?;
         Ok(pb::StartSsoSignInResponse { authorize_url, state: sign_in.state })
     }
 
@@ -501,7 +510,20 @@ impl AuthService for Api {
         respond(
             async {
                 let state = request.get_ref().state.trim();
-                let sign_in = self.app.node()?.sso_sign_in(state).await?.ok_or(Error::NotFound("sign-in"))?;
+                // Before the provider answers, only the state knows about it.
+                let settings = self.app.settings();
+                let sign_in = match self.app.node()?.sso_sign_in(state).await? {
+                    Some(sign_in) => sign_in,
+                    None => sso::ticket::read(
+                        self.app.picture_key(),
+                        &settings.sso_provider,
+                        state,
+                        crate::id::now_ms(),
+                        &settings.public_url,
+                        &settings.allowed_origins,
+                    )
+                    .map_err(|_| Error::NotFound("sign-in"))?,
+                };
                 Ok(pb::GetSsoSignInResponse {
                     return_origin: sign_in.return_origin,
                     provider_name: self.app.settings().sso_provider.name.clone(),

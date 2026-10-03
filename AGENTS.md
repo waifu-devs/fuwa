@@ -67,7 +67,10 @@
     `Provider` (stored as JSON: node.db settings' `sso_provider`, or the server
     file's `server.sso`), `Endpoints` (every URL from the public URL, never the
     request), and start/identify/finish over a `sso_sign_ins` table (node.db
-    for the instance, the server file for a server). `oidc.rs` is the code
+    for the instance, the server file for a server). The instance's sign-ins
+    get a row only once the provider answers: until then the state is a
+    signed ticket (`ticket.rs`, under the picture-link key) that carries
+    everything, since anyone may start one. `oidc.rs` is the code
     flow with PKCE and ID token checks against the JWKS; `saml.rs` the
     HTTP-Redirect AuthnRequest and the signed-response checks, over the
     hand-written exclusive C14N in `xml.rs` (fixtures signed by an

@@ -403,6 +403,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
             sso_sign_in: settings.sso_sign_in(),
             sso_sign_up: settings.sso_sign_up(),
             sso_name: if settings.sso_sign_in() { settings.sso_provider.name.clone() } else { String::new() },
+            sso_host: if settings.sso_sign_in() { settings.sso_provider.host() } else { String::new() },
             linked_issuer: if settings.linked_sign_in() { settings.linked_issuer.clone() } else { String::new() },
         }),
         server_creation: settings.server_creation as i32,

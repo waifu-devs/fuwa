@@ -80,6 +80,9 @@ message AuthMethods {
   bool sso_sign_up = 7;
   // The provider's name, for "Continue with <name>".
   string sso_name = 8;
+  // The host of the provider's sign-in page: that site sees the address of
+  // whoever signs in, so apps name it next to the button.
+  string sso_host = 9;
 }
 
 // Who may make agents (accounts programs drive) on an instance.

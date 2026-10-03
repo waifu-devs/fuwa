@@ -245,7 +245,7 @@ impl SsoService for Api {
                     (&format!("server {} account {}", sdb.id, account.id), sso::MAX_STARTS_ACCOUNT),
                 ])?;
                 let (authorize_url, sign_in) =
-                    sso::start(&provider, &endpoints, &origin, &req.secret_hash, &account.id, false).await?;
+                    sso::start(&provider, &endpoints, &origin, &req.secret_hash, &account.id).await?;
                 sdb.write(&account.id, async |conn, _| sso::save(conn, &sign_in).await).await?;
                 Ok(pb::StartServerSsoResponse { authorize_url, state: sign_in.state })
             }

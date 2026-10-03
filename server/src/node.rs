@@ -452,18 +452,19 @@ impl NodeDb {
     }
 
     /// Holds a single sign-on to the instance until the provider answers.
-    pub async fn create_sso_sign_in(&self, sign_in: &crate::sso::SignIn) -> Result<()> {
-        db::write(&self.db, async |conn| crate::sso::save(conn, sign_in).await).await
-    }
-
     /// A single sign-on to the instance that hasn't run out.
     pub async fn sso_sign_in(&self, state: &str) -> Result<Option<crate::sso::SignIn>> {
         crate::sso::load(&self.read()?, state).await
     }
 
     /// Records who the provider signed in, once.
-    pub async fn sso_answered(&self, state: &str, code_hash: &str, identity: &crate::sso::Identity) -> Result<bool> {
-        db::write(&self.db, async |conn| crate::sso::answered(conn, state, code_hash, identity).await).await
+    pub async fn sso_answered(
+        &self,
+        sign_in: &crate::sso::SignIn,
+        code_hash: &str,
+        identity: &crate::sso::Identity,
+    ) -> Result<bool> {
+        db::write(&self.db, async |conn| crate::sso::answered_ticket(conn, sign_in, code_hash, identity).await).await
     }
 
     /// Ends a single sign-on, so its code works once. False if another request already did.
