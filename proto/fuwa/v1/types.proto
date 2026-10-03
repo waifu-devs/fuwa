@@ -494,6 +494,10 @@ message AutoModRule {
   // where flags go and its TIME_OUT action for how long; both are optional
   // until a label needs them.
   repeated AutoModLabelRule labels = 16;
+  // PROVIDER: also show the provider the message's pictures (attached ones
+  // and embeds'), when it reads pictures (AutoModProvider.pictures). Up to 4
+  // PNG, JPEG or WebP pictures per message, fetched by the server.
+  bool pictures = 17;
 }
 
 // What an AutoMod alert tells moderators.

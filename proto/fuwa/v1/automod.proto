@@ -43,6 +43,8 @@ message AutoModProvider {
   string host = 3;
   // What it can tell apart, each with the level a new rule starts at.
   repeated AutoModLabel labels = 4;
+  // Whether it reads pictures as well as text (Cloudflare Clef does).
+  bool pictures = 5;
 }
 
 message AutoModLabel {

@@ -488,7 +488,7 @@ impl AdminService for Api {
                 // Whether it's on doesn't matter for a test.
                 let given = pb::AutoModProviderSettings { enabled: false, ..given };
                 let setup = providers::Setup::from_pb(&given, previous)?;
-                let (answer, took) = providers::check(&setup, content).await;
+                let (answer, took) = providers::check(&setup, content, &[]).await;
                 let elapsed_ms = took.as_millis().min(i32::MAX as u128) as i32;
                 Ok(match answer {
                     Ok(mut scores) => {

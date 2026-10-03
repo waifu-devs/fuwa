@@ -8,6 +8,7 @@ import {
   FlaskConicalIcon,
   GlobeLockIcon,
   HashIcon,
+  ImageIcon,
   LinkIcon,
   LoaderCircleIcon,
   PlusIcon,
@@ -114,6 +115,7 @@ function fresh(trigger: AutoModTrigger, provider?: AutoModProvider, alertChannel
       enabled: true,
       trigger,
       provider: provider.id,
+      pictures: provider.pictures,
       labels: provider.labels.map((l) => create(AutoModLabelRuleSchema, { label: l.id, level: l.defaultLevel, threshold: 80 })),
       actions: [create(AutoModActionSchema, { kind: AutoModActionKind.ALERT, channelId: alertChannelId })],
     });
@@ -344,7 +346,7 @@ function RuleCard({
         actionOf(draft, AutoModActionKind.TIME_OUT) && "times out",
       ].filter(Boolean);
   const summary = smart
-    ? `${provider?.name ?? "Provider turned off on this instance"} · watching ${watching} ${watching === 1 ? "kind" : "kinds"}`
+    ? `${provider?.name ?? "Provider turned off on this instance"} · watching ${watching} ${watching === 1 ? "kind" : "kinds"}${provider?.pictures && draft.pictures ? " · with pictures" : ""}`
     : draft.trigger === AutoModTrigger.KEYWORDS
       ? `${draft.keywords.length} ${draft.keywords.length === 1 ? "word" : "words"}`
       : draft.trigger === AutoModTrigger.MENTION_SPAM
@@ -415,6 +417,7 @@ function RuleCard({
                 {smart ? (
                   <>
                     <ProviderPicker providers={providers} draft={draft} set={set} />
+                    <Pictures provider={provider} draft={draft} set={set} />
                     <Labels provider={provider} draft={draft} set={set} />
                     <Tester instanceKey={instanceKey} serverId={serverId} rule={draft} />
                     <SmartActions instanceKey={instanceKey} serverId={serverId} draft={draft} setAction={setAction} />
@@ -999,7 +1002,7 @@ function ProviderPicker({
                 type="button"
                 role="radio"
                 aria-checked={on}
-                onClick={() => set({ provider: p.id })}
+                onClick={() => set({ provider: p.id, pictures: p.pictures })}
                 className={cn("relative flex-1 rounded-xl px-3 py-1.5 text-sm font-bold transition-colors", on ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
               >
                 {on && <motion.span layoutId={`provider-${draft.id || "new"}`} transition={SPRING} className="absolute inset-0 rounded-xl bg-background shadow-sm" />}
@@ -1025,8 +1028,8 @@ function ProviderPicker({
           {chosen ? (
             <span className="min-w-0 text-muted-foreground">
               <b className="text-foreground">{chosen.name}</b> reads the messages this rule checks, at <b className="break-all text-foreground">{chosen.host}</b>. It
-              gets the text alone: never who wrote it, where, or this server's name, and mentions and custom emoji are swapped for placeholders first. Your
-              instance sends it, never anyone's app.
+              gets the text{chosen.pictures && draft.pictures ? " and pictures" : ""} alone: never who wrote it, where, or this server's name, and mentions and
+              custom emoji are swapped for placeholders first. Your instance sends it, never anyone's app.
             </span>
           ) : (
             <span className="min-w-0 text-amber-700 dark:text-amber-400">
@@ -1036,6 +1039,49 @@ function ProviderPicker({
         </motion.div>
       </AnimatePresence>
     </Field>
+  );
+}
+
+/** Whether the provider sees messages' pictures too, for providers that read them. */
+function Pictures({ provider, draft, set }: { provider?: AutoModProvider; draft: AutoModRule; set: (patch: Partial<AutoModRule>) => void }) {
+  return (
+    <AnimatePresence initial={false}>
+      {provider?.pictures && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: "auto", opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={SPRING}
+          className="overflow-hidden"
+        >
+          <label
+            className={cn(
+              "flex cursor-pointer items-center gap-3 rounded-2xl border p-3 transition-colors",
+              draft.pictures ? "border-primary/40 bg-primary/5" : "hover:border-primary/20",
+            )}
+          >
+            <motion.span
+              animate={draft.pictures ? { scale: [1, 1.2, 1], rotate: [0, -10, 0] } : { scale: 1 }}
+              transition={{ duration: 0.35 }}
+              className={cn(
+                "grid size-8 shrink-0 place-items-center rounded-xl transition-colors",
+                draft.pictures ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+              )}
+            >
+              <ImageIcon className="size-4" />
+            </motion.span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-bold">Check pictures too</span>
+              <span className="block text-xs text-muted-foreground">
+                Up to 4 per message, attached or in embeds (PNG, JPEG or WebP). Your instance fetches them and sends them along; GIFs and very large photos
+                are skipped.
+              </span>
+            </span>
+            <Switch checked={draft.pictures} onCheckedChange={(on) => set({ pictures: on })} aria-label="Check pictures too" />
+          </label>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
