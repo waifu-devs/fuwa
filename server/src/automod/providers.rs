@@ -31,6 +31,7 @@ use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+use super::pace;
 use crate::error::{Error, Result};
 use crate::pb::{self, AutoModLevel as Level};
 use crate::reports;
@@ -577,6 +578,8 @@ pub enum Failure {
     Status(String),
     #[error("its answer didn't read: {0}")]
     BadAnswer(String),
+    #[error("too many messages are already waiting for it")]
+    Busy,
 }
 
 impl Failure {
@@ -590,6 +593,7 @@ impl Failure {
             Failure::Unreachable(_) => "automod_provider_unreachable",
             Failure::Status(_) => "automod_provider_status",
             Failure::BadAnswer(_) => "automod_provider_bad_answer",
+            Failure::Busy => "automod_provider_busy",
         }
     }
 }
@@ -734,9 +738,23 @@ pub async fn check(
     let message = Message { text: &text, pictures };
     let timeout = if pictures.is_empty() { TIMEOUT } else { PICTURES_TIMEOUT };
     let answer = match build(setup) {
-        Ok(provider) => {
-            tokio::time::timeout(timeout, provider.classify(&message)).await.unwrap_or(Err(Failure::TimedOut))
-        }
+        // Each provider's checks take turns (see `pace`); waiting for one
+        // gets as long as the check itself.
+        Ok(provider) => match pace::turn(&setup.id, timeout).await {
+            Ok(turn) => {
+                let answer =
+                    tokio::time::timeout(timeout, provider.classify(&message)).await.unwrap_or(Err(Failure::TimedOut));
+                // A key turned down or a bad answer says nothing of how
+                // busy the provider is.
+                turn.finish(!matches!(
+                    answer,
+                    Err(Failure::TimedOut | Failure::RateLimited | Failure::Unreachable(_) | Failure::Status(_))
+                ));
+                answer
+            }
+            Err(pace::Refused::Busy) => Err(Failure::Busy),
+            Err(pace::Refused::TimedOut) => Err(Failure::TimedOut),
+        },
         Err(failure) => Err(failure),
     };
     let took = started.elapsed();

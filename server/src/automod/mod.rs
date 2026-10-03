@@ -2,6 +2,7 @@
 //! here; `api/automod.rs` keeps the rules and `api/messages.rs` acts on what
 //! they catch.
 
+pub mod pace;
 pub mod providers;
 
 use crate::pb::{self, AutoModTrigger as Trigger};
