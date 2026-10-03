@@ -137,12 +137,47 @@ pub fn info(p: P) -> (&'static str, &'static str) {
         P::Connect => ("Connect", "Join voice channels."),
         P::Speak => ("Speak", "Talk in voice channels. Without it they can join and listen."),
         P::Video => ("Video", "Turn their camera on and share their screen in voice channels."),
-        P::Record => {
-            ("Record", "Record voice channels' sound on their own device. Everyone in the channel sees while they do.")
-        }
+        P::Record => (
+            "Record",
+            "Record voice channels on their device or on the server, and download and delete the server's recordings. People using fuwa see it and hear a beep; nothing can stop someone recording their speakers with other software.",
+        ),
         P::MuteMembers => ("Mute members", "Mute or deafen people ranked below them in voice channels, for everyone."),
         P::MoveMembers => ("Move members", "Disconnect people ranked below them from voice channels."),
     }
+}
+
+/// The permissions a channel can allow or deny, as the channel settings group them (the web's `CHANNEL_GROUPS`).
+pub const CHANNEL_GROUPS: [(&str, &[P]); 3] = [
+    ("General", &[P::ViewChannels, P::ManageChannels, P::ManageRoles, P::CreateInvite]),
+    ("Text", &[P::SendMessages, P::EmbedLinks, P::AttachFiles, P::MentionEveryone, P::ManageMessages]),
+    ("Voice", &[P::Connect, P::Speak, P::Video, P::Record, P::MuteMembers, P::MoveMembers]),
+];
+
+/// What a permission lets people do in one channel, where that reads differently from server-wide.
+pub fn channel_about(p: P) -> &'static str {
+    match p {
+        P::ManageRoles => "Change who can do what in this channel.",
+        P::ManageChannels => "Edit or delete this channel. Also skips its slow mode.",
+        P::ViewChannels => "See this channel and read its messages.",
+        P::CreateInvite => "Make invite links that open this channel.",
+        P::Connect => "Join this voice channel.",
+        P::Speak => "Talk in this voice channel. Without it they can join and listen.",
+        P::Video => "Turn their camera on and share their screen in this voice channel.",
+        P::Record => {
+            "Record this voice channel on their device or on the server, and download and delete its recordings. People using fuwa see it and hear a beep; nothing can stop someone recording their speakers with other software."
+        }
+        P::MuteMembers => "Mute or deafen people ranked below them in this voice channel.",
+        P::MoveMembers => "Disconnect people ranked below them from this voice channel.",
+        other => info(other).1,
+    }
+}
+
+/// Hidden from @everyone by its own overwrites.
+pub fn is_private(channel: &pb::Channel, everyone_id: &str) -> bool {
+    channel
+        .permission_overwrites
+        .iter()
+        .any(|o| o.target_id == everyone_id && is_role(o) && o.deny.contains(&(P::ViewChannels as i32)))
 }
 
 #[derive(Debug, Clone, Default)]

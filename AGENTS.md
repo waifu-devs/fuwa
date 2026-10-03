@@ -329,7 +329,7 @@
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
     in both), `settings_keys.rs` the Keyboard page where they're changed,
     `server_settings.rs` a server's settings
-    (overview, welcome screen, invites, roles, emoji, integrations, members,
+    (overview, welcome screen, invites, roles, channels, emoji, integrations, members,
     bans, AutoMod, audit log; the server's name opens it; a cached view, so
     it redraws only when the server changes, and its flourishes play once
     rather than loop; `save_bar` is the floating unsaved-changes bar pages
@@ -347,6 +347,11 @@
     the Welcome screen editor beside a preview drawn like the welcome
     dialog, `server_settings/automod.rs` the AutoMod rules (each tried with
     `TestAutoModRule` as it's edited, before it's saved),
+    `server_settings/channels.rs` the Channels page (moved a place at a
+    time with `core/arrange.rs`'s `step`, each one's name, topic, category
+    and slow mode, and who can see and do what in it, saved as one
+    `SetChannelPermissions`; the New button opens the app's new-channel
+    dialog and stays in settings),
     `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),
