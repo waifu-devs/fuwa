@@ -15,6 +15,9 @@
 - `e2ee-wasm/`: `fuwa-e2ee` for the web app, as WebAssembly. `pnpm wasm` (in
   `web/`) builds it into `web/src/e2ee/pkg` (not committed); the wasm-bindgen
   crate and CLI versions must match.
+- `voice/`: `fuwa-voice`, the client crate programs use to hear and talk in
+  voice channels (`ListenVoice` and `SpeakVoice`, no WebRTC), with the
+  `parrot` example. The server's tests use it against a real instance.
 - `server/`: the Rust server (`fuwa` binary, `fuwa_server` library).
   - `app.rs`: shared state, the HTTP router (gRPC, gRPC-Web, CORS, health), serving.
   - `api/`: one file per gRPC service, all implemented on `Api`.
@@ -159,7 +162,10 @@
     server file keeps server mute and deafen), TURN credentials, and
     `spawn_voice_guard`, which hangs people up as soon as an event takes
     their access away (through `Hub::tap`). `cluster/media.rs` is a media
-    part (`FUWA_ROLE=media`). Calls in direct messages are end-to-end
+    part (`FUWA_ROLE=media`). Programs join voice channels through a
+    bridge in `rtc.rs` (`Sfu::bridge` and `Sfu::speak`): no WebRTC, Opus
+    frames labelled by speaker, carried by `listen` in `api/calls.rs` across
+    media restarts. Calls in direct messages are end-to-end
     encrypted by the apps; the server never holds their keys and only
     forwards sealed frames. Never put a participant's address in a log or an event.
   - `config.rs`: `FUWA_*` environment variables: how the process starts, and

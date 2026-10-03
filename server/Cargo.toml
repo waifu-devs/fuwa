@@ -74,4 +74,6 @@ tonic-prost-build = "0.14"
 [dev-dependencies]
 # Real devices for the direct-message tests.
 fuwa-e2ee = { path = "../e2ee", features = ["client"] }
+# The client programs use to be in voice channels, against a real instance.
+fuwa-voice = { path = "../voice" }
 tempfile = "3"

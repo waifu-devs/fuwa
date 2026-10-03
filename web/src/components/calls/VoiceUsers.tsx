@@ -2,7 +2,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useMemo } from "react";
 import type { VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";
-import { displayName, memberName } from "@/lib/format";
+import { AppBadge } from "@/components/AppBadge";
+import { displayName, isAgent, memberName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { ParticipantMenu, useSpeaking, VoiceAvatar, VoiceFlags } from "./parts";
 
@@ -67,6 +68,7 @@ function VoiceUserRow({ instanceKey, serverId, channelId, state }: { instanceKey
           <span className={cn("min-w-0 flex-1 truncate transition-[font-weight]", speaking && "font-bold")}>
             {name}
           </span>
+          {isAgent(member?.user ?? user) && <AppBadge agent />}
           <VoiceFlags state={state} />
         </button>
       </ParticipantMenu>

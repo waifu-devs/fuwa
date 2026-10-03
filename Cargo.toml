@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "e2ee", "e2ee-wasm"]
+members = ["server", "e2ee", "e2ee-wasm", "voice"]
 # The desktop app is its own workspace, so GPUI stays out of the server's lock
 # file and its reproducible build.
 exclude = ["desktop"]

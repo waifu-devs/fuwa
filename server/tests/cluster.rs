@@ -914,10 +914,12 @@ async fn calls_ride_out_a_media_restart() {
     let mut voice = pb::call_service_client::CallServiceClient::new(channel);
     let (juan, _) = sign_up(&mut c, "juan").await;
     let (mika, _) = sign_up(&mut c, "mika").await;
+    let (helper, _) = sign_up(&mut c, "helper").await;
     let settings = voice.get_call_settings(authed(&juan, pb::GetCallSettingsRequest {})).await.unwrap().into_inner();
     assert!(settings.enabled, "the directory knows where the media part is");
     let server = create_server(&mut c, &juan, "Calls").await;
     join(&mut c, &mika, &server.id).await.unwrap();
+    join(&mut c, &helper, &server.id).await.unwrap();
     let lounge = c
         .channels
         .create_channel(authed(
@@ -952,8 +954,34 @@ async fn calls_ride_out_a_media_restart() {
     let (mut b, offer) = common::Peer::new().await;
     let b_joined = join_voice(mika.clone(), offer, String::new()).await;
     b.answer(&b_joined.answer);
+    // A program listens too, through the gateway, the shard and the media part.
+    let mut listening = voice
+        .clone()
+        .listen_voice(authed(
+            &helper,
+            pb::ListenVoiceRequest {
+                server_id: server.id.clone(),
+                channel_id: lounge.id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    listening.next().await.unwrap().unwrap();
+    let heard = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counting = heard.clone();
+    let program = tokio::spawn(async move {
+        while let Some(Ok(message)) = listening.next().await {
+            if matches!(message.event, Some(pb::listen_voice_response::Event::Frame(_))) {
+                counting.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    });
     common::talk(&mut a, &mut b, Duration::from_secs(3)).await;
     assert!(b.heard.len() > 20, "sound goes through the split instance's media part");
+    let before = heard.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(before > 40, "the program heard {before} frames");
 
     // A deploy: the media part tells everyone, and a new one takes its place.
     calls.cancel();
@@ -972,14 +1000,18 @@ async fn calls_ride_out_a_media_restart() {
     b.answer(&join_voice(mika.clone(), offer, b_joined.session_id.clone()).await.answer);
     common::talk(&mut a, &mut b, Duration::from_secs(3)).await;
     assert!(b.heard.len() > 20, "sound is back after the restart");
+    let after = heard.load(std::sync::atomic::Ordering::Relaxed) - before;
+    assert!(after > 40, "the program heard {after} frames after the restart, without listening again");
+    assert!(!program.is_finished(), "its stream stayed open");
     let states = voice
         .list_voice_states(authed(&juan, pb::ListVoiceStatesRequest { server_id: server.id.clone() }))
         .await
         .unwrap()
         .into_inner()
         .states;
-    assert_eq!(states.len(), 2);
+    assert_eq!(states.len(), 3);
 
+    program.abort();
     media.stop().await;
     gateway.stop().await;
     shard.stop().await;

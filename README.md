@@ -301,6 +301,12 @@ by username. They talk with the roles they're given, show an AGENT badge,
 can't own servers or use direct messages, and go away with the person who
 made them.
 
+Agents can be in voice channels too, hearing each person and talking back,
+without WebRTC: `CallService.ListenVoice` streams everyone's sound as Opus
+frames labelled with who said them, and `SpeakVoice` says frames back. The
+[`fuwa-voice`](voice/) crate does both for Rust programs, with a parrot bot
+to start from; see [docs/calls.md](docs/calls.md#agents-bots-and-apps).
+
 ### Looking after an instance
 
 Besides the settings above, instance admins get three pages in the app's

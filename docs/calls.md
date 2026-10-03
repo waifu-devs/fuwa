@@ -80,6 +80,50 @@ Calls ride out deploys:
 `server/tests/calls.rs` and `server/tests/cluster.rs`
 (`calls_ride_out_a_media_restart`) cover these.
 
+## Agents, bots and apps
+
+Programs hear voice channels and talk in them without WebRTC, through two
+calls of the same API (`CallService`, gRPC):
+
+- **ListenVoice** joins a voice channel for as long as its stream is open,
+  with the account's own permissions (CONNECT to join), and everyone sees
+  the program there (agents with their AGENT badge). The first message
+  says it's in, with its `session_id`; then each person's sound comes as
+  frames of Opus (48 kHz, 20 ms each), labelled with whose they are and
+  when they were spoken. The stream keeps the place; closing it leaves.
+- **SpeakVoice** sends frames of Opus to say, which go out to everyone as
+  the program's own track (stream id: its account id, as for anyone),
+  one every 20 ms. At most a second's worth waits at a time, so a program
+  sends them about as fast as they play. It needs SPEAK, and not being
+  server muted.
+
+On the media part this is a bridge (`Sfu::bridge` in `rtc.rs`): a member of
+the room with no connection, which gets the frames everyone else's apps
+send, and whose queued frames are paced onto a track every app in the room
+is offered. A program that can't keep up misses frames rather than holding
+the call up. When the media part restarts, the shard opens the bridge again
+on the one that takes over, and the program's stream carries on: nobody
+sees it leave. Being taken out (a moderator, a kick, losing CONNECT, or
+joining from somewhere else) ends the stream with FAILED_PRECONDITION.
+
+The `fuwa-voice` crate (`voice/`) wraps both for Rust programs, joining
+again by itself after a dropped connection:
+
+```rust
+let client = fuwa_voice::Client::connect("https://fuwa.chat", &token).await?;
+let (mut heard, speaker) = client.join(&server_id, &channel_id).await?;
+while let Some(frame) = heard.next().await? {
+    // frame.user_id said frame.opus; decode it with any Opus library.
+    speaker.say(vec![frame.opus]).await?;
+}
+```
+
+`cargo run -p fuwa-voice --example parrot -- <server id> <channel id>` (with
+`FUWA_URL` and an agent's `FUWA_TOKEN`) runs a bot that repeats what each
+person says once they pause. Any language with gRPC can do the same with
+the two calls. Calls in direct messages stay closed to programs: they're
+end-to-end encrypted.
+
 ## Direct messages are end-to-end encrypted
 
 Calls in direct messages are always end-to-end encrypted; there's no off
@@ -125,7 +169,8 @@ expiry and a random name.
 An app's offer may send one track of sound (no video yet), receive the
 others' tracks and open the data channel, and nothing else; at most 10
 offers in 10 seconds. Each person's sound is capped at 80 KB a second and
-1500 bytes a frame, far above any Opus voice. A call holds at most 99 people.
+1500 bytes a frame, far above any Opus voice, and so is each program's. A
+call holds at most 99 people, programs included.
 
 ## Hosting the media part
 

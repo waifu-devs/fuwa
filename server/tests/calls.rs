@@ -565,3 +565,296 @@ async fn direct_message_calls_ring_the_other_person() {
     instance.app.shutdown.cancel();
     instance.serving.await.unwrap();
 }
+
+/// What a ListenVoice stream gave, while it ran.
+#[derive(Default)]
+struct Listened {
+    frames: Vec<pb::VoiceFrame>,
+}
+
+#[tokio::test]
+async fn programs_hear_and_talk_without_webrtc() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let (juan, juan_id) = sign_up(&mut c, "juan").await;
+    let (bot, bot_id) = sign_up(&mut c, "helper").await;
+    let sid = c
+        .servers
+        .create_server(authed(
+            &juan,
+            pb::CreateServerRequest { name: "Bots".into(), discoverable: true, ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap()
+        .id;
+    c.servers
+        .join_server(authed(&bot, pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    let voice = c
+        .channels
+        .create_channel(authed(
+            &juan,
+            pb::CreateChannelRequest {
+                server_id: sid.clone(),
+                name: "Lounge".into(),
+                r#type: pb::ChannelType::Voice as i32,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .channel
+        .unwrap();
+    let mut juan_events = c
+        .events
+        .subscribe(authed(
+            &juan,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Juan is in the channel with an app.
+    let (mut a, offer) = Peer::new().await;
+    let joined = c
+        .calls
+        .join_voice(authed(
+            &juan,
+            pb::JoinVoiceRequest { server_id: sid.clone(), channel_id: voice.id.clone(), offer, ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    a.answer(&joined.answer);
+    a.run_for(Duration::from_millis(500)).await;
+    next_voice_event(&mut juan_events).await;
+
+    // The program listens: it's in the channel as itself.
+    let mut stream = c
+        .calls
+        .listen_voice(authed(
+            &bot,
+            pb::ListenVoiceRequest { server_id: sid.clone(), channel_id: voice.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let first = stream.next().await.unwrap().unwrap().event.unwrap();
+    let pb::listen_voice_response::Event::Joined(bot_joined) = first else { panic!("joined comes first") };
+    assert_eq!(bot_joined.state.as_ref().unwrap().user_id, bot_id);
+    let Payload::VoiceStateUpdated(seen) = next_voice_event(&mut juan_events).await else { panic!("not a join") };
+    assert_eq!(seen.state.unwrap().user_id, bot_id, "everyone sees the program join");
+    let session = bot_joined.session_id.clone();
+
+    // Juan talks while the program listens and talks back, a few frames at a time.
+    let mut calls = c.calls.clone();
+    let (bot_token, sid2, session2) = (bot.clone(), sid.clone(), session.clone());
+    let program = async move {
+        let mut listened = Listened::default();
+        let until = tokio::time::Instant::now() + Duration::from_secs(4);
+        let mut speak = tokio::time::interval(Duration::from_millis(100));
+        let mut sent = 0;
+        while tokio::time::Instant::now() < until {
+            tokio::select! {
+                message = stream.next() => {
+                    if let Some(pb::listen_voice_response::Event::Frame(frame)) = message.unwrap().unwrap().event {
+                        listened.frames.push(frame);
+                    }
+                }
+                _ = speak.tick() => {
+                    let frames = (0..5).map(|_| { sent += 1; format!("agent {sent}").into_bytes() }).collect();
+                    let request = pb::SpeakVoiceRequest { server_id: sid2.clone(), session_id: session2.clone(), frames };
+                    let queued = calls.speak_voice(authed(&bot_token, request)).await.unwrap().into_inner().queued;
+                    assert!(queued <= 10, "frames go out as fast as they come: {queued} waiting");
+                }
+            }
+        }
+        (listened, stream)
+    };
+    let ((listened, stream), ()) = tokio::join!(program, a.run_for(Duration::from_secs(4)));
+
+    assert!(listened.frames.len() > 50, "the program heard {} frames", listened.frames.len());
+    assert!(listened.frames.iter().all(|f| f.user_id == juan_id), "labelled with whose they are");
+    assert!(listened.frames.iter().all(|f| f.opus.starts_with(b"frame ")), "passed on untouched");
+    let steps: Vec<u32> = listened.frames.windows(2).map(|w| w[1].timestamp.wrapping_sub(w[0].timestamp)).collect();
+    assert!(steps.iter().filter(|s| **s == 960).count() > steps.len() / 2, "20 ms apart: {steps:?}");
+    let said: Vec<String> = a.heard.iter().map(|(_, d)| String::from_utf8_lossy(d).to_string()).collect();
+    let from_program = said.iter().filter(|f| f.starts_with("agent ")).count();
+    assert!(from_program > 50, "juan heard {from_program} of the program's frames");
+    assert!(a.signals.iter().any(|s| s == "offer"), "the program's sound came as a track of its own");
+
+    // Only its own session speaks, and only a second at a time.
+    let speak = |session: &str, frames: usize| {
+        let frames = vec![b"x".to_vec(); frames];
+        authed(&bot, pb::SpeakVoiceRequest { server_id: sid.clone(), session_id: session.into(), frames })
+    };
+    assert_eq!(c.calls.speak_voice(speak("nope", 1)).await.unwrap_err().code(), Code::FailedPrecondition);
+    assert_eq!(c.calls.speak_voice(speak(&session, 51)).await.unwrap_err().code(), Code::InvalidArgument);
+
+    // Server muted, it's told so.
+    c.calls
+        .moderate_voice(authed(
+            &juan,
+            pb::ModerateVoiceRequest {
+                server_id: sid.clone(),
+                user_id: bot_id.clone(),
+                server_mute: Some(true),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(c.calls.speak_voice(speak(&session, 1)).await.unwrap_err().code(), Code::PermissionDenied);
+
+    // Closing the stream leaves the channel.
+    drop(stream);
+    loop {
+        if let Payload::VoiceStateRemoved(removed) = next_voice_event(&mut juan_events).await {
+            assert_eq!(removed.user_id, bot_id);
+            break;
+        }
+    }
+
+    // Taken out by a moderator, its stream ends saying so.
+    let mut stream = c
+        .calls
+        .listen_voice(authed(
+            &bot,
+            pb::ListenVoiceRequest { server_id: sid.clone(), channel_id: voice.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    stream.next().await.unwrap().unwrap();
+    c.calls
+        .moderate_voice(authed(
+            &juan,
+            pb::ModerateVoiceRequest {
+                server_id: sid.clone(),
+                user_id: bot_id.clone(),
+                disconnect: true,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match stream.next().await {
+                Some(Ok(_)) => continue,
+                Some(Err(status)) => return status.code(),
+                None => return Code::Ok,
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(ended, Code::FailedPrecondition);
+
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
+}
+
+#[tokio::test]
+async fn the_voice_crate_hears_and_talks() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let (juan, juan_id) = sign_up(&mut c, "juan").await;
+    let (bot, _) = sign_up(&mut c, "parrot").await;
+    let sid = c
+        .servers
+        .create_server(authed(
+            &juan,
+            pb::CreateServerRequest { name: "Birds".into(), discoverable: true, ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap()
+        .id;
+    c.servers
+        .join_server(authed(&bot, pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    let request = pb::CreateChannelRequest {
+        server_id: sid.clone(),
+        name: "Perch".into(),
+        r#type: pb::ChannelType::Voice as i32,
+        ..Default::default()
+    };
+    let voice = c.channels.create_channel(authed(&juan, request)).await.unwrap().into_inner().channel.unwrap();
+    let (mut a, offer) = Peer::new().await;
+    let request =
+        pb::JoinVoiceRequest { server_id: sid.clone(), channel_id: voice.id.clone(), offer, ..Default::default() };
+    a.answer(&c.calls.join_voice(authed(&juan, request)).await.unwrap().into_inner().answer);
+
+    let client = fuwa_voice::Client::connect(&format!("http://{}", instance.addr), &bot).await.unwrap();
+    let (mut heard, speaker) = client.join(&sid, &voice.id).await.unwrap();
+    assert!(heard.state().is_some_and(|s| s.channel_id == voice.id));
+    let program = async move {
+        let mut frames = Vec::new();
+        while frames.len() < 25 {
+            frames.push(heard.next().await.unwrap().unwrap());
+        }
+        let started = std::time::Instant::now();
+        speaker.say(frames.iter().map(|f| [b"back ".as_slice(), &f.opus].concat())).await.unwrap();
+        (frames, started.elapsed(), heard)
+    };
+    let ((frames, took, _heard), ()) = tokio::join!(program, a.run_for(Duration::from_secs(4)));
+    assert!(frames.iter().all(|f| f.user_id == juan_id && f.opus.starts_with(b"frame ")));
+    assert!(took >= Duration::from_millis(250), "it says them about as fast as they play: {took:?}");
+    let back = a.heard.iter().filter(|(_, d)| d.starts_with(b"back frame ")).count();
+    assert!(back >= 20, "juan heard {back} frames said back");
+
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
+}
+
+#[tokio::test]
+async fn programs_hear_each_other() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (one, one_id) = sign_up(&mut c, "one").await;
+    let (two, _) = sign_up(&mut c, "two").await;
+    let request = pb::CreateServerRequest { name: "Bots".into(), discoverable: true, ..Default::default() };
+    let sid = c.servers.create_server(authed(&juan, request)).await.unwrap().into_inner().server.unwrap().id;
+    for token in [&one, &two] {
+        let request = pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() };
+        c.servers.join_server(authed(token, request)).await.unwrap();
+    }
+    let request = pb::CreateChannelRequest {
+        server_id: sid.clone(),
+        name: "Lounge".into(),
+        r#type: pb::ChannelType::Voice as i32,
+        ..Default::default()
+    };
+    let voice = c.channels.create_channel(authed(&juan, request)).await.unwrap().into_inner().channel.unwrap();
+    let url = format!("http://{}", instance.addr);
+    let (_one_heard, one_says) =
+        fuwa_voice::Client::connect(&url, &one).await.unwrap().join(&sid, &voice.id).await.unwrap();
+    let (mut two_heard, _) =
+        fuwa_voice::Client::connect(&url, &two).await.unwrap().join(&sid, &voice.id).await.unwrap();
+    one_says.say((0..10).map(|i| format!("hello {i}").into_bytes())).await.unwrap();
+    let mut heard = Vec::new();
+    while heard.len() < 10 {
+        let frame = tokio::time::timeout(Duration::from_secs(5), two_heard.next()).await.unwrap().unwrap().unwrap();
+        heard.push(frame);
+    }
+    assert!(heard.iter().all(|f| f.user_id == one_id));
+    assert_eq!(heard[0].opus, b"hello 0");
+    assert_eq!(heard[1].timestamp.wrapping_sub(heard[0].timestamp), 960);
+
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
+}

@@ -5,10 +5,12 @@
 //! with sequence 0; direct-message calls run on the directory and reach both
 //! people through `DirectMessageService.Watch`.
 
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
+use futures::Stream;
 use hmac::{Hmac, Mac};
 use tonic::metadata::MetadataMap;
 use tonic::{Request, Response, Status};
@@ -28,6 +30,99 @@ const TURN_CREDENTIAL: Duration = Duration::from_secs(60 * 60);
 
 /// Checks for places nobody kept this often.
 const SWEEP: Duration = Duration::from_secs(1);
+
+/// How often a ListenVoice stream keeps its place.
+const LISTEN_KEEP: Duration = Duration::from_secs(5);
+/// Messages a ListenVoice stream holds for a program that's behind (about
+/// two seconds of five people talking); past that it misses sound.
+const LISTEN_BUFFER: usize = 512;
+/// How long a ListenVoice stream tries to reach a media part again after
+/// one went away, before it gives up and the program has to listen again.
+const LISTEN_RECONNECT: Duration = Duration::from_secs(30);
+
+type ListenStream = Pin<Box<dyn Stream<Item = std::result::Result<pb::ListenVoiceResponse, Status>> + Send>>;
+type Listener = tokio::sync::mpsc::Sender<std::result::Result<pb::ListenVoiceResponse, Status>>;
+
+fn listened(event: pb::listen_voice_response::Event) -> pb::ListenVoiceResponse {
+    pb::ListenVoiceResponse { event: Some(event) }
+}
+
+/// Carries a ListenVoice stream: passes on what the bridge hears, keeps the
+/// place while the program listens, opens the bridge again on whichever
+/// media part takes over after one restarts, and leaves when the program
+/// goes.
+async fn listen(app: Arc<App>, server_id: String, mut place: Place, mut events: voice::BridgeEvents, tx: Listener) {
+    use crate::rtc::{Bridged, Ending};
+    use tokio_stream::StreamExt;
+    let user_id = place.state.user_id.clone();
+    let mut keep = tokio::time::interval(LISTEN_KEEP);
+    keep.tick().await;
+    let ended = loop {
+        tokio::select! {
+            _ = tx.closed() => {
+                if let Some(place) = app.voice.remove(&server_id, &user_id, Some(&place.session_id)) {
+                    app.media_link.close(&place.room, Some(&user_id), Some(&place.session_id)).await;
+                    gone(&app, &server_id, &place).await;
+                }
+                return;
+            }
+            _ = app.shutdown.cancelled() => break Status::unavailable("this part of the instance is restarting; listen again"),
+            _ = keep.tick() => {
+                let session = place.session_id.clone();
+                match app.voice.update(&server_id, &user_id, |p| if p.session_id == session { p.expires = lease() }) {
+                    Some(kept) if kept.session_id == session && app.settings().calls => place = kept,
+                    _ => break moved_away().into(),
+                }
+            }
+            event = events.next() => match event {
+                Some(Bridged::Frame(heard)) => {
+                    let frame = pb::VoiceFrame { user_id: heard.participant, opus: heard.frame, timestamp: heard.timestamp };
+                    // A program that doesn't keep up misses sound, rather than holding the call up.
+                    let _ = tx.try_send(Ok(listened(pb::listen_voice_response::Event::Frame(frame))));
+                }
+                Some(Bridged::Ended(Ending::Replaced)) => {
+                    break Status::failed_precondition("you joined this call from somewhere else");
+                }
+                Some(Bridged::Ended(Ending::Closed)) => break moved_away().into(),
+                Some(Bridged::Ended(Ending::Restarting)) | None => match rebridge(&app, &server_id, &place, &tx).await {
+                    Some(again) => events = again,
+                    None if tx.is_closed() => continue,
+                    None => break Status::unavailable("calls are restarting; listen again"),
+                },
+            }
+        }
+    };
+    let _ = tx.send(Err(ended)).await;
+}
+
+/// Opens a place's bridge again, on the media part that took over, for as
+/// long as the place is still the program's.
+async fn rebridge(app: &App, server_id: &str, place: &Place, tx: &Listener) -> Option<voice::BridgeEvents> {
+    let until = Instant::now() + LISTEN_RECONNECT;
+    let mut wait = Duration::from_millis(150 + u64::from(rand_byte()) * 2);
+    loop {
+        tokio::select! {
+            _ = tx.closed() => return None,
+            _ = tokio::time::sleep(wait) => {}
+        }
+        let current = app.voice.get(server_id, &place.state.user_id);
+        let place = current.filter(|p| p.session_id == place.session_id)?;
+        match app.media_link.bridge(&place).await {
+            Ok(events) => return Some(events),
+            Err(err) if Instant::now() < until => {
+                tracing::debug!(error = %err, "a voice bridge couldn't open again yet");
+                wait = (wait * 2).min(Duration::from_secs(4));
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+fn rand_byte() -> u8 {
+    let mut byte = [0u8; 1];
+    let _ = getrandom::fill(&mut byte);
+    byte[0]
+}
 
 /// Lets go of the places nobody kept, telling everyone, for as long as the
 /// instance runs.
@@ -238,27 +333,34 @@ impl Api {
         Ok((seat, channel))
     }
 
-    async fn join_voice(&self, metadata: &MetadataMap, req: pb::JoinVoiceRequest) -> Result<pb::JoinVoiceResponse> {
-        let account = self.account(metadata).await?;
+    /// The place someone joining a voice channel gets: checked, not taken yet.
+    async fn voice_place(
+        &self,
+        account: &Account,
+        server_id: &str,
+        channel_id: &str,
+        (self_mute, self_deaf): (bool, bool),
+        session_id: &str,
+    ) -> Result<(String, Place)> {
         self.calls_on()?;
-        check_session(&req.session_id)?;
-        let (seat, channel) = self.voice_channel(&account, &req.server_id, &req.channel_id).await?;
+        check_session(session_id)?;
+        let (seat, channel) = self.voice_channel(account, server_id, channel_id).await?;
         seat.access.require_in(&channel.id, pb::Permission::Connect)?;
         super::messages::check_not_timed_out(&seat.member)?;
         let server_id = seat.sdb.id.clone();
         let before = self.app.voice.get(&server_id, &account.id);
         let session_id = match &before {
-            _ if req.session_id.is_empty() => new_id(),
-            Some(place) if place.session_id != req.session_id => return Err(moved_away()),
-            _ => req.session_id.clone(),
+            _ if session_id.is_empty() => new_id(),
+            Some(place) if place.session_id != session_id => return Err(moved_away()),
+            _ => session_id.to_string(),
         };
         let same_channel = before.as_ref().is_some_and(|p| p.state.channel_id == channel.id);
         let (server_mute, server_deaf) = seat.sdb.voice_moderation(&account.id).await?;
         let state = pb::VoiceState {
             user_id: account.id.clone(),
             channel_id: channel.id.clone(),
-            self_mute: req.self_mute,
-            self_deaf: req.self_deaf,
+            self_mute,
+            self_deaf,
             server_mute,
             server_deaf,
             joined_at: match &before {
@@ -269,15 +371,64 @@ impl Api {
             ..Default::default()
         };
         let place = Place { session_id, room: voice::channel_room(&server_id, &channel.id), state, expires: lease() };
-        let answer = self.app.media_link.open(&place, &req.offer).await?;
-        if let Some(before) = self.app.voice.put(&server_id, place.clone())
+        Ok((server_id, place))
+    }
+
+    /// Takes a place once its connection to the media part is up, hanging
+    /// up the one it moved from, and tells everyone.
+    async fn take_voice_place(&self, server_id: &str, place: &Place) {
+        let user_id = &place.state.user_id;
+        if let Some(before) = self.app.voice.put(server_id, place.clone())
             && before.room != place.room
         {
-            self.app.media_link.close(&before.room, Some(&account.id), Some(&before.session_id)).await;
+            self.app.media_link.close(&before.room, Some(user_id), Some(&before.session_id)).await;
         }
         let update = Payload::VoiceStateUpdated(pb::VoiceStateUpdated { state: Some(place.state.clone()) });
-        publish_voice(&self.app, &server_id, &account.id, update);
+        publish_voice(&self.app, server_id, user_id, update);
+    }
+
+    async fn join_voice(&self, metadata: &MetadataMap, req: pb::JoinVoiceRequest) -> Result<pb::JoinVoiceResponse> {
+        let account = self.account(metadata).await?;
+        let selves = (req.self_mute, req.self_deaf);
+        let (server_id, place) =
+            self.voice_place(&account, &req.server_id, &req.channel_id, selves, &req.session_id).await?;
+        let answer = self.app.media_link.open(&place, &req.offer).await?;
+        self.take_voice_place(&server_id, &place).await;
         Ok(pb::JoinVoiceResponse { answer, session_id: place.session_id, state: Some(place.state) })
+    }
+
+    async fn listen_voice(&self, metadata: &MetadataMap, req: pb::ListenVoiceRequest) -> Result<ListenStream> {
+        let account = self.account(metadata).await?;
+        let selves = (req.self_mute, req.self_deaf);
+        let (server_id, place) =
+            self.voice_place(&account, &req.server_id, &req.channel_id, selves, &req.session_id).await?;
+        let events = self.app.media_link.bridge(&place).await?;
+        self.take_voice_place(&server_id, &place).await;
+        let (tx, rx) = tokio::sync::mpsc::channel(LISTEN_BUFFER);
+        let joined = pb::VoiceJoined { session_id: place.session_id.clone(), state: Some(place.state.clone()) };
+        let _ = tx.try_send(Ok(listened(pb::listen_voice_response::Event::Joined(joined))));
+        tokio::spawn(listen(self.app.clone(), server_id, place, events, tx));
+        Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
+    }
+
+    async fn speak_voice(&self, metadata: &MetadataMap, req: pb::SpeakVoiceRequest) -> Result<pb::SpeakVoiceResponse> {
+        let account = self.account(metadata).await?;
+        check_session(&req.session_id)?;
+        if req.frames.len() > crate::rtc::MAX_QUEUED {
+            return Err(Error::invalid(format!("at most {} frames at a time", crate::rtc::MAX_QUEUED)));
+        }
+        let server_id = self.app.servers.get(&req.server_id).await?.id.clone();
+        let place = self
+            .app
+            .voice
+            .get(&server_id, &account.id)
+            .filter(|p| !req.session_id.is_empty() && p.session_id == req.session_id)
+            .ok_or_else(moved_away)?;
+        if !place.may_speak() {
+            return Err(Error::PermissionDenied("you can't speak in this voice channel".into()));
+        }
+        let queued = self.app.media_link.speak(&place, req.frames).await?;
+        Ok(pb::SpeakVoiceResponse { queued: queued as u32 })
     }
 
     async fn leave_voice(&self, metadata: &MetadataMap, req: pb::LeaveVoiceRequest) -> Result<pb::LeaveVoiceResponse> {
@@ -612,6 +763,19 @@ impl CallService for Api {
         request: Request<pb::ModerateVoiceRequest>,
     ) -> Result<Response<pb::ModerateVoiceResponse>, Status> {
         respond(Api::moderate_voice(self, request.metadata(), request.get_ref().clone()).await)
+    }
+
+    type ListenVoiceStream = ListenStream;
+
+    async fn listen_voice(&self, request: Request<pb::ListenVoiceRequest>) -> Result<Response<ListenStream>, Status> {
+        respond(Api::listen_voice(self, request.metadata(), request.get_ref().clone()).await)
+    }
+
+    async fn speak_voice(
+        &self,
+        request: Request<pb::SpeakVoiceRequest>,
+    ) -> Result<Response<pb::SpeakVoiceResponse>, Status> {
+        respond(Api::speak_voice(self, request.metadata(), request.get_ref().clone()).await)
     }
 
     async fn join_dm_call(

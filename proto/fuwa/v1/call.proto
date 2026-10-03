@@ -51,6 +51,25 @@ service CallService {
   // disconnects them (MOVE_MEMBERS). Only people ranked below the caller.
   rpc ModerateVoice(ModerateVoiceRequest) returns (ModerateVoiceResponse);
 
+  // For agents, bots and other programs: joins a voice channel without
+  // WebRTC, for as long as this stream is open, the same as JoinVoice
+  // otherwise (CONNECT there, one place per account per server, and
+  // everyone sees you in it). The first message says you're in; then each
+  // person's sound comes as frames of Opus (48 kHz, 20 ms each), labelled
+  // with whose they are. Nothing needs keeping: the stream keeps the place,
+  // and closing it leaves. It ends with FAILED_PRECONDITION when you were
+  // taken out of the call, or joined it from somewhere else; any other end
+  // (the instance restarting) is worth opening again with the same
+  // `session_id`. The media part restarting doesn't end it. Voice channels
+  // only: calls in direct messages are end-to-end encrypted.
+  rpc ListenVoice(ListenVoiceRequest) returns (stream ListenVoiceResponse);
+  // Says something in the voice channel ListenVoice put you in: frames of
+  // Opus, 48 kHz, 20 ms each (mono or stereo), which go out to everyone one
+  // every 20 ms, in order. At most a second's worth (50 frames) may be
+  // waiting; send them about as fast as they play. Needs SPEAK and not
+  // being server muted (PERMISSION_DENIED otherwise).
+  rpc SpeakVoice(SpeakVoiceRequest) returns (SpeakVoiceResponse);
+
   // Joins the call in a direct-message conversation, starting it if nobody
   // is in it. The other person's apps hear it ring (CallUpdated on
   // DirectMessageService.Watch). The sound is end-to-end encrypted by the
@@ -139,6 +158,53 @@ message ModerateVoiceRequest {
 }
 
 message ModerateVoiceResponse {}
+
+message ListenVoiceRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  bool self_mute = 3;
+  bool self_deaf = 4;
+  // Rejoin this session, after the stream was cut off.
+  string session_id = 5;
+}
+
+message ListenVoiceResponse {
+  oneof event {
+    // First: you're in, as this session (SpeakVoice names it).
+    VoiceJoined joined = 1;
+    // Someone's sound.
+    VoiceFrame frame = 2;
+  }
+}
+
+message VoiceJoined {
+  string session_id = 1;
+  VoiceState state = 2;
+}
+
+// One frame of someone's sound, as they sent it.
+message VoiceFrame {
+  // Whose it is.
+  string user_id = 1;
+  // One Opus packet: decode it with any Opus decoder at 48 kHz.
+  bytes opus = 2;
+  // When it was spoken, in 48 kHz ticks of that person's own clock (960 a
+  // frame): a gap of more than 960 since their last frame is sound that was
+  // lost or silence they didn't send.
+  uint32 timestamp = 3;
+}
+
+message SpeakVoiceRequest {
+  string server_id = 1;
+  string session_id = 2;
+  // Each one Opus packet, 20 ms of sound.
+  repeated bytes frames = 3;
+}
+
+message SpeakVoiceResponse {
+  // Frames waiting to go out now, including these.
+  uint32 queued = 1;
+}
 
 message JoinDmCallRequest {
   string conversation_id = 1;
