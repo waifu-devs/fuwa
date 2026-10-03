@@ -385,6 +385,7 @@ async fn review_guest(
     access: &Access,
     channel: &pb::Channel,
     content: &str,
+    asked: Option<&automod::Asked>,
     events: &mut Vec<Payload>,
 ) -> Result<Option<String>> {
     // Already out until the year 9999, as far as `review` can tell.
@@ -393,7 +394,7 @@ async fn review_guest(
         timed_out_until: Some(timestamp(253_402_300_799_000)),
         ..Default::default()
     };
-    let verdict = automod::review(conn, server_id, &member, access, channel, content, events).await?;
+    let verdict = automod::review(conn, server_id, &member, access, channel, content, asked, events).await?;
     let times_out = store::load_automod(conn).await?.iter().any(|rule| {
         rule.enabled
             && !rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id)
@@ -474,6 +475,7 @@ fn no_pings(message: &mut pb::Message) {
 /// Runs this server's own AutoMod over what one of its people writes in a
 /// channel it shows from another, before it goes there.
 async fn review_here(
+    app: &App,
     sdb: &ServerDb,
     member: &pb::Member,
     access: &Access,
@@ -483,11 +485,12 @@ async fn review_here(
     if access.has(Permission::ManageServer) || store::load_automod(&sdb.read()?).await?.is_empty() {
         return Ok(());
     }
+    let asked = automod::ask(app, sdb, member, access, channel_id, content).await;
     let author_id = member.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
     let blocked = sdb
         .write(&author_id, async |conn, events| {
             let channel = load_channel(conn, &sdb.id, channel_id).await?.ok_or(Error::NotFound("channel"))?;
-            Ok(automod::review(conn, &sdb.id, member, access, &channel, content, events).await?.blocked)
+            Ok(automod::review(conn, &sdb.id, member, access, &channel, content, asked.as_ref(), events).await?.blocked)
         })
         .await?;
     match blocked {
@@ -545,7 +548,7 @@ pub(super) async fn guest_send(
 ) -> Result<pb::Message> {
     let channel_id = link.channel_id.clone().unwrap_or_default();
     let guest = guest_of(&sdb.read()?, &sdb.id, account, access, link).await?;
-    review_here(sdb, member, access, &channel_id, &req.content).await?;
+    review_here(app, sdb, member, access, &channel_id, &req.content).await?;
     let call = Call::Send(cpb::GuestSend {
         guest: Some(guest),
         content: req.content,
@@ -598,7 +601,7 @@ pub(super) async fn guest_edit(
     req: &pb::UpdateMessageRequest,
 ) -> Result<pb::Message> {
     let channel_id = link.channel_id.clone().unwrap_or_default();
-    review_here(sdb, member, access, &channel_id, &req.content).await?;
+    review_here(app, sdb, member, access, &channel_id, &req.content).await?;
     let call = Call::Edit(cpb::GuestEdit {
         guest: Some(guest),
         message_id: req.message_id.clone(),
@@ -630,7 +633,7 @@ pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::S
         Call::Send(send) => home_send(app, &sdb, send).await,
         Call::List(list) => home_list(&sdb, list).await,
         Call::Get(get) => home_get(&sdb, get).await,
-        Call::Edit(edit) => home_edit(&sdb, edit).await,
+        Call::Edit(edit) => home_edit(app, &sdb, edit).await,
         Call::Delete(delete) => home_delete(&sdb, delete).await,
         Call::Left(left) => home_left(&sdb, left).await,
         Call::Approved(approved) => guest_approved(app, &sdb, approved).await,
@@ -743,6 +746,7 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
     {
         return Err(Error::ResourceExhausted("this channel's home server is out of storage".into()));
     }
+    let asked = ask_home(app, sdb, &guest, &send.content).await;
     let message = sdb
         .write(&author_id, async |conn, events| {
             let (row, user, server) = connection(conn, &guest).await?;
@@ -765,7 +769,9 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
                 }
             }
             remember(conn, &user, &server).await?;
-            let verdict = review_guest(conn, &sdb.id, &user, &server, &access, &channel, &send.content, events).await?;
+            let verdict =
+                review_guest(conn, &sdb.id, &user, &server, &access, &channel, &send.content, asked.as_ref(), events)
+                    .await?;
             if let Some(why) = verdict {
                 return Ok(Err(why));
             }
@@ -826,9 +832,28 @@ async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply
     Ok(cpb::SharedReply { message: Some(message), author, ..Default::default() })
 }
 
-async fn home_edit(sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cpb::SharedReply> {
+/// Asks the home's provider rule about what a guest writes, before the
+/// write, as `messages` does for the home's own people. `None` when the
+/// guest's connection is gone; the write then turns them away.
+async fn ask_home(app: &App, sdb: &ServerDb, guest: &cpb::Guest, content: &str) -> Option<automod::Asked> {
+    let (row, user, _) = connection(&sdb.read().ok()?, guest).await.ok()?;
+    let channel_id = row.channel_id.clone();
+    let access = Access::guest(&channel_id, row.allowed);
+    let member = pb::Member { user: Some(user), ..Default::default() };
+    automod::ask(app, sdb, &member, &access, &channel_id, content).await
+}
+
+async fn home_edit(app: &App, sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cpb::SharedReply> {
     let guest = edit.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
     let author_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
+    // Only new text the author wrote goes to a provider.
+    let before = load_message(&sdb.read()?, &sdb.id, &edit.message_id).await?;
+    let asked = match before {
+        Some(m) if m.author_id == author_id && m.content != edit.content => {
+            ask_home(app, sdb, &guest, &edit.content).await
+        }
+        _ => None,
+    };
     let message = sdb
         .write(&author_id, async |conn, events| {
             let (row, user, server) = connection(conn, &guest).await?;
@@ -850,8 +875,18 @@ async fn home_edit(sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cpb::SharedRe
             remember(conn, &user, &server).await?;
             if message.content != edit.content {
                 let access = Access::guest(&channel.id, row.allowed);
-                let verdict =
-                    review_guest(conn, &sdb.id, &user, &server, &access, &channel, &edit.content, events).await?;
+                let verdict = review_guest(
+                    conn,
+                    &sdb.id,
+                    &user,
+                    &server,
+                    &access,
+                    &channel,
+                    &edit.content,
+                    asked.as_ref(),
+                    events,
+                )
+                .await?;
                 if let Some(why) = verdict {
                     return Ok(Err(why));
                 }

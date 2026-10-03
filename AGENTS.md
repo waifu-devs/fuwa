@@ -136,12 +136,23 @@
     the message (`execute_webhook`): its `author_id` is the webhook's id and
     `Message.webhook` carries the name and picture it posted under. Webhook
     messages never ping @everyone, @here or roles, and nobody can edit them.
-  - `automod.rs`: what an AutoMod rule catches (words with `*` wildcards,
+  - `automod/`: what an AutoMod rule catches (words with `*` wildcards,
     pings, links to sites not allowed); `api/automod.rs` keeps the rules
     (`automod_rules`, one protobuf blob each) and `review` runs them inside
     the write that sends or edits a message: it blocks (an error starting
     "AutoMod: "), posts an alert message (`MESSAGE_KIND_AUTO_MOD_ALERT`) and
     times the author out. People with Manage Server are never caught.
+    `automod/providers.rs` is moderation services (`Provider`, registered in
+    `KINDS`: TypeSafe Jev and Cloudflare Clef, which both speak System One,
+    so one adapter): the instance's `automod_providers` setting holds their
+    keys (never sent to clients; shards get them in `WatchResponse`), and a
+    server's one PROVIDER rule ("Smart filter") picks one and a level per
+    label. `api/automod.rs`'s `ask` calls it before the message's write
+    (never inside it), with only the text (`providers::outgoing` strips
+    mentions and emoji ids), cut off at 3 seconds; a failure lets the
+    message through that rule and is counted in the anonymous report by
+    kind and provider id. The web pages are `settings/instance/Moderation.tsx`
+    and the Smart filter in `settings/server/AutoMod.tsx`.
   - `permissions.rs`: roles and permissions. `Rules::access` works out what a
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's
@@ -327,9 +338,11 @@
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
     in both), `settings_keys.rs` the Keyboard page where they're changed,
     `server_settings.rs` a server's settings
-    (overview, invites, roles, emoji, webhooks, members, bans, audit log;
-    the server's name opens it; a cached view, so it redraws only when the
-    server changes, and its flourishes play once rather than loop),
+    (overview, welcome screen, invites, roles, emoji, integrations, members,
+    bans, AutoMod, audit log; the server's name opens it; a cached view, so
+    it redraws only when the server changes, and its flourishes play once
+    rather than loop; `save_bar` is the floating unsaved-changes bar pages
+    share),
     `server_settings/roles.rs` the Roles page (order, color, permissions
     and members of each role, saved together from a floating bar, over the
     role calls in `core/server_admin.rs`; you edit only roles below your own
@@ -337,7 +350,12 @@
     `server_settings/emoji.rs` the Emoji page (pictures dropped or picked,
     shrunk to 128 pixels and written as PNGs by `png.rs`, which compresses
     them itself so the app needs no image encoder), `server_settings/webhooks.rs`
-    the Webhooks page (a test post goes to the webhook's own instance only),
+    the webhooks on the Integrations page (a test post goes to the webhook's
+    own instance only), under the agents in `server_settings/agents.rs`
+    (added by username, removed by kicking), `server_settings/welcome.rs`
+    the Welcome screen editor beside a preview drawn like the welcome
+    dialog, `server_settings/automod.rs` the AutoMod rules (each tried with
+    `TestAutoModRule` as it's edited, before it's saved),
     `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),

@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
-import type { AccountFilter, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
+import type { AccountFilter, AutoModProviderSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
 import type { ChannelPlacement, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
 import type { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
@@ -899,6 +899,10 @@ export const updateSettings = (key: string, settings: InstanceSettings, update: 
     return config!;
   });
 
+/** Runs some text through a moderation provider as the form has it (an empty key uses the saved one). */
+export const testAutoModProvider = (key: string, provider: AutoModProviderSettings, content: string) =>
+  call((signal) => api(key).admin.testAutoModProvider({ provider, content }, { signal }));
+
 export const nodeUsage = (key: string) => call((signal) => api(key).admin.getNodeUsage({}, { signal }));
 
 /** Replaces a server's own caps; unset ones follow the instance defaults. */
@@ -1184,7 +1188,9 @@ export { ChannelType };
 // ───────────────────────── AutoMod, emoji and the welcome screen ─────────────────────────
 
 export const listAutoModRules = (key: string, serverId: string) =>
-  call((signal) => api(key).automod.listAutoModRules({ serverId }, { signal })).pipe(Effect.map((r) => r.rules));
+  call((signal) => api(key).automod.listAutoModRules({ serverId }, { signal })).pipe(
+    Effect.map((r) => ({ rules: r.rules, providers: r.providers })),
+  );
 
 /** Adds a rule (no id) or replaces one; resolves to the rule as the server keeps it. */
 export const saveAutoModRule = (key: string, serverId: string, rule: AutoModRule) =>

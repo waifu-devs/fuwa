@@ -182,6 +182,7 @@ struct Clients {
     webhooks: pb::webhook_service_client::WebhookServiceClient<Channel>,
     agents: pb::agent_service_client::AgentServiceClient<Channel>,
     shared: pb::shared_channel_service_client::SharedChannelServiceClient<Channel>,
+    automod: pb::auto_mod_service_client::AutoModServiceClient<Channel>,
 }
 
 async fn clients(part: &Part) -> Clients {
@@ -199,7 +200,8 @@ async fn clients(part: &Part) -> Clients {
         invites: pb::invite_service_client::InviteServiceClient::new(channel.clone()),
         webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel.clone()),
         agents: pb::agent_service_client::AgentServiceClient::new(channel.clone()),
-        shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel),
+        shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel.clone()),
+        automod: pb::auto_mod_service_client::AutoModServiceClient::new(channel),
     }
 }
 
@@ -606,6 +608,33 @@ async fn a_split_instance_works_like_one() {
     c.messages.send_message(authed(&made.token, said)).await.unwrap();
     let mine = c.agents.list_agents(authed(&juan, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents;
     assert_eq!(mine[0].servers, 1);
+
+    // A moderation provider set up on the directory reaches the shards, key
+    // and all (they check messages), while clients only learn a key is set.
+    let jev = pb::AutoModProviderSettings {
+        id: "typesafe-jev".into(),
+        enabled: true,
+        api_key: "made-up-key-for-a-test".into(),
+        ..Default::default()
+    };
+    let update = pb::UpdateSettingsRequest {
+        settings: Some(pb::InstanceSettings { automod_providers: vec![jev], ..Default::default() }),
+        update_mask: Some(prost_types::FieldMask { paths: vec!["automod_providers".into()] }),
+        reset_mask: None,
+    };
+    let saved = c.admin.update_settings(authed(&juan, update)).await.unwrap().into_inner();
+    let shown = saved.config.unwrap().settings.unwrap().automod_providers;
+    assert!(shown.iter().all(|p| p.api_key.is_empty()));
+    let mut offered = Vec::new();
+    for _ in 0..50 {
+        let list = pb::ListAutoModRulesRequest { server_id: on_b.id.clone() };
+        offered = c.automod.list_auto_mod_rules(authed(&juan, list)).await.unwrap().into_inner().providers;
+        if !offered.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(offered[0].id, "typesafe-jev");
 
     // Deleting a server: the stream says so, and the directory forgets it.
     c.servers.delete_server(authed(&juan, pb::DeleteServerRequest { server_id: on_a.id.clone() })).await.unwrap();

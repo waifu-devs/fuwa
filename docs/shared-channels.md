@@ -60,7 +60,9 @@ the news lets go the next time it hears "gone" from the other.
 - **Each side's AutoMod reads what that side's people write**: the guest's
   rules run on its shard before a message leaves, the home's run when it
   arrives. A home rule that would time someone out keeps a guest out of the
-  channel instead, since they aren't the home's member.
+  channel instead, since they aren't the home's member. Provider rules
+  (docs/automod.md) count too: each side asks its own provider before its
+  write, as for its own channels.
 - **Each side moderates its own people.** A guest's moderators (Manage
   Messages in their channel) can delete their own server's people's messages
   there; the home's moderators can delete anyone's. The home can keep a guest

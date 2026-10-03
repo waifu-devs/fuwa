@@ -524,6 +524,7 @@ impl MessageService for Api {
                 {
                     return Err(Error::ResourceExhausted("this server is out of storage".into()));
                 }
+                let asked = automod::ask(&self.app, &sdb, &member, &access, &req.channel_id, &req.content).await;
                 let message = sdb
                     .write(&account.id, async |conn, events| {
                         let channel =
@@ -540,8 +541,17 @@ impl MessageService for Api {
                                 return Err(Error::NotFound("message being replied to"));
                             }
                         }
-                        let verdict =
-                            automod::review(conn, &sdb.id, &member, &access, &channel, &req.content, events).await?;
+                        let verdict = automod::review(
+                            conn,
+                            &sdb.id,
+                            &member,
+                            &access,
+                            &channel,
+                            &req.content,
+                            asked.as_ref(),
+                            events,
+                        )
+                        .await?;
                         if let Some(why) = verdict.blocked {
                             return Ok(Err(why));
                         }
@@ -662,6 +672,14 @@ impl MessageService for Api {
                     let message = shared::guest_edit(&self.app, &sdb, &member, &access, &link, guest, &req).await?;
                     return Ok(pb::UpdateMessageResponse { message: Some(message) });
                 }
+                // A provider is asked before the write, about new text the author wrote.
+                let before = load_message(&sdb.read()?, &sdb.id, &req.message_id).await?;
+                let asked = match before {
+                    Some(m) if m.author_id == account.id && m.content != req.content => {
+                        automod::ask(&self.app, &sdb, &member, &access, &m.channel_id, &req.content).await
+                    }
+                    _ => None,
+                };
                 let message = sdb
                     .write(&account.id, async |conn, events| {
                         let mut message = load_message(conn, &sdb.id, &req.message_id)
@@ -679,9 +697,17 @@ impl MessageService for Api {
                             let channel = load_channel(conn, &sdb.id, &message.channel_id)
                                 .await?
                                 .ok_or(Error::NotFound("channel"))?;
-                            let verdict =
-                                automod::review(conn, &sdb.id, &member, &access, &channel, &req.content, events)
-                                    .await?;
+                            let verdict = automod::review(
+                                conn,
+                                &sdb.id,
+                                &member,
+                                &access,
+                                &channel,
+                                &req.content,
+                                asked.as_ref(),
+                                events,
+                            )
+                            .await?;
                             if let Some(why) = verdict.blocked {
                                 return Ok(Err(why));
                             }

@@ -1,6 +1,6 @@
 //! A server's settings, full screen with a side menu like the app's own:
-//! its name, picture and words, invites, roles, emoji, webhooks, members,
-//! bans and the audit log.
+//! its name, picture and words, the welcome screen, invites, roles, emoji,
+//! agents and webhooks, members, bans, AutoMod and the audit log.
 //! Each page shows only to people whose permissions open it, as in the web
 //! app's `ServerSettingsDialog.tsx`.
 
@@ -32,9 +32,12 @@ use crate::ui::widgets::{
     primary_button, server_icon, soft_button,
 };
 
+mod agents;
+mod automod;
 mod emoji;
 mod roles;
 mod webhooks;
+mod welcome;
 
 pub enum ServerSettingsEvent {
     Close,
@@ -48,12 +51,14 @@ pub enum ServerSettingsEvent {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Page {
     Overview,
+    Welcome,
     Invites,
     Roles,
     Emoji,
-    Webhooks,
+    Integrations,
     Members,
     Bans,
+    AutoMod,
     AuditLog,
 }
 
@@ -61,12 +66,14 @@ impl Page {
     fn label(self) -> &'static str {
         match self {
             Page::Overview => "Overview",
+            Page::Welcome => "Welcome screen",
             Page::Invites => "Invites",
             Page::Roles => "Roles",
             Page::Emoji => "Emoji",
-            Page::Webhooks => "Webhooks",
+            Page::Integrations => "Integrations",
             Page::Members => "Members",
             Page::Bans => "Bans",
+            Page::AutoMod => "AutoMod",
             Page::AuditLog => "Audit log",
         }
     }
@@ -74,12 +81,14 @@ impl Page {
     fn glyph(self) -> &'static str {
         match self {
             Page::Overview => "settings",
+            Page::Welcome => "party-popper",
             Page::Invites => "link",
             Page::Roles => "shield",
             Page::Emoji => "face-slightly-smiling-plus",
-            Page::Webhooks => "webhook",
+            Page::Integrations => "webhook",
             Page::Members => "users",
             Page::Bans => "gavel",
+            Page::AutoMod => "bot",
             Page::AuditLog => "scroll-text",
         }
     }
@@ -90,17 +99,22 @@ impl Page {
             Page::Invites => "The links that let people in. Revoke one and it stops working at once.",
             Page::Roles => "Who can do what. Members take the color of their highest role.",
             Page::Emoji => "The server's own emoji. Everyone here can use them as :name:.",
-            Page::Webhooks => "Addresses other apps post messages to, each into one channel.",
+            Page::Welcome => "What new members see first: a few words and channels to start in.",
+            Page::Integrations => {
+                "Agents, accounts programs drive, and webhooks, addresses other apps post messages to."
+            }
             Page::Members => "Everyone here. Time out, kick or ban the people you rank above.",
             Page::Bans => "Who's kept out, and why.",
+            Page::AutoMod => "Rules that catch messages as they're sent: blocked words, mention spam and links.",
             Page::AuditLog => "Every change people made here with their permissions.",
         }
     }
 }
 
 /// The settings group, then the moderation group, as on the web.
-const SETTINGS: [Page; 5] = [Page::Overview, Page::Invites, Page::Roles, Page::Emoji, Page::Webhooks];
-const MODERATION: [Page; 3] = [Page::Members, Page::Bans, Page::AuditLog];
+const SETTINGS: [Page; 6] =
+    [Page::Overview, Page::Welcome, Page::Invites, Page::Roles, Page::Emoji, Page::Integrations];
+const MODERATION: [Page; 4] = [Page::Members, Page::Bans, Page::AutoMod, Page::AuditLog];
 
 /// The pages someone with this access may open.
 fn pages(access: &crate::core::permissions::Access) -> Vec<Page> {
@@ -113,6 +127,7 @@ fn pages(access: &crate::core::permissions::Access) -> Vec<Page> {
     let mut out = Vec::new();
     if access.has(P::ManageServer) {
         out.push(Page::Overview);
+        out.push(Page::Welcome);
     }
     if invites {
         out.push(Page::Invites);
@@ -123,14 +138,17 @@ fn pages(access: &crate::core::permissions::Access) -> Vec<Page> {
     if access.has(P::ManageEmoji) {
         out.push(Page::Emoji);
     }
-    if access.has(P::ManageWebhooks) {
-        out.push(Page::Webhooks);
+    if access.has(P::ManageWebhooks) || access.has(P::ManageServer) {
+        out.push(Page::Integrations);
     }
     if members {
         out.push(Page::Members);
     }
     if access.has(P::BanMembers) {
         out.push(Page::Bans);
+    }
+    if access.has(P::ManageServer) {
+        out.push(Page::AutoMod);
     }
     if access.has(P::ViewAuditLog) {
         out.push(Page::AuditLog);
@@ -181,6 +199,11 @@ pub struct ServerSettingsView {
     roles: roles::Roles,
     emojis: emoji::Emojis,
     hooks: webhooks::Hooks,
+    agents: agents::Agents,
+    automod: automod::AutoMod,
+    welcome: welcome::Welcome,
+    /// A floating bar of changes not saved yet, drawn over the page's foot.
+    bar: Option<AnyElement>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -205,6 +228,9 @@ impl ServerSettingsView {
         let (roles, role_subscriptions) = roles::Roles::new(window, cx);
         let (emojis, emoji_subscriptions) = emoji::Emojis::new(window, cx);
         let (hooks, hook_subscriptions) = webhooks::Hooks::new(window, cx);
+        let (agents, agent_subscriptions) = agents::Agents::new(window, cx);
+        let (automod, automod_subscriptions) = automod::AutoMod::new(window, cx);
+        let (welcome, welcome_subscriptions) = welcome::Welcome::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe(&name, |_: &mut Self, _, e: &InputEvent, cx| {
                 if let InputEvent::Change = e {
@@ -225,6 +251,9 @@ impl ServerSettingsView {
         subscriptions.extend(role_subscriptions);
         subscriptions.extend(emoji_subscriptions);
         subscriptions.extend(hook_subscriptions);
+        subscriptions.extend(agent_subscriptions);
+        subscriptions.extend(automod_subscriptions);
+        subscriptions.extend(welcome_subscriptions);
         Self {
             core,
             key,
@@ -250,6 +279,10 @@ impl ServerSettingsView {
             roles,
             emojis,
             hooks,
+            agents,
+            automod,
+            welcome,
+            bar: None,
             _subscriptions: subscriptions,
         }
     }
@@ -1243,21 +1276,30 @@ impl Render for ServerSettingsView {
             )
             .child(menu);
 
+        self.bar = None;
         let body = match page {
             Page::Overview => self.overview(&server, &p, window, cx),
             Page::Invites => self.invites_page(&p, cx),
-            Page::Roles => {
-                self.roles.bar = None;
-                self.roles_page(&p, window, cx)
-            }
+            Page::Welcome => self.welcome_page(&server, &p, window, cx),
+            Page::Roles => self.roles_page(&p, window, cx),
             Page::Emoji => self.emoji_page(&p, window, cx),
-            Page::Webhooks => self.webhooks_page(&p, window, cx),
+            Page::Integrations => {
+                let mut both = div().flex().flex_col().gap(px(36.0));
+                if access.has(P::ManageServer) {
+                    both = both.child(self.agents_page(&p, window, cx));
+                }
+                if access.has(P::ManageWebhooks) {
+                    both = both.child(self.webhooks_page(&p, window, cx));
+                }
+                both.into_any_element()
+            }
             Page::Members => self.members_page(&p, cx),
             Page::Bans => self.bans_page(&p, cx),
+            Page::AutoMod => self.automod_page(&p, window, cx),
             Page::AuditLog => self.audit_page(&p, cx),
         };
         let content = div()
-            .w(px(if page == Page::Roles { 860.0 } else { 680.0 }))
+            .w(px(if matches!(page, Page::Roles | Page::Welcome) { 860.0 } else { 680.0 }))
             .flex()
             .flex_col()
             .gap(px(6.0))
@@ -1302,7 +1344,7 @@ impl Render for ServerSettingsView {
                             14.0,
                         )),
                 )
-                .when_some(self.roles.bar.take().filter(|_| page == Page::Roles), |el, bar| {
+                .when_some(self.bar.take(), |el, bar| {
                     el.child(
                         div().absolute().bottom(px(24.0)).left(px(300.0)).right_0().flex().justify_center().child(bar),
                     )
@@ -1384,6 +1426,73 @@ fn pill(text: &str, color: Hsla) -> gpui_kit::Div {
 
 fn chip_text(text: String, fg: Hsla, bg: Hsla) -> gpui_kit::Div {
     div().px(px(6.0)).rounded(px(6.0)).bg(bg).text_color(fg).child(text)
+}
+
+/// The floating "n changes not saved" bar, with Discard and Save.
+fn save_bar(
+    id: &str,
+    n: usize,
+    saving: bool,
+    p: &Palette,
+    cx: &mut Context<ServerSettingsView>,
+    discard: impl Fn(&mut ServerSettingsView, &mut Window, &mut Context<ServerSettingsView>) + 'static,
+    save: impl Fn(&mut ServerSettingsView, &mut Context<ServerSettingsView>) + 'static,
+) -> AnyElement {
+    motion::rise(
+        div()
+            .id(SharedString::from(format!("{id}-card")))
+            .occlude()
+            .w(px(560.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .px(px(16.0))
+            .py(px(10.0))
+            .rounded(corner(16.0))
+            .bg(p.card)
+            .border_1()
+            .border_color(alpha(p.primary, 0.4))
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: alpha(p.primary, if p.dark { 0.3 } else { 0.2 }),
+                offset: gpui_kit::point(px(0.0), px(16.0)),
+                blur_radius: px(40.0),
+                spread_radius: px(-10.0),
+                inset: false,
+            }])
+            .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child(if n == 1 {
+                "1 change not saved".to_owned()
+            } else {
+                format!("{n} changes not saved")
+            }))
+            .child(
+                soft_button(SharedString::from(format!("{id}-discard")), "Discard", p)
+                    .on_click(cx.listener(move |this, _, window, cx| discard(this, window, cx))),
+            )
+            .child(
+                primary_button(
+                    SharedString::from(format!("{id}-save")),
+                    if saving { "Saving…" } else { "Save changes" },
+                    p,
+                )
+                .when(saving, |el| el.opacity(0.6))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if !saving {
+                        save(this, cx)
+                    }
+                })),
+            ),
+        SharedString::from(id.to_owned()),
+        Duration::ZERO,
+        12.0,
+    )
+    .into_any_element()
+}
+
+/// A circle that turns while something's on its way.
+fn spinner(id: impl Into<SharedString>, size: f32, window: &Window) -> AnyElement {
+    motion::ambient(icon("loader-circle").size(px(size)), id.into(), Duration::from_millis(900), window, |el, t| {
+        el.rotate(gpui_kit::radians(t * std::f32::consts::TAU))
+    })
 }
 
 /// Grey bars that pulse while a list loads.
@@ -1871,14 +1980,18 @@ mod tests {
             pages(&owner),
             vec![
                 Page::Overview,
+                Page::Welcome,
                 Page::Invites,
                 Page::Roles,
                 Page::Emoji,
-                Page::Webhooks,
+                Page::Integrations,
                 Page::Members,
                 Page::Bans,
+                Page::AutoMod,
                 Page::AuditLog
             ]
         );
+        let hooks = Access { server: crate::core::permissions::bit(P::ManageWebhooks), ..Access::default() };
+        assert_eq!(pages(&hooks), vec![Page::Integrations]);
     }
 }

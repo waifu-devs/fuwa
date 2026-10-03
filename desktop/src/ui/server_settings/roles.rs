@@ -58,8 +58,6 @@ pub(super) struct Roles {
     /// The order being saved, shown until the server answers.
     moving: Option<Vec<String>>,
     saved: Option<Instant>,
-    /// The unsaved-changes bar, floated over the page's foot by the view.
-    pub(super) bar: Option<AnyElement>,
 }
 
 impl Roles {
@@ -92,7 +90,6 @@ impl Roles {
             busy: None,
             moving: None,
             saved: None,
-            bar: None,
         };
         (roles, subscriptions)
     }
@@ -133,7 +130,7 @@ fn dot(color: Option<u32>, size: f32, p: &Palette) -> gpui_kit::Div {
 }
 
 /// A switch that calls back into the page.
-fn switch(
+pub(super) fn switch(
     id: SharedString,
     on: bool,
     disabled: bool,
@@ -675,54 +672,23 @@ impl ServerSettingsView {
 
         let n = self.changes(role, everyone, cx);
         let saving = self.roles.saving;
-        let bar = (n > 0).then(|| {
+        if n > 0 {
             let (r1, r2) = (role.clone(), role.clone());
-            motion::rise(
-                div()
-                    .id("role-save-bar-card")
-                    .occlude()
-                    .w(px(560.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .px(px(16.0))
-                    .py(px(10.0))
-                    .rounded(corner(16.0))
-                    .bg(p.card)
-                    .border_1()
-                    .border_color(alpha(p.primary, 0.4))
-                    .shadow(vec![gpui_kit::BoxShadow {
-                        color: alpha(p.primary, if p.dark { 0.3 } else { 0.2 }),
-                        offset: gpui_kit::point(px(0.0), px(16.0)),
-                        blur_radius: px(40.0),
-                        spread_radius: px(-10.0),
-                        inset: false,
-                    }])
-                    .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child(if n == 1 {
-                        "1 change not saved".to_owned()
-                    } else {
-                        format!("{n} changes not saved")
-                    }))
-                    .child(
-                        soft_button("role-discard", "Discard", p)
-                            .on_click(cx.listener(move |this, _, window, cx| this.discard_role(&r1, window, cx))),
-                    )
-                    .child(
-                        primary_button("role-save", if saving { "Saving…" } else { "Save changes" }, p)
-                            .when(saving, |el| el.opacity(0.6))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if !this.roles.saving {
-                                    this.save_role(&r2, everyone, cx)
-                                }
-                            })),
-                    ),
+            self.bar = Some(save_bar(
                 "role-save-bar",
-                Duration::ZERO,
-                12.0,
-            )
-        });
+                n,
+                saving,
+                p,
+                cx,
+                move |this, window, cx| this.discard_role(&r1, window, cx),
+                move |this, cx| {
+                    if !this.roles.saving {
+                        this.save_role(&r2, everyone, cx)
+                    }
+                },
+            ));
+        }
         let _ = window;
-        self.roles.bar = bar.map(IntoElement::into_any_element);
         div()
             .flex()
             .flex_col()

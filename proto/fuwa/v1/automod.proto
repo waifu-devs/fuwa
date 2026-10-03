@@ -11,11 +11,13 @@ service AutoModService {
   // The server's rules, oldest first. MANAGE_SERVER.
   rpc ListAutoModRules(ListAutoModRulesRequest) returns (ListAutoModRulesResponse);
   // Adds a rule (with no id) or replaces one. MANAGE_SERVER. A server has up
-  // to 6 keyword rules, one mention spam rule and one link rule.
+  // to 6 keyword rules, one mention spam rule, one link rule and one
+  // provider rule.
   rpc SaveAutoModRule(SaveAutoModRuleRequest) returns (SaveAutoModRuleResponse);
   rpc DeleteAutoModRule(DeleteAutoModRuleRequest) returns (DeleteAutoModRuleResponse);
   // What a rule, saved or not, would make of some text, without sending
-  // anything. MANAGE_SERVER.
+  // anything. MANAGE_SERVER. A PROVIDER rule asks its provider, so the text
+  // goes to the provider's host.
   rpc TestAutoModRule(TestAutoModRuleRequest) returns (TestAutoModRuleResponse);
 }
 
@@ -25,6 +27,32 @@ message ListAutoModRulesRequest {
 
 message ListAutoModRulesResponse {
   repeated AutoModRule rules = 1;
+  // The moderation providers this instance's admins turned on, which a
+  // PROVIDER rule can use.
+  repeated AutoModProvider providers = 2;
+}
+
+// A moderation provider a server can use. Messages it checks (their text
+// only, never who wrote them or where) go from the instance to its host.
+message AutoModProvider {
+  // "typesafe-jev", "cloudflare-clef", or "custom-..." for the instance's own.
+  string id = 1;
+  // "TypeSafe Jev".
+  string name = 2;
+  // Where checked messages go, such as "api.typesafe.ai".
+  string host = 3;
+  // What it can tell apart, each with the level a new rule starts at.
+  repeated AutoModLabel labels = 4;
+}
+
+message AutoModLabel {
+  // "hate".
+  string id = 1;
+  // "Hate".
+  string name = 2;
+  // What it means, in a sentence.
+  string description = 3;
+  AutoModLevel default_level = 4;
 }
 
 message SaveAutoModRuleRequest {
@@ -52,6 +80,12 @@ message TestAutoModRuleRequest {
 message TestAutoModRuleResponse {
   // Whether it would set the rule off.
   bool matched = 1;
-  // What did: the words or links, or how many pings.
+  // What did: the words or links, how many pings, or the provider's labels
+  // and how sure it was ("Hate 97%").
   repeated string matches = 2;
+  // PROVIDER: why the provider couldn't answer. Messages then go through its
+  // rule unchecked (the other rules still apply).
+  string error = 3;
+  // PROVIDER: how long the provider took.
+  int32 elapsed_ms = 4;
 }
