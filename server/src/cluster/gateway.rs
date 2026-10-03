@@ -319,6 +319,7 @@ impl Gateway {
                 }
             })
             .layer(cors(self.clone()))
+            .layer(axum::middleware::from_fn(crate::probes::turn_away))
     }
 
     /// Passes a call on to whichever part answers it. A part that's down,

@@ -876,6 +876,13 @@ async fn browsers_can_call_over_grpc_web() {
         // With the web client built in, unknown paths open the app instead (see tests/web.rs).
         assert_eq!(http.get(format!("{base}/nope")).send().await.unwrap().status(), 404);
     }
+    // Scanners' paths are turned away before the API or the web app sees them.
+    for probe in ["/.env", "/wp-login.php", "/.git/config", "/actuator/env", "/wp-admin/"] {
+        let response = http.get(format!("{base}{probe}")).send().await.unwrap();
+        assert_eq!(response.status(), 404, "{probe}");
+        assert_eq!(response.headers()["cache-control"], "public, max-age=86400");
+        assert_eq!(response.text().await.unwrap(), "not found\n");
+    }
 
     // Live events stream to browsers too, over plain HTTP/1.1.
     let mut c = clients(&instance).await;
