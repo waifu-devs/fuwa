@@ -17,6 +17,7 @@ import { setTitle } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceFlags } from "./parts";
 import { CameraButton, LiveBadge, PopOutButton, RecordButton, ScreenButton, TileMedia } from "./Video";
+import { RecordingsButton } from "./Recordings";
 import { useVoiceIn } from "./VoiceUsers";
 
 /**
@@ -67,6 +68,7 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
         <CopyId id={channel.id} what="channel ID" />
         <span className="flex-1" />
         <RecordingPill instanceKey={instanceKey} serverId={serverId} states={states} />
+        <RecordingsButton instanceKey={instanceKey} serverId={serverId} channel={channel} states={states} />
         <AnimatePresence>
           {states.length > 0 && (
             <motion.span
@@ -205,11 +207,12 @@ function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey:
   );
 }
 
-/** Who's recording the channel, for everyone to see, while anyone is. */
+/** Who's recording the channel, for everyone to see, while anyone is: on the server, or on their device. */
 function RecordingPill({ instanceKey, serverId, states }: { instanceKey: string; serverId: string; states: VoiceState[] }) {
+  const onServer = states.some((v) => v.serverRecord);
   const names = useFuwa((s) =>
     states
-      .filter((v) => v.selfRecord)
+      .filter((v) => v.selfRecord || v.serverRecord)
       .map((v) => {
         const member = s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === v.userId);
         return member ? memberName(member) : displayName(s.instances[instanceKey]?.users[v.userId]);
@@ -224,14 +227,16 @@ function RecordingPill({ instanceKey, serverId, states }: { instanceKey: string;
           animate={{ opacity: 1, scale: 1, x: 0 }}
           exit={{ opacity: 0, scale: 0.8 }}
           transition={SPRING}
-          title={`${names} ${names.includes(",") ? "are" : "is"} recording this channel`}
+          title={`${names} ${names.includes(",") ? "are" : "is"} recording this channel${onServer ? " (on the server)" : ""}`}
           className="flex max-w-[45%] items-center gap-1.5 rounded-full bg-[#ed4245]/12 px-2.5 py-1 text-xs font-bold text-[#ed4245]"
         >
           <span aria-hidden className="relative grid size-2 place-items-center">
             <span className="absolute inset-0 animate-ping rounded-full bg-[#ed4245]/60" />
             <span className="size-2 rounded-full bg-[#ed4245]" />
           </span>
-          <span className="truncate">Recording · {names}</span>
+          <span className="truncate">
+            {onServer ? "Recording on the server" : "Recording"} · {names}
+          </span>
         </motion.span>
       )}
     </AnimatePresence>

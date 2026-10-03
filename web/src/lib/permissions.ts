@@ -147,8 +147,10 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
   },
   [P.RECORD]: {
     label: "Record",
-    about: "Record voice channels' sound on their own device. Everyone in the channel sees while they do.",
-    channel: "Record this voice channel's sound on their own device. Everyone in it sees while they do.",
+    about:
+      "Record voice channels on their device or on the server, and download and delete the server's recordings. People using fuwa see it and hear a beep; nothing can stop someone recording their speakers with other software.",
+    channel:
+      "Record this voice channel on their device or on the server, and download and delete its recordings. People using fuwa see it and hear a beep; nothing can stop someone recording their speakers with other software.",
   },
   [P.MUTE_MEMBERS]: {
     label: "Mute members",

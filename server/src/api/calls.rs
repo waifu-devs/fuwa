@@ -40,6 +40,7 @@ const LISTEN_BUFFER: usize = 512;
 /// one went away, before it gives up and the program has to listen again.
 const LISTEN_RECONNECT: Duration = Duration::from_secs(30);
 
+type DownloadStream = Pin<Box<dyn Stream<Item = std::result::Result<pb::DownloadRecordingResponse, Status>> + Send>>;
 type ListenStream = Pin<Box<dyn Stream<Item = std::result::Result<pb::ListenVoiceResponse, Status>> + Send>>;
 type Listener = tokio::sync::mpsc::Sender<std::result::Result<pb::ListenVoiceResponse, Status>>;
 
@@ -235,7 +236,19 @@ impl Quiet {
         state.video_suppress = self.video_suppress;
         state.record_suppress = self.record_suppress;
         state.self_record &= !self.record_suppress;
+        state.server_record &= !self.record_suppress;
     }
+}
+
+/// What someone says they're doing in a voice channel.
+#[derive(Debug, Clone, Copy, Default)]
+struct Selves {
+    self_mute: bool,
+    self_deaf: bool,
+    self_video: bool,
+    self_stream: bool,
+    self_record: bool,
+    server_record: bool,
 }
 
 /// Whether someone may be in a voice channel, and if so what they can't do there.
@@ -275,6 +288,8 @@ async fn gone(app: &App, scope: &str, place: &Place) {
 
 /// Sends a voice change to the server's members, not stored.
 fn publish_voice(app: &App, server_id: &str, actor_id: &str, payload: Payload) {
+    // A recording starts or stops with who's in the call and what they say.
+    app.recordings.nudge();
     app.hub.publish([pb::Event {
         id: new_id(),
         server_id: server_id.to_string(),
@@ -370,7 +385,7 @@ impl Api {
         account: &Account,
         server_id: &str,
         channel_id: &str,
-        (self_mute, self_deaf, self_video, self_stream, self_record): (bool, bool, bool, bool, bool),
+        Selves { self_mute, self_deaf, self_video, self_stream, self_record, server_record }: Selves,
         session_id: &str,
     ) -> Result<(String, Place)> {
         self.calls_on()?;
@@ -401,6 +416,7 @@ impl Api {
             self_video,
             self_stream,
             self_record,
+            server_record: server_record && self.app.settings().call_recordings,
             ..Default::default()
         };
         Quiet::new(&seat.access, &channel.id).apply(&mut state);
@@ -423,7 +439,14 @@ impl Api {
 
     async fn join_voice(&self, metadata: &MetadataMap, req: pb::JoinVoiceRequest) -> Result<pb::JoinVoiceResponse> {
         let account = self.account(metadata).await?;
-        let selves = (req.self_mute, req.self_deaf, req.self_video, req.self_stream, req.self_record);
+        let selves = Selves {
+            self_mute: req.self_mute,
+            self_deaf: req.self_deaf,
+            self_video: req.self_video,
+            self_stream: req.self_stream,
+            self_record: req.self_record,
+            server_record: req.server_record,
+        };
         let (server_id, place) =
             self.voice_place(&account, &req.server_id, &req.channel_id, selves, &req.session_id).await?;
         let answer = self.app.media_link.open(&place, &req.offer).await?;
@@ -433,8 +456,8 @@ impl Api {
 
     async fn listen_voice(&self, metadata: &MetadataMap, req: pb::ListenVoiceRequest) -> Result<ListenStream> {
         let account = self.account(metadata).await?;
-        // Programs have no camera.
-        let selves = (req.self_mute, req.self_deaf, false, false, false);
+        // Programs have no camera, and record by listening.
+        let selves = Selves { self_mute: req.self_mute, self_deaf: req.self_deaf, ..Default::default() };
         let (server_id, place) =
             self.voice_place(&account, &req.server_id, &req.channel_id, selves, &req.session_id).await?;
         let events = self.app.media_link.bridge(&place).await?;
@@ -516,17 +539,20 @@ impl Api {
         let place = match before {
             Some(mut place) => {
                 let may_before = place.may();
+                let server_record = req.server_record && self.app.settings().call_recordings;
                 let changed = Quiet::of(&place.state) != quiet
                     || place.state.self_mute != req.self_mute
                     || place.state.self_deaf != req.self_deaf
                     || place.state.self_video != req.self_video
                     || place.state.self_stream != req.self_stream
-                    || place.state.self_record != req.self_record;
+                    || place.state.self_record != req.self_record
+                    || place.state.server_record != server_record;
                 place.state.self_mute = req.self_mute;
                 place.state.self_deaf = req.self_deaf;
                 place.state.self_video = req.self_video;
                 place.state.self_stream = req.self_stream;
                 place.state.self_record = req.self_record;
+                place.state.server_record = server_record;
                 quiet.apply(&mut place.state);
                 let may_changed = place.may() != may_before;
                 place.expires = lease();
@@ -555,6 +581,7 @@ impl Api {
                     self_video: req.self_video,
                     self_stream: req.self_stream,
                     self_record: req.self_record,
+                    server_record: req.server_record && self.app.settings().call_recordings,
                     server_mute: moderation.0,
                     server_deaf: moderation.1,
                     joined_at: Some(timestamp(now_ms())),
@@ -647,6 +674,55 @@ impl Api {
         let update = Payload::VoiceStateUpdated(pb::VoiceStateUpdated { state: Some(place.state.clone()) });
         publish_voice(&self.app, &server_id, &account.id, update);
         Ok(pb::ModerateVoiceResponse {})
+    }
+
+    // ───────────────────────── Recordings ─────────────────────────
+
+    /// The caller's seat in the server a recording is in.
+    async fn recorder(&self, metadata: &MetadataMap, server_id: &str) -> Result<Seat> {
+        let account = self.account(metadata).await?;
+        self.membership(&account, server_id).await
+    }
+
+    async fn list_recordings(
+        &self,
+        metadata: &MetadataMap,
+        req: pb::ListRecordingsRequest,
+    ) -> Result<pb::ListRecordingsResponse> {
+        let seat = self.recorder(metadata, &req.server_id).await?;
+        seat.access.require_in(&req.channel_id, pb::Permission::Record)?;
+        let recordings = crate::recordings::list(&self.app, &seat.sdb, &req.channel_id).await?;
+        Ok(pb::ListRecordingsResponse { recordings })
+    }
+
+    async fn download_recording(
+        &self,
+        metadata: &MetadataMap,
+        req: pb::DownloadRecordingRequest,
+    ) -> Result<DownloadStream> {
+        use tokio_stream::StreamExt;
+        let seat = self.recorder(metadata, &req.server_id).await?;
+        let row = crate::recordings::find(&seat.sdb, &req.recording_id).await?;
+        seat.access.require_in(&row.channel_id, pb::Permission::Record)?;
+        let row = crate::recordings::finished(&self.app, &seat.sdb, row).await?;
+        let user_id = crate::id::parse_id("account", &req.user_id)?;
+        let pieces = crate::recordings::download(&self.app, &seat.sdb, &row, &user_id).await?;
+        let stream = tokio_stream::wrappers::ReceiverStream::new(pieces)
+            .map(|piece| piece.map(|data| pb::DownloadRecordingResponse { data }).map_err(Status::from));
+        Ok(Box::pin(stream))
+    }
+
+    async fn delete_recording(
+        &self,
+        metadata: &MetadataMap,
+        req: pb::DeleteRecordingRequest,
+    ) -> Result<pb::DeleteRecordingResponse> {
+        let seat = self.recorder(metadata, &req.server_id).await?;
+        let row = crate::recordings::find(&seat.sdb, &req.recording_id).await?;
+        seat.access.require_in(&row.channel_id, pb::Permission::Record)?;
+        let row = crate::recordings::finished(&self.app, &seat.sdb, row).await?;
+        crate::recordings::delete(&self.app, &seat.sdb, &row).await?;
+        Ok(pb::DeleteRecordingResponse {})
     }
 
     // ───────────────────────── Direct-message calls ─────────────────────────
@@ -785,7 +861,11 @@ impl CallService for Api {
                     true => ice_servers(&settings.ice_urls, &settings.turn_secret)?,
                     false => vec![],
                 };
-                Ok(pb::GetCallSettingsResponse { enabled, ice_servers })
+                Ok(pb::GetCallSettingsResponse {
+                    enabled,
+                    ice_servers,
+                    recordings: enabled && settings.call_recordings,
+                })
             }
             .await,
         )
@@ -837,6 +917,29 @@ impl CallService for Api {
         request: Request<pb::SpeakVoiceRequest>,
     ) -> Result<Response<pb::SpeakVoiceResponse>, Status> {
         respond(Api::speak_voice(self, request.metadata(), request.get_ref().clone()).await)
+    }
+
+    async fn list_recordings(
+        &self,
+        request: Request<pb::ListRecordingsRequest>,
+    ) -> Result<Response<pb::ListRecordingsResponse>, Status> {
+        respond(Api::list_recordings(self, request.metadata(), request.get_ref().clone()).await)
+    }
+
+    type DownloadRecordingStream = DownloadStream;
+
+    async fn download_recording(
+        &self,
+        request: Request<pb::DownloadRecordingRequest>,
+    ) -> Result<Response<DownloadStream>, Status> {
+        respond(Api::download_recording(self, request.metadata(), request.get_ref().clone()).await)
+    }
+
+    async fn delete_recording(
+        &self,
+        request: Request<pb::DeleteRecordingRequest>,
+    ) -> Result<Response<pb::DeleteRecordingResponse>, Status> {
+        respond(Api::delete_recording(self, request.metadata(), request.get_ref().clone()).await)
     }
 
     async fn join_dm_call(

@@ -1,9 +1,9 @@
-import { CircleDotIcon, CropIcon, ExpandIcon, MonitorUpIcon, MonitorXIcon, PictureInPicture2Icon, SparklesIcon, TagIcon, VideoIcon, VideoOffIcon, XIcon } from "lucide-react";
+import { CircleDotIcon, CropIcon, LaptopIcon, ServerIcon, ExpandIcon, MonitorUpIcon, MonitorXIcon, PictureInPicture2Icon, SparklesIcon, TagIcon, VideoIcon, VideoOffIcon, XIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Permission, type User, type VoiceState } from "@/gen/fuwa/v1/types_pb";
-import { toggleCamera, toggleRecording, toggleScreen } from "@/calls/engine";
+import { setRecording, setServerRecording, toggleCamera, toggleRecording, toggleScreen } from "@/calls/engine";
 import { getCalls, subscribeCalls, useCalls, type CallTarget } from "@/calls/state";
 import { canShareScreen, feedOf, useLayerFor, useVideoTrack } from "@/calls/video";
 import { useAccess } from "@/fuwa/hooks";
@@ -15,6 +15,7 @@ import { setPrefs, usePrefs } from "@/lib/prefs";
 import { cue } from "@/lib/sounds";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useSpeaking, VoiceAvatar } from "./parts";
 
 /**
@@ -189,17 +190,26 @@ export function useMayRecord(target: CallTarget | null | undefined): boolean {
   return hasIn(access, target.channelId, Permission.RECORD);
 }
 
-/** Records the call's sound to a file on this device, or stops and saves it. Hidden where you can't record. */
+/**
+ * Records the call: its sound to a file on this device, or (in a voice
+ * channel, where the instance allows it) everyone's sound on the server, a
+ * track per person. With both to choose from it opens a menu. Hidden where
+ * you can't record.
+ */
 export function RecordButton({ size = "sm", className }: { size?: "sm" | "lg"; className?: string }) {
-  const on = useCalls((s) => s.selfRecord);
+  const device = useCalls((s) => s.selfRecord);
+  const server = useCalls((s) => s.serverRecord);
+  const offered = useCalls((s) => s.serverRecordings);
   const target = useCalls((s) => s.call?.target);
   const may = useMayRecord(target);
+  const on = device || server;
   if (!may && !on) return null;
-  const label = on ? "Stop recording and save it" : "Record the call's sound (everyone sees you are)";
-  return (
+  const both = target?.kind === "voice" && (offered || server);
+  const label = !both ? (on ? "Stop recording and save it" : "Record the call's sound (everyone sees you are)") : on ? "Recording: stop it here" : "Record this channel";
+  const button = (
     <button
       type="button"
-      onClick={toggleRecording}
+      onClick={both ? undefined : toggleRecording}
       aria-pressed={on}
       aria-label={label}
       title={label}
@@ -216,6 +226,40 @@ export function RecordButton({ size = "sm", className }: { size?: "sm" | "lg"; c
       </motion.span>
     </button>
   );
+  if (!both) return button;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="center" className="w-72">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">Everyone in the channel sees it, and hears a beep</DropdownMenuLabel>
+        <DropdownMenuItem onSelect={() => setRecording(!device)} className="items-start gap-2.5 py-2">
+          <LaptopIcon className="mt-0.5" />
+          <span className="min-w-0">
+            <span className="block font-bold">{device ? "Stop and save the file" : "On this device"}</span>
+            <span className="block text-xs text-muted-foreground">{device ? "Your recording downloads now." : "The call's sound as you hear it, saved here as one file."}</span>
+          </span>
+          {device && <RecordingDot />}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setServerRecording(!server)} className="items-start gap-2.5 py-2">
+          <ServerIcon className="mt-0.5" />
+          <span className="min-w-0">
+            <span className="block font-bold">{server ? "Stop recording on the server" : "On the server"}</span>
+            <span className="block text-xs text-muted-foreground">{server ? "It stays in this channel's recordings." : "A track per person, kept for people who can record here."}</span>
+          </span>
+          {server && <RecordingDot />}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function RecordingDot() {
+  return (
+    <span aria-hidden className="relative mt-1.5 ml-auto grid size-2 shrink-0 place-items-center">
+      <span className="absolute inset-0 animate-ping rounded-full bg-[#ed4245]/60" />
+      <span className="size-2 rounded-full bg-[#ed4245]" />
+    </span>
+  );
 }
 
 /**
@@ -229,8 +273,7 @@ export function RecordingWatch() {
     if (!inst || !target) return "";
     const states = target.kind === "voice" ? inst.voice[target.serverId]?.filter((v) => v.channelId === target.channelId) : inst.dms.calls[target.conversationId]?.participants;
     return (states ?? [])
-      .filter((v) => v.selfRecord && v.userId !== inst.me?.id)
-      .map((v) => v.userId)
+      .flatMap((v) => (v.userId === inst.me?.id ? [] : [...(v.selfRecord ? [v.userId] : []), ...(v.serverRecord ? [`server:${v.userId}`] : [])]))
       .sort()
       .join(" ");
   });
@@ -241,9 +284,12 @@ export function RecordingWatch() {
     seen.current = now;
     if (!fresh.length || !target) return;
     const inst = store.get().instances[target.instance];
-    const names = fresh.map((id) => displayName(inst?.users[id])).join(", ");
+    const name = (ids: string[]) => ids.map((id) => displayName(inst?.users[id])).join(", ");
+    const onServer = fresh.filter((id) => id.startsWith("server:")).map((id) => id.slice(7));
+    const onDevice = fresh.filter((id) => !id.startsWith("server:"));
     cue("recording");
-    toast(`${names} started recording this call.`);
+    if (onDevice.length) toast(`${name(onDevice)} started recording this call.`);
+    if (onServer.length) toast(`${name(onServer)} started recording this channel on the server.`);
   }, [recording, target]);
   return null;
 }

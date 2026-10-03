@@ -768,6 +768,12 @@ message VoiceState {
   // They can't record here: they don't have RECORD in this channel. Never
   // set in direct-message calls.
   bool record_suppress = 14;
+  // They're recording the voice channel on the server: the instance keeps
+  // everyone's sound, one track per person, for the people with RECORD
+  // there (CallService.ListRecordings). Needs RECORD, and the instance
+  // allowing it (InstanceSettings.call_recordings). Never set in
+  // direct-message calls.
+  bool server_record = 15;
 }
 
 message ServerUpdated {

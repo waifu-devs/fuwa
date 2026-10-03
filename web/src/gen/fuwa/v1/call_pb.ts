@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/call.proto.
  */
 export const file_fuwa_v1_call: GenFile = /*@__PURE__*/
-  fileDesc("ChJmdXdhL3YxL2NhbGwucHJvdG8SB2Z1d2EudjEiPwoJSWNlU2VydmVyEgwKBHVybHMYASADKAkSEAoIdXNlcm5hbWUYAiABKAkSEgoKY3JlZGVudGlhbBgDIAEoCSIYChZHZXRDYWxsU2V0dGluZ3NSZXF1ZXN0IlMKF0dldENhbGxTZXR0aW5nc1Jlc3BvbnNlEg8KB2VuYWJsZWQYASABKAgSJwoLaWNlX3NlcnZlcnMYAiADKAsyEi5mdXdhLnYxLkljZVNlcnZlciLAAQoQSm9pblZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRINCgVvZmZlchgDIAEoCRIRCglzZWxmX211dGUYBCABKAgSEQoJc2VsZl9kZWFmGAUgASgIEhIKCnNlc3Npb25faWQYBiABKAkSEgoKc2VsZl92aWRlbxgHIAEoCBITCgtzZWxmX3N0cmVhbRgIIAEoCBITCgtzZWxmX3JlY29yZBgJIAEoCCJbChFKb2luVm9pY2VSZXNwb25zZRIOCgZhbnN3ZXIYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIiCgVzdGF0ZRgDIAEoCzITLmZ1d2EudjEuVm9pY2VTdGF0ZSI6ChFMZWF2ZVZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIUChJMZWF2ZVZvaWNlUmVzcG9uc2UisQEKEEtlZXBWb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCRIRCglzZWxmX211dGUYBCABKAgSEQoJc2VsZl9kZWFmGAUgASgIEhIKCnNlbGZfdmlkZW8YBiABKAgSEwoLc2VsZl9zdHJlYW0YByABKAgSEwoLc2VsZl9yZWNvcmQYCCABKAgiNwoRS2VlcFZvaWNlUmVzcG9uc2USIgoFc3RhdGUYASABKAsyEy5mdXdhLnYxLlZvaWNlU3RhdGUiKwoWTGlzdFZvaWNlU3RhdGVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiPgoXTGlzdFZvaWNlU3RhdGVzUmVzcG9uc2USIwoGc3RhdGVzGAEgAygLMhMuZnV3YS52MS5Wb2ljZVN0YXRlIqIBChRNb2RlcmF0ZVZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIYCgtzZXJ2ZXJfbXV0ZRgDIAEoCEgAiAEBEhgKC3NlcnZlcl9kZWFmGAQgASgISAGIAQESEgoKZGlzY29ubmVjdBgFIAEoCEIOCgxfc2VydmVyX211dGVCDgoMX3NlcnZlcl9kZWFmIhcKFU1vZGVyYXRlVm9pY2VSZXNwb25zZSJ1ChJMaXN0ZW5Wb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEQoJc2VsZl9tdXRlGAMgASgIEhEKCXNlbGZfZGVhZhgEIAEoCBISCgpzZXNzaW9uX2lkGAUgASgJImwKE0xpc3RlblZvaWNlUmVzcG9uc2USJgoGam9pbmVkGAEgASgLMhQuZnV3YS52MS5Wb2ljZUpvaW5lZEgAEiQKBWZyYW1lGAIgASgLMhMuZnV3YS52MS5Wb2ljZUZyYW1lSABCBwoFZXZlbnQiRQoLVm9pY2VKb2luZWQSEgoKc2Vzc2lvbl9pZBgBIAEoCRIiCgVzdGF0ZRgCIAEoCzITLmZ1d2EudjEuVm9pY2VTdGF0ZSI+CgpWb2ljZUZyYW1lEg8KB3VzZXJfaWQYASABKAkSDAoEb3B1cxgCIAEoDBIRCgl0aW1lc3RhbXAYAyABKA0iSgoRU3BlYWtWb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGZnJhbWVzGAMgAygMIiQKElNwZWFrVm9pY2VSZXNwb25zZRIOCgZxdWV1ZWQYASABKA0iswEKEUpvaW5EbUNhbGxSZXF1ZXN0EhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRINCgVvZmZlchgCIAEoCRIRCglzZWxmX211dGUYAyABKAgSEQoJc2VsZl9kZWFmGAQgASgIEhIKCnNlc3Npb25faWQYBSABKAkSEgoKc2VsZl92aWRlbxgGIAEoCBITCgtzZWxmX3N0cmVhbRgHIAEoCBITCgtzZWxmX3JlY29yZBgIIAEoCCJcChJKb2luRG1DYWxsUmVzcG9uc2USDgoGYW5zd2VyGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSIgoFc3RhdGUYAyABKAsyEy5mdXdhLnYxLlZvaWNlU3RhdGUiQQoSTGVhdmVEbUNhbGxSZXF1ZXN0EhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIhUKE0xlYXZlRG1DYWxsUmVzcG9uc2UipAEKEUtlZXBEbUNhbGxSZXF1ZXN0EhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXNlbGZfbXV0ZRgDIAEoCBIRCglzZWxmX2RlYWYYBCABKAgSEgoKc2VsZl92aWRlbxgFIAEoCBITCgtzZWxmX3N0cmVhbRgGIAEoCBITCgtzZWxmX3JlY29yZBgHIAEoCCI4ChJLZWVwRG1DYWxsUmVzcG9uc2USIgoFc3RhdGUYASABKAsyEy5mdXdhLnYxLlZvaWNlU3RhdGUiFAoSTGlzdERtQ2FsbHNSZXF1ZXN0IjUKE0xpc3REbUNhbGxzUmVzcG9uc2USHgoFY2FsbHMYASADKAsyDy5mdXdhLnYxLkRtQ2FsbCKQAQoGRG1DYWxsEhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRIpCgxwYXJ0aWNpcGFudHMYAiADKAsyEy5mdXdhLnYxLlZvaWNlU3RhdGUSLgoKc3RhcnRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKc3RhcnRlZF9ieRgEIAEoCTKNBwoLQ2FsbFNlcnZpY2USVAoPR2V0Q2FsbFNldHRpbmdzEh8uZnV3YS52MS5HZXRDYWxsU2V0dGluZ3NSZXF1ZXN0GiAuZnV3YS52MS5HZXRDYWxsU2V0dGluZ3NSZXNwb25zZRJCCglKb2luVm9pY2USGS5mdXdhLnYxLkpvaW5Wb2ljZVJlcXVlc3QaGi5mdXdhLnYxLkpvaW5Wb2ljZVJlc3BvbnNlEkUKCkxlYXZlVm9pY2USGi5mdXdhLnYxLkxlYXZlVm9pY2VSZXF1ZXN0GhsuZnV3YS52MS5MZWF2ZVZvaWNlUmVzcG9uc2USQgoJS2VlcFZvaWNlEhkuZnV3YS52MS5LZWVwVm9pY2VSZXF1ZXN0GhouZnV3YS52MS5LZWVwVm9pY2VSZXNwb25zZRJUCg9MaXN0Vm9pY2VTdGF0ZXMSHy5mdXdhLnYxLkxpc3RWb2ljZVN0YXRlc1JlcXVlc3QaIC5mdXdhLnYxLkxpc3RWb2ljZVN0YXRlc1Jlc3BvbnNlEk4KDU1vZGVyYXRlVm9pY2USHS5mdXdhLnYxLk1vZGVyYXRlVm9pY2VSZXF1ZXN0Gh4uZnV3YS52MS5Nb2RlcmF0ZVZvaWNlUmVzcG9uc2USSgoLTGlzdGVuVm9pY2USGy5mdXdhLnYxLkxpc3RlblZvaWNlUmVxdWVzdBocLmZ1d2EudjEuTGlzdGVuVm9pY2VSZXNwb25zZTABEkUKClNwZWFrVm9pY2USGi5mdXdhLnYxLlNwZWFrVm9pY2VSZXF1ZXN0GhsuZnV3YS52MS5TcGVha1ZvaWNlUmVzcG9uc2USRQoKSm9pbkRtQ2FsbBIaLmZ1d2EudjEuSm9pbkRtQ2FsbFJlcXVlc3QaGy5mdXdhLnYxLkpvaW5EbUNhbGxSZXNwb25zZRJICgtMZWF2ZURtQ2FsbBIbLmZ1d2EudjEuTGVhdmVEbUNhbGxSZXF1ZXN0GhwuZnV3YS52MS5MZWF2ZURtQ2FsbFJlc3BvbnNlEkUKCktlZXBEbUNhbGwSGi5mdXdhLnYxLktlZXBEbUNhbGxSZXF1ZXN0GhsuZnV3YS52MS5LZWVwRG1DYWxsUmVzcG9uc2USSAoLTGlzdERtQ2FsbHMSGy5mdXdhLnYxLkxpc3REbUNhbGxzUmVxdWVzdBocLmZ1d2EudjEuTGlzdERtQ2FsbHNSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChJmdXdhL3YxL2NhbGwucHJvdG8SB2Z1d2EudjEiPwoJSWNlU2VydmVyEgwKBHVybHMYASADKAkSEAoIdXNlcm5hbWUYAiABKAkSEgoKY3JlZGVudGlhbBgDIAEoCSIYChZHZXRDYWxsU2V0dGluZ3NSZXF1ZXN0ImcKF0dldENhbGxTZXR0aW5nc1Jlc3BvbnNlEg8KB2VuYWJsZWQYASABKAgSJwoLaWNlX3NlcnZlcnMYAiADKAsyEi5mdXdhLnYxLkljZVNlcnZlchISCgpyZWNvcmRpbmdzGAMgASgIItcBChBKb2luVm9pY2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEg0KBW9mZmVyGAMgASgJEhEKCXNlbGZfbXV0ZRgEIAEoCBIRCglzZWxmX2RlYWYYBSABKAgSEgoKc2Vzc2lvbl9pZBgGIAEoCRISCgpzZWxmX3ZpZGVvGAcgASgIEhMKC3NlbGZfc3RyZWFtGAggASgIEhMKC3NlbGZfcmVjb3JkGAkgASgIEhUKDXNlcnZlcl9yZWNvcmQYCiABKAgiWwoRSm9pblZvaWNlUmVzcG9uc2USDgoGYW5zd2VyGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSIgoFc3RhdGUYAyABKAsyEy5mdXdhLnYxLlZvaWNlU3RhdGUiOgoRTGVhdmVWb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiFAoSTGVhdmVWb2ljZVJlc3BvbnNlIsgBChBLZWVwVm9pY2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkSEQoJc2VsZl9tdXRlGAQgASgIEhEKCXNlbGZfZGVhZhgFIAEoCBISCgpzZWxmX3ZpZGVvGAYgASgIEhMKC3NlbGZfc3RyZWFtGAcgASgIEhMKC3NlbGZfcmVjb3JkGAggASgIEhUKDXNlcnZlcl9yZWNvcmQYCSABKAgiNwoRS2VlcFZvaWNlUmVzcG9uc2USIgoFc3RhdGUYASABKAsyEy5mdXdhLnYxLlZvaWNlU3RhdGUiKwoWTGlzdFZvaWNlU3RhdGVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiPgoXTGlzdFZvaWNlU3RhdGVzUmVzcG9uc2USIwoGc3RhdGVzGAEgAygLMhMuZnV3YS52MS5Wb2ljZVN0YXRlIqIBChRNb2RlcmF0ZVZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIYCgtzZXJ2ZXJfbXV0ZRgDIAEoCEgAiAEBEhgKC3NlcnZlcl9kZWFmGAQgASgISAGIAQESEgoKZGlzY29ubmVjdBgFIAEoCEIOCgxfc2VydmVyX211dGVCDgoMX3NlcnZlcl9kZWFmIhcKFU1vZGVyYXRlVm9pY2VSZXNwb25zZSJ1ChJMaXN0ZW5Wb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEQoJc2VsZl9tdXRlGAMgASgIEhEKCXNlbGZfZGVhZhgEIAEoCBISCgpzZXNzaW9uX2lkGAUgASgJImwKE0xpc3RlblZvaWNlUmVzcG9uc2USJgoGam9pbmVkGAEgASgLMhQuZnV3YS52MS5Wb2ljZUpvaW5lZEgAEiQKBWZyYW1lGAIgASgLMhMuZnV3YS52MS5Wb2ljZUZyYW1lSABCBwoFZXZlbnQiRQoLVm9pY2VKb2luZWQSEgoKc2Vzc2lvbl9pZBgBIAEoCRIiCgVzdGF0ZRgCIAEoCzITLmZ1d2EudjEuVm9pY2VTdGF0ZSI+CgpWb2ljZUZyYW1lEg8KB3VzZXJfaWQYASABKAkSDAoEb3B1cxgCIAEoDBIRCgl0aW1lc3RhbXAYAyABKA0iSgoRU3BlYWtWb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGZnJhbWVzGAMgAygMIiQKElNwZWFrVm9pY2VSZXNwb25zZRIOCgZxdWV1ZWQYASABKA0iswEKEUpvaW5EbUNhbGxSZXF1ZXN0EhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRINCgVvZmZlchgCIAEoCRIRCglzZWxmX211dGUYAyABKAgSEQoJc2VsZl9kZWFmGAQgASgIEhIKCnNlc3Npb25faWQYBSABKAkSEgoKc2VsZl92aWRlbxgGIAEoCBITCgtzZWxmX3N0cmVhbRgHIAEoCBITCgtzZWxmX3JlY29yZBgIIAEoCCJcChJKb2luRG1DYWxsUmVzcG9uc2USDgoGYW5zd2VyGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSIgoFc3RhdGUYAyABKAsyEy5mdXdhLnYxLlZvaWNlU3RhdGUiQQoSTGVhdmVEbUNhbGxSZXF1ZXN0EhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIhUKE0xlYXZlRG1DYWxsUmVzcG9uc2UipAEKEUtlZXBEbUNhbGxSZXF1ZXN0EhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXNlbGZfbXV0ZRgDIAEoCBIRCglzZWxmX2RlYWYYBCABKAgSEgoKc2VsZl92aWRlbxgFIAEoCBITCgtzZWxmX3N0cmVhbRgGIAEoCBITCgtzZWxmX3JlY29yZBgHIAEoCCI4ChJLZWVwRG1DYWxsUmVzcG9uc2USIgoFc3RhdGUYASABKAsyEy5mdXdhLnYxLlZvaWNlU3RhdGUiFAoSTGlzdERtQ2FsbHNSZXF1ZXN0IjUKE0xpc3REbUNhbGxzUmVzcG9uc2USHgoFY2FsbHMYASADKAsyDy5mdXdhLnYxLkRtQ2FsbCKQAQoGRG1DYWxsEhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCRIpCgxwYXJ0aWNpcGFudHMYAiADKAsyEy5mdXdhLnYxLlZvaWNlU3RhdGUSLgoKc3RhcnRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKc3RhcnRlZF9ieRgEIAEoCSLaAQoJUmVjb3JkaW5nEgoKAmlkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEgoKc3RhcnRlZF9ieRgDIAEoCRIuCgpzdGFydGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIsCghlbmRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASJwoGdHJhY2tzGAYgAygLMhcuZnV3YS52MS5SZWNvcmRpbmdUcmFjaxISCgpzaXplX2J5dGVzGAcgASgDIkoKDlJlY29yZGluZ1RyYWNrEg8KB3VzZXJfaWQYASABKAkSEgoKc2l6ZV9ieXRlcxgCIAEoAxITCgtkdXJhdGlvbl9tcxgDIAEoAyI+ChVMaXN0UmVjb3JkaW5nc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkiQAoWTGlzdFJlY29yZGluZ3NSZXNwb25zZRImCgpyZWNvcmRpbmdzGAEgAygLMhIuZnV3YS52MS5SZWNvcmRpbmciVAoYRG93bmxvYWRSZWNvcmRpbmdSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIUCgxyZWNvcmRpbmdfaWQYAiABKAkSDwoHdXNlcl9pZBgDIAEoCSIpChlEb3dubG9hZFJlY29yZGluZ1Jlc3BvbnNlEgwKBGRhdGEYASABKAwiQQoWRGVsZXRlUmVjb3JkaW5nUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSFAoMcmVjb3JkaW5nX2lkGAIgASgJIhkKF0RlbGV0ZVJlY29yZGluZ1Jlc3BvbnNlMpQJCgtDYWxsU2VydmljZRJUCg9HZXRDYWxsU2V0dGluZ3MSHy5mdXdhLnYxLkdldENhbGxTZXR0aW5nc1JlcXVlc3QaIC5mdXdhLnYxLkdldENhbGxTZXR0aW5nc1Jlc3BvbnNlEkIKCUpvaW5Wb2ljZRIZLmZ1d2EudjEuSm9pblZvaWNlUmVxdWVzdBoaLmZ1d2EudjEuSm9pblZvaWNlUmVzcG9uc2USRQoKTGVhdmVWb2ljZRIaLmZ1d2EudjEuTGVhdmVWb2ljZVJlcXVlc3QaGy5mdXdhLnYxLkxlYXZlVm9pY2VSZXNwb25zZRJCCglLZWVwVm9pY2USGS5mdXdhLnYxLktlZXBWb2ljZVJlcXVlc3QaGi5mdXdhLnYxLktlZXBWb2ljZVJlc3BvbnNlElQKD0xpc3RWb2ljZVN0YXRlcxIfLmZ1d2EudjEuTGlzdFZvaWNlU3RhdGVzUmVxdWVzdBogLmZ1d2EudjEuTGlzdFZvaWNlU3RhdGVzUmVzcG9uc2USTgoNTW9kZXJhdGVWb2ljZRIdLmZ1d2EudjEuTW9kZXJhdGVWb2ljZVJlcXVlc3QaHi5mdXdhLnYxLk1vZGVyYXRlVm9pY2VSZXNwb25zZRJKCgtMaXN0ZW5Wb2ljZRIbLmZ1d2EudjEuTGlzdGVuVm9pY2VSZXF1ZXN0GhwuZnV3YS52MS5MaXN0ZW5Wb2ljZVJlc3BvbnNlMAESRQoKU3BlYWtWb2ljZRIaLmZ1d2EudjEuU3BlYWtWb2ljZVJlcXVlc3QaGy5mdXdhLnYxLlNwZWFrVm9pY2VSZXNwb25zZRJRCg5MaXN0UmVjb3JkaW5ncxIeLmZ1d2EudjEuTGlzdFJlY29yZGluZ3NSZXF1ZXN0Gh8uZnV3YS52MS5MaXN0UmVjb3JkaW5nc1Jlc3BvbnNlElwKEURvd25sb2FkUmVjb3JkaW5nEiEuZnV3YS52MS5Eb3dubG9hZFJlY29yZGluZ1JlcXVlc3QaIi5mdXdhLnYxLkRvd25sb2FkUmVjb3JkaW5nUmVzcG9uc2UwARJUCg9EZWxldGVSZWNvcmRpbmcSHy5mdXdhLnYxLkRlbGV0ZVJlY29yZGluZ1JlcXVlc3QaIC5mdXdhLnYxLkRlbGV0ZVJlY29yZGluZ1Jlc3BvbnNlEkUKCkpvaW5EbUNhbGwSGi5mdXdhLnYxLkpvaW5EbUNhbGxSZXF1ZXN0GhsuZnV3YS52MS5Kb2luRG1DYWxsUmVzcG9uc2USSAoLTGVhdmVEbUNhbGwSGy5mdXdhLnYxLkxlYXZlRG1DYWxsUmVxdWVzdBocLmZ1d2EudjEuTGVhdmVEbUNhbGxSZXNwb25zZRJFCgpLZWVwRG1DYWxsEhouZnV3YS52MS5LZWVwRG1DYWxsUmVxdWVzdBobLmZ1d2EudjEuS2VlcERtQ2FsbFJlc3BvbnNlEkgKC0xpc3REbUNhbGxzEhsuZnV3YS52MS5MaXN0RG1DYWxsc1JlcXVlc3QaHC5mdXdhLnYxLkxpc3REbUNhbGxzUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.IceServer
@@ -72,6 +72,14 @@ export type GetCallSettingsResponse = Message<"fuwa.v1.GetCallSettingsResponse">
    * @generated from field: repeated fuwa.v1.IceServer ice_servers = 2;
    */
   iceServers: IceServer[];
+
+  /**
+   * Voice channels can be recorded on the server
+   * (InstanceSettings.call_recordings), by people with RECORD there.
+   *
+   * @generated from field: bool recordings = 3;
+   */
+  recordings: boolean;
 };
 
 /**
@@ -143,6 +151,14 @@ export type JoinVoiceRequest = Message<"fuwa.v1.JoinVoiceRequest"> & {
    * @generated from field: bool self_record = 9;
    */
   selfRecord: boolean;
+
+  /**
+   * Recording the call on the server (RECORD there; see
+   * VoiceState.server_record).
+   *
+   * @generated from field: bool server_record = 10;
+   */
+  serverRecord: boolean;
 };
 
 /**
@@ -266,6 +282,11 @@ export type KeepVoiceRequest = Message<"fuwa.v1.KeepVoiceRequest"> & {
    * @generated from field: bool self_record = 8;
    */
   selfRecord: boolean;
+
+  /**
+   * @generated from field: bool server_record = 9;
+   */
+  serverRecord: boolean;
 };
 
 /**
@@ -809,6 +830,213 @@ export const DmCallSchema: GenMessage<DmCall> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_call, 27);
 
 /**
+ * A voice channel recorded on the server: one track per person who spoke.
+ *
+ * @generated from message fuwa.v1.Recording
+ */
+export type Recording = Message<"fuwa.v1.Recording"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * Who turned it on.
+   *
+   * @generated from field: string started_by = 3;
+   */
+  startedBy: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp started_at = 4;
+   */
+  startedAt?: Timestamp | undefined;
+
+  /**
+   * Unset while it's going on.
+   *
+   * @generated from field: google.protobuf.Timestamp ended_at = 5;
+   */
+  endedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: repeated fuwa.v1.RecordingTrack tracks = 6;
+   */
+  tracks: RecordingTrack[];
+
+  /**
+   * All its tracks' files together.
+   *
+   * @generated from field: int64 size_bytes = 7;
+   */
+  sizeBytes: bigint;
+};
+
+/**
+ * Describes the message fuwa.v1.Recording.
+ * Use `create(RecordingSchema)` to create a new message.
+ */
+export const RecordingSchema: GenMessage<Recording> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_call, 28);
+
+/**
+ * One person's sound in a recording, from when the recording started (it's
+ * silent until they first spoke) to when it ended.
+ *
+ * @generated from message fuwa.v1.RecordingTrack
+ */
+export type RecordingTrack = Message<"fuwa.v1.RecordingTrack"> & {
+  /**
+   * @generated from field: string user_id = 1;
+   */
+  userId: string;
+
+  /**
+   * @generated from field: int64 size_bytes = 2;
+   */
+  sizeBytes: bigint;
+
+  /**
+   * @generated from field: int64 duration_ms = 3;
+   */
+  durationMs: bigint;
+};
+
+/**
+ * Describes the message fuwa.v1.RecordingTrack.
+ * Use `create(RecordingTrackSchema)` to create a new message.
+ */
+export const RecordingTrackSchema: GenMessage<RecordingTrack> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_call, 29);
+
+/**
+ * @generated from message fuwa.v1.ListRecordingsRequest
+ */
+export type ListRecordingsRequest = Message<"fuwa.v1.ListRecordingsRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ListRecordingsRequest.
+ * Use `create(ListRecordingsRequestSchema)` to create a new message.
+ */
+export const ListRecordingsRequestSchema: GenMessage<ListRecordingsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_call, 30);
+
+/**
+ * @generated from message fuwa.v1.ListRecordingsResponse
+ */
+export type ListRecordingsResponse = Message<"fuwa.v1.ListRecordingsResponse"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.Recording recordings = 1;
+   */
+  recordings: Recording[];
+};
+
+/**
+ * Describes the message fuwa.v1.ListRecordingsResponse.
+ * Use `create(ListRecordingsResponseSchema)` to create a new message.
+ */
+export const ListRecordingsResponseSchema: GenMessage<ListRecordingsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_call, 31);
+
+/**
+ * @generated from message fuwa.v1.DownloadRecordingRequest
+ */
+export type DownloadRecordingRequest = Message<"fuwa.v1.DownloadRecordingRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string recording_id = 2;
+   */
+  recordingId: string;
+
+  /**
+   * Whose track.
+   *
+   * @generated from field: string user_id = 3;
+   */
+  userId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.DownloadRecordingRequest.
+ * Use `create(DownloadRecordingRequestSchema)` to create a new message.
+ */
+export const DownloadRecordingRequestSchema: GenMessage<DownloadRecordingRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_call, 32);
+
+/**
+ * @generated from message fuwa.v1.DownloadRecordingResponse
+ */
+export type DownloadRecordingResponse = Message<"fuwa.v1.DownloadRecordingResponse"> & {
+  /**
+   * The next piece of the file.
+   *
+   * @generated from field: bytes data = 1;
+   */
+  data: Uint8Array;
+};
+
+/**
+ * Describes the message fuwa.v1.DownloadRecordingResponse.
+ * Use `create(DownloadRecordingResponseSchema)` to create a new message.
+ */
+export const DownloadRecordingResponseSchema: GenMessage<DownloadRecordingResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_call, 33);
+
+/**
+ * @generated from message fuwa.v1.DeleteRecordingRequest
+ */
+export type DeleteRecordingRequest = Message<"fuwa.v1.DeleteRecordingRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string recording_id = 2;
+   */
+  recordingId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.DeleteRecordingRequest.
+ * Use `create(DeleteRecordingRequestSchema)` to create a new message.
+ */
+export const DeleteRecordingRequestSchema: GenMessage<DeleteRecordingRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_call, 34);
+
+/**
+ * @generated from message fuwa.v1.DeleteRecordingResponse
+ */
+export type DeleteRecordingResponse = Message<"fuwa.v1.DeleteRecordingResponse"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.DeleteRecordingResponse.
+ * Use `create(DeleteRecordingResponseSchema)` to create a new message.
+ */
+export const DeleteRecordingResponseSchema: GenMessage<DeleteRecordingResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_call, 35);
+
+/**
  * Voice: talking in a server's voice channels, and calls in direct messages.
  *
  * Sound and cameras go over WebRTC to the instance's media part (an SFU: it
@@ -944,6 +1172,38 @@ export const CallService: GenService<{
     methodKind: "unary";
     input: typeof SpeakVoiceRequestSchema;
     output: typeof SpeakVoiceResponseSchema;
+  },
+  /**
+   * A voice channel's recordings on the server, newest first, the one going
+   * on now included. Needs RECORD there.
+   *
+   * @generated from rpc fuwa.v1.CallService.ListRecordings
+   */
+  listRecordings: {
+    methodKind: "unary";
+    input: typeof ListRecordingsRequestSchema;
+    output: typeof ListRecordingsResponseSchema;
+  },
+  /**
+   * One person's track of a finished recording, as an Ogg Opus file sent in
+   * pieces. Needs RECORD in the recording's channel.
+   *
+   * @generated from rpc fuwa.v1.CallService.DownloadRecording
+   */
+  downloadRecording: {
+    methodKind: "server_streaming";
+    input: typeof DownloadRecordingRequestSchema;
+    output: typeof DownloadRecordingResponseSchema;
+  },
+  /**
+   * Deletes a finished recording. Needs RECORD in its channel.
+   *
+   * @generated from rpc fuwa.v1.CallService.DeleteRecording
+   */
+  deleteRecording: {
+    methodKind: "unary";
+    input: typeof DeleteRecordingRequestSchema;
+    output: typeof DeleteRecordingResponseSchema;
   },
   /**
    * Joins the call in a direct-message conversation, starting it if nobody

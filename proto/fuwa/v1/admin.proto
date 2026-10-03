@@ -86,6 +86,11 @@ message InstanceSettings {
   // The secret shared with the TURN servers (coturn's static-auth-secret),
   // which makes each caller a credential that expires. FUWA_TURN_SECRET.
   string turn_secret = 22;
+  // People with RECORD may record voice channels on the server: everyone's
+  // sound is kept, one track per person, in the shard's data directory (and
+  // its replica). Recording on one's own device is always up to them.
+  // FUWA_CALL_RECORDINGS.
+  bool call_recordings = 23;
   // Who may make agents (bot accounts). Agents already made keep working.
   // FUWA_AGENT_CREATION.
   AgentCreation agent_creation = 13;

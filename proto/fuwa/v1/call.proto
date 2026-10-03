@@ -77,6 +77,15 @@ service CallService {
   // being server muted (PERMISSION_DENIED otherwise).
   rpc SpeakVoice(SpeakVoiceRequest) returns (SpeakVoiceResponse);
 
+  // A voice channel's recordings on the server, newest first, the one going
+  // on now included. Needs RECORD there.
+  rpc ListRecordings(ListRecordingsRequest) returns (ListRecordingsResponse);
+  // One person's track of a finished recording, as an Ogg Opus file sent in
+  // pieces. Needs RECORD in the recording's channel.
+  rpc DownloadRecording(DownloadRecordingRequest) returns (stream DownloadRecordingResponse);
+  // Deletes a finished recording. Needs RECORD in its channel.
+  rpc DeleteRecording(DeleteRecordingRequest) returns (DeleteRecordingResponse);
+
   // Joins the call in a direct-message conversation, starting it if nobody
   // is in it. The other person's apps hear it ring (CallUpdated on
   // DirectMessageService.Watch). The sound is end-to-end encrypted by the
@@ -102,6 +111,9 @@ message GetCallSettingsResponse {
   // media part. Voice channels show, but nobody can join them.
   bool enabled = 1;
   repeated IceServer ice_servers = 2;
+  // Voice channels can be recorded on the server
+  // (InstanceSettings.call_recordings), by people with RECORD there.
+  bool recordings = 3;
 }
 
 message JoinVoiceRequest {
@@ -123,6 +135,9 @@ message JoinVoiceRequest {
   bool self_stream = 8;
   // Recording the call (RECORD there).
   bool self_record = 9;
+  // Recording the call on the server (RECORD there; see
+  // VoiceState.server_record).
+  bool server_record = 10;
 }
 
 message JoinVoiceResponse {
@@ -152,6 +167,7 @@ message KeepVoiceRequest {
   bool self_video = 6;
   bool self_stream = 7;
   bool self_record = 8;
+  bool server_record = 9;
 }
 
 message KeepVoiceResponse {
@@ -280,3 +296,53 @@ message DmCall {
   // Who started it.
   string started_by = 4;
 }
+
+// A voice channel recorded on the server: one track per person who spoke.
+message Recording {
+  string id = 1;
+  string channel_id = 2;
+  // Who turned it on.
+  string started_by = 3;
+  google.protobuf.Timestamp started_at = 4;
+  // Unset while it's going on.
+  google.protobuf.Timestamp ended_at = 5;
+  repeated RecordingTrack tracks = 6;
+  // All its tracks' files together.
+  int64 size_bytes = 7;
+}
+
+// One person's sound in a recording, from when the recording started (it's
+// silent until they first spoke) to when it ended.
+message RecordingTrack {
+  string user_id = 1;
+  int64 size_bytes = 2;
+  int64 duration_ms = 3;
+}
+
+message ListRecordingsRequest {
+  string server_id = 1;
+  string channel_id = 2;
+}
+
+message ListRecordingsResponse {
+  repeated Recording recordings = 1;
+}
+
+message DownloadRecordingRequest {
+  string server_id = 1;
+  string recording_id = 2;
+  // Whose track.
+  string user_id = 3;
+}
+
+message DownloadRecordingResponse {
+  // The next piece of the file.
+  bytes data = 1;
+}
+
+message DeleteRecordingRequest {
+  string server_id = 1;
+  string recording_id = 2;
+}
+
+message DeleteRecordingResponse {}
