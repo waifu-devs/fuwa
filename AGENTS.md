@@ -230,6 +230,20 @@
     away with `fuwa-not-ready` until every known shard has registered again
     (`Shards::caught_up`). A gateway's `/healthz` fails until it has reached
     the directory.
+    Regions (`docs/regions.md` is the design): every part may carry
+    `FUWA_REGION`; the directory's is the home region and keeps each shard's
+    (`shards.region`). A server's region is its shard's, stamped on its file
+    when opened (`server.region`); `create_server` picks the emptiest shard
+    of the region asked for (`Shards::emptiest_in`), never one elsewhere.
+    `moves.rs` moves a server between regions for an admin
+    (`AdminService.MoveServer`): the directory records it in `moves`, the new
+    shard pulls the files from the old one (`SendServer`, which freezes it:
+    writes answer `Error::Moving`, which gateways ride out), the directory
+    switches the placement, then the old shard lets go (`ReleaseServer`,
+    deleting its files, recordings and replica copies, and ending live
+    streams with `Misrouted` so gateways follow) and the new one starts
+    replicating. `sort_registration` keeps a restart mid-move from putting a
+    server in two places.
   - `web.rs`: serves the embedded web app (feature `web`, from `web/dist`), with
     `index.html` for any path the API doesn't answer so deep links work.
   - `tests/api.rs`: end-to-end tests against a running instance; `tests/web.rs`

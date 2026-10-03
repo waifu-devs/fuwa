@@ -354,6 +354,21 @@ impl AdminService for Api {
         )
     }
 
+    async fn move_server(
+        &self,
+        request: Request<pb::MoveServerRequest>,
+    ) -> Result<Response<pb::MoveServerResponse>, Status> {
+        respond(
+            async {
+                self.require_instance_admin(request.metadata()).await?;
+                let req = request.into_inner();
+                let server = crate::cluster::moves::move_server(&self.app, &req.server_id, req.region.trim()).await?;
+                Ok(pb::MoveServerResponse { server: Some(server) })
+            }
+            .await,
+        )
+    }
+
     async fn export_server(
         &self,
         request: Request<pb::ExportServerRequest>,

@@ -141,7 +141,10 @@ impl App {
                     }
                 }
                 let (servers, link) = if role == Role::All {
-                    (Servers::open(&config.data_path, key, hub.clone(), false, None).await?, Link::Alone)
+                    (
+                        Servers::open(&config.data_path, key, hub.clone(), false, None, &config.cluster.region).await?,
+                        Link::Alone,
+                    )
                 } else {
                     let shards = crate::cluster::directory::Shards::load(&config, &node).await?;
                     (Servers::none(hub.clone()), Link::Directory(Box::new(shards)))
@@ -149,7 +152,9 @@ impl App {
                 (Some(node), Some(dms), Some(media), servers, link)
             }
             Role::Shard => {
-                let servers = Servers::open(&config.data_path, key, hub.clone(), true, replica.clone()).await?;
+                let servers =
+                    Servers::open(&config.data_path, key, hub.clone(), true, replica.clone(), &config.cluster.region)
+                        .await?;
                 (None, None, None, servers, Link::Shard(Box::new(crate::cluster::shard::Link::new(&config)?)))
             }
         };
@@ -295,7 +300,7 @@ impl App {
     }
 
     pub fn node_info(&self) -> pb::Node {
-        node_info(&self.settings(), self.announcement())
+        pb::Node { regions: self.regions(), ..node_info(&self.settings(), self.announcement()) }
     }
 
     /// Every route: the gRPC services (also reachable as gRPC-Web from
@@ -418,6 +423,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
             commit: crate::COMMIT.into(),
             source: crate::SOURCE.into(),
         }),
+        regions: vec![],
     }
 }
 

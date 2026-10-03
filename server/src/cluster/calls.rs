@@ -263,21 +263,37 @@ impl App {
         }
     }
 
+    /// The regions this instance keeps servers in, the home region first;
+    /// one or none when there's nothing to choose.
+    pub fn regions(&self) -> Vec<pb::Region> {
+        match &self.link {
+            Link::Directory(shards) => shards.regions(),
+            _ if self.config.cluster.region.is_empty() => vec![],
+            _ => {
+                let cluster = &self.config.cluster;
+                let name = super::region_name(&cluster.region, cluster.region_name.as_deref());
+                vec![pb::Region { id: cluster.region.clone(), name, home: true }]
+            }
+        }
+    }
+
     // ─────────────── Asked of the shards ───────────────
 
-    /// Makes a new server: here, or on the shard holding the fewest.
-    pub async fn create_server(&self, owner: &pb::User, new: NewServer) -> Result<pb::Server> {
+    /// Makes a new server in `region` (empty for the home region): here, or
+    /// on the shard there holding the fewest.
+    pub async fn create_server(&self, owner: &pb::User, new: NewServer, region: &str) -> Result<pb::Server> {
+        if !region.is_empty() {
+            super::check_region(region).map_err(|err| Error::invalid(format!("region {err}")))?;
+        }
         let Link::Directory(shards) = &self.link else {
+            if !region.is_empty() && region != self.config.cluster.region {
+                return Err(Error::invalid(format!("this instance has no region {region:?}")));
+            }
             let server = self.servers.create(owner, new).await?;
             self.index.insert(server.clone(), vec![owner.id.clone()], vec![], None);
             return Ok(server);
         };
-        let sizes = self.index.shard_sizes();
-        let (shard_id, mut client) = shards
-            .up()
-            .into_iter()
-            .min_by_key(|(id, _)| (sizes.get(id).copied().unwrap_or(0), id.clone()))
-            .ok_or_else(|| Error::Unavailable("no shard is up to hold a new server; try again soon".into()))?;
+        let (shard_id, mut client) = shards.emptiest_in(region, &self.index.shard_sizes())?;
         let request = cpb::CreateServerRequest {
             owner: Some(owner.clone()),
             name: new.name,

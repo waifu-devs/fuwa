@@ -20,7 +20,7 @@ use crate::auth::{self, Viewer};
 use crate::config::Config;
 use crate::cpb::{self, directory_service_server::DirectoryService};
 use crate::error::{Error, Result};
-use crate::node::NodeDb;
+use crate::node::{Move, NodeDb};
 use crate::pb;
 
 /// The shards a directory knows of: every one that has registered, and
@@ -38,10 +38,19 @@ pub struct Shards {
     /// they do, the index is missing their servers and who's in them.
     missing: RwLock<HashSet<String>>,
     started: Instant,
+    /// The instance's home region: the directory's FUWA_REGION, and its name.
+    home: (String, String),
+    /// Servers being moved between shards, and whether a move is running
+    /// for each now (one recorded before a restart isn't: it's finished or
+    /// undone as its shards register).
+    pub(crate) moves: RwLock<HashMap<String, (Move, bool)>>,
 }
 
 struct Shard {
     url: String,
+    /// Its FUWA_REGION (empty for the home region), and what it's called.
+    region: String,
+    region_name: Option<String>,
     /// None until it says where it is.
     client: Option<ShardClient>,
     /// Open settings streams from it: up while there's one.
@@ -60,10 +69,11 @@ impl Shards {
     pub async fn load(config: &Config, node: &NodeDb) -> Result<Self> {
         let key = config.cluster.key_value()?;
         let mut known = HashMap::new();
-        for (id, url) in node.shards().await? {
+        for (id, url, region) in node.shards().await? {
             let client = Some(shard_client(&url, key.clone())?);
-            known.insert(id, Shard { url, client, watching: 0 });
+            known.insert(id, Shard { url, region, region_name: None, client, watching: 0 });
         }
+        let moves = node.moves().await?.into_iter().map(|moved| (moved.server_id.clone(), (moved, false))).collect();
         let left = leftovers(&config.data_path)?.len();
         if left == 0 && promised(&config.data_path)?.is_some() {
             // Left by a stop right after a handover.
@@ -95,7 +105,60 @@ impl Shards {
             left: RwLock::new(left),
             missing,
             started: Instant::now(),
+            home: (
+                config.cluster.region.clone(),
+                super::region_name(&config.cluster.region, config.cluster.region_name.as_deref()),
+            ),
+            moves: RwLock::new(moves),
         })
+    }
+
+    /// A region as shards and servers name it, with the home region's label
+    /// for empty.
+    pub fn region(&self, region: &str) -> String {
+        if region.is_empty() { self.home.0.clone() } else { region.to_string() }
+    }
+
+    /// The region a shard is in.
+    pub fn region_of(&self, id: &str) -> Option<String> {
+        self.read().get(id).map(|shard| self.region(&shard.region))
+    }
+
+    /// The regions this instance keeps servers in, the home region first.
+    pub fn regions(&self) -> Vec<pb::Region> {
+        let mut regions = vec![pb::Region { id: self.home.0.clone(), name: self.home.1.clone(), home: true }];
+        let mut others: Vec<pb::Region> = Vec::new();
+        for shard in self.read().values() {
+            let id = self.region(&shard.region);
+            if id == self.home.0 || others.iter().any(|r| r.id == id) {
+                continue;
+            }
+            others.push(pb::Region { name: super::region_name(&id, shard.region_name.as_deref()), id, home: false });
+        }
+        others.sort_by(|a, b| a.name.cmp(&b.name));
+        regions.extend(others);
+        regions
+    }
+
+    /// The shard up in `region` holding the fewest servers (by `sizes`),
+    /// with a client for it.
+    pub fn emptiest_in(&self, region: &str, sizes: &HashMap<String, usize>) -> Result<(String, ShardClient)> {
+        let region = self.region(region);
+        let mut known = false;
+        let chosen = self
+            .read()
+            .iter()
+            .filter(|(_, shard)| self.region(&shard.region) == region)
+            .inspect(|_| known = true)
+            .filter_map(|(id, shard)| shard.up().map(|client| (id.clone(), client.clone())))
+            .min_by_key(|(id, _)| (sizes.get(id).copied().unwrap_or(0), id.clone()));
+        match chosen {
+            Some(chosen) => Ok(chosen),
+            None if known || region == self.home.0 => {
+                Err(Error::Unavailable("no shard in that region is up to hold a server; try again soon".into()))
+            }
+            None => Err(Error::invalid(format!("this instance has no region {region:?}"))),
+        }
     }
 
     /// Whether every shard known before this start has registered again, and
@@ -123,7 +186,7 @@ impl Shards {
     }
 
     /// Notes where a shard is, as it registers.
-    pub fn register(&self, id: &str, url: &str) -> Result<()> {
+    pub fn register(&self, id: &str, url: &str, region: &str, region_name: Option<&str>) -> Result<()> {
         {
             let mut missing = self.missing.write().unwrap_or_else(|p| p.into_inner());
             if missing.remove(id) && missing.is_empty() {
@@ -131,17 +194,22 @@ impl Shards {
             }
         }
         let mut known = self.write();
-        match known.get_mut(id) {
-            Some(shard) if shard.url == url && shard.client.is_some() => {}
+        let shard = match known.get_mut(id) {
+            Some(shard) if shard.url == url && shard.client.is_some() => shard,
             Some(shard) => {
                 shard.client = Some(shard_client(url, self.key.clone())?);
                 shard.url = url.to_string();
+                shard
             }
             None => {
                 let client = Some(shard_client(url, self.key.clone())?);
-                known.insert(id.to_string(), Shard { url: url.to_string(), client, watching: 0 });
+                let shard =
+                    Shard { url: url.to_string(), region: String::new(), region_name: None, client, watching: 0 };
+                known.entry(id.to_string()).or_insert(shard)
             }
-        }
+        };
+        shard.region = region.to_string();
+        shard.region_name = region_name.map(str::to_string);
         Ok(())
     }
 
@@ -151,7 +219,14 @@ impl Shards {
             shard.watching = shard.watching.saturating_add_signed(change);
         } else if change > 0 {
             // Following before its first registration: up once it says where it is.
-            known.insert(id.to_string(), Shard { url: String::new(), client: None, watching: change as usize });
+            let shard = Shard {
+                url: String::new(),
+                region: String::new(),
+                region_name: None,
+                client: None,
+                watching: change as usize,
+            };
+            known.insert(id.to_string(), shard);
         }
     }
 
@@ -404,12 +479,23 @@ impl DirectoryService for Internal {
     ) -> Result<Response<cpb::RegisterShardResponse>, Status> {
         respond(
             async {
-                let req = request.into_inner();
+                let mut req = request.into_inner();
                 super::check_shard_id(&req.shard_id).map_err(Error::invalid)?;
+                if !req.region.is_empty() {
+                    super::check_region(&req.region).map_err(Error::invalid)?;
+                }
+                let region_name = Some(req.region_name.as_str()).filter(|name| !name.is_empty());
+                // Servers on their way to or from this shard aren't taken from
+                // what it says until the move says so.
+                let (answer, settled) =
+                    super::moves::sort_registration(self.shards()?, &req.shard_id, &mut req.servers);
                 let ids: Vec<String> =
                     req.servers.iter().filter_map(|entry| entry.server.as_ref().map(|s| s.id.clone())).collect();
-                self.app.node()?.register_shard(&req.shard_id, &req.url, &ids).await?;
-                self.shards()?.register(&req.shard_id, &req.url)?;
+                self.app.node()?.register_shard(&req.shard_id, &req.url, &req.region, &ids).await?;
+                self.shards()?.register(&req.shard_id, &req.url, &req.region, region_name)?;
+                for server_id in settled {
+                    super::moves::settled(&self.app, &server_id).await;
+                }
                 // Servers gone from the shard keep their notification settings: the
                 // file may only be moving to another shard.
                 let gone = self.app.index.register(&req.shard_id, req.servers);
@@ -421,7 +507,7 @@ impl DirectoryService for Internal {
                     let index = &self.app.index;
                     shards.left.write().unwrap_or_else(|p| p.into_inner()).retain(|id| index.placement(id).is_none());
                 }
-                Ok(cpb::RegisterShardResponse {})
+                Ok(answer)
             }
             .await,
         )

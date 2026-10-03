@@ -182,7 +182,8 @@ same Caddyfile as above, with `h2c://127.0.0.1:8080` as the address.
    new 0.1.x releases deploy by themselves once Railway notices them.
 
 Keep it to one replica: every server's database is a file on that one volume.
-For more than one machine, see [Scaling out](../README.md#scaling-out).
+For more than one machine, see [Scaling out](../README.md#scaling-out), and
+for keeping communities' data in the EU or elsewhere, [Regions](regions.md).
 fuwa.chat's own [Railway config](../.railway/railway.ts) is a worked example:
 with its `SPLIT` setting on, the service with the domain becomes the gateways
 (several replicas), a `fuwa-directory` service takes over the volume, and each

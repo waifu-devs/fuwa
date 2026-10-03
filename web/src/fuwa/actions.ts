@@ -661,10 +661,11 @@ const joined = (key: string, server: Server | undefined) =>
     yield* follow(key, server.id);
   });
 
-export const createServer = (key: string, name: string, description: string, discoverable: boolean, iconUrl = "") =>
+/** `region` is one of the instance's `Node.regions`; empty for its home region. */
+export const createServer = (key: string, name: string, description: string, discoverable: boolean, iconUrl = "", region = "") =>
   Effect.gen(function* () {
     const { server } = yield* call((signal) =>
-      api(key).servers.createServer({ name, description, discoverable, iconUrl }, { signal }),
+      api(key).servers.createServer({ name, description, discoverable, iconUrl, region }, { signal }),
     );
     yield* joined(key, server);
     return server!;
@@ -893,6 +894,14 @@ export const updateSettings = (key: string, settings: InstanceSettings, update: 
     const { node } = yield* call((signal) => api(key).node.getNode({}, { signal }));
     updateInstance(key, (i) => ({ ...i, node: node ?? i.node }));
     return config!;
+  });
+
+/** Moves a server to another region (instance admins). Resolves once it's there. */
+export const moveServer = (key: string, serverId: string, region: string) =>
+  Effect.gen(function* () {
+    const { server } = yield* call((signal) => api(key).admin.moveServer({ serverId, region }, { signal }));
+    if (server) updateInstance(key, (i) => (i.servers.some((s) => s.id === server.id) ? addServer(i, server) : i));
+    return server!;
   });
 
 export const nodeUsage = (key: string) => call((signal) => api(key).admin.getNodeUsage({}, { signal }));
