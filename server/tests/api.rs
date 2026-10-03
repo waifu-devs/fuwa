@@ -5202,3 +5202,99 @@ async fn servers_are_never_handed_to_agents() {
     assert_eq!(handed.unwrap_err().code(), Code::FailedPrecondition);
     instance.stop().await;
 }
+
+#[tokio::test]
+async fn channel_overwrites_and_moves_respect_rank_and_reach() {
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (moderator, mod_user, _) = sign_up(&mut c, "moderator").await;
+    let (boss, boss_user, _) = sign_up(&mut c, "boss").await;
+    let (helper, helper_user, _) = sign_up(&mut c, "helper").await;
+    let server = create_server(&mut c, &owner, "Ranks", true).await;
+    let sid = server.id.clone();
+    for token in [&moderator, &boss, &helper] {
+        join(&mut c, token, &sid).await;
+    }
+    let high = create_role(&mut c, &owner, &sid, "High", &[]).await.unwrap();
+    // New roles land right above @everyone, so Mods ends up below High, and Low below Mods.
+    let mods = create_role(&mut c, &owner, &sid, "Mods", &[P::ManageRoles]).await.unwrap();
+    let low = create_role(&mut c, &owner, &sid, "Low", &[]).await.unwrap();
+    give_role(&mut c, &owner, &sid, &mod_user.id, &mods.id).await.unwrap();
+    give_role(&mut c, &owner, &sid, &boss_user.id, &high.id).await.unwrap();
+    let channel = new_channel(&mut c, &owner, &sid, "ranked", pb::ChannelType::Text).await;
+    let mute =
+        |target_id: &str, target: pb::OverwriteTarget| vec![overwrite(target_id, target, &[], &[P::SendMessages])];
+
+    // Overwrites change only for what ranks below the caller.
+    let above = set_permissions(&mut c, &moderator, &sid, &channel.id, mute(&high.id, pb::OverwriteTarget::Role)).await;
+    assert_eq!(above.unwrap_err(), Code::PermissionDenied);
+    let over_boss =
+        set_permissions(&mut c, &moderator, &sid, &channel.id, mute(&boss_user.id, pb::OverwriteTarget::Member)).await;
+    assert_eq!(over_boss.unwrap_err(), Code::PermissionDenied);
+    set_permissions(&mut c, &moderator, &sid, &channel.id, mute(&low.id, pb::OverwriteTarget::Role)).await.unwrap();
+    set_permissions(&mut c, &moderator, &sid, &channel.id, mute(&sid, pb::OverwriteTarget::Role)).await.unwrap();
+    // One the owner set above them stays out of their reach, even to remove.
+    set_permissions(&mut c, &owner, &sid, &channel.id, mute(&high.id, pb::OverwriteTarget::Role)).await.unwrap();
+    assert_eq!(
+        set_permissions(&mut c, &moderator, &sid, &channel.id, vec![]).await.unwrap_err(),
+        Code::PermissionDenied
+    );
+
+    // Managing one channel doesn't reach moving it out of its category.
+    let category = c
+        .channels
+        .create_channel(authed(
+            &owner,
+            pb::CreateChannelRequest {
+                server_id: sid.clone(),
+                name: "Things".into(),
+                r#type: pb::ChannelType::Category as i32,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .channel
+        .unwrap();
+    let inside = c
+        .channels
+        .create_channel(authed(
+            &owner,
+            pb::CreateChannelRequest {
+                server_id: sid.clone(),
+                name: "inside".into(),
+                r#type: pb::ChannelType::Text as i32,
+                parent_id: category.id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .channel
+        .unwrap();
+    let manage_here = vec![overwrite(&helper_user.id, pb::OverwriteTarget::Member, &[P::ManageChannels], &[])];
+    set_permissions(&mut c, &owner, &sid, &inside.id, manage_here).await.unwrap();
+    let update = |parent_id: Option<&str>, name: &str| {
+        authed(
+            &helper,
+            pb::UpdateChannelRequest {
+                server_id: sid.clone(),
+                channel_id: inside.id.clone(),
+                name: Some(name.into()),
+                parent_id: parent_id.map(str::to_string),
+                ..Default::default()
+            },
+        )
+    };
+    let out = c.channels.update_channel(update(Some(""), "inside")).await;
+    assert_eq!(out.unwrap_err().code(), Code::PermissionDenied);
+    let renamed = c.channels.update_channel(update(None, "renamed")).await.unwrap().into_inner();
+    assert_eq!(renamed.channel.unwrap().parent_id, category.id, "the rest is theirs to change");
+
+    instance.stop().await;
+}
