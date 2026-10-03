@@ -201,11 +201,19 @@ impl Settings {
             call_recordings_keep_days: self.call_recordings_keep_days,
             ice_urls: self.ice_urls.clone(),
             turn_secret: self.turn_secret.clone(),
+            turn_secret_set: !self.turn_secret.is_empty(),
+            turn_secret_hint: hint(&self.turn_secret),
             automod_providers: crate::automod::providers::complete(&self.automod_providers)
                 .iter()
                 .map(|setup| setup.to_pb(false))
                 .collect(),
         }
+    }
+
+    /// As instance admins see it: secrets stay on the server, shown only as
+    /// whether one is saved and its last characters.
+    pub fn to_admin_pb(&self) -> pb::InstanceSettings {
+        pb::InstanceSettings { turn_secret: String::new(), ..self.to_pb() }
     }
 
     /// A moderation provider servers can use now, by id.
@@ -562,6 +570,13 @@ fn flag(field: &str, value: &Value) -> Result<bool> {
     value.as_bool().ok_or_else(|| Error::invalid(format!("{field} must be true or false")))
 }
 
+/// The last four characters of a secret long enough that they give little
+/// away, so an admin can tell which one is saved; empty otherwise.
+fn hint(secret: &str) -> String {
+    let chars: Vec<char> = secret.chars().collect();
+    if chars.len() >= 12 { chars[chars.len() - 4..].iter().collect() } else { String::new() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -627,6 +642,22 @@ mod tests {
             from_pb.set_from_pb(field, &settings.to_pb()).unwrap();
             assert_eq!(from_pb.get_json(field).unwrap(), settings.get_json(field).unwrap(), "{field} via pb");
         }
+    }
+
+    #[test]
+    fn admins_never_get_the_turn_secret() {
+        let mut settings = Settings::defaults(&config());
+        settings.turn_secret = "a-long-turn-secret-0123".into();
+        let shown = settings.to_admin_pb();
+        assert!(shown.turn_secret.is_empty());
+        assert!(shown.turn_secret_set);
+        assert_eq!(shown.turn_secret_hint, "0123");
+        // Shards still get it, to make each caller's TURN password.
+        assert_eq!(settings.to_pb().turn_secret, settings.turn_secret);
+        settings.turn_secret = "short".into();
+        assert!(settings.to_admin_pb().turn_secret_hint.is_empty());
+        settings.turn_secret.clear();
+        assert!(!settings.to_admin_pb().turn_secret_set);
     }
 
     #[test]

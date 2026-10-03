@@ -103,7 +103,15 @@ message InstanceSettings {
   repeated string ice_urls = 21;
   // The secret shared with the TURN servers (coturn's static-auth-secret),
   // which makes each caller a credential that expires. FUWA_TURN_SECRET.
+  // Never sent to apps: GetSettings leaves it empty and fills turn_secret_set
+  // and turn_secret_hint, and an empty one in UpdateSettings keeps the saved
+  // secret (reset the field to go back to the default).
   string turn_secret = 22;
+  // Whether a TURN secret is saved. Read-only.
+  bool turn_secret_set = 32;
+  // The secret's last four characters, when it is long enough to spare them.
+  // Read-only.
+  string turn_secret_hint = 33;
   // People with RECORD may record voice channels on the server: everyone's
   // sound is kept, one track per person, in the shard's data directory (and
   // its replica). Recording on one's own device is always up to them.

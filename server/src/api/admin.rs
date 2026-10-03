@@ -70,8 +70,8 @@ impl Api {
             self.app.node()?.settings().await?.into_iter().map(|(field, _)| field).collect();
         overridden.retain(|field| settings::FIELDS.contains(&field.as_str()));
         Ok(pb::InstanceConfig {
-            settings: Some(self.app.settings().to_pb()),
-            defaults: Some(Settings::defaults(config).to_pb()),
+            settings: Some(self.app.settings().to_admin_pb()),
+            defaults: Some(Settings::defaults(config).to_admin_pb()),
             overridden,
             startup: Some(pb::StartupSettings {
                 port: config.port.into(),
@@ -145,6 +145,10 @@ impl AdminService for Api {
                 let mut next = (*self.app.settings()).clone();
                 let mut store = Vec::new();
                 for field in &update {
+                    // The secret is never shown, so an empty one keeps it.
+                    if field == "turn_secret" && from.turn_secret.trim().is_empty() {
+                        continue;
+                    }
                     next.set_from_pb(field, &from)?;
                     store.push((field.clone(), next.get_json(field)?.to_string()));
                 }
