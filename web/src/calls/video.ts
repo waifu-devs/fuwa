@@ -180,19 +180,58 @@ export const ENCODINGS: RTCRtpEncodingParameters[] = [
 
 // ───────────────────────── Your screen ─────────────────────────
 
-/** Asks the browser for a screen, window or tab to share, at up to 1080p. */
-export async function openScreen(): Promise<MediaStreamTrack> {
+export type SharedScreen = {
+  video: MediaStreamTrack;
+  /** Its sound, when asked for and the browser gave it. */
+  audio: MediaStreamTrack | null;
+  /** Why there's no sound, when it was asked for and none came. */
+  silent: string | null;
+};
+
+/**
+ * Asks the browser for a screen, window or tab to share, at up to 1080p,
+ * and with `sound` what it plays too. The sound is left as it is (no echo
+ * cancelling or noise suppression, which are for voices and spoil music),
+ * and never includes this page's own sound, so nobody hears the call back.
+ */
+export async function openScreen(sound: boolean): Promise<SharedScreen> {
   if (!navigator.mediaDevices?.getDisplayMedia) throw new DOMException("No screen sharing", "NotSupportedError");
+  const asking = sound && canShareSound();
   const stream = await navigator.mediaDevices.getDisplayMedia({
-    audio: false,
+    audio: asking
+      ? ({ echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: false, restrictOwnAudio: true } as MediaTrackConstraints)
+      : false,
     video: { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 30 } },
-  });
-  const track = stream.getVideoTracks()[0];
-  if (!track) throw new DOMException("No screen", "NotFoundError");
+    // Chrome offers the whole system's sound for a whole screen where it can.
+    ...(asking ? { systemAudio: "include" } : {}),
+  } as DisplayMediaStreamOptions);
+  const video = stream.getVideoTracks()[0];
+  if (!video) throw new DOMException("No screen", "NotFoundError");
   // Text stays sharp; motion gives way first.
-  track.contentHint = "detail";
-  return track;
+  video.contentHint = "detail";
+  const audio = stream.getAudioTracks()[0] ?? null;
+  if (audio) audio.contentHint = "music";
+  const surface = (video.getSettings() as MediaTrackSettings & { displaySurface?: string }).displaySurface;
+  const silent = !sound || audio ? null : !canShareSound() ? NO_SOUND_HERE : silentBecause(surface);
+  return { video, audio, silent };
 }
+
+/** Said when this browser can't share sound at all. */
+export const NO_SOUND_HERE = "This browser shares the picture only, no sound. Chrome or Edge can share a tab's sound.";
+
+/** Why a share came without sound, by what was shared. */
+function silentBecause(surface: string | undefined): string {
+  if (surface === "browser") return "The tab's sound isn't shared: it was left unticked in the browser's picker. Share again and tick it to bring the sound.";
+  if (surface === "window") return "Browsers can't share one window's sound. Share a tab, or your whole screen, to bring sound.";
+  return "Your system doesn't let the browser share the whole screen's sound (Chrome and Edge can on Windows and ChromeOS). Share a tab to bring its sound.";
+}
+
+/** Whether this browser can share sound with a screen at all: Chrome and Edge can; Firefox and Safari share pictures only. */
+export const canShareSound = () => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /Chrome|Chromium|Edg\//.test(ua) && !/Firefox|FxiOS/.test(ua);
+};
 
 /** Whether this browser can share a screen at all (phones can't). */
 export const canShareScreen = () => typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia && !/Android|iPhone|iPad/.test(navigator.userAgent);

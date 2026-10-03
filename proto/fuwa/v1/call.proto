@@ -115,6 +115,11 @@ message GetCallSettingsResponse {
   // Voice channels can be recorded on the server
   // (InstanceSettings.call_recordings), by people with RECORD there.
   bool recordings = 3;
+  // A shared screen may bring its sound: apps send it as a second audio
+  // track after the microphone, and the media part passes it on (named like
+  // the screen) while the screen is shared. Off from instances that predate
+  // it, whose media part takes one audio track only.
+  bool screen_sound = 4;
 }
 
 message JoinVoiceRequest {

@@ -36,6 +36,14 @@ export type CallsState = {
   selfVideo: boolean;
   /** You're sharing your screen. Every call starts without. */
   selfStream: boolean;
+  /** Your shared screen's sound: going out (true), turned off while you share (false), or none in this share (null). */
+  screenSound: boolean | null;
+  /** Whose shared screen's sound is coming in, by user id. */
+  screenSounds: Record<string, true>;
+  /** Shared screens you turned the sound off of, by user id: for this call. */
+  quietScreens: Record<string, true>;
+  /** The instance passes a screen's sound on (older ones take a microphone only). */
+  screenSoundOffered: boolean;
   /** You're recording the call's sound to a file. Every call starts without. */
   selfRecord: boolean;
   /** You're recording the voice channel on the server. Every call starts without. */
@@ -63,7 +71,7 @@ function load(): Pick<CallsState, "selfMute" | "selfDeaf"> {
   }
 }
 
-let state: CallsState = { call: null, speaking: {}, talking: false, declined: {}, ended: null, selfVideo: false, selfStream: false, selfRecord: false, serverRecord: false, serverRecordings: false, ...load() };
+let state: CallsState = { call: null, speaking: {}, talking: false, declined: {}, ended: null, selfVideo: false, selfStream: false, selfRecord: false, serverRecord: false, serverRecordings: false, screenSound: null, screenSounds: {}, quietScreens: {}, screenSoundOffered: false, ...load() };
 const listeners = new Set<() => void>();
 
 export const getCalls = () => state;

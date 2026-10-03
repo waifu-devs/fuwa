@@ -24,6 +24,8 @@ pub struct Peer {
     mic: Mid,
     camera: Option<Mid>,
     screen: Option<Mid>,
+    /// The shared screen's sound, sent with the screen.
+    screen_sound: Option<Mid>,
     channel: Option<ChannelId>,
     pending: Option<SdpPendingOffer>,
     /// Sound received, by whose it is (the stream id).
@@ -47,7 +49,8 @@ impl Peer {
         Self::start(true, false).await
     }
 
-    /// One that sends a camera and a shared screen, each in three sizes.
+    /// One that sends a camera and a shared screen, each in three sizes, and
+    /// the screen's sound.
     pub async fn with_camera_and_screen() -> (Self, String) {
         Self::start(true, true).await
     }
@@ -67,6 +70,8 @@ impl Peer {
         };
         let camera = filming.then(&mut video);
         let screen = sharing.then(&mut video);
+        // As browsers do: the screen's sound is the second audio track, after the microphone.
+        let screen_sound = sharing.then(|| change.add_media(MediaKind::Audio, Direction::SendOnly, None, None, None));
         change.add_channel("fuwa".into());
         let (offer, pending) = change.apply().unwrap();
         let peer = Self {
@@ -75,6 +80,7 @@ impl Peer {
             mic,
             camera,
             screen,
+            screen_sound,
             channel: None,
             pending: Some(pending),
             heard: vec![],
@@ -204,16 +210,24 @@ impl Peer {
         self.seen[from..].iter().filter(|(_, frame, _)| frame.windows(6).any(|w| w == b"screen")).count()
     }
 
+    /// How many frames of sound since `from` were a shared screen's.
+    pub fn screen_sounds_heard(&self, from: usize) -> usize {
+        self.heard[from..].iter().filter(|(_, frame)| frame.starts_with(b"screen")).count()
+    }
+
     fn speak(&mut self) {
-        let Some(writer) = self.rtc.writer(self.mic) else { return };
-        let Some(pt) = writer.payload_params().find(|p| p.spec().codec == Codec::Opus).map(|p| p.pt()) else {
-            return;
-        };
         let time = MediaTime::new(self.sent * 960, str0m::media::Frequency::FORTY_EIGHT_KHZ);
         self.sent += 1;
         // Not real Opus, but the media part never looks inside.
-        let frame = format!("frame {}", self.sent).into_bytes();
-        writer.write(pt, Instant::now(), time, frame).unwrap();
+        for (mid, what) in [(Some(self.mic), "frame"), (self.screen_sound, "screen sound")] {
+            let Some(mid) = mid else { continue };
+            let Some(writer) = self.rtc.writer(mid) else { continue };
+            let Some(pt) = writer.payload_params().find(|p| p.spec().codec == Codec::Opus).map(|p| p.pt()) else {
+                continue;
+            };
+            let frame = format!("{what} {}", self.sent).into_bytes();
+            writer.write(pt, Instant::now(), time, frame).unwrap();
+        }
     }
 }
 

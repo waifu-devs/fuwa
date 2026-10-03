@@ -1,11 +1,11 @@
-import { CircleDotIcon, CropIcon, LaptopIcon, ServerIcon, ExpandIcon, MonitorUpIcon, MonitorXIcon, PictureInPicture2Icon, SparklesIcon, TagIcon, VideoIcon, VideoOffIcon, XIcon } from "lucide-react";
-import { motion } from "motion/react";
+import { CheckIcon, CircleDotIcon, CropIcon, LaptopIcon, ServerIcon, ExpandIcon, MonitorIcon, MonitorUpIcon, MonitorXIcon, PictureInPicture2Icon, SparklesIcon, TagIcon, VideoIcon, VideoOffIcon, Volume2Icon, VolumeXIcon, XIcon } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Permission, type User, type VoiceState } from "@/gen/fuwa/v1/types_pb";
-import { setRecording, setServerRecording, toggleCamera, toggleRecording, toggleScreen } from "@/calls/engine";
+import { setRecording, setScreenSound, setServerRecording, shareScreen, toggleCamera, toggleRecording, toggleScreen, toggleScreenQuiet } from "@/calls/engine";
 import { getCalls, subscribeCalls, useCalls, type CallTarget } from "@/calls/state";
-import { canShareScreen, feedOf, useLayerFor, useVideoTrack } from "@/calls/video";
+import { canShareScreen, canShareSound, feedOf, useLayerFor, useVideoTrack } from "@/calls/video";
 import { useAccess } from "@/fuwa/hooks";
 import { store, useFuwa } from "@/fuwa/store";
 import { hue } from "@/components/Icons";
@@ -151,18 +151,26 @@ export function CameraButton({ size = "sm", className }: { size?: "sm" | "lg"; c
   );
 }
 
-/** Shares your screen in the call you're in, or stops. Not on phones, which can't. */
+/**
+ * Shares your screen in the call you're in, or stops. Not on phones, which
+ * can't. Where the instance passes a screen's sound on, starting opens a
+ * menu: with its sound, or the picture only (the choice is remembered, and
+ * the keyboard shortcut uses it). Browsers that can't share sound say so there.
+ */
 export function ScreenButton({ size = "sm", className }: { size?: "sm" | "lg"; className?: string }) {
   const on = useCalls((s) => s.selfStream);
   const target = useCalls((s) => s.call?.target);
+  const offered = useCalls((s) => s.screenSoundOffered);
+  const withSound = usePrefs((p) => p.shareSound);
   const may = useMayFilm(target);
   if (!canShareScreen()) return null;
   const label = !may ? "You can't share your screen here" : on ? "Stop sharing your screen" : "Share your screen";
   const Icon = on ? MonitorXIcon : MonitorUpIcon;
-  return (
+  const menu = offered && may && !on;
+  const button = (
     <button
       type="button"
-      onClick={() => void toggleScreen()}
+      onClick={menu ? undefined : () => void toggleScreen()}
       disabled={!may}
       aria-pressed={on}
       aria-label={label}
@@ -178,6 +186,95 @@ export function ScreenButton({ size = "sm", className }: { size?: "sm" | "lg"; c
         <Icon className={cn(size === "sm" ? "size-[18px]" : "size-5", "transition-transform", on ? "group-hover:scale-110" : "group-hover:-translate-y-0.5")} />
       </motion.span>
     </button>
+  );
+  if (!menu) return button;
+  const sound = canShareSound();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="center" className="w-72">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">Share your screen</DropdownMenuLabel>
+        <DropdownMenuItem disabled={!sound} onSelect={() => void shareScreen(true)} className="items-start gap-2.5 py-2">
+          <Volume2Icon className="mt-0.5" />
+          <span className="min-w-0">
+            <span className="block font-bold">With its sound</span>
+            <span className="block text-xs text-muted-foreground">
+              {sound ? "A tab's sound, or the whole screen's where your system allows. Your call's sound stays out." : "This browser shares the picture only. Chrome and Edge can share sound."}
+            </span>
+          </span>
+          {sound && withSound && <CheckIcon className="mt-0.5 ml-auto text-primary" />}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => void shareScreen(false)} className="items-start gap-2.5 py-2">
+          <MonitorIcon className="mt-0.5" />
+          <span className="min-w-0">
+            <span className="block font-bold">Picture only</span>
+            <span className="block text-xs text-muted-foreground">No sound goes with it.</span>
+          </span>
+          {(!sound || !withSound) && <CheckIcon className="mt-0.5 ml-auto text-primary" />}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * The sound button on a shared screen: yours turns its sound off for
+ * everyone (the share goes on); someone else's turns it off for you. Its
+ * bars dance while the screen plays something. Only there while sound comes.
+ */
+export function ScreenSoundButton({ userId, self, className }: { userId: string; self: boolean; className?: string }) {
+  const mine = useCalls((s) => s.screenSound);
+  const coming = useCalls((s) => !!s.screenSounds[userId]);
+  const quiet = useCalls((s) => !!s.quietScreens[userId]);
+  const playing = useSpeaking(feedOf(userId, true));
+  const shown = self ? mine !== null : coming;
+  const on = self ? mine === true : !quiet;
+  const label = self ? (on ? "Stop sharing your screen's sound" : "Share your screen's sound again") : on ? "Turn this screen's sound off for you" : "Turn this screen's sound back on";
+  return (
+    <AnimatePresence>
+      {shown && (
+        <motion.button
+          type="button"
+          initial={{ opacity: 0, scale: 0.6 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.6 }}
+          transition={{ type: "spring", stiffness: 600, damping: 22 }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (self) setScreenSound(!on);
+            else toggleScreenQuiet(userId);
+          }}
+          aria-pressed={!on}
+          aria-label={label}
+          title={label}
+          className={cn(
+            "flex h-8 items-center gap-1 rounded-xl px-2 shadow-sm backdrop-blur transition hover:scale-105 active:scale-90",
+            on ? "bg-background/75 text-foreground hover:bg-background" : "bg-[#ed4245] text-white",
+            className,
+          )}
+        >
+          <motion.span key={String(on)} initial={{ scale: 0.4, rotate: -20 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 14 }} className="grid place-items-center">
+            {on ? <Volume2Icon className="size-4" /> : <VolumeXIcon className="size-4" />}
+          </motion.span>
+          {on && <SoundBars playing={playing} />}
+        </motion.button>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** Three little bars that bounce while something plays, and rest when it doesn't. */
+function SoundBars({ playing }: { playing: boolean }) {
+  return (
+    <span aria-hidden className="flex h-3 items-end gap-[2px]">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className={cn("w-[3px] origin-bottom rounded-full bg-current transition-transform duration-300", playing ? "animate-[sound-bar_0.9s_ease-in-out_infinite]" : "scale-y-[0.3]")}
+          style={{ height: "100%", animationDelay: `${i * 0.15}s` }}
+        />
+      ))}
+    </span>
   );
 }
 

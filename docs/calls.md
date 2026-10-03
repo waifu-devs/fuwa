@@ -100,7 +100,33 @@ same three sizes as a camera with more bits (200 kbit/s, 700 kbit/s and 2.5
 Mbit/s, since text needs them), marked as detail so browsers keep text
 sharp and drop frames first, and switches sizes the same way. VIDEO covers
 screens too, and in direct messages a screen is end-to-end encrypted like
-a camera. No sound goes with a screen yet.
+a camera.
+
+### A screen's sound
+
+A screen can bring its sound: a tab's, or the whole system's where the
+browser and the system allow it. Where the instance offers it
+(`GetCallSettingsResponse.screen_sound`), every app's first offer has a
+second send-only audio track after the microphone's, empty until a share
+brings sound, and the media part takes an app's second audio track as its
+screen's sound. It passes that on exactly when it passes the screen on
+(sharing, with VIDEO), on the screen's stream (`<account id>-screen`), so
+apps play it beside the sharer's voice, never mixed into it, and it shares
+the voice's caps (80 KB a second, 1500 bytes a frame). In direct messages it
+is end-to-end encrypted like the voice. Programs and server recordings get
+voices only, never a screen's sound.
+
+The web app asks before sharing: with its sound, or the picture only (it
+remembers, and the shortcut uses the choice). The sound goes as it is, no
+echo cancelling or noise suppression, which spoil music, at up to 128 kbit/s,
+and the browser is asked to leave the page's own sound out, so nobody hears
+the call back. While sharing, the sound button on your screen turns its sound
+off for everyone and back on, without stopping the share; on someone else's
+screen it turns it off for you. Browsers differ, and the app says which case
+you hit rather than sharing in silence: Firefox and Safari share pictures
+only; Chrome and Edge share a tab's sound everywhere, the whole screen's only
+where the system lets them (Windows and ChromeOS), and never a single
+window's.
 
 Apps show shared screens above everyone's tiles, whole (never cropped),
 with a LIVE mark, and pop them out like cameras: the window is titled
@@ -295,8 +321,8 @@ expiry and a random name.
 
 ## What the media part accepts
 
-An app's offer may send one track of sound, one of camera and one of
-screen, receive the
+An app's offer may send one track of sound, one of camera, one of screen
+and one of the screen's sound, receive the
 others' tracks and open the data channel, and nothing else; at most 10
 offers in 10 seconds. Each person's sound is capped at 80 KB a second and
 1500 bytes a frame, far above any Opus voice, and so is each program's.
@@ -320,8 +346,6 @@ interruption.
 
 - **Caps on recordings**: how much a server may keep, as a server limit,
   and recordings older than a set age deleted by themselves.
-- **A shared screen's sound** (a tab's or the whole system's), as a second
-  track of sound next to it.
 - **The desktop app's calls**: str0m as the WebRTC client, cpal for the
   microphone and speakers, Opus, the frame encryption it already has, and
   then cameras, with each person's camera in a native window of its own.

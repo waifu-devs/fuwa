@@ -872,6 +872,7 @@ impl CallService for Api {
                     enabled,
                     ice_servers,
                     recordings: enabled && settings.call_recordings,
+                    screen_sound: enabled,
                 })
             }
             .await,
