@@ -93,7 +93,43 @@ export function shaderLine(full: number, code: string): number | null {
   return line >= 1 && line <= code.split("\n").length ? line : null;
 }
 
-const stripComments = (code: string) => code.replace(/\/\*[\s\S]*?(\*\/|$)/g, " ").replace(/\/\/[^\n]*/g, "");
+/** WGSL's line breaks: a line comment ends at any of them. */
+const LINE_BREAK = /[\n\v\f\r\u0085\u2028\u2029]/;
+
+/**
+ * The code without its comments, read left to right as the WGSL compiler reads
+ * it: `//` runs to the next line break, and block comments nest. Anything the
+ * compiler would see as code stays, so the checks below see it too.
+ */
+export function stripComments(code: string): string {
+  let out = "";
+  let i = 0;
+  while (i < code.length) {
+    if (code.startsWith("//", i)) {
+      i += 2;
+      while (i < code.length && !LINE_BREAK.test(code[i]!)) i++;
+      continue;
+    }
+    if (code.startsWith("/*", i)) {
+      let depth = 1;
+      i += 2;
+      while (i < code.length && depth > 0) {
+        if (code.startsWith("/*", i)) {
+          depth++;
+          i += 2;
+        } else if (code.startsWith("*/", i)) {
+          depth--;
+          i += 2;
+        } else i++;
+      }
+      out += " ";
+      continue;
+    }
+    out += code[i];
+    i++;
+  }
+  return out;
+}
 
 /**
  * What's wrong with a shader before it goes near a GPU, or null. These are
@@ -103,10 +139,12 @@ const stripComments = (code: string) => code.replace(/\/\*[\s\S]*?(\*\/|$)/g, " 
 export function shaderProblem(code: string): string | null {
   if (!code.trim()) return "The shader is empty.";
   if (bytes(code) > MAX_SHADER_BYTES) return `Shaders can be at most ${MAX_SHADER_BYTES / 1024} KB.`;
+  // Links, even in comments: there's nothing for a shader to point at (and in code, `//` would start a comment anyway).
+  if (/[a-z][a-z0-9+.-]*:\/\//i.test(code)) return "Shaders can't have links, even in comments. Everything they draw comes from the inputs fuwa gives them.";
   const live = stripComments(code);
-  if (/[a-z][a-z0-9+.-]*:\/\//i.test(live)) return "Shaders can't point at links. Everything they draw comes from the inputs fuwa gives them.";
   if (live.includes("@")) return "Shaders can't use attributes (@…): fuwa gives every input, so there's nothing to bind.";
-  if (/^\s*(enable|requires|diagnostic)\b/m.test(live)) return "Shaders can't turn on extensions.";
+  // Reserved words in WGSL, so anywhere they appear outside a comment they're the directives.
+  if (/\b(enable|requires|diagnostic)\b/.test(live)) return "Shaders can't turn on extensions.";
   if (!/\bfn\s+shade\s*\(/.test(live)) return "Define fn shade(uv: vec2f) -> vec4f: it's what fuwa calls for every pixel.";
   return null;
 }

@@ -559,7 +559,8 @@
   `docs/self-hosting.md` in step with anything self-hosters set up (variables,
   ports, image tags, the proxy).
 - Before pushing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
-  `cargo test`, and `buf lint`; for `web/`, `pnpm wasm` and `pnpm build`, then
+  `cargo test`, and `buf lint`; for `web/`, `pnpm wasm`, `pnpm build` and `pnpm test`
+  (node's own test runner over `src/**/*.test.ts`), then
   `cargo test --features web`; for `desktop/`, the same three cargo commands
   run inside `desktop/` (`cargo fmt`, not `--all`).
 - The desktop app and the web app are two faces of one client: a feature,

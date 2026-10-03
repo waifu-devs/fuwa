@@ -145,10 +145,14 @@ at group 0, binding 0. Apps must give exactly these inputs, so a shader draws th
 
 What keeps a shader to these inputs, in every app:
 
-- **Checked as text first** (`shaderProblem`): with comments left out, no `@`
-  at all (no bindings, no entry points of its own, so no textures, buffers or
-  samplers), no `enable`, `requires` or `diagnostic`, nothing that looks like
-  a link (`scheme://`), and a `fn shade(`. Control characters other than tabs
+- **Checked as text first** (`shaderProblem`): no link (`scheme://`)
+  anywhere, comments included; then, with comments left out, no `@` at all
+  (no bindings, no entry points of its own, so no textures, buffers or
+  samplers), no `enable`, `requires` or `diagnostic`, and a `fn shade(`.
+  Comments are read the way the compiler reads them (`stripComments`): left to
+  right, `//` to the next WGSL line break (`\n`, `\v`, `\f`, `\r`, U+0085,
+  U+2028, U+2029), and `/* */` nesting, so nothing the compiler sees as code is
+  skipped. Control characters other than tabs
   and line ends are dropped on read. WGSL has no way to load anything, so
   this is all a shader can reach.
 - **Compiled before it draws.** One that doesn't compile never draws; the

@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "generate": "buf generate --template buf.gen.yaml",
     "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "doctor": "react-doctor",
     "preview": "vite preview"
   },
