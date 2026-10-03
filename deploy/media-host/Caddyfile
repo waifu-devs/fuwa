@@ -1,0 +1,4 @@
+# No access log: nothing here records who connects (docs/calls.md, "Privacy").
+{$MEDIA_DOMAIN}:8443 {
+	reverse_proxy h2c://media:8080
+}
