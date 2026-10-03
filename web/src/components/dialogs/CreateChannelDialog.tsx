@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { FolderIcon, HashIcon, LoaderCircleIcon, MegaphoneIcon, Volume2Icon } from "lucide-react";
+import { FolderIcon, HashIcon, LoaderCircleIcon, MegaphoneIcon, ShieldCheckIcon, Volume2Icon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import { ChannelType, createChannel } from "@/fuwa/actions";
@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 const TYPES = [
   { type: ChannelType.TEXT, icon: HashIcon, label: "Text", hint: "Messages, links, Markdown" },
   { type: ChannelType.ANNOUNCEMENT, icon: MegaphoneIcon, label: "Announcements", hint: "News people follow" },
+  { type: ChannelType.SECURE, icon: ShieldCheckIcon, label: "Secure", hint: "End-to-end encrypted: not even the server can read it" },
   { type: ChannelType.VOICE, icon: Volume2Icon, label: "Voice", hint: "Talk, hang out, play together" },
   { type: ChannelType.CATEGORY, icon: FolderIcon, label: "Category", hint: "Groups channels" },
 ] as const;
@@ -119,14 +120,20 @@ export function CreateChannelDialog({
               <AnimatePresence initial={false}>
                 {!category && (
                   <motion.span
-                    key={type === ChannelType.VOICE ? "voice" : "text"}
+                    key={type === ChannelType.VOICE ? "voice" : type === ChannelType.SECURE ? "secure" : "text"}
                     initial={{ opacity: 0, scale: 0.4, rotate: -30 }}
                     animate={{ opacity: 1, scale: 1, rotate: 0 }}
                     exit={{ opacity: 0, scale: 0.4 }}
                     transition={SPRING}
                     className="pointer-events-none absolute top-3.5 left-3 text-muted-foreground"
                   >
-                    {type === ChannelType.VOICE ? <Volume2Icon className="size-4" /> : <HashIcon className="size-4" />}
+                    {type === ChannelType.VOICE ? (
+                      <Volume2Icon className="size-4" />
+                    ) : type === ChannelType.SECURE ? (
+                      <ShieldCheckIcon className="size-4" />
+                    ) : (
+                      <HashIcon className="size-4" />
+                    )}
                   </motion.span>
                 )}
               </AnimatePresence>

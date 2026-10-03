@@ -3,8 +3,8 @@ import { timestampMs } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
 import type { Api } from "@/fuwa/client";
 import { toFuwaError } from "@/fuwa/errors";
-import { store, updateDms, type DmMember } from "@/fuwa/store";
-import { onDirectMessage } from "@/lib/notify";
+import { store, updateDms, updateInstance, type DmMember } from "@/fuwa/store";
+import { onDirectMessage, onSecureMessage } from "@/lib/notify";
 import {
   ConversationRecordKind,
   DirectMessageContentSchema,
@@ -16,7 +16,12 @@ import {
   type DirectMessageEvent,
 } from "@/gen/fuwa/v1/dm_pb";
 import type { DmCall } from "@/gen/fuwa/v1/call_pb";
-import type { User } from "@/gen/fuwa/v1/types_pb";
+import type { Device as DeviceInfo } from "@/gen/fuwa/v1/dm_pb";
+import { SecureRecordKind } from "@/gen/fuwa/v1/secure_pb";
+import { Permission, type Event, type User } from "@/gen/fuwa/v1/types_pb";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { accessOf, hasIn } from "@/lib/permissions";
+import { reportError } from "@/lib/reports";
 import * as vault from "./vault";
 import { loadE2ee, type Commit, type Device, type E2ee, type Processed, type WasmMember } from "./wasm";
 
@@ -52,12 +57,67 @@ export const MAX_DM = 4000;
 /** What a conversation's group exports its call secret under. */
 const CALL_LABEL = "fuwa call v1";
 
+/** The most people or devices one call asks the instance about. */
+const LOOKUPS = 100;
+/** How long a device waits, at most, before taking people who lost access out of a secure channel. */
+const ACCESS_SETTLE_MS = 2500;
+
+/**
+ * Why a secure channel can't be read or written: its group can't be followed
+ * any more (a change to it no device could read), until someone with Manage
+ * Channels starts its encryption over.
+ */
+export const SECURE_BROKEN =
+  "This channel's encryption can't be followed any more: a change to its keys couldn't be read. Someone who can manage the channel can start it over.";
+
+/** One entry in a group's log: a direct message's ConversationRecord, or a secure channel's SecureRecord. */
+type Rec = {
+  sequence: bigint;
+  kind: number;
+  senderId: string;
+  senderDeviceId: string;
+  data: Uint8Array;
+  createdAt?: Timestamp;
+};
+
+/**
+ * One MLS group this device takes part in, and how to reach it: a direct
+ * message conversation (DirectMessageService) or a secure channel in a
+ * community server (SecureChannelService). Both keep their records the same
+ * way, so everything else here is the same for both.
+ */
+type Room = {
+  id: string;
+  channel: { serverId: string } | null;
+  /** Who may show up in the group's history. */
+  allowed: string[];
+  /** Who belongs in the group now, asked fresh. */
+  belong(): Promise<string[]>;
+  /** Refuses to write when the group can't be made right yet. */
+  check(devices: DeviceInfo[], belong: string[]): void;
+  records(after: number): Promise<{ records: Rec[]; hasMore: boolean }>;
+  welcome(): Promise<{ sequence: bigint; data: Uint8Array } | undefined>;
+  groupInfo(): Promise<{ epoch: bigint; groupInfo: Uint8Array }>;
+  commit(commit: Commit, welcome: boolean): Promise<Rec | undefined>;
+  message(ciphertext: Uint8Array): Promise<void>;
+  remove(seq: number): Promise<void>;
+  /** A message someone else sent, just opened. */
+  notify(item: vault.Item): void;
+};
+
+/** A secure channel this device follows. */
+type SecureChannel = { serverId: string; memberIds: string[] };
+
+const unique = (ids: Iterable<string>) => [...new Set([...ids].filter(Boolean))];
+const chunks = <T,>(list: T[], size: number) =>
+  Array.from({ length: Math.ceil(list.length / size) }, (_, n) => list.slice(n * size, n * size + size));
+
 /** Something a person can be told about why sending didn't work. */
 export class DmError extends Error {
   override name = "DmError";
 }
 
-const ms = (record: ConversationRecord) => (record.createdAt ? timestampMs(record.createdAt) : Date.now());
+const ms = (record: Rec) => (record.createdAt ? timestampMs(record.createdAt) : Date.now());
 const isPrecondition = (err: unknown) => toFuwaError(err).code === Code.FailedPrecondition;
 const lockName = (vaultKey: string) => `fuwa-e2ee:${vaultKey}`;
 
@@ -108,6 +168,10 @@ export class DmEngine {
   private readonly controller = new AbortController();
   private readonly tabs: BroadcastChannel | null;
   private conversations = new Map<string, Conversation>();
+  /** Secure channels in servers, by channel id: followed once opened, or once a record arrives. */
+  private secure = new Map<string, SecureChannel>();
+  /** Servers whose secure channels wait to be brought in step with a permission change. */
+  private settling = new Map<string, ReturnType<typeof setTimeout>>();
   /** Catch-ups waiting their turn, so a burst of records reads each conversation once. */
   private queued = new Set<string>();
   private work: Promise<void> = Promise.resolve();
@@ -179,6 +243,7 @@ export class DmEngine {
     if (this.stopped) return;
     this.controller.abort();
     this.tabs?.close();
+    for (const timer of this.settling.values()) clearTimeout(timer);
     try {
       this.device.free();
     } catch {
@@ -320,12 +385,23 @@ export class DmEngine {
           await this.fresh();
           await this.catchUp(conversation);
         });
+        this.setBroken(conversation, false);
       } catch (err) {
-        console.warn("fuwa: couldn't catch up on a conversation", err);
+        if (err instanceof DmError && err.message === SECURE_BROKEN) this.setBroken(conversation, true);
+        else console.warn("fuwa: couldn't catch up on a conversation", err);
       }
       await this.refresh(conversation).catch(() => {});
     });
     return this.work;
+  }
+
+  /** Shows (or clears) that a secure channel's encryption can't be followed. */
+  private setBroken(id: string, broken: boolean) {
+    updateDms(this.key, (d) => {
+      const now = d.blocked[id] ?? "";
+      if (broken ? now === SECURE_BROKEN : now !== SECURE_BROKEN) return d;
+      return { ...d, blocked: { ...d.blocked, [id]: broken ? SECURE_BROKEN : "" } };
+    });
   }
 
   // ───────────────────────── Under the lock ─────────────────────────
@@ -350,13 +426,108 @@ export class DmEngine {
     return { vault: this.vaultKey, session: this.session, state: this.device.save(), version: this.version };
   }
 
-  private allowed(c: Conversation) {
-    return c.users.map((u) => u.id);
+  /** How to reach a conversation or secure channel's group, if it's one this device knows. */
+  private room(id: string): Room | undefined {
+    const c = this.conversations.get(id);
+    if (c) return this.conversationRoom(c);
+    const sc = this.secure.get(id);
+    if (sc) return this.channelRoom(id, sc);
+    return undefined;
+  }
+
+  private conversationRoom(c: Conversation): Room {
+    const dms = this.api.dms;
+    const id = c.id;
+    const allowed = c.users.map((u) => u.id);
+    return {
+      id,
+      channel: null,
+      allowed,
+      belong: async () => allowed,
+      check: (devices) => {
+        const partner = c.users.find((u) => u.id !== this.me.id);
+        if (partner && !devices.some((d) => d.userId === partner.id)) {
+          const name = partner.displayName || partner.username;
+          throw new DmError(
+            partner.username === "deleted"
+              ? "This account was deleted."
+              : `${name} isn't signed in to fuwa anywhere that can receive encrypted messages yet. You can write once they are.`,
+          );
+        }
+      },
+      records: (after) => dms.listRecords({ conversationId: id, afterSequence: BigInt(after), limit: PAGE }, CALL),
+      welcome: async () => (await dms.listWelcomes({}, CALL)).welcomes.find((w) => w.conversationId === id),
+      groupInfo: () => dms.getGroupInfo({ conversationId: id }, CALL),
+      commit: async (commit, welcome) =>
+        (
+          await dms.postCommit(
+            {
+              conversationId: id,
+              commit: commit.commit,
+              groupInfo: commit.groupInfo,
+              welcome: welcome ? (commit.welcome ?? new Uint8Array()) : new Uint8Array(),
+              welcomeDeviceIds: welcome && commit.welcome ? commit.added.map((m) => m.deviceId) : [],
+            },
+            CALL,
+          )
+        ).record,
+      message: async (message) => {
+        await dms.postMessage({ conversationId: id, message }, CALL);
+      },
+      remove: async (seq) => {
+        await dms.deleteRecord({ conversationId: id, sequence: BigInt(seq) }, CALL);
+      },
+      notify: (i) => onDirectMessage(this.key, id, c.users.find((u) => u.id === i.senderId), i.content, i.at),
+    };
+  }
+
+  private channelRoom(id: string, sc: SecureChannel): Room {
+    const secure = this.api.secure;
+    const at = { serverId: sc.serverId, channelId: id };
+    const members = store.get().instances[this.key]?.members[sc.serverId] ?? [];
+    // Someone added earlier may have lost access since; the group's history still names them.
+    const allowed = unique([this.me.id, ...sc.memberIds, ...members.map((m) => m.user?.id ?? "")]);
+    return {
+      id,
+      channel: { serverId: sc.serverId },
+      allowed,
+      belong: async () => {
+        const { memberIds } = await secure.getSecureChannel(at, CALL);
+        sc.memberIds = memberIds;
+        return memberIds;
+      },
+      check: (_devices, belong) => {
+        if (!belong.includes(this.me.id)) throw new DmError("You can't see this channel any more.");
+      },
+      records: (after) => secure.listSecureRecords({ ...at, afterSequence: BigInt(after), limit: PAGE }, CALL),
+      welcome: async () => (await secure.listSecureWelcomes({ serverId: sc.serverId }, CALL)).welcomes.find((w) => w.channelId === id),
+      groupInfo: () => secure.getSecureGroupInfo(at, CALL),
+      commit: async (commit, welcome) =>
+        (
+          await secure.postSecureCommit(
+            {
+              ...at,
+              commit: commit.commit,
+              groupInfo: commit.groupInfo,
+              welcome: welcome ? (commit.welcome ?? new Uint8Array()) : new Uint8Array(),
+              welcomeDeviceIds: welcome && commit.welcome ? commit.added.map((m) => m.deviceId) : [],
+            },
+            CALL,
+          )
+        ).record,
+      message: async (message) => {
+        await secure.postSecureMessage({ ...at, message }, CALL);
+      },
+      remove: async (seq) => {
+        await secure.deleteSecureRecord({ ...at, sequence: BigInt(seq) }, CALL);
+      },
+      notify: (i) => onSecureMessage(this.key, sc.serverId, id, i.senderId, i.content, i.at),
+    };
   }
 
   /** Reads a conversation's records this device hasn't, joining it first if it isn't in. */
   private async catchUp(id: string, depth = 0): Promise<void> {
-    const c = this.conversations.get(id);
+    const c = this.room(id);
     if (!c) return;
     let note = await vault.loadNote(this.vaultKey, id);
     if (!this.device.isMember(id)) {
@@ -371,10 +542,7 @@ export class DmEngine {
     }
     const known = new Map((await vault.loadItems(this.vaultKey, id)).map((i) => [i.seq, i]));
     for (;;) {
-      const { records, hasMore } = await this.api.dms.listRecords(
-        { conversationId: id, afterSequence: BigInt(note.cursor), limit: PAGE },
-        CALL,
-      );
+      const { records, hasMore } = await c.records(note.cursor);
       const changed = new Map<number, vault.Item>();
       const had = new Set(known.keys());
       const forgetSent: string[] = [];
@@ -382,7 +550,8 @@ export class DmEngine {
       for (const record of records) {
         const outcome = await this.open(c, record, known, changed, forgetSent);
         note = { ...note, cursor: Number(record.sequence) };
-        if (outcome === "rejoin") {
+        if (outcome === "reset" && c.channel) this.restart(c.channel.serverId, id);
+        if (outcome === "rejoin" || outcome === "reset") {
           rejoin = true;
           break;
         }
@@ -390,8 +559,7 @@ export class DmEngine {
       await vault.write(this.vaultKey, { device: this.saved(), notes: [note], items: [...changed.values()], forgetSent });
       this.tell(id);
       for (const i of changed.values()) {
-        if (i.kind === "text" && !had.has(i.seq) && i.senderId !== this.me.id)
-          onDirectMessage(this.key, id, c.users.find((u) => u.id === i.senderId), i.content, i.at);
+        if (i.kind === "text" && !had.has(i.seq) && i.senderId !== this.me.id) c.notify(i);
       }
       if (rejoin) {
         if (depth < 2) await this.catchUp(id, depth + 1);
@@ -401,20 +569,29 @@ export class DmEngine {
     }
   }
 
-  /** Opens one record and notes what it said. "rejoin" if this device has to join the group again. */
+  /**
+   * Opens one record and notes what it said. "rejoin" if this device has to
+   * join the group again; "reset" if the channel's encryption started over.
+   */
   private async open(
-    c: Conversation,
-    record: ConversationRecord,
+    c: Room,
+    record: Rec,
     known: Map<number, vault.Item>,
     changed: Map<number, vault.Item>,
     forgetSent: string[],
-  ): Promise<"rejoin" | void> {
+  ): Promise<"rejoin" | "reset" | void> {
     const seq = Number(record.sequence);
     const at = ms(record);
     const put = (i: vault.Item) => {
       known.set(i.seq, i);
       changed.set(i.seq, i);
     };
+    if (c.channel && record.kind === SecureRecordKind.RESET) {
+      // The group before it is gone; the next commit starts a new one.
+      this.device.forget(c.id);
+      put(item(this.vaultKey, c.id, { seq, at, kind: "reset", senderId: record.senderId }));
+      return "reset";
+    }
     if (record.data.length === 0) {
       // Deleted before this device read it.
       const before = known.get(seq);
@@ -424,10 +601,11 @@ export class DmEngine {
     const own = record.senderDeviceId === this.device.deviceId;
     let out: Processed;
     try {
-      out = this.device.process(c.id, record.data, own, this.allowed(c)) as Processed;
+      out = this.device.process(c.id, record.data, own, c.allowed) as Processed;
     } catch (err) {
       // A commit this device can't follow leaves it out of the group: it joins again.
       if ((err as Error).name === "Behind" || record.kind === ConversationRecordKind.COMMIT) {
+        reportError("e2ee.lost_group", c.channel ? "secure_channel" : "dm");
         console.warn("fuwa: lost track of a conversation's group; joining it again", err);
         this.device.forget(c.id);
         return "rejoin";
@@ -519,10 +697,9 @@ export class DmEngine {
    * device, or else by itself from the group's public state. Null if nobody
    * started the group yet.
    */
-  private async join(c: Conversation, note: vault.Note): Promise<vault.Note | null> {
-    const allowed = this.allowed(c);
-    const { welcomes } = await this.api.dms.listWelcomes({}, CALL);
-    const welcome = welcomes.find((w) => w.conversationId === c.id);
+  private async join(c: Room, note: vault.Note): Promise<vault.Note | null> {
+    const allowed = c.allowed;
+    const welcome = await c.welcome();
     if (welcome) {
       try {
         this.device.joinFromWelcome(c.id, welcome.data, allowed);
@@ -540,15 +717,20 @@ export class DmEngine {
       }
     }
     for (let attempt = 0; attempt < 3; attempt++) {
-      const info = await this.api.dms.getGroupInfo({ conversationId: c.id }, CALL);
+      const info = await c.groupInfo();
       if (info.epoch === 0n || info.groupInfo.length === 0) return null;
-      const commit = this.device.joinByItself(c.id, info.groupInfo, allowed) as Commit;
+      let commit: Commit;
+      try {
+        commit = this.device.joinByItself(c.id, info.groupInfo, allowed) as Commit;
+      } catch (err) {
+        if (!c.channel) throw err;
+        // Nothing to join from: the group the server holds can't be read.
+        reportError("e2ee.secure_broken", "secure_channel");
+        throw new DmError(SECURE_BROKEN);
+      }
       await vault.write(this.vaultKey, { device: this.saved() });
       try {
-        const { record } = await this.api.dms.postCommit(
-          { conversationId: c.id, commit: commit.commit, groupInfo: commit.groupInfo },
-          CALL,
-        );
+        const record = await c.commit(commit, false);
         const seq = Number(record?.sequence ?? 0n);
         const next = { ...note, cursor: seq };
         await vault.write(this.vaultKey, {
@@ -571,18 +753,12 @@ export class DmEngine {
    * Makes the group hold exactly the devices both people are signed in on:
    * starts it if nobody has, adds new devices, drops ones whose sessions ended.
    */
-  private async reconcile(c: Conversation, attempt = 0): Promise<void> {
-    const allowed = this.allowed(c);
-    const { devices } = await this.api.dms.listDevices({ userIds: allowed }, CALL);
-    const partner = c.users.find((u) => u.id !== this.me.id);
-    if (partner && !devices.some((d) => d.userId === partner.id)) {
-      const name = partner.displayName || partner.username;
-      throw new DmError(
-        partner.username === "deleted"
-          ? "This account was deleted."
-          : `${name} isn't signed in to fuwa anywhere that can receive encrypted messages yet. You can write once they are.`,
-      );
-    }
+  private async reconcile(c: Room, attempt = 0): Promise<void> {
+    const belong = await c.belong();
+    const devices: DeviceInfo[] = [];
+    for (const userIds of chunks(belong, LOOKUPS)) devices.push(...(await this.api.dms.listDevices({ userIds }, CALL)).devices);
+    c.check(devices, belong);
+    const allowed = unique([...c.allowed, ...belong]);
     const starting = !this.device.isMember(c.id);
     if (starting) this.device.createGroup(c.id);
     const members = this.device.members(c.id) as WasmMember[];
@@ -590,10 +766,12 @@ export class DmEngine {
     const expected = new Set(devices.map((d) => d.id));
     const adds = devices.filter((d) => !present.has(d.id)).map((d) => d.id);
     const removes = members.filter((m) => !expected.has(m.deviceId) && m.deviceId !== this.device.deviceId).map((m) => m.deviceId);
-    const claimed = adds.length ? (await this.api.dms.claimKeyPackages({ deviceIds: adds }, CALL)).keyPackages : [];
-    if (!claimed.length && !removes.length) {
+    const claimed = [];
+    for (const deviceIds of chunks(adds, LOOKUPS)) claimed.push(...(await this.api.dms.claimKeyPackages({ deviceIds }, CALL)).keyPackages);
+    // A secure channel starts its group even when nobody else is signed in yet, so its first writer isn't stuck.
+    if (!claimed.length && !removes.length && !(starting && c.channel)) {
       if (starting) this.device.forget(c.id);
-      if (starting && partner) throw new DmError("couldn't reach their devices yet; try again in a moment");
+      if (starting) throw new DmError("couldn't reach their devices yet; try again in a moment");
       return;
     }
     const commit = this.device.commit(
@@ -604,16 +782,7 @@ export class DmEngine {
     ) as Commit;
     await vault.write(this.vaultKey, { device: this.saved() });
     try {
-      await this.api.dms.postCommit(
-        {
-          conversationId: c.id,
-          commit: commit.commit,
-          groupInfo: commit.groupInfo,
-          welcome: commit.welcome ?? new Uint8Array(),
-          welcomeDeviceIds: commit.welcome ? commit.added.map((m) => m.deviceId) : [],
-        },
-        CALL,
-      );
+      await c.commit(commit, true);
     } catch (err) {
       if (this.device.epoch(c.id) === 0) this.device.forget(c.id);
       else this.device.discardPending(c.id);
@@ -632,9 +801,9 @@ export class DmEngine {
   prepare(id: string): Promise<void> {
     return exclusive(this.lock, async () => {
       await this.fresh();
-      const c = this.conversations.get(id);
-      if (!c) throw new DmError("that conversation isn't here");
       await this.catchUp(id);
+      const c = this.room(id);
+      if (!c) throw new DmError("that conversation isn't here");
       await this.reconcile(c);
     }).finally(() => this.refresh(id).catch(() => {}));
   }
@@ -643,9 +812,9 @@ export class DmEngine {
   send(id: string, content: Content): Promise<void> {
     return exclusive(this.lock, async () => {
       await this.fresh();
-      const c = this.conversations.get(id);
-      if (!c) throw new DmError("that conversation isn't here");
       await this.catchUp(id);
+      const c = this.room(id);
+      if (!c) throw new DmError("that conversation isn't here");
       await this.reconcile(c);
       const plaintext = encode(content);
       for (let attempt = 0; ; attempt++) {
@@ -654,7 +823,7 @@ export class DmEngine {
         // Kept first: this device can't open what it sent, so this is how it knows what it said.
         await vault.write(this.vaultKey, { device: this.saved(), sent: [{ hash, plaintext }] });
         try {
-          await this.api.dms.postMessage({ conversationId: id, message: ciphertext }, CALL);
+          await c.message(ciphertext);
           break;
         } catch (err) {
           await vault.write(this.vaultKey, { forgetSent: [hash] });
@@ -668,7 +837,9 @@ export class DmEngine {
 
   /** Deletes a message you sent: from the instance, and from every device's copy. */
   async remove(id: string, seq: number) {
-    await this.api.dms.deleteRecord({ conversationId: id, sequence: BigInt(seq) }, CALL);
+    const c = this.room(id);
+    if (!c) throw new DmError("that conversation isn't here");
+    await c.remove(seq);
     await this.forgetDeleted(id, seq);
   }
 
@@ -690,7 +861,8 @@ export class DmEngine {
       await vault.write(this.vaultKey, { notes: [{ ...note, read: last }] });
       this.tell(id);
     });
-    updateDms(this.key, (d) => (d.unread[id] ? { ...d, unread: { ...d.unread, [id]: 0 } } : d));
+    if (this.secure.has(id)) updateInstance(this.key, (i) => (i.unread[id] ? { ...i, unread: { ...i.unread, [id]: 0 } } : i));
+    else updateDms(this.key, (d) => (d.unread[id] ? { ...d, unread: { ...d.unread, [id]: 0 } } : d));
   }
 
   /** Remembers that you compared this safety number with the other person (or forgets it, with ""). */
@@ -711,6 +883,7 @@ export class DmEngine {
 
   /** Puts what this browser knows about a conversation in the store. */
   async refresh(id: string) {
+    if (this.secure.has(id)) return this.refreshChannel(id);
     const c = this.conversations.get(id);
     if (!c || this.stopped) return;
     const [items, note, members] = await Promise.all([
@@ -737,6 +910,153 @@ export class DmEngine {
       verified: { ...d.verified, [id]: note.verified },
     }));
     if (looking && items.length && note.read < items.at(-1)!.seq) void this.markRead(id).catch(() => {});
+  }
+
+  /** Puts what this browser knows about a secure channel in the store; its unread count goes with the server's channels. */
+  private async refreshChannel(id: string) {
+    const [items, note, members] = await Promise.all([
+      vault.loadItems(this.vaultKey, id),
+      vault.loadNote(this.vaultKey, id),
+      exclusive(this.lock, async () => {
+        await this.fresh();
+        return this.device.isMember(id) ? (this.device.members(id) as WasmMember[]) : [];
+      }),
+    ]);
+    if (this.stopped || !this.secure.has(id)) return;
+    const focused = store.get().focus;
+    const looking = focused?.instance === this.key && focused.channel === id && document.visibilityState === "visible";
+    const unread = looking
+      ? 0
+      : items.filter((i) => i.kind === "text" && !i.deleted && i.senderId !== this.me.id && i.seq > note.read).length;
+    updateDms(this.key, (d) => ({
+      ...d,
+      items: { ...d.items, [id]: items },
+      members: { ...d.members, [id]: members satisfies DmMember[] },
+    }));
+    updateInstance(this.key, (i) => (i.unread[id] === unread ? i : { ...i, unread: { ...i.unread, [id]: unread } }));
+    if (looking && items.length && note.read < items.at(-1)!.seq) void this.markRead(id).catch(() => {});
+  }
+
+  // ───────────────────────── Secure channels ─────────────────────────
+
+  /** Starts following a secure channel (opened, or it had news): catches up on it. */
+  followChannel(serverId: string, channelId: string): Promise<void> {
+    if (!this.secure.has(channelId)) this.secure.set(channelId, { serverId, memberIds: [] });
+    return this.queue(channelId);
+  }
+
+  /** Follows the secure channels this device was already in, when their server comes in: what came while away is read. */
+  async followServer(serverId: string, channelIds: string[]) {
+    const notes = new Set((await vault.loadNotes(this.vaultKey)).map((n) => n.conversation));
+    for (const id of channelIds) if (notes.has(id)) void this.followChannel(serverId, id);
+  }
+
+  /** A server event, as it arrives live: secure channels' records, and changes to who can see them. */
+  onServerEvent(event: Event) {
+    const p = event.payload;
+    switch (p.case) {
+      case "secureRecordAdded":
+        if (p.value.record) void this.followChannel(event.serverId, p.value.record.channelId);
+        return;
+      case "secureRecordDeleted":
+        if (this.secure.has(p.value.channelId)) void this.forgetDeleted(p.value.channelId, Number(p.value.sequence)).catch(() => {});
+        return;
+      case "channelDeleted":
+        if (this.secure.has(p.value.channelId)) void this.leaveChannel(p.value.channelId).catch(() => {});
+        return;
+      case "channelUpdated":
+      case "roleUpdated":
+      case "roleDeleted":
+      case "memberUpdated":
+      case "memberLeft":
+      case "memberJoined":
+        this.settle(event.serverId);
+        return;
+    }
+  }
+
+  /**
+   * After a change to who can see what, brings the server's secure channels
+   * this device is in back in step: people who lost access go, people who
+   * gained it come in. Every device that's online would do it, so each waits
+   * a moment first; the first commit wins and the rest find nothing to do.
+   */
+  private settle(serverId: string) {
+    if (this.settling.has(serverId)) return;
+    const ids = [...this.secure].filter(([, sc]) => sc.serverId === serverId).map(([id]) => id);
+    if (!ids.length) return;
+    const timer = setTimeout(
+      () => {
+        this.settling.delete(serverId);
+        for (const id of ids) {
+          // Only people who may write commit for the group; the server refuses the others'.
+          if (!this.secure.has(id) || !this.canWrite(serverId, id)) continue;
+          void exclusive(this.lock, async () => {
+            await this.fresh();
+            await this.catchUp(id);
+            const c = this.room(id);
+            if (c && this.device.isMember(id)) await this.reconcile(c);
+          })
+            .catch((err: unknown) => {
+              if (!(err instanceof DmError)) reportError("e2ee.secure_settle", "secure_channel");
+            })
+            .finally(() => void this.refresh(id).catch(() => {}));
+        }
+      },
+      400 + Math.random() * ACCESS_SETTLE_MS,
+    );
+    this.settling.set(serverId, timer);
+  }
+
+  /**
+   * After a channel's encryption started over: someone who may write starts
+   * its new group. Every such device that's online would, so each waits a
+   * moment; the first commit wins and the rest join from its welcome.
+   */
+  private restart(serverId: string, id: string) {
+    if (!this.canWrite(serverId, id)) return;
+    setTimeout(
+      () => {
+        if (this.secure.has(id) && !this.stopped) void this.prepare(id).catch(() => {});
+      },
+      400 + Math.random() * ACCESS_SETTLE_MS,
+    );
+  }
+
+  /** Whether you may write in a server's channel, worked out as the server does, from what this app knows. */
+  private canWrite(serverId: string, channelId: string): boolean {
+    const i = store.get().instances[this.key];
+    const server = i?.servers.find((x) => x.id === serverId);
+    if (!i || !server) return false;
+    const member = i.members[serverId]?.find((m) => m.user?.id === this.me.id);
+    const access = accessOf(
+      serverId,
+      server.ownerId,
+      i.roles[serverId] ?? [],
+      i.channels[serverId] ?? [],
+      this.me.id,
+      member?.roleIds ?? [],
+      !!member?.pending && server.hasRules,
+      !!member?.timedOutUntil && timestampMs(member.timedOutUntil) > Date.now(),
+    );
+    return hasIn(access, channelId, Permission.SEND_MESSAGES);
+  }
+
+  /** A secure channel you can't see any more (or that was deleted): this device lets go of it and what it kept. */
+  private async leaveChannel(id: string) {
+    this.secure.delete(id);
+    await exclusive(this.lock, async () => {
+      await this.fresh();
+      this.device.forget(id);
+      await vault.write(this.vaultKey, { device: this.saved() });
+      await vault.forget(this.vaultKey, id);
+      this.tell(id);
+    });
+    updateDms(this.key, (d) => {
+      const { [id]: _, ...items } = d.items;
+      const { [id]: __, ...members } = d.members;
+      return { ...d, items, members };
+    });
   }
 
   /** Both people's safety number, from the devices in the group. Empty until both have one there. */

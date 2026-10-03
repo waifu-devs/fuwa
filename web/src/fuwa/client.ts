@@ -16,6 +16,7 @@ import { MediaService } from "@/gen/fuwa/v1/media_pb";
 import { MessageService } from "@/gen/fuwa/v1/message_pb";
 import { NodeService } from "@/gen/fuwa/v1/node_pb";
 import { RoleService } from "@/gen/fuwa/v1/role_pb";
+import { SecureChannelService } from "@/gen/fuwa/v1/secure_pb";
 import { ServerService } from "@/gen/fuwa/v1/server_pb";
 import { SsoService } from "@/gen/fuwa/v1/sso_pb";
 import { WebhookService } from "@/gen/fuwa/v1/webhook_pb";
@@ -36,6 +37,7 @@ export type Api = {
   invites: Client<typeof InviteService>;
   join: Client<typeof JoinService>;
   dms: Client<typeof DirectMessageService>;
+  secure: Client<typeof SecureChannelService>;
   automod: Client<typeof AutoModService>;
   emojis: Client<typeof EmojiService>;
   calls: Client<typeof CallService>;
@@ -70,6 +72,7 @@ export function makeApi(url: string, token: () => string | null): Api {
     invites: createClient(InviteService, transport),
     join: createClient(JoinService, transport),
     dms: createClient(DirectMessageService, transport),
+    secure: createClient(SecureChannelService, transport),
     automod: createClient(AutoModService, transport),
     emojis: createClient(EmojiService, transport),
     calls: createClient(CallService, transport),
