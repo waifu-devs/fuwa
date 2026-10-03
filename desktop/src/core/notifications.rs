@@ -69,6 +69,9 @@ impl InstanceState {
         if message.mentions_everyone && !suppress_everyone {
             return true;
         }
+        if message.mention_role_ids.is_empty() {
+            return false;
+        }
         let mine = self.my_member(server_id).map(|m| m.role_ids.as_slice()).unwrap_or_default();
         message.mention_role_ids.iter().any(|id| mine.contains(id))
     }
