@@ -2635,12 +2635,22 @@ async fn instance_admins_manage_accounts_servers_and_announcements() {
     instance.stop().await;
 }
 
-/// A file that starts like a PNG, `size` bytes long.
+/// A PNG's chunks, `size` bytes long (at least [`PNG_MIN`]): a header, a
+/// private chunk of `fill` bytes, and the end, so it's kept as it is.
 fn png(size: usize, fill: u8) -> Vec<u8> {
-    let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
-    bytes.resize(size, fill);
-    bytes
+    assert!(size >= PNG_MIN, "a test PNG is at least {PNG_MIN} bytes");
+    let chunk =
+        |kind: &[u8; 4], data: &[u8]| [&(data.len() as u32).to_be_bytes()[..], kind, data, &[0, 0, 0, 0]].concat();
+    [
+        &b"\x89PNG\r\n\x1a\n"[..],
+        &chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]),
+        &chunk(b"fuWa", &vec![fill; size - PNG_MIN]),
+        &chunk(b"IEND", &[]),
+    ]
+    .concat()
 }
+
+const PNG_MIN: usize = 8 + 25 + 12 + 12;
 
 /// The same address on the test instance: links are made with the public
 /// URL, which the test doesn't know before the port is picked.
@@ -2736,13 +2746,66 @@ async fn backgrounds_are_kept_listed_and_deleted() {
 
     // There's a cap on how many one account keeps.
     for n in 1..fuwa_server::media::MAX_BACKGROUNDS {
-        let url = upload(&mut c, &instance, &mika, background, png(20, n as u8)).await;
+        let url = upload(&mut c, &instance, &mika, background, png(60, n as u8)).await;
         c.media.keep_background(keep(&mika, &url)).await.unwrap();
     }
-    let last = upload(&mut c, &instance, &mika, background, png(20, 0)).await;
+    let last = upload(&mut c, &instance, &mika, background, png(60, 0)).await;
     c.media.keep_background(keep(&mika, &last)).await.unwrap();
-    let over = upload(&mut c, &instance, &mika, background, png(21, 0)).await;
+    let over = upload(&mut c, &instance, &mika, background, png(61, 0)).await;
     assert_eq!(c.media.keep_background(keep(&mika, &over)).await.unwrap_err().code(), Code::ResourceExhausted);
+}
+
+#[tokio::test]
+async fn pictures_are_kept_without_where_they_were_taken() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_PUBLIC_URL", "https://chat.example.com")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let avatar = pb::MediaPurpose::Avatar;
+    let send = async |c: &mut Clients, kind: &str, bytes: Vec<u8>| {
+        let reserved = create_upload(c, &juan, avatar, kind, bytes.len()).await.unwrap();
+        let status = put(&instance, &reserved.upload_url, bytes).await;
+        (status, reserved.media.unwrap().url)
+    };
+
+    // A phone photo: its EXIF names where it was taken, and another picture
+    // with its own EXIF follows the end.
+    let segment =
+        |marker: u8, data: &[u8]| [&[0xff, marker][..], &((data.len() + 2) as u16).to_be_bytes(), data].concat();
+    let picture =
+        [segment(0xdb, &[0; 65]), segment(0xda, &[1, 1, 0, 0, 0x3f, 0]), vec![0x12, 0x34, 0xff, 0xd9]].concat();
+    let photo = [
+        &[0xff, 0xd8][..],
+        &segment(0xe1, b"Exif\0\0GPS 35.6812N 139.7671E"),
+        &picture,
+        &[0xff, 0xd8],
+        &segment(0xe1, b"Exif\0\0GPS again"),
+        &[0xff, 0xd9],
+    ]
+    .concat();
+    let (status, url) = send(&mut c, "image/jpeg", photo).await;
+    assert_eq!(status, reqwest::StatusCode::NO_CONTENT);
+    let (status, headers, body) = fetch(&instance, &url).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(body, [&[0xff, 0xd8][..], &picture].concat());
+    assert_eq!(headers[reqwest::header::CONTENT_LENGTH], body.len().to_string().as_str());
+
+    // A PNG's text chunks go too.
+    let with_text = {
+        let plain = png(100, 1);
+        let text = [&5u32.to_be_bytes()[..], b"tEXt", b"GPS\0x", &[0; 4]].concat();
+        [&plain[..33], &text, &plain[33..]].concat()
+    };
+    let (status, url) = send(&mut c, "image/png", with_text).await;
+    assert_eq!(status, reqwest::StatusCode::NO_CONTENT);
+    assert_eq!(fetch(&instance, &url).await.2, png(100, 1));
+
+    // One whose chunks can't be followed isn't kept, metadata and all.
+    let mut broken = b"\x89PNG\r\n\x1a\n".to_vec();
+    broken.resize(100, 0xff);
+    let (status, url) = send(&mut c, "image/png", broken).await;
+    assert_eq!(status, reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(fetch(&instance, &url).await.0, reqwest::StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -2904,7 +2967,7 @@ async fn pictures_upload_serve_and_clean_up() {
 
     // Uploads nothing uses are swept: unsent ones when their link runs out,
     // stored ones after a day.
-    let unused = upload(&mut c, &instance, &juan, pb::MediaPurpose::Banner, png(50, 6)).await;
+    let unused = upload(&mut c, &instance, &juan, pb::MediaPurpose::Banner, png(60, 6)).await;
     let now = fuwa_server::id::now_ms();
     instance.app.sweep_media(now).await.unwrap();
     assert_eq!(fetch(&instance, &unused).await.0, reqwest::StatusCode::OK, "a fresh upload waits to be used");

@@ -1355,10 +1355,15 @@ impl NodeDb {
     }
 
     /// Records that an upload's bytes arrived, and what they turned out to be.
-    pub async fn finish_upload(&self, id: &str, content_type: &str, now: i64) -> Result<()> {
+    /// Marks an upload stored, with its type and its size as kept (smaller
+    /// than it came when its metadata was taken out).
+    pub async fn finish_upload(&self, id: &str, content_type: &str, size: i64, now: i64) -> Result<()> {
         db::write(&self.db, async |conn| {
-            conn.execute("UPDATE media SET stored_at = ?2, content_type = ?3 WHERE id = ?1", (id, now, content_type))
-                .await?;
+            conn.execute(
+                "UPDATE media SET stored_at = ?2, content_type = ?3, size = ?4 WHERE id = ?1",
+                (id, now, content_type, size),
+            )
+            .await?;
             Ok(())
         })
         .await
