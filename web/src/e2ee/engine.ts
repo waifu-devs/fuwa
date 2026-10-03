@@ -10,10 +10,15 @@ import {
   DirectMessageContentSchema,
   DirectMessageEditSchema,
   DirectMessageTextSchema,
+  SharedEntrySchema,
+  SharedHistorySchema,
+  SignedContentSchema,
+  SignedPayloadSchema,
   type Conversation,
   type ConversationRecord,
   type DirectMessageContent,
   type DirectMessageEvent,
+  type SharedHistory,
 } from "@/gen/fuwa/v1/dm_pb";
 import type { DmCall } from "@/gen/fuwa/v1/call_pb";
 import type { Device as DeviceInfo } from "@/gen/fuwa/v1/dm_pb";
@@ -59,8 +64,13 @@ const CALL_LABEL = "fuwa call v1";
 
 /** The most people or devices one call asks the instance about. */
 const LOOKUPS = 100;
+/** The most shared history one device passes on at once: the newest messages that fit in one encrypted message. */
+const HISTORY_BYTES = 56_000;
+const HISTORY_ENTRIES = 500;
 /** How long a device waits, at most, before taking people who lost access out of a secure channel. */
 const ACCESS_SETTLE_MS = 2500;
+/** How much longer a device that joined a secure channel after it started waits, so one with more of its history goes first. */
+const LATE_SETTLE_MS = 3500;
 
 /**
  * Why a secure channel can't be read or written: its group can't be followed
@@ -100,13 +110,17 @@ type Room = {
   groupInfo(): Promise<{ epoch: bigint; groupInfo: Uint8Array }>;
   commit(commit: Commit, welcome: boolean): Promise<Rec | undefined>;
   message(ciphertext: Uint8Array): Promise<void>;
+  /** Whether earlier messages are passed on to devices added later (secure channels only), asked fresh. */
+  shares(): Promise<boolean>;
+  /** Passes earlier messages on, right after this device's commit that added devices. */
+  history(ciphertext: Uint8Array): Promise<void>;
   remove(seq: number): Promise<void>;
   /** A message someone else sent, just opened. */
   notify(item: vault.Item): void;
 };
 
 /** A secure channel this device follows. */
-type SecureChannel = { serverId: string; memberIds: string[] };
+type SecureChannel = { serverId: string; memberIds: string[]; shareHistory: boolean };
 
 const unique = (ids: Iterable<string>) => [...new Set([...ids].filter(Boolean))];
 const chunks = <T,>(list: T[], size: number) =>
@@ -155,12 +169,21 @@ const ref = (m: WasmMember): vault.DeviceRef => ({ userId: m.userId, deviceId: m
 /** The plaintext of a message: what only the conversation's devices see. */
 export type Content = { text: string; replyTo?: number } | { edit: number; text: string };
 
-function encode(content: Content): Uint8Array {
+function contentOf(content: Content): DirectMessageContent {
   const body: DirectMessageContent["body"] =
     "edit" in content
       ? { case: "edit", value: create(DirectMessageEditSchema, { sequence: BigInt(content.edit), content: content.text }) }
       : { case: "text", value: create(DirectMessageTextSchema, { content: content.text, replyToSequence: BigInt(content.replyTo ?? 0) }) };
-  return toBinary(DirectMessageContentSchema, create(DirectMessageContentSchema, { body }));
+  return create(DirectMessageContentSchema, { body });
+}
+
+const encode = (content: Content): Uint8Array => toBinary(DirectMessageContentSchema, contentOf(content));
+
+/** What a signed message says, once its signature checks out against the device that signed it. */
+type Opened = { payload: ReturnType<typeof readPayload>; signed: vault.Signed };
+
+function readPayload(bytes: Uint8Array) {
+  return fromBinary(SignedPayloadSchema, bytes);
 }
 
 export class DmEngine {
@@ -474,6 +497,8 @@ export class DmEngine {
       message: async (message) => {
         await dms.postMessage({ conversationId: id, message }, CALL);
       },
+      shares: async () => false,
+      history: async () => {},
       remove: async (seq) => {
         await dms.deleteRecord({ conversationId: id, sequence: BigInt(seq) }, CALL);
       },
@@ -492,8 +517,10 @@ export class DmEngine {
       channel: { serverId: sc.serverId },
       allowed,
       belong: async () => {
-        const { memberIds } = await secure.getSecureChannel(at, CALL);
+        const { memberIds, shareHistory } = await secure.getSecureChannel(at, CALL);
         sc.memberIds = memberIds;
+        sc.shareHistory = shareHistory;
+        this.showHistorySetting(id, shareHistory);
         return memberIds;
       },
       check: (_devices, belong) => {
@@ -517,6 +544,15 @@ export class DmEngine {
         ).record,
       message: async (message) => {
         await secure.postSecureMessage({ ...at, message }, CALL);
+      },
+      shares: async () => {
+        const { shareHistory } = await secure.getSecureChannel(at, CALL);
+        sc.shareHistory = shareHistory;
+        this.showHistorySetting(id, shareHistory);
+        return shareHistory;
+      },
+      history: async (message) => {
+        await secure.postSecureHistory({ ...at, message }, CALL);
       },
       remove: async (seq) => {
         await secure.deleteSecureRecord({ ...at, sequence: BigInt(seq) }, CALL);
@@ -559,7 +595,7 @@ export class DmEngine {
       await vault.write(this.vaultKey, { device: this.saved(), notes: [note], items: [...changed.values()], forgetSent });
       this.tell(id);
       for (const i of changed.values()) {
-        if (i.kind === "text" && !had.has(i.seq) && i.senderId !== this.me.id) c.notify(i);
+        if (i.kind === "text" && !had.has(i.seq) && i.senderId !== this.me.id && !i.sharedBy) c.notify(i);
       }
       if (rejoin) {
         if (depth < 2) await this.catchUp(id, depth + 1);
@@ -586,6 +622,14 @@ export class DmEngine {
       known.set(i.seq, i);
       changed.set(i.seq, i);
     };
+    if (c.channel && record.kind === SecureRecordKind.SETTINGS) {
+      const sc = this.secure.get(c.id);
+      const on = (record as Rec & { shareHistory?: boolean }).shareHistory ?? false;
+      if (sc) sc.shareHistory = on;
+      this.showHistorySetting(c.id, on);
+      put(item(this.vaultKey, c.id, { seq, at, kind: "setting", senderId: record.senderId, content: on ? "on" : "off" }));
+      return;
+    }
     if (c.channel && record.kind === SecureRecordKind.RESET) {
       // The group before it is gone; the next commit starts a new one.
       this.device.forget(c.id);
@@ -613,15 +657,19 @@ export class DmEngine {
       put(item(this.vaultKey, c.id, { seq, at, kind: "unreadable", senderId: record.senderId, deviceId: record.senderDeviceId }));
       return;
     }
+    const history = c.channel && record.kind === SecureRecordKind.HISTORY;
     switch (out.kind) {
       case "message":
-        this.read(c.id, seq, at, out.sender.userId, out.sender.deviceId, out.plaintext, known, put);
+        if (history) await this.takeHistory(c, out.sender.userId, out.plaintext, known, put);
+        else this.read(c, seq, at, out.sender, out.plaintext, known, put);
         return;
       case "own": {
+        // What this device passed on, the others already have.
+        if (history) return;
         const hash = this.e2ee.sha256(record.data);
         const plaintext = await vault.loadSent(this.vaultKey, hash);
         if (plaintext) {
-          this.read(c.id, seq, at, this.me.id, this.device.deviceId, plaintext, known, put);
+          this.read(c, seq, at, { userId: this.me.id, deviceId: this.device.deviceId, signatureKey: this.device.signatureKey }, plaintext, known, put);
           forgetSent.push(hash);
         } else {
           put(item(this.vaultKey, c.id, { seq, at, kind: "unreadable", senderId: this.me.id, deviceId: this.device.deviceId }));
@@ -652,28 +700,40 @@ export class DmEngine {
     }
   }
 
-  /** What a message said: new text, or an edit of the sender's own earlier message. */
+  /**
+   * What a message said: new text, or an edit of the sender's own earlier
+   * message. In a secure channel it comes signed by the device that sent it,
+   * which is kept so it can be passed on to devices added later.
+   */
   private read(
-    conversation: string,
+    c: Room,
     seq: number,
     at: number,
-    senderId: string,
-    deviceId: string,
+    sender: WasmMember,
     plaintext: Uint8Array,
     known: Map<number, vault.Item>,
     put: (i: vault.Item) => void,
   ) {
+    const senderId = sender.userId;
+    const deviceId = sender.deviceId;
+    const unreadable = () => put(item(this.vaultKey, c.id, { seq, at, kind: "unreadable", senderId, deviceId }));
     let content: DirectMessageContent;
+    let signed: vault.Signed | undefined;
     try {
       content = fromBinary(DirectMessageContentSchema, plaintext);
+      if (content.body.case === "signed") {
+        const opened = this.openSigned(c.id, content.body.value.payload, content.body.value.signature, sender.signatureKey);
+        if (!opened || opened.payload.senderId !== senderId || !opened.payload.content) return unreadable();
+        content = opened.payload.content;
+        signed = opened.signed;
+      }
     } catch {
-      put(item(this.vaultKey, conversation, { seq, at, kind: "unreadable", senderId, deviceId }));
-      return;
+      return unreadable();
     }
     const body = content.body;
     if (body.case === "text") {
       put(
-        item(this.vaultKey, conversation, {
+        item(this.vaultKey, c.id, {
           seq,
           at,
           kind: "text",
@@ -681,15 +741,142 @@ export class DmEngine {
           deviceId,
           content: body.value.content.slice(0, MAX_DM),
           replyTo: Number(body.value.replyToSequence),
+          signed,
         }),
       );
     } else if (body.case === "edit") {
       const target = known.get(Number(body.value.sequence));
       if (target?.kind === "text" && target.senderId === senderId && !target.deleted) {
-        put({ ...target, content: body.value.content.slice(0, MAX_DM), editedAt: at });
+        put({ ...target, content: body.value.content.slice(0, MAX_DM), editedAt: at, editSigned: signed });
       }
     }
     // Anything else is from a newer app: there's nothing to show for it here.
+  }
+
+  /** A signed payload for this conversation, if `key` signed it. */
+  private openSigned(conversation: string, payload: Uint8Array, signature: Uint8Array, key: Uint8Array): Opened | null {
+    if (!this.e2ee.verify(key, payload, signature)) return null;
+    const opened = readPayload(payload);
+    if (opened.conversationId !== conversation) return null;
+    return { payload: opened, signed: { payload, signature, key } };
+  }
+
+  /** What this device sends in a secure channel: the content, signed by this device. */
+  private signedContent(id: string, content: Content): Uint8Array {
+    const payload = toBinary(
+      SignedPayloadSchema,
+      create(SignedPayloadSchema, { conversationId: id, senderId: this.me.id, sentAtMs: BigInt(Date.now()), content: contentOf(content) }),
+    );
+    const signature = this.device.sign(payload);
+    return toBinary(
+      DirectMessageContentSchema,
+      create(DirectMessageContentSchema, { body: { case: "signed", value: create(SignedContentSchema, { payload, signature }) } }),
+    );
+  }
+
+  /**
+   * Earlier messages someone's device passed on when it added this one. Each
+   * is checked against the signature of the device that sent it; only
+   * messages from before this device joined, and not already here, are
+   * taken. A message whose signing device isn't its sender's any more is
+   * kept but marked as one that can't be checked.
+   */
+  private async takeHistory(c: Room, by: string, plaintext: Uint8Array, known: Map<number, vault.Item>, put: (i: vault.Item) => void) {
+    let shared: SharedHistory;
+    try {
+      const content = fromBinary(DirectMessageContentSchema, plaintext);
+      if (content.body.case !== "history") return;
+      shared = content.body.value;
+    } catch {
+      return;
+    }
+    if (!(await c.shares())) return;
+    const joined = Math.max(0, ...[...known.values()].filter((i) => i.kind === "joined" && i.senderId === this.me.id).map((i) => i.seq));
+    if (!joined) return;
+    const entries: { seq: number; opened: Opened; deviceId: string }[] = [];
+    for (const entry of shared.entries.slice(0, HISTORY_ENTRIES)) {
+      const seq = Number(entry.sequence);
+      if (seq <= 0 || seq >= joined) continue;
+      try {
+        const opened = this.openSigned(c.id, entry.payload, entry.signature, entry.signatureKey);
+        if (!opened || !c.allowed.includes(opened.payload.senderId)) continue;
+        entries.push({ seq, opened, deviceId: this.e2ee.deviceId(entry.signatureKey) });
+      } catch {
+        // Not a signed payload: left out.
+      }
+    }
+    if (!entries.length) return;
+    const senders = unique(entries.map((e) => e.opened.payload.senderId));
+    const theirs = new Set<string>();
+    for (const userIds of chunks(senders, LOOKUPS)) {
+      for (const d of (await this.api.dms.listDevices({ userIds }, CALL)).devices) theirs.add(`${d.userId}/${d.id}`);
+    }
+    for (const { seq, opened, deviceId } of entries) {
+      const { senderId, content } = opened.payload;
+      const at = Number(opened.payload.sentAtMs);
+      const unchecked = !theirs.has(`${senderId}/${deviceId}`);
+      const body = content?.body;
+      if (body?.case === "text") {
+        if (known.has(seq)) continue;
+        put(
+          item(this.vaultKey, c.id, {
+            seq,
+            at,
+            kind: "text",
+            senderId,
+            deviceId,
+            content: body.value.content.slice(0, MAX_DM),
+            replyTo: Number(body.value.replyToSequence),
+            signed: opened.signed,
+            sharedBy: by,
+            unchecked,
+          }),
+        );
+      } else if (body?.case === "edit") {
+        const target = known.get(Number(body.value.sequence));
+        if (target?.sharedBy && target.kind === "text" && target.senderId === senderId && !target.deleted) {
+          put({ ...target, content: body.value.content.slice(0, MAX_DM), editedAt: at, editSigned: opened.signed, unchecked: target.unchecked || unchecked });
+        }
+      }
+    }
+  }
+
+  /**
+   * Passes the newest earlier messages this device has, as their senders
+   * signed them, on to the devices its commit just added. Only while the
+   * channel shares history; the server takes one right after the commit.
+   */
+  private async shareHistory(c: Room) {
+    if (!c.channel || !(await c.shares())) return;
+    const items = (await vault.loadItems(this.vaultKey, c.id))
+      .filter((i) => i.kind === "text" && !i.deleted && i.signed)
+      .sort((a, b) => b.seq - a.seq);
+    const entries: ReturnType<typeof create<typeof SharedEntrySchema>>[] = [];
+    let size = 0;
+    for (const i of items) {
+      const parts = [i.signed!, ...(i.editSigned ? [i.editSigned] : [])].map((s) =>
+        create(SharedEntrySchema, { sequence: BigInt(i.seq), payload: s.payload, signature: s.signature, signatureKey: s.key }),
+      );
+      const bytes = parts.reduce((n, p) => n + p.payload.length + p.signature.length + p.signatureKey.length + 16, 0);
+      if (size + bytes > HISTORY_BYTES || entries.length + parts.length > HISTORY_ENTRIES) break;
+      size += bytes;
+      // Newest first here; turned around below, so an edit follows its message.
+      entries.push(...parts.reverse());
+    }
+    if (!entries.length) return;
+    entries.reverse();
+    const plaintext = toBinary(
+      DirectMessageContentSchema,
+      create(DirectMessageContentSchema, { body: { case: "history", value: create(SharedHistorySchema, { entries }) } }),
+    );
+    const ciphertext = this.device.encrypt(c.id, plaintext);
+    await vault.write(this.vaultKey, { device: this.saved() });
+    await c.history(ciphertext);
+  }
+
+  /** Tells the screens whether a secure channel shares history. */
+  private showHistorySetting(id: string, on: boolean) {
+    updateDms(this.key, (d) => (d.secureHistory[id] === on ? d : { ...d, secureHistory: { ...d.secureHistory, [id]: on } }));
   }
 
   /**
@@ -793,6 +980,13 @@ export class DmEngine {
       return this.reconcile(c, attempt + 1);
     }
     await this.catchUp(c.id);
+    if (claimed.length && c.channel) {
+      // Best effort: messages keep working whether or not this goes through.
+      await this.shareHistory(c).catch((err: unknown) => {
+        if (!isPrecondition(err)) reportError("e2ee.secure_share_history", "secure_channel");
+      });
+      await this.catchUp(c.id);
+    }
   }
 
   // ───────────────────────── What people do ─────────────────────────
@@ -816,7 +1010,7 @@ export class DmEngine {
       const c = this.room(id);
       if (!c) throw new DmError("that conversation isn't here");
       await this.reconcile(c);
-      const plaintext = encode(content);
+      const plaintext = c.channel ? this.signedContent(id, content) : encode(content);
       for (let attempt = 0; ; attempt++) {
         const ciphertext = this.device.encrypt(id, plaintext);
         const hash = this.e2ee.sha256(ciphertext);
@@ -941,7 +1135,7 @@ export class DmEngine {
 
   /** Starts following a secure channel (opened, or it had news): catches up on it. */
   followChannel(serverId: string, channelId: string): Promise<void> {
-    if (!this.secure.has(channelId)) this.secure.set(channelId, { serverId, memberIds: [] });
+    if (!this.secure.has(channelId)) this.secure.set(channelId, { serverId, memberIds: [], shareHistory: false });
     return this.queue(channelId);
   }
 
@@ -985,6 +1179,10 @@ export class DmEngine {
     if (this.settling.has(serverId)) return;
     const ids = [...this.secure].filter(([, sc]) => sc.serverId === serverId).map(([id]) => id);
     if (!ids.length) return;
+    // The device whose commit adds someone is the one that passes history on,
+    // so devices that joined after the channel started (and hold less of it)
+    // let the others go first.
+    const late = ids.some((id) => store.get().instances[this.key]?.dms.items[id]?.some((i) => i.kind === "joined" && i.senderId === this.me.id && i.seq > 1));
     const timer = setTimeout(
       () => {
         this.settling.delete(serverId);
@@ -1003,7 +1201,7 @@ export class DmEngine {
             .finally(() => void this.refresh(id).catch(() => {}));
         }
       },
-      400 + Math.random() * ACCESS_SETTLE_MS,
+      400 + Math.random() * ACCESS_SETTLE_MS + (late ? LATE_SETTLE_MS : 0),
     );
     this.settling.set(serverId, timer);
   }

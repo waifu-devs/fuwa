@@ -46,6 +46,14 @@ service SecureChannelService {
   // every device forgets the group, and the next one to write starts a new
   // one at epoch 0. What devices already read stays on them. MANAGE_CHANNELS.
   rpc ResetSecureChannel(ResetSecureChannelRequest) returns (ResetSecureChannelResponse);
+  // Turns sharing earlier messages with people added later on or off. Adds
+  // a SETTINGS record with the new value. MANAGE_CHANNELS.
+  rpc SetSecureHistory(SetSecureHistoryRequest) returns (SetSecureHistoryResponse);
+  // Adds a HISTORY record: earlier messages, encrypted for the group, from
+  // the device whose commit just added devices. Only while the channel shares
+  // history, and only right after that device's own commit with a welcome,
+  // so there's one per add. SEND_MESSAGES; slow mode doesn't apply.
+  rpc PostSecureHistory(PostSecureHistoryRequest) returns (PostSecureHistoryResponse);
 }
 
 enum SecureRecordKind {
@@ -57,6 +65,12 @@ enum SecureRecordKind {
   // Someone with MANAGE_CHANNELS started the encryption over: the group
   // before it is gone, and the next record starts a new one. No data.
   SECURE_RECORD_KIND_RESET = 3;
+  // Earlier messages passed on to devices that were just added: an
+  // encrypted message carrying a SharedHistory.
+  SECURE_RECORD_KIND_HISTORY = 4;
+  // Someone with MANAGE_CHANNELS turned sharing history on or off
+  // (share_history). No data.
+  SECURE_RECORD_KIND_SETTINGS = 5;
 }
 
 // One entry in a secure channel's log. Devices read them in order. The same
@@ -78,6 +92,8 @@ message SecureRecord {
   google.protobuf.Timestamp deleted_at = 9;
   // Who deleted it, when it wasn't its sender.
   string deleted_by = 10;
+  // For SETTINGS: whether the channel shares history from here on.
+  bool share_history = 11;
 }
 
 message GetSecureChannelRequest {
@@ -93,6 +109,8 @@ message GetSecureChannelResponse {
   // The people whose devices belong in the group: every member (not agents,
   // who have no devices) the channel's permissions let see it now.
   repeated string member_ids = 3;
+  // Whether devices pass earlier messages on to devices added later.
+  bool share_history = 4;
 }
 
 message GetSecureGroupInfoRequest {
@@ -193,4 +211,25 @@ message SecureRecordDeleted {
   int64 sequence = 2;
   // Who deleted it, when it wasn't its sender.
   string deleted_by = 3;
+}
+
+message SetSecureHistoryRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  bool share_history = 3;
+}
+
+message SetSecureHistoryResponse {
+  SecureRecord record = 1;
+}
+
+message PostSecureHistoryRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // An MLSMessage carrying an encrypted application message.
+  bytes message = 3;
+}
+
+message PostSecureHistoryResponse {
+  SecureRecord record = 1;
 }

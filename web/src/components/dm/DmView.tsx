@@ -4,6 +4,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   CopyIcon,
+  HistoryIcon,
   KeyRoundIcon,
   RotateCcwKeyIcon,
   LockKeyholeIcon,
@@ -543,6 +544,22 @@ const DmRow = memo(function DmRow({
                 (edited)
               </span>
             )}
+            {item.sharedBy && (
+              <span
+                className={cn(
+                  "ml-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-full px-1.5 py-px align-middle text-[0.65rem] font-bold",
+                  item.unchecked ? "bg-amber-500/12 text-amber-700 dark:text-amber-300" : "bg-muted text-muted-foreground",
+                )}
+                title={
+                  item.unchecked
+                    ? "Passed on when this device joined. The device that signed it isn't theirs any more, so it can't be checked against them."
+                    : "Passed on when this device joined, and checked against the signature of the device that sent it."
+                }
+              >
+                <HistoryIcon className="size-3" />
+                {item.unchecked ? "shared · can't check" : "shared"}
+              </span>
+            )}
           </>
         )}
       </MessageLine>
@@ -627,7 +644,8 @@ function deviceLine(item: Item, users: Map<string, User>, me: User): string {
 }
 
 function SystemLine({ item, text, animate }: { item: Item; text: string; animate: boolean }) {
-  const Icon = item.kind === "unreadable" ? ShieldAlertIcon : item.kind === "reset" ? RotateCcwKeyIcon : KeyRoundIcon;
+  const Icon =
+    item.kind === "unreadable" ? ShieldAlertIcon : item.kind === "reset" ? RotateCcwKeyIcon : item.kind === "setting" ? HistoryIcon : KeyRoundIcon;
   return (
     <motion.div
       {...(animate ? enter : {})}
