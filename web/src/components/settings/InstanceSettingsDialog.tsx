@@ -66,6 +66,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "default_limits.storage_bytes", get: (s) => s.defaultLimits?.storageBytes },
   { path: "default_limits.attachment_bytes", get: (s) => s.defaultLimits?.attachmentBytes },
   { path: "default_limits.emojis", get: (s) => s.defaultLimits?.emojis },
+  { path: "default_limits.recording_bytes", get: (s) => s.defaultLimits?.recordingBytes },
   { path: "picture_upload_bytes", get: (s) => s.pictureUploadBytes },
   { path: "picture_upload_bytes_per_day", get: (s) => s.pictureUploadBytesPerDay },
   { path: "telemetry", get: (s) => s.telemetry },
@@ -539,6 +540,7 @@ export function InstanceSettingsDialog({
                   `${size(defaults.defaultLimits?.storageBytes)} storage`,
                   `${size(defaults.defaultLimits?.attachmentBytes)} files`,
                   `${count(defaults.defaultLimits?.emojis)} emoji`,
+                  `${size(defaults.defaultLimits?.recordingBytes)} recordings`,
                 ].join(", ")}
                 {...resetter(
                   "default_limits.members",
@@ -546,6 +548,7 @@ export function InstanceSettingsDialog({
                   "default_limits.storage_bytes",
                   "default_limits.attachment_bytes",
                   "default_limits.emojis",
+                  "default_limits.recording_bytes",
                 )}
               >
                 <div className="flex flex-col gap-3">
@@ -554,6 +557,7 @@ export function InstanceSettingsDialog({
                   <Cap label="Storage" bytes value={draft.defaultLimits?.storageBytes} onChange={(v) => patch((d) => (d.defaultLimits!.storageBytes = v))} />
                   <Cap label="Files" bytes value={draft.defaultLimits?.attachmentBytes} onChange={(v) => patch((d) => (d.defaultLimits!.attachmentBytes = v))} />
                   <Cap label="Emoji" value={draft.defaultLimits?.emojis} onChange={(v) => patch((d) => (d.defaultLimits!.emojis = v))} />
+                  <Cap label="Recordings" bytes value={draft.defaultLimits?.recordingBytes} onChange={(v) => patch((d) => (d.defaultLimits!.recordingBytes = v))} />
                 </div>
               </Setting>
               <Setting
@@ -720,8 +724,8 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         into.pictureUploadBytesPerDay = from.pictureUploadBytesPerDay;
         break;
       default: {
-        const key = path.replace("default_limits.", "") as "members" | "channels" | "storage_bytes" | "attachment_bytes" | "emojis";
-        const field = key === "storage_bytes" ? "storageBytes" : key === "attachment_bytes" ? "attachmentBytes" : key;
+        const key = path.replace("default_limits.", "") as "members" | "channels" | "storage_bytes" | "attachment_bytes" | "emojis" | "recording_bytes";
+        const field = key === "storage_bytes" ? "storageBytes" : key === "attachment_bytes" ? "attachmentBytes" : key === "recording_bytes" ? "recordingBytes" : key;
         into.defaultLimits ??= create(ServerLimitsSchema);
         into.defaultLimits[field] = from.defaultLimits?.[field];
       }

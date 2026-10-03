@@ -19,6 +19,12 @@
 //! `recordings/<server>/<recording>/`, and downloads come from there when a
 //! shard doesn't have the files (it took the server over, or lost its disk).
 //!
+//! A server's recordings may be capped, all together
+//! (`ServerLimits.recording_bytes`, FUWA_LIMIT_RECORDING_STORAGE): once
+//! they reach it, the one going on stops and no new one starts until some
+//! are deleted. And finished ones may delete themselves after a number of
+//! days (FUWA_CALL_RECORDINGS_KEEP_DAYS). Neither is set by default.
+//!
 //! Direct-message calls are never recorded here: their sound is end-to-end
 //! encrypted, so all a bridge could keep is ciphertext.
 
@@ -63,6 +69,11 @@ const FINISH_WAIT: Duration = Duration::from_secs(10);
 const PIECE: usize = 256 * 1024;
 /// Recordings a channel lists.
 const LISTED: i64 = 100;
+/// How often recordings older than the instance keeps them are looked for.
+const SWEEP_EVERY: Duration = Duration::from_secs(60 * 60);
+/// Recordings one sweep deletes per server at most; the next sweep does the rest.
+const SWEPT: i64 = 200;
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// The recordings going on in calls this part keeps.
 #[derive(Default)]
@@ -142,6 +153,7 @@ impl Recordings {
     pub fn spawn(app: Arc<App>) {
         tokio::spawn(async move {
             let mut every = tokio::time::interval(CHECK_EVERY);
+            let mut swept: Option<Instant> = None;
             loop {
                 tokio::select! {
                     _ = app.shutdown.cancelled() => return,
@@ -149,6 +161,10 @@ impl Recordings {
                     _ = app.recordings.nudged.notified() => {}
                 }
                 reconcile(&app).await;
+                if swept.is_none_or(|at| at.elapsed() >= SWEEP_EVERY) {
+                    swept = Some(Instant::now());
+                    sweep(&app).await;
+                }
             }
         });
     }
@@ -164,13 +180,47 @@ impl Stored {
     }
 }
 
-/// Brings the recordings going on in line with who wants one.
+/// What a server's recordings come to (the ones going on included), and
+/// the most they may.
+pub async fn usage(app: &App, sdb: &ServerDb) -> Result<(i64, Option<i64>)> {
+    let cap = sdb.limits(&app.settings().limits).await?.recording_bytes;
+    let live: i64 = app
+        .recordings
+        .lock()
+        .values()
+        .filter(|rec| rec.server_id == sdb.id)
+        .map(|rec| lock(&rec.tracks).values().map(|t| t.size_bytes).sum::<i64>())
+        .sum();
+    Ok((sdb.recording_bytes().await? + live, cap))
+}
+
+/// Whether a server's recordings reached its cap, so none may go on.
+pub async fn full(app: &App, sdb: &ServerDb) -> Result<bool> {
+    let (used, cap) = usage(app, sdb).await?;
+    Ok(cap.is_some_and(|cap| used >= cap))
+}
+
+/// Brings the recordings going on in line with who wants one, and the caps.
 async fn reconcile(app: &Arc<App>) {
     let settings = app.settings();
-    let wanted: Vec<(String, String, String)> = match settings.calls && settings.call_recordings {
+    let mut wanted: Vec<(String, String, String)> = match settings.calls && settings.call_recordings {
         true => app.voice.recorded(),
         false => vec![],
     };
+    let mut servers: Vec<String> = wanted.iter().map(|(s, _, _)| s.clone()).collect();
+    servers.sort();
+    servers.dedup();
+    let mut over = Vec::new();
+    for server_id in servers {
+        let Ok(sdb) = app.servers.get(&server_id).await else { continue };
+        if full(app, &sdb).await.unwrap_or(false) {
+            over.push(server_id);
+        }
+    }
+    if !over.is_empty() {
+        tracing::debug!(servers = over.len(), "recordings stop at their servers' caps");
+        wanted.retain(|(s, _, _)| !over.contains(s));
+    }
     let starting: Vec<(String, String, String)> = {
         let mut live = app.recordings.lock();
         for rec in live.values_mut() {
@@ -190,6 +240,30 @@ async fn reconcile(app: &Arc<App>) {
     for (server_id, channel_id, by) in starting {
         if let Err(err) = start(app, &server_id, &channel_id, &by).await {
             tracing::warn!(server = %server_id, channel = %channel_id, error = %err, "couldn't start a recording");
+        }
+    }
+}
+
+/// Deletes finished recordings older than the instance keeps them, in every
+/// server this part holds.
+pub async fn sweep(app: &Arc<App>) {
+    let Some(days) = app.settings().call_recordings_keep_days else { return };
+    let before = now_ms() - days.saturating_mul(DAY_MS);
+    for sdb in app.servers.all() {
+        let rows = match sdb.recordings_ended_before(before, SWEPT).await {
+            Ok(rows) => rows,
+            Err(err) => {
+                tracing::warn!(server = %sdb.id, error = %err, "couldn't look for old recordings");
+                continue;
+            }
+        };
+        for row in rows {
+            match delete(app, &sdb, &row).await {
+                Ok(()) => tracing::debug!(server = %sdb.id, recording = %row.id, "an old recording deleted itself"),
+                Err(err) => {
+                    tracing::warn!(server = %sdb.id, recording = %row.id, error = %err, "couldn't delete an old recording")
+                }
+            }
         }
     }
 }
