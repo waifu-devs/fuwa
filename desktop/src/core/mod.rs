@@ -9,6 +9,7 @@
 pub mod account;
 pub mod api;
 pub mod arrange;
+pub mod backgrounds;
 pub mod calls;
 pub mod config;
 pub mod dms;
@@ -21,6 +22,7 @@ pub mod server_admin;
 pub mod sso;
 pub mod store;
 mod sync;
+pub mod themes;
 pub mod vault;
 
 use std::collections::HashMap;

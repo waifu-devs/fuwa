@@ -13,7 +13,7 @@ use gpui_kit::{
 use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::motion;
 use crate::ui::text::safety_rows;
-use crate::ui::theme::{Palette, alpha};
+use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{card, error_line, icon, icon_button, labeled, pal, primary_button, soft_button};
 
 /// What a server or instance calls its identity provider, for "Continue with …".
@@ -33,7 +33,7 @@ pub fn host_notice(host: &str, p: &Palette) -> AnyElement {
         .gap(px(8.0))
         .px(px(12.0))
         .py(px(10.0))
-        .rounded(px(12.0))
+        .rounded(corner(12.0))
         .bg(alpha(p.primary, 0.08))
         .text_sm()
         .text_color(p.muted_foreground)
@@ -142,7 +142,7 @@ impl FuwaApp {
                         .gap(px(8.0))
                         .px(px(14.0))
                         .h(px(44.0))
-                        .rounded(px(12.0))
+                        .rounded(corner(12.0))
                         .bg(p.secondary)
                         .border_1()
                         .border_color(p.border)
@@ -186,7 +186,7 @@ impl FuwaApp {
                     .flex_col()
                     .gap(px(6.0))
                     .p(px(18.0))
-                    .rounded(px(14.0))
+                    .rounded(corner(14.0))
                     .bg(p.secondary)
                     .font_family("monospace")
                     .text_lg()
@@ -227,7 +227,7 @@ impl FuwaApp {
                                 .gap(px(8.0))
                                 .px(px(12.0))
                                 .h(px(44.0))
-                                .rounded(px(12.0))
+                                .rounded(corner(12.0))
                                 .border_1()
                                 .border_color(if on { p.primary } else { p.border })
                                 .bg(if on { alpha(p.primary, 0.12) } else { p.secondary.into() })
@@ -286,7 +286,7 @@ impl FuwaApp {
                                     .flex()
                                     .gap(px(12.0))
                                     .p(px(12.0))
-                                    .rounded(px(12.0))
+                                    .rounded(corner(12.0))
                                     .bg(p.secondary)
                                     .child(
                                         div()
@@ -344,7 +344,7 @@ impl FuwaApp {
                         div()
                             .size(px(44.0))
                             .flex_none()
-                            .rounded(px(14.0))
+                            .rounded(corner(14.0))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -494,7 +494,7 @@ impl FuwaApp {
                     .gap(px(8.0))
                     .px(px(12.0))
                     .py(px(8.0))
-                    .rounded(px(12.0))
+                    .rounded(corner(12.0))
                     .bg(p.secondary)
                     .text_sm()
                     .child(icon("message-circle-heart").size(px(14.0)).text_color(p.primary))
@@ -547,7 +547,7 @@ impl FuwaApp {
         let panel = card(&p)
             .w(px(380.0))
             .overflow_hidden()
-            .child(div().h(px(96.0)).rounded_t(px(20.0)).bg(accent))
+            .child(div().h(px(96.0)).rounded_t(corner(20.0)).bg(accent))
             .child(
                 div().px(px(20.0)).mt(px(-44.0)).mb(px(10.0)).child(
                     div()
@@ -649,7 +649,7 @@ impl FuwaApp {
                                 .items_center()
                                 .gap(px(12.0))
                                 .p(px(12.0))
-                                .rounded(px(14.0))
+                                .rounded(corner(14.0))
                                 .border_1()
                                 .border_color(p.border)
                                 .bg(p.secondary)
@@ -764,7 +764,7 @@ impl FuwaApp {
                     div()
                         .size(px(36.0))
                         .flex_none()
-                        .rounded(px(12.0))
+                        .rounded(corner(12.0))
                         .flex()
                         .items_center()
                         .justify_center()
@@ -824,7 +824,7 @@ fn welcome_emoji(emoji: &str, look: &crate::ui::mentions::Look, p: &Palette) -> 
     let base = div()
         .size(px(36.0))
         .flex_none()
-        .rounded(px(12.0))
+        .rounded(corner(12.0))
         .flex()
         .items_center()
         .justify_center()

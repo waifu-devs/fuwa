@@ -6,6 +6,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use gpui_kit::AnimationExt as _;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::message_scroller::MessageScrollerState;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -232,6 +233,8 @@ pub struct FuwaApp {
     pub arrange_slots: Vec<crate::ui::arrange::Slot>,
     pub dragging: Option<String>,
     pub landed: Option<(String, Instant)>,
+    /// The page's color before the theme changed, fading out over the new one.
+    theme_fade: Option<(gpui_kit::Rgba, Instant)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -379,6 +382,7 @@ impl FuwaApp {
             arrange_slots: Vec::new(),
             dragging: None,
             landed: None,
+            theme_fade: None,
             emoji_open: false,
             emoji_query,
             profile: None,
@@ -835,8 +839,12 @@ impl FuwaApp {
                 match event {
                     SettingsEvent::Close => this.settings = None,
                     SettingsEvent::Prefs => {
+                        let before = pal(cx).background;
                         this.prefs = this.core.prefs();
                         theme::apply(&this.prefs, window.appearance(), cx);
+                        if pal(cx).background != before && !cx.reduce_motion() {
+                            this.theme_fade = Some((before, Instant::now()));
+                        }
                         window.refresh();
                     }
                     SettingsEvent::SignIn { key } => {
@@ -1351,6 +1359,9 @@ impl FuwaApp {
     }
 }
 
+/// How long a new theme takes to wash in.
+const THEME_FADE: Duration = Duration::from_millis(420);
+
 impl Render for FuwaApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let began = crate::ui::perf::frame();
@@ -1364,6 +1375,7 @@ impl FuwaApp {
         let p = pal(cx);
         window.set_rem_size(px(16.0 * self.prefs.text_scale.clamp(0.8, 1.4)));
         let empty = self.core.shared.read(|s| s.order.is_empty());
+        let behind = crate::ui::backdrop::layers(&theme::backdrop(cx), &p, window, cx);
 
         let base = div()
             .id("fuwa")
@@ -1377,7 +1389,8 @@ impl FuwaApp {
             .overflow_hidden()
             .font_family(FONT)
             .bg(p.background)
-            .text_color(p.foreground);
+            .text_color(p.foreground)
+            .when_some(behind, |el, behind| el.child(behind));
 
         if empty && let Some(connect) = &self.connect {
             return base.child(connect.clone()).into_any_element();
@@ -1405,6 +1418,14 @@ impl FuwaApp {
         .when_some(self.server_settings.clone(), |el, settings| el.child(settings))
         .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
         .child(self.render_toasts(window, cx))
+        .when_some(self.theme_fade.filter(|(_, at)| at.elapsed() < THEME_FADE), |el, (color, at)| {
+            // A new theme washes in: the old page color fades away over it.
+            el.child(div().absolute().inset_0().bg(color).with_animation(
+                gpui_kit::SharedString::from(format!("theme-fade|{at:?}")),
+                gpui_kit::Animation::new(THEME_FADE).with_easing(gpui_kit::ease_out_quint()),
+                |el, t| el.opacity(0.85 * (1.0 - t)),
+            ))
+        })
         .into_any_element()
     }
 }

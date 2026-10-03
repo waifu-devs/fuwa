@@ -23,7 +23,7 @@ use gpui_kit::{
 use crate::core::arrange::{Drop, layout_of, moved};
 use crate::ui::app::FuwaApp;
 use crate::ui::motion;
-use crate::ui::theme::alpha;
+use crate::ui::theme::{alpha, corner};
 use crate::ui::widgets::{icon, pal};
 
 /// What's being dragged, and the copy of it that follows the pointer.
@@ -52,7 +52,7 @@ impl Render for ChannelDrag {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .rounded(px(10.0))
+            .rounded(corner(10.0))
             .bg(p.background)
             .border_1()
             .border_color(alpha(p.primary, 0.5))
@@ -102,7 +102,7 @@ impl Render for ChannelDrag {
                         .top(px(6.0))
                         .w(px(self.width - 12.0))
                         .h(px(34.0))
-                        .rounded(px(10.0))
+                        .rounded(corner(10.0))
                         .bg(alpha(p.primary, 0.14))
                         .border_1()
                         .border_color(alpha(p.primary, 0.25)),
@@ -320,7 +320,7 @@ impl FuwaApp {
                 .right(px(2.0))
                 .top(px(top + 8.0))
                 .h(px(bottom - top - 6.0))
-                .rounded(px(10.0))
+                .rounded(corner(10.0))
                 .border_2()
                 .border_color(p.primary)
                 .bg(alpha(p.primary, 0.08))

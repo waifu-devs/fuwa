@@ -19,7 +19,7 @@ use crate::core::Core;
 use crate::core::store::user_name;
 use crate::pb;
 use crate::ui::motion;
-use crate::ui::theme::alpha;
+use crate::ui::theme::{alpha, corner};
 use crate::ui::widgets::{app_badge, avatar, icon, is_agent, pal};
 
 /// Rows are this tall, every one, which is what lets the list skip the rest.
@@ -147,7 +147,7 @@ impl Render for MembersView {
             .size_full()
             .flex()
             .flex_col()
-            .bg(p.sidebar)
+            .bg(p.side_surface)
             .border_l_1()
             .border_color(p.border)
             .child(
@@ -185,7 +185,7 @@ fn member_row(
         .flex()
         .items_center()
         .gap(px(10.0))
-        .rounded(px(12.0))
+        .rounded(corner(12.0))
         .hover(move |s| s.bg(hover))
         .cursor_pointer()
         .on_click(cx.listener(move |_, _, _, cx| cx.emit(MembersEvent::Open { user_id: uid.clone() })))

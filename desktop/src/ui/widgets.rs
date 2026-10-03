@@ -12,7 +12,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 
 use crate::core::store::Connection;
 use crate::pb;
-use crate::ui::theme::{self, Palette, alpha, mix};
+use crate::ui::theme::{self, Palette, alpha, corner, mix};
 
 /// A Lucide icon by name (`hash`, `plus`, `settings`...).
 /// It takes the color of the text around it unless given one.
@@ -161,7 +161,7 @@ pub fn primary_button(id: impl Into<ElementId>, label: impl Into<SharedString>, 
         .id(id)
         .h(px(40.0))
         .px(px(18.0))
-        .rounded(px(12.0))
+        .rounded(corner(12.0))
         .flex()
         .items_center()
         .justify_center()
@@ -202,7 +202,7 @@ pub fn soft_button(id: impl Into<ElementId>, label: impl Into<SharedString>, p: 
         .id(id)
         .h(px(36.0))
         .px(px(14.0))
-        .rounded(px(10.0))
+        .rounded(corner(10.0))
         .flex()
         .items_center()
         .justify_center()
@@ -236,7 +236,7 @@ pub fn icon_button_in(id: impl Into<ElementId>, name: &str, p: &Palette, color: 
         .id(id)
         .size(px(32.0))
         .flex_none()
-        .rounded(px(10.0))
+        .rounded(corner(10.0))
         .flex()
         .items_center()
         .justify_center()
@@ -306,7 +306,7 @@ pub fn labeled(label: &str, field: impl IntoElement, p: &Palette) -> Div {
 
 /// A soft card on the page.
 pub fn card(p: &Palette) -> Div {
-    div().bg(p.card).rounded(px(20.0)).border_1().border_color(p.border).shadow(vec![gpui_kit::BoxShadow {
+    div().bg(p.card).rounded(corner(20.0)).border_1().border_color(p.border).shadow(vec![gpui_kit::BoxShadow {
         color: alpha(p.primary, if p.dark { 0.18 } else { 0.14 }),
         offset: gpui_kit::point(px(0.0), px(24.0)),
         blur_radius: px(60.0),
@@ -325,7 +325,7 @@ pub fn error_line(error: Option<&str>, p: &Palette) -> Option<AnyElement> {
             .gap(px(8.0))
             .px(px(12.0))
             .py(px(8.0))
-            .rounded(px(10.0))
+            .rounded(corner(10.0))
             .bg(alpha(p.destructive, 0.12))
             .text_color(p.destructive)
             .text_sm()

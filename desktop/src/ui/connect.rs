@@ -17,7 +17,7 @@ use gpui_kit::{
 use crate::core::{Core, SignIn};
 use crate::pb;
 use crate::ui::motion;
-use crate::ui::theme::{alpha, mix};
+use crate::ui::theme::{alpha, corner, mix};
 use crate::ui::widgets::{card, error_line, fuwa_mark, icon, icon_button, labeled, pal, primary_button, soft_button};
 
 pub enum ConnectEvent {
@@ -275,7 +275,7 @@ impl Render for ConnectView {
                             .items_start()
                             .gap(px(10.0))
                             .p(px(12.0))
-                            .rounded(px(12.0))
+                            .rounded(corner(12.0))
                             .bg(alpha(p.destructive, 0.1))
                             .text_color(p.destructive)
                             .text_sm()
@@ -299,6 +299,15 @@ impl Render for ConnectView {
                                 cx.listener(move |this, _, window, cx| this.in_browser(true, who.clone(), window, cx)),
                             ),
                     );
+                    // The provider's site sees the address of whoever signs in there, so it's named first.
+                    if !auth.sso_host.is_empty() {
+                        body = body.child(motion::rise(
+                            div().child(crate::ui::overlay::host_notice(&auth.sso_host, &p)),
+                            "sso-host",
+                            Duration::from_millis(100),
+                            4.0,
+                        ));
+                    }
                 }
                 if auth.linked_sign_in {
                     let who = issuer.clone();

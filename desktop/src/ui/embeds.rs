@@ -13,7 +13,7 @@ use gpui_kit::{
 
 use crate::pb;
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha};
+use crate::ui::theme::{Palette, alpha, corner};
 
 /// Only links a browser should open: http(s).
 fn safe(url: &str) -> Option<&str> {
@@ -81,7 +81,7 @@ fn card(id: &str, embed: &pb::Embed, p: &Palette) -> gpui_kit::Div {
         img(SharedString::from(url.to_owned()))
             .size(px(64.0))
             .flex_none()
-            .rounded(px(10.0))
+            .rounded(corner(10.0))
             .object_fit(ObjectFit::Cover)
     });
     let image = safe(&embed.image_url).map(|url| {
@@ -89,13 +89,13 @@ fn card(id: &str, embed: &pb::Embed, p: &Palette) -> gpui_kit::Div {
             .w_full()
             .max_h(px(288.0))
             .mt(px(8.0))
-            .rounded(px(10.0))
+            .rounded(corner(10.0))
             .object_fit(ObjectFit::Cover)
     });
     div()
         .max_w(px(520.0))
         .flex()
-        .rounded(px(12.0))
+        .rounded(corner(12.0))
         .overflow_hidden()
         .border_1()
         .border_color(p.border)

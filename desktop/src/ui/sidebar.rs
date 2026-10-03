@@ -15,7 +15,7 @@ use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Menu, Nav};
 use crate::ui::arrange::{ChannelDrag, Slot};
 use crate::ui::motion;
-use crate::ui::theme::{Palette, alpha};
+use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{avatar, badge, conn_dot, icon, icon_button, pal, section_label, server_icon};
 
 pub const SIDEBAR: f32 = 248.0;
@@ -47,7 +47,7 @@ impl FuwaApp {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(p.sidebar)
+            .bg(p.side_surface)
             .border_r_1()
             .border_color(p.border)
             .child(
@@ -120,7 +120,7 @@ impl FuwaApp {
                     .flex()
                     .items_center()
                     .gap(px(4.0))
-                    .rounded(px(8.0))
+                    .rounded(corner(8.0))
                     .group("server-name")
                     .child(
                         div()
@@ -202,7 +202,7 @@ impl FuwaApp {
                 .flex()
                 .items_center()
                 .gap(px(10.0))
-                .rounded(px(12.0))
+                .rounded(corner(12.0))
                 .bg(alpha(p.primary, 0.1))
                 .text_color(p.primary)
                 .text_sm()
@@ -244,7 +244,7 @@ impl FuwaApp {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .rounded(px(10.0))
+                    .rounded(corner(10.0))
                     .text_color(p.primary)
                     .font_weight(FontWeight::BOLD)
                     .cursor_pointer()
@@ -391,7 +391,7 @@ impl FuwaApp {
                         .right_0()
                         .top(px(at))
                         .h(px(ROW - 2.0))
-                        .rounded(px(10.0))
+                        .rounded(corner(10.0))
                         .bg(alpha(p.primary, 0.16)),
                 )
                 .child(rows);
@@ -443,7 +443,7 @@ impl FuwaApp {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .rounded(px(10.0))
+            .rounded(corner(10.0))
             .text_color(if strong { p.foreground } else { p.muted_foreground })
             .when(openable, |el| el.cursor_pointer().hover(move |s| s.bg(hover)))
             .when(!openable, |el| el.opacity(0.55))
@@ -539,7 +539,7 @@ impl FuwaApp {
                     .flex()
                     .items_center()
                     .gap(px(10.0))
-                    .rounded(px(12.0))
+                    .rounded(corner(12.0))
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
                     .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
@@ -583,7 +583,7 @@ impl FuwaApp {
                         .right_0()
                         .top(px(at))
                         .h(px(46.0))
-                        .rounded(px(12.0))
+                        .rounded(corner(12.0))
                         .bg(alpha(p.primary, 0.16)),
                 )
                 .child(list);
@@ -610,7 +610,7 @@ impl FuwaApp {
                     .mt(px(8.0))
                     .px(px(10.0))
                     .py(px(8.0))
-                    .rounded(px(10.0))
+                    .rounded(corner(10.0))
                     .bg(alpha(p.muted_foreground, 0.08))
                     .text_xs()
                     .text_color(p.muted_foreground)
@@ -659,7 +659,7 @@ impl FuwaApp {
                     .flex()
                     .items_center()
                     .gap(px(10.0))
-                    .rounded(px(12.0))
+                    .rounded(corner(12.0))
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
                     .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))

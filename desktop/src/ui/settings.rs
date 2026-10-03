@@ -13,11 +13,12 @@ use gpui_kit::{
 };
 
 use crate::core::Core;
-use crate::core::config::{Density, MotionChoice, NotifyFor, Prefs, ThemeChoice};
+use crate::core::config::{MotionChoice, NotifyFor, Prefs};
 use crate::core::store::{Connection, user_name};
 use crate::ui::motion;
 use crate::ui::settings_account::AccountForm;
-use crate::ui::theme::{DARK, LIGHT, Palette, alpha, mix};
+use crate::ui::settings_look::{Look, sync_sliders};
+use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{avatar, conn_dot, icon, icon_button, pal, primary_button, soft_button};
 
 pub enum SettingsEvent {
@@ -32,6 +33,7 @@ enum Page {
     Profile,
     Security,
     Appearance,
+    Background,
     Motion,
     Notifications,
     Streamer,
@@ -44,8 +46,9 @@ enum Page {
 const ACCOUNT_PAGES: [(Page, &str, &str); 2] =
     [(Page::Profile, "user-round-pen", "Profile"), (Page::Security, "key-round", "Password and devices")];
 
-const PAGES: [(Page, &str, &str); 7] = [
+const PAGES: [(Page, &str, &str); 8] = [
     (Page::Appearance, "palette", "Appearance"),
+    (Page::Background, "image", "Background"),
     (Page::Motion, "sparkles", "Motion"),
     (Page::Notifications, "bell", "Notifications"),
     (Page::Streamer, "eye-off", "Streamer mode"),
@@ -58,16 +61,18 @@ pub struct SettingsView {
     pub(crate) core: Arc<Core>,
     page: Page,
     pub(crate) account: AccountForm,
+    pub(crate) look: Look,
 }
 
 impl EventEmitter<SettingsEvent> for SettingsView {}
 
 impl SettingsView {
     pub fn new(core: Arc<Core>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self { core, page: Page::Appearance, account: AccountForm::new(window, cx) }
+        let look = Look::new(&core.prefs(), window, cx);
+        Self { core, page: Page::Appearance, account: AccountForm::new(window, cx), look }
     }
 
-    fn set(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Prefs)) {
+    pub(crate) fn set(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Prefs)) {
         self.core.set_prefs(f);
         cx.emit(SettingsEvent::Prefs);
         cx.notify();
@@ -87,95 +92,16 @@ impl SettingsView {
             Page::Security => {
                 ("Password and devices".into(), "Keep your account yours.".into(), self.security_page(p, window, cx))
             }
-            Page::Appearance => {
-                let themes = [
-                    (ThemeChoice::System, "Like my computer", None),
-                    (ThemeChoice::Light, "Light", Some(LIGHT)),
-                    (ThemeChoice::Dark, "Dark", Some(DARK)),
-                ];
-                let mut row = div().flex().gap(px(14.0));
-                for (choice, label, preview) in themes {
-                    let on = prefs.theme == choice;
-                    row = row.child(
-                        div()
-                            .id(SharedString::from(format!("theme-{label}")))
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(8.0))
-                            .p(px(10.0))
-                            .rounded(px(16.0))
-                            .border_2()
-                            .border_color(if on { p.primary } else { p.border })
-                            .cursor_pointer()
-                            .hover({
-                                let c = mix(p.border, p.primary, 0.5);
-                                move |s| s.border_color(c)
-                            })
-                            .active(|s| s.top(px(1.0)))
-                            .on_click(cx.listener(move |this, _, _, cx| this.set(cx, |pr| pr.theme = choice)))
-                            .child(match preview {
-                                Some(pv) => theme_preview(&pv).into_any_element(),
-                                None => div()
-                                    .flex()
-                                    .rounded(px(10.0))
-                                    .overflow_hidden()
-                                    .child(div().flex_1().child(theme_preview(&LIGHT)))
-                                    .child(div().flex_1().child(theme_preview(&DARK)))
-                                    .into_any_element(),
-                            })
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_sm()
-                                    .child(radio(on, p))
-                                    .child(label),
-                            ),
-                    );
-                }
-                let sizes = [(0.9, "Small"), (1.0, "Normal"), (1.15, "Large"), (1.3, "Larger")];
-                let body = div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(28.0))
-                    .child(section("Theme", row, p))
-                    .child(section(
-                        "Text size",
-                        segmented(
-                            "size",
-                            sizes.iter().map(|(v, l)| (*l, (prefs.text_scale - *v).abs() < 0.01)).collect(),
-                            p,
-                            window,
-                            cx,
-                            move |this, n, cx| {
-                                let v = sizes[n].0;
-                                this.set(cx, |pr| pr.text_scale = v);
-                            },
-                        ),
-                        p,
-                    ))
-                    .child(section(
-                        "Message density",
-                        segmented(
-                            "density",
-                            vec![
-                                ("Cozy", prefs.density == Density::Cozy),
-                                ("Compact", prefs.density == Density::Compact),
-                            ],
-                            p,
-                            window,
-                            cx,
-                            |this, n, cx| {
-                                this.set(cx, |pr| pr.density = if n == 0 { Density::Cozy } else { Density::Compact })
-                            },
-                        ),
-                        p,
-                    ));
-                ("Appearance".into(), "How fuwa looks on this computer.".into(), body.into_any_element())
-            }
+            Page::Appearance => (
+                "Appearance".into(),
+                "How fuwa looks on this computer, the same themes as everywhere else.".into(),
+                self.appearance_page(prefs, p, window, cx),
+            ),
+            Page::Background => (
+                "Background".into(),
+                "A picture and a texture behind the app, under any theme without its own.".into(),
+                self.background_page(prefs, p, window, cx),
+            ),
             Page::Motion => {
                 let reduced = cx.reduce_motion();
                 let body = div()
@@ -207,7 +133,7 @@ impl SettingsView {
                             .items_center()
                             .gap(px(16.0))
                             .p(px(18.0))
-                            .rounded(px(16.0))
+                            .rounded(corner(16.0))
                             .bg(p.secondary)
                             .child(bouncer(p, reduced))
                             .child(div().text_sm().text_color(p.muted_foreground).child(if reduced {
@@ -313,7 +239,7 @@ impl SettingsView {
                             .items_center()
                             .gap(px(14.0))
                             .p(px(14.0))
-                            .rounded(px(16.0))
+                            .rounded(corner(16.0))
                             .bg(p.card)
                             .border_1()
                             .border_color(p.border)
@@ -401,7 +327,7 @@ impl SettingsView {
                     ("Close what's open", "Esc"),
                 ];
                 let mut list =
-                    div().flex().flex_col().rounded(px(16.0)).border_1().border_color(p.border).overflow_hidden();
+                    div().flex().flex_col().rounded(corner(16.0)).border_1().border_color(p.border).overflow_hidden();
                 for (n, (what, key)) in keys.iter().enumerate() {
                     list = list.child(
                         div()
@@ -415,7 +341,7 @@ impl SettingsView {
                                 div()
                                     .px(px(10.0))
                                     .py(px(3.0))
-                                    .rounded(px(8.0))
+                                    .rounded(corner(8.0))
                                     .bg(p.secondary)
                                     .border_1()
                                     .border_color(p.border)
@@ -470,6 +396,8 @@ impl Render for SettingsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let prefs = self.core.prefs();
+        sync_sliders(&self.look, &prefs.backdrop, _window, cx);
+        let behind = crate::ui::backdrop::layers(&crate::ui::theme::backdrop(cx), &p, _window, cx);
         let mut menu = div().flex().flex_col().w(px(220.0));
         let mut y = 0.0;
         let mut at_y = 0.0;
@@ -500,7 +428,7 @@ impl Render for SettingsView {
                         .flex()
                         .items_center()
                         .gap(px(10.0))
-                        .rounded(px(10.0))
+                        .rounded(corner(10.0))
                         .cursor_pointer()
                         .text_color(if on { p.foreground } else { p.muted_foreground })
                         .when(on, |el| el.font_weight(FontWeight::BOLD))
@@ -525,7 +453,7 @@ impl Render for SettingsView {
                     .right_0()
                     .top(px(at))
                     .h(px(38.0))
-                    .rounded(px(10.0))
+                    .rounded(corner(10.0))
                     .bg(alpha(p.primary, 0.16)),
             )
             .child(menu);
@@ -555,6 +483,7 @@ impl Render for SettingsView {
                 .occlude()
                 .flex()
                 .bg(p.background)
+                .when_some(behind, |el, behind| el.child(behind))
                 .child(
                     div()
                         .flex_none()
@@ -564,7 +493,7 @@ impl Render for SettingsView {
                         .justify_end()
                         .pt(px(56.0))
                         .pr(px(16.0))
-                        .bg(p.sidebar)
+                        .bg(p.side_surface)
                         .child(motion::slide_in(menu, "settings-menu", -24.0)),
                 )
                 .child(
@@ -572,6 +501,7 @@ impl Render for SettingsView {
                         .id("settings-body")
                         .flex_1()
                         .h_full()
+                        .bg(p.chat_surface)
                         .overflow_y_scroll()
                         .pt(px(56.0))
                         .px(px(40.0))
@@ -622,7 +552,7 @@ impl Render for SettingsView {
     }
 }
 
-fn section(title: &str, body: impl IntoElement, p: &Palette) -> impl IntoElement {
+pub(crate) fn section(title: &str, body: impl IntoElement, p: &Palette) -> impl IntoElement {
     div()
         .flex()
         .flex_col()
@@ -637,7 +567,7 @@ fn section(title: &str, body: impl IntoElement, p: &Palette) -> impl IntoElement
         .child(body)
 }
 
-fn radio(on: bool, p: &Palette) -> impl IntoElement {
+pub(crate) fn radio(on: bool, p: &Palette) -> impl IntoElement {
     div()
         .size(px(16.0))
         .rounded_full()
@@ -650,11 +580,11 @@ fn radio(on: bool, p: &Palette) -> impl IntoElement {
 }
 
 /// A tiny picture of the app in a palette.
-fn theme_preview(pv: &Palette) -> impl IntoElement {
+pub(crate) fn theme_preview(pv: &Palette) -> impl IntoElement {
     div()
         .h(px(84.0))
         .flex()
-        .rounded(px(10.0))
+        .rounded(px(10.0 * pv.radius))
         .overflow_hidden()
         .bg(pv.background)
         .child(div().w(px(16.0)).h_full().bg(pv.rail))
@@ -675,7 +605,7 @@ fn theme_preview(pv: &Palette) -> impl IntoElement {
 }
 
 /// Choices side by side; the chosen one sits on a pill that glides between them.
-fn segmented(
+pub(crate) fn segmented(
     id: &'static str,
     options: Vec<(&'static str, bool)>,
     p: &Palette,
@@ -685,8 +615,13 @@ fn segmented(
 ) -> impl IntoElement {
     let width = 150.0;
     let chosen = options.iter().position(|(_, on)| *on).unwrap_or(0);
-    let mut row =
-        div().relative().flex().p(px(4.0)).rounded(px(14.0)).bg(p.secondary).w(px(width * options.len() as f32 + 8.0));
+    let mut row = div()
+        .relative()
+        .flex()
+        .p(px(4.0))
+        .rounded(corner(14.0))
+        .bg(p.secondary)
+        .w(px(width * options.len() as f32 + 8.0));
     // The pill moves with a spring, keyed to this control.
     let pill = gpui_kit::base::motion::spring(
         SharedString::from(format!("seg-{id}")),
@@ -702,7 +637,7 @@ fn segmented(
             .left(px(4.0 + pill))
             .w(px(width))
             .h(px(36.0))
-            .rounded(px(10.0))
+            .rounded(corner(10.0))
             .bg(p.card)
             .shadow(vec![gpui_kit::BoxShadow {
                 color: alpha(p.primary, 0.18),
@@ -734,7 +669,7 @@ fn segmented(
     row
 }
 
-fn toggle_row(
+pub(crate) fn toggle_row(
     id: &'static str,
     title: &str,
     body: &str,
@@ -750,7 +685,7 @@ fn toggle_row(
         .items_center()
         .gap(px(16.0))
         .p(px(16.0))
-        .rounded(px(16.0))
+        .rounded(corner(16.0))
         .bg(p.card)
         .border_1()
         .border_color(p.border)

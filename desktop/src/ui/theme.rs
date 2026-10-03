@@ -1,13 +1,16 @@
-//! fuwa's look: the web app's palettes (`web/src/styles/app.css`), its font,
+//! fuwa's look: the theme on screen (`core/themes.rs`, the web app's), its font,
 //! and the app's appearance settings, applied to GPUI Kit's theme so its
 //! components match the rest of the app.
 
 use std::borrow::Cow;
 
-use gpui_kit::component::{Theme, ThemeMode};
-use gpui_kit::{App, Hsla, Rgba, WindowAppearance, px, rgb};
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::core::config::{MotionChoice, Prefs, ThemeChoice};
+use gpui_kit::component::{Theme as KitTheme, ThemeMode};
+use gpui_kit::{App, Hsla, Pixels, Rgba, WindowAppearance, px, rgb};
+
+use crate::core::config::{MotionChoice, Prefs};
+use crate::core::themes::{self, Backdrop, Theme};
 
 /// The bundled font, with Japanese: what the site and the web app use.
 /// M PLUS Rounded 1c, as its files name their family.
@@ -24,7 +27,8 @@ pub fn load_fonts(cx: &mut App) {
     }
 }
 
-/// One of fuwa's palettes.
+/// The colors views draw with: a theme's tokens and the app's surfaces made
+/// from them (`docs/themes.md`).
 #[derive(Debug, Clone, Copy)]
 pub struct Palette {
     pub dark: bool,
@@ -39,51 +43,67 @@ pub struct Palette {
     pub accent: Rgba,
     pub destructive: Rgba,
     pub border: Rgba,
-    /// The far-left rail and the sidebar sit a little darker than the page.
+    /// The server rail and the channel sidebar.
     pub rail: Rgba,
     pub sidebar: Rgba,
-    /// A second color the primary blends into, for gradients.
+    /// The primary turned 48° in hue, for gradients and effects.
     pub glow: Rgba,
     pub success: Rgba,
+    /// Corner radius, in rem (1 is the size the app's corners are drawn for).
+    pub radius: f32,
+    /// What the chat, the sidebars and the rail are painted with: solid, or
+    /// see-through over a backdrop, as solid as its `panels` says.
+    pub chat_surface: Hsla,
+    pub side_surface: Hsla,
+    pub rail_surface: Hsla,
 }
 
-pub const LIGHT: Palette = Palette {
-    dark: false,
-    background: rgba(0xfff5f8),
-    foreground: rgba(0x3b2330),
-    card: rgba(0xffffff),
-    primary: rgba(0xf06292),
-    primary_foreground: rgba(0xffffff),
-    secondary: rgba(0xfdedf2),
-    muted: rgba(0xfbe5ec),
-    muted_foreground: rgba(0x8a6577),
-    accent: rgba(0xfde5ed),
-    destructive: rgba(0xe5484d),
-    border: rgba(0xf8d3e0),
-    rail: rgba(0xf6dbe5),
-    sidebar: rgba(0xfdebf1),
-    glow: rgba(0x7dd3fc),
-    success: rgba(0x2fb47c),
-};
+impl Palette {
+    pub fn of(theme: &Theme) -> Self {
+        let t = &theme.tokens;
+        let dark = theme.dark();
+        let (primary, muted, background) = (t.get("primary"), t.get("muted"), t.get("background"));
+        Palette {
+            dark,
+            background: rgba(background),
+            foreground: rgba(t.get("foreground")),
+            card: rgba(t.get("card")),
+            primary: rgba(primary),
+            primary_foreground: rgba(t.get("primary-foreground")),
+            secondary: rgba(t.get("secondary")),
+            muted: rgba(muted),
+            muted_foreground: rgba(t.get("muted-foreground")),
+            accent: rgba(t.get("accent")),
+            destructive: rgba(t.get("destructive")),
+            border: rgba(t.get("border")),
+            rail: rgba(if dark { themes::mix(background, 0x000000, 0.78) } else { themes::mix(primary, muted, 0.09) }),
+            sidebar: rgba(themes::mix(t.get("card"), background, 0.55)),
+            glow: rgba(themes::turn(primary, 48.0)),
+            success: rgba(if dark { 0x4ade80 } else { 0x2fb47c }),
+            radius: theme.radius,
+            chat_surface: rgba(background).into(),
+            side_surface: rgba(themes::mix(t.get("card"), background, 0.55)).into(),
+            rail_surface: rgba(if dark {
+                themes::mix(background, 0x000000, 0.78)
+            } else {
+                themes::mix(primary, muted, 0.09)
+            })
+            .into(),
+        }
+    }
 
-pub const DARK: Palette = Palette {
-    dark: true,
-    background: rgba(0x14111f),
-    foreground: rgba(0xece6ff),
-    card: rgba(0x1f1a2e),
-    primary: rgba(0xb388ff),
-    primary_foreground: rgba(0x14111f),
-    secondary: rgba(0x2a2240),
-    muted: rgba(0x241e36),
-    muted_foreground: rgba(0x9a90b8),
-    accent: rgba(0x2a2240),
-    destructive: rgba(0xe5484d),
-    border: rgba(0x342b4d),
-    rail: rgba(0x0e0c16),
-    sidebar: rgba(0x19152a),
-    glow: rgba(0x7dd3fc),
-    success: rgba(0x4ade80),
-};
+    /// The surfaces turned see-through over a backdrop (the sidebars 20 points more solid than the chat).
+    pub fn over(mut self, backdrop: &Backdrop) -> Self {
+        if backdrop.any() {
+            let chat = f32::from(backdrop.panels) / 100.0;
+            let side = (chat + 0.2).min(1.0);
+            self.chat_surface = alpha(self.background, chat);
+            self.side_surface = alpha(self.sidebar, side);
+            self.rail_surface = alpha(self.rail, side);
+        }
+        self
+    }
+}
 
 const fn rgba(hex: u32) -> Rgba {
     Rgba {
@@ -94,13 +114,21 @@ const fn rgba(hex: u32) -> Rgba {
     }
 }
 
+/// The theme's corner radius, for corners drawn at 1 rem.
+static CORNERS: AtomicU32 = AtomicU32::new(0x3f80_0000); // 1.0
+
+/// A corner of `n` pixels at the usual radius, scaled to the theme's.
+pub fn corner(n: f32) -> Pixels {
+    px(n * f32::from_bits(CORNERS.load(Ordering::Relaxed)))
+}
+
 /// The palette in use, kept as a global so views can read it.
 pub struct Current(pub Palette);
 
 impl gpui_kit::Global for Current {}
 
 pub fn palette(cx: &App) -> Palette {
-    cx.try_global::<Current>().map(|c| c.0).unwrap_or(DARK)
+    cx.try_global::<Current>().map(|c| c.0).unwrap_or_else(|| Palette::of(&themes::builtins()[1]))
 }
 
 /// Mixes two colors, `t` of the way from `a` to `b`.
@@ -120,22 +148,36 @@ pub fn tint(seed: &str) -> Rgba {
     rgb(TINTS[(hash as usize) % TINTS.len()])
 }
 
-/// Applies the app's settings: light or dark (or the system's), the font,
-/// the text size, and whether things move.
+/// Whether the system is in dark mode.
+pub fn system_dark(appearance: WindowAppearance) -> bool {
+    matches!(appearance, WindowAppearance::Dark | WindowAppearance::VibrantDark)
+}
+
+/// The backdrop on screen, kept as a global for the window to draw.
+pub struct CurrentBackdrop(pub Backdrop);
+
+impl gpui_kit::Global for CurrentBackdrop {}
+
+pub fn backdrop(cx: &App) -> Backdrop {
+    cx.try_global::<CurrentBackdrop>().map(|c| c.0.clone()).unwrap_or_default()
+}
+
+/// Applies the app's settings: the theme (or the system's light or dark
+/// pick), its backdrop, the font, the text size, and whether things move.
 pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
-    let dark = match prefs.theme {
-        ThemeChoice::Dark => true,
-        ThemeChoice::Light => false,
-        ThemeChoice::System => matches!(appearance, WindowAppearance::Dark | WindowAppearance::VibrantDark),
-    };
-    let p = if dark { DARK } else { LIGHT };
+    let theme = prefs.active_theme(system_dark(appearance));
+    let backdrop = prefs.active_backdrop(&theme);
+    let p = Palette::of(&theme).over(&backdrop);
+    let dark = p.dark;
+    CORNERS.store(p.radius.to_bits(), Ordering::Relaxed);
+    cx.set_global(CurrentBackdrop(backdrop));
     cx.set_global(Current(p));
-    Theme::change(if dark { ThemeMode::Dark } else { ThemeMode::Light }, None, cx);
-    Theme::update(cx, |t| {
+    KitTheme::change(if dark { ThemeMode::Dark } else { ThemeMode::Light }, None, cx);
+    KitTheme::update(cx, |t| {
         t.font_family = FONT.into();
         t.font_size = px(15.0 * prefs.text_scale.clamp(0.8, 1.4));
-        t.radius = px(10.0);
-        t.radius_lg = px(16.0);
+        t.radius = corner(10.0);
+        t.radius_lg = corner(16.0);
         let c = &mut t.colors;
         c.background = p.background.into();
         c.foreground = p.foreground.into();
@@ -177,6 +219,10 @@ pub fn apply(prefs: &Prefs, appearance: WindowAppearance, cx: &mut App) {
         c.list_active = alpha(p.primary, 0.14);
         c.title_bar = p.rail.into();
         c.title_bar_border = p.border.into();
+        c.slider_bar = p.primary.into();
+        c.slider_thumb = p.card.into();
+        t.tokens.slider_bar = Hsla::from(p.primary).into();
+        t.tokens.slider_thumb = Hsla::from(p.card).into();
     });
     match prefs.motion {
         MotionChoice::System => gpui_kit::base::apply_system_reduce_motion(cx),
