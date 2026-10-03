@@ -170,7 +170,7 @@ impl Api {
             account_id: caller.account.id.clone(),
             session_id: session_id.clone(),
             signature_key: req.signature_key,
-            label: crate::auth::user_agent(metadata),
+            label: crate::dms::device_label(&crate::auth::user_agent(metadata)),
             created_at: now,
         };
         let packages =

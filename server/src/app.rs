@@ -62,6 +62,8 @@ pub struct App {
     pub link: Link,
     /// Where this process's databases and pictures are continuously copied.
     pub replica: Option<Arc<Replica>>,
+    /// What links to pictures from other sites are signed with.
+    picture_key: crate::outside::Key,
 }
 
 /// Where the parts this process doesn't run are.
@@ -145,6 +147,13 @@ impl App {
             }
         };
 
+        // Every part of a split instance signs picture links alike; a single
+        // process keeps its own key.
+        let picture_key = match (&config.cluster.key, &node) {
+            (Some(cluster_key), _) => crate::outside::Key::from_cluster_key(cluster_key),
+            (None, Some(node)) => node.picture_key().await?,
+            (None, None) => return Err(Error::internal("a shard needs FUWA_CLUSTER_KEY")),
+        };
         let index = Index::default();
         let (settings, announcement) = match &node {
             Some(node) => (Settings::load(&config, &node.settings().await?), node.announcement().await?),
@@ -178,6 +187,7 @@ impl App {
             shutdown: CancellationToken::new(),
             link,
             replica,
+            picture_key,
         });
         if app.node.is_some() {
             app.sweep_media(crate::id::now_ms()).await?;
@@ -191,6 +201,16 @@ impl App {
     /// needs them there.
     pub fn node(&self) -> Result<&NodeDb> {
         self.node.as_ref().ok_or_else(|| Error::internal("this part of the instance doesn't keep accounts"))
+    }
+
+    /// What links to pictures from other sites are signed with.
+    pub fn picture_key(&self) -> &crate::outside::Key {
+        &self.picture_key
+    }
+
+    /// The link to store for a picture someone gave: see [`crate::outside::link`].
+    pub fn picture_link(&self, url: &str) -> String {
+        crate::outside::link(&self.picture_key, &self.settings().public_url, url)
     }
 
     /// Direct messages, where accounts are kept.
@@ -308,7 +328,7 @@ impl App {
         let mut router =
             grpc.into_axum_router().layer(tonic_web::GrpcWebLayer::new()).route("/healthz", get(|| async { "ok" }));
         if self.node.is_some() {
-            router = router.merge(crate::media::routes(self.clone()));
+            router = router.merge(crate::media::routes(self.clone())).merge(crate::outside::routes(self.clone()));
         }
         if matches!(self.link, Link::Alone | Link::Shard(_)) {
             router = router.merge(crate::webhooks::routes(self.clone()));

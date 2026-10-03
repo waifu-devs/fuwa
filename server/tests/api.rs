@@ -3620,7 +3620,10 @@ async fn linked_accounts_sign_in_with_waifu_dev() {
     let user = first.user.unwrap();
     assert_eq!(user.kind, pb::AccountKind::Linked as i32);
     assert_eq!((user.username.as_str(), user.display_name.as_str()), ("juan_dev", "Juan"));
-    assert_eq!(user.avatar_url, "https://avatars.example/juan.png");
+    // The picture from waifu.dev comes through the instance, so people who
+    // see it aren't seen by the site it's on.
+    assert!(user.avatar_url.starts_with("http://localhost:8080/media/outside/"), "{}", user.avatar_url);
+    assert!(user.avatar_url.ends_with("?url=https%3A%2F%2Favatars%2Eexample%2Fjuan%2Epng"), "{}", user.avatar_url);
     assert_eq!(
         finish_linked(&mut c, &started.state, &code, "the app's secret").await.unwrap_err(),
         Code::FailedPrecondition
@@ -4485,6 +4488,26 @@ async fn webhooks_post_into_channels() {
     let last = messages(&mut c, &member, &server.id, &general.id).await.pop().unwrap();
     assert_eq!(last.webhook.unwrap().name, "Deploys");
 
+    // Pictures from other sites, in embeds or as a post's avatar, come
+    // through the instance; links stay as they are.
+    let response = post_webhook(
+        &instance,
+        &hook,
+        r#"{"avatar_url":"https://tracker.example/a.png","embeds":[{"url":"https://example.com/","image":{"url":"https://tracker.example/i.png"},"thumbnail":{"url":"https://tracker.example/t.png"}}]}"#,
+        false,
+    )
+    .await;
+    assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+    let last = messages(&mut c, &member, &server.id, &general.id).await.pop().unwrap();
+    let embed = &last.embeds[0];
+    assert_eq!(embed.url, "https://example.com/");
+    for picture in [&last.webhook.as_ref().unwrap().avatar_url, &embed.image_url, &embed.thumbnail_url] {
+        assert!(picture.starts_with("http://localhost:8080/media/outside/"), "{picture}");
+    }
+    let fetched =
+        reqwest::get(format!("http://{}/media/outside/{}?url=x", instance.addr, "0".repeat(32))).await.unwrap();
+    assert_eq!(fetched.status(), reqwest::StatusCode::NOT_FOUND, "unsigned links are never fetched");
+
     // Bad posts and wrong tokens.
     assert_eq!(post_webhook(&instance, &hook, "not json", false).await.status(), reqwest::StatusCode::BAD_REQUEST);
     assert_eq!(
@@ -4562,7 +4585,7 @@ async fn webhooks_post_into_channels() {
         .unwrap()
         .into_inner();
     assert_eq!(listed.webhooks.len(), 1);
-    assert_eq!(listed.webhooks[0].messages, 3);
+    assert_eq!(listed.webhooks[0].messages, 4);
     assert!(listed.webhooks[0].last_used_at.is_some());
     assert_eq!(listed.creators[0].username, "owner");
 

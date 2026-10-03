@@ -159,7 +159,7 @@ impl ServerService for Api {
                 let new = NewServer {
                     name: text("name", &req.name, 1, 100)?,
                     description: text("description", &req.description, 0, 1000)?,
-                    icon_url: url("icon_url", &req.icon_url)?,
+                    icon_url: self.app.picture_link(&url("icon_url", &req.icon_url)?),
                     discoverable: req.discoverable,
                 };
                 let icon = self.check_picture(&account, pb::MediaPurpose::ServerIcon, &new.icon_url).await?;
@@ -230,7 +230,7 @@ impl ServerService for Api {
                 let sdb = self.with(&account, &req.server_id, Permission::ManageServer).await?.sdb;
                 let name = req.name.as_deref().map(|v| text("name", v, 1, 100)).transpose()?;
                 let description = req.description.as_deref().map(|v| text("description", v, 0, 1000)).transpose()?;
-                let icon_url = req.icon_url.as_deref().map(|v| url("icon_url", v)).transpose()?;
+                let icon_url = req.icon_url.as_deref().map(|v| url("icon_url", v)).transpose()?.map(|v| self.app.picture_link(&v));
                 let old_icon = sdb.server().await?.icon_url;
                 let new_icon = match icon_url.as_deref().filter(|url| *url != old_icon) {
                     Some(url) => self.check_picture(&account, pb::MediaPurpose::ServerIcon, url).await?,

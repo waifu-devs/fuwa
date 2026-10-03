@@ -320,14 +320,14 @@ pub async fn execute_webhook(
     };
     let avatar_url = match post.avatar_url.trim() {
         "" => webhook.avatar_url.clone(),
-        url => super::url("avatar_url", url)?,
+        url => app.picture_link(&super::url("avatar_url", url)?),
     };
     let mut message = WebhookMessage {
         content: post.content,
         embeds: post.embeds,
         author: pb::MessageWebhook { webhook_id: webhook.id.clone(), name: username, avatar_url },
     };
-    check_webhook_message(&mut message)?;
+    check_webhook_message(app, &mut message)?;
     let limits = sdb.limits(&app.settings().limits).await?;
     if let Some(limit) = limits.storage_bytes
         && sdb.storage_bytes() >= limit
