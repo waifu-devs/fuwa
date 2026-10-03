@@ -377,5 +377,9 @@ impl Api {
             Ok(member)
         })
         .await
+        .map(|mut member| {
+            store::scrub_sso(&mut member, &account.id, access.has(Permission::ManageServer));
+            member
+        })
     }
 }

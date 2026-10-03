@@ -496,6 +496,8 @@ impl ServerService for Api {
                         Ok(member)
                     })
                     .await?;
+                let mut member = member;
+                store::scrub_sso(&mut member, &account.id, me.has(Permission::ManageServer));
                 Ok(pb::UpdateMemberResponse { member: Some(member) })
             }
             .await,
@@ -562,6 +564,8 @@ impl ServerService for Api {
                         Ok(member)
                     })
                     .await?;
+                let mut member = member;
+                store::scrub_sso(&mut member, &account.id, me.has(Permission::ManageServer));
                 Ok(pb::TimeOutMemberResponse { member: Some(member) })
             }
             .await,

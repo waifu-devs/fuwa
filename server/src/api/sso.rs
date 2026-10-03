@@ -240,6 +240,10 @@ impl SsoService for Api {
                 let settings = self.app.settings();
                 let origin =
                     crate::linked::return_origin(&req.return_origin, &settings.public_url, &settings.allowed_origins)?;
+                sso::starts().start(&[
+                    (&format!("server {}", sdb.id), sso::MAX_STARTS_SERVER),
+                    (&format!("server {} account {}", sdb.id, account.id), sso::MAX_STARTS_ACCOUNT),
+                ])?;
                 let (authorize_url, sign_in) =
                     sso::start(&provider, &endpoints, &origin, &req.secret_hash, &account.id, false).await?;
                 sdb.write(&account.id, async |conn, _| sso::save(conn, &sign_in).await).await?;

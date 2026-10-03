@@ -390,6 +390,53 @@ pub struct SignIn {
     pub expires_at: i64,
 }
 
+/// How many sign-ins may start in [`TTL_MS`]: through the instance's provider
+/// in all (anyone may start one, and nothing says who they are, since no
+/// client address is ever looked at), through one server's in all, and by one
+/// account at one server. Each start keeps a row until it runs out, so this
+/// also bounds those.
+pub const MAX_STARTS_INSTANCE: usize = 2_000;
+pub const MAX_STARTS_SERVER: usize = 1_000;
+pub const MAX_STARTS_ACCOUNT: usize = 10;
+
+/// Counts sign-ins started, per key, over the last [`TTL_MS`]. Instance
+/// sign-ins all start on the directory and a server's on the shard holding it,
+/// so one lock in one process sees every start for a key.
+#[derive(Default)]
+pub struct StartLimiter {
+    starts: std::sync::Mutex<std::collections::HashMap<String, std::collections::VecDeque<i64>>>,
+}
+
+impl StartLimiter {
+    /// Counts a start against every one of `limits`, or refuses it (counting
+    /// nothing) when any is spent.
+    pub fn start(&self, limits: &[(&str, usize)]) -> Result<()> {
+        let mut starts = self.starts.lock().unwrap_or_else(|p| p.into_inner());
+        let now = now_ms();
+        starts.retain(|_, times| {
+            while times.front().is_some_and(|t| now - t >= TTL_MS) {
+                times.pop_front();
+            }
+            !times.is_empty()
+        });
+        if limits.iter().any(|(key, max)| starts.get(*key).is_some_and(|times| times.len() >= *max)) {
+            return Err(Error::ResourceExhausted(
+                "too many sign-ins started through this provider just now; try again in a few minutes".into(),
+            ));
+        }
+        for (key, _) in limits {
+            starts.entry(key.to_string()).or_default().push_back(now);
+        }
+        Ok(())
+    }
+}
+
+/// The one limiter for this process.
+pub fn starts() -> &'static StartLimiter {
+    static STARTS: std::sync::OnceLock<StartLimiter> = std::sync::OnceLock::new();
+    STARTS.get_or_init(StartLimiter::default)
+}
+
 /// Begins a sign-in: the provider's page, and the row to keep until it's back.
 /// `return_origin` is already checked (`linked::return_origin`): only apps the
 /// instance trusts get sign-ins back.
@@ -625,6 +672,18 @@ mod tests {
         assert_eq!(first.host(), "login.acme.com");
         let shown = format!("{first:?}");
         assert!(!shown.contains("s3cret") && shown.contains("<redacted>"), "{shown}");
+    }
+
+    #[test]
+    fn starting_sign_ins_is_limited_per_key() {
+        let limiter = StartLimiter::default();
+        for _ in 0..3 {
+            limiter.start(&[("server", 5), ("ana", 3)]).unwrap();
+        }
+        assert!(limiter.start(&[("server", 5), ("ana", 3)]).is_err(), "ana's are spent");
+        limiter.start(&[("server", 5), ("bea", 3)]).unwrap();
+        limiter.start(&[("server", 5), ("bea", 3)]).unwrap();
+        assert!(limiter.start(&[("server", 5), ("cai", 3)]).is_err(), "the server's are spent");
     }
 
     #[test]

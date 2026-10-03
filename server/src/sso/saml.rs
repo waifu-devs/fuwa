@@ -157,10 +157,18 @@ pub fn identify(posted: &str, expect: &Expect) -> Result<Identity> {
         });
     }
 
-    if let Some(destination) = response.attribute("Destination")
-        && destination != expect.acs_url
-    {
-        return Err(refused("it was sent to another address"));
+    // A signed response must say where it was sent (SAML bindings 3.5.5.2),
+    // and it has to be here. An unsigned response around a signed assertion
+    // may leave it out: nothing unsigned is trusted anyway, and the assertion's
+    // own Recipient, checked below, says where it was meant for.
+    let response_signed = only_child(response, DSIG, "Signature")
+        .is_some_and(|signature| verify(&text, response, signature, &certificates).is_ok());
+    match response.attribute("Destination") {
+        Some(destination) if destination != expect.acs_url => {
+            return Err(refused("it was sent to another address"));
+        }
+        None if response_signed => return Err(refused("it doesn't say where it was sent")),
+        _ => {}
     }
     if let Some(in_response_to) = response.attribute("InResponseTo")
         && in_response_to != expect.request_id
@@ -493,6 +501,8 @@ mod tests {
             assert!(err.contains("refused"), "{file}: {err}");
         }
         assert!(ok("assertion-signed.xml", EC).is_err(), "signed with another key");
+        let err = ok("response-signed-no-destination.xml", RSA).unwrap_err().to_string();
+        assert!(err.contains("where it was sent"), "a signed response names where it was sent: {err}");
     }
 
     #[test]

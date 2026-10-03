@@ -384,7 +384,7 @@ impl JoinService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let sdb = self.with(&account, &req.server_id, Permission::KickMembers).await?.sdb;
+                let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::KickMembers).await?;
                 let reason = text("reason", &req.reason, 0, 512)?;
                 let limits = sdb.limits(&self.app.settings().limits).await?;
                 let member = sdb
@@ -444,6 +444,10 @@ impl JoinService for Api {
                     .await?;
                 if member.is_some() {
                     self.app.membership_changed(&req.user_id, &sdb.id, true).await;
+                }
+                let mut member = member;
+                if let Some(member) = &mut member {
+                    store::scrub_sso(member, &account.id, access.has(Permission::ManageServer));
                 }
                 Ok(pb::ReviewApplicationResponse { member })
             }
