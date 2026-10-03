@@ -228,6 +228,40 @@ fn label<'a>(what: &str, value: &'a str, max: usize) -> Result<&'a str> {
     Ok(value)
 }
 
+/// The browser families fuwa web reports, and what the desktop app reports.
+const WEB_PLATFORMS: &[&str] = &["chromium", "firefox", "safari", "other"];
+const DESKTOP_PLATFORMS: &[&str] = &["native"];
+/// The OS families the apps report: nothing else, so a modified app can't
+/// slip an address or a name into one.
+const APP_OSES: &[&str] = &["windows", "macos", "linux", "android", "ios", "chromeos", "other"];
+
+fn app_platforms(app: &str) -> &'static [&'static str] {
+    if app == "desktop" { DESKTOP_PLATFORMS } else { WEB_PLATFORMS }
+}
+
+fn one_of<'a>(what: &str, value: &'a str, allowed: &[&str]) -> Result<&'a str> {
+    if allowed.contains(&value) {
+        Ok(value)
+    } else {
+        Err(Error::invalid(format!("{what} must be one of {}", allowed.join(", "))))
+    }
+}
+
+/// An app's version: "dev", or a version number like 0.1.0 with an optional
+/// short suffix (0.1.0-beta.1). Never anything shaped like an address.
+fn app_version(value: &str) -> Result<&str> {
+    let (number, suffix) = value.split_once('-').unwrap_or((value, ""));
+    let parts: Vec<&str> = number.split('.').collect();
+    let number_ok =
+        parts.len() == 3 && parts.iter().all(|p| (1..=4).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit()));
+    let suffix_ok = suffix.len() <= 16 && suffix.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.');
+    if value == "dev" || (number_ok && suffix_ok && !(value.contains('-') && suffix.is_empty())) {
+        Ok(value)
+    } else {
+        Err(Error::invalid("version must be dev or a version number such as 0.1.0"))
+    }
+}
+
 /// Adds an app's report to the counts, unless the instance's telemetry is
 /// off. `account_id` only limits how often one account may send; it's
 /// forgotten within a minute.
@@ -237,9 +271,9 @@ pub fn add_app_report(account_id: &str, telemetry: bool, report: &pb::AppReport)
             "web" | "desktop" => report.app.clone(),
             _ => return Err(Error::invalid("app must be web or desktop")),
         },
-        version: label("version", &report.version, 32)?.to_string(),
-        platform: label("platform", &report.platform, 16)?.to_ascii_lowercase(),
-        os: label("os", &report.os, 16)?.to_ascii_lowercase(),
+        version: app_version(&report.version)?.to_string(),
+        platform: one_of("platform", &report.platform, app_platforms(&report.app))?.to_string(),
+        os: one_of("os", &report.os, APP_OSES)?.to_string(),
     };
     if report.errors.len() > MAX_APP_ENTRIES
         || report.timings.len() > MAX_APP_ENTRIES
@@ -542,6 +576,24 @@ mod tests {
         let mut bad = report();
         bad.app = "toaster".into();
         assert!(add_app_report("a-check", true, &bad).is_err());
+        for (field, value) in [
+            ("version", "juan@example.com"),
+            ("version", "10.0.0.1"),
+            ("platform", "10.0.0.1"),
+            ("platform", "native"),
+            ("os", "juan"),
+        ] {
+            let mut bad = report();
+            match field {
+                "version" => bad.version = value.into(),
+                "platform" => bad.platform = value.into(),
+                _ => bad.os = value.into(),
+            }
+            assert!(add_app_report("a-check", true, &bad).is_err(), "{field} {value}");
+        }
+        assert_eq!(app_version("0.1.0-beta.1").ok(), Some("0.1.0-beta.1"));
+        assert_eq!(app_version("dev").ok(), Some("dev"));
+        assert!(app_version("0.1.0-").is_err());
         let mut bad = report();
         bad.timings[0].buckets.pop();
         assert!(add_app_report("a-check", true, &bad).is_err());
