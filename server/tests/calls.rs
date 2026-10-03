@@ -116,7 +116,7 @@ async fn sound_goes_from_one_to_the_other() {
     let settings = c.calls.get_call_settings(authed(&juan, pb::GetCallSettingsRequest {})).await.unwrap().into_inner();
     assert!(settings.enabled);
     assert_eq!(settings.ice_servers.len(), 2);
-    assert!(settings.ice_servers[1].username.ends_with(&format!(":{juan_id}")));
+    assert!(!settings.ice_servers[1].username.contains(&juan_id), "TURN credentials name no account");
 
     let server = c
         .servers

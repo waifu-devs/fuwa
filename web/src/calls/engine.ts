@@ -266,6 +266,9 @@ class Session {
     const tryAgain = async (delay: number) => {
       if (this.stopped) return;
       try {
+        // Fresh TURN credentials: they're short-lived, and a long call may have outlived them.
+        const settings = await this.api.calls.getCallSettings({});
+        if (settings.enabled) this.settings = settings;
         await this.connect();
       } catch (err) {
         const e = toFuwaError(err);

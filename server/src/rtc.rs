@@ -907,7 +907,8 @@ impl Engine {
         match transmit.proto {
             Protocol::Udp => {
                 if let Err(err) = self.udp.send_to(&transmit.contents, transmit.destination).await {
-                    tracing::debug!(to = %transmit.destination, error = %err, "couldn't send a call packet");
+                    // Never the address: it's a participant's.
+                    tracing::debug!(error = %err, "couldn't send a call packet");
                 }
             }
             Protocol::Tcp => {

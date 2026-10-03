@@ -22,8 +22,9 @@ use crate::pb::{self, call_service_server::CallService};
 use crate::servers::{self as store, Payload};
 use crate::voice::{self, LEASE, Place};
 
-/// How long a TURN credential works.
-const TURN_CREDENTIAL: Duration = Duration::from_secs(24 * 60 * 60);
+/// How long a TURN credential works. Apps ask for new ones each time they
+/// (re)connect a call, so this only has to outlast one connection setting up.
+const TURN_CREDENTIAL: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// Checks for places nobody kept this often.
 const SWEEP: Duration = Duration::from_secs(1);
@@ -92,17 +93,19 @@ fn publish_dm_call(app: &App, conversation_id: &str, participants: &[String]) {
     }
 }
 
-/// A coturn-style credential (its REST API): the username says until when
-/// and for whom, the password is the HMAC of it under the shared secret.
-fn turn_credential(secret: &str, account_id: &str, now: i64) -> (String, String) {
+/// A coturn-style credential (its REST API): the username says until when,
+/// the password is the HMAC of it under the shared secret. Each one is new
+/// (`name` is random), so the TURN server's logs can't tie it to an account
+/// or to another of the same person's calls.
+fn turn_credential(secret: &str, name: &str, now: i64) -> (String, String) {
     let expires = now / 1000 + TURN_CREDENTIAL.as_secs() as i64;
-    let username = format!("{expires}:{account_id}");
+    let username = format!("{expires}:{name}");
     let mut mac = Hmac::<sha1::Sha1>::new_from_slice(secret.as_bytes()).expect("HMAC takes any key");
     mac.update(username.as_bytes());
     (username, base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes()))
 }
 
-fn ice_servers(urls: &[String], secret: &str, account_id: &str) -> Vec<pb::IceServer> {
+fn ice_servers(urls: &[String], secret: &str) -> Vec<pb::IceServer> {
     let (stun, turn): (Vec<&String>, Vec<&String>) = urls.iter().partition(|u| u.starts_with("stun:"));
     let mut servers = Vec::new();
     if !stun.is_empty() {
@@ -110,10 +113,16 @@ fn ice_servers(urls: &[String], secret: &str, account_id: &str) -> Vec<pb::IceSe
     }
     if !turn.is_empty() {
         let (username, credential) =
-            if secret.is_empty() { Default::default() } else { turn_credential(secret, account_id, now_ms()) };
+            if secret.is_empty() { Default::default() } else { turn_credential(secret, &random_name(), now_ms()) };
         servers.push(pb::IceServer { urls: turn.into_iter().cloned().collect(), username, credential });
     }
     servers
+}
+
+fn random_name() -> String {
+    let mut bytes = [0u8; 12];
+    let _ = getrandom::fill(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn moved_away() -> Error {
@@ -463,11 +472,11 @@ impl CallService for Api {
     ) -> Result<Response<pb::GetCallSettingsResponse>, Status> {
         respond(
             async {
-                let account = self.account(request.metadata()).await?;
+                self.account(request.metadata()).await?;
                 let settings = self.app.settings();
                 let enabled = settings.calls && self.app.media_link.is_on();
                 let ice_servers = match enabled {
-                    true => ice_servers(&settings.ice_urls, &settings.turn_secret, &account.id),
+                    true => ice_servers(&settings.ice_urls, &settings.turn_secret),
                     false => vec![],
                 };
                 Ok(pb::GetCallSettingsResponse { enabled, ice_servers })
@@ -548,11 +557,12 @@ mod tests {
     fn turn_credentials_follow_coturn() {
         // coturn checks HMAC-SHA1(secret, "<expiry>:<name>"), base64.
         let (username, credential) = turn_credential("north", "acc", 1_000_000);
-        assert_eq!(username, format!("{}:acc", 1000 + 24 * 60 * 60));
+        assert_eq!(username, format!("{}:acc", 1000 + 2 * 60 * 60));
         assert_eq!(credential.len(), 28);
-        let servers = ice_servers(&["stun:a:3478".into(), "turn:b:3478".into()], "north", "acc");
+        let servers = ice_servers(&["stun:a:3478".into(), "turn:b:3478".into()], "north");
         assert_eq!(servers.len(), 2);
         assert!(servers[0].username.is_empty());
         assert!(!servers[1].credential.is_empty());
+        assert_ne!(servers[1].username, ice_servers(&["turn:b:3478".into()], "north")[0].username, "new each time");
     }
 }
