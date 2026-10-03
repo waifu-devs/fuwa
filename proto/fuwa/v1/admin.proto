@@ -131,6 +131,11 @@ message InstanceSettings {
   // Turning it off stops new codes and requests; channels already shared
   // stay shared until either side ends them. FUWA_SHARED_CHANNELS.
   bool shared_channels = 30;
+  // How many times a day (UTC) one server's Smart filter may ask its
+  // provider; unset for no cap. Past it, that day's messages go through the
+  // Smart filter unchecked (the server's other rules still apply).
+  // FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY.
+  optional int64 automod_checks_per_day = 31;
 }
 
 // One moderation provider, as the instance's admins set it up: one fuwa

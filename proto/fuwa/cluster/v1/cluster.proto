@@ -55,6 +55,11 @@ service DirectoryService {
   rpc ForgetPicture(ForgetPictureRequest) returns (ForgetPictureResponse);
   // A server's pictures the directory still keeps, for its shard to take.
   rpc ServerPictures(ServerPicturesRequest) returns (ServerPicturesResponse);
+  // Uses up an upload link for a server's picture, whose bytes the shard
+  // holding the server receives and keeps.
+  rpc StartServerUpload(StartServerUploadRequest) returns (StartServerUploadResponse);
+  // The shard has a server picture's bytes (or they didn't arrive).
+  rpc FinishServerUpload(FinishServerUploadRequest) returns (FinishServerUploadResponse);
   // How many servers an account owns, for the cap on that.
   rpc CountOwnedServers(CountOwnedServersRequest) returns (CountOwnedServersResponse);
   // An agent by username, for adding it to a server.
@@ -353,6 +358,8 @@ message CheckPictureRequest {
   string account_id = 1;
   fuwa.v1.MediaPurpose purpose = 2;
   string url = 3;
+  // The server it's for, if it's one of a server's pictures.
+  string server_id = 4;
 }
 
 message CheckPictureResponse {
@@ -405,6 +412,29 @@ message ServerPicturesRequest {
 message ServerPicturesResponse {
   repeated string media_ids = 1;
 }
+
+message StartServerUploadRequest {
+  // The SHA-256 of the upload link's token, as node.db keeps it.
+  string upload_hash = 1;
+  string server_id = 2;
+}
+
+message StartServerUploadResponse {
+  string media_id = 1;
+  // The size it was said to be, in bytes.
+  int64 size = 2;
+}
+
+message FinishServerUploadRequest {
+  string media_id = 1;
+  string server_id = 2;
+  // What the bytes turned out to be, and their size as kept; empty when they
+  // didn't arrive whole (the upload is then dropped).
+  string content_type = 3;
+  int64 size = 4;
+}
+
+message FinishServerUploadResponse {}
 
 message CountOwnedServersRequest {
   string account_id = 1;

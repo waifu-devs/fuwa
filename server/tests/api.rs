@@ -2650,12 +2650,22 @@ async fn instance_admins_manage_accounts_servers_and_announcements() {
     instance.stop().await;
 }
 
-/// A file that starts like a PNG, `size` bytes long.
+/// A PNG's chunks, `size` bytes long (at least [`PNG_MIN`]): a header, a
+/// private chunk of `fill` bytes, and the end, so it's kept as it is.
 fn png(size: usize, fill: u8) -> Vec<u8> {
-    let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
-    bytes.resize(size, fill);
-    bytes
+    assert!(size >= PNG_MIN, "a test PNG is at least {PNG_MIN} bytes");
+    let chunk =
+        |kind: &[u8; 4], data: &[u8]| [&(data.len() as u32).to_be_bytes()[..], kind, data, &[0, 0, 0, 0]].concat();
+    [
+        &b"\x89PNG\r\n\x1a\n"[..],
+        &chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]),
+        &chunk(b"fuWa", &vec![fill; size - PNG_MIN]),
+        &chunk(b"IEND", &[]),
+    ]
+    .concat()
 }
+
+const PNG_MIN: usize = 8 + 25 + 12 + 12;
 
 /// The same address on the test instance: links are made with the public
 /// URL, which the test doesn't know before the port is picked.
@@ -2674,7 +2684,12 @@ async fn create_upload(
     c.media
         .create_upload(authed(
             token,
-            pb::CreateUploadRequest { purpose: purpose as i32, content_type: content_type.into(), size: size as i64 },
+            pb::CreateUploadRequest {
+                purpose: purpose as i32,
+                content_type: content_type.into(),
+                size: size as i64,
+                server_id: String::new(),
+            },
         ))
         .await
         .map(|r| r.into_inner())
@@ -2751,13 +2766,66 @@ async fn backgrounds_are_kept_listed_and_deleted() {
 
     // There's a cap on how many one account keeps.
     for n in 1..fuwa_server::media::MAX_BACKGROUNDS {
-        let url = upload(&mut c, &instance, &mika, background, png(20, n as u8)).await;
+        let url = upload(&mut c, &instance, &mika, background, png(60, n as u8)).await;
         c.media.keep_background(keep(&mika, &url)).await.unwrap();
     }
-    let last = upload(&mut c, &instance, &mika, background, png(20, 0)).await;
+    let last = upload(&mut c, &instance, &mika, background, png(60, 0)).await;
     c.media.keep_background(keep(&mika, &last)).await.unwrap();
-    let over = upload(&mut c, &instance, &mika, background, png(21, 0)).await;
+    let over = upload(&mut c, &instance, &mika, background, png(61, 0)).await;
     assert_eq!(c.media.keep_background(keep(&mika, &over)).await.unwrap_err().code(), Code::ResourceExhausted);
+}
+
+#[tokio::test]
+async fn pictures_are_kept_without_where_they_were_taken() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_PUBLIC_URL", "https://chat.example.com")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let avatar = pb::MediaPurpose::Avatar;
+    let send = async |c: &mut Clients, kind: &str, bytes: Vec<u8>| {
+        let reserved = create_upload(c, &juan, avatar, kind, bytes.len()).await.unwrap();
+        let status = put(&instance, &reserved.upload_url, bytes).await;
+        (status, reserved.media.unwrap().url)
+    };
+
+    // A phone photo: its EXIF names where it was taken, and another picture
+    // with its own EXIF follows the end.
+    let segment =
+        |marker: u8, data: &[u8]| [&[0xff, marker][..], &((data.len() + 2) as u16).to_be_bytes(), data].concat();
+    let picture =
+        [segment(0xdb, &[0; 65]), segment(0xda, &[1, 1, 0, 0, 0x3f, 0]), vec![0x12, 0x34, 0xff, 0xd9]].concat();
+    let photo = [
+        &[0xff, 0xd8][..],
+        &segment(0xe1, b"Exif\0\0GPS 35.6812N 139.7671E"),
+        &picture,
+        &[0xff, 0xd8],
+        &segment(0xe1, b"Exif\0\0GPS again"),
+        &[0xff, 0xd9],
+    ]
+    .concat();
+    let (status, url) = send(&mut c, "image/jpeg", photo).await;
+    assert_eq!(status, reqwest::StatusCode::NO_CONTENT);
+    let (status, headers, body) = fetch(&instance, &url).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(body, [&[0xff, 0xd8][..], &picture].concat());
+    assert_eq!(headers[reqwest::header::CONTENT_LENGTH], body.len().to_string().as_str());
+
+    // A PNG's text chunks go too.
+    let with_text = {
+        let plain = png(100, 1);
+        let text = [&5u32.to_be_bytes()[..], b"tEXt", b"GPS\0x", &[0; 4]].concat();
+        [&plain[..33], &text, &plain[33..]].concat()
+    };
+    let (status, url) = send(&mut c, "image/png", with_text).await;
+    assert_eq!(status, reqwest::StatusCode::NO_CONTENT);
+    assert_eq!(fetch(&instance, &url).await.2, png(100, 1));
+
+    // One whose chunks can't be followed isn't kept, metadata and all.
+    let mut broken = b"\x89PNG\r\n\x1a\n".to_vec();
+    broken.resize(100, 0xff);
+    let (status, url) = send(&mut c, "image/png", broken).await;
+    assert_eq!(status, reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(fetch(&instance, &url).await.0, reqwest::StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -2781,7 +2849,12 @@ async fn pictures_upload_serve_and_clean_up() {
     assert!(too_big.message().contains("4 KB"), "{}", too_big.message());
     let anonymous = c
         .media
-        .create_upload(pb::CreateUploadRequest { purpose: avatar as i32, content_type: "image/png".into(), size: 10 })
+        .create_upload(pb::CreateUploadRequest {
+            purpose: avatar as i32,
+            content_type: "image/png".into(),
+            size: 10,
+            server_id: String::new(),
+        })
         .await;
     assert_eq!(anonymous.unwrap_err().code(), Code::Unauthenticated);
 
@@ -2919,7 +2992,7 @@ async fn pictures_upload_serve_and_clean_up() {
 
     // Uploads nothing uses are swept: unsent ones when their link runs out,
     // stored ones after a day.
-    let unused = upload(&mut c, &instance, &juan, pb::MediaPurpose::Banner, png(50, 6)).await;
+    let unused = upload(&mut c, &instance, &juan, pb::MediaPurpose::Banner, png(60, 6)).await;
     let now = fuwa_server::id::now_ms();
     instance.app.sweep_media(now).await.unwrap();
     assert_eq!(fetch(&instance, &unused).await.0, reqwest::StatusCode::OK, "a fresh upload waits to be used");
@@ -4533,9 +4606,9 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
     // asked about, and still goes through when the provider doesn't answer.
     let rule = save_rule(&mut c, &owner, &server.id, pb::AutoModRule { pictures: true, ..rule.clone() }).await.unwrap();
     assert!(rule.pictures);
-    // A 16 by 16 PNG's headers, which is all the server looks at before sending it.
-    let mut cat = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\x10\0\0\0\x10\x08\x06\0\0\0".to_vec();
-    cat.resize(300, 0);
+    // A 16 by 16 PNG: its header is all the server looks at before sending it.
+    let mut cat = png(300, 0);
+    cat[16..24].copy_from_slice(&[0, 0, 0, 16, 0, 0, 0, 16]);
     let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, cat).await;
     let sent = c
         .messages
@@ -4651,6 +4724,82 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
     c.admin.update_settings(authed(&admin, update(vec![off]))).await.unwrap();
     assert!(list(&mut c).await.providers.is_empty());
     send(&mut c, &member, &server.id, &general.id, "still here").await.unwrap();
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn smart_filter_checks_stop_at_the_daily_limit() {
+    use pb::{AutoModActionKind as Kind, AutoModTrigger as Trigger};
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(
+        dir.path(),
+        &[
+            ("FUWA_CLEF_API_TOKEN", "not-a-real-token-1234"),
+            ("FUWA_CLEF_ACCOUNT_ID", "00000000000000000000000000000000"),
+            ("FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY", "2"),
+        ],
+    )
+    .await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (member, _, _) = sign_up(&mut c, "member").await;
+    let server = create_server(&mut c, &owner, "Capped", true).await;
+    join(&mut c, &member, &server.id).await;
+    let general = new_channel(&mut c, &owner, &server.id, "general", pb::ChannelType::Text).await;
+    let mods = new_channel(&mut c, &owner, &server.id, "mod-log", pb::ChannelType::Text).await;
+    let smart = pb::AutoModRule {
+        enabled: true,
+        trigger: Trigger::Provider as i32,
+        provider: "cloudflare-clef".into(),
+        actions: vec![pb::AutoModAction {
+            kind: Kind::Alert as i32,
+            channel_id: mods.id.clone(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let rule = save_rule(&mut c, &owner, &server.id, smart).await.unwrap();
+
+    // The limit is the instance's, shown with each server's usage.
+    let shown = c
+        .servers
+        .get_server_usage(authed(&owner, pb::GetServerUsageRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(shown.limits.unwrap().automod_checks_per_day, Some(2));
+    assert_eq!(shown.own_limits.unwrap().automod_checks_per_day, None);
+    let settings = c.admin.get_settings(authed(&admin, pb::GetSettingsRequest {})).await.unwrap().into_inner();
+    assert_eq!(settings.config.unwrap().settings.unwrap().automod_checks_per_day, Some(2));
+
+    // Each message the filter checks counts, and past the limit messages go
+    // through unchecked, without asking.
+    for text in ["one", "two", "three", "four"] {
+        send(&mut c, &member, &server.id, &general.id, text).await.unwrap();
+    }
+    assert_eq!(usage(&mut c, &owner, &server.id).await.automod_checks_today, 2);
+    let tried = c
+        .automod
+        .test_auto_mod_rule(authed(
+            &owner,
+            pb::TestAutoModRuleRequest { server_id: server.id.clone(), rule: Some(rule), content: "hi".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(tried.error.contains("today's 2 Smart filter checks are used up"), "{tried:?}");
+    assert_eq!(usage(&mut c, &owner, &server.id).await.automod_checks_today, 2);
+
+    // Admins raise it from the app.
+    let raised = settings_update(
+        pb::InstanceSettings { automod_checks_per_day: Some(3), ..Default::default() },
+        &["automod_checks_per_day"],
+        &[],
+    );
+    c.admin.update_settings(authed(&admin, raised)).await.unwrap();
+    send(&mut c, &member, &server.id, &general.id, "five").await.unwrap();
+    assert_eq!(usage(&mut c, &owner, &server.id).await.automod_checks_today, 3);
     instance.stop().await;
 }
 
@@ -5338,8 +5487,12 @@ async fn picture_uploads_take_the_caps_admins_set() {
         let mut media = c.media.clone();
         let juan = juan.clone();
         tokio::spawn(async move {
-            let request =
-                pb::CreateUploadRequest { purpose: avatar as i32, content_type: "image/png".into(), size: 500 };
+            let request = pb::CreateUploadRequest {
+                purpose: avatar as i32,
+                content_type: "image/png".into(),
+                size: 500,
+                server_id: String::new(),
+            };
             media.create_upload(authed(&juan, request)).await.map_err(|err| err.code())
         })
     });

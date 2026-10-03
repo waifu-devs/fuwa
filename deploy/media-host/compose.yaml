@@ -1,0 +1,35 @@
+# A media part on a host of its own: carries a split instance's calls with
+# real UDP and TCP on port 443, while everything else stays where it is.
+# Steps in docs/self-hosting.md ("The media part on a host of its own").
+services:
+  media:
+    image: ghcr.io/waifu-devs/fuwa:latest
+    restart: unless-stopped
+    environment:
+      FUWA_ROLE: media
+      FUWA_CLUSTER_KEY: ${FUWA_CLUSTER_KEY}
+      # The address apps reach it on: this host's public IP, port 443.
+      FUWA_MEDIA_ADDRESSES: ${MEDIA_PUBLIC_IP}:443
+      # Optional: the region label it serves (FUWA_REGION), "" for home.
+      FUWA_REGION: ${FUWA_REGION:-}
+    ports:
+      # Calls: UDP when a network allows it, TCP on the same port when not.
+      - "443:50000/udp"
+      - "443:50000/tcp"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      # 80 only answers the certificate check; 8443 is where the instance's
+      # shards and directory open calls (gRPC over TLS, with the cluster key).
+      - "80:80"
+      - "8443:8443"
+    environment:
+      MEDIA_DOMAIN: ${MEDIA_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+
+volumes:
+  caddy:

@@ -337,11 +337,11 @@ impl Api {
             None => String::new(),
         };
         let new_avatar = match avatar_url.as_deref().filter(|url| *url != account.avatar_url) {
-            Some(url) => self.check_picture(account, pb::MediaPurpose::Avatar, url).await?,
+            Some(url) => self.check_picture(account, pb::MediaPurpose::Avatar, url, None).await?,
             None => None,
         };
         let new_banner = match banner_url.as_deref().filter(|url| *url != old_banner) {
-            Some(url) => self.check_picture(account, pb::MediaPurpose::Banner, url).await?,
+            Some(url) => self.check_picture(account, pb::MediaPurpose::Banner, url, None).await?,
             None => None,
         };
         let change = ProfileChange {

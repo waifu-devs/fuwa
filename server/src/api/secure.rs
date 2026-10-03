@@ -31,8 +31,7 @@ const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 /// devices in the channel.
 const MAX_COMMIT_BYTES: usize = 2 * 1024 * 1024;
 
-const RECORD_COLUMNS: &str =
-    "channel_id, seq, kind, epoch, sender_id, sender_device_id, data, created_at, deleted_at, deleted_by";
+const RECORD_COLUMNS: &str = "channel_id, seq, kind, epoch, sender_id, sender_device_id, data, created_at, deleted_at, deleted_by, share_history";
 
 fn record_row(r: &turso::Row) -> turso::Result<pb::SecureRecord> {
     Ok(pb::SecureRecord {
@@ -46,6 +45,7 @@ fn record_row(r: &turso::Row) -> turso::Result<pb::SecureRecord> {
         created_at: Some(timestamp(r.get(7)?)),
         deleted_at: r.get::<Option<i64>>(8)?.map(timestamp),
         deleted_by: r.get::<Option<String>>(9)?.unwrap_or_default(),
+        share_history: r.get::<i64>(10)? != 0,
     })
 }
 
@@ -109,6 +109,15 @@ async fn group(conn: &turso::Connection, channel_id: &str) -> Result<(i64, i64, 
     .unwrap_or((0, 0, None)))
 }
 
+/// Whether the channel passes earlier messages on to devices added later.
+async fn shares_history(conn: &turso::Connection, channel_id: &str) -> Result<bool> {
+    Ok(query_one(conn, "SELECT share_history FROM secure_groups WHERE channel_id = ?1", [channel_id], |r| {
+        r.get::<i64>(0)
+    })
+    .await?
+    .is_some_and(|v| v != 0))
+}
+
 /// A record to add to a channel's log.
 struct NewRecord<'a> {
     channel_id: &'a str,
@@ -166,9 +175,12 @@ async fn append(
         created_at: Some(timestamp(now)),
         deleted_at: None,
         deleted_by: String::new(),
+        share_history: false,
     };
     conn.execute(
-        &format!("INSERT INTO secure_records ({RECORD_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL)"),
+        &format!(
+            "INSERT INTO secure_records ({RECORD_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, 0)"
+        ),
         (
             record.channel_id,
             stored.sequence,
@@ -206,8 +218,8 @@ async fn append(
 pub(super) async fn forget_channel(conn: &turso::Connection, channel_id: &str) -> Result<(i64, i64)> {
     let gone = query_one(
         conn,
-        "SELECT count(*), coalesce(sum(length(data)), 0) FROM secure_records WHERE channel_id = ?1 AND kind = ?2 AND data IS NOT NULL",
-        (channel_id, pb::SecureRecordKind::Message as i64),
+        "SELECT count(*), coalesce(sum(length(data)), 0) FROM secure_records WHERE channel_id = ?1 AND kind IN (?2, ?3) AND data IS NOT NULL",
+        (channel_id, pb::SecureRecordKind::Message as i64, pb::SecureRecordKind::History as i64),
         |r| Ok((r.get::<i64>(0)?, r.get::<i64>(1)?)),
     )
     .await?
@@ -431,10 +443,11 @@ impl Api {
                     created_at: Some(timestamp(now)),
                     deleted_at: None,
                     deleted_by: String::new(),
+                    share_history: false,
                 };
                 conn.execute(
                     &format!(
-                        "INSERT INTO secure_records ({RECORD_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, '', NULL, ?6, NULL, NULL)"
+                        "INSERT INTO secure_records ({RECORD_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, '', NULL, ?6, NULL, NULL, 0)"
                     ),
                     (channel.id.as_str(), sequence, record.kind, epoch, account.id.as_str(), now),
                 )
@@ -452,6 +465,162 @@ impl Api {
             })
             .await?;
         Ok(pb::ResetSecureChannelResponse { record: Some(record) })
+    }
+}
+
+impl Api {
+    async fn set_secure_history(
+        &self,
+        metadata: &tonic::metadata::MetadataMap,
+        req: pb::SetSecureHistoryRequest,
+    ) -> Result<pb::SetSecureHistoryResponse> {
+        let account = self.account(metadata).await?;
+        let seat = self.membership(&account, &req.server_id).await?;
+        let channel = secure_channel(&seat.sdb.read()?, &seat, &req.channel_id).await?;
+        seat.access.require_in(&channel.id, Permission::ManageChannels)?;
+        let record = seat
+            .sdb
+            .write(&account.id, async |conn, events| {
+                let now = now_ms();
+                conn.execute(
+                    "INSERT OR IGNORE INTO secure_groups (channel_id, updated_at) VALUES (?1, ?2)",
+                    (channel.id.as_str(), now),
+                )
+                .await?;
+                let before = shares_history(conn, &channel.id).await?;
+                conn.execute(
+                    "UPDATE secure_groups SET share_history = ?2, last_seq = last_seq + 1, updated_at = ?3
+                     WHERE channel_id = ?1",
+                    (channel.id.as_str(), i64::from(req.share_history), now),
+                )
+                .await?;
+                let (epoch, sequence, _) = group(conn, &channel.id).await?;
+                let record = pb::SecureRecord {
+                    channel_id: channel.id.clone(),
+                    sequence,
+                    kind: pb::SecureRecordKind::Settings as i32,
+                    epoch,
+                    sender_id: account.id.clone(),
+                    sender_device_id: String::new(),
+                    data: Vec::new(),
+                    created_at: Some(timestamp(now)),
+                    deleted_at: None,
+                    deleted_by: String::new(),
+                    share_history: req.share_history,
+                };
+                conn.execute(
+                    &format!(
+                        "INSERT INTO secure_records ({RECORD_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, '', NULL, ?6, NULL, NULL, ?7)"
+                    ),
+                    (
+                        channel.id.as_str(),
+                        sequence,
+                        record.kind,
+                        epoch,
+                        account.id.as_str(),
+                        now,
+                        i64::from(req.share_history),
+                    ),
+                )
+                .await?;
+                store::audit(
+                    conn,
+                    &account.id,
+                    Audit::new(pb::AuditAction::ChannelUpdate, &channel.id).channel(&channel.name).change(
+                        "share_history",
+                        before,
+                        req.share_history,
+                    ),
+                )
+                .await?;
+                events.push(Payload::SecureRecordAdded(pb::SecureRecordAdded { record: Some(record.clone()) }));
+                Ok(record)
+            })
+            .await?;
+        Ok(pb::SetSecureHistoryResponse { record: Some(record) })
+    }
+
+    async fn post_secure_history(
+        &self,
+        metadata: &tonic::metadata::MetadataMap,
+        req: pb::PostSecureHistoryRequest,
+    ) -> Result<pb::PostSecureHistoryResponse> {
+        let (caller, seat, device) = self.on_secure_device(metadata, &req.server_id).await?;
+        check_not_timed_out(&seat.member)?;
+        let conn = seat.sdb.read()?;
+        let channel = secure_channel(&conn, &seat, &req.channel_id).await?;
+        seat.access.require_in(&channel.id, Permission::SendMessages)?;
+        if req.message.len() > MAX_MESSAGE_BYTES {
+            return Err(Error::invalid(format!("shared history can be at most {MAX_MESSAGE_BYTES} bytes")));
+        }
+        let header = wire::message_header(&req.message).map_err(malformed)?;
+        if header.group_id != channel.id.as_bytes() {
+            return Err(Error::invalid("that message is for another channel"));
+        }
+        if header.wire_format != WireFormat::PrivateMessage || header.content_type != ContentType::Application {
+            return Err(Error::invalid("shared history must be an encrypted application message"));
+        }
+        let limits = seat.sdb.limits(&self.app.settings().limits).await?;
+        if let Some(limit) = limits.storage_bytes
+            && seat.sdb.storage_bytes() >= limit
+        {
+            return Err(Error::ResourceExhausted("this server is out of storage".into()));
+        }
+        let record = seat
+            .sdb
+            .write(&caller.account.id, async |conn, events| {
+                if !shares_history(conn, &channel.id).await? {
+                    return Err(Error::FailedPrecondition("this channel doesn't share history".into()));
+                }
+                // Only right after this device's own commit that added devices:
+                // one share per add, and nobody else's turn to speak skipped.
+                let (_, last_seq, _) = group(conn, &channel.id).await?;
+                let last = query_one(
+                    conn,
+                    &format!("SELECT {RECORD_COLUMNS} FROM secure_records WHERE channel_id = ?1 AND seq = ?2"),
+                    (channel.id.as_str(), last_seq),
+                    record_row,
+                )
+                .await?;
+                let welcomed = query_one(
+                    conn,
+                    "SELECT count(*) FROM secure_welcomes WHERE channel_id = ?1 AND seq = ?2",
+                    (channel.id.as_str(), last_seq),
+                    |r| r.get::<i64>(0),
+                )
+                .await?
+                .unwrap_or(0);
+                if !last.is_some_and(|r| r.kind == pb::SecureRecordKind::Commit as i32 && r.sender_device_id == device)
+                    || welcomed == 0
+                {
+                    return Err(Error::FailedPrecondition(
+                        "history can only be shared right after your own commit that added devices".into(),
+                    ));
+                }
+                let record = append(
+                    conn,
+                    &NewRecord {
+                        channel_id: &channel.id,
+                        kind: pb::SecureRecordKind::History,
+                        epoch: epoch(header.epoch)?,
+                        sender_id: &caller.account.id,
+                        sender_device_id: &device,
+                        data: &req.message,
+                        group_info: None,
+                        welcome: None,
+                    },
+                    events,
+                )
+                .await?;
+                store::add_usage(
+                    conn,
+                    UsageChange { messages: 1, message_bytes: req.message.len() as i64, ..Default::default() },
+                )
+                .await?;
+                Ok(record)
+            })
+            .await?;
+        Ok(pb::PostSecureHistoryResponse { record: Some(record) })
     }
 }
 
@@ -500,7 +669,8 @@ impl SecureChannelService for Api {
                     return Err(too_many());
                 }
                 let (epoch, last_sequence, _) = group(&conn, &channel.id).await?;
-                Ok(pb::GetSecureChannelResponse { epoch, last_sequence, member_ids })
+                let share_history = shares_history(&conn, &channel.id).await?;
+                Ok(pb::GetSecureChannelResponse { epoch, last_sequence, member_ids, share_history })
             }
             .await,
         )
@@ -593,6 +763,22 @@ impl SecureChannelService for Api {
         respond(Api::reset_secure_channel(self, &metadata, req).await)
     }
 
+    async fn set_secure_history(
+        &self,
+        request: Request<pb::SetSecureHistoryRequest>,
+    ) -> Result<Response<pb::SetSecureHistoryResponse>, Status> {
+        let (metadata, _, req) = request.into_parts();
+        respond(Api::set_secure_history(self, &metadata, req).await)
+    }
+
+    async fn post_secure_history(
+        &self,
+        request: Request<pb::PostSecureHistoryRequest>,
+    ) -> Result<Response<pb::PostSecureHistoryResponse>, Status> {
+        let (metadata, _, req) = request.into_parts();
+        respond(Api::post_secure_history(self, &metadata, req).await)
+    }
+
     async fn delete_secure_record(
         &self,
         request: Request<pb::DeleteSecureRecordRequest>,
@@ -621,7 +807,9 @@ impl SecureChannelService for Api {
                         if own {
                             seat.access.require_not_timed_out()?;
                         }
-                        if record.kind != pb::SecureRecordKind::Message as i32 {
+                        if record.kind != pb::SecureRecordKind::Message as i32
+                            && record.kind != pb::SecureRecordKind::History as i32
+                        {
                             return Err(Error::invalid("only messages can be deleted"));
                         }
                         if record.deleted_at.is_some() {

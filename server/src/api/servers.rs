@@ -166,7 +166,7 @@ impl ServerService for Api {
                     icon_url: self.app.picture_link(&url("icon_url", &req.icon_url)?),
                     discoverable: req.discoverable,
                 };
-                let icon = self.check_picture(&account, pb::MediaPurpose::ServerIcon, &new.icon_url).await?;
+                let icon = self.check_picture(&account, pb::MediaPurpose::ServerIcon, &new.icon_url, None).await?;
                 let server = self.app.create_server(&account.user(), new, req.region.trim()).await?;
                 self.keep_picture(icon.as_deref(), Some(&server.id)).await;
                 tracing::info!(server = %server.id, owner = %account.id, "server created");
@@ -237,7 +237,7 @@ impl ServerService for Api {
                 let icon_url = req.icon_url.as_deref().map(|v| url("icon_url", v)).transpose()?.map(|v| self.app.picture_link(&v));
                 let old_icon = sdb.server().await?.icon_url;
                 let new_icon = match icon_url.as_deref().filter(|url| *url != old_icon) {
-                    Some(url) => self.check_picture(&account, pb::MediaPurpose::ServerIcon, url).await?,
+                    Some(url) => self.check_picture(&account, pb::MediaPurpose::ServerIcon, url, Some(&sdb.id)).await?,
                     None => None,
                 };
                 self.keep_picture(new_icon.as_deref(), Some(&sdb.id)).await;
@@ -524,8 +524,12 @@ impl ServerService for Api {
                     self.with(viewer.account()?, server_id, Permission::ManageServer).await?.sdb
                 };
                 let own = sdb.own_limits().await?;
+                let usage = pb::ServerUsage {
+                    automod_checks_today: super::automod::checks_today(&sdb.id),
+                    ..sdb.usage().await?
+                };
                 Ok(pb::GetServerUsageResponse {
-                    usage: Some(sdb.usage().await?),
+                    usage: Some(usage),
                     limits: Some(effective_limits(own, &self.app.settings().limits)),
                     own_limits: Some(own),
                 })

@@ -54,7 +54,7 @@ impl Api {
         // The owner uploads the picture; it becomes the agent's, so it goes
         // with the agent and is replaced like a person's avatar.
         if let Some(url) = req.avatar_url.as_deref().map(str::trim).filter(|url| *url != agent.account.avatar_url)
-            && let Some(id) = self.check_picture(owner, pb::MediaPurpose::Avatar, url).await?
+            && let Some(id) = self.check_picture(owner, pb::MediaPurpose::Avatar, url, None).await?
         {
             self.app.node()?.give_media(&id, &agent.account.id).await?;
         }

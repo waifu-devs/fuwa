@@ -13,7 +13,7 @@ and every server can then pick one. fuwa knows two:
 | Provider | Where messages go | What it needs |
 | --- | --- | --- |
 | TypeSafe Jev | `api.typesafe.ai` (US) | An API key |
-| Cloudflare Clef | `api.cloudflare.com` | An API token with Workers AI, and the account id |
+| Cloudflare Clef | `api.cloudflare.com` | An API token with Workers AI Read (an account token or a user token), and the account id |
 
 and admins can add **their own**: anything at an https address that answers
 the requests below. Point it at a classifier you run, or at a small service
@@ -41,6 +41,14 @@ that turns fuwa's questions into another provider's.
   To run a classifier on your own network, start the instance with
   `FUWA_AUTOMOD_ALLOW_PRIVATE=1`.
 - fuwa reads at most 64 KB of an answer.
+- Admins can cap how many times a day (UTC) each server's Smart filter asks
+  its provider (Instance settings, Moderation, or
+  `FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY`); there's no cap unless set. Past it,
+  that server's messages go through the Smart filter unchecked until
+  midnight UTC, like when the provider is down, and its other rules still
+  apply: a limit that blocked messages would stop a busy server talking. Each
+  server's Usage page shows the day's count. It's counted where the server
+  lives, in memory, so a restart starts the day's count again.
 
 ## The request
 
@@ -72,7 +80,11 @@ and Clef speak:
 }
 ```
 
-`model` is there only when the admins typed one. The question ids are always
+`model` is there only when the admins typed one. For Clef, fuwa sends to
+`https://api.cloudflare.com/client/v4/accounts/<account id>/ai/run/@cf/cloudflare/clef`
+(or `clef-flash`) with the bare `"model": "clef"` in the body, and the token
+as `Authorization: Bearer`, which works the same for account-owned and user
+tokens. The question ids are always
 these seven; the wording may get better between releases, so read the ids,
 not the text.
 

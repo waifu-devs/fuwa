@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/secure.proto.
  */
 export const file_fuwa_v1_secure: GenFile = /*@__PURE__*/
-  fileDesc("ChRmdXdhL3YxL3NlY3VyZS5wcm90bxIHZnV3YS52MSKbAgoMU2VjdXJlUmVjb3JkEhIKCmNoYW5uZWxfaWQYASABKAkSEAoIc2VxdWVuY2UYAiABKAMSJwoEa2luZBgDIAEoDjIZLmZ1d2EudjEuU2VjdXJlUmVjb3JkS2luZBINCgVlcG9jaBgEIAEoAxIRCglzZW5kZXJfaWQYBSABKAkSGAoQc2VuZGVyX2RldmljZV9pZBgGIAEoCRIMCgRkYXRhGAcgASgMEi4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCmRlbGV0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmRlbGV0ZWRfYnkYCiABKAkiQAoXR2V0U2VjdXJlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkiVAoYR2V0U2VjdXJlQ2hhbm5lbFJlc3BvbnNlEg0KBWVwb2NoGAEgASgDEhUKDWxhc3Rfc2VxdWVuY2UYAiABKAMSEgoKbWVtYmVyX2lkcxgDIAMoCSJCChlHZXRTZWN1cmVHcm91cEluZm9SZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJIj8KGkdldFNlY3VyZUdyb3VwSW5mb1Jlc3BvbnNlEg0KBWVwb2NoGAEgASgDEhIKCmdyb3VwX2luZm8YAiABKAwiaAoYTGlzdFNlY3VyZVJlY29yZHNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhYKDmFmdGVyX3NlcXVlbmNlGAMgASgDEg0KBWxpbWl0GAQgASgFIlUKGUxpc3RTZWN1cmVSZWNvcmRzUmVzcG9uc2USJgoHcmVjb3JkcxgBIAMoCzIVLmZ1d2EudjEuU2VjdXJlUmVjb3JkEhAKCGhhc19tb3JlGAIgASgIIi4KGUxpc3RTZWN1cmVXZWxjb21lc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIkYKGkxpc3RTZWN1cmVXZWxjb21lc1Jlc3BvbnNlEigKCHdlbGNvbWVzGAEgAygLMhYuZnV3YS52MS5TZWN1cmVXZWxjb21lIkMKDVNlY3VyZVdlbGNvbWUSEgoKY2hhbm5lbF9pZBgBIAEoCRIQCghzZXF1ZW5jZRgCIAEoAxIMCgRkYXRhGAMgASgMIpEBChdQb3N0U2VjdXJlQ29tbWl0UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIOCgZjb21taXQYAyABKAwSEgoKZ3JvdXBfaW5mbxgEIAEoDBIPCgd3ZWxjb21lGAUgASgMEhoKEndlbGNvbWVfZGV2aWNlX2lkcxgGIAMoCSJBChhQb3N0U2VjdXJlQ29tbWl0UmVzcG9uc2USJQoGcmVjb3JkGAEgASgLMhUuZnV3YS52MS5TZWN1cmVSZWNvcmQiUgoYUG9zdFNlY3VyZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEg8KB21lc3NhZ2UYAyABKAwiQgoZUG9zdFNlY3VyZU1lc3NhZ2VSZXNwb25zZRIlCgZyZWNvcmQYASABKAsyFS5mdXdhLnYxLlNlY3VyZVJlY29yZCJUChlEZWxldGVTZWN1cmVSZWNvcmRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhAKCHNlcXVlbmNlGAMgASgDIhwKGkRlbGV0ZVNlY3VyZVJlY29yZFJlc3BvbnNlIkIKGVJlc2V0U2VjdXJlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkiQwoaUmVzZXRTZWN1cmVDaGFubmVsUmVzcG9uc2USJQoGcmVjb3JkGAEgASgLMhUuZnV3YS52MS5TZWN1cmVSZWNvcmQiOgoRU2VjdXJlUmVjb3JkQWRkZWQSJQoGcmVjb3JkGAEgASgLMhUuZnV3YS52MS5TZWN1cmVSZWNvcmQiTwoTU2VjdXJlUmVjb3JkRGVsZXRlZBISCgpjaGFubmVsX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgDEhIKCmRlbGV0ZWRfYnkYAyABKAkqkwEKEFNlY3VyZVJlY29yZEtpbmQSIgoeU0VDVVJFX1JFQ09SRF9LSU5EX1VOU1BFQ0lGSUVEEAASHQoZU0VDVVJFX1JFQ09SRF9LSU5EX0NPTU1JVBABEh4KGlNFQ1VSRV9SRUNPUkRfS0lORF9NRVNTQUdFEAISHAoYU0VDVVJFX1JFQ09SRF9LSU5EX1JFU0VUEAMy/AUKFFNlY3VyZUNoYW5uZWxTZXJ2aWNlElcKEEdldFNlY3VyZUNoYW5uZWwSIC5mdXdhLnYxLkdldFNlY3VyZUNoYW5uZWxSZXF1ZXN0GiEuZnV3YS52MS5HZXRTZWN1cmVDaGFubmVsUmVzcG9uc2USXQoSR2V0U2VjdXJlR3JvdXBJbmZvEiIuZnV3YS52MS5HZXRTZWN1cmVHcm91cEluZm9SZXF1ZXN0GiMuZnV3YS52MS5HZXRTZWN1cmVHcm91cEluZm9SZXNwb25zZRJaChFMaXN0U2VjdXJlUmVjb3JkcxIhLmZ1d2EudjEuTGlzdFNlY3VyZVJlY29yZHNSZXF1ZXN0GiIuZnV3YS52MS5MaXN0U2VjdXJlUmVjb3Jkc1Jlc3BvbnNlEl0KEkxpc3RTZWN1cmVXZWxjb21lcxIiLmZ1d2EudjEuTGlzdFNlY3VyZVdlbGNvbWVzUmVxdWVzdBojLmZ1d2EudjEuTGlzdFNlY3VyZVdlbGNvbWVzUmVzcG9uc2USVwoQUG9zdFNlY3VyZUNvbW1pdBIgLmZ1d2EudjEuUG9zdFNlY3VyZUNvbW1pdFJlcXVlc3QaIS5mdXdhLnYxLlBvc3RTZWN1cmVDb21taXRSZXNwb25zZRJaChFQb3N0U2VjdXJlTWVzc2FnZRIhLmZ1d2EudjEuUG9zdFNlY3VyZU1lc3NhZ2VSZXF1ZXN0GiIuZnV3YS52MS5Qb3N0U2VjdXJlTWVzc2FnZVJlc3BvbnNlEl0KEkRlbGV0ZVNlY3VyZVJlY29yZBIiLmZ1d2EudjEuRGVsZXRlU2VjdXJlUmVjb3JkUmVxdWVzdBojLmZ1d2EudjEuRGVsZXRlU2VjdXJlUmVjb3JkUmVzcG9uc2USXQoSUmVzZXRTZWN1cmVDaGFubmVsEiIuZnV3YS52MS5SZXNldFNlY3VyZUNoYW5uZWxSZXF1ZXN0GiMuZnV3YS52MS5SZXNldFNlY3VyZUNoYW5uZWxSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("ChRmdXdhL3YxL3NlY3VyZS5wcm90bxIHZnV3YS52MSKyAgoMU2VjdXJlUmVjb3JkEhIKCmNoYW5uZWxfaWQYASABKAkSEAoIc2VxdWVuY2UYAiABKAMSJwoEa2luZBgDIAEoDjIZLmZ1d2EudjEuU2VjdXJlUmVjb3JkS2luZBINCgVlcG9jaBgEIAEoAxIRCglzZW5kZXJfaWQYBSABKAkSGAoQc2VuZGVyX2RldmljZV9pZBgGIAEoCRIMCgRkYXRhGAcgASgMEi4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCmRlbGV0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmRlbGV0ZWRfYnkYCiABKAkSFQoNc2hhcmVfaGlzdG9yeRgLIAEoCCJAChdHZXRTZWN1cmVDaGFubmVsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCSJrChhHZXRTZWN1cmVDaGFubmVsUmVzcG9uc2USDQoFZXBvY2gYASABKAMSFQoNbGFzdF9zZXF1ZW5jZRgCIAEoAxISCgptZW1iZXJfaWRzGAMgAygJEhUKDXNoYXJlX2hpc3RvcnkYBCABKAgiQgoZR2V0U2VjdXJlR3JvdXBJbmZvUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCSI/ChpHZXRTZWN1cmVHcm91cEluZm9SZXNwb25zZRINCgVlcG9jaBgBIAEoAxISCgpncm91cF9pbmZvGAIgASgMImgKGExpc3RTZWN1cmVSZWNvcmRzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIWCg5hZnRlcl9zZXF1ZW5jZRgDIAEoAxINCgVsaW1pdBgEIAEoBSJVChlMaXN0U2VjdXJlUmVjb3Jkc1Jlc3BvbnNlEiYKB3JlY29yZHMYASADKAsyFS5mdXdhLnYxLlNlY3VyZVJlY29yZBIQCghoYXNfbW9yZRgCIAEoCCIuChlMaXN0U2VjdXJlV2VsY29tZXNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSJGChpMaXN0U2VjdXJlV2VsY29tZXNSZXNwb25zZRIoCgh3ZWxjb21lcxgBIAMoCzIWLmZ1d2EudjEuU2VjdXJlV2VsY29tZSJDCg1TZWN1cmVXZWxjb21lEhIKCmNoYW5uZWxfaWQYASABKAkSEAoIc2VxdWVuY2UYAiABKAMSDAoEZGF0YRgDIAEoDCKRAQoXUG9zdFNlY3VyZUNvbW1pdFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDgoGY29tbWl0GAMgASgMEhIKCmdyb3VwX2luZm8YBCABKAwSDwoHd2VsY29tZRgFIAEoDBIaChJ3ZWxjb21lX2RldmljZV9pZHMYBiADKAkiQQoYUG9zdFNlY3VyZUNvbW1pdFJlc3BvbnNlEiUKBnJlY29yZBgBIAEoCzIVLmZ1d2EudjEuU2VjdXJlUmVjb3JkIlIKGFBvc3RTZWN1cmVNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdtZXNzYWdlGAMgASgMIkIKGVBvc3RTZWN1cmVNZXNzYWdlUmVzcG9uc2USJQoGcmVjb3JkGAEgASgLMhUuZnV3YS52MS5TZWN1cmVSZWNvcmQiVAoZRGVsZXRlU2VjdXJlUmVjb3JkUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIQCghzZXF1ZW5jZRgDIAEoAyIcChpEZWxldGVTZWN1cmVSZWNvcmRSZXNwb25zZSJCChlSZXNldFNlY3VyZUNoYW5uZWxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJIkMKGlJlc2V0U2VjdXJlQ2hhbm5lbFJlc3BvbnNlEiUKBnJlY29yZBgBIAEoCzIVLmZ1d2EudjEuU2VjdXJlUmVjb3JkIjoKEVNlY3VyZVJlY29yZEFkZGVkEiUKBnJlY29yZBgBIAEoCzIVLmZ1d2EudjEuU2VjdXJlUmVjb3JkIk8KE1NlY3VyZVJlY29yZERlbGV0ZWQSEgoKY2hhbm5lbF9pZBgBIAEoCRIQCghzZXF1ZW5jZRgCIAEoAxISCgpkZWxldGVkX2J5GAMgASgJIlcKF1NldFNlY3VyZUhpc3RvcnlSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhUKDXNoYXJlX2hpc3RvcnkYAyABKAgiQQoYU2V0U2VjdXJlSGlzdG9yeVJlc3BvbnNlEiUKBnJlY29yZBgBIAEoCzIVLmZ1d2EudjEuU2VjdXJlUmVjb3JkIlIKGFBvc3RTZWN1cmVIaXN0b3J5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdtZXNzYWdlGAMgASgMIkIKGVBvc3RTZWN1cmVIaXN0b3J5UmVzcG9uc2USJQoGcmVjb3JkGAEgASgLMhUuZnV3YS52MS5TZWN1cmVSZWNvcmQq1AEKEFNlY3VyZVJlY29yZEtpbmQSIgoeU0VDVVJFX1JFQ09SRF9LSU5EX1VOU1BFQ0lGSUVEEAASHQoZU0VDVVJFX1JFQ09SRF9LSU5EX0NPTU1JVBABEh4KGlNFQ1VSRV9SRUNPUkRfS0lORF9NRVNTQUdFEAISHAoYU0VDVVJFX1JFQ09SRF9LSU5EX1JFU0VUEAMSHgoaU0VDVVJFX1JFQ09SRF9LSU5EX0hJU1RPUlkQBBIfChtTRUNVUkVfUkVDT1JEX0tJTkRfU0VUVElOR1MQBTKxBwoUU2VjdXJlQ2hhbm5lbFNlcnZpY2USVwoQR2V0U2VjdXJlQ2hhbm5lbBIgLmZ1d2EudjEuR2V0U2VjdXJlQ2hhbm5lbFJlcXVlc3QaIS5mdXdhLnYxLkdldFNlY3VyZUNoYW5uZWxSZXNwb25zZRJdChJHZXRTZWN1cmVHcm91cEluZm8SIi5mdXdhLnYxLkdldFNlY3VyZUdyb3VwSW5mb1JlcXVlc3QaIy5mdXdhLnYxLkdldFNlY3VyZUdyb3VwSW5mb1Jlc3BvbnNlEloKEUxpc3RTZWN1cmVSZWNvcmRzEiEuZnV3YS52MS5MaXN0U2VjdXJlUmVjb3Jkc1JlcXVlc3QaIi5mdXdhLnYxLkxpc3RTZWN1cmVSZWNvcmRzUmVzcG9uc2USXQoSTGlzdFNlY3VyZVdlbGNvbWVzEiIuZnV3YS52MS5MaXN0U2VjdXJlV2VsY29tZXNSZXF1ZXN0GiMuZnV3YS52MS5MaXN0U2VjdXJlV2VsY29tZXNSZXNwb25zZRJXChBQb3N0U2VjdXJlQ29tbWl0EiAuZnV3YS52MS5Qb3N0U2VjdXJlQ29tbWl0UmVxdWVzdBohLmZ1d2EudjEuUG9zdFNlY3VyZUNvbW1pdFJlc3BvbnNlEloKEVBvc3RTZWN1cmVNZXNzYWdlEiEuZnV3YS52MS5Qb3N0U2VjdXJlTWVzc2FnZVJlcXVlc3QaIi5mdXdhLnYxLlBvc3RTZWN1cmVNZXNzYWdlUmVzcG9uc2USXQoSRGVsZXRlU2VjdXJlUmVjb3JkEiIuZnV3YS52MS5EZWxldGVTZWN1cmVSZWNvcmRSZXF1ZXN0GiMuZnV3YS52MS5EZWxldGVTZWN1cmVSZWNvcmRSZXNwb25zZRJdChJSZXNldFNlY3VyZUNoYW5uZWwSIi5mdXdhLnYxLlJlc2V0U2VjdXJlQ2hhbm5lbFJlcXVlc3QaIy5mdXdhLnYxLlJlc2V0U2VjdXJlQ2hhbm5lbFJlc3BvbnNlElcKEFNldFNlY3VyZUhpc3RvcnkSIC5mdXdhLnYxLlNldFNlY3VyZUhpc3RvcnlSZXF1ZXN0GiEuZnV3YS52MS5TZXRTZWN1cmVIaXN0b3J5UmVzcG9uc2USWgoRUG9zdFNlY3VyZUhpc3RvcnkSIS5mdXdhLnYxLlBvc3RTZWN1cmVIaXN0b3J5UmVxdWVzdBoiLmZ1d2EudjEuUG9zdFNlY3VyZUhpc3RvcnlSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * One entry in a secure channel's log. Devices read them in order. The same
@@ -82,6 +82,13 @@ export type SecureRecord = Message<"fuwa.v1.SecureRecord"> & {
    * @generated from field: string deleted_by = 10;
    */
   deletedBy: string;
+
+  /**
+   * For SETTINGS: whether the channel shares history from here on.
+   *
+   * @generated from field: bool share_history = 11;
+   */
+  shareHistory: boolean;
 };
 
 /**
@@ -138,6 +145,13 @@ export type GetSecureChannelResponse = Message<"fuwa.v1.GetSecureChannelResponse
    * @generated from field: repeated string member_ids = 3;
    */
   memberIds: string[];
+
+  /**
+   * Whether devices pass earlier messages on to devices added later.
+   *
+   * @generated from field: bool share_history = 4;
+   */
+  shareHistory: boolean;
 };
 
 /**
@@ -560,6 +574,96 @@ export const SecureRecordDeletedSchema: GenMessage<SecureRecordDeleted> = /*@__P
   messageDesc(file_fuwa_v1_secure, 19);
 
 /**
+ * @generated from message fuwa.v1.SetSecureHistoryRequest
+ */
+export type SetSecureHistoryRequest = Message<"fuwa.v1.SetSecureHistoryRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * @generated from field: bool share_history = 3;
+   */
+  shareHistory: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.SetSecureHistoryRequest.
+ * Use `create(SetSecureHistoryRequestSchema)` to create a new message.
+ */
+export const SetSecureHistoryRequestSchema: GenMessage<SetSecureHistoryRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_secure, 20);
+
+/**
+ * @generated from message fuwa.v1.SetSecureHistoryResponse
+ */
+export type SetSecureHistoryResponse = Message<"fuwa.v1.SetSecureHistoryResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.SecureRecord record = 1;
+   */
+  record?: SecureRecord | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.SetSecureHistoryResponse.
+ * Use `create(SetSecureHistoryResponseSchema)` to create a new message.
+ */
+export const SetSecureHistoryResponseSchema: GenMessage<SetSecureHistoryResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_secure, 21);
+
+/**
+ * @generated from message fuwa.v1.PostSecureHistoryRequest
+ */
+export type PostSecureHistoryRequest = Message<"fuwa.v1.PostSecureHistoryRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * An MLSMessage carrying an encrypted application message.
+   *
+   * @generated from field: bytes message = 3;
+   */
+  message: Uint8Array;
+};
+
+/**
+ * Describes the message fuwa.v1.PostSecureHistoryRequest.
+ * Use `create(PostSecureHistoryRequestSchema)` to create a new message.
+ */
+export const PostSecureHistoryRequestSchema: GenMessage<PostSecureHistoryRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_secure, 22);
+
+/**
+ * @generated from message fuwa.v1.PostSecureHistoryResponse
+ */
+export type PostSecureHistoryResponse = Message<"fuwa.v1.PostSecureHistoryResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.SecureRecord record = 1;
+   */
+  record?: SecureRecord | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.PostSecureHistoryResponse.
+ * Use `create(PostSecureHistoryResponseSchema)` to create a new message.
+ */
+export const PostSecureHistoryResponseSchema: GenMessage<PostSecureHistoryResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_secure, 23);
+
+/**
  * @generated from enum fuwa.v1.SecureRecordKind
  */
 export enum SecureRecordKind {
@@ -589,6 +693,22 @@ export enum SecureRecordKind {
    * @generated from enum value: SECURE_RECORD_KIND_RESET = 3;
    */
   RESET = 3,
+
+  /**
+   * Earlier messages passed on to devices that were just added: an
+   * encrypted message carrying a SharedHistory.
+   *
+   * @generated from enum value: SECURE_RECORD_KIND_HISTORY = 4;
+   */
+  HISTORY = 4,
+
+  /**
+   * Someone with MANAGE_CHANNELS turned sharing history on or off
+   * (share_history). No data.
+   *
+   * @generated from enum value: SECURE_RECORD_KIND_SETTINGS = 5;
+   */
+  SETTINGS = 5,
 }
 
 /**
@@ -706,6 +826,30 @@ export const SecureChannelService: GenService<{
     methodKind: "unary";
     input: typeof ResetSecureChannelRequestSchema;
     output: typeof ResetSecureChannelResponseSchema;
+  },
+  /**
+   * Turns sharing earlier messages with people added later on or off. Adds
+   * a SETTINGS record with the new value. MANAGE_CHANNELS.
+   *
+   * @generated from rpc fuwa.v1.SecureChannelService.SetSecureHistory
+   */
+  setSecureHistory: {
+    methodKind: "unary";
+    input: typeof SetSecureHistoryRequestSchema;
+    output: typeof SetSecureHistoryResponseSchema;
+  },
+  /**
+   * Adds a HISTORY record: earlier messages, encrypted for the group, from
+   * the device whose commit just added devices. Only while the channel shares
+   * history, and only right after that device's own commit with a welcome,
+   * so there's one per add. SEND_MESSAGES; slow mode doesn't apply.
+   *
+   * @generated from rpc fuwa.v1.SecureChannelService.PostSecureHistory
+   */
+  postSecureHistory: {
+    methodKind: "unary";
+    input: typeof PostSecureHistoryRequestSchema;
+    output: typeof PostSecureHistoryResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_secure, 0);

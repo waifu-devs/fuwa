@@ -9,9 +9,10 @@
 //! it used; replacing or clearing it deletes the old one, and uploads nothing
 //! uses are swept after a day.
 //!
-//! Files live in `<data>/media/`, named by id, exactly as uploaded. Pictures
-//! are public at their links, so they aren't encrypted even when the databases
-//! are.
+//! Files live in `<data>/media/`, named by id, as uploaded but without what
+//! a picture says about where and how it was taken (a photo's GPS position,
+//! camera and time: see `strip`). Pictures are public at their links, so they
+//! aren't encrypted even when the databases are.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -33,11 +34,13 @@ use crate::error::Result;
 use crate::id::now_ms;
 use crate::pb;
 
+mod strip;
+
 /// How long an upload link works.
 pub const UPLOAD_TTL_MS: i64 = 10 * 60 * 1000;
 
 /// How long an upload may take once its bytes start arriving.
-const RECEIVE_TTL_MS: i64 = 60 * 60 * 1000;
+pub const RECEIVE_TTL_MS: i64 = 60 * 60 * 1000;
 
 /// How long a stored picture waits to be used before it's swept.
 pub const UNUSED_TTL_MS: i64 = 24 * 60 * 60 * 1000;
@@ -149,6 +152,41 @@ pub fn sniff(head: &[u8]) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// Takes a JPEG's, PNG's or WebP's metadata out of the file at `path`, in
+/// place, and says its new size; `None` for types kept as they came (GIF,
+/// AVIF). A file whose metadata can't be found is an error, so it isn't kept
+/// with it.
+async fn without_metadata(path: &Path, content_type: &str) -> std::io::Result<Option<i64>> {
+    if !matches!(content_type, "image/jpeg" | "image/png" | "image/webp") {
+        return Ok(None);
+    }
+    let path = path.to_path_buf();
+    let content_type = content_type.to_string();
+    tokio::task::spawn_blocking(move || {
+        let clean = path.with_extension("clean");
+        let stripped = (|| {
+            let mut from = std::io::BufReader::new(std::fs::File::open(&path)?);
+            let mut to = std::io::BufWriter::new(std::fs::File::create(&clean)?);
+            strip::strip(&content_type, &mut from, &mut to)?;
+            let file = to.into_inner().map_err(|err| err.into_error())?;
+            file.sync_all()?;
+            Ok::<_, std::io::Error>(file.metadata()?.len())
+        })();
+        match stripped {
+            Ok(size) => {
+                std::fs::rename(&clean, &path)?;
+                Ok(Some(size as i64))
+            }
+            Err(err) => {
+                let _ = std::fs::remove_file(&clean);
+                Err(err)
+            }
+        }
+    })
+    .await
+    .map_err(std::io::Error::other)?
 }
 
 /// "8 MB", "512 KB": a size for people.
@@ -270,43 +308,63 @@ async fn upload(app: Arc<App>, token: String, body: Body) -> Response {
 
 /// Writes the body to a file beside the store, checks it, then moves it in.
 async fn receive(app: &App, row: &MediaRow, temp: &Path, body: Body) -> std::result::Result<(), (StatusCode, String)> {
-    let broken = |err: std::io::Error| {
-        tracing::error!(media = %row.id, error = %err, "couldn't store an upload");
+    let (content_type, size) = receive_file(&row.id, row.size, temp, body).await?;
+    let (node, media) = kept(app);
+    tokio::fs::rename(temp, media.path(&row.id)).await.map_err(|err| broken(&row.id, err))?;
+    node.finish_upload(&row.id, content_type, size, now_ms()).await.map_err(|err| {
+        media.remove(&row.id);
+        tracing::error!(media = %row.id, error = %err, "couldn't record an upload");
         (StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string())
-    };
-    let mut file = tokio::fs::File::create(temp).await.map_err(broken)?;
+    })
+}
+
+/// Writes an upload's body to `temp` and checks it: exactly `size` bytes of
+/// a picture fuwa takes, with its metadata taken out (location, camera and
+/// the like). Returns what it is and its size as kept. Every
+/// upload goes through here, where accounts are kept or (a server's
+/// pictures on a split instance) on its shard.
+pub async fn receive_file(
+    id: &str,
+    size: i64,
+    temp: &Path,
+    body: Body,
+) -> std::result::Result<(&'static str, i64), (StatusCode, String)> {
+    let mut file = tokio::fs::File::create(temp).await.map_err(|err| broken(id, err))?;
     let mut stream = body.into_data_stream();
     let mut received: i64 = 0;
     let mut head = Vec::with_capacity(16);
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|_| (StatusCode::BAD_REQUEST, "the upload was cut off".to_string()))?;
         received += chunk.len() as i64;
-        if received > row.size {
+        if received > size {
             return Err((
                 StatusCode::PAYLOAD_TOO_LARGE,
-                format!("the file is bigger than the {} it was said to be", size_label(row.size)),
+                format!("the file is bigger than the {} it was said to be", size_label(size)),
             ));
         }
         if head.len() < 16 {
             head.extend_from_slice(&chunk[..chunk.len().min(16 - head.len())]);
         }
-        file.write_all(&chunk).await.map_err(broken)?;
+        file.write_all(&chunk).await.map_err(|err| broken(id, err))?;
     }
-    if received != row.size {
-        return Err((StatusCode::BAD_REQUEST, format!("got {received} bytes of a {}-byte file", row.size)));
+    if received != size {
+        return Err((StatusCode::BAD_REQUEST, format!("got {received} bytes of a {size}-byte file")));
     }
     let content_type = sniff(&head).ok_or_else(|| {
         (StatusCode::UNSUPPORTED_MEDIA_TYPE, "that isn't a PNG, JPEG, GIF, WebP or AVIF picture".to_string())
     })?;
-    file.sync_all().await.map_err(broken)?;
+    file.sync_all().await.map_err(|err| broken(id, err))?;
     drop(file);
-    let (node, media) = kept(app);
-    tokio::fs::rename(temp, media.path(&row.id)).await.map_err(broken)?;
-    node.finish_upload(&row.id, content_type, now_ms()).await.map_err(|err| {
-        media.remove(&row.id);
-        tracing::error!(media = %row.id, error = %err, "couldn't record an upload");
-        (StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string())
-    })
+    let kept = without_metadata(temp, content_type).await.map_err(|err| {
+        tracing::info!(media = %id, error = %err, "refused an upload whose metadata couldn't be taken out");
+        (StatusCode::UNPROCESSABLE_ENTITY, "that picture looks broken; save it again and upload that".to_string())
+    })?;
+    Ok((content_type, kept.unwrap_or(received)))
+}
+
+fn broken(id: &str, err: std::io::Error) -> (StatusCode, String) {
+    tracing::error!(media = %id, error = %err, "couldn't store an upload");
+    (StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string())
 }
 
 #[cfg(test)]

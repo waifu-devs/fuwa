@@ -247,10 +247,17 @@ Addresses can be `HOST`, `HOST:PORT` (when a port forward changes it), or
 start with `udp/` or `tcp/` for only that protocol, comma-separated. Apps use
 UDP when they can and TCP on the same port when a network blocks UDP.
 
-People on networks that block both (some offices and schools) get through
-with a TURN server, such as [coturn](https://github.com/coturn/coturn) with
-`use-auth-secret`. Give fuwa its addresses and secret, from the instance
-settings' **Calls** page or `FUWA_ICE_URLS`
+People on networks that block both (some offices and schools) can often
+still reach port 443, so the surest fix is to give the media port 443 (map
+it: `"443:50000/udp"` and `"443:50000/tcp"`, with
+`FUWA_MEDIA_ADDRESSES=<public IP>:443`) on a machine where nothing else
+uses that port, such as a media part on a host of its own (below).
+
+A TURN server, such as [coturn](https://github.com/coturn/coturn) with
+`use-auth-secret`, also helps, but only when the media port takes UDP:
+TURN relays to it over UDP, whatever way the app reached TURN. Give fuwa
+its addresses and secret, from the instance settings' **Calls** page or
+`FUWA_ICE_URLS`
 (`turn:turn.example.com:3478?transport=udp,turns:turn.example.com:5349`) and
 `FUWA_TURN_SECRET`. Apps get a new password for each call that lasts an hour
 and names no account. In coturn's config, keep the relay away from your own
@@ -288,8 +295,38 @@ Servers) and have old ones delete themselves
 (`FUWA_CALL_RECORDINGS_KEEP_DAYS=30`).
 
 On Railway, which has no public UDP, add a TCP proxy for port 50000 and set
-`FUWA_MEDIA_ADDRESSES=tcp/<proxy host>:<proxy port>`; a TURN server elsewhere
-helps people on strict networks.
+`FUWA_MEDIA_ADDRESSES=tcp/<proxy host>:<proxy port>`. Calls then go over
+TCP on the proxy's random port: they work, but networks that block unusual
+ports can't join, and a TURN server can't help (it needs the media port's
+UDP). For both, run the media part on a host of its own.
+
+### The media part on a host of its own
+
+A split instance (`FUWA_ROLE`, see the README's [Scaling out](../README.md#scaling-out)) can carry its
+calls on any machine with a public IP, such as a small VPS, while
+everything else stays where it is. Apps get UDP and TCP on port 443 there;
+the instance's directory and shards open calls on it over HTTPS with the
+cluster key. It keeps nothing, so it needs no volume or backups.
+
+1. Point a name at the machine, such as `media.example.com` (with
+   Cloudflare, "DNS only": its proxy carries no calls).
+2. Open ports 80 and 8443 (TCP) and 443 (UDP and TCP), and nothing else
+   but SSH: `sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw
+   allow 8443/tcp && sudo ufw allow 443 && sudo ufw enable`.
+3. Copy [`deploy/media-host`](../deploy/media-host) there, copy
+   `.env.example` to `.env`, fill it in (`chmod 600 .env`), and run
+   `docker compose up -d`. Caddy gets the certificate for port 8443 by
+   itself, through port 80.
+4. Check it: `curl https://media.example.com:8443/healthz` says `ok`.
+5. Set `FUWA_MEDIA_URL=https://media.example.com:8443` on the directory
+   and every shard, in place of the old media part (several, comma-separated,
+   share calls between them). Calls in progress join the new one by
+   themselves.
+
+Nothing on it logs addresses: fuwa never does, and the Caddyfile has no
+access log. Keep it on the same version as the rest of the instance:
+update it with them (`docker compose pull && docker compose up -d`), and
+calls ride the restart out as on any media part.
 
 ## Moderation providers
 
@@ -302,8 +339,10 @@ violence, self-harm, scams and spam.
 
 - **TypeSafe Jev**: an API key from your TypeSafe account. Messages go to
   `api.typesafe.ai` (US).
-- **Cloudflare Clef**: an API token with the Workers AI permission and your
-  account id. Messages go to `api.cloudflare.com`.
+- **Cloudflare Clef**: an API token with the Workers AI Read permission and
+  your account id. Account-owned tokens (Manage Account, Account API Tokens)
+  and user tokens (My Profile, API Tokens) both work. Messages go to
+  `api.cloudflare.com`.
 - **Your own**: press **Add your own** and give it a name, an https address
   and, if it needs one, a key and the header it goes in. It gets the same
   requests Jev and Clef do; [automod.md](automod.md) has what fuwa sends and

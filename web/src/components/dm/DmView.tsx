@@ -4,6 +4,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   CopyIcon,
+  HistoryIcon,
   KeyRoundIcon,
   RotateCcwKeyIcon,
   LockKeyholeIcon,
@@ -543,6 +544,15 @@ const DmRow = memo(function DmRow({
                 (edited)
               </span>
             )}
+            {item.sharedBy && (
+              <span
+                className="ml-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-full bg-muted px-1.5 py-px align-middle text-[0.65rem] font-bold text-muted-foreground"
+                title="Passed on when this device joined, and checked against the signature of the sender's device."
+              >
+                <HistoryIcon className="size-3" />
+                shared
+              </span>
+            )}
           </>
         )}
       </MessageLine>
@@ -627,7 +637,8 @@ function deviceLine(item: Item, users: Map<string, User>, me: User): string {
 }
 
 function SystemLine({ item, text, animate }: { item: Item; text: string; animate: boolean }) {
-  const Icon = item.kind === "unreadable" ? ShieldAlertIcon : item.kind === "reset" ? RotateCcwKeyIcon : KeyRoundIcon;
+  const Icon =
+    item.kind === "unreadable" ? ShieldAlertIcon : item.kind === "reset" ? RotateCcwKeyIcon : item.kind === "setting" ? HistoryIcon : KeyRoundIcon;
   return (
     <motion.div
       {...(animate ? enter : {})}

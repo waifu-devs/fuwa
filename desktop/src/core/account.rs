@@ -227,6 +227,7 @@ impl Core {
                 purpose: purpose as i32,
                 content_type: content_type.into(),
                 size: bytes.len() as i64,
+                server_id: String::new(),
             })
         )
         .await?;

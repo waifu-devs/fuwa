@@ -282,7 +282,49 @@ message DirectMessageContent {
   oneof body {
     DirectMessageText text = 1;
     DirectMessageEdit edit = 2;
+    // A secure channel's text or edit, signed by the sending device so it can
+    // be checked again later, after it was passed on as shared history.
+    SignedContent signed = 3;
+    // A secure channel's earlier messages, for devices that joined after
+    // them (only while the channel shares history).
+    SharedHistory history = 4;
   }
+}
+
+// What the sender's device signed (fuwa_e2ee's Device::sign) and the
+// signature. Whoever opens it checks it with the signature key of the device
+// MLS says sent it.
+message SignedContent {
+  // A SignedPayload.
+  bytes payload = 1;
+  bytes signature = 2;
+}
+
+message SignedPayload {
+  // The secure channel it was sent in.
+  string conversation_id = 1;
+  string sender_id = 2;
+  // Unix milliseconds, by the sender's clock.
+  int64 sent_at_ms = 3;
+  // A text or an edit.
+  DirectMessageContent content = 4;
+}
+
+// Messages a device passes on to devices added after them, each as its
+// sender's device signed it. Checked one by one: a device that shares
+// history can leave messages out, but can't change or make one up.
+message SharedHistory {
+  repeated SharedEntry entries = 1;
+}
+
+message SharedEntry {
+  // Where it was in the channel (an edit gives its message's).
+  int64 sequence = 1;
+  // A SignedPayload, and its signature.
+  bytes payload = 2;
+  bytes signature = 3;
+  // The signature key of the device that signed it.
+  bytes signature_key = 4;
 }
 
 message DirectMessageText {

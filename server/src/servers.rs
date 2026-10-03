@@ -43,6 +43,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0016_region.sql"),
     include_str!("../migrations/server/0017_shared_channels.sql"),
     include_str!("../migrations/server/0018_voice_video_off.sql"),
+    include_str!("../migrations/server/0019_secure_history.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -513,6 +514,8 @@ impl ServerDb {
                     attachment_bytes: r.get(3)?,
                     emojis: r.get(4)?,
                     recording_bytes: r.get(5)?,
+                    // Instance-wide only.
+                    automod_checks_per_day: None,
                 })
             },
         )
@@ -672,6 +675,7 @@ pub fn effective_limits(own: pb::ServerLimits, defaults: &config::Limits) -> pb:
         attachment_bytes: own.attachment_bytes.or(defaults.attachment_bytes),
         emojis: own.emojis.or(defaults.emojis),
         recording_bytes: own.recording_bytes.or(defaults.recording_bytes),
+        automod_checks_per_day: defaults.automod_checks_per_day,
     }
 }
 
@@ -709,6 +713,7 @@ fn usage_row(r: &Row) -> turso::Result<pb::ServerUsage> {
         storage_bytes: 0,
         updated_at: Some(timestamp(r.get(8)?)),
         emojis: r.get(9)?,
+        automod_checks_today: 0,
     })
 }
 

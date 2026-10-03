@@ -312,12 +312,21 @@ async fn a_split_instance_comes_back_from_its_replica() {
     }
     sent.sort();
     c.servers.delete_server(authed(&juan, pb::DeleteServerRequest { server_id: gone.clone() })).await.unwrap();
-    let mut picture = b"\x89PNG\r\n\x1a\n".to_vec();
-    picture.resize(300, 7);
+    // A header, a private chunk and the end: kept as it is.
+    let chunk =
+        |kind: &[u8; 4], data: &[u8]| [&(data.len() as u32).to_be_bytes()[..], kind, data, &[0, 0, 0, 0]].concat();
+    let picture = [
+        &b"\x89PNG\r\n\x1a\n"[..],
+        &chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]),
+        &chunk(b"fuWa", &[7; 243]),
+        &chunk(b"IEND", &[]),
+    ]
+    .concat();
     let request = pb::CreateUploadRequest {
         purpose: pb::MediaPurpose::Avatar as i32,
         content_type: "image/png".into(),
         size: picture.len() as i64,
+        server_id: String::new(),
     };
     let reserved = c.media.create_upload(authed(&juan, request)).await.unwrap().into_inner();
     let upload = reqwest::Client::new().put(on(&cluster.gateway, &reserved.upload_url)).body(picture.clone());

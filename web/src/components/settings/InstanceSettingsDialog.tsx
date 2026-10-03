@@ -608,7 +608,7 @@ export function InstanceSettingsDialog({
           )}
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
           {tab === "moderation" && saved && (
-            <ModerationSettings instanceKey={instanceKey} draft={draft} saved={saved} patch={patch} resetter={resetter} />
+            <ModerationSettings instanceKey={instanceKey} draft={draft} saved={saved} defaults={defaults} patch={patch} resetter={resetter} />
           )}
           {tab === "privacy" && (
             <>

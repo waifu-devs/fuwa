@@ -129,8 +129,9 @@ region's personal data that isn't a server's content stays there too.
 ## A server's pictures
 
 Server icons, custom emoji and webhook pictures belong to a server, so they
-live with it. They're uploaded to the directory like any picture, and once
-the server uses one, the shard holding the server takes it: it copies the
+live with it: on the shard holding the server, and in its bucket. One
+uploaded for the server goes straight there (below); one that arrived at the
+directory like any picture is taken once the server uses it: the shard copies the
 file (checked by SHA-256) to `<data>/server-pictures/<server>/` and its
 bucket (`server-pictures/<server>/<picture>`), and the directory deletes its
 own copy and its replica's. The picture's link doesn't change:
@@ -140,12 +141,17 @@ the server, wherever it is. A shard that lost a picture fetches it back from
 its bucket (only pictures the server links to, so made-up ids never reach
 the bucket).
 
-Until its shard takes it, a new picture sits in the home region: on the
-directory and in its bucket, for the moment between the upload and the
-server using it (and longer if the take fails). The picture's row (who
+Apps upload a server's pictures for that server (`CreateUpload` with
+`server_id`, which only its members can do): the upload link then leads to
+the shard holding the server, through any gateway, and the bytes are kept
+there and in its bucket from the start, never at the directory. Such a
+picture can only be used by that server, and its shard deletes it if the
+server hasn't used it two days later. A picture uploaded without a server
+(an older app, or a new server's icon, uploaded before the server exists)
+arrives at the directory and is taken by the server's shard once the server
+uses it, so it sits in the home region until then. Each picture's row (who
 uploaded it, its size and type) stays in node.db at home, like the
-uploader's account. Uploading a server's pictures straight to its shard,
-once the server is placed, is the next step.
+uploader's account.
 
 They move with the server like its recordings. Pictures a server used before
 this, or that couldn't be taken when it started using them (counted as an
