@@ -518,8 +518,12 @@ impl ServerService for Api {
                     self.with(viewer.account()?, server_id, Permission::ManageServer).await?.sdb
                 };
                 let own = sdb.own_limits().await?;
+                let usage = pb::ServerUsage {
+                    automod_checks_today: super::automod::checks_today(&sdb.id),
+                    ..sdb.usage().await?
+                };
                 Ok(pb::GetServerUsageResponse {
-                    usage: Some(sdb.usage().await?),
+                    usage: Some(usage),
                     limits: Some(effective_limits(own, &self.app.settings().limits)),
                     own_limits: Some(own),
                 })

@@ -187,6 +187,9 @@ pub struct Limits {
     /// FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY: how many bytes of pictures one
     /// account may upload in a day (UTC), e.g. `256MiB`.
     pub picture_upload_bytes_per_day: Option<i64>,
+    /// FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY: how many times a day (UTC) one
+    /// server's Smart filter may ask its provider.
+    pub automod_checks_per_day: Option<i64>,
 }
 
 impl Limits {
@@ -332,6 +335,7 @@ impl Config {
             recording_bytes: bytes("FUWA_LIMIT_RECORDING_STORAGE")?,
             picture_upload_bytes: upload_bytes("FUWA_LIMIT_PICTURE_UPLOAD")?,
             picture_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY")?,
+            automod_checks_per_day: count("FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY")?,
         };
 
         let do_not_track = get("DO_NOT_TRACK").is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"));
