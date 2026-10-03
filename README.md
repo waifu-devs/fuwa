@@ -116,6 +116,7 @@ the log filter are read only from the environment.
 | `FUWA_LINKED_ACCOUNTS` | `open` | Signing in with waifu.dev: `open` (anyone with a waifu.dev account gets one here), `closed` (existing linked accounts only), `off` |
 | `FUWA_LINKED_ISSUER` | `https://api.waifu.dev` | The OpenAuth issuer linked accounts sign in with |
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
+| `FUWA_AGENT_CREATION` | `everyone` | Who can make agents (accounts programs drive): `everyone`, `admins`, `off` |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |
 | `FUWA_ENCRYPTION_KEY` | unset | 64 hex characters (`openssl rand -hex 32`); encrypts every database at rest |
 | `FUWA_LIMIT_SERVERS_PER_ACCOUNT` | unlimited | Servers one account may own |
@@ -206,6 +207,28 @@ on the same port as everything else. It answers `204`, or `200` with the
 message with `?wait=true`. Each webhook may post 30 messages a minute (then
 `429` with `Retry-After`), and never pings @everyone, @here or roles. Anyone
 with the address can post, so a leaked one is replaced with New address.
+
+### Agents
+
+Agents are accounts a program drives: bots, assistants, integrations that
+need to read as well as post. Anyone signed in makes them under Settings,
+Agents (instance admins can limit that to admins, or turn it off, with
+`FUWA_AGENT_CREATION`), up to 25 each. Each one gets a token, shown once,
+that the program sends as `authorization: Bearer <token>` on every call of
+the same API the apps use:
+
+```sh
+grpcurl -H "authorization: Bearer $AGENT_TOKEN" \
+  -d '{"server_id": "…", "channel_id": "…", "content": "Hello! 🤖"}' \
+  fuwa.example:443 fuwa.v1.MessageService/SendMessage
+```
+
+An agent joins a server only when someone with Manage Server adds it (Server
+settings, Integrations, or from the agent's own card). Agents are private
+until their owner marks them public: then any server's managers can add them
+by username. They talk with the roles they're given, show an AGENT badge,
+can't own servers or use direct messages, and go away with the person who
+made them.
 
 ### Looking after an instance
 

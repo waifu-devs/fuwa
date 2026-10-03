@@ -77,6 +77,9 @@ message InstanceSettings {
   // unless changed. Accounts already linked keep the issuer they came from.
   // FUWA_LINKED_ISSUER.
   string linked_issuer = 12;
+  // Who may make agents (bot accounts). Agents already made keep working.
+  // FUWA_AGENT_CREATION.
+  AgentCreation agent_creation = 13;
 }
 
 // Whether standalone accounts (a username and password kept on the instance) work.

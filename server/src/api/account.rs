@@ -29,9 +29,11 @@ impl Api {
     /// Checks the account's password, for changes that need it again.
     async fn confirm_password(&self, account: &Account, password: &str) -> Result<()> {
         if !account.has_password() {
-            return Err(Error::FailedPrecondition(
-                "this account signs in through waifu.dev, not with a password".into(),
-            ));
+            return Err(Error::FailedPrecondition(if account.kind == pb::AccountKind::Agent {
+                "agents sign in with their token, not a password".into()
+            } else {
+                "this account signs in through waifu.dev, not with a password".into()
+            }));
         }
         let guesses = format!("password:{}", account.id);
         self.app.limiter.check(&guesses)?;
@@ -117,6 +119,9 @@ impl Api {
 
     async fn delete_account(&self, caller: Caller, req: pb::DeleteAccountRequest) -> Result<()> {
         let account = caller.account;
+        if account.kind == pb::AccountKind::Agent {
+            return Err(Error::denied("an agent is deleted by the person who made it"));
+        }
         if account.has_password() {
             self.confirm_password(&account, &req.password).await?;
             if account.two_factor {
@@ -147,7 +152,16 @@ impl Api {
             ));
         }
 
-        // Every server they were ever in keeps their messages, from a deleted account.
+        // Their agents go with them.
+        for agent in self.app.node()?.agents(&account.id).await? {
+            self.erase_account(&agent.account).await?;
+        }
+        self.erase_account(&account).await
+    }
+
+    /// Takes an account off the instance: out of every server (which keep its
+    /// messages, from "Deleted account"), with its sessions, devices and pictures.
+    pub(super) async fn erase_account(&self, account: &Account) -> Result<()> {
         let gone = pb::User {
             id: account.id.clone(),
             username: "deleted".into(),
@@ -425,7 +439,11 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
         "instance": { "name": settings.name, "url": settings.public_url },
         "account": {
             "id": account.id,
-            "kind": if account.has_password() { "standalone" } else { "linked" },
+            "kind": match account.kind {
+                pb::AccountKind::Agent => "agent",
+                _ if account.has_password() => "standalone",
+                _ => "linked",
+            },
             "username": account.username,
             "display_name": account.display_name,
             "avatar_url": account.avatar_url,

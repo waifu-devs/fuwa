@@ -1,5 +1,5 @@
 import { timestampDate, type Timestamp } from "@bufbuild/protobuf/wkt";
-import type { Member, User } from "@/gen/fuwa/v1/types_pb";
+import { AccountKind, type Member, type User } from "@/gen/fuwa/v1/types_pb";
 import { getPrefs, type Clock } from "@/lib/prefs";
 
 export const toDate = (ts: Timestamp | undefined) => (ts ? timestampDate(ts) : new Date(0));
@@ -62,6 +62,8 @@ export function formatBytes(bytes: number) {
 
 export const displayName = (user: User | undefined) => user?.displayName || user?.username || "Someone";
 export const memberName = (member: Member | undefined) => member?.nickname || displayName(member?.user);
+/** An agent: an account a program drives, not a person. */
+export const isAgent = (user: User | undefined) => user?.kind === AccountKind.AGENT;
 
 /** One or two letters for an icon: "Waifu Devs" → "WD", "fuwa" → "F". */
 export function initials(name: string) {

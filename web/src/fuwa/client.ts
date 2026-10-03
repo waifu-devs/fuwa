@@ -1,6 +1,7 @@
 import { createClient, type Client, type Interceptor } from "@connectrpc/connect";
 import { createGrpcWebTransport } from "@connectrpc/connect-web";
 import { AccountService } from "@/gen/fuwa/v1/account_pb";
+import { AgentService } from "@/gen/fuwa/v1/agent_pb";
 import { AdminService } from "@/gen/fuwa/v1/admin_pb";
 import { AuthService } from "@/gen/fuwa/v1/auth_pb";
 import { AutoModService } from "@/gen/fuwa/v1/automod_pb";
@@ -35,6 +36,7 @@ export type Api = {
   automod: Client<typeof AutoModService>;
   emojis: Client<typeof EmojiService>;
   webhooks: Client<typeof WebhookService>;
+  agents: Client<typeof AgentService>;
 };
 
 /**
@@ -66,5 +68,6 @@ export function makeApi(url: string, token: () => string | null): Api {
     automod: createClient(AutoModService, transport),
     emojis: createClient(EmojiService, transport),
     webhooks: createClient(WebhookService, transport),
+    agents: createClient(AgentService, transport),
   };
 }

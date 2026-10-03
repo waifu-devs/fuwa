@@ -23,6 +23,8 @@ message Node {
   Announcement announcement = 7;
   // The build the instance says it runs.
   Build build = 8;
+  // Who may make agents (bot accounts).
+  AgentCreation agent_creation = 9;
 }
 
 // What a fuwa binary was built from. The instance reports this about itself,
@@ -74,6 +76,14 @@ message AuthMethods {
   bool linked_sign_up = 5;
 }
 
+// Who may make agents (accounts programs drive) on an instance.
+enum AgentCreation {
+  AGENT_CREATION_UNSPECIFIED = 0;
+  AGENT_CREATION_EVERYONE = 1;
+  AGENT_CREATION_ADMINS = 2;
+  AGENT_CREATION_DISABLED = 3;
+}
+
 // Who may create community servers on an instance.
 enum ServerCreation {
   SERVER_CREATION_UNSPECIFIED = 0;
@@ -92,6 +102,9 @@ enum AccountKind {
   ACCOUNT_KIND_LOCAL = 1;
   // Signs in through waifu.dev.
   ACCOUNT_KIND_LINKED = 2;
+  // Driven by a program, made by a person; signs in with a token. See
+  // AgentService.
+  ACCOUNT_KIND_AGENT = 3;
 }
 
 // A person's public profile.

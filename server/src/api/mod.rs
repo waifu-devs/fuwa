@@ -2,6 +2,7 @@
 
 mod account;
 mod admin;
+mod agents;
 mod auth;
 mod automod;
 mod channels;
