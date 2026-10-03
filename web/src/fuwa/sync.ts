@@ -4,6 +4,7 @@ import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
 import type { Event } from "@/gen/fuwa/v1/types_pb";
 import { startDms, stopDms, wipeDms } from "@/e2ee/engine";
 import { onLiveEvent, onRemoved } from "@/lib/notify";
+import { reportStartup, reportTiming, type ReportTarget } from "@/lib/reports";
 import { makeApi, type Api } from "./client";
 import { FuwaError, call, toFuwaError } from "./errors";
 import { instanceKey, loadSaved, storeSaved, type SavedInstance } from "./saved";
@@ -70,6 +71,16 @@ function persist() {
     return e ? [{ url: e.url, token: e.token }] : [];
   });
   storeSaved(list);
+}
+
+/** Where anonymous reports go: the first instance you're signed in to whose telemetry is on. */
+export function reportTarget(): ReportTarget | null {
+  const s = store.get();
+  for (const key of s.order) {
+    const e = engines.get(key);
+    if (e?.token && s.instances[key]?.node?.telemetry && s.instances[key]?.me) return e.api.node;
+  }
+  return null;
 }
 
 /** Loads the saved instances and starts following them. Call once at startup. */
@@ -201,10 +212,13 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
     const resumedFrom = new Map<string, bigint>();
     /** Channel events that arrived while a server's channels were being listed again. */
     const relisting = new Map<string, Event[]>();
+    /** When the stream last started, to time how long catching up takes. */
+    let subscribedAt = 0;
 
     const subscribe = (ids: readonly string[]) =>
       Stream.suspend(() => {
         const controller = new AbortController();
+        subscribedAt = performance.now();
         const request = { servers: ids.map((serverId) => ({ serverId, afterSequence: cursors.get(serverId) })) };
         resumedFrom.clear();
         for (const [serverId, sequence] of cursors) resumedFrom.set(serverId, sequence);
@@ -315,6 +329,8 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
             yield* FiberSet.run(snapshots, snapshot(head.serverId));
           }
           patchInstance(key, { connection: "live", problem: null });
+          reportTiming("catch_up", performance.now() - subscribedAt);
+          reportStartup();
         }
         const event = res.event;
         if (!event) return;

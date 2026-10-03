@@ -192,12 +192,17 @@ pub struct Telemetry {
     pub enabled: bool,
     /// FUWA_TELEMETRY_URL, default https://analytics.waifu.dev/v1/fuwa/signals.
     pub url: String,
+    /// FUWA_REPORTS_URL, where the hourly health report goes. Defaults to
+    /// FUWA_TELEMETRY_URL with `/signals` changed to `/reports`, so
+    /// https://analytics.waifu.dev/v1/fuwa/reports.
+    pub reports_url: String,
     /// FUWA_HOSTING: self_hosted (default) | hosted. Only Waifu Devs' own hosted
     /// instance says hosted, so the signal can tell the two apart.
     pub hosted: bool,
 }
 
 pub const DEFAULT_TELEMETRY_URL: &str = "https://analytics.waifu.dev/v1/fuwa/signals";
+pub const DEFAULT_REPORTS_URL: &str = "https://analytics.waifu.dev/v1/fuwa/reports";
 
 impl Config {
     /// Reads the configuration from the environment (and `.env`).
@@ -416,6 +421,13 @@ impl Config {
             limits,
             telemetry: Telemetry {
                 enabled: telemetry_enabled,
+                reports_url: get("FUWA_REPORTS_URL").unwrap_or_else(|| {
+                    let url = get("FUWA_TELEMETRY_URL").unwrap_or_else(|| DEFAULT_TELEMETRY_URL.into());
+                    match url.trim_end_matches('/').strip_suffix("/signals") {
+                        Some(base) => format!("{base}/reports"),
+                        None => DEFAULT_REPORTS_URL.into(),
+                    }
+                }),
                 url: get("FUWA_TELEMETRY_URL").unwrap_or_else(|| DEFAULT_TELEMETRY_URL.into()),
                 hosted,
             },
@@ -565,6 +577,9 @@ mod tests {
     #[test]
     fn telemetry_can_be_turned_off() {
         assert!(!config(&[("FUWA_TELEMETRY", "off")]).unwrap().telemetry.enabled);
+        assert_eq!(config(&[]).unwrap().telemetry.reports_url, DEFAULT_REPORTS_URL);
+        let moved = config(&[("FUWA_TELEMETRY_URL", "http://collector.test/v1/fuwa/signals")]).unwrap();
+        assert_eq!(moved.telemetry.reports_url, "http://collector.test/v1/fuwa/reports");
         assert!(!config(&[("DO_NOT_TRACK", "1")]).unwrap().telemetry.enabled);
     }
 

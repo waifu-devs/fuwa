@@ -109,6 +109,12 @@ impl From<Error> for Status {
             Error::Remote(status) => return status.clone(),
             Error::Database(_) | Error::Io(_) | Error::Internal(_) => {
                 tracing::error!(error = %err, "request failed");
+                let kind = match &err {
+                    Error::Database(_) => "rpc_database",
+                    Error::Io(_) => "rpc_io",
+                    _ => "rpc_internal",
+                };
+                crate::reports::server_error(kind, None);
                 return Status::internal("something went wrong on the server");
             }
         };

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { reportUsage } from "@/lib/reports";
 
 /**
  * Screens anything in the app can open: settings, the shortcut overlay, the
@@ -44,6 +45,7 @@ let lastSection = "appearance";
 /** Opens settings at a section (for one thing on it, like a server), or where they were last. */
 export function openSettings(section?: string, target: string | null = null) {
   if (section) lastSection = section;
+  if (ui.settings === null) reportUsage("settings.open");
   set({ settings: section ?? lastSection, settingsTarget: target, shortcuts: false, switcher: false });
 }
 
@@ -54,7 +56,10 @@ export function setSettingsSection(section: string) {
 
 export const closeSettings = () => set({ settings: null });
 export const setShortcuts = (open: boolean) => set({ shortcuts: open, switcher: open ? false : ui.switcher });
-export const setSwitcher = (open: boolean) => set({ switcher: open, shortcuts: open ? false : ui.shortcuts });
+export const setSwitcher = (open: boolean) => {
+  if (open && !ui.switcher) reportUsage("quick_switcher.open");
+  set({ switcher: open, shortcuts: open ? false : ui.shortcuts });
+};
 export const hideStreamerBanner = (hidden = true) => set({ streamerBannerHidden: hidden });
 
 let nextToast = 1;

@@ -77,6 +77,7 @@ async fn main() -> ExitCode {
         .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
         .with_ansi(std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none())
         .init();
+    fuwa_server::reports::count_panics();
 
     match fuwa_server::app::run(config).await {
         Ok(()) => ExitCode::SUCCESS,

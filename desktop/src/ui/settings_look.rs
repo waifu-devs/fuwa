@@ -97,6 +97,7 @@ impl SettingsView {
     /// Picks a theme: the one on screen, or the light or dark one when following the system.
     fn pick_theme(&mut self, theme: &Theme, slot: Slot, cx: &mut Context<Self>) {
         let id = theme.id.clone();
+        crate::core::reports::used("theme.change");
         self.set(cx, |pr| match slot {
             Slot::Only => pr.theme = id,
             Slot::Light => pr.light_theme = id,

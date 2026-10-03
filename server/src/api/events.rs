@@ -169,6 +169,7 @@ impl EventService for Api {
     type SubscribeStream = EventStream;
 
     async fn subscribe(&self, request: Request<pb::SubscribeRequest>) -> Result<Response<EventStream>, Status> {
+        let started = std::time::Instant::now();
         let caller = self.caller(request.metadata()).await?;
         let account = caller.account;
         let cursors = request.into_inner().servers;
@@ -262,6 +263,7 @@ impl EventService for Api {
                 views.insert(sdb.id.clone(), view);
             }
             let ready = pb::SubscribeReady { servers: heads };
+            crate::reports::server_timing("subscribe.ready", started.elapsed());
             if !send(Ok(pb::SubscribeResponse { event: None, ready: Some(ready) })).await {
                 return;
             }

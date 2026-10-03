@@ -144,8 +144,11 @@ const APP: SettingsSection[] = [
     id: "advanced",
     label: "Advanced",
     icon: CodeXmlIcon,
-    description: "Tools for people who build on fuwa.",
-    settings: [{ id: "developer-mode", label: "Developer mode", keywords: "copy id" }],
+    description: "Bug reports and tools for people who build on fuwa.",
+    settings: [
+      { id: "share-reports", label: "Help fix bugs", keywords: "anonymous reports telemetry crash errors performance privacy" },
+      { id: "developer-mode", label: "Developer mode", keywords: "copy id" },
+    ],
   },
 ];
 

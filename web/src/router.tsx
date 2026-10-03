@@ -21,6 +21,7 @@ import { ChannelPage, ServerIndex } from "@/pages/ServerPages";
 import { Welcome } from "@/pages/Welcome";
 import { lazyComponent } from "@/components/lazy";
 import { useUi } from "@/lib/ui";
+import { reportThrown, setRouteSource } from "@/lib/reports";
 
 const SettingsScreens = lazyComponent(() => import("@/components/settings/UserSettings").then((m) => m.UserSettings));
 
@@ -162,7 +163,12 @@ export const router = createRouter({
   defaultPreload: false,
   // Streamer mode shows instances by a local alias instead of their address.
   rewrite: { input: ({ url }) => aliasToKey(url), output: ({ url }) => keyToAlias(url) },
+  // A page that failed to draw, for anonymous reports.
+  defaultOnCatch: (error) => reportThrown(error, "render"),
 });
+
+// Reports say which page by its pattern ("/$instance/$server/$channel"), never the address itself.
+setRouteSource(() => router.state.matches.at(-1)?.routeId);
 
 declare module "@tanstack/react-router" {
   interface Register {

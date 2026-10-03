@@ -1,5 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 
@@ -22,7 +23,11 @@ function woff2Only(): Plugin {
   };
 }
 
+// The app ships inside the server, so its version is the server's (for anonymous reports).
+const version = /^version\s*=\s*"([^"]+)"/m.exec(readFileSync(new URL("../server/Cargo.toml", import.meta.url), "utf8"))?.[1] ?? "dev";
+
 export default defineConfig({
+  define: { __FUWA_VERSION__: JSON.stringify(version) },
   plugins: [woff2Only(), react(), tailwindcss()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },

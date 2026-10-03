@@ -128,8 +128,9 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_EMOJIS` | unlimited | Custom emoji per server |
 | `FUWA_LIMIT_PICTURE_UPLOAD` | unlimited | Largest avatar, banner, server icon or emoji one upload may be, like `8MB` |
 | `FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY` | unlimited | Pictures one account may upload in a day (UTC), like `256MiB` |
-| `FUWA_TELEMETRY` | `on` | The anonymous usage signal; `off` turns it off (so does `DO_NOT_TRACK=1`) |
+| `FUWA_TELEMETRY` | `on` | The anonymous usage signal and health reports; `off` turns both off (so does `DO_NOT_TRACK=1`), and apps on the instance then send no reports either |
 | `FUWA_TELEMETRY_URL` | `https://analytics.waifu.dev/v1/fuwa/signals` | Where the signal goes |
+| `FUWA_REPORTS_URL` | `FUWA_TELEMETRY_URL` with `/signals` changed to `/reports` | Where the hourly health report goes |
 | `FUWA_HOSTING` | `self_hosted` | `hosted` only on Waifu Devs' own instance; reported in the signal |
 | `FUWA_LOG` | `info,turso_core=warn` | Log filter ([syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)) |
 | `FUWA_CALLS` | `on` | Voice channels and calls in direct messages; `off` turns them off |
@@ -517,6 +518,36 @@ also written to the log, so you can see exactly what left. It contains:
 
 It never contains message content, usernames, account or server ids, server
 names, or addresses.
+
+### Anonymous health reports
+
+So we can find bugs and slow spots, each part of the instance also counts
+what went wrong and how long things took, and once an hour (and as it shuts
+down) sends the counts to `FUWA_REPORTS_URL`, when there's anything to send.
+The same switch turns it off. Each report is logged at debug level
+(`FUWA_LOG=debug`), so you can see exactly what left. It contains:
+
+- `schema` (`fuwa.report.v1`), a random `report_id`, `since` and `sent_at`,
+  `hosting`, `part` (`all`, `directory`, `shard` or `gateway`), the
+  `install_id` on the parts that keep accounts, and `bounds_ms`, the timing
+  buckets' limits
+- `errors`: kinds of failure (a panic, a request that failed on the server's
+  side) and where in fuwa's code they happened (a source file and line, or the
+  gRPC method), with how many times
+- `timings`: how long requests took per gRPC method, starting up and catching
+  up an event stream, as counts per bucket
+- `usage`: how many times a few features were used
+- each entry's app (`server`, `web` or `desktop`), version, platform and OS
+  family
+
+The web and desktop apps send their own counts of the same kinds (uncaught
+errors, startup, catching up, calls connecting, slow frames, requests, a few
+features) to the instance they're signed in to (`NodeService.SendReport`),
+which adds them to its report; apps never send anything anywhere else. Each
+app has its own "Help fix bugs" switch, on by default, and sends nothing while
+the instance's switch is off. Reports never contain message content, names,
+file names, ids of people or servers, links or addresses, and who sent an
+app's report is never kept.
 
 ## Protocol
 

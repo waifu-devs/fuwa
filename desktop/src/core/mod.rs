@@ -18,6 +18,7 @@ pub mod linked;
 pub mod moderation;
 pub mod notifications;
 pub mod permissions;
+pub mod reports;
 pub mod secrets;
 pub mod server_admin;
 pub mod sso;
@@ -167,6 +168,7 @@ impl Core {
         let secrets = secrets::Secrets::open(&paths.config);
         let vault_key = secrets.vault_key();
         let prefs = config::load_prefs(&paths);
+        reports::start(&paths.config, prefs.share_reports);
         let core = Arc::new(Self {
             shared,
             paths,
@@ -181,6 +183,17 @@ impl Core {
         for saved in config::load_instances(&core.paths, &core.secrets) {
             core.add_instance(&saved.url, saved.token);
         }
+        // The anonymous reports go out a minute after starting, then every ten.
+        let weak = Arc::downgrade(&core);
+        core.runtime.spawn(async move {
+            tokio::time::sleep(reports::FIRST_SEND).await;
+            loop {
+                let Some(core) = weak.upgrade() else { return };
+                core.send_reports().await;
+                drop(core);
+                tokio::time::sleep(reports::SEND_EVERY).await;
+            }
+        });
         Ok(core)
     }
 
@@ -223,8 +236,65 @@ impl Core {
             f(&mut prefs);
             prefs.clone()
         };
+        reports::set_enabled(prefs.share_reports);
         config::store_prefs(&self.paths, &prefs);
         self.shared.update(|_| {});
+    }
+
+    // ───────────────────────── Anonymous reports ─────────────────────────
+
+    /// The instance reports go to: the first one you're signed in to whose
+    /// own telemetry is on. None when no instance takes them.
+    pub fn report_destination(&self) -> Option<String> {
+        let engines = self.engines.lock();
+        self.shared.read(|s| {
+            s.order
+                .iter()
+                .find(|key| {
+                    engines.get(*key).is_some_and(|e| e.api.token().is_some())
+                        && s.instance(key).is_some_and(|i| {
+                            i.me.is_some()
+                                && i.connection != store::Connection::SignedOut
+                                && i.node.as_ref().is_some_and(|n| n.telemetry)
+                        })
+                })
+                .cloned()
+        })
+    }
+
+    /// Sends what's been counted, if the setting is on and an instance takes
+    /// it; otherwise it waits for the next time.
+    pub async fn send_reports(&self) {
+        if !reports::enabled() {
+            return;
+        }
+        if let Some(key) = self.report_destination() {
+            let _ = self.send_report_to(&key).await;
+        }
+    }
+
+    /// Sends what's been counted to one instance. Whatever doesn't get there
+    /// (no connection, or one report a minute already) is kept for the next
+    /// one. False when there was nothing to send.
+    pub async fn send_report_to(&self, key: &str) -> Result<bool, Problem> {
+        let api = self.api(key).ok_or_else(|| Problem::new(tonic::Code::NotFound, "That instance isn't here."))?;
+        let Some(held) = reports::take() else { return Ok(false) };
+        let report = held.to_report();
+        match rpc!(api.node(), send_report(pb::SendReportRequest { report: Some(report) })).await {
+            Ok(_) => {
+                reports::sent();
+                Ok(true)
+            }
+            Err(err) => {
+                // One the instance turned down as malformed would only be turned down again.
+                if err.code != tonic::Code::InvalidArgument {
+                    reports::put_back(held);
+                } else {
+                    reports::sent();
+                }
+                Err(err)
+            }
+        }
     }
 
     // ───────────────────────── Instances ─────────────────────────
@@ -550,6 +620,9 @@ impl Core {
                 }
             }
         });
+        if res.is_ok() {
+            reports::used("message.send");
+        }
         res.map(|_| ())
     }
 
@@ -578,6 +651,7 @@ impl Core {
             })
         )
         .await?;
+        reports::used("message.edit");
         if let Some(message) = res.message {
             self.shared.instance(key, |i| {
                 if let Some(loaded) = i.messages.get_mut(&message.channel_id) {
@@ -648,6 +722,7 @@ impl Core {
             join_server(pb::JoinServerRequest { server_id: server_id.into(), invite_code: code.into() })
         )
         .await?;
+        reports::used("server.join");
         let server = joined.server.unwrap_or_default();
         self.shared.instance(key, |i| store::add_server(i, server.clone()));
         self.follow(key, &server.id, true);
@@ -707,7 +782,11 @@ impl Core {
         if let Some(text) = &text {
             self.shared.instance(key, |i| i.dms.sending.entry(id.to_owned()).or_default().push(text.clone()));
         }
+        let feature = if text.is_some() { "dm.send" } else { "message.edit" };
         let result = engine.send(id, content).await;
+        if result.is_ok() {
+            reports::used(feature);
+        }
         if let Some(text) = text {
             self.shared.instance(key, |i| {
                 if let Some(list) = i.dms.sending.get_mut(id)

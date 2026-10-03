@@ -37,6 +37,7 @@ import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
 import { instanceKey, normalizeUrl } from "./saved";
 import { wipeDms } from "@/e2ee/engine";
+import { reportUsage } from "@/lib/reports";
 import { addInstance, engine, follow, removeInstance } from "./sync";
 import {
   addServer,
@@ -307,6 +308,7 @@ const PUT_FAILURES: Record<number, Code> = {
  */
 export const uploadPicture = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent: number) => void) =>
   Effect.gen(function* () {
+    reportUsage("upload.picture");
     const { uploadUrl, media } = yield* call((signal) =>
       api(key).media.createUpload({ purpose, contentType: file.type, size: BigInt(file.size) }, { signal }),
     );
@@ -676,6 +678,7 @@ export const discover = (key: string) =>
 /** Joins a server from Browse, or with one of its invites. */
 export const joinServer = (key: string, serverId: string, inviteCode = "") =>
   Effect.gen(function* () {
+    reportUsage(inviteCode ? "server.join_invite" : "server.join");
     const { server } = yield* call((signal) => api(key).servers.joinServer({ serverId, inviteCode }, { signal }));
     yield* joined(key, server);
     return server!;
@@ -1088,6 +1091,7 @@ let nonce = 0;
 /** Sends a message. It shows up right away, dimmed until the server confirms it. */
 export const sendMessage = (key: string, serverId: string, channelId: string, content: string) =>
   Effect.gen(function* () {
+    reportUsage("message.send");
     const pending: PendingMessage = { nonce: `n${++nonce}`, content, createdAt: Date.now(), failed: null };
     const setPending = (fn: (list: PendingMessage[]) => PendingMessage[]) =>
       updateInstance(key, (i) => ({ ...i, pending: { ...i.pending, [channelId]: fn(i.pending[channelId] ?? []) } }));
@@ -1120,6 +1124,7 @@ export const dismissPending = (key: string, channelId: string, pendingNonce: str
 
 export const editMessage = (key: string, serverId: string, channelId: string, messageId: string, content: string) =>
   Effect.gen(function* () {
+    reportUsage("message.edit");
     const { message } = yield* call((signal) =>
       api(key).messages.updateMessage({ serverId, messageId, content }, { signal }),
     );

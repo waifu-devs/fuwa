@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use fuwa_desktop::core::config::Paths;
 use fuwa_desktop::core::dms::{Content, DmStatus, now_ms};
 use fuwa_desktop::core::moderation::{Action, timed_out_until};
+use fuwa_desktop::core::reports;
 use fuwa_desktop::core::store::{Connection, Focus, Store};
 use fuwa_desktop::core::vault::ItemKind;
 use fuwa_desktop::core::{Core, Notice};
@@ -265,6 +266,46 @@ fn two_people_talk_in_a_server_and_in_private() {
     drop(alice);
     let alice = Core::start(Paths::under(home_a.path())).unwrap();
     said(&alice, "got it");
+
+    instance.app.shutdown.cancel();
+    drop(instance.runtime);
+}
+
+#[test]
+fn anonymous_reports_reach_the_instance() {
+    // SAFETY: set before anything reads it.
+    unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
+    let data = tempfile::tempdir().unwrap();
+    let instance = start_instance(data.path());
+    let home = tempfile::tempdir().unwrap();
+    let app = Core::start(Paths::under(home.path())).unwrap();
+    assert!(app.prefs().share_reports, "on unless turned off");
+    let key = {
+        let (core, url) = (app.clone(), instance.url.clone());
+        wait(&app, async move { core.sign_up(&url, "carol", "correct horse battery", "Carol").await }).unwrap()
+    };
+    until(&app, "signed in", |s| s.instance(&key).is_some_and(|i| i.me.is_some()));
+    // The test instance's telemetry is off, so the app doesn't pick it by itself.
+    assert_eq!(app.report_destination(), None);
+
+    // Signing up was timed, among other calls.
+    reports::used("message.send");
+    assert!(reports::pending().timings > 0);
+    let sent = {
+        let (core, key) = (app.clone(), key.clone());
+        wait(&app, async move { core.send_report_to(&key).await })
+    };
+    assert!(sent.unwrap(), "the report went out");
+
+    // A second one within the minute is turned away, which shows the first
+    // arrived, and it stays here for the next time.
+    reports::used("message.send");
+    let again = {
+        let (core, key) = (app.clone(), key.clone());
+        wait(&app, async move { core.send_report_to(&key).await })
+    };
+    assert_eq!(again.unwrap_err().code, tonic::Code::ResourceExhausted);
+    assert!(reports::pending().usage >= 1, "kept for the next report");
 
     instance.app.shutdown.cancel();
     drop(instance.runtime);
