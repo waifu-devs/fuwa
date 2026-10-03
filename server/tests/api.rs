@@ -4580,9 +4580,9 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
     // asked about, and still goes through when the provider doesn't answer.
     let rule = save_rule(&mut c, &owner, &server.id, pb::AutoModRule { pictures: true, ..rule.clone() }).await.unwrap();
     assert!(rule.pictures);
-    // A 16 by 16 PNG's headers, which is all the server looks at before sending it.
-    let mut cat = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\x10\0\0\0\x10\x08\x06\0\0\0".to_vec();
-    cat.resize(300, 0);
+    // A 16 by 16 PNG: its header is all the server looks at before sending it.
+    let mut cat = png(300, 0);
+    cat[16..24].copy_from_slice(&[0, 0, 0, 16, 0, 0, 0, 16]);
     let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, cat).await;
     let sent = c
         .messages
