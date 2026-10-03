@@ -1627,6 +1627,13 @@ pub async fn load_emojis(conn: &Connection, server_id: &str) -> Result<Vec<pb::E
 }
 
 /// The server's AutoMod rules, oldest first.
+/// A new, empty server file at `path`, for tests that work in one.
+#[cfg(test)]
+pub(crate) async fn scratch(path: &std::path::Path) -> Connection {
+    let db = db::open(path, None, MIGRATIONS).await.unwrap();
+    db::connect(&db).unwrap()
+}
+
 pub async fn load_automod(conn: &Connection) -> Result<Vec<pb::AutoModRule>> {
     query_all(conn, "SELECT rule FROM automod_rules ORDER BY created_at, id", (), |r| r.get::<Vec<u8>>(0))
         .await?

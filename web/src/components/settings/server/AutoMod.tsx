@@ -175,7 +175,7 @@ export function AutoMod({ instanceKey, serverId }: { instanceKey: string; server
           <ShieldCheckIcon className="size-4" />
         </motion.span>
         <p className="text-muted-foreground">
-          AutoMod reads each message as it's sent or edited, before anyone sees it. People who can manage the server are never caught, so test a rule with the
+          AutoMod reads each message as it's sent or edited, before anyone sees it. A Smart filter answer that comes late takes the message down a moment after. People who can manage the server are never caught, so test a rule with the
           box under it rather than in chat.
         </p>
       </motion.div>
