@@ -23,6 +23,10 @@ like, hosted or self-hosted, over the same protocol.
   device has its own keys, which never leave it; the instance only stores and
   passes along ciphertext, and can't read it even if its operator wanted to.
   There's no off switch. See [docs/e2ee.md](docs/e2ee.md).
+- **Channels shared between servers.** Two communities can talk in one
+  channel, like Slack Connect: both admins agree, the messages live only on
+  the server that shared it, and each side keeps its own roles and
+  moderators. See [docs/shared-channels.md](docs/shared-channels.md).
 - **Usage tracked, limits optional.** Every server counts its members, channels,
   messages and storage. Limits are off unless the operator sets them.
 - **Live by design.** Every change is an event in the server's log; clients
@@ -118,6 +122,7 @@ the log filter are read only from the environment.
 | `FUWA_SSO_ACCOUNTS` | `off` | Single sign-on through the identity provider set up in instance settings: `open`, `closed` (existing SSO accounts only), `off` |
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
 | `FUWA_AGENT_CREATION` | `everyone` | Who can make agents (accounts programs drive): `everyone`, `admins`, `off` |
+| `FUWA_SHARED_CHANNELS` | `on` | Servers sharing a text channel with another server on this instance ([docs/shared-channels.md](docs/shared-channels.md)); `off` stops new shares |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |
 | `FUWA_ENCRYPTION_KEY` | unset | 64 hex characters (`openssl rand -hex 32`); encrypts every database at rest |
 | `FUWA_LIMIT_SERVERS_PER_ACCOUNT` | unlimited | Servers one account may own |

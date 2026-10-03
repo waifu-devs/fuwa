@@ -115,6 +115,15 @@
     (`MEDIA_PURPOSE_EMOJI`) counted in the server's attachments, and every
     change sends the whole list (`EmojisUpdated`). Messages write them
     `<:name:id>` (`<a:name:id>` when they move).
+    Shared channels (`api/shared.rs`, docs/shared-channels.md): a channel's
+    home keeps it and every message (`channel_guests`, `share_codes`,
+    `channel_blocks`); a guest server shows it as a channel of its own
+    (`channel_links`) and keeps none of it. The guest's shard checks its own
+    roles and AutoMod and passes reads and writes to the home as
+    `cluster.v1.SharedCall`s (`App::shared`); the home's
+    `spawn_shared_fanout` passes message events back, published at the guest
+    as sequence 0. Message calls on a channel check `shared::link_of` first;
+    new channel kinds or message paths must too.
   - `webhooks.rs`: posting through a webhook over plain HTTP
     (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
     body), with each webhook's 30-a-minute limit (counted only for posts
@@ -491,7 +500,7 @@
   one event payload and keeps the usage totals in step: members and channels in
   the `usage` row, message totals through `servers::add_usage`. Invites are the
   exception: their codes are secrets, so making or revoking one writes only an
-  audit entry, never an event. AutoMod rules are the same: members mustn't
+  audit entry, never an event (shared channels' share codes too). AutoMod rules are the same: members mustn't
   see the words a rule looks for.
 - Writes can run more than once (after a clash), so the closure given to
   `ServerDb::write` or `db::write` does nothing outside its transaction. Reads
