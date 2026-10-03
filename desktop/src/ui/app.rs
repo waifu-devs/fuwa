@@ -153,6 +153,8 @@ pub struct ListSync {
     pub len: usize,
     pub first: String,
     pub digest: u64,
+    /// Each row's digest, so only the rows that changed are measured again.
+    pub rows: Vec<u64>,
 }
 
 pub struct FuwaApp {
@@ -167,12 +169,16 @@ pub struct FuwaApp {
     pub scroller: Entity<MessageScrollerState>,
     pub list: ListSync,
     pub rows: std::rc::Rc<Vec<crate::ui::chat::Row>>,
+    /// The open channel's messages as built, kept between changes.
+    pub built: crate::ui::chat::Built,
     /// Messages that arrived while their list was open, and when: they rise in.
     pub fresh: HashMap<String, Instant>,
     pub requested: HashSet<String>,
     pub prepared: HashSet<String>,
     pub hovered: Option<String>,
     pub members_open: bool,
+    /// The open server's member list, a view of its own.
+    pub members_view: Option<Entity<crate::ui::members::MembersView>>,
     pub connect: Option<Entity<ConnectView>>,
     pub settings: Option<Entity<SettingsView>>,
     pub server_settings: Option<Entity<ServerSettingsView>>,
@@ -248,6 +254,8 @@ impl FuwaApp {
                 theme::apply(&this.prefs, window.appearance(), cx);
                 cx.notify();
             }),
+            // Ambient loops run only while the window is in front.
+            cx.observe_window_activation(window, |_, _, cx| cx.notify()),
         ];
         // Keys the text fields would otherwise take: the @ list's arrows, Enter
         // and Escape, Up to edit your last message, Escape to stop editing.
@@ -318,11 +326,13 @@ impl FuwaApp {
             scroller,
             list: ListSync::default(),
             rows: std::rc::Rc::new(Vec::new()),
+            built: Default::default(),
             fresh: HashMap::new(),
             requested: HashSet::new(),
             prepared: HashSet::new(),
             hovered: None,
             members_open: true,
+            members_view: None,
             connect: None,
             settings: None,
             server_settings: None,
@@ -357,6 +367,7 @@ impl FuwaApp {
     // ───────────────────────── Reacting ─────────────────────────
 
     fn on_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let _timed = crate::ui::perf::time("store change");
         // A server that went away (left, removed) takes you home.
         let gone = match &self.nav {
             Nav::Server { key, server } => {
@@ -1206,6 +1217,14 @@ impl FuwaApp {
 
 impl Render for FuwaApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let began = crate::ui::perf::frame();
+        let root = self.render_root(window, cx);
+        crate::ui::perf::measured(root, began)
+    }
+}
+
+impl FuwaApp {
+    fn render_root(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let p = pal(cx);
         window.set_rem_size(px(16.0 * self.prefs.text_scale.clamp(0.8, 1.4)));
         let empty = self.core.shared.read(|s| s.order.is_empty());
@@ -1225,7 +1244,7 @@ impl Render for FuwaApp {
             .text_color(p.foreground);
 
         if empty && let Some(connect) = &self.connect {
-            return base.child(connect.clone());
+            return base.child(connect.clone()).into_any_element();
         }
 
         base.child(
@@ -1250,5 +1269,6 @@ impl Render for FuwaApp {
         .when_some(self.server_settings.clone(), |el, settings| el.child(settings))
         .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
         .child(self.render_toasts(window, cx))
+        .into_any_element()
     }
 }

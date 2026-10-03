@@ -1,6 +1,7 @@
 //! The middle of the window: a channel or a private conversation (its
 //! messages and the composer), the member list, an instance's page, or home.
 
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash as _, Hasher as _};
 use std::rc::Rc;
@@ -11,9 +12,8 @@ use gpui_kit::component::message_scroller::MessageScroller;
 use gpui_kit::component::text::{TextView, TextViewStyle};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, App, Context, Focusable as _, FontWeight, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window,
-    div, px, rgb,
+    AnyElement, App, AppContext as _, Context, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, px, rgb,
 };
 
 use crate::core::config::Density;
@@ -21,6 +21,7 @@ use crate::core::store::{Connection, InstanceState, user_name};
 use crate::core::vault::ItemKind;
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Menu, Nav, Target};
+use crate::ui::members::{MembersEvent, MembersView};
 use crate::ui::mentions::{Look, Pick, SCHEME, mention_links};
 use crate::ui::motion;
 use crate::ui::text::{clock, images_as_links, ms_of, when};
@@ -35,6 +36,27 @@ pub struct Blocked {
     pub text: String,
     pub action: Option<(&'static str, Dialog)>,
 }
+
+/// The rows (as runs, in the new list) whose digest differs from the row
+/// that was `shift` places earlier before: the ones to measure again.
+fn changed_rows(before: &[u64], after: &[u64], shift: usize) -> Vec<std::ops::Range<usize>> {
+    let mut runs: Vec<std::ops::Range<usize>> = Vec::new();
+    for (n, was) in before.iter().enumerate() {
+        let at = n + shift;
+        if after.get(at).is_some_and(|now| now != was) {
+            match runs.last_mut() {
+                Some(run) if run.end == at => run.end = at + 1,
+                _ => runs.push(at..at + 1),
+            }
+        }
+    }
+    runs
+}
+
+/// The open channel's messages as built for the list, by id, with a
+/// signature of everything each was built from: a message whose signature
+/// hasn't changed is reused rather than worked out again.
+pub type Built = HashMap<String, Rc<Msg>>;
 
 /// Messages from the same person this close together sit under one header.
 const GROUP_MS: i64 = 7 * 60 * 1000;
@@ -57,7 +79,7 @@ pub enum Row {
         icon: &'static str,
         text: String,
     },
-    Msg(Box<Msg>),
+    Msg(Rc<Msg>),
 }
 
 #[derive(Clone)]
@@ -88,15 +110,21 @@ pub struct Msg {
     pub badge: Option<&'static str>,
     /// Cards an app posted with it.
     pub embeds: Vec<pb::Embed>,
+    /// What it was built from (0 when it isn't kept between changes).
+    pub sig: u64,
 }
 
 impl Row {
     fn id(&self) -> String {
+        self.id_str().to_owned()
+    }
+
+    fn id_str(&self) -> &str {
         match self {
-            Row::Older { .. } => "older".into(),
-            Row::Start { .. } => "start".into(),
-            Row::Note { id, .. } => id.clone(),
-            Row::Msg(m) => m.id.clone(),
+            Row::Older { .. } => "older",
+            Row::Start { .. } => "start",
+            Row::Note { id, .. } => id,
+            Row::Msg(m) => &m.id,
         }
     }
 
@@ -105,6 +133,7 @@ impl Row {
             Row::Older { loading } => ("older", loading).hash(h),
             Row::Start { title, .. } => ("start", title).hash(h),
             Row::Note { id, text, .. } => (id, text).hash(h),
+            Row::Msg(m) if m.sig != 0 => (m.sig, m.head).hash(h),
             Row::Msg(m) => {
                 (&m.id, &m.shown, m.edited, m.head, m.pending, &m.failed, &m.name, m.editing, m.mentions_me).hash(h)
             }
@@ -113,8 +142,9 @@ impl Row {
 }
 
 impl FuwaApp {
-    /// What the open list shows, row by row.
-    fn rows(&self) -> Vec<Row> {
+    /// What the open list shows, row by row. `built` keeps the messages
+    /// from the last time, so a new message doesn't redo the whole channel.
+    fn rows(&self, built: &mut Built) -> Vec<Row> {
         match self.target() {
             Some(Target::Channel { key, server, channel }) => self.core.shared.read(|s| {
                 let Some(i) = s.instance(&key) else { return Vec::new() };
@@ -123,8 +153,27 @@ impl FuwaApp {
                 let Some(loaded) = i.messages.get(&channel) else { return rows };
                 let name = i.channel(&server, &channel).map(|c| c.name.clone()).unwrap_or_default();
                 let look = Look::of(i, &server);
+                let mut kept = Built::default();
+                // Each author as shown (name, colour, badge, picture), looked up once.
+                type Author = Rc<(String, Option<Hsla>, Option<&'static str>, Option<pb::User>)>;
+                let mut authors: HashMap<String, Author> = HashMap::new();
+                let mut author = |id: &str| -> Author {
+                    authors
+                        .entry(id.to_owned())
+                        .or_insert_with(|| {
+                            Rc::new((
+                                i.display_name(Some(&server), id),
+                                i.name_color(&server, id).map(|c| rgb(c).into()),
+                                is_agent(i.users.get(id)).then_some("AGENT"),
+                                i.users.get(id).cloned(),
+                            ))
+                        })
+                        .clone()
+                };
                 let manage = i.access(&server).has_in(&channel, pb::Permission::ManageMessages);
                 let suppress = i.effective_notifications(&server, &channel, 0).suppress_everyone;
+                // My roles, which decide whether a role mention pings me.
+                let mine: Vec<String> = i.my_member(&server).map(|m| m.role_ids.clone()).unwrap_or_default();
                 if loaded.has_more {
                     rows.push(Row::Older { loading: loaded.loading });
                 } else {
@@ -139,54 +188,65 @@ impl FuwaApp {
                         rows.push(Row::Note {
                             id: m.id.clone(),
                             icon: "sparkles",
-                            text: format!("{} joined the server. Say hi!", i.display_name(Some(&server), &m.author_id)),
+                            text: format!("{} joined the server. Say hi!", author(&m.author_id).0),
                         });
                         continue;
                     }
                     if m.kind == pb::MessageKind::AutoModAlert as i32 {
                         if let Some(alert) = &m.auto_mod {
-                            rows.push(Row::Msg(Box::new(auto_mod_row(i, &server, m, alert, manage))));
+                            rows.push(Row::Msg(Rc::new(auto_mod_row(i, &server, m, alert, manage))));
                         }
                         continue;
                     }
                     let hook = m.webhook.as_ref();
-                    rows.push(Row::Msg(Box::new(Msg {
-                        id: m.id.clone(),
-                        user: match hook {
-                            Some(w) => Some(webhook_author(w)),
-                            None => i.users.get(&m.author_id).cloned(),
-                        },
-                        name: match hook {
-                            Some(w) => w.name.clone(),
-                            None => i.display_name(Some(&server), &m.author_id),
-                        },
-                        color: if hook.is_some() {
-                            None
-                        } else {
-                            i.name_color(&server, &m.author_id).map(|c| rgb(c).into())
-                        },
-                        content: m.content.clone(),
-                        shown: mention_links(&images_as_links(&m.content), &look),
-                        mentions_me: i.pings_me(&server, m, suppress),
-                        editing: self.editing.as_deref() == Some(m.id.as_str()),
-                        can_delete: m.author_id == me || manage,
-                        at: ms_of(m.created_at.as_ref()),
-                        edited: m.edited_at.is_some(),
-                        head: true,
-                        mine: m.author_id == me,
-                        pending: false,
-                        failed: None,
-                        nonce: 0,
-                        unreadable: false,
-                        badge: match hook {
-                            Some(_) => Some("APP"),
-                            None => is_agent(i.users.get(&m.author_id)).then_some("AGENT"),
-                        },
-                        embeds: m.embeds.clone(),
-                    })));
+                    let who: Author = match hook {
+                        Some(w) => Rc::new((w.name.clone(), None, Some("APP"), Some(webhook_author(w)))),
+                        None => author(&m.author_id),
+                    };
+                    let (author_name, color, badge, user) = &*who;
+                    let editing = self.editing.as_deref() == Some(m.id.as_str());
+                    let mut h = DefaultHasher::new();
+                    (&m.content, m.edited_at.as_ref().map(|t| (t.seconds, t.nanos)), m.embeds.len()).hash(&mut h);
+                    (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
+                    user.as_ref().map(|u| (&u.avatar_url, &u.username)).hash(&mut h);
+                    (look.digest, editing, manage, suppress, &me, &mine).hash(&mut h);
+                    (m.mentions_everyone, &m.mention_role_ids).hash(&mut h);
+                    // Never 0, which means "not kept".
+                    let sig = h.finish() | 1;
+                    let (key, was) = match built.remove_entry(&m.id) {
+                        Some((key, was)) => (key, Some(was)),
+                        None => (m.id.clone(), None),
+                    };
+                    let msg = match was {
+                        Some(was) if was.sig == sig => was,
+                        _ => Rc::new(Msg {
+                            id: m.id.clone(),
+                            user: user.clone(),
+                            name: author_name.clone(),
+                            color: *color,
+                            content: m.content.clone(),
+                            shown: mention_links(&images_as_links(&m.content), &look),
+                            mentions_me: i.pings_me(&server, m, suppress),
+                            editing,
+                            can_delete: m.author_id == me || manage,
+                            at: ms_of(m.created_at.as_ref()),
+                            edited: m.edited_at.is_some(),
+                            head: true,
+                            mine: m.author_id == me,
+                            pending: false,
+                            failed: None,
+                            nonce: 0,
+                            unreadable: false,
+                            badge: *badge,
+                            embeds: m.embeds.clone(),
+                            sig,
+                        }),
+                    };
+                    kept.insert(key, msg.clone());
+                    rows.push(Row::Msg(msg));
                 }
                 for p in i.pending.get(&channel).into_iter().flatten() {
-                    rows.push(Row::Msg(Box::new(Msg {
+                    rows.push(Row::Msg(Rc::new(Msg {
                         id: format!("p{}", p.nonce),
                         user: i.me.clone(),
                         name: i.display_name(Some(&server), &me),
@@ -206,8 +266,10 @@ impl FuwaApp {
                         unreadable: false,
                         badge: None,
                         embeds: Vec::new(),
+                        sig: 0,
                     })));
                 }
+                *built = kept;
                 group(&mut rows);
                 rows
             }),
@@ -229,7 +291,7 @@ impl FuwaApp {
                 for item in i.dms.items.get(&conversation).into_iter().flatten() {
                     let name = person(&item.sender_id).map(|u| user_name(&u)).unwrap_or_else(|| "Someone".into());
                     match item.kind {
-                        ItemKind::Text if !item.deleted => rows.push(Row::Msg(Box::new(Msg {
+                        ItemKind::Text if !item.deleted => rows.push(Row::Msg(Rc::new(Msg {
                             id: item.seq.to_string(),
                             user: person(&item.sender_id),
                             name,
@@ -249,9 +311,10 @@ impl FuwaApp {
                             unreadable: false,
                             badge: None,
                             embeds: Vec::new(),
+                        sig: 0,
                         }))),
                         ItemKind::Text => {}
-                        ItemKind::Unreadable => rows.push(Row::Msg(Box::new(Msg {
+                        ItemKind::Unreadable => rows.push(Row::Msg(Rc::new(Msg {
                             id: item.seq.to_string(),
                             user: person(&item.sender_id),
                             name,
@@ -271,6 +334,7 @@ impl FuwaApp {
                             unreadable: true,
                             badge: None,
                             embeds: Vec::new(),
+                        sig: 0,
                         }))),
                         ItemKind::Joined => rows.push(Row::Note {
                             id: item.seq.to_string(),
@@ -299,7 +363,7 @@ impl FuwaApp {
                     }
                 }
                 for (n, text) in i.dms.sending.get(&conversation).into_iter().flatten().enumerate() {
-                    rows.push(Row::Msg(Box::new(Msg {
+                    rows.push(Row::Msg(Rc::new(Msg {
                         id: format!("s{n}"),
                         user: me.clone(),
                         name: me.as_ref().map(user_name).unwrap_or_default(),
@@ -319,6 +383,7 @@ impl FuwaApp {
                         unreadable: false,
                         badge: None,
                         embeds: Vec::new(),
+                        sig: 0,
                     })));
                 }
                 group(&mut rows);
@@ -331,12 +396,20 @@ impl FuwaApp {
     /// Keeps the message list in step: grows at the bottom (and lets new
     /// messages rise in), grows at the top for older ones, or starts over.
     pub(crate) fn sync_list(&mut self, cx: &mut Context<Self>) {
-        let rows = self.rows();
+        let mut built = std::mem::take(&mut self.built);
+        let rows = self.rows(&mut built);
+        self.built = built;
         let target = self.target().map(|t| t.id());
+        let digests: Vec<u64> = rows
+            .iter()
+            .map(|r| {
+                let mut h = DefaultHasher::new();
+                r.digest(&mut h);
+                h.finish()
+            })
+            .collect();
         let mut h = DefaultHasher::new();
-        for r in &rows {
-            r.digest(&mut h);
-        }
+        digests.hash(&mut h);
         let digest = h.finish();
         let first = rows.iter().find(|r| matches!(r, Row::Msg(_) | Row::Note { .. })).map(Row::id).unwrap_or_default();
         let len = rows.len();
@@ -357,21 +430,32 @@ impl FuwaApp {
                     }
                 }
                 // Only what's actually new rises in.
-                let old: std::collections::HashSet<String> =
-                    rows[..list.len.min(rows.len())].iter().map(Row::id).collect();
-                self.fresh.retain(|id, at| !old.contains(id) || at.elapsed() < Duration::from_millis(900));
+                let old: std::collections::HashSet<&str> =
+                    rows[..list.len.min(rows.len())].iter().map(Row::id_str).collect();
+                self.fresh.retain(|id, at| !old.contains(id.as_str()) || at.elapsed() < Duration::from_millis(900));
+                let changed = changed_rows(&list.rows, &digests, 0);
                 self.scroller.update(cx, |s, cx| {
                     s.append(added, cx);
-                    s.remeasure(cx);
+                    for range in changed {
+                        s.remeasure_items(range, cx);
+                    }
                 });
             } else if len > list.len && first != list.first {
                 let added = len - list.len;
+                let changed = changed_rows(&list.rows, &digests, added);
                 self.scroller.update(cx, |s, cx| {
                     s.prepend(added, cx);
-                    s.remeasure(cx);
+                    for range in changed {
+                        s.remeasure_items(range, cx);
+                    }
                 });
             } else if len == list.len {
-                self.scroller.update(cx, |s, cx| s.remeasure(cx));
+                let changed = changed_rows(&list.rows, &digests, 0);
+                self.scroller.update(cx, |s, cx| {
+                    for range in changed {
+                        s.remeasure_items(range, cx);
+                    }
+                });
             } else {
                 self.scroller.update(cx, |s, cx| s.reset(len, cx));
             }
@@ -380,6 +464,7 @@ impl FuwaApp {
         self.list.len = len;
         self.list.first = first;
         self.list.digest = digest;
+        self.list.rows = digests;
         self.fresh.retain(|_, at| at.elapsed() < Duration::from_secs(2));
         self.rows = Rc::new(rows);
     }
@@ -389,7 +474,7 @@ impl FuwaApp {
         let body: AnyElement = match self.nav.clone() {
             Nav::Server { key, server } => self.channel_view(&key, &server, window, cx),
             Nav::Home { dm: Some((key, id)) } => self.dm_view(&key, &id, window, cx),
-            Nav::Home { dm: None } => home_splash(&p).into_any_element(),
+            Nav::Home { dm: None } => home_splash(&p, window).into_any_element(),
             Nav::Instance { key } => self.instance_page(&key, window, cx),
         };
         div().flex_1().h_full().min_w_0().flex().bg(p.background).child(body)
@@ -712,117 +797,32 @@ impl FuwaApp {
         &mut self,
         key: &str,
         server: &str,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let p = pal(cx);
-        let (members, me) = self.core.shared.read(|s| {
-            let i = s.instance(key);
-            (
-                i.and_then(|i| i.members.get(server).cloned()).unwrap_or_default(),
-                i.and_then(|i| i.me.as_ref().map(|m| m.id.clone())).unwrap_or_default(),
-            )
+        let current = self.members_view.as_ref().filter(|v| {
+            let v = v.read(cx);
+            v.key == key && v.server == server
         });
-        let colors: Vec<Option<Hsla>> = self.core.shared.read(|s| {
-            let Some(i) = s.instance(key) else { return vec![None; members.len()] };
-            members
-                .iter()
-                .map(|m| m.user.as_ref().and_then(|u| i.name_color(server, &u.id)).map(|c| rgb(c).into()))
-                .collect()
-        });
-        let mut list = div().flex().flex_col().px(px(8.0)).pb(px(12.0)).child(
-            div()
-                .px(px(8.0))
-                .pt(px(18.0))
-                .pb(px(6.0))
-                .text_size(px(11.0))
-                .font_weight(FontWeight::EXTRA_BOLD)
-                .text_color(p.muted_foreground)
-                .child(format!("MEMBERS — {}", members.iter().filter(|m| !m.pending).count())),
-        );
-        let now = crate::core::dms::now_ms();
-        let amber = gpui_kit::hsla(0.11, 0.9, if p.dark { 0.62 } else { 0.42 }, 1.0);
-        for (n, (m, color)) in members.iter().zip(colors).enumerate() {
-            if m.pending {
-                continue;
+        let view = match current {
+            Some(view) => view.clone(),
+            None => {
+                let core = self.core.clone();
+                let view = cx.new(|cx| MembersView::new(core, key.to_owned(), server.to_owned(), window, cx));
+                let (k, s) = (key.to_owned(), server.to_owned());
+                cx.subscribe_in(&view, window, move |this, _, event: &MembersEvent, window, cx| match event {
+                    MembersEvent::Open { user_id } => {
+                        let dialog =
+                            Dialog::Profile { key: k.clone(), user_id: user_id.clone(), server: Some(s.clone()) };
+                        this.open_dialog(dialog, window, cx)
+                    }
+                })
+                .detach();
+                self.members_view = Some(view.clone());
+                view
             }
-            let Some(user) = m.user.clone() else { continue };
-            let name = if m.nickname.is_empty() { user_name(&user) } else { m.nickname.clone() };
-            let mine = user.id == me;
-            let hover = alpha(p.primary, 0.08);
-            let (k, uid) = (key.to_owned(), user.id.clone());
-            list = list.child(motion::rise(
-                div()
-                    .id(SharedString::from(format!("member|{}", user.id)))
-                    .group("member")
-                    .h(px(44.0))
-                    .px(px(8.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .rounded(px(12.0))
-                    .hover(move |s| s.bg(hover))
-                    .cursor_pointer()
-                    .on_click({
-                        let server = server.to_owned();
-                        cx.listener(move |this, _, window, cx| {
-                            let dialog =
-                                Dialog::Profile { key: k.clone(), user_id: uid.clone(), server: Some(server.clone()) };
-                            this.open_dialog(dialog, window, cx)
-                        })
-                    })
-                    .child(avatar(Some(&user), 32.0, &p))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(color.unwrap_or(p.foreground.into()))
-                                    .child(name),
-                            )
-                            .when(is_agent(Some(&user)), |el| {
-                                el.child(app_badge(
-                                    SharedString::from(format!("member-badge|{}", user.id)),
-                                    "AGENT",
-                                    &p,
-                                ))
-                            }),
-                    )
-                    .when(crate::core::moderation::timed_out_until(m, now).is_some(), |el| {
-                        el.child(icon("hourglass").size(px(14.0)).text_color(amber))
-                    })
-                    .when(!mine, |el| {
-                        el.child(
-                            div()
-                                .opacity(0.0)
-                                .group_hover("member", |s| s.opacity(1.0))
-                                .text_color(p.primary)
-                                .child(icon("chevron-right").size(px(14.0))),
-                        )
-                    }),
-                SharedString::from(format!("member-in|{}", user.id)),
-                Duration::from_millis((14 * n.min(20)) as u64),
-                6.0,
-            ));
-        }
-        div()
-            .id("members")
-            .w(px(232.0))
-            .h_full()
-            .flex_none()
-            .overflow_y_scroll()
-            .bg(p.sidebar)
-            .border_l_1()
-            .border_color(p.border)
-            .child(list)
+        };
+        gpui_kit::AnyView::from(view).cached(gpui_kit::StyleRefinement::default().w(px(232.0)).h_full().flex_none())
     }
 
     // ───────────────────────── A private conversation ─────────────────────────
@@ -1091,7 +1091,10 @@ fn group(rows: &mut [Row]) {
         match row {
             Row::Msg(m) => {
                 let author = m.user.as_ref().map(|u| u.id.clone()).unwrap_or_else(|| m.name.clone());
-                m.head = !matches!(&last, Some((a, at)) if *a == author && m.at - at < GROUP_MS && m.at >= *at);
+                let head = !matches!(&last, Some((a, at)) if *a == author && m.at - at < GROUP_MS && m.at >= *at);
+                if m.head != head {
+                    Rc::make_mut(m).head = head;
+                }
                 last = Some((author, m.at));
             }
             _ => last = None,
@@ -1466,7 +1469,7 @@ fn edit_box(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>) -> impl IntoElement {
 }
 
 /// Home, with nothing open: the cloud bobbing, and what lives here.
-fn home_splash(p: &Palette) -> impl IntoElement {
+fn home_splash(p: &Palette, window: &Window) -> impl IntoElement {
     let bob = fuwa_mark(96.0, p);
     div()
         .size_full()
@@ -1475,11 +1478,9 @@ fn home_splash(p: &Palette) -> impl IntoElement {
         .items_center()
         .justify_center()
         .gap(px(14.0))
-        .child(div().child(bob).with_animation(
-            "splash-bob",
-            Animation::new(Duration::from_millis(3200)).repeat(),
-            |el, t| el.relative().top(px((t * std::f32::consts::TAU).sin() * 6.0)),
-        ))
+        .child(motion::ambient(div().child(bob), "splash-bob", Duration::from_millis(3200), window, |el, t| {
+            el.relative().top(px((t * std::f32::consts::TAU).sin() * 6.0))
+        }))
         .child(motion::rise(
             div().text_2xl().font_weight(FontWeight::EXTRA_BOLD).child("Your private messages"),
             "splash-title",
@@ -1566,6 +1567,7 @@ fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::Au
         unreadable: false,
         badge: Some("BOT"),
         embeds: Vec::new(),
+        sig: 0,
     }
 }
 
@@ -1601,5 +1603,21 @@ fn webhook_author(w: &pb::MessageWebhook) -> pb::User {
         display_name: w.name.clone(),
         avatar_url: w.avatar_url.clone(),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::changed_rows;
+
+    #[test]
+    fn only_changed_rows_are_measured_again() {
+        // A message added at the end that changes the one before it (its header).
+        assert_eq!(changed_rows(&[1, 2, 3], &[1, 2, 9, 4], 0), vec![2..3]);
+        // Older messages added at the top: the old rows moved down by two.
+        assert_eq!(changed_rows(&[1, 2, 3], &[7, 8, 5, 2, 3], 2), vec![2..3]);
+        // Two edits side by side and one further on.
+        assert_eq!(changed_rows(&[1, 2, 3, 4, 5], &[1, 9, 9, 4, 9], 0), vec![1..3, 4..5]);
+        assert!(changed_rows(&[1, 2], &[1, 2], 0).is_empty());
     }
 }

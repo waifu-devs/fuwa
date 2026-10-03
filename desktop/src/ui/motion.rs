@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use gpui_kit::base::motion::{Spring, spring};
 use gpui_kit::{
-    Animation, AnimationExt as _, App, ElementId, IntoElement, SpringConfig, Styled, Window, px, sampled_easing,
+    Animation, AnimationExt as _, AnyElement, App, ElementId, IntoElement, SpringConfig, Styled, Window, px,
+    sampled_easing,
 };
 
 /// The spring things enter with: quick, with a touch of overshoot.
@@ -44,6 +45,24 @@ pub fn fade_in<E: IntoElement + Styled + 'static>(
     duration: Duration,
 ) -> impl IntoElement {
     el.with_animation(id, Animation::new(duration).with_easing(gpui_kit::ease_out_quint()), |el, t| el.opacity(t))
+}
+
+/// A gentle loop that's only there to look nice (a mascot bobbing, a glow
+/// drifting): it runs while the window is in front, and rests at its
+/// starting pose while it isn't, so a window in the background doesn't
+/// redraw many times a second for nobody.
+pub fn ambient<E: IntoElement + Styled + 'static>(
+    el: E,
+    id: impl Into<ElementId>,
+    period: Duration,
+    window: &Window,
+    pose: impl Fn(E, f32) -> E + 'static,
+) -> AnyElement {
+    if window.is_window_active() {
+        el.with_animation(id, Animation::new(period).repeat(), pose).into_any_element()
+    } else {
+        pose(el, 0.0).into_any_element()
+    }
 }
 
 /// An easing that waits for the first `start` of the time, then runs `easing` over the rest.

@@ -240,8 +240,20 @@ impl Core {
     }
 
     /// The addresses of the instances you added.
+    /// The addresses of the instances you added, and the public address each
+    /// says it has: the only places pictures load from.
     pub fn instance_urls(&self) -> Vec<String> {
-        self.engines.lock().values().map(|e| e.api.url.clone()).collect()
+        let mut urls: Vec<String> = self.engines.lock().values().map(|e| e.api.url.clone()).collect();
+        self.shared.read(|s| {
+            for key in &s.order {
+                if let Some(url) = s.instance(key).and_then(|i| i.node.as_ref()).map(|n| n.public_url.clone())
+                    && !url.is_empty()
+                {
+                    urls.push(url);
+                }
+            }
+        });
+        urls
     }
 
     pub fn api(&self, key: &str) -> Option<Api> {

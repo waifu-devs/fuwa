@@ -20,10 +20,15 @@ pub struct Look {
     pub roles: HashMap<String, String>,
     /// The server's emoji: ids to pictures.
     pub emojis: HashMap<String, String>,
+    /// Changes whenever any of the above does, so what was worked out with
+    /// one look can be kept until the next.
+    pub digest: u64,
 }
 
 impl Look {
     pub fn of(i: &InstanceState, server_id: &str) -> Self {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
         let people = i
             .members
             .get(server_id)
@@ -32,12 +37,31 @@ impl Look {
             .filter_map(|m| {
                 let user = m.user.as_ref()?;
                 let name = if m.nickname.is_empty() { user_name(user) } else { m.nickname.clone() };
+                (&user.username, &name).hash(&mut h);
                 Some((user.username.to_lowercase(), name))
             })
             .collect();
-        let roles = i.roles.get(server_id).into_iter().flatten().map(|r| (r.id.clone(), r.name.clone())).collect();
-        let emojis = i.emojis.get(server_id).into_iter().flatten().map(|e| (e.id.clone(), e.url.clone())).collect();
-        Self { people, roles, emojis }
+        let roles = i
+            .roles
+            .get(server_id)
+            .into_iter()
+            .flatten()
+            .map(|r| {
+                (&r.id, &r.name).hash(&mut h);
+                (r.id.clone(), r.name.clone())
+            })
+            .collect();
+        let emojis = i
+            .emojis
+            .get(server_id)
+            .into_iter()
+            .flatten()
+            .map(|e| {
+                (&e.id, &e.url).hash(&mut h);
+                (e.id.clone(), e.url.clone())
+            })
+            .collect();
+        Self { people, roles, emojis, digest: h.finish() }
     }
 }
 
@@ -312,6 +336,7 @@ mod tests {
             people: [("mika".to_owned(), "Mika Sato".to_owned())].into_iter().collect(),
             roles: [(ROLE.to_owned(), "Mods".to_owned())].into_iter().collect(),
             emojis: [(ROLE.to_owned(), "https://x/e.webp".to_owned())].into_iter().collect(),
+            digest: 0,
         }
     }
 

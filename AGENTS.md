@@ -253,7 +253,9 @@
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
-    `overlay.rs` draw the parts; `compose.rs` is the @ list and editing in
+    `overlay.rs` draw the parts; `members.rs` is the member list, a view of
+    its own (cached, so the window's animations don't redraw it) that builds
+    only the rows in sight; `compose.rs` is the @ list and editing in
     place (and the keys they take first), `mentions.rs` finds mentions and
     makes them links, `menus.rs` the bell menus, `notify.rs` the system
     notifications (clicks come back through a channel), `settings_account.rs`
@@ -264,13 +266,20 @@
     the `:name:` list, and a Markdown plugin that draws emoji inline),
     `emoji_picker.rs` the picker by the composer, `embeds.rs` the cards apps
     post through webhooks; `http.rs` fetches pictures for `img` on the core's
-    runtime (GPUI's own client loads nothing): from your instances, from
-    anywhere; from anyone else, only https to public addresses, checked
-    after DNS and on every redirect. Markdown goes through `text::markdown`,
+    runtime (GPUI's own client loads nothing), only from fuwa instances
+    (the ones you added, at either address they have), redirects included,
+    like the web app's `lib/shown.ts`; instances fetch other sites' pictures
+    themselves (`server/src/outside.rs`). Markdown goes through `text::markdown`,
     whose links open only for http(s) and mailto. `motion.rs` is how things move (springs,
-    rises, glides, all settling at once with reduced motion); `theme.rs` is
+    rises, glides, all settling at once with reduced motion; `ambient` loops
+    run only while the window is in front); `theme.rs` is
     the web app's palettes and the bundled font (M PLUS Rounded 1c, whose
-    files name the family "Rounded Mplus 1c").
+    files name the family "Rounded Mplus 1c"). `perf.rs` is the frame and
+    memory meter: `FUWA_DESKTOP_PERF=1` logs startup, frames a second, frame
+    build times and memory (debug level logs every frame). The whole window
+    redraws on any change or animation frame, so keep big parts virtual or
+    in cached views, and keep work that grows with a channel's length out of
+    each change (`chat.rs` reuses built messages by signature).
   - `tests/core.rs`: two app cores against an in-process instance: servers,
     live messages, mentions that notify, edits, mutes kept on the instance,
     unread counts, time-outs and kicks reaching the person live, encrypted DMs both ways, and that no plaintext reaches the

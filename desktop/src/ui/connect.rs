@@ -236,7 +236,7 @@ impl ConnectView {
 }
 
 impl Render for ConnectView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let busy = self.busy;
         let node_name =
@@ -432,9 +432,11 @@ impl Render for ConnectView {
                     .items_center()
                     .gap(px(10.0))
                     .text_center()
-                    .child(div().child(fuwa_mark(72.0, &p)).with_animation(
+                    .child(motion::ambient(
+                        div().child(fuwa_mark(72.0, &p)),
                         "connect-bob",
-                        Animation::new(Duration::from_millis(3000)).repeat(),
+                        Duration::from_millis(3000),
+                        window,
                         |el, t| el.relative().top(px((t * std::f32::consts::TAU).sin() * 4.0)),
                     ))
                     .child(div().text_2xl().font_weight(FontWeight::EXTRA_BOLD).child(title))
@@ -450,17 +452,17 @@ impl Render for ConnectView {
 
         // Two soft glows behind the card, drifting.
         let glow = |id: &'static str, color, x: f32, y: f32, period: u64| {
-            div()
+            let el = div()
                 .absolute()
                 .left(gpui_kit::relative(x))
                 .top(gpui_kit::relative(y))
                 .size(px(360.0))
                 .rounded_full()
-                .bg(color)
-                .with_animation(id, Animation::new(Duration::from_millis(period)).repeat(), move |el, t| {
-                    let a = t * std::f32::consts::TAU;
-                    el.ml(px(a.cos() * 30.0 - 180.0)).mt(px(a.sin() * 24.0 - 180.0))
-                })
+                .bg(color);
+            motion::ambient(el, id, Duration::from_millis(period), window, move |el, t| {
+                let a = t * std::f32::consts::TAU;
+                el.ml(px(a.cos() * 30.0 - 180.0)).mt(px(a.sin() * 24.0 - 180.0))
+            })
         };
         div()
             .id("connect")

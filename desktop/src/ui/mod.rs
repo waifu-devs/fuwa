@@ -10,12 +10,14 @@ mod embeds;
 mod emoji;
 mod emoji_picker;
 mod http;
+mod members;
 mod mentions;
 mod menus;
 mod moderate;
 mod motion;
 mod notify;
 mod overlay;
+pub mod perf;
 mod rail;
 mod server_settings;
 mod settings;
@@ -34,6 +36,7 @@ use crate::core::Core;
 use crate::core::config::Paths;
 
 pub fn run() -> anyhow::Result<()> {
+    perf::start();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "fuwa_desktop=info,warn".into()),
@@ -51,6 +54,7 @@ pub fn run() -> anyhow::Result<()> {
     }
 
     let core = Core::start(paths)?;
+    perf::mark("core started");
 
     let trusted: http::Trusted = {
         let core = core.clone();
@@ -58,8 +62,10 @@ pub fn run() -> anyhow::Result<()> {
     };
     let pictures = std::sync::Arc::new(http::Client::new(core.handle(), trusted));
     gpui_kit::application().with_assets(assets::Assets).with_http_client(pictures).run(move |cx| {
+        perf::mark("app running");
         gpui_kit::init(cx);
         theme::load_fonts(cx);
+        perf::mark("fonts loaded");
         app::bind_keys(cx);
 
         let bounds = Bounds::centered(None, size(px(1280.0), px(800.0)), cx);
@@ -71,6 +77,7 @@ pub fn run() -> anyhow::Result<()> {
             ..Default::default()
         };
         let opened = gpui_kit::open_window(options, cx, |window, cx| {
+            perf::mark("window open");
             theme::apply(&core.prefs(), window.appearance(), cx);
             cx.new(|cx| app::FuwaApp::new(core.clone(), window, cx))
         });
