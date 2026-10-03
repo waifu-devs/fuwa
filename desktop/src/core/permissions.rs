@@ -13,7 +13,7 @@ pub const fn bit(p: P) -> Bits {
     1 << (p as u32)
 }
 
-const KNOWN: [P; 18] = [
+const KNOWN: [P; 19] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -32,6 +32,7 @@ const KNOWN: [P; 18] = [
     P::ManageMessages,
     P::CreateInvite,
     P::ManageEmoji,
+    P::ManageWebhooks,
 ];
 
 pub const ALL: Bits = {

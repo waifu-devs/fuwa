@@ -11,6 +11,7 @@ pub mod api;
 pub mod config;
 pub mod dms;
 pub mod linked;
+pub mod moderation;
 pub mod notifications;
 pub mod permissions;
 pub mod store;
@@ -175,6 +176,11 @@ impl Core {
             let _ = tx.send(future.await);
         });
         rx
+    }
+
+    /// The core's runtime, for work the window hands it (fetching pictures).
+    pub fn handle(&self) -> tokio::runtime::Handle {
+        self.runtime.handle().clone()
     }
 
     /// Changes whenever the store does.
