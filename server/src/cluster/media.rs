@@ -35,7 +35,12 @@ impl cpb::media_service_server::MediaService for Internal {
         let r = request.into_inner();
         let heard = self
             .0
-            .bridge(&r.room, &r.participant, &r.session_id, May { speak: r.may_speak, hear: r.may_hear, video: false })
+            .bridge(
+                &r.room,
+                &r.participant,
+                &r.session_id,
+                May { speak: r.may_speak, hear: r.may_hear, video: false, screen: false },
+            )
             .await?;
         let events = tokio_stream::wrappers::ReceiverStream::new(heard).map(|bridged| {
             let event = match bridged {
@@ -66,7 +71,7 @@ impl cpb::media_service_server::MediaService for Internal {
                 &r.participant,
                 &r.session_id,
                 &r.offer,
-                May { speak: r.may_speak, hear: r.may_hear, video: r.may_video },
+                May { speak: r.may_speak, hear: r.may_hear, video: r.may_video, screen: r.may_screen },
             )
             .await?;
         Ok(Response::new(cpb::OpenResponse { answer }))
@@ -84,7 +89,12 @@ impl cpb::media_service_server::MediaService for Internal {
         let session = (!r.session_id.is_empty()).then_some(r.session_id.as_str());
         let connected = self
             .0
-            .update(&r.room, &r.participant, session, May { speak: r.may_speak, hear: r.may_hear, video: r.may_video })
+            .update(
+                &r.room,
+                &r.participant,
+                session,
+                May { speak: r.may_speak, hear: r.may_hear, video: r.may_video, screen: r.may_screen },
+            )
             .await?;
         Ok(Response::new(cpb::UpdateResponse { connected }))
     }

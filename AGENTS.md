@@ -170,7 +170,9 @@
     frames labelled by speaker, carried by `listen` in `api/calls.rs` across
     media restarts. Cameras are simulcast (rids l, m, h): `TrackOut` sends
     each viewer the size it asked for over the data channel ("layers"),
-    switching on keyframes, and VIDEO gates them (`May` in `rtc.rs`).
+    switching on keyframes, and VIDEO gates them (`May` in `rtc.rs`). An
+    app's second video track is its shared screen (`Source::Screen`), sent
+    on a stream named `<account>-screen`.
     Calls in direct messages are end-to-end
     encrypted by the apps; the server never holds their keys and only
     forwards sealed frames. Never put a participant's address in a log or an event.

@@ -879,8 +879,8 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     };
     let voice = c.channels.create_channel(authed(&juan, request)).await.unwrap().into_inner().channel.unwrap();
 
-    // Mika films; Juan only watches.
-    let (mut filming, offer) = Peer::with_camera().await;
+    // Mika films (and can share a screen); Juan only watches.
+    let (mut filming, offer) = Peer::with_camera_and_screen().await;
     let request = pb::JoinVoiceRequest {
         server_id: sid.clone(),
         channel_id: voice.id.clone(),
@@ -923,21 +923,34 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
 
     // A camera turned off isn't passed on, even if its app keeps sending.
     watching.say(serde_json::json!({ "type": "layers", "layers": { &mid: "h" } }));
-    let keep = |self_video| pb::KeepVoiceRequest {
+    let keep = |self_video, self_stream| pb::KeepVoiceRequest {
         server_id: sid.clone(),
         session_id: joined.session_id.clone(),
         channel_id: voice.id.clone(),
         self_video,
+        self_stream,
         ..Default::default()
     };
-    c.calls.keep_voice(authed(&mika, keep(false))).await.unwrap();
+    assert_eq!(watching.screens_seen(0), 0, "no screen until it's shared");
+    c.calls.keep_voice(authed(&mika, keep(false, false))).await.unwrap();
     talk(&mut filming, &mut watching, Duration::from_millis(500)).await;
     let from = watching.seen.len();
     talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
     assert_eq!(watching.seen.len(), from, "no frames while the camera says off");
-    c.calls.keep_voice(authed(&mika, keep(true))).await.unwrap();
+    c.calls.keep_voice(authed(&mika, keep(true, false))).await.unwrap();
     talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
     assert!(watching.seen.len() > from + 5, "back once it's on again");
+    assert_eq!(watching.screens_seen(from), 0);
+
+    // Sharing a screen: it comes as a track of its own, next to the camera.
+    let state = c.calls.keep_voice(authed(&mika, keep(true, true))).await.unwrap().into_inner().state.unwrap();
+    assert!(state.self_stream);
+    let from = watching.seen.len();
+    talk(&mut filming, &mut watching, Duration::from_secs(2)).await;
+    assert!(watching.screens_seen(from) > 5, "the screen came through");
+    let screen = watching.seen[from..].iter().find(|(_, f, _)| f.windows(6).any(|w| w == b"screen")).unwrap();
+    assert_ne!(screen.0.to_string(), mid, "on its own track");
+    assert!(screen.2, "starting on a keyframe");
 
     // A channel that takes VIDEO away stops the camera there, and says so.
     let everyone = pb::PermissionOverwrite {

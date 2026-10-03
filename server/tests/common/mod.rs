@@ -23,6 +23,7 @@ pub struct Peer {
     socket: UdpSocket,
     mic: Mid,
     camera: Option<Mid>,
+    screen: Option<Mid>,
     channel: Option<ChannelId>,
     pending: Option<SdpPendingOffer>,
     /// Sound received, by whose it is (the stream id).
@@ -32,33 +33,40 @@ pub struct Peer {
     pub signals: Vec<String>,
     sent: u64,
     filmed: u64,
-    /// Sizes asked for a keyframe.
-    keyframes: Vec<Rid>,
+    /// Tracks and sizes asked for a keyframe.
+    keyframes: Vec<(Mid, Rid)>,
 }
 
 impl Peer {
     pub async fn new() -> (Self, String) {
-        Self::start(false).await
+        Self::start(false, false).await
     }
 
     /// One that sends a camera too, in three sizes.
     pub async fn with_camera() -> (Self, String) {
-        Self::start(true).await
+        Self::start(true, false).await
     }
 
-    async fn start(filming: bool) -> (Self, String) {
+    /// One that sends a camera and a shared screen, each in three sizes.
+    pub async fn with_camera_and_screen() -> (Self, String) {
+        Self::start(true, true).await
+    }
+
+    async fn start(filming: bool, sharing: bool) -> (Self, String) {
         let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let mut rtc = Rtc::builder().build(Instant::now());
         rtc.add_local_candidate(Candidate::host(socket.local_addr().unwrap(), "udp").unwrap());
         let mut change = rtc.sdp_api();
         let mic = change.add_media(MediaKind::Audio, Direction::SendOnly, None, None, None);
-        let camera = filming.then(|| {
+        let mut video = || {
             let mut simulcast = Simulcast::new();
             for size in SIZES {
                 simulcast.add_send_layer(SimulcastLayer::new(size));
             }
             change.add_media(MediaKind::Video, Direction::SendOnly, None, None, Some(simulcast))
-        });
+        };
+        let camera = filming.then(&mut video);
+        let screen = sharing.then(&mut video);
         change.add_channel("fuwa".into());
         let (offer, pending) = change.apply().unwrap();
         let peer = Self {
@@ -66,6 +74,7 @@ impl Peer {
             socket,
             mic,
             camera,
+            screen,
             channel: None,
             pending: Some(pending),
             heard: vec![],
@@ -73,7 +82,12 @@ impl Peer {
             signals: vec![],
             sent: 0,
             filmed: 0,
-            keyframes: SIZES.iter().map(|s| Rid::from(*s)).collect(),
+            // Every camera starts on a keyframe of each size, as browsers' do.
+            keyframes: [camera, screen]
+                .into_iter()
+                .flatten()
+                .flat_map(|mid| SIZES.map(|s| (mid, Rid::from(s))))
+                .collect(),
         };
         (peer, offer.to_sdp_string())
     }
@@ -153,33 +167,41 @@ impl Peer {
             Event::MediaData(data) => self.heard.push((data.mid, data.data.to_vec())),
             Event::KeyframeRequest(request) => {
                 if let Some(rid) = request.rid
-                    && !self.keyframes.contains(&rid)
+                    && !self.keyframes.contains(&(request.mid, rid))
                 {
-                    self.keyframes.push(rid);
+                    self.keyframes.push((request.mid, rid));
                 }
             }
             _ => {}
         }
     }
 
-    /// A frame of each size. Not real VP8, but its first byte says
-    /// keyframe or not as VP8's does, and the next says which size it is.
+    /// A frame of each size, from the camera and the screen. Not real VP8,
+    /// but its first byte says keyframe or not as VP8's does, the next says
+    /// which size it is, and the rest whether it's the camera or the screen.
     fn film(&mut self) {
-        let Some(camera) = self.camera else { return };
         let time = MediaTime::new(self.filmed * 3600, str0m::media::Frequency::NINETY_KHZ);
         self.filmed += 1;
-        for size in SIZES {
-            let rid = Rid::from(size);
-            let keyframe = self.keyframes.contains(&rid);
-            self.keyframes.retain(|r| *r != rid);
-            let Some(writer) = self.rtc.writer(camera) else { return };
-            let Some(pt) = writer.payload_params().find(|p| p.spec().codec == Codec::Vp8).map(|p| p.pt()) else {
-                return;
-            };
-            let mut frame = vec![if keyframe { 0x00 } else { 0x01 }];
-            frame.extend(format!("{size} frame {}", self.filmed).into_bytes());
-            writer.rid(rid).write(pt, Instant::now(), time, frame).unwrap();
+        for (mid, what) in [(self.camera, "camera"), (self.screen, "screen")] {
+            let Some(mid) = mid else { continue };
+            for size in SIZES {
+                let rid = Rid::from(size);
+                let keyframe = self.keyframes.contains(&(mid, rid));
+                self.keyframes.retain(|k| *k != (mid, rid));
+                let Some(writer) = self.rtc.writer(mid) else { return };
+                let Some(pt) = writer.payload_params().find(|p| p.spec().codec == Codec::Vp8).map(|p| p.pt()) else {
+                    return;
+                };
+                let mut frame = vec![if keyframe { 0x00 } else { 0x01 }];
+                frame.extend(format!("{size} {what} {}", self.filmed).into_bytes());
+                writer.rid(rid).write(pt, Instant::now(), time, frame).unwrap();
+            }
         }
+    }
+
+    /// How many camera frames since `from` were of a shared screen.
+    pub fn screens_seen(&self, from: usize) -> usize {
+        self.seen[from..].iter().filter(|(_, frame, _)| frame.windows(6).any(|w| w == b"screen")).count()
     }
 
     fn speak(&mut self) {

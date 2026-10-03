@@ -221,6 +221,8 @@ pub struct May {
     pub hear: bool,
     /// Their camera is passed on.
     pub video: bool,
+    /// Their shared screen is passed on.
+    pub screen: bool,
 }
 
 /// What a bridge hears, and how it ends.
@@ -557,6 +559,26 @@ struct TrackIn {
     participant: String,
     mid: Mid,
     kind: MediaKind,
+    source: Source,
+}
+
+/// What a track carries: each app sends one of each at most.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Source {
+    Microphone,
+    Camera,
+    /// A shared screen: an app's second video track.
+    Screen,
+}
+
+/// What the stream of a track that goes out is named: whose it is, and
+/// `-screen` after a shared screen, so apps tell it from the camera (stream
+/// names keep only letters, digits and dashes on the way).
+fn stream_of(participant: &str, source: Source) -> String {
+    match source {
+        Source::Screen => format!("{participant}-screen"),
+        _ => participant.to_string(),
+    }
 }
 
 /// A track someone sends here.
@@ -649,6 +671,8 @@ struct Client {
     sent: (Instant, usize),
     /// Camera it sent this second, every size together: (since, bytes).
     filmed: (Instant, usize),
+    /// Shared screen it sent this second, the same way.
+    shown: (Instant, usize),
 }
 
 /// The most an app's offer may be.
@@ -693,10 +717,10 @@ fn offer_allowed(sdp: &str) -> bool {
         }
     }
     let sending = |kind: &str| sections.iter().filter(|(k, sends)| *k == kind && *sends).count();
-    sections.len() <= 2 * MAX_ROOM + 3
+    sections.len() <= 3 * MAX_ROOM + 4
         && sections.iter().all(|(k, _)| matches!(*k, "audio" | "video" | "application"))
         && sending("audio") <= 1
-        && sending("video") <= 1
+        && sending("video") <= 2
         && sections.iter().filter(|(k, _)| *k == "application").count() <= 1
 }
 
@@ -751,9 +775,9 @@ impl Client {
             match track.state {
                 TrackState::ToOpen => {
                     if let Some(from) = track.from.upgrade() {
-                        // The stream is named for whoever's sound it is, so the
-                        // app knows whose track it got.
-                        let stream = from.participant.clone();
+                        // The stream is named for whoever's track it is, so the
+                        // app knows whose it got (and that it's a screen).
+                        let stream = stream_of(&from.participant, from.source);
                         let mid = change.add_media(from.kind, Direction::SendOnly, Some(stream), None, None);
                         track.state = TrackState::Negotiating(mid);
                     }
@@ -870,15 +894,23 @@ impl Client {
                 }
             }
             Event::ChannelData(data) if Some(data.id) == self.channel => self.on_signal(data),
-            // One track of sound and one of camera from each app; anything
-            // more it can't send.
-            Event::MediaAdded(added) if self.tracks_in.iter().any(|t| t.track.kind == added.kind) => {}
+            // One track of sound, one of camera and one of screen from each
+            // app (its first video track is the camera, the second the
+            // screen); anything more it can't send.
             Event::MediaAdded(added) => {
+                let has = |source| self.tracks_in.iter().any(|t| t.track.source == source);
+                let source = match added.kind {
+                    MediaKind::Audio if !has(Source::Microphone) => Source::Microphone,
+                    MediaKind::Video if !has(Source::Camera) => Source::Camera,
+                    MediaKind::Video if !has(Source::Screen) => Source::Screen,
+                    _ => return,
+                };
                 let track = Arc::new(TrackIn {
                     origin: self.id,
                     participant: self.participant.clone(),
                     mid: added.mid,
                     kind: added.kind,
+                    source,
                 });
                 let incoming = Incoming::new(track);
                 if incoming.shared {
@@ -887,16 +919,21 @@ impl Client {
                 self.tracks_in.push(incoming);
             }
             Event::MediaData(data) => {
-                let Some(kind) = self.tracks_in.iter().find(|t| t.track.mid == data.mid).map(|t| t.track.kind) else {
+                let Some(source) = self.tracks_in.iter().find(|t| t.track.mid == data.mid).map(|t| t.track.source)
+                else {
                     return;
                 };
-                if !self.within_budget(kind, data.data.len()) {
+                if !self.within_budget(source, data.data.len()) {
                     return;
                 }
                 if !data.contiguous {
                     self.ask_keyframe(data.mid, data.rid, KeyframeRequestKind::Fir);
                 }
-                let allowed = if kind == MediaKind::Video { self.may.video } else { self.may.speak };
+                let allowed = match source {
+                    Source::Microphone => self.may.speak,
+                    Source::Camera => self.may.video,
+                    Source::Screen => self.may.screen,
+                };
                 if !allowed || self.leaving.is_some() {
                     return;
                 }
@@ -923,10 +960,11 @@ impl Client {
     }
 
     /// Whether a frame this size fits in what one person may send.
-    fn within_budget(&mut self, kind: MediaKind, len: usize) -> bool {
-        let (most, per_second, spent) = match kind {
-            MediaKind::Video => (MAX_VIDEO_FRAME, MAX_VIDEO_BYTES_PER_SECOND, &mut self.filmed),
-            MediaKind::Audio => (MAX_FRAME, MAX_BYTES_PER_SECOND, &mut self.sent),
+    fn within_budget(&mut self, source: Source, len: usize) -> bool {
+        let (most, per_second, spent) = match source {
+            Source::Camera => (MAX_VIDEO_FRAME, MAX_VIDEO_BYTES_PER_SECOND, &mut self.filmed),
+            Source::Screen => (MAX_VIDEO_FRAME, MAX_VIDEO_BYTES_PER_SECOND, &mut self.shown),
+            Source::Microphone => (MAX_FRAME, MAX_BYTES_PER_SECOND, &mut self.sent),
         };
         if len > most {
             return false;
@@ -1247,7 +1285,7 @@ impl Engine {
                 }
                 for bridge in &mut self.bridges {
                     if bridge.room == room && bridge.participant == participant {
-                        bridge.may = May { video: false, ..may };
+                        bridge.may = May { video: false, screen: false, ..may };
                         connected |= session_id.as_ref().is_none_or(|s| *s == bridge.session_id);
                     }
                 }
@@ -1334,6 +1372,7 @@ impl Engine {
             offers: VecDeque::new(),
             sent: (now, 0),
             filmed: (now, 0),
+            shown: (now, 0),
         };
         // Everyone else's sound and cameras, offered once the data channel is up.
         for other in self.clients.iter().filter(|c| c.room == client.room && c.leaving.is_none()) {
@@ -1402,6 +1441,7 @@ impl Engine {
             participant: participant.clone(),
             mid: Mid::from("bridge"),
             kind: MediaKind::Audio,
+            source: Source::Microphone,
         });
         for client in self.clients.iter_mut().filter(|c| c.room == room) {
             client.tracks_out.push(TrackOut::new(Arc::downgrade(&track)));
@@ -1414,7 +1454,7 @@ impl Engine {
             events,
             track,
             // Programs only ever get sound.
-            may: May { video: false, ..may },
+            may: May { video: false, screen: false, ..may },
             queue: VecDeque::new(),
             started: now,
             next: now,
@@ -1574,7 +1614,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn offers_send_one_microphone_and_one_camera_at_most() {
+    fn offers_send_one_microphone_one_camera_and_one_screen_at_most() {
         let sdp = |sections: &[(&str, &str)]| {
             let mut s = String::from("v=0\r\n");
             for (kind, dir) in sections {
@@ -1586,9 +1626,10 @@ mod tests {
         assert!(offer_allowed(&sdp(&[("audio", "sendrecv"), ("application", "sendrecv"), ("audio", "recvonly")])));
         assert!(!offer_allowed(&sdp(&[("audio", "sendonly"), ("audio", "sendrecv")])), "two microphones");
         assert!(offer_allowed(&sdp(&[("audio", "sendonly"), ("video", "sendonly"), ("application", "sendrecv")])));
-        assert!(!offer_allowed(&sdp(&[("video", "sendonly"), ("video", "sendonly")])), "two cameras");
+        assert!(offer_allowed(&sdp(&[("video", "sendonly"), ("video", "sendonly")])), "a camera and a screen");
+        assert!(!offer_allowed(&sdp(&[("video", "sendonly"); 3])), "three videos");
         assert!(!offer_allowed(&sdp(&[("text", "sendonly")])));
-        assert!(!offer_allowed(&sdp(&vec![("audio", "recvonly"); 2 * MAX_ROOM + 4])), "too many");
+        assert!(!offer_allowed(&sdp(&vec![("audio", "recvonly"); 3 * MAX_ROOM + 5])), "too many");
         assert!(!offer_allowed(&"a".repeat(MAX_SDP + 1)));
     }
 
@@ -1596,7 +1637,7 @@ mod tests {
     async fn programs_stay_out_of_direct_message_calls() {
         let config = MediaConfig { port: 0, addresses: vec![Advertised::parse("127.0.0.1").unwrap()] };
         let sfu = Sfu::start(config, CancellationToken::new()).await.unwrap();
-        let may = May { speak: true, hear: true, video: true };
+        let may = May { speak: true, hear: true, video: true, screen: true };
         assert!(sfu.bridge("d/conversation", "bot", "s1", may).await.is_err());
         assert!(sfu.bridge("s/server/channel", "bot", "s1", may).await.is_ok());
     }

@@ -34,6 +34,8 @@ export type CallsState = {
   selfDeaf: boolean;
   /** Your camera is on. Unlike mute, every call starts with it off. */
   selfVideo: boolean;
+  /** You're sharing your screen. Every call starts without. */
+  selfStream: boolean;
   /** Who's talking right now in your call, by user id (you included). */
   speaking: Record<string, boolean>;
   /** Push to talk's key is down. */
@@ -55,7 +57,7 @@ function load(): Pick<CallsState, "selfMute" | "selfDeaf"> {
   }
 }
 
-let state: CallsState = { call: null, speaking: {}, talking: false, declined: {}, ended: null, selfVideo: false, ...load() };
+let state: CallsState = { call: null, speaking: {}, talking: false, declined: {}, ended: null, selfVideo: false, selfStream: false, ...load() };
 const listeners = new Set<() => void>();
 
 export const getCalls = () => state;

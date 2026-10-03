@@ -143,6 +143,8 @@ message OpenRequest {
   bool may_hear = 6;
   // Whether their camera's frames are passed on.
   bool may_video = 7;
+  // Whether their shared screen's frames are passed on.
+  bool may_screen = 8;
 }
 
 message OpenResponse {
@@ -167,6 +169,7 @@ message UpdateRequest {
   // Only if it's still this session; empty for whichever.
   string session_id = 5;
   bool may_video = 6;
+  bool may_screen = 7;
 }
 
 message UpdateResponse {
