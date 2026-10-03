@@ -346,7 +346,7 @@ pub async fn sweep(app: &App, now: i64) -> Result<usize> {
         for (id, path) in pictures(&app.config.data_path, &server_id)? {
             let arrived = std::fs::metadata(&path)?.modified()?;
             let arrived = arrived.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
-            if now - arrived >= UNUSED_FOR_MS && !uses(app, &server_id, &id).await {
+            if now - arrived >= UNUSED_FOR_MS && unused(uses(app, &server_id, &id).await, &id) {
                 drop(app, &server_id, &id).await;
                 swept += 1;
             }
@@ -366,7 +366,7 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
     let path = app.config.data_path.join(&key);
     // Only a picture the server uses is fetched back, so asking for made-up
     // ids never reaches the bucket.
-    if !path.exists() && !(uses(app, &server_id, &id).await && restore(app, &key, &path).await) {
+    if !path.exists() && !(matches!(uses(app, &server_id, &id).await, Ok(true)) && restore(app, &key, &path).await) {
         return plain(StatusCode::NOT_FOUND, "not found");
     }
     let etag = format!("\"{id}\"");
@@ -386,9 +386,22 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
     response
 }
 
+/// Whether a picture is certainly unused, so the sweep may delete it. When
+/// the server couldn't be asked (it's busy, restarting or moving), it's
+/// kept: only a definite no deletes anything.
+fn unused(used: Result<bool>, media_id: &str) -> bool {
+    match used {
+        Ok(used) => !used,
+        Err(err) => {
+            tracing::warn!(media = %media_id, error = %err, "couldn't tell whether a server uses a picture; keeping it");
+            false
+        }
+    }
+}
+
 /// Whether the server links to the picture: its icon, an emoji or a
 /// webhook's picture.
-async fn uses(app: &App, server_id: &str, media_id: &str) -> bool {
+async fn uses(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
     let used = async {
         let sdb = app.servers.get(server_id).await?;
         let conn = sdb.read()?;
@@ -405,7 +418,7 @@ async fn uses(app: &App, server_id: &str, media_id: &str) -> bool {
         .await
     }
     .await;
-    matches!(used, Ok(Some(_)))
+    used.map(|found| found.is_some())
 }
 
 /// Fetches a picture this shard lost (its disk was replaced) back from its
@@ -572,6 +585,15 @@ fn is_id(file: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_definite_no_sweeps_a_picture() {
+        assert!(unused(Ok(false), "x"));
+        assert!(!unused(Ok(true), "x"));
+        for failed in [Error::Busy, Error::Misrouted, Error::Moving, Error::internal("the read failed")] {
+            assert!(!unused(Err(failed), "x"));
+        }
+    }
 
     #[test]
     fn only_picture_ids_name_files() {
