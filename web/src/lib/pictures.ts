@@ -85,3 +85,32 @@ export async function cropped(image: HTMLImageElement, crop: Crop, kind: Picture
   if (!png) throw new Error("this browser couldn't save the crop");
   return png;
 }
+
+/** The longest side backgrounds are kept at: sharp on a 1440p screen, small enough to load fast. */
+export const BACKGROUND_MAX = 2560;
+
+/**
+ * A background picture ready to upload: scaled down to `BACKGROUND_MAX` and
+ * saved as WebP where the browser can (GIFs go as they are, so they keep
+ * moving). Small pictures that are already WebP go untouched.
+ */
+export async function backgroundPicture(file: Blob): Promise<Blob> {
+  if (file.type === "image/gif") return file;
+  const url = URL.createObjectURL(file);
+  try {
+    const image = await loadImage(url);
+    const scale = Math.min(1, BACKGROUND_MAX / Math.max(image.naturalWidth, image.naturalHeight));
+    if (scale === 1 && file.type === "image/webp") return file;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.88));
+    return blob && blob.type === "image/webp" && blob.size < file.size ? blob : file;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

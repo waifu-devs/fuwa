@@ -2,6 +2,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { MotionConfig } from "motion/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { AppBackdrop } from "@/components/Backdrop";
 import { refreshOnFocus } from "@/fuwa/actions";
 import { restore } from "@/fuwa/sync";
 import { watchUnread } from "@/lib/notify";
@@ -24,6 +25,7 @@ function App() {
   return (
     <MotionConfig reducedMotion={reduce === "system" ? "user" : reduce}>
       <RouterProvider router={router} />
+      <AppBackdrop />
     </MotionConfig>
   );
 }

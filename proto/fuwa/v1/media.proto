@@ -5,7 +5,7 @@ package fuwa.v1;
 import "google/protobuf/timestamp.proto";
 
 // Pictures people upload to this instance: profile pictures, profile banners,
-// server icons and custom emoji.
+// server icons, custom emoji and app backgrounds.
 //
 // An upload takes two steps. CreateUpload checks the file and reserves a
 // place for it; then an HTTP PUT of the file's bytes to `upload_url` stores
@@ -13,8 +13,18 @@ import "google/protobuf/timestamp.proto";
 // picture is then served at `media.url` to anyone with the link. Setting that
 // URL as an avatar, banner or server icon keeps it; replacing or clearing it
 // deletes the old one. Uploads nothing uses are deleted after a day.
+//
+// Backgrounds are pictures people put behind the app (fuwa themes). The app
+// settings that use them live on the device, so the instance keeps a small
+// list of each account's backgrounds instead: KeepBackground adds an upload
+// to it, and DeleteBackground removes one and its file.
 service MediaService {
   rpc CreateUpload(CreateUploadRequest) returns (CreateUploadResponse);
+  // Keeps an uploaded background, so it isn't swept. At most 24 per account.
+  rpc KeepBackground(KeepBackgroundRequest) returns (KeepBackgroundResponse);
+  // Your kept backgrounds, newest first.
+  rpc ListBackgrounds(ListBackgroundsRequest) returns (ListBackgroundsResponse);
+  rpc DeleteBackground(DeleteBackgroundRequest) returns (DeleteBackgroundResponse);
 }
 
 // What an upload is for. A picture can only be used for what it was uploaded
@@ -26,6 +36,8 @@ enum MediaPurpose {
   MEDIA_PURPOSE_SERVER_ICON = 3;
   // A server's custom emoji.
   MEDIA_PURPOSE_EMOJI = 4;
+  // A picture behind the app, kept with KeepBackground.
+  MEDIA_PURPOSE_BACKGROUND = 5;
 }
 
 // A stored file.
@@ -54,3 +66,24 @@ message CreateUploadResponse {
   // Where the file will be once it's stored.
   Media media = 3;
 }
+
+message KeepBackgroundRequest {
+  // The `media.url` of a stored background upload of yours.
+  string url = 1;
+}
+
+message KeepBackgroundResponse {
+  Media media = 1;
+}
+
+message ListBackgroundsRequest {}
+
+message ListBackgroundsResponse {
+  repeated Media backgrounds = 1;
+}
+
+message DeleteBackgroundRequest {
+  string url = 1;
+}
+
+message DeleteBackgroundResponse {}

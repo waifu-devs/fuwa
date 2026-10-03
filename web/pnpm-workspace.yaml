@@ -1,4 +1,7 @@
 # pnpm settings for the web app.
 # buf's install script isn't needed: pnpm installs its binary as a platform package.
+# vgpu's Node adapter (and the Dawn build under it) is for its command line, not the app.
 ignoredBuiltDependencies:
   - "@bufbuild/buf"
+  - "@vgpu/adapter-node"
+  - "webgpu"

@@ -1,4 +1,4 @@
-//! Pictures people upload: avatars, banners and server icons.
+//! Pictures people upload: avatars, banners, server icons, emoji and backgrounds.
 //!
 //! An upload is reserved with `MediaService.CreateUpload`, which makes a row
 //! in node.db's `media` table and a one-time token. The bytes arrive with an
@@ -39,6 +39,9 @@ const RECEIVE_TTL_MS: i64 = 60 * 60 * 1000;
 
 /// How long a stored picture waits to be used before it's swept.
 pub const UNUSED_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Backgrounds one account may keep (`MediaService.KeepBackground`).
+pub const MAX_BACKGROUNDS: usize = 24;
 
 /// Uploads one account may have reserved and not finished at once.
 pub const MAX_PENDING_UPLOADS: i64 = 10;

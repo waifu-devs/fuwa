@@ -23,9 +23,14 @@ impl MediaService for Api {
                         purpose @ (pb::MediaPurpose::Avatar
                         | pb::MediaPurpose::Banner
                         | pb::MediaPurpose::ServerIcon
-                        | pb::MediaPurpose::Emoji),
+                        | pb::MediaPurpose::Emoji
+                        | pb::MediaPurpose::Background),
                     ) => purpose,
-                    _ => return Err(Error::invalid("an upload is an avatar, a banner, a server icon or an emoji")),
+                    _ => {
+                        return Err(Error::invalid(
+                            "an upload is an avatar, a banner, a server icon, an emoji or a background",
+                        ));
+                    }
                 };
                 if !media::PICTURE_TYPES.contains(&req.content_type.as_str()) {
                     return Err(Error::invalid("pictures can be PNG, JPEG, GIF, WebP or AVIF"));
@@ -78,9 +83,84 @@ impl MediaService for Api {
             .await,
         )
     }
+
+    async fn keep_background(
+        &self,
+        request: Request<pb::KeepBackgroundRequest>,
+    ) -> Result<Response<pb::KeepBackgroundResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let url = request.into_inner().url;
+                let Some(upload) = self.check_upload(&account, pb::MediaPurpose::Background, &url).await? else {
+                    return Err(Error::invalid("upload the background to this instance first"));
+                };
+                let node = self.app.node()?;
+                let kept = node.backgrounds(&account.id).await?;
+                if !kept.iter().any(|row| row.id == upload.id) && kept.len() >= media::MAX_BACKGROUNDS {
+                    return Err(Error::ResourceExhausted(format!(
+                        "you can keep {} backgrounds here; delete one first",
+                        media::MAX_BACKGROUNDS
+                    )));
+                }
+                node.use_media(&upload.id, None).await?;
+                Ok(pb::KeepBackgroundResponse {
+                    media: Some(self.served(&upload.id, upload.content_type, upload.size)),
+                })
+            }
+            .await,
+        )
+    }
+
+    async fn list_backgrounds(
+        &self,
+        request: Request<pb::ListBackgroundsRequest>,
+    ) -> Result<Response<pb::ListBackgroundsResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let rows = self.app.node()?.backgrounds(&account.id).await?;
+                Ok(pb::ListBackgroundsResponse {
+                    backgrounds: rows.into_iter().map(|row| self.served(&row.id, row.content_type, row.size)).collect(),
+                })
+            }
+            .await,
+        )
+    }
+
+    async fn delete_background(
+        &self,
+        request: Request<pb::DeleteBackgroundRequest>,
+    ) -> Result<Response<pb::DeleteBackgroundResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let url = request.into_inner().url;
+                let Some(id) = media::id_in_url(&url) else {
+                    return Err(Error::invalid("that isn't a background here"));
+                };
+                match self.app.node()?.media(&id).await? {
+                    Some(row) if row.account_id == account.id && row.purpose == pb::MediaPurpose::Background => {
+                        self.app.delete_media(&[id]).await?;
+                    }
+                    // Already gone: deleting twice is fine.
+                    None => {}
+                    Some(_) => return Err(Error::denied("that background isn't yours")),
+                }
+                Ok(pb::DeleteBackgroundResponse {})
+            }
+            .await,
+        )
+    }
 }
 
 impl Api {
+    /// An upload as apps see it, at this instance's public address.
+    fn served(&self, id: &str, content_type: String, size: i64) -> pb::Media {
+        let base = self.app.settings().public_url.clone();
+        pb::Media { url: format!("{base}/media/{id}"), id: id.to_string(), content_type, size }
+    }
+
     /// Checks a picture link about to be set; see [`App::check_picture`](crate::app::App::check_picture).
     pub(super) async fn check_picture(
         &self,
