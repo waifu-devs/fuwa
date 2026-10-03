@@ -1,0 +1,95 @@
+name: Desktop installers
+
+# The desktop app (desktop/) for each system, ready to install:
+#   Linux    fuwa-desktop-<version>-x86_64-linux.deb and .AppImage
+#   macOS    fuwa-desktop-<version>-aarch64-macos.dmg
+#   Windows  fuwa-desktop-<version>-x86_64-windows-setup.exe
+# and the bare program for each, as before. cargo-packager does the packing,
+# from [package.metadata.packager] in desktop/Cargo.toml. They aren't signed
+# yet, so macOS and Windows warn the first time they open.
+#
+# Release runs this for each tag and attaches what it makes. A pull request
+# that changes the packaging runs it too, so a broken installer shows up
+# before a release, and it can be started by hand from Actions.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The version in the file names.
+        type: string
+        required: true
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - desktop/Cargo.toml
+      - desktop/packaging/**
+      - .github/workflows/desktop.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Desktop app, ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux (x64)
+            runner: ubuntu-latest
+            file: x86_64-linux
+            exe: ""
+            formats: deb,appimage
+          - name: macOS (Apple silicon)
+            runner: macos-latest
+            file: aarch64-macos
+            exe: ""
+            formats: dmg
+          - name: Windows (x64)
+            runner: windows-latest
+            file: x86_64-windows
+            exe: .exe
+            formats: nsis
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    env:
+      VERSION: ${{ inputs.version || format('0.0.0-{0}', github.run_number) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: What GPUI needs on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
+            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libfuse2t64
+      - uses: dtolnay/rust-toolchain@stable
+      # The version is pinned so a new cargo-packager can't change the installers by surprise.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@0.11.8
+      - run: cargo build --release --locked --bin fuwa-desktop
+      - run: cargo packager --release --formats ${{ matrix.formats }}
+      - name: Name them for the release
+        run: |
+          mkdir dist
+          base="fuwa-desktop-$VERSION-${{ matrix.file }}"
+          cp "target/release/fuwa-desktop${{ matrix.exe }}" "dist/$base${{ matrix.exe }}"
+          shopt -s nullglob
+          for f in target/packages/*.deb; do cp "$f" "dist/$base.deb"; done
+          for f in target/packages/*.AppImage; do cp "$f" "dist/$base.AppImage"; done
+          for f in target/packages/*.dmg; do cp "$f" "dist/$base.dmg"; done
+          for f in target/packages/*-setup.exe; do cp "$f" "dist/$base-setup.exe"; done
+          ls -la dist
+          # Each system gets its installer, or this fails.
+          case "${{ runner.os }}" in
+            Linux) test -f "dist/$base.deb" && test -f "dist/$base.AppImage" ;;
+            macOS) test -f "dist/$base.dmg" ;;
+            Windows) test -f "dist/$base-setup.exe" ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fuwa-desktop-${{ matrix.file }}
+          path: desktop/dist/*

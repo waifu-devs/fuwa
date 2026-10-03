@@ -12,7 +12,8 @@ use tokio::sync::watch;
 use tonic::Code;
 
 use crate::core::api::{Api, Problem};
-use crate::core::dms::{DmEngine, DmStatus};
+use crate::core::dms::{self, DmEngine, DmStatus};
+use crate::core::notifications;
 use crate::core::store::{self, Connection, Outcome};
 use crate::core::{Core, Notice};
 use crate::pb;
@@ -22,6 +23,8 @@ use crate::rpc;
 const SILENCE: Duration = Duration::from_secs(70);
 /// How often the instance's public details (and its announcement) are read again.
 const NODE_REFRESH: Duration = Duration::from_secs(60);
+/// Events older than this came in while catching up after a reconnect; they stay quiet.
+const FRESH_MS: i64 = 30_000;
 
 /// Retry quickly at first, then every 20 seconds at most, a little at random.
 struct Backoff(Duration);
@@ -116,6 +119,9 @@ async fn follow_instance(
         start_dms(core, key, api, user, &token, dms);
     }
 
+    // Notification settings follow the account; an older instance without them just has none.
+    core.refresh_notifications(key).await;
+
     let servers = retrying(core, key, || rpc!(api.servers(), list_servers(pb::ListServersRequest {}))).await?.servers;
     let ids: Vec<String> = servers.iter().map(|s| s.id.clone()).collect();
     core.shared.instance(key, |i| {
@@ -137,6 +143,8 @@ async fn follow_instance(
                 if let Ok(res) = rpc!(api.node(), get_node(pb::GetNodeRequest {})).await {
                     core.shared.instance(&key, |i| i.node = res.node);
                 }
+                // Notification settings changed on another device don't send an event either.
+                core.refresh_notifications(&key).await;
             }
         })
     };
@@ -326,6 +334,7 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
             list.push(event.clone());
         }
     }
+    let prefs = core.prefs();
     let (outcome, name, notice) = core.shared.update(|store| {
         let focus = store.focus_channel(key).map(str::to_owned);
         let Some(i) = store.instances.get_mut(key) else { return (Outcome::Nothing, None, None) };
@@ -334,7 +343,14 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
         let notice = match (&outcome, &event.payload) {
             (Outcome::Unread { channel_id }, Some(Payload::MessageCreated(created))) => {
                 created.message.as_ref().and_then(|m| {
-                    (m.kind == pb::MessageKind::Unspecified as i32).then(|| Notice::Message {
+                    // Join messages and catching up after a reconnect stay quiet.
+                    let fresh = event.created_at.as_ref().is_none_or(|t| dms::now_ms() - t.seconds * 1000 < FRESH_MS);
+                    if m.kind != pb::MessageKind::Unspecified as i32 || !fresh {
+                        return None;
+                    }
+                    let settings = i.effective_notifications(&sid, channel_id, dms::now_ms());
+                    let mention = i.pings_me(&sid, m, settings.suppress_everyone);
+                    notifications::should_notify(settings, mention, &prefs).then(|| Notice::Message {
                         instance: key.to_owned(),
                         server_id: Some(sid.clone()),
                         channel_id: channel_id.clone(),
@@ -343,7 +359,8 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
                             i.display_name(Some(&sid), &m.author_id),
                             i.channel(&sid, channel_id).map(|c| c.name.as_str()).unwrap_or("a channel")
                         ),
-                        body: m.content.chars().take(140).collect(),
+                        body: m.content.chars().take(160).collect(),
+                        mention,
                     })
                 })
             }

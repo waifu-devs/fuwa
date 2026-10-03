@@ -64,6 +64,8 @@ pub struct InstanceState {
     /// Servers whose channels and members are loaded.
     pub synced: HashSet<String>,
     pub dms: DmState,
+    /// Your notification settings, by `notifications::key`. Only servers and channels that have some.
+    pub notifications: HashMap<String, pb::NotificationSettings>,
 }
 
 impl InstanceState {
@@ -86,6 +88,7 @@ impl InstanceState {
             unread: HashMap::new(),
             synced: HashSet::new(),
             dms: DmState::default(),
+            notifications: HashMap::new(),
         }
     }
 
@@ -117,11 +120,17 @@ impl InstanceState {
         }
     }
 
-    /// Unread messages across a server's channels.
+    /// Unread messages across a server's channels; muted ones don't count.
     pub fn server_unread(&self, server_id: &str) -> u32 {
+        let now = crate::core::dms::now_ms();
         self.channels
             .get(server_id)
-            .map(|list| list.iter().map(|c| self.unread.get(&c.id).copied().unwrap_or(0)).sum())
+            .map(|list| {
+                list.iter()
+                    .filter(|c| !self.is_muted(server_id, &c.id, now))
+                    .map(|c| self.unread.get(&c.id).copied().unwrap_or(0))
+                    .sum()
+            })
             .unwrap_or(0)
     }
 

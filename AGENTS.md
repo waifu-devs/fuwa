@@ -176,17 +176,31 @@
     device per install and account, through `fuwa-e2ee`'s `client` feature,
     kept in 0600 files under the app's data folder; signing out wipes it),
     `linked.rs` (waifu.dev sign-in through the browser and a loopback page),
-    `config.rs` (saved instances and the app's settings). It runs on its own
+    `config.rs` (saved instances and the app's settings), `permissions.rs`
+    (what you may do in a server, a port of `web/src/lib/permissions.ts`),
+    `notifications.rs` (per channel and server levels and mutes, kept on the
+    instance, and whether a message should notify), `account.rs` (profile,
+    pictures, password, signed-in devices, rules, creating channels). It runs on its own
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
-    `overlay.rs` draw the parts; `motion.rs` is how things move (springs,
+    `overlay.rs` draw the parts; `compose.rs` is the @ list and editing in
+    place (and the keys they take first), `mentions.rs` finds mentions and
+    makes them links, `menus.rs` the bell menus, `notify.rs` the system
+    notifications (clicks come back through a channel), `settings_account.rs`
+    the profile and security pages; `motion.rs` is how things move (springs,
     rises, glides, all settling at once with reduced motion); `theme.rs` is
     the web app's palettes and the bundled font (M PLUS Rounded 1c, whose
     files name the family "Rounded Mplus 1c").
   - `tests/core.rs`: two app cores against an in-process instance: servers,
-    live messages, unread counts, encrypted DMs both ways, and that no
-    plaintext reaches the instance's files.
+    live messages, mentions that notify, edits, mutes kept on the instance,
+    unread counts, encrypted DMs both ways, and that no plaintext reaches the
+    instance's files.
+  - `packaging/`: the icon (`icon.svg`, and the PNGs and `.ico` made from it)
+    for the installers. `[package.metadata.packager]` in `Cargo.toml` tells
+    cargo-packager what to make, and `.github/workflows/desktop.yml` makes
+    them: a `.deb` and AppImage for Linux, a `.dmg` for macOS, an NSIS
+    `-setup.exe` for Windows. Release calls it for each tag.
 - `web/`: the web app (pnpm, Vite, React 19, TanStack Router, Tailwind 4,
   shadcn/ui and Animate UI copied from the waifu.dev site, Effect).
   - `src/gen/`: protobuf code from `pnpm generate`. Generated, committed, never
