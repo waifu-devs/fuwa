@@ -1131,6 +1131,7 @@ pub(super) async fn tell_ended(app: &Arc<App>, server_id: &str, actor_id: &str, 
     for (connection_id, guest_server_id) in ended.guests {
         let call = Call::Ended(cpb::HomeEnded { connection_id, actor_id: actor_id.to_string() });
         if let Err(err) = app.shared(cpb::SharedCall { server_id: guest_server_id, call: Some(call) }).await {
+            crate::reports::server_error("shared_ended", Some("SharedChannels/ended"));
             tracing::info!(error = %err, "couldn't tell a server a shared channel ended");
         }
     }
@@ -1139,6 +1140,7 @@ pub(super) async fn tell_ended(app: &Arc<App>, server_id: &str, actor_id: &str, 
             cpb::GuestLeft { connection_id, guest_server_id: server_id.to_string(), actor_id: actor_id.to_string() };
         if let Err(err) = app.shared(cpb::SharedCall { server_id: home_server_id, call: Some(Call::Left(left)) }).await
         {
+            crate::reports::server_error("shared_ended", Some("SharedChannels/ended"));
             tracing::info!(error = %err, "couldn't tell a server a shared channel ended");
         }
     }
@@ -1209,6 +1211,7 @@ async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
         }
         .await;
         if let Err(err) = decorated {
+            crate::reports::server_error("shared_decorate", Some("SharedChannels/fanout"));
             tracing::warn!(server = %event.server_id, error = %err, "couldn't say who wrote a shared message");
             return None;
         }
@@ -1225,7 +1228,10 @@ fn spawn_queue(app: Arc<App>) -> mpsc::UnboundedSender<Outgoing> {
     let (tx, mut rx) = mpsc::unbounded_channel::<Outgoing>();
     tokio::spawn(async move {
         while let Some((home_id, connection_id, call)) = rx.recv().await {
-            match app.shared(call).await {
+            let started = std::time::Instant::now();
+            let passed = app.shared(call).await;
+            crate::reports::server_timing("shared.fanout", started.elapsed());
+            match passed {
                 Ok(_) => {}
                 // The guest doesn't show the channel anymore: let it go here too.
                 Err(err) if gone(&err) => {
@@ -1236,10 +1242,14 @@ fn spawn_queue(app: Arc<App>) -> mpsc::UnboundedSender<Outgoing> {
                     }
                     .await;
                     if let Err(err) = healed {
+                        crate::reports::server_error("shared_heal", Some("SharedChannels/fanout"));
                         tracing::warn!(server = %home_id, error = %err, "couldn't end a shared channel its guest left");
                     }
                 }
-                Err(err) => tracing::info!(error = %err, "couldn't show a server what happened in a shared channel"),
+                Err(err) => {
+                    crate::reports::server_error("shared_fanout", Some("SharedChannels/fanout"));
+                    tracing::info!(error = %err, "couldn't show a server what happened in a shared channel");
+                }
             }
         }
     });
