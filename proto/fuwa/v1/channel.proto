@@ -155,6 +155,10 @@ message SharedConnection {
   // SEND_MESSAGES, EMBED_LINKS and ATTACH_FILES. VIEW_CHANNELS always.
   repeated Permission allowed = 7;
   google.protobuf.Timestamp created_at = 8;
+  // Outside AutoMod providers the home's rules send the channel's messages
+  // to, as "Name (host)", the guest's people's included. Asked of the home
+  // each time the list is read; empty when none, or when it couldn't be.
+  repeated string checked_by = 9;
 }
 
 enum SharedConnectionState {

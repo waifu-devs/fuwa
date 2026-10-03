@@ -13,6 +13,7 @@ pub mod backgrounds;
 pub mod calls;
 pub mod config;
 pub mod dms;
+pub mod instance_admin;
 pub mod keybinds;
 pub mod linked;
 pub mod moderation;

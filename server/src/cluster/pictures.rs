@@ -478,8 +478,9 @@ pub async fn finish_upload(
         return Err(Error::FailedPrecondition("that isn't an upload for that server in progress".into()));
     }
     match content_type {
-        Some(kind) if crate::media::PICTURE_TYPES.contains(&kind) && size == row.size => {
-            node.finish_upload(&row.id, kind, crate::id::now_ms()).await
+        // Taking out its metadata only ever makes it smaller.
+        Some(kind) if crate::media::PICTURE_TYPES.contains(&kind) && (1..=row.size).contains(&size) => {
+            node.finish_upload(&row.id, kind, size, crate::id::now_ms()).await
         }
         Some(_) => Err(Error::invalid("that isn't the picture that was reserved")),
         None => app.delete_media(std::slice::from_ref(&row.id)).await,

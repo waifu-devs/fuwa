@@ -961,7 +961,7 @@ impl ServerSettingsView {
                 p,
                 cx,
                 |this, _, cx| this.discard_channel(cx),
-                move |this, cx| {
+                move |this, _, cx| {
                     if !this.channels.saving {
                         this.save_channel(&c, cx)
                     }
@@ -1451,7 +1451,7 @@ impl ServerSettingsView {
                     this.error = None;
                     cx.notify();
                 },
-                move |this, cx| {
+                move |this, _, cx| {
                     if !this.channels.perm_saving {
                         this.save_permissions(cid.clone(), cx)
                     }

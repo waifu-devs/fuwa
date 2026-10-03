@@ -271,6 +271,19 @@ async fn until(stream: &mut Streaming<pb::SubscribeResponse>, matches: impl Fn(&
 
 /// Retries until a call stops failing as `code`, for changes that take a
 /// moment to reach every part.
+/// A real 300-byte PNG: a header, a 243-byte chunk of `kind` and the end.
+fn test_png(fill: u8, kind: &[u8; 4]) -> Vec<u8> {
+    let chunk =
+        |kind: &[u8; 4], data: &[u8]| [&(data.len() as u32).to_be_bytes()[..], kind, data, &[0, 0, 0, 0]].concat();
+    [
+        &b"\x89PNG\r\n\x1a\n"[..],
+        &chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]),
+        &chunk(kind, &[fill; 243]),
+        &chunk(b"IEND", &[]),
+    ]
+    .concat()
+}
+
 /// Waits for something done in the background.
 async fn wait_for(done: impl Fn() -> bool) {
     for _ in 0..100 {
@@ -466,9 +479,16 @@ async fn a_split_instance_works_like_one() {
     // Pictures go up and come back through the gateway, and a shard's server
     // can use one as its icon.
     let png = {
-        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
-        bytes.resize(600, 7);
-        bytes
+        // A header, a private chunk and the end: kept as it is.
+        let chunk =
+            |kind: &[u8; 4], data: &[u8]| [&(data.len() as u32).to_be_bytes()[..], kind, data, &[0, 0, 0, 0]].concat();
+        [
+            &b"\x89PNG\r\n\x1a\n"[..],
+            &chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]),
+            &chunk(b"fuWa", &[7; 543]),
+            &chunk(b"IEND", &[]),
+        ]
+        .concat()
     };
     let reserved = c
         .media
@@ -1224,8 +1244,7 @@ async fn servers_live_in_their_region_and_move() {
     let upload = |purpose: pb::MediaPurpose, fill: u8| {
         let (mut media, http, juan) = (media.clone(), http.clone(), juan.clone());
         async move {
-            let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
-            png.resize(300, fill);
+            let png = test_png(fill, b"fuWa");
             let request = pb::CreateUploadRequest {
                 purpose: purpose as i32,
                 content_type: "image/png".into(),
@@ -1363,18 +1382,21 @@ async fn servers_live_in_their_region_and_move() {
             media.create_upload(authed(&token, request)).await.map(|r| r.into_inner())
         }
     };
-    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
-    png.resize(300, 4);
+    // Its text chunk is taken out on the shard, as at the directory.
+    let with_text = test_png(4, b"tEXt");
+    let png = [&with_text[..33], &with_text[33 + 255..]].concat();
     let reserved = reserve(pb::MediaPurpose::ServerIcon, &server.id, &juan).await.unwrap();
     let direct = reserved.media.clone().unwrap();
     assert!(reserved.upload_url.contains(&format!("/media/servers/{}/upload/", server.id)));
-    assert_eq!(http.put(&reserved.upload_url).body(png.clone()).send().await.unwrap().status(), 204);
+    assert_eq!(http.put(&reserved.upload_url).body(with_text.clone()).send().await.unwrap().status(), 204);
     assert_eq!(std::fs::read(picture_at(&shard_b, &direct.id)).unwrap(), png);
+    let row = cluster.directory.app().node().unwrap().media(&direct.id).await.unwrap().unwrap();
+    assert_eq!(row.size, png.len() as i64);
     assert!(picture_at(&bucket_eu, &direct.id).exists());
     assert!(!directory_media.join(&direct.id).exists() && !picture_at(&shard_a, &direct.id).exists());
     assert_eq!(http.get(&direct.url).send().await.unwrap().bytes().await.unwrap().to_vec(), png);
     // A link works once.
-    assert_eq!(http.put(&reserved.upload_url).body(png.clone()).send().await.unwrap().status(), 404);
+    assert_eq!(http.put(&reserved.upload_url).body(with_text.clone()).send().await.unwrap().status(), 404);
     // Only for that server, and only by its members.
     let request = pb::UpdateServerRequest {
         server_id: in_eu.id.clone(),
@@ -1392,13 +1414,13 @@ async fn servers_live_in_their_region_and_move() {
     c.servers.update_server(authed(&juan, request)).await.unwrap();
     // A wrong-sized upload is turned away and nothing is kept.
     let short = reserve(pb::MediaPurpose::Emoji, &server.id, &juan).await.unwrap();
-    assert_eq!(http.put(&short.upload_url).body(png[..200].to_vec()).send().await.unwrap().status(), 400);
+    assert_eq!(http.put(&short.upload_url).body(with_text[..200].to_vec()).send().await.unwrap().status(), 400);
     let short = short.media.unwrap();
     assert!(!picture_at(&shard_b, &short.id).exists());
     assert!(cluster.directory.app().node().unwrap().media(&short.id).await.unwrap().is_none());
     // Uploads the server never used are swept from its shard and bucket.
     let unused = reserve(pb::MediaPurpose::Emoji, &server.id, &juan).await.unwrap();
-    assert_eq!(http.put(&unused.upload_url).body(png.clone()).send().await.unwrap().status(), 204);
+    assert_eq!(http.put(&unused.upload_url).body(with_text.clone()).send().await.unwrap().status(), 204);
     let unused = unused.media.unwrap();
     let later = fuwa_server::id::now_ms() + 3 * 24 * 60 * 60 * 1000;
     fuwa_server::cluster::pictures::sweep(cluster.shards[1].app(), later).await.unwrap();

@@ -774,6 +774,9 @@ message ServerUsage {
   google.protobuf.Timestamp updated_at = 11;
   // Custom emoji. Their pictures count in attachments and attachment_bytes.
   int64 emojis = 12;
+  // Times the server's Smart filter asked its provider today (UTC). Counted
+  // where the server lives, in memory: a restart starts the day again.
+  int64 automod_checks_today = 13;
 }
 
 // Caps on a community server. An unset field means unlimited.
@@ -787,6 +790,11 @@ message ServerLimits {
   // Once reached, recordings stop and no new one starts until some are
   // deleted.
   optional int64 recording_bytes = 6;
+  // Times a day (UTC) the server's Smart filter may ask its provider. Set
+  // for the whole instance (InstanceSettings.automod_checks_per_day), never
+  // per server: SetServerLimits ignores it. Past it, messages go through
+  // the Smart filter unchecked; the server's other rules still apply.
+  optional int64 automod_checks_per_day = 7;
 }
 
 // ============================================================================

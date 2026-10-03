@@ -728,7 +728,9 @@ function Usage({ instanceKey, serverId }: { instanceKey: string; serverId: strin
   if (!data?.usage) return <div className="grid gap-3 sm:grid-cols-2">{[0, 1, 2, 3].map((n) => <div key={n} className="shimmer h-24 rounded-2xl" />)}</div>;
   const u = data.usage;
   const l = data.limits;
-  const rows = [
+  const checks = Number(u.automodChecksToday);
+  const checkCap = l?.automodChecksPerDay === undefined ? null : Number(l.automodChecksPerDay);
+  const rows: { label: string; value: number; limit?: bigint; bytes?: boolean; sub?: string; note?: string; warn?: boolean }[] = [
     { label: "Members", value: Number(u.members), limit: l?.members },
     { label: "Channels", value: Number(u.channels), limit: l?.channels },
     { label: "Messages", value: Number(u.messages), sub: `${Number(u.messagesSent).toLocaleString()} sent all time` },
@@ -736,6 +738,19 @@ function Usage({ instanceKey, serverId }: { instanceKey: string; serverId: strin
     { label: "Attachments", value: Number(u.attachmentBytes), limit: l?.attachmentBytes, bytes: true, sub: `${Number(u.attachments)} files` },
     { label: "Emoji", value: Number(u.emojis), limit: l?.emojis },
     { label: "Events", value: Number(u.events), sub: "in the server's log" },
+    {
+      label: "Smart filter checks today",
+      value: checks,
+      limit: l?.automodChecksPerDay,
+      sub: "no daily limit",
+      warn: checkCap !== null && checks >= checkCap,
+      note:
+        checkCap === null
+          ? undefined
+          : checks >= checkCap
+            ? `all ${checkCap.toLocaleString()} used: messages skip the smart filter until midnight UTC`
+            : `of ${checkCap.toLocaleString()} · ${(checkCap - checks).toLocaleString()} left until midnight UTC`,
+    },
   ];
   return (
     <div className="flex flex-col gap-3">
@@ -757,14 +772,14 @@ function Usage({ instanceKey, serverId }: { instanceKey: string; serverId: strin
               </p>
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                 <motion.div
-                  className="h-full rounded-full bg-primary"
+                  className={cn("h-full rounded-full", r.warn ? "bg-amber-500" : "bg-primary")}
                   initial={{ width: 0 }}
                   animate={{ width: limit ? `${share * 100}%` : "100%", opacity: limit ? 1 : 0.25 }}
                   transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1], delay: 0.1 + n * 0.05 }}
                 />
               </div>
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                {limit !== null ? `of ${r.bytes ? formatBytes(limit) : limit.toLocaleString()}` : (r.sub ?? "no limit")}
+              <p className={cn("mt-1.5 text-xs", r.warn ? "font-bold text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>
+                {r.note ?? (limit !== null ? `of ${r.bytes ? formatBytes(limit) : limit.toLocaleString()}` : (r.sub ?? "no limit"))}
               </p>
             </motion.div>
           );

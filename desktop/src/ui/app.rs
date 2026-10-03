@@ -20,6 +20,7 @@ use crate::core::dms::{Content, now_ms};
 use crate::core::store::Focus;
 use crate::core::{Core, Notice};
 use crate::ui::connect::{ConnectEvent, ConnectView};
+use crate::ui::instance_settings::{InstanceSettingsEvent, InstanceSettingsView};
 use crate::ui::server_settings::{ServerSettingsEvent, ServerSettingsView};
 use crate::ui::settings::{SettingsEvent, SettingsView};
 use crate::ui::theme::{self, FONT};
@@ -192,6 +193,7 @@ pub struct FuwaApp {
     pub connect: Option<Entity<ConnectView>>,
     pub settings: Option<Entity<SettingsView>>,
     pub server_settings: Option<Entity<ServerSettingsView>>,
+    pub instance_settings: Option<Entity<InstanceSettingsView>>,
     pub dialog: Option<Dialog>,
     pub dialog_input: Entity<InputState>,
     pub dialog_busy: bool,
@@ -364,6 +366,7 @@ impl FuwaApp {
             connect: None,
             settings: None,
             server_settings: None,
+            instance_settings: None,
             dialog: None,
             dialog_input,
             dialog_busy: false,
@@ -874,6 +877,22 @@ impl FuwaApp {
         cx.notify();
     }
 
+    /// An instance's settings, for its admins, over everything but dialogs.
+    pub fn open_instance_settings(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.menu = None;
+        let core = self.core.clone();
+        let view = cx.new(|cx| InstanceSettingsView::new(core, key.to_owned(), window, cx));
+        self._subscriptions.push(cx.subscribe_in(&view, window, |this: &mut Self, _, event, _, cx| {
+            match event {
+                InstanceSettingsEvent::Close => this.instance_settings = None,
+            }
+            cx.notify();
+        }));
+        self.instance_settings = Some(view);
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
     /// A server's settings, over everything but dialogs.
     pub fn open_server_settings(&mut self, key: &str, server: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.menu = None;
@@ -1374,6 +1393,8 @@ impl FuwaApp {
             self.dialog = None;
         } else if self.server_settings.is_some() {
             self.server_settings = None;
+        } else if self.instance_settings.is_some() {
+            self.instance_settings = None;
         } else if self.settings.is_some() {
             self.settings = None;
         } else if let Some(connect) = &self.connect {
@@ -1409,6 +1430,7 @@ impl FuwaApp {
             self.connect.is_some(),
             self.settings.is_some(),
             self.server_settings.is_some(),
+            self.instance_settings.is_some(),
             self.switcher.is_some(),
         ]
         .into_iter()
@@ -1420,7 +1442,7 @@ impl FuwaApp {
         self.covers = covers;
         let empty = self.core.shared.read(|s| s.order.is_empty());
         // Server settings cover the whole window with a solid page.
-        crate::ui::effects::hold(self.server_settings.is_some());
+        crate::ui::effects::hold(self.server_settings.is_some() || self.instance_settings.is_some());
         let behind = crate::ui::backdrop::layers(&theme::backdrop(cx), &p, window, cx);
 
         let base = div()
@@ -1468,6 +1490,12 @@ impl FuwaApp {
         .when_some(self.settings.clone(), |el, settings| el.child(settings))
         .when_some(self.server_settings.clone(), |el, settings| {
             // Drawn again only when it changes, not on every frame of the window.
+            el.child(
+                gpui_kit::AnyView::from(settings)
+                    .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full()),
+            )
+        })
+        .when_some(self.instance_settings.clone(), |el, settings| {
             el.child(
                 gpui_kit::AnyView::from(settings)
                     .cached(gpui_kit::StyleRefinement::default().absolute().top_0().left_0().size_full()),
