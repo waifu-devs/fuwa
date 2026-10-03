@@ -37,7 +37,9 @@ Both servers' admins agree, so neither can pull the other in:
 3. The home's admin approves (`ReviewShare`). The guest makes its channel
    first, so an approval it can't take (no room for another channel, say)
    never stands at the home; then the home marks the connection active.
-   Turning it down ends the request on both sides.
+   Turning it down ends the request on both sides. Once approved, the
+   guest's people can read the whole channel, messages from before the
+   share included; the Share tab says so before the home hands out a code.
 
 Either side can **disconnect** at any time (`Disconnect`). The guest's
 channel goes; the messages stay at the home, guests' messages included.
@@ -76,7 +78,9 @@ the news lets go the next time it hears "gone" from the other.
 - **Writes** (`SendMessage`, `UpdateMessage`, `DeleteMessage`) are passed on
   as `GuestSend`, `GuestEdit` and `GuestDelete`. The home stores the author's
   profile (`users.guest_of` names their server) so its own members see who
-  wrote it. Edit and delete take `channel_id`; apps that leave it out still
+  wrote it. @everyone, @here and role pings never reach the other server:
+  guests' messages are stored without them, and messages shown to a guest
+  have them cleared (`no_pings`). Edit and delete take `channel_id`; apps that leave it out still
   work, more slowly (`shared::locate` asks each connected home).
 - **Live**: `spawn_shared_fanout` reads every event the shards holding servers
   publish (`Hub::shared_tap`), picks the messages created, edited and deleted
