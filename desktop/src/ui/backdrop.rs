@@ -205,7 +205,7 @@ fn blur_picture(source: &RenderImage, dw: usize, dh: usize, radius: usize, wrap:
         // BGRA back to RGBA.
         rgba.extend_from_slice(&[p[2], p[1], p[0], p[3]].map(|v| v.round().clamp(0.0, 255.0) as u8));
     }
-    Some(png(dw as u32, dh as u32, &rgba))
+    Some(crate::ui::png::png(dw as u32, dh as u32, &rgba, false))
 }
 
 /// One box blur pass along lines of `len` pixels `step` apart, `lines` of
@@ -321,7 +321,7 @@ pub fn noise_png(effect: Effect) -> Option<(Vec<u8>, f32)> {
                 let (c, a) = if v > 0.5 { (255, v - 0.5) } else { (0, 0.5 - v) };
                 rgba.extend_from_slice(&[c, c, c, (a * 0.5 * 255.0) as u8]);
             }
-            Some((png(n as u32, n as u32, &rgba), n as f32))
+            Some((crate::ui::png::png(n as u32, n as u32, &rgba, false), n as f32))
         }
         Effect::Paper => {
             // Smooth noise on a lattice that wraps: long across, short down, for fibers.
@@ -347,60 +347,10 @@ pub fn noise_png(effect: Effect) -> Option<(Vec<u8>, f32)> {
                     rgba.extend_from_slice(&[140, 115, 89, (a * 255.0) as u8]);
                 }
             }
-            Some((png(n as u32, n as u32, &rgba), n as f32))
+            Some((crate::ui::png::png(n as u32, n as u32, &rgba, false), n as f32))
         }
         _ => None,
     }
-}
-
-/// A plain PNG (stored, not compressed) of RGBA pixels.
-fn png(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
-    fn crc(bytes: &[u8]) -> u32 {
-        let mut c = 0xffff_ffffu32;
-        for b in bytes {
-            c ^= u32::from(*b);
-            for _ in 0..8 {
-                c = if c & 1 == 1 { 0xedb8_8320 ^ (c >> 1) } else { c >> 1 };
-            }
-        }
-        !c
-    }
-    fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
-        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
-        let mut body = kind.to_vec();
-        body.extend_from_slice(data);
-        out.extend_from_slice(&body);
-        out.extend_from_slice(&crc(&body).to_be_bytes());
-    }
-    let mut raw = Vec::with_capacity((w as usize * 4 + 1) * h as usize);
-    for row in rgba.chunks(w as usize * 4) {
-        raw.push(0);
-        raw.extend_from_slice(row);
-    }
-    let mut z = vec![0x78, 0x01];
-    let blocks: Vec<&[u8]> = raw.chunks(65_535).collect();
-    for (i, block) in blocks.iter().enumerate() {
-        z.push(u8::from(i + 1 == blocks.len()));
-        let len = block.len() as u16;
-        z.extend_from_slice(&len.to_le_bytes());
-        z.extend_from_slice(&(!len).to_le_bytes());
-        z.extend_from_slice(block);
-    }
-    let (mut a, mut b) = (1u32, 0u32);
-    for byte in &raw {
-        a = (a + u32::from(*byte)) % 65_521;
-        b = (b + a) % 65_521;
-    }
-    z.extend_from_slice(&((b << 16) | a).to_be_bytes());
-    let mut ihdr = Vec::new();
-    ihdr.extend_from_slice(&w.to_be_bytes());
-    ihdr.extend_from_slice(&h.to_be_bytes());
-    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
-    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
-    chunk(&mut out, b"IHDR", &ihdr);
-    chunk(&mut out, b"IDAT", &z);
-    chunk(&mut out, b"IEND", &[]);
-    out
 }
 
 /// A tile as SVG, drawn at twice its size so it stays sharp on high-density screens.

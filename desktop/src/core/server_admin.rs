@@ -255,3 +255,238 @@ impl Core {
         Ok(())
     }
 }
+
+// ───────────────────────── Emoji ─────────────────────────
+
+/// Whether `name` can be an emoji's name: 2 to 32 letters, digits and underscores.
+pub fn emoji_name_ok(name: &str) -> bool {
+    (2..=32).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// A file name made into an emoji name (`Party Cat.png` → `party_cat`), as the web's `nameFromFile`.
+pub fn emoji_name_from_file(file: &str) -> String {
+    let stem = match file.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem,
+        _ => file,
+    };
+    let mut name = String::new();
+    for c in stem.to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            name.push(c);
+        } else if !name.ends_with('_') {
+            name.push('_');
+        }
+    }
+    let name: String = name.trim_matches('_').chars().take(32).collect();
+    if name.len() >= 2 { name } else { format!("emoji_{}", if name.is_empty() { "1" } else { &name }) }
+}
+
+/// `name`, or `name_2`, `name_3`… when one of `taken` (lowercase) already has it.
+pub fn unique_emoji_name(name: &str, taken: &std::collections::HashSet<String>) -> String {
+    let mut out = name.to_owned();
+    let stem: String = name.chars().take(29).collect();
+    let mut n = 2;
+    while taken.contains(&out.to_lowercase()) {
+        out = format!("{stem}_{n}");
+        n += 1;
+    }
+    out
+}
+
+impl Core {
+    fn put_emojis(&self, key: &str, server_id: &str, change: impl FnOnce(&mut Vec<pb::Emoji>)) {
+        self.shared.instance(key, |i| change(i.emojis.entry(server_id.to_owned()).or_default()));
+    }
+
+    /// How many emoji the server may hold, or `None` for no cap.
+    pub async fn emoji_cap(&self, key: &str, server_id: &str) -> Result<Option<i64>, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res =
+            rpc!(api.servers(), get_server_usage(pb::GetServerUsageRequest { server_id: server_id.into() })).await?;
+        Ok(res.limits.and_then(|l| l.emojis))
+    }
+
+    /// Uploads a picture and makes it an emoji.
+    pub async fn add_emoji(
+        self: &std::sync::Arc<Self>,
+        key: &str,
+        server_id: &str,
+        name: &str,
+        content_type: &str,
+        bytes: Vec<u8>,
+    ) -> Result<pb::Emoji, Problem> {
+        let url = self.upload_picture(key, pb::MediaPurpose::Emoji, content_type, bytes).await?;
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.emojis(),
+            create_emoji(pb::CreateEmojiRequest { server_id: server_id.into(), name: name.into(), url })
+        )
+        .await?;
+        let emoji = res.emoji.unwrap_or_default();
+        self.put_emojis(key, server_id, |list| {
+            list.retain(|e| e.id != emoji.id);
+            list.push(emoji.clone());
+        });
+        Ok(emoji)
+    }
+
+    pub async fn rename_emoji(
+        &self,
+        key: &str,
+        server_id: &str,
+        emoji_id: &str,
+        name: &str,
+    ) -> Result<pb::Emoji, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.emojis(),
+            update_emoji(pb::UpdateEmojiRequest {
+                server_id: server_id.into(),
+                emoji_id: emoji_id.into(),
+                name: name.into(),
+            })
+        )
+        .await?;
+        let emoji = res.emoji.unwrap_or_default();
+        self.put_emojis(key, server_id, |list| {
+            if let Some(e) = list.iter_mut().find(|e| e.id == emoji.id) {
+                *e = emoji.clone();
+            }
+        });
+        Ok(emoji)
+    }
+
+    pub async fn delete_emoji(&self, key: &str, server_id: &str, emoji_id: &str) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        rpc!(
+            api.emojis(),
+            delete_emoji(pb::DeleteEmojiRequest { server_id: server_id.into(), emoji_id: emoji_id.into() })
+        )
+        .await?;
+        self.put_emojis(key, server_id, |list| list.retain(|e| e.id != emoji_id));
+        Ok(())
+    }
+}
+
+// ───────────────────────── Webhooks ─────────────────────────
+
+/// What changes about a webhook; `None` keeps it.
+#[derive(Debug, Clone, Default)]
+pub struct WebhookPatch {
+    pub name: Option<String>,
+    /// A new upload, or empty for none.
+    pub avatar_url: Option<String>,
+    pub channel_id: Option<String>,
+}
+
+/// The address apps post to, on the instance's own address, as the web's `webhookUrl`.
+pub fn webhook_url(instance_url: &str, w: &pb::Webhook) -> String {
+    format!("{}/webhooks/{}/{}/{}", instance_url.trim_end_matches('/'), w.server_id, w.id, w.token)
+}
+
+impl Core {
+    /// The server's webhooks, and who made them.
+    pub async fn webhooks(&self, key: &str, server_id: &str) -> Result<(Vec<pb::Webhook>, People), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(api.webhooks(), list_webhooks(pb::ListWebhooksRequest { server_id: server_id.into() })).await?;
+        Ok((res.webhooks, people(res.creators)))
+    }
+
+    pub async fn create_webhook(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+        name: &str,
+    ) -> Result<pb::Webhook, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.webhooks(),
+            create_webhook(pb::CreateWebhookRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                name: name.into(),
+                avatar_url: String::new(),
+            })
+        )
+        .await?;
+        Ok(res.webhook.unwrap_or_default())
+    }
+
+    /// Changes a webhook; the request carries all three fields, so the ones
+    /// not changed go as they are.
+    pub async fn update_webhook(
+        &self,
+        key: &str,
+        w: &pb::Webhook,
+        patch: WebhookPatch,
+    ) -> Result<pb::Webhook, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.webhooks(),
+            update_webhook(pb::UpdateWebhookRequest {
+                server_id: w.server_id.clone(),
+                webhook_id: w.id.clone(),
+                name: patch.name.unwrap_or_else(|| w.name.clone()),
+                avatar_url: patch.avatar_url.unwrap_or_else(|| w.avatar_url.clone()),
+                channel_id: patch.channel_id.unwrap_or_else(|| w.channel_id.clone()),
+            })
+        )
+        .await?;
+        Ok(res.webhook.unwrap_or_default())
+    }
+
+    /// A new secret for its address; the old address stops working.
+    pub async fn reset_webhook(&self, key: &str, server_id: &str, webhook_id: &str) -> Result<pb::Webhook, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.webhooks(),
+            reset_webhook_token(pb::ResetWebhookTokenRequest {
+                server_id: server_id.into(),
+                webhook_id: webhook_id.into(),
+            })
+        )
+        .await?;
+        Ok(res.webhook.unwrap_or_default())
+    }
+
+    pub async fn delete_webhook(&self, key: &str, server_id: &str, webhook_id: &str) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        rpc!(
+            api.webhooks(),
+            delete_webhook(pb::DeleteWebhookRequest { server_id: server_id.into(), webhook_id: webhook_id.into() })
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Posts through a webhook the way other apps do, to try it. The post
+    /// goes to the instance the webhook lives on, never anywhere else.
+    pub async fn test_webhook(&self, key: &str, w: &pb::Webhook, content: &str) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let body = serde_json::to_vec(&serde_json::json!({ "content": content })).unwrap_or_default();
+        crate::core::account::send(http::Method::POST, &webhook_url(&api.url, w), "application/json", body).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn emoji_names_from_files() {
+        assert_eq!(emoji_name_from_file("Party Cat.png"), "party_cat");
+        assert_eq!(emoji_name_from_file("--wow!!--.GIF"), "wow");
+        assert_eq!(emoji_name_from_file("x.png"), "emoji_x");
+        assert_eq!(emoji_name_from_file("ねこ.webp"), "emoji_1");
+        assert!(emoji_name_ok(&emoji_name_from_file(&format!("{}.png", "a".repeat(80)))));
+        assert!(emoji_name_ok("ok_2") && !emoji_name_ok("a") && !emoji_name_ok("no way"));
+
+        let w = pb::Webhook { id: "w1".into(), server_id: "s1".into(), token: "t0k".into(), ..Default::default() };
+        assert_eq!(webhook_url("https://fuwa.chat/", &w), "https://fuwa.chat/webhooks/s1/w1/t0k");
+
+        let taken = ["blob".to_owned(), "blob_2".to_owned()].into_iter().collect();
+        assert_eq!(unique_emoji_name("Blob", &taken), "Blob_3");
+        assert_eq!(unique_emoji_name("cat", &taken), "cat");
+    }
+}

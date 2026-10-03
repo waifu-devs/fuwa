@@ -73,6 +73,19 @@ pub fn ambient<E: IntoElement + Styled + 'static>(
     }
 }
 
+/// A flourish that plays once when it first shows (a wiggle, a bob, dots
+/// drifting by) and then rests at `pose(1.0)`, so a page that holds still
+/// stops drawing. For ones that keep going while the window's in front, see
+/// [`ambient`].
+pub fn once<E: IntoElement + Styled + 'static>(
+    el: E,
+    id: impl Into<ElementId>,
+    duration: Duration,
+    pose: impl Fn(E, f32) -> E + 'static,
+) -> AnyElement {
+    el.with_animation(id, Animation::new(duration), pose).into_any_element()
+}
+
 /// An easing that waits for the first `start` of the time, then runs `easing` over the rest.
 fn delayed(start: f32, easing: impl Fn(f32) -> f32 + 'static) -> impl Fn(f32) -> f32 + 'static {
     move |t| {

@@ -22,6 +22,7 @@ mod motion;
 mod notify;
 mod overlay;
 pub mod perf;
+mod png;
 mod rail;
 mod server_settings;
 mod settings;

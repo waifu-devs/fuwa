@@ -1,5 +1,6 @@
 //! A server's settings, full screen with a side menu like the app's own:
-//! its name, picture and words, invites, members, bans and the audit log.
+//! its name, picture and words, invites, roles, emoji, webhooks, members,
+//! bans and the audit log.
 //! Each page shows only to people whose permissions open it, as in the web
 //! app's `ServerSettingsDialog.tsx`.
 
@@ -27,11 +28,13 @@ use crate::ui::moderate::{duration, stamp};
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha, corner, mix};
 use crate::ui::widgets::{
-    app_badge, avatar, error_line, icon, icon_button, icon_button_in, is_agent, labeled, pal, primary_button,
-    server_icon, soft_button,
+    app_badge, avatar, danger_button, error_line, icon, icon_button, icon_button_in, is_agent, labeled, pal,
+    primary_button, server_icon, soft_button,
 };
 
+mod emoji;
 mod roles;
+mod webhooks;
 
 pub enum ServerSettingsEvent {
     Close,
@@ -47,6 +50,8 @@ enum Page {
     Overview,
     Invites,
     Roles,
+    Emoji,
+    Webhooks,
     Members,
     Bans,
     AuditLog,
@@ -58,6 +63,8 @@ impl Page {
             Page::Overview => "Overview",
             Page::Invites => "Invites",
             Page::Roles => "Roles",
+            Page::Emoji => "Emoji",
+            Page::Webhooks => "Webhooks",
             Page::Members => "Members",
             Page::Bans => "Bans",
             Page::AuditLog => "Audit log",
@@ -69,6 +76,8 @@ impl Page {
             Page::Overview => "settings",
             Page::Invites => "link",
             Page::Roles => "shield",
+            Page::Emoji => "face-slightly-smiling-plus",
+            Page::Webhooks => "webhook",
             Page::Members => "users",
             Page::Bans => "gavel",
             Page::AuditLog => "scroll-text",
@@ -80,6 +89,8 @@ impl Page {
             Page::Overview => "Its name, picture and a few words, and how it notifies people by default.",
             Page::Invites => "The links that let people in. Revoke one and it stops working at once.",
             Page::Roles => "Who can do what. Members take the color of their highest role.",
+            Page::Emoji => "The server's own emoji. Everyone here can use them as :name:.",
+            Page::Webhooks => "Addresses other apps post messages to, each into one channel.",
             Page::Members => "Everyone here. Time out, kick or ban the people you rank above.",
             Page::Bans => "Who's kept out, and why.",
             Page::AuditLog => "Every change people made here with their permissions.",
@@ -88,7 +99,7 @@ impl Page {
 }
 
 /// The settings group, then the moderation group, as on the web.
-const SETTINGS: [Page; 3] = [Page::Overview, Page::Invites, Page::Roles];
+const SETTINGS: [Page; 5] = [Page::Overview, Page::Invites, Page::Roles, Page::Emoji, Page::Webhooks];
 const MODERATION: [Page; 3] = [Page::Members, Page::Bans, Page::AuditLog];
 
 /// The pages someone with this access may open.
@@ -108,6 +119,12 @@ fn pages(access: &crate::core::permissions::Access) -> Vec<Page> {
     }
     if access.has(P::ManageRoles) {
         out.push(Page::Roles);
+    }
+    if access.has(P::ManageEmoji) {
+        out.push(Page::Emoji);
+    }
+    if access.has(P::ManageWebhooks) {
+        out.push(Page::Webhooks);
     }
     if members {
         out.push(Page::Members);
@@ -162,6 +179,8 @@ pub struct ServerSettingsView {
     audit_open: Option<String>,
     copied: Option<(String, Instant)>,
     roles: roles::Roles,
+    emojis: emoji::Emojis,
+    hooks: webhooks::Hooks,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -184,6 +203,8 @@ impl ServerSettingsView {
         })
         .detach();
         let (roles, role_subscriptions) = roles::Roles::new(window, cx);
+        let (emojis, emoji_subscriptions) = emoji::Emojis::new(window, cx);
+        let (hooks, hook_subscriptions) = webhooks::Hooks::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe(&name, |_: &mut Self, _, e: &InputEvent, cx| {
                 if let InputEvent::Change = e {
@@ -202,6 +223,8 @@ impl ServerSettingsView {
             }),
         ];
         subscriptions.extend(role_subscriptions);
+        subscriptions.extend(emoji_subscriptions);
+        subscriptions.extend(hook_subscriptions);
         Self {
             core,
             key,
@@ -225,6 +248,8 @@ impl ServerSettingsView {
             audit_open: None,
             copied: None,
             roles,
+            emojis,
+            hooks,
             _subscriptions: subscriptions,
         }
     }
@@ -1225,6 +1250,8 @@ impl Render for ServerSettingsView {
                 self.roles.bar = None;
                 self.roles_page(&p, window, cx)
             }
+            Page::Emoji => self.emoji_page(&p, window, cx),
+            Page::Webhooks => self.webhooks_page(&p, window, cx),
             Page::Members => self.members_page(&p, cx),
             Page::Bans => self.bans_page(&p, cx),
             Page::AuditLog => self.audit_page(&p, cx),
@@ -1818,7 +1845,16 @@ mod tests {
         assert_eq!(words("ManageServer"), "Manage server");
         assert_eq!(
             pages(&owner),
-            vec![Page::Overview, Page::Invites, Page::Roles, Page::Members, Page::Bans, Page::AuditLog]
+            vec![
+                Page::Overview,
+                Page::Invites,
+                Page::Roles,
+                Page::Emoji,
+                Page::Webhooks,
+                Page::Members,
+                Page::Bans,
+                Page::AuditLog
+            ]
         );
     }
 }

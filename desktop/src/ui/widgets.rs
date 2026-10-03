@@ -156,7 +156,22 @@ pub fn conn_dot(connection: Connection, p: &Palette) -> Div {
 
 /// A filled button in the primary color, with a glow on hover and a dip on press.
 pub fn primary_button(id: impl Into<ElementId>, label: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
-    let glow = alpha(p.primary, 0.45);
+    filled_button(id, label, p.primary, p.primary_foreground, p)
+}
+
+/// The same in the destructive color, for deleting and other things that can't be undone.
+pub fn danger_button(id: impl Into<ElementId>, label: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
+    filled_button(id, label, p.destructive, gpui_kit::rgb(0xffffff), p)
+}
+
+fn filled_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    color: Rgba,
+    text: Rgba,
+    p: &Palette,
+) -> Stateful<Div> {
+    let glow = alpha(color, 0.45);
     div()
         .id(id)
         .h(px(40.0))
@@ -166,19 +181,19 @@ pub fn primary_button(id: impl Into<ElementId>, label: impl Into<SharedString>, 
         .items_center()
         .justify_center()
         .gap(px(8.0))
-        .bg(p.primary)
-        .text_color(p.primary_foreground)
+        .bg(color)
+        .text_color(text)
         .font_weight(FontWeight::BOLD)
         .cursor_pointer()
         .shadow(vec![gpui_kit::BoxShadow {
-            color: alpha(p.primary, 0.28),
+            color: alpha(color, 0.28),
             offset: gpui_kit::point(px(0.0), px(6.0)),
             blur_radius: px(18.0),
             spread_radius: px(-6.0),
             inset: false,
         }])
         .hover({
-            let c = mix(p.primary, p.foreground, 0.08);
+            let c = mix(color, p.foreground, 0.08);
             move |s| {
                 s.bg(c).shadow(vec![gpui_kit::BoxShadow {
                     color: glow,
@@ -190,7 +205,7 @@ pub fn primary_button(id: impl Into<ElementId>, label: impl Into<SharedString>, 
             }
         })
         .active({
-            let c = mix(p.primary, p.foreground, 0.18);
+            let c = mix(color, p.foreground, 0.18);
             move |s| s.bg(c).top(px(1.0))
         })
         .child(label.into())

@@ -295,12 +295,18 @@
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
     in both), `settings_keys.rs` the Keyboard page where they're changed,
     `server_settings.rs` a server's settings
-    (overview, invites, roles, members, bans, audit log; the server's name
-    opens it; a cached view, so it redraws only when the server changes),
+    (overview, invites, roles, emoji, webhooks, members, bans, audit log;
+    the server's name opens it; a cached view, so it redraws only when the
+    server changes, and its flourishes play once rather than loop),
     `server_settings/roles.rs` the Roles page (order, color, permissions
     and members of each role, saved together from a floating bar, over the
     role calls in `core/server_admin.rs`; you edit only roles below your own
-    and hand out only what you have, as the server checks), `moderate.rs` the time out, kick and ban
+    and hand out only what you have, as the server checks),
+    `server_settings/emoji.rs` the Emoji page (pictures dropped or picked,
+    shrunk to 128 pixels and written as PNGs by `png.rs`, which compresses
+    them itself so the app needs no image encoder), `server_settings/webhooks.rs`
+    the Webhooks page (a test post goes to the webhook's own instance only),
+    `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),
     `emoji_picker.rs` the picker by the composer, `embeds.rs` the cards apps
