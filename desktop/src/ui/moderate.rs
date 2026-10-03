@@ -59,7 +59,7 @@ pub fn left(ms: i64) -> String {
 }
 
 /// When it ends, in local time: "16:30" today, else "Tue 4 Oct 16:30".
-fn stamp(ms: i64) -> String {
+pub(crate) fn stamp(ms: i64) -> String {
     use chrono::TimeZone as _;
     let Some(at) = chrono::Local.timestamp_millis_opt(ms).single() else { return String::new() };
     if at.date_naive() == chrono::Local::now().date_naive() {
