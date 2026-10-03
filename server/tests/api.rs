@@ -4889,3 +4889,41 @@ async fn agents_are_made_by_people_and_added_by_managers() {
     assert_eq!(me(&mut c, &second.token).await.unwrap_err(), Code::Unauthenticated);
     instance.stop().await;
 }
+
+#[tokio::test]
+async fn agents_stop_when_their_owner_is_turned_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let (owner, owner_user, _) = sign_up(&mut c, "owner").await;
+    let made = c
+        .agents
+        .create_agent(authed(&owner, pb::CreateAgentRequest { username: "helper".into(), display_name: "Helper".into() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(me(&mut c, &made.token).await.is_ok());
+
+    let off = pb::UpdateAccountRequest { account_id: owner_user.id.clone(), disabled: Some(true), ..Default::default() };
+    update_account(&mut c, &admin, off).await.unwrap();
+    assert_eq!(me(&mut c, &owner).await.unwrap_err(), Code::Unauthenticated);
+    assert_eq!(me(&mut c, &made.token).await.unwrap_err(), Code::Unauthenticated, "its agents stop with it");
+
+    // Turned back on, the owner hands out a new token; the old one stays dead.
+    let on = pb::UpdateAccountRequest { account_id: owner_user.id.clone(), disabled: Some(false), ..Default::default() };
+    update_account(&mut c, &admin, on).await.unwrap();
+    assert_eq!(me(&mut c, &made.token).await.unwrap_err(), Code::Unauthenticated);
+    let owner = sign_in(&mut c, "owner", "correct horse battery").await.unwrap().token;
+    let agent_id = made.agent.unwrap().user.unwrap().id;
+    let fresh = c
+        .agents
+        .reset_agent_token(authed(&owner, pb::ResetAgentTokenRequest { agent_id }))
+        .await
+        .unwrap()
+        .into_inner()
+        .token;
+    assert!(me(&mut c, &fresh).await.is_ok());
+
+    instance.stop().await;
+}

@@ -557,7 +557,7 @@ impl NodeDb {
     }
 
     /// The account a live session belongs to, marking the session as active
-    /// and the account as seen.
+    /// and the account as seen. An agent whose owner is turned off has none.
     pub async fn session_account(&self, token_hash: &str) -> Result<Option<Account>> {
         let conn = self.read()?;
         let now = now_ms();
@@ -565,7 +565,9 @@ impl NodeDb {
             &conn,
             &format!(
                 "SELECT {}, sessions.last_active_at FROM sessions JOIN accounts ON accounts.id = sessions.account_id
-                 WHERE sessions.token_hash = ?1 AND sessions.expires_at > ?2 AND accounts.disabled_at IS NULL",
+                 LEFT JOIN accounts AS owners ON owners.id = accounts.owner_id
+                 WHERE sessions.token_hash = ?1 AND sessions.expires_at > ?2 AND accounts.disabled_at IS NULL
+                   AND owners.disabled_at IS NULL",
                 account_columns_of("accounts")
             ),
             (token_hash, now),
@@ -1118,8 +1120,8 @@ impl NodeDb {
         .await
     }
 
-    /// Turns an account off, signing out its devices and any sign-in half done,
-    /// or back on. Admins have to stop being admins first.
+    /// Turns an account off, signing out its devices, any sign-in half done
+    /// and its agents, or back on. Admins have to stop being admins first.
     pub async fn set_disabled(&self, id: &str, disabled: bool, reason: &str) -> Result<()> {
         let _one_at_a_time = self.admin_changes.lock().await;
         let account = self.account(id).await?.ok_or(Error::NotFound("account"))?;
@@ -1137,6 +1139,12 @@ impl NodeDb {
                 .await?;
                 conn.execute("DELETE FROM sessions WHERE account_id = ?1", [id]).await?;
                 conn.execute("DELETE FROM sign_in_tickets WHERE account_id = ?1", [id]).await?;
+                // Their agents stop too: they act for someone who can't.
+                conn.execute(
+                    "DELETE FROM sessions WHERE account_id IN (SELECT id FROM accounts WHERE owner_id = ?1)",
+                    [id],
+                )
+                .await?;
             } else {
                 conn.execute(
                     "UPDATE accounts SET disabled_at = NULL, disabled_reason = '', updated_at = ?2 WHERE id = ?1",
