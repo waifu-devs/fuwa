@@ -334,7 +334,8 @@
   Railway project ("fuwa"): the published image, a volume at `/data`, the
   domain. Its `SPLIT` setting turns it into a directory (on that volume),
   shards (a volume each) and gateway replicas; shards can be added, never
-  removed. Every merge to master redeploys each service it declares onto the
+  removed. `fuwa-media` carries calls' sound, reached by apps through a TCP
+  proxy (Railway has no public UDP), one replica. Every merge to master redeploys each service it declares onto the
   new image (the `Deploy fuwa.chat` job in `publish.yml`); with a volume
   attached, Railway stops the old deployment before starting the new one, so
   while it's one process each deploy briefly drops connections. Split, only
