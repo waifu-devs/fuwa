@@ -32,6 +32,12 @@ that turns fuwa's questions into another provider's.
   `typesafe-jev`, `cloudflare-clef` or `custom`, never your provider's name or
   address.
 - fuwa never follows a redirect, and only speaks https.
+- Your own provider has to be on the internet: loopback, private, link-local
+  and other internal addresses (and names like `localhost` or `*.internal`)
+  are refused when you save it, and a name that resolves to one isn't called.
+  To run a classifier on your own network, start the instance with
+  `FUWA_AUTOMOD_ALLOW_PRIVATE=1`.
+- fuwa reads at most 64 KB of an answer.
 
 ## The request
 

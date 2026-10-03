@@ -22,7 +22,8 @@
 //! address).
 
 use std::fmt;
-use std::sync::LazyLock;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
@@ -454,7 +455,82 @@ fn check_url(url: &str) -> std::result::Result<(), String> {
     {
         return Err(bad());
     }
+    let internal = match parsed.host() {
+        Some(url::Host::Ipv4(ip)) => private_ip(IpAddr::V4(ip)),
+        Some(url::Host::Ipv6(ip)) => private_ip(IpAddr::V6(ip)),
+        Some(url::Host::Domain(name)) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            name == "localhost" || [".localhost", ".internal", ".local"].iter().any(|end| name.ends_with(end))
+        }
+        None => true,
+    };
+    if internal && !*ALLOW_PRIVATE {
+        return Err(PRIVATE.into());
+    }
     Ok(())
+}
+
+/// Why a provider of the admins' own at an internal address is refused.
+const PRIVATE: &str = "your provider has to be on the internet, not a private or internal address \
+     (whoever runs the instance can allow those with FUWA_AUTOMOD_ALLOW_PRIVATE=1)";
+
+/// Whoever runs the instance lets the admins' own providers be on its own
+/// network (`FUWA_AUTOMOD_ALLOW_PRIVATE=1`). Off, the instance never calls a
+/// private, loopback or link-local address for a provider, so a provider's
+/// address can't be used to reach the instance's own network.
+static ALLOW_PRIVATE: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("FUWA_AUTOMOD_ALLOW_PRIVATE").is_ok_and(|v| matches!(v.trim(), "1" | "true" | "on" | "yes"))
+});
+
+/// An address that isn't on the public internet.
+fn private_ip(ip: IpAddr) -> bool {
+    fn v4(ip: Ipv4Addr) -> bool {
+        let [a, b, ..] = ip.octets();
+        ip.is_loopback()
+            || ip.is_private()
+            || ip.is_link_local()
+            || ip.is_unspecified()
+            || ip.is_broadcast()
+            || ip.is_multicast()
+            || a == 0
+            || (a == 100 && b & 0xc0 == 64)
+    }
+    match ip {
+        IpAddr::V4(ip) => v4(ip),
+        IpAddr::V6(ip) => {
+            let s = ip.segments();
+            if let Some(mapped) = ip.to_ipv4_mapped() {
+                return v4(mapped);
+            }
+            // NAT64 (64:ff9b::/96) carries an IPv4 address too.
+            if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+                let [_, _, _, _, _, _, _, _, _, _, _, _, a, b, c, d] = ip.octets();
+                return v4(Ipv4Addr::new(a, b, c, d));
+            }
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_multicast()
+                || s[0] & 0xfe00 == 0xfc00
+                || s[0] & 0xffc0 == 0xfe80
+        }
+    }
+}
+
+/// Looks names up and drops internal addresses, so a public name that
+/// points (or later re-points) inside the instance's network isn't called.
+struct PublicOnly;
+
+impl reqwest::dns::Resolve for PublicOnly {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async move {
+            let found = tokio::net::lookup_host((name.as_str(), 0)).await?;
+            let public: Vec<SocketAddr> = found.filter(|a| *ALLOW_PRIVATE || !private_ip(a.ip())).collect();
+            if public.is_empty() {
+                return Err(PRIVATE.into());
+            }
+            Ok(Box::new(public.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
 }
 
 /// How likely a message is to be each label, 0 to 1, in [`LABELS`] order.
@@ -539,8 +615,10 @@ pub async fn check(setup: &Setup, text: &str) -> (std::result::Result<Scores, Fa
 
 /// https only, no redirects (a redirect could send the key or the text
 /// somewhere the admins didn't pick).
+/// Names are looked up by [`PublicOnly`].
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
+        .dns_resolver(Arc::new(PublicOnly))
         .https_only(true)
         .redirect(reqwest::redirect::Policy::none())
         .timeout(TIMEOUT)
@@ -604,7 +682,7 @@ impl Provider for SystemOne {
                 .await
                 .map_err(|err| if err.is_timeout() { Failure::TimedOut } else { Failure::Unreachable(short(err)) })?;
             let status = response.status();
-            let body: Value = response.json().await.unwrap_or(Value::Null);
+            let body = read_body(response).await;
             match status.as_u16() {
                 200..=299 => read_answers(&body),
                 401 | 403 => Err(Failure::Unauthorized(error_message(&body).unwrap_or_else(|| status.to_string()))),
@@ -619,8 +697,30 @@ impl Provider for SystemOne {
 }
 
 /// An error without the address it was for.
+/// The most of an answer fuwa reads.
+const MAX_ANSWER: usize = 64 * 1024;
+
+/// An answer's JSON, or null when it's longer than [`MAX_ANSWER`] or isn't JSON.
+async fn read_body(mut response: reqwest::Response) -> Value {
+    let mut bytes = Vec::new();
+    while let Ok(Some(chunk)) = response.chunk().await {
+        if bytes.len() + chunk.len() > MAX_ANSWER {
+            return Value::Null;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+}
+
 fn short(err: reqwest::Error) -> String {
     let err = err.without_url();
+    let mut source: Option<&dyn std::error::Error> = Some(&err);
+    while let Some(err) = source {
+        if err.to_string() == PRIVATE {
+            return PRIVATE.into();
+        }
+        source = err.source();
+    }
     let text = if err.is_connect() { "couldn't connect".to_string() } else { err.to_string() };
     text.chars().take(160).collect()
 }
@@ -817,6 +917,43 @@ mod tests {
         let ids: Vec<String> = complete(std::slice::from_ref(&made)).into_iter().map(|s| s.id).collect();
         assert_eq!(ids, ["typesafe-jev", "cloudflare-clef", made.id.as_str()]);
         assert!(!is_custom_id("custom-") && !is_custom_id("custom-../x") && !is_custom_id("typesafe-jev"));
+    }
+
+    #[test]
+    fn own_providers_stay_off_the_instance_s_network() {
+        for url in [
+            "https://127.0.0.1:8443/",
+            "https://10.0.0.5/",
+            "https://192.168.1.2/",
+            "https://169.254.169.254/latest",
+            "https://100.64.0.1/",
+            "https://0.0.0.0/",
+            "https://2130706433/",
+            "https://[::1]/",
+            "https://[fd00::1]/",
+            "https://[fe80::1]/",
+            "https://[::ffff:127.0.0.1]/",
+            "https://[::ffff:10.0.0.1]/",
+            "https://[64:ff9b::a00:1]/",
+            "https://localhost/",
+            "https://LOCALHOST./",
+            "https://api.localhost/",
+            "https://metadata.google.internal/",
+            "https://printer.local/",
+        ] {
+            assert_eq!(check_url(url), Err(PRIVATE.to_string()), "{url}");
+        }
+        for url in ["https://moderation.example.com/v1", "https://1.1.1.1/", "https://[2606:4700::1111]/"] {
+            assert!(check_url(url).is_ok(), "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn names_that_point_inside_are_dropped_when_called() {
+        use reqwest::dns::Resolve;
+        let name: reqwest::dns::Name = "localhost".parse().unwrap();
+        let refused = PublicOnly.resolve(name).await.err().expect("localhost resolves to loopback only");
+        assert_eq!(refused.to_string(), PRIVATE);
     }
 
     #[test]

@@ -140,6 +140,7 @@ the log filter are read only from the environment.
 | `FUWA_ICE_URLS` | unset | STUN and TURN servers for people on strict networks, comma-separated `stun:`, `turn:` and `turns:` URLs |
 | `FUWA_TURN_SECRET` | unset | The TURN servers' shared secret (coturn's `static-auth-secret`); each call gets a password from it |
 | `FUWA_JEV_API_KEY` | unset | Turns on TypeSafe Jev for servers' AutoMod smart filter (also set from the app: Instance settings, Moderation) |
+| `FUWA_AUTOMOD_ALLOW_PRIVATE` | off | `1` lets instance admins add a moderation provider of their own at a private or internal address (your own network); off, those are refused when saved and when called |
 | `FUWA_CLEF_API_TOKEN`, `FUWA_CLEF_ACCOUNT_ID` | unset | Turn on Cloudflare Clef (Workers AI) the same way; set both |
 | `FUWA_S3_BUCKET` and the other `FUWA_S3_*` | unset | Split instances only: a bucket the directory and shards copy their files to as they change; see [Replicating to a bucket](#replicating-to-a-bucket) |
 | `FUWA_REPLICA_PATH` | unset | Split instances only: a folder to replicate to instead of a bucket |

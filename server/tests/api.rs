@@ -4541,13 +4541,17 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
         id: "custom".into(),
         enabled: true,
         name: "Our classifier".into(),
-        url: "https://127.0.0.1:9/v1/check".into(),
+        url: "https://fuwa-test.invalid/v1/check".into(),
         api_key: "our-secret-key-5678".into(),
         header: "X-Api-Key".into(),
         ..Default::default()
     };
     let plain = pb::AutoModProviderSettings { url: "http://mod.example.com/check".into(), ..ours.clone() };
     let refused = c.admin.update_settings(authed(&admin, update(vec![clef(""), plain]))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
+    // Nor anything on the instance's own network.
+    let inside = pb::AutoModProviderSettings { url: "https://169.254.169.254/latest".into(), ..ours.clone() };
+    let refused = c.admin.update_settings(authed(&admin, update(vec![clef(""), inside]))).await.unwrap_err();
     assert_eq!(refused.code(), Code::InvalidArgument);
     let saved = c
         .admin
@@ -4569,7 +4573,7 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
     );
     let offered = list(&mut c).await.providers;
     let theirs = offered.iter().find(|p| p.id == mine.id).unwrap();
-    assert_eq!((theirs.name.as_str(), theirs.host.as_str()), ("Our classifier", "127.0.0.1"));
+    assert_eq!((theirs.name.as_str(), theirs.host.as_str()), ("Our classifier", "fuwa-test.invalid"));
 
     // A server's smart filter picks it. Nothing answers there, so messages go
     // through, and the test says why.
