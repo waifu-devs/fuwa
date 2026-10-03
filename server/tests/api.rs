@@ -6206,8 +6206,46 @@ async fn shared_preview_names_outside_providers() {
     assert_eq!(preview(&mut c).await, ["TypeSafe Jev (api.typesafe.ai)"]);
 
     // A channel the rule leaves alone isn't sent anywhere.
-    save_rule(&mut c, &juan, &home, pb::AutoModRule { exempt_channel_ids: vec![dev.id.clone()], ..rule })
+    let exempt = pb::AutoModRule { exempt_channel_ids: vec![dev.id.clone()], ..rule.clone() };
+    save_rule(&mut c, &juan, &home, exempt).await.unwrap();
+    assert!(preview(&mut c).await.is_empty());
+    save_rule(&mut c, &juan, &home, rule.clone()).await.unwrap();
+
+    // Once connected, both sides' Shared channels pages say so too, asked of
+    // the home each time, so a rule changed later shows up.
+    let asked = c
+        .shared
+        .accept_share(authed(
+            &mika,
+            pb::AcceptShareRequest { server_id: guest.clone(), code: code.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    let listed = async |c: &mut Clients, token: &str, server_id: &str| {
+        c.shared
+            .list_connections(authed(token, pb::ListConnectionsRequest { server_id: server_id.into() }))
+            .await
+            .unwrap()
+            .into_inner()
+            .connections
+            .into_iter()
+            .map(|c| c.checked_by)
+            .collect::<Vec<_>>()
+    };
+    let jev = vec!["TypeSafe Jev (api.typesafe.ai)".to_string()];
+    assert_eq!(listed(&mut c, &mika, &guest).await, vec![jev.clone()], "a waiting request");
+    c.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
+        ))
         .await
         .unwrap();
-    assert!(preview(&mut c).await.is_empty());
+    assert_eq!(listed(&mut c, &mika, &guest).await, vec![jev.clone()]);
+    assert_eq!(listed(&mut c, &juan, &home).await, vec![jev]);
+    save_rule(&mut c, &juan, &home, pb::AutoModRule { enabled: false, ..rule }).await.unwrap();
+    assert_eq!(listed(&mut c, &mika, &guest).await, [Vec::<String>::new()]);
 }
