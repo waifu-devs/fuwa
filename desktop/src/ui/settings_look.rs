@@ -1,6 +1,6 @@
 //! The Appearance and Background pages: fuwa's themes (the five built-in
 //! ones and those made or imported here), light and dark picks that follow
-//! the system, theme files in and out, and the picture and texture behind
+//! the system, theme files in and out, and the picture and effect behind
 //! the app. The same themes and files as the web app (`docs/themes.md`).
 
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
@@ -20,7 +20,9 @@ use crate::ui::widgets::{icon, icon_button, soft_button};
 /// What the two pages keep between frames.
 pub struct Look {
     dim: Entity<SliderState>,
+    blur: Entity<SliderState>,
     intensity: Entity<SliderState>,
+    speed: Entity<SliderState>,
     panels: Entity<SliderState>,
     /// The instance whose backgrounds are listed, and them.
     backgrounds: Option<(String, Vec<String>)>,
@@ -34,14 +36,16 @@ pub struct Look {
 impl Look {
     pub fn new(prefs: &Prefs, window: &mut Window, cx: &mut Context<SettingsView>) -> Self {
         let b = &prefs.backdrop;
-        let slider = |min: u8, max: u8, value: u8, cx: &mut Context<SettingsView>| {
+        let slider = |(min, max): (u8, u8), step: f32, value: u8, cx: &mut Context<SettingsView>| {
             cx.new(|_| {
-                SliderState::new().min(f32::from(min)).max(f32::from(max)).step(1.0).default_value(f32::from(value))
+                SliderState::new().min(f32::from(min)).max(f32::from(max)).step(step).default_value(f32::from(value))
             })
         };
-        let dim = slider(themes::DIM.0, themes::DIM.1, b.dim, cx);
-        let intensity = slider(themes::INTENSITY.0, themes::INTENSITY.1, b.intensity, cx);
-        let panels = slider(themes::PANELS.0, themes::PANELS.1, b.panels, cx);
+        let dim = slider(themes::DIM, 1.0, b.dim, cx);
+        let blur = slider(themes::BLUR, 1.0, b.blur, cx);
+        let intensity = slider(themes::INTENSITY, 1.0, b.intensity, cx);
+        let speed = slider(themes::SPEED, 10.0, b.speed, cx);
+        let panels = slider(themes::PANELS, 1.0, b.panels, cx);
         let watch = |state: &Entity<SliderState>, set: fn(&mut Backdrop, u8), cx: &mut Context<SettingsView>| {
             cx.subscribe_in(state, window, move |this, _, event: &SliderEvent, _, cx| {
                 let SliderEvent::Change(value) = event else { return };
@@ -51,12 +55,16 @@ impl Look {
         };
         let subscriptions = vec![
             watch(&dim, |b, v| b.dim = v, cx),
+            watch(&blur, |b, v| b.blur = v, cx),
             watch(&intensity, |b, v| b.intensity = v, cx),
+            watch(&speed, |b, v| b.speed = v, cx),
             watch(&panels, |b, v| b.panels = v, cx),
         ];
         Self {
             dim,
+            blur,
             intensity,
+            speed,
             panels,
             backgrounds: None,
             loading: None,
@@ -604,7 +612,7 @@ impl SettingsView {
         };
 
         let mut effects = div().flex().flex_wrap().gap(px(8.0));
-        for effect in [Effect::None, Effect::Grain, Effect::Paper, Effect::Dots, Effect::Grid] {
+        for effect in Effect::ALL {
             let on = b.effect == effect;
             effects = effects.child(
                 div()
@@ -627,6 +635,7 @@ impl SettingsView {
             );
         }
         let animated = !b.effect.texture() && b.effect != Effect::None;
+        let speed = if b.speed == 0 { "Still".to_owned() } else { format!("{}%", b.speed) };
 
         let slider_row = |label: &str, state: &Entity<SliderState>, value: String| {
             div()
@@ -681,22 +690,21 @@ impl SettingsView {
                     p,
                 ))
                 .child(slider_row("Dim the picture", &self.look.dim, format!("{}%", b.dim)))
+                .child(slider_row("Blur", &self.look.blur, format!("{}px", b.blur)))
             })
             .child(section(
-                "Texture",
-                div().flex().flex_col().gap(px(10.0)).child(effects).when(animated, |el| {
-                    el.child(
-                        div().text_sm().text_color(p.muted_foreground).child(format!(
-                            "{} moves in the web app; here it shows as just the picture.",
-                            b.effect.name()
-                        )),
-                    )
-                }),
+                "Effect",
+                div().flex().flex_col().gap(px(10.0)).child(effects).child(
+                    div().text_sm().text_color(p.muted_foreground).child(
+                        "Moving effects draw at most 30 frames a second, and stop while fuwa is behind other windows.",
+                    ),
+                ),
                 p,
             ))
-            .when(b.effect.texture(), |el| {
+            .when(b.effect != Effect::None, |el| {
                 el.child(slider_row("Strength", &self.look.intensity, format!("{}%", b.intensity)))
             })
+            .when(animated, |el| el.child(slider_row("Speed", &self.look.speed, speed)))
             .when(b.any(), |el| el.child(slider_row("Solid panels", &self.look.panels, format!("{}%", b.panels))))
             .into_any_element()
     }
@@ -712,7 +720,13 @@ enum Slot {
 
 /// Keeps a slider where the setting is when something else changed it.
 pub fn sync_sliders(look: &Look, b: &Backdrop, window: &mut Window, cx: &mut Context<SettingsView>) {
-    for (state, v) in [(&look.dim, b.dim), (&look.intensity, b.intensity), (&look.panels, b.panels)] {
+    for (state, v) in [
+        (&look.dim, b.dim),
+        (&look.blur, b.blur),
+        (&look.intensity, b.intensity),
+        (&look.speed, b.speed),
+        (&look.panels, b.panels),
+    ] {
         if (state.read(cx).value().start() - f32::from(v)).abs() > 0.5 {
             state.update(cx, |s, cx| s.set_value(f32::from(v), window, cx));
         }

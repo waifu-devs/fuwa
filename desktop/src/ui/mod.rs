@@ -8,6 +8,7 @@ mod backdrop;
 mod chat;
 mod compose;
 mod connect;
+mod effects;
 mod embeds;
 mod emoji;
 mod emoji_picker;

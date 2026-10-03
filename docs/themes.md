@@ -107,8 +107,10 @@ half resolution and waves at three quarters, and stop while the window is
 hidden or settings cover the app; with reduced motion they draw one frame.
 Where WebGPU isn't there, a CSS version stands in (`styles/app.css`,
 `.fx-*`). `grain`, `paper`, `dots` and `grid` are still textures (CSS, with
-SVG noise inline, never a file from elsewhere). A desktop app can run the
-same WGSL with wgpu, or its own drawing of the same idea.
+SVG noise inline, never a file from elsewhere). The desktop app draws its
+own version of the same effects with GPUI's shapes (`desktop/src/ui/effects.rs`:
+soft shadows for light, paths for petals and waves, small quads for stars),
+at the same 30 frames a second, still while its window is behind others.
 
 ## Theme files
 
