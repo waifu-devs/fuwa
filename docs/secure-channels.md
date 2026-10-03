@@ -181,7 +181,7 @@ handles MLS beyond reading headers.
   `SecureRecordAdded` and `SecureRecordDeleted`.
 - `server/src/api/secure.rs`: the service, over the server file's
   `secure_groups`, `secure_records` and `secure_welcomes`
-  (`migrations/server/0016_secure_channels.sql`).
+  (`migrations/server/0015_secure_channels.sql`).
 - `server/tests/secure.rs`: three people, someone losing access, moderation.
 - `web/src/e2ee/engine.ts`: one device for direct messages and secure
   channels; `web/src/components/chat/SecureChannelView.tsx`: the channel.

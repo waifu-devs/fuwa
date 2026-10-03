@@ -1,4 +1,4 @@
-import { AudioLinesIcon, DownloadIcon, FileArchiveIcon, LoaderCircleIcon, ServerIcon, Trash2Icon } from "lucide-react";
+import { AudioLinesIcon, DownloadIcon, FileArchiveIcon, HourglassIcon, LoaderCircleIcon, ServerIcon, Trash2Icon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Permission, type Channel, type VoiceState } from "@/gen/fuwa/v1/types_pb";
@@ -71,10 +71,12 @@ export function RecordingsButton({ instanceKey, serverId, channel, states }: { i
 function RecordingList({ instanceKey, serverId, channel, live }: { instanceKey: string; serverId: string; channel: Channel; live: boolean }) {
   const [recordings, setRecordings] = useState<Recording[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [usage, setUsage] = useState<Usage | null>(null);
   const load = useCallback(async () => {
     try {
       const res = await engine(instanceKey).api.calls.listRecordings({ serverId, channelId: channel.id });
       setRecordings(res.recordings);
+      setUsage({ used: Number(res.usedBytes), cap: res.capBytes === undefined ? null : Number(res.capBytes), keepDays: res.keepDays === undefined ? null : Number(res.keepDays) });
       setProblem(null);
     } catch (err) {
       setProblem(toFuwaError(err).message);
@@ -98,22 +100,80 @@ function RecordingList({ instanceKey, serverId, channel, live }: { instanceKey: 
     );
   if (!recordings.length)
     return (
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={SPRING} className="flex flex-col items-center gap-2 rounded-3xl border border-dashed px-6 py-10 text-center">
-        <motion.span animate={{ y: [0, -4, 0] }} transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }} className="grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
-          <AudioLinesIcon className="size-6" />
-        </motion.span>
-        <p className="font-bold">No recordings yet</p>
-        <p className="max-w-xs text-sm text-muted-foreground">In the call, press Record and pick "On the server". Everyone in the channel sees it, and hears a beep when it starts.</p>
-      </motion.div>
+      <div className="flex flex-col gap-3">
+        {usage && <UsageStrip usage={usage} />}
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={SPRING} className="flex flex-col items-center gap-2 rounded-3xl border border-dashed px-6 py-10 text-center">
+          <motion.span animate={{ y: [0, -4, 0] }} transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }} className="grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
+            <AudioLinesIcon className="size-6" />
+          </motion.span>
+          <p className="font-bold">No recordings yet</p>
+          <p className="max-w-xs text-sm text-muted-foreground">In the call, press Record and pick "On the server". Everyone in the channel sees it, and hears a beep when it starts.</p>
+        </motion.div>
+      </div>
     );
   return (
-    <ul className="flex flex-col gap-3">
-      <AnimatePresence initial={false} mode="popLayout">
-        {recordings.map((rec, n) => (
-          <RecordingCard key={rec.id} instanceKey={instanceKey} serverId={serverId} channel={channel} rec={rec} index={n} onDeleted={() => setRecordings((list) => list?.filter((r) => r.id !== rec.id) ?? null)} />
-        ))}
-      </AnimatePresence>
-    </ul>
+    <div className="flex flex-col gap-3">
+      {usage && <UsageStrip usage={usage} />}
+      <ul className="flex flex-col gap-3">
+        <AnimatePresence initial={false} mode="popLayout">
+          {recordings.map((rec, n) => (
+            <RecordingCard
+              key={rec.id}
+              instanceKey={instanceKey}
+              serverId={serverId}
+              channel={channel}
+              rec={rec}
+              index={n}
+              onDeleted={() => {
+                setRecordings((list) => list?.filter((r) => r.id !== rec.id) ?? null);
+                void load();
+              }}
+            />
+          ))}
+        </AnimatePresence>
+      </ul>
+    </div>
+  );
+}
+
+type Usage = { used: number; cap: number | null; keepDays: number | null };
+
+/**
+ * How much the server's recordings (every channel's) take, against its cap
+ * when it has one, and how long they're kept. The bar fills as it grows,
+ * and turns red once it's full, when no recording can go on.
+ */
+function UsageStrip({ usage: { used, cap, keepDays } }: { usage: Usage }) {
+  if (cap === null && keepDays === null) return null;
+  const share = cap ? Math.min(1, used / cap) : 0;
+  const full = cap !== null && used >= cap;
+  return (
+    <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={SPRING} className="flex flex-col gap-2 rounded-2xl border bg-muted/40 px-3.5 py-3">
+      {cap !== null && (
+        <>
+          <div className="flex items-baseline justify-between gap-3 text-sm">
+            <span className={cn("font-bold", full && "text-destructive")}>{full ? "Full: delete some to record again" : "This server's recordings"}</span>
+            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+              {formatBytes(used)} of {formatBytes(cap)}
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <motion.div
+              className={cn("h-full origin-left rounded-full", full ? "bg-destructive" : share > 0.8 ? "bg-amber-500" : "bg-primary")}
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: share }}
+              transition={{ type: "spring", stiffness: 120, damping: 20 }}
+            />
+          </div>
+        </>
+      )}
+      {keepDays !== null && (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <HourglassIcon className="size-3.5 shrink-0" />
+          Each recording deletes itself {keepDays === 1 ? "a day" : `${keepDays} days`} after it ends.
+        </p>
+      )}
+    </motion.div>
   );
 }
 

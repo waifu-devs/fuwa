@@ -688,6 +688,10 @@ message ServerLimits {
   optional int64 storage_bytes = 3;
   optional int64 attachment_bytes = 4;
   optional int64 emojis = 5;
+  // Voice channel recordings kept on the server, all together, in bytes.
+  // Once reached, recordings stop and no new one starts until some are
+  // deleted.
+  optional int64 recording_bytes = 6;
 }
 
 // ============================================================================

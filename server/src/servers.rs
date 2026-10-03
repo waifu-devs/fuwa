@@ -38,7 +38,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0011_sso.sql"),
     include_str!("../migrations/server/0012_video.sql"),
     include_str!("../migrations/server/0013_recordings.sql"),
-    include_str!("../migrations/server/0016_secure_channels.sql"),
+    include_str!("../migrations/server/0014_recording_limits.sql"),
+    include_str!("../migrations/server/0015_secure_channels.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -457,7 +458,7 @@ impl ServerDb {
         let conn = self.read()?;
         query_one(
             &conn,
-            "SELECT members, channels, storage_bytes, attachment_bytes, emojis FROM limits WHERE id = 1",
+            "SELECT members, channels, storage_bytes, attachment_bytes, emojis, recording_bytes FROM limits WHERE id = 1",
             (),
             |r| {
                 Ok(pb::ServerLimits {
@@ -466,6 +467,7 @@ impl ServerDb {
                     storage_bytes: r.get(2)?,
                     attachment_bytes: r.get(3)?,
                     emojis: r.get(4)?,
+                    recording_bytes: r.get(5)?,
                 })
             },
         )
@@ -558,6 +560,29 @@ impl ServerDb {
         .await
     }
 
+    /// What the server's finished recordings come to, in bytes.
+    pub async fn recording_bytes(&self) -> Result<i64> {
+        let conn = self.read()?;
+        let total =
+            query_one(&conn, "SELECT coalesce(sum(size_bytes), 0) FROM recordings", (), |r| r.get::<i64>(0)).await?;
+        Ok(total.unwrap_or(0))
+    }
+
+    /// Finished recordings that ended before `before` (ms), oldest first.
+    pub async fn recordings_ended_before(&self, before: i64, limit: i64) -> Result<Vec<RecordingRow>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            &format!(
+                "SELECT {RECORDING_COLUMNS} FROM recordings WHERE ended_at IS NOT NULL AND ended_at < ?1 \
+                 ORDER BY ended_at LIMIT ?2"
+            ),
+            (before, limit),
+            recording_row,
+        )
+        .await
+    }
+
     /// The caps in force: this server's own, else the instance defaults.
     pub async fn limits(&self, defaults: &config::Limits) -> Result<pb::ServerLimits> {
         Ok(effective_limits(self.own_limits().await?, defaults))
@@ -566,8 +591,16 @@ impl ServerDb {
     pub async fn set_limits(&self, limits: &pb::ServerLimits) -> Result<()> {
         db::write(&self.db, async |conn| {
             conn.execute(
-                "UPDATE limits SET members = ?1, channels = ?2, storage_bytes = ?3, attachment_bytes = ?4, emojis = ?5 WHERE id = 1",
-                (limits.members, limits.channels, limits.storage_bytes, limits.attachment_bytes, limits.emojis),
+                "UPDATE limits SET members = ?1, channels = ?2, storage_bytes = ?3, attachment_bytes = ?4, emojis = ?5, \
+                 recording_bytes = ?6 WHERE id = 1",
+                (
+                    limits.members,
+                    limits.channels,
+                    limits.storage_bytes,
+                    limits.attachment_bytes,
+                    limits.emojis,
+                    limits.recording_bytes,
+                ),
             )
             .await?;
             Ok(())
@@ -583,6 +616,7 @@ pub fn effective_limits(own: pb::ServerLimits, defaults: &config::Limits) -> pb:
         storage_bytes: own.storage_bytes.or(defaults.storage_bytes),
         attachment_bytes: own.attachment_bytes.or(defaults.attachment_bytes),
         emojis: own.emojis.or(defaults.emojis),
+        recording_bytes: own.recording_bytes.or(defaults.recording_bytes),
     }
 }
 
