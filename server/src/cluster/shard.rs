@@ -169,7 +169,13 @@ async fn stay_in_touch(app: Arc<App>) {
                         message = stream.message() => match message {
                             Ok(Some(message)) => {
                                 if let Some(settings) = message.settings {
-                                    app.replace_settings(Settings::from_pb(&app.config, &settings));
+                                    let mut settings = Settings::from_pb(&app.config, &settings);
+                                    settings.automod_providers = message
+                                        .automod_providers
+                                        .iter()
+                                        .map(crate::automod::providers::Setup::from_cluster)
+                                        .collect();
+                                    app.replace_settings(settings);
                                 }
                                 if first {
                                     first = false;
@@ -218,8 +224,16 @@ async fn register(app: &App, link: &Link) {
         let registered = async {
             let servers = app.servers.entries().await?;
             let count = servers.len();
-            let request = cpb::RegisterShardRequest { shard_id: link.id.clone(), url: link.url.clone(), servers };
-            link.directory().register_shard(request).await?;
+            let cluster = &app.config.cluster;
+            let request = cpb::RegisterShardRequest {
+                shard_id: link.id.clone(),
+                url: link.url.clone(),
+                servers,
+                region: cluster.region.clone(),
+                region_name: cluster.region_name.clone().unwrap_or_default(),
+            };
+            let answer = link.directory().register_shard(request).await?.into_inner();
+            super::moves::after_registering(app, &answer).await;
             Ok::<_, Error>(count)
         }
         .await;
@@ -518,6 +532,7 @@ fn respond<T>(result: Result<T>) -> Result<Response<T>, Status> {
 }
 
 type ExportStream = Pin<Box<dyn Stream<Item = Result<cpb::ExportAccountResponse, Status>> + Send>>;
+type MovedStream = Pin<Box<dyn Stream<Item = Result<cpb::SendServerResponse, Status>> + Send>>;
 
 #[tonic::async_trait]
 impl ShardService for Internal {
@@ -592,6 +607,35 @@ impl ShardService for Internal {
         )
     }
 
+    type SendServerStream = MovedStream;
+
+    async fn send_server(&self, request: Request<cpb::SendServerRequest>) -> Result<Response<MovedStream>, Status> {
+        let pieces = super::moves::send(self.app.clone(), request.into_inner().server_id);
+        Ok(Response::new(Box::pin(ReceiverStream::new(pieces))))
+    }
+
+    async fn adopt_server(
+        &self,
+        request: Request<cpb::AdoptServerRequest>,
+    ) -> Result<Response<cpb::AdoptServerResponse>, Status> {
+        let req = request.into_inner();
+        respond(
+            super::moves::adopt(&self.app, &req.server_id, &req.from_url)
+                .await
+                .map(|entry| cpb::AdoptServerResponse { entry: Some(entry) }),
+        )
+    }
+
+    async fn release_server(
+        &self,
+        request: Request<cpb::ReleaseServerRequest>,
+    ) -> Result<Response<cpb::ReleaseServerResponse>, Status> {
+        let req = request.into_inner();
+        respond(
+            super::moves::release(&self.app, &req.server_id, req.keep).await.map(|()| cpb::ReleaseServerResponse {}),
+        )
+    }
+
     async fn describe_invite(
         &self,
         request: Request<cpb::DescribeInviteRequest>,
@@ -602,5 +646,10 @@ impl ShardService for Internal {
                 .await
                 .map(|invite| cpb::DescribeInviteResponse { invite: Some(invite) }),
         )
+    }
+
+    async fn shared(&self, request: Request<cpb::SharedRequest>) -> Result<Response<cpb::SharedResponse>, Status> {
+        let call = request.into_inner().call.ok_or_else(|| Status::invalid_argument("call is required"))?;
+        respond(crate::api::shared_call(&self.app, call).await.map(|reply| cpb::SharedResponse { reply: Some(reply) }))
     }
 }

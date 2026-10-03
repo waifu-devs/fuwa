@@ -93,12 +93,6 @@ fn channel_glyph(c: Option<&pb::Channel>) -> &'static str {
     }
 }
 
-fn spinner(id: impl Into<SharedString>, size: f32, window: &Window) -> AnyElement {
-    motion::ambient(icon("loader-circle").size(px(size)), id.into(), Duration::from_millis(900), window, |el, t| {
-        el.rotate(gpui_kit::radians(t * std::f32::consts::TAU))
-    })
-}
-
 impl ServerSettingsView {
     fn load_hooks(&mut self, cx: &mut Context<Self>) {
         if self.hooks.loading || self.hooks.list.is_some() {
@@ -143,7 +137,7 @@ impl ServerSettingsView {
         }
     }
 
-    fn text_channels(&self) -> Vec<pb::Channel> {
+    pub(super) fn text_channels(&self) -> Vec<pb::Channel> {
         self.core.shared.read(|s| {
             let mut list: Vec<pb::Channel> = s
                 .instance(&self.key)

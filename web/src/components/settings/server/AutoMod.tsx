@@ -6,12 +6,15 @@ import {
   CheckIcon,
   ChevronDownIcon,
   FlaskConicalIcon,
+  GlobeLockIcon,
   HashIcon,
+  ImageIcon,
   LinkIcon,
   LoaderCircleIcon,
   PlusIcon,
   ShieldCheckIcon,
   ShieldIcon,
+  SparklesIcon,
   TimerIcon,
   Trash2Icon,
   TypeIcon,
@@ -19,9 +22,12 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useMemo, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
+import type { AutoModProvider } from "@/gen/fuwa/v1/automod_pb";
 import {
   AutoModActionKind,
   AutoModActionSchema,
+  AutoModLabelRuleSchema,
+  AutoModLevel,
   AutoModRuleSchema,
   AutoModTrigger,
   ChannelType,
@@ -73,7 +79,26 @@ const KINDS = [
     tint: "from-sky-500/20 text-sky-500",
     max: 1,
   },
+  {
+    trigger: AutoModTrigger.PROVIDER,
+    label: "Smart filter",
+    blurb: "A moderation service reads each message and says what kind it is: hate, harassment, scams, spam and more. You pick what happens for each.",
+    icon: SparklesIcon,
+    tint: "from-violet-500/20 text-violet-500",
+    max: 1,
+  },
 ] as const;
+
+/** What a smart filter can do about one kind of message, mildest first. */
+const LEVELS = [
+  { level: AutoModLevel.OFF, label: "Nothing", short: "Off" },
+  { level: AutoModLevel.FLAG, label: "Flag", short: "Flag" },
+  { level: AutoModLevel.BLOCK, label: "Block", short: "Block" },
+  { level: AutoModLevel.TIME_OUT, label: "Block + time out", short: "Time out" },
+] as const;
+
+/** The level a label is at (unset reads as nothing). */
+const levelOf = (level: AutoModLevel) => (level === AutoModLevel.UNSPECIFIED ? AutoModLevel.OFF : level);
 
 const TIME_OUTS = [
   { value: 60, label: "1 minute" },
@@ -84,7 +109,16 @@ const TIME_OUTS = [
   { value: 604_800, label: "1 week" },
 ];
 
-function fresh(trigger: AutoModTrigger): AutoModRule {
+function fresh(trigger: AutoModTrigger, provider?: AutoModProvider, alertChannelId = ""): AutoModRule {
+  if (trigger === AutoModTrigger.PROVIDER && provider)
+    return create(AutoModRuleSchema, {
+      enabled: true,
+      trigger,
+      provider: provider.id,
+      pictures: provider.pictures,
+      labels: provider.labels.map((l) => create(AutoModLabelRuleSchema, { label: l.id, level: l.defaultLevel, threshold: 80 })),
+      actions: [create(AutoModActionSchema, { kind: AutoModActionKind.ALERT, channelId: alertChannelId })],
+    });
   return create(AutoModRuleSchema, {
     enabled: true,
     trigger,
@@ -100,11 +134,20 @@ function fresh(trigger: AutoModTrigger): AutoModRule {
  */
 export function AutoMod({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
   const [rules, setRules] = useState<AutoModRule[] | null>(null);
+  const [providers, setProviders] = useState<AutoModProvider[]>([]);
   const [drafts, setDrafts] = useState<{ key: string; rule: AutoModRule }[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
+  const inst = useInstance(instanceKey);
+  const firstTextChannel = (inst?.channels[serverId] ?? []).find((c) => c.type === ChannelType.TEXT)?.id ?? "";
 
   useEffect(() => {
-    run(listAutoModRules(instanceKey, serverId)).then(setRules, (e: FuwaError) => setProblem(e.message));
+    run(listAutoModRules(instanceKey, serverId)).then(
+      (r) => {
+        setRules(r.rules);
+        setProviders(r.providers);
+      },
+      (e: FuwaError) => setProblem(e.message),
+    );
   }, [instanceKey, serverId]);
 
   if (problem) return <p className="text-sm text-muted-foreground first-letter:uppercase">{problem}</p>;
@@ -139,7 +182,8 @@ export function AutoMod({ instanceKey, serverId }: { instanceKey: string; server
       {KINDS.map((kind, n) => {
         const mine = rules.filter((r) => r.trigger === kind.trigger);
         const pending = drafts.filter((d) => d.rule.trigger === kind.trigger);
-        const room = mine.length + pending.length < kind.max;
+        const unavailable = kind.trigger === AutoModTrigger.PROVIDER && providers.length === 0;
+        const room = mine.length + pending.length < kind.max && !unavailable;
         return (
           <motion.section
             key={kind.trigger}
@@ -162,19 +206,33 @@ export function AutoMod({ instanceKey, serverId }: { instanceKey: string; server
                   variant={mine.length + pending.length ? "ghost" : "default"}
                   size="sm"
                   className="group ml-auto shrink-0 rounded-xl font-bold"
-                  onClick={() => setDrafts((d) => [...d, { key: `new-${Date.now()}`, rule: fresh(kind.trigger) }])}
+                  onClick={() =>
+                    setDrafts((d) => [...d, { key: `new-${Date.now()}`, rule: fresh(kind.trigger, providers[0], firstTextChannel) }])
+                  }
                 >
                   <PlusIcon className="transition-transform group-hover:rotate-90" />
                   {mine.length + pending.length ? "Another list" : "Set up"}
                 </Button>
               )}
             </div>
+            {unavailable && mine.length === 0 && (
+              <motion.p
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={SPRING}
+                className="rounded-2xl border border-dashed p-3 text-sm text-muted-foreground"
+              >
+                This instance hasn't turned on a moderation service yet. Its admins can, under Instance settings, Moderation: TypeSafe Jev and Cloudflare Clef take
+                a key and one switch.
+              </motion.p>
+            )}
             <AnimatePresence initial={false}>
               {mine.map((rule) => (
                 <RuleCard
                   key={rule.id}
                   instanceKey={instanceKey}
                   serverId={serverId}
+                  providers={providers}
                   saved={rule}
                   onSaved={(next) => setRules((list) => list?.map((r) => (r.id === next.id ? next : r)) ?? null)}
                   onDeleted={() => setRules((list) => list?.filter((r) => r.id !== rule.id) ?? null)}
@@ -185,6 +243,7 @@ export function AutoMod({ instanceKey, serverId }: { instanceKey: string; server
                   key={d.key}
                   instanceKey={instanceKey}
                   serverId={serverId}
+                  providers={providers}
                   saved={d.rule}
                   isNew
                   onSaved={(next) => {
@@ -208,6 +267,7 @@ const actionOf = (rule: AutoModRule, kind: AutoModActionKind) => rule.actions.fi
 function RuleCard({
   instanceKey,
   serverId,
+  providers,
   saved,
   isNew = false,
   onSaved,
@@ -215,6 +275,7 @@ function RuleCard({
 }: {
   instanceKey: string;
   serverId: string;
+  providers: AutoModProvider[];
   saved: AutoModRule;
   isNew?: boolean;
   onSaved: (rule: AutoModRule) => void;
@@ -274,13 +335,19 @@ function RuleCard({
     if ((await remove.go(instanceKey, serverId, saved.id)) !== undefined) onDeleted();
   }
 
-  const doing = [
-    actionOf(draft, AutoModActionKind.BLOCK) && "blocks",
-    actionOf(draft, AutoModActionKind.ALERT) && "alerts",
-    actionOf(draft, AutoModActionKind.TIME_OUT) && "times out",
-  ].filter(Boolean);
-  const summary =
-    draft.trigger === AutoModTrigger.KEYWORDS
+  const smart = draft.trigger === AutoModTrigger.PROVIDER;
+  const provider = providers.find((p) => p.id === draft.provider);
+  const watching = draft.labels.filter((l) => levelOf(l.level) !== AutoModLevel.OFF).length;
+  const doing = smart
+    ? []
+    : [
+        actionOf(draft, AutoModActionKind.BLOCK) && "blocks",
+        actionOf(draft, AutoModActionKind.ALERT) && "alerts",
+        actionOf(draft, AutoModActionKind.TIME_OUT) && "times out",
+      ].filter(Boolean);
+  const summary = smart
+    ? `${provider?.name ?? "Provider turned off on this instance"} · watching ${watching} ${watching === 1 ? "kind" : "kinds"}${provider?.pictures && draft.pictures ? " · with pictures" : ""}`
+    : draft.trigger === AutoModTrigger.KEYWORDS
       ? `${draft.keywords.length} ${draft.keywords.length === 1 ? "word" : "words"}`
       : draft.trigger === AutoModTrigger.MENTION_SPAM
         ? `More than ${draft.mentionLimit} pings`
@@ -347,9 +414,21 @@ function RuleCard({
                     className="h-10 rounded-xl"
                   />
                 </Field>
-                <Trigger draft={draft} set={set} />
-                <Tester instanceKey={instanceKey} serverId={serverId} rule={draft} />
-                <Actions instanceKey={instanceKey} serverId={serverId} draft={draft} setAction={setAction} />
+                {smart ? (
+                  <>
+                    <ProviderPicker providers={providers} draft={draft} set={set} />
+                    <Pictures provider={provider} draft={draft} set={set} />
+                    <Labels provider={provider} draft={draft} set={set} />
+                    <Tester instanceKey={instanceKey} serverId={serverId} rule={draft} />
+                    <SmartActions instanceKey={instanceKey} serverId={serverId} draft={draft} setAction={setAction} />
+                  </>
+                ) : (
+                  <>
+                    <Trigger draft={draft} set={set} />
+                    <Tester instanceKey={instanceKey} serverId={serverId} rule={draft} />
+                    <Actions instanceKey={instanceKey} serverId={serverId} draft={draft} setAction={setAction} />
+                  </>
+                )}
                 <Exemptions instanceKey={instanceKey} serverId={serverId} draft={draft} set={set} />
                 <div className="flex flex-wrap items-center gap-2 border-t pt-4">
                   <AnimatePresence mode="popLayout" initial={false}>
@@ -579,9 +658,24 @@ function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId
   const [result, setResult] = useState<{
     matched: boolean;
     matches: string[];
+    error: string;
+    elapsedMs: number;
   } | null>(null);
   const [checking, setChecking] = useState(false);
-  const key = useMemo(() => JSON.stringify([rule.trigger, rule.keywords, rule.allowed, rule.mentionLimit, text]), [rule, text]);
+  const smart = rule.trigger === AutoModTrigger.PROVIDER;
+  const key = useMemo(
+    () =>
+      JSON.stringify([
+        rule.trigger,
+        rule.keywords,
+        rule.allowed,
+        rule.mentionLimit,
+        rule.provider,
+        rule.labels.map((l) => [l.label, l.level, l.threshold]),
+        text,
+      ]),
+    [rule, text],
+  );
 
   useEffect(() => {
     if (!text.trim()) return setResult(null);
@@ -589,10 +683,11 @@ function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId
     setChecking(true);
     const t = setTimeout(() => {
       run(testAutoModRule(instanceKey, serverId, rule, text))
-        .then((r) => live && setResult({ matched: r.matched, matches: r.matches }))
+        .then((r) => live && setResult({ matched: r.matched, matches: r.matches, error: r.error, elapsedMs: r.elapsedMs }))
         .catch(() => live && setResult(null))
         .finally(() => live && setChecking(false));
-    }, 250);
+      // A smart filter asks its provider each time, so wait for a pause in typing.
+    }, smart ? 700 : 250);
     return () => {
       live = false;
       clearTimeout(t);
@@ -608,14 +703,14 @@ function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId
       <Textarea
         value={text}
         rows={2}
-        placeholder="Write something the rule should catch, or let through."
+        placeholder={smart ? "Write something it should flag or block, or let through. It goes to the provider." : "Write something the rule should catch, or let through."}
         onChange={(e) => setText(e.target.value)}
         className="rounded-xl bg-background"
       />
       <AnimatePresence mode="popLayout" initial={false}>
         {text.trim() && (
           <motion.div
-            key={checking ? "checking" : result?.matched ? `caught-${result.matches.join()}` : "fine"}
+            key={checking ? "checking" : result?.error ? "error" : result?.matched ? `caught-${result.matches.join()}` : "fine"}
             initial={{ opacity: 0, y: 6, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6 }}
@@ -624,7 +719,11 @@ function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId
           >
             {checking || !result ? (
               <span className="flex items-center gap-1.5 text-muted-foreground">
-                <LoaderCircleIcon className="size-3.5 animate-spin" /> Checking…
+                <LoaderCircleIcon className="size-3.5 animate-spin" /> {smart ? "Asking the provider…" : "Checking…"}
+              </span>
+            ) : result.error ? (
+              <span className="text-xs text-amber-700 first-letter:uppercase dark:text-amber-400">
+                The provider didn't answer: {result.error}. Messages go through this rule unchecked until it does; your other rules still apply.
               </span>
             ) : result.matched ? (
               <>
@@ -653,6 +752,7 @@ function Tester({ instanceKey, serverId, rule }: { instanceKey: string; serverId
                 <CheckIcon className="size-3" strokeWidth={3} /> Gets through
               </span>
             )}
+            {smart && result && !checking && <span className="ml-auto text-xs text-muted-foreground tabular-nums">{result.elapsedMs} ms</span>}
           </motion.div>
         )}
       </AnimatePresence>
@@ -876,6 +976,319 @@ function Exemptions({
         </DropdownMenu>
       </div>
     </Field>
+  );
+}
+
+/** Which of the instance's moderation services reads messages, and what it gets to see. */
+function ProviderPicker({
+  providers,
+  draft,
+  set,
+}: {
+  providers: AutoModProvider[];
+  draft: AutoModRule;
+  set: (patch: Partial<AutoModRule>) => void;
+}) {
+  const chosen = providers.find((p) => p.id === draft.provider);
+  return (
+    <Field label="Provider" hint="The services this instance's admins turned on.">
+      {providers.length > 1 && (
+        <div className="flex flex-wrap gap-1 rounded-2xl bg-muted/60 p-1" role="radiogroup" aria-label="Provider">
+          {providers.map((p) => {
+            const on = p.id === draft.provider;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                onClick={() => set({ provider: p.id, pictures: p.pictures })}
+                className={cn("relative flex-1 rounded-xl px-3 py-1.5 text-sm font-bold transition-colors", on ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
+              >
+                {on && <motion.span layoutId={`provider-${draft.id || "new"}`} transition={SPRING} className="absolute inset-0 rounded-xl bg-background shadow-sm" />}
+                <span className="relative">{p.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.div
+          key={chosen?.id ?? "none"}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={SPRING}
+          className={cn(
+            "flex items-start gap-2.5 rounded-2xl border p-3 text-sm",
+            chosen ? "border-violet-500/30 bg-violet-500/5" : "border-amber-500/40 bg-amber-500/5",
+          )}
+        >
+          <GlobeLockIcon className={cn("mt-0.5 size-4 shrink-0", chosen ? "text-violet-500" : "text-amber-500")} />
+          {chosen ? (
+            <span className="min-w-0 text-muted-foreground">
+              <b className="text-foreground">{chosen.name}</b> reads the messages this rule checks, at <b className="break-all text-foreground">{chosen.host}</b>. It
+              gets the text{chosen.pictures && draft.pictures ? " and pictures" : ""} alone: never who wrote it, where, or this server's name, and mentions and
+              custom emoji are swapped for placeholders first. Your instance sends it, never anyone's app.
+            </span>
+          ) : (
+            <span className="min-w-0 text-amber-700 dark:text-amber-400">
+              This instance turned that provider off, so the rule lets every message through. Pick another, or ask the instance's admins.
+            </span>
+          )}
+        </motion.div>
+      </AnimatePresence>
+    </Field>
+  );
+}
+
+/** Whether the provider sees messages' pictures too, for providers that read them. */
+function Pictures({ provider, draft, set }: { provider?: AutoModProvider; draft: AutoModRule; set: (patch: Partial<AutoModRule>) => void }) {
+  return (
+    <AnimatePresence initial={false}>
+      {provider?.pictures && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: "auto", opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={SPRING}
+          className="overflow-hidden"
+        >
+          <label
+            className={cn(
+              "flex cursor-pointer items-center gap-3 rounded-2xl border p-3 transition-colors",
+              draft.pictures ? "border-primary/40 bg-primary/5" : "hover:border-primary/20",
+            )}
+          >
+            <motion.span
+              animate={draft.pictures ? { scale: [1, 1.2, 1], rotate: [0, -10, 0] } : { scale: 1 }}
+              transition={{ duration: 0.35 }}
+              className={cn(
+                "grid size-8 shrink-0 place-items-center rounded-xl transition-colors",
+                draft.pictures ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+              )}
+            >
+              <ImageIcon className="size-4" />
+            </motion.span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-bold">Check pictures too</span>
+              <span className="block text-xs text-muted-foreground">
+                Up to 4 per message, attached or in embeds (PNG, JPEG or WebP). Your instance fetches them and sends them along; GIFs and very large photos
+                are skipped.
+              </span>
+            </span>
+            <Switch checked={draft.pictures} onCheckedChange={(on) => set({ pictures: on })} aria-label="Check pictures too" />
+          </label>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** Each kind of message the provider tells apart, with what happens to it and how sure it must be. */
+function Labels({ provider, draft, set }: { provider?: AutoModProvider; draft: AutoModRule; set: (patch: Partial<AutoModRule>) => void }) {
+  const labels = provider?.labels ?? [];
+  const ruleFor = (id: string) => draft.labels.find((l) => l.label === id);
+  const change = (id: string, patch: { level?: AutoModLevel; threshold?: number }) => {
+    const current = ruleFor(id);
+    const next = create(AutoModLabelRuleSchema, {
+      label: id,
+      level: patch.level ?? current?.level ?? AutoModLevel.OFF,
+      threshold: patch.threshold ?? (current?.threshold || 80),
+    });
+    set({ labels: [...draft.labels.filter((l) => l.label !== id), next] });
+  };
+  const resetAll = () =>
+    set({ labels: labels.map((l) => create(AutoModLabelRuleSchema, { label: l.id, level: l.defaultLevel, threshold: 80 })) });
+  if (!labels.length) return null;
+  return (
+    <Field
+      label="What to do about each kind"
+      hint={
+        <>
+          Flags post to your alert channel and let the message through. The bar is how sure the provider must be.{" "}
+          <button type="button" onClick={resetAll} className="font-bold text-primary hover:underline">
+            Back to the defaults
+          </button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-2">
+        {labels.map((label, n) => {
+          const rule = ruleFor(label.id);
+          const level = levelOf(rule?.level ?? label.defaultLevel);
+          const threshold = rule?.threshold || 80;
+          const off = level === AutoModLevel.OFF;
+          return (
+            <motion.div
+              key={label.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ ...SPRING, delay: n * 0.03 }}
+              className={cn("rounded-2xl border p-3 transition-colors", off ? "bg-transparent" : "border-primary/25 bg-primary/[0.03]")}
+            >
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className={cn("min-w-40 flex-1 transition-opacity", off && "opacity-60")}>
+                  <span className="block text-sm font-bold">{label.name}</span>
+                  <span className="block text-xs text-muted-foreground">{label.description}</span>
+                </span>
+                <div className="flex w-full gap-0.5 rounded-xl bg-muted/70 p-0.5 sm:w-auto" role="radiogroup" aria-label={`What to do about ${label.name}`}>
+                  {LEVELS.map((option) => {
+                    const on = option.level === level;
+                    return (
+                      <button
+                        key={option.level}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        title={option.label}
+                        onClick={() => change(label.id, { level: option.level })}
+                        className={cn(
+                          "relative flex-1 rounded-[0.6rem] px-2.5 py-1 text-xs font-bold whitespace-nowrap transition-colors sm:flex-none",
+                          on ? (option.level >= AutoModLevel.BLOCK ? "text-white" : "text-foreground") : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {on && (
+                          <motion.span
+                            layoutId={`level-${draft.id || "new"}-${label.id}`}
+                            transition={SPRING}
+                            className={cn(
+                              "absolute inset-0 rounded-[0.6rem] shadow-sm",
+                              option.level >= AutoModLevel.BLOCK ? "bg-destructive" : option.level === AutoModLevel.FLAG ? "bg-amber-400/80" : "bg-background",
+                            )}
+                          />
+                        )}
+                        <span className="relative">{option.short}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <AnimatePresence initial={false}>
+                {!off && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={SPRING}
+                    className="overflow-hidden"
+                  >
+                    <div className="flex items-center gap-3 pt-2.5">
+                      <span className="shrink-0 text-xs text-muted-foreground">How sure</span>
+                      <input
+                        type="range"
+                        min={50}
+                        max={99}
+                        value={threshold}
+                        onChange={(e) => change(label.id, { threshold: Number(e.target.value) })}
+                        aria-label={`How sure the provider must be about ${label.name}`}
+                        className="h-1.5 flex-1 cursor-pointer accent-primary"
+                      />
+                      <motion.span
+                        key={threshold}
+                        initial={{ scale: 1.25 }}
+                        animate={{ scale: 1 }}
+                        transition={SPRING}
+                        className="w-10 shrink-0 text-right text-xs font-bold tabular-nums"
+                      >
+                        {threshold}%
+                      </motion.span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+          );
+        })}
+      </div>
+    </Field>
+  );
+}
+
+/** Where flags go, what blocked people are told and how long a time-out lasts: shown as the labels need them. */
+function SmartActions({
+  instanceKey,
+  serverId,
+  draft,
+  setAction,
+}: {
+  instanceKey: string;
+  serverId: string;
+  draft: AutoModRule;
+  setAction: (kind: AutoModActionKind, action: Partial<AutoModAction> | null) => void;
+}) {
+  const inst = useInstance(instanceKey);
+  const textChannels = (inst?.channels[serverId] ?? []).filter((c) => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT);
+  const levels = draft.labels.map((l) => levelOf(l.level));
+  const blocks = levels.some((l) => l >= AutoModLevel.BLOCK);
+  const timesOut = levels.includes(AutoModLevel.TIME_OUT);
+  const flags = levels.includes(AutoModLevel.FLAG);
+  const alert = actionOf(draft, AutoModActionKind.ALERT);
+  const block = actionOf(draft, AutoModActionKind.BLOCK);
+  const timeOut = actionOf(draft, AutoModActionKind.TIME_OUT);
+  const alertChannel = textChannels.find((c) => c.id === alert?.channelId);
+  return (
+    <div className="flex flex-col gap-4">
+      <Field
+        label="Alert channel"
+        hint={flags ? "Flagged messages are posted here for your mods; blocked ones too." : "Blocked messages are posted here too, if you pick one."}
+      >
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "group flex h-10 w-full items-center gap-2 rounded-xl border px-3 text-left text-sm transition hover:border-primary/40 data-[state=open]:border-primary/60",
+                flags && !alertChannel && "border-amber-500/60",
+              )}
+            >
+              <HashIcon className="size-4 text-muted-foreground" />
+              <span className="flex-1 truncate font-bold">{alertChannel?.name ?? (flags ? "Pick a channel for flags" : "No alerts")}</span>
+              <ChevronDownIcon className="size-4 text-muted-foreground transition-transform duration-300 group-data-[state=open]:rotate-180" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-72 w-60 overflow-y-auto">
+            {!flags && (
+              <DropdownMenuItem onSelect={() => setAction(AutoModActionKind.ALERT, null)}>
+                <XIcon /> No alerts
+              </DropdownMenuItem>
+            )}
+            {textChannels.map((c) => (
+              <DropdownMenuItem key={c.id} onSelect={() => setAction(AutoModActionKind.ALERT, { channelId: c.id })}>
+                <HashIcon /> {c.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </Field>
+      <AnimatePresence initial={false}>
+        {blocks && (
+          <motion.div key="block" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
+            <Field label="What blocked people are told">
+              <Input
+                value={block?.message ?? ""}
+                maxLength={150}
+                placeholder="Optional: “That message breaks our rules.”"
+                onChange={(e) => setAction(AutoModActionKind.BLOCK, e.target.value ? { message: e.target.value } : null)}
+                className="h-10 rounded-xl"
+              />
+            </Field>
+          </motion.div>
+        )}
+        {timesOut && (
+          <motion.div key="time-out" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
+            <Field label="Time-out length">
+              <Chips
+                label="Time-out length"
+                value={timeOut?.durationSeconds ?? 600}
+                options={TIME_OUTS}
+                onChange={(durationSeconds) => setAction(AutoModActionKind.TIME_OUT, { durationSeconds })}
+              />
+            </Field>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 

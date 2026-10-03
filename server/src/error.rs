@@ -35,6 +35,10 @@ pub enum Error {
     /// where it is now and tries again.
     #[error("that server is on another shard")]
     Misrouted,
+    /// A change to a server that's being moved to another shard; the gateway
+    /// tries again shortly, where the server is by then.
+    #[error("that server is moving; try again in a moment")]
+    Moving,
     /// What another part of a split instance answered, passed on as it is.
     #[error("{}", .0.message())]
     Remote(Status),
@@ -104,6 +108,11 @@ impl From<Error> for Status {
             Error::Misrouted => {
                 let mut status = Status::unavailable(err.to_string());
                 status.metadata_mut().insert(MISROUTED, "1".parse().expect("a valid header value"));
+                return status;
+            }
+            Error::Moving => {
+                let mut status = Status::unavailable(err.to_string());
+                status.metadata_mut().insert(NOT_READY, "1".parse().expect("a valid header value"));
                 return status;
             }
             Error::Remote(status) => return status.clone(),

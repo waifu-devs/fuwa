@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/admin.proto.
  */
 export const file_fuwa_v1_admin: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL2FkbWluLnByb3RvEgdmdXdhLnYxIqsGChBJbnN0YW5jZVNldHRpbmdzEgwKBG5hbWUYASABKAkSEgoKcHVibGljX3VybBgCIAEoCRIXCg9hbGxvd2VkX29yaWdpbnMYAyADKAkSLgoObG9jYWxfYWNjb3VudHMYBCABKA4yFi5mdXdhLnYxLkxvY2FsQWNjb3VudHMSMAoPc2VydmVyX2NyZWF0aW9uGAUgASgOMhcuZnV3YS52MS5TZXJ2ZXJDcmVhdGlvbhIgChNzZXJ2ZXJzX3Blcl9hY2NvdW50GAYgASgDSACIAQESLQoOZGVmYXVsdF9saW1pdHMYByABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cxIRCgl0ZWxlbWV0cnkYCCABKAgSCwoDd2ViGAkgASgIEiEKFHBpY3R1cmVfdXBsb2FkX2J5dGVzGAogASgDSAGIAQESMAoPbGlua2VkX2FjY291bnRzGAsgASgOMhcuZnV3YS52MS5MaW5rZWRBY2NvdW50cxIVCg1saW5rZWRfaXNzdWVyGAwgASgJEg0KBWNhbGxzGBQgASgIEhAKCGljZV91cmxzGBUgAygJEhMKC3R1cm5fc2VjcmV0GBYgASgJEhcKD2NhbGxfcmVjb3JkaW5ncxgXIAEoCBImChljYWxsX3JlY29yZGluZ3Nfa2VlcF9kYXlzGBggASgDSAKIAQESLgoOYWdlbnRfY3JlYXRpb24YDSABKA4yFi5mdXdhLnYxLkFnZW50Q3JlYXRpb24SKQoccGljdHVyZV91cGxvYWRfYnl0ZXNfcGVyX2RheRgOIAEoA0gDiAEBEioKDHNzb19hY2NvdW50cxgPIAEoDjIULmZ1d2EudjEuU3NvQWNjb3VudHMSLwoMc3NvX3Byb3ZpZGVyGBAgASgLMhkuZnV3YS52MS5JZGVudGl0eVByb3ZpZGVyQhYKFF9zZXJ2ZXJzX3Blcl9hY2NvdW50QhcKFV9waWN0dXJlX3VwbG9hZF9ieXRlc0IcChpfY2FsbF9yZWNvcmRpbmdzX2tlZXBfZGF5c0IfCh1fcGljdHVyZV91cGxvYWRfYnl0ZXNfcGVyX2RheSLDAQoPU3RhcnR1cFNldHRpbmdzEgwKBHBvcnQYASABKAUSEgoKZW5jcnlwdGlvbhgCIAEoCBITCgthZG1pbl90b2tlbhgDIAEoCBIUCgx3ZWJfYnVpbHRfaW4YBCABKAgSFQoNdGVsZW1ldHJ5X3VybBgFIAEoCRIOCgZob3N0ZWQYBiABKAgSDwoHdmVyc2lvbhgHIAEoCRISCgptZWRpYV9wb3J0GBQgASgFEhcKD21lZGlhX2FkZHJlc3NlcxgVIAMoCSLhAQoOSW5zdGFuY2VDb25maWcSKwoIc2V0dGluZ3MYASABKAsyGS5mdXdhLnYxLkluc3RhbmNlU2V0dGluZ3MSKwoIZGVmYXVsdHMYAiABKAsyGS5mdXdhLnYxLkluc3RhbmNlU2V0dGluZ3MSEgoKb3ZlcnJpZGRlbhgDIAMoCRIpCgdzdGFydHVwGAQgASgLMhguZnV3YS52MS5TdGFydHVwU2V0dGluZ3MSNgoUc3NvX3NlcnZpY2VfcHJvdmlkZXIYBSABKAsyGC5mdXdhLnYxLlNlcnZpY2VQcm92aWRlciIUChJHZXRTZXR0aW5nc1JlcXVlc3QiPgoTR2V0U2V0dGluZ3NSZXNwb25zZRInCgZjb25maWcYASABKAsyFy5mdXdhLnYxLkluc3RhbmNlQ29uZmlnIqUBChVVcGRhdGVTZXR0aW5nc1JlcXVlc3QSKwoIc2V0dGluZ3MYASABKAsyGS5mdXdhLnYxLkluc3RhbmNlU2V0dGluZ3MSLwoLdXBkYXRlX21hc2sYAiABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrEi4KCnJlc2V0X21hc2sYAyABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrIkEKFlVwZGF0ZVNldHRpbmdzUmVzcG9uc2USJwoGY29uZmlnGAEgASgLMhcuZnV3YS52MS5JbnN0YW5jZUNvbmZpZyIVChNHZXROb2RlVXNhZ2VSZXF1ZXN0Ir0BChRHZXROb2RlVXNhZ2VSZXNwb25zZRIQCghhY2NvdW50cxgBIAEoAxIPCgdzZXJ2ZXJzGAIgASgDEioKDHNlcnZlcl91c2FnZRgDIAMoCzIULmZ1d2EudjEuU2VydmVyVXNhZ2USLQoOZGVmYXVsdF9saW1pdHMYBCABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cxIQCghwaWN0dXJlcxgFIAEoAxIVCg1waWN0dXJlX2J5dGVzGAYgASgDIlIKFlNldFNlcnZlckxpbWl0c1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEiUKBmxpbWl0cxgCIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzIkAKF1NldFNlcnZlckxpbWl0c1Jlc3BvbnNlEiUKBmxpbWl0cxgBIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzIsgCCg5BY2NvdW50U3VtbWFyeRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAIgASgIEhAKCGRpc2FibGVkGAMgASgIEhcKD2Rpc2FibGVkX3JlYXNvbhgEIAEoCRIvCgtkaXNhYmxlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKdHdvX2ZhY3RvchgGIAEoCBIuCgpjcmVhdGVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIwCgxsYXN0X3NlZW5fYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhAKCHNlc3Npb25zGAkgASgFEg8KB3NlcnZlcnMYCiABKAUSFQoNc2VydmVyc19vd25lZBgLIAEoBSJuChNMaXN0QWNjb3VudHNSZXF1ZXN0Eg0KBXF1ZXJ5GAEgASgJEiYKBmZpbHRlchgCIAEoDjIWLmZ1d2EudjEuQWNjb3VudEZpbHRlchIRCgliZWZvcmVfaWQYAyABKAkSDQoFbGltaXQYBCABKAUiewoUTGlzdEFjY291bnRzUmVzcG9uc2USKQoIYWNjb3VudHMYASADKAsyFy5mdXdhLnYxLkFjY291bnRTdW1tYXJ5EhAKCGhhc19tb3JlGAIgASgIEiYKBnRvdGFscxgDIAEoCzIWLmZ1d2EudjEuQWNjb3VudFRvdGFscyI+Cg1BY2NvdW50VG90YWxzEgsKA2FsbBgBIAEoAxIOCgZhZG1pbnMYAiABKAMSEAoIZGlzYWJsZWQYAyABKAMifAoUVXBkYXRlQWNjb3VudFJlcXVlc3QSEgoKYWNjb3VudF9pZBgBIAEoCRISCgVhZG1pbhgCIAEoCEgAiAEBEhUKCGRpc2FibGVkGAMgASgISAGIAQESDgoGcmVhc29uGAQgASgJQggKBl9hZG1pbkILCglfZGlzYWJsZWQiQQoVVXBkYXRlQWNjb3VudFJlc3BvbnNlEigKB2FjY291bnQYASABKAsyFy5mdXdhLnYxLkFjY291bnRTdW1tYXJ5Ik4KG1Jlc2V0QWNjb3VudFBhc3N3b3JkUmVxdWVzdBISCgphY2NvdW50X2lkGAEgASgJEhsKE3R1cm5fb2ZmX3R3b19mYWN0b3IYAiABKAgiMAocUmVzZXRBY2NvdW50UGFzc3dvcmRSZXNwb25zZRIQCghwYXNzd29yZBgBIAEoCSKrAQoOSW5zdGFuY2VTZXJ2ZXISHwoGc2VydmVyGAEgASgLMg8uZnV3YS52MS5TZXJ2ZXISHAoFb3duZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISIwoFdXNhZ2UYAyABKAsyFC5mdXdhLnYxLlNlcnZlclVzYWdlEiUKBmxpbWl0cxgEIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzEg4KBm1lbWJlchgFIAEoCCIcChpMaXN0SW5zdGFuY2VTZXJ2ZXJzUmVxdWVzdCJHChtMaXN0SW5zdGFuY2VTZXJ2ZXJzUmVzcG9uc2USKAoHc2VydmVycxgBIAMoCzIXLmZ1d2EudjEuSW5zdGFuY2VTZXJ2ZXIiKAoTRXhwb3J0U2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiRQoURXhwb3J0U2VydmVyUmVzcG9uc2USDQoFY2h1bmsYASABKAwSDAoEc2l6ZRgCIAEoAxIQCghmaWxlbmFtZRgDIAEoCSJFChZTZXRBbm5vdW5jZW1lbnRSZXF1ZXN0EisKDGFubm91bmNlbWVudBgBIAEoCzIVLmZ1d2EudjEuQW5ub3VuY2VtZW50IkYKF1NldEFubm91bmNlbWVudFJlc3BvbnNlEisKDGFubm91bmNlbWVudBgBIAEoCzIVLmZ1d2EudjEuQW5ub3VuY2VtZW50KnEKC1Nzb0FjY291bnRzEhwKGFNTT19BQ0NPVU5UU19VTlNQRUNJRklFRBAAEhUKEVNTT19BQ0NPVU5UU19PUEVOEAESFwoTU1NPX0FDQ09VTlRTX0NMT1NFRBACEhQKEFNTT19BQ0NPVU5UU19PRkYQAyp7Cg1Mb2NhbEFjY291bnRzEh4KGkxPQ0FMX0FDQ09VTlRTX1VOU1BFQ0lGSUVEEAASFwoTTE9DQUxfQUNDT1VOVFNfT1BFThABEhkKFUxPQ0FMX0FDQ09VTlRTX0NMT1NFRBACEhYKEkxPQ0FMX0FDQ09VTlRTX09GRhADKoABCg5MaW5rZWRBY2NvdW50cxIfChtMSU5LRURfQUNDT1VOVFNfVU5TUEVDSUZJRUQQABIYChRMSU5LRURfQUNDT1VOVFNfT1BFThABEhoKFkxJTktFRF9BQ0NPVU5UU19DTE9TRUQQAhIXChNMSU5LRURfQUNDT1VOVFNfT0ZGEAMqZwoNQWNjb3VudEZpbHRlchIeChpBQ0NPVU5UX0ZJTFRFUl9VTlNQRUNJRklFRBAAEhkKFUFDQ09VTlRfRklMVEVSX0FETUlOUxABEhsKF0FDQ09VTlRfRklMVEVSX0RJU0FCTEVEEAIy1wYKDEFkbWluU2VydmljZRJICgtHZXRTZXR0aW5ncxIbLmZ1d2EudjEuR2V0U2V0dGluZ3NSZXF1ZXN0GhwuZnV3YS52MS5HZXRTZXR0aW5nc1Jlc3BvbnNlElEKDlVwZGF0ZVNldHRpbmdzEh4uZnV3YS52MS5VcGRhdGVTZXR0aW5nc1JlcXVlc3QaHy5mdXdhLnYxLlVwZGF0ZVNldHRpbmdzUmVzcG9uc2USSwoMR2V0Tm9kZVVzYWdlEhwuZnV3YS52MS5HZXROb2RlVXNhZ2VSZXF1ZXN0Gh0uZnV3YS52MS5HZXROb2RlVXNhZ2VSZXNwb25zZRJUCg9TZXRTZXJ2ZXJMaW1pdHMSHy5mdXdhLnYxLlNldFNlcnZlckxpbWl0c1JlcXVlc3QaIC5mdXdhLnYxLlNldFNlcnZlckxpbWl0c1Jlc3BvbnNlEksKDExpc3RBY2NvdW50cxIcLmZ1d2EudjEuTGlzdEFjY291bnRzUmVxdWVzdBodLmZ1d2EudjEuTGlzdEFjY291bnRzUmVzcG9uc2USTgoNVXBkYXRlQWNjb3VudBIdLmZ1d2EudjEuVXBkYXRlQWNjb3VudFJlcXVlc3QaHi5mdXdhLnYxLlVwZGF0ZUFjY291bnRSZXNwb25zZRJjChRSZXNldEFjY291bnRQYXNzd29yZBIkLmZ1d2EudjEuUmVzZXRBY2NvdW50UGFzc3dvcmRSZXF1ZXN0GiUuZnV3YS52MS5SZXNldEFjY291bnRQYXNzd29yZFJlc3BvbnNlEmAKE0xpc3RJbnN0YW5jZVNlcnZlcnMSIy5mdXdhLnYxLkxpc3RJbnN0YW5jZVNlcnZlcnNSZXF1ZXN0GiQuZnV3YS52MS5MaXN0SW5zdGFuY2VTZXJ2ZXJzUmVzcG9uc2USTQoMRXhwb3J0U2VydmVyEhwuZnV3YS52MS5FeHBvcnRTZXJ2ZXJSZXF1ZXN0Gh0uZnV3YS52MS5FeHBvcnRTZXJ2ZXJSZXNwb25zZTABElQKD1NldEFubm91bmNlbWVudBIfLmZ1d2EudjEuU2V0QW5ub3VuY2VtZW50UmVxdWVzdBogLmZ1d2EudjEuU2V0QW5ub3VuY2VtZW50UmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_sso, file_fuwa_v1_types, file_google_protobuf_field_mask, file_google_protobuf_timestamp]);
+  fileDesc("ChNmdXdhL3YxL2FkbWluLnByb3RvEgdmdXdhLnYxIoEHChBJbnN0YW5jZVNldHRpbmdzEgwKBG5hbWUYASABKAkSEgoKcHVibGljX3VybBgCIAEoCRIXCg9hbGxvd2VkX29yaWdpbnMYAyADKAkSLgoObG9jYWxfYWNjb3VudHMYBCABKA4yFi5mdXdhLnYxLkxvY2FsQWNjb3VudHMSMAoPc2VydmVyX2NyZWF0aW9uGAUgASgOMhcuZnV3YS52MS5TZXJ2ZXJDcmVhdGlvbhIgChNzZXJ2ZXJzX3Blcl9hY2NvdW50GAYgASgDSACIAQESLQoOZGVmYXVsdF9saW1pdHMYByABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cxIRCgl0ZWxlbWV0cnkYCCABKAgSCwoDd2ViGAkgASgIEiEKFHBpY3R1cmVfdXBsb2FkX2J5dGVzGAogASgDSAGIAQESMAoPbGlua2VkX2FjY291bnRzGAsgASgOMhcuZnV3YS52MS5MaW5rZWRBY2NvdW50cxIVCg1saW5rZWRfaXNzdWVyGAwgASgJEg0KBWNhbGxzGBQgASgIEhAKCGljZV91cmxzGBUgAygJEhMKC3R1cm5fc2VjcmV0GBYgASgJEhcKD2NhbGxfcmVjb3JkaW5ncxgXIAEoCBImChljYWxsX3JlY29yZGluZ3Nfa2VlcF9kYXlzGBggASgDSAKIAQESLgoOYWdlbnRfY3JlYXRpb24YDSABKA4yFi5mdXdhLnYxLkFnZW50Q3JlYXRpb24SKQoccGljdHVyZV91cGxvYWRfYnl0ZXNfcGVyX2RheRgOIAEoA0gDiAEBEioKDHNzb19hY2NvdW50cxgPIAEoDjIULmZ1d2EudjEuU3NvQWNjb3VudHMSLwoMc3NvX3Byb3ZpZGVyGBAgASgLMhkuZnV3YS52MS5JZGVudGl0eVByb3ZpZGVyEjsKEWF1dG9tb2RfcHJvdmlkZXJzGBkgAygLMiAuZnV3YS52MS5BdXRvTW9kUHJvdmlkZXJTZXR0aW5ncxIXCg9zaGFyZWRfY2hhbm5lbHMYHiABKAhCFgoUX3NlcnZlcnNfcGVyX2FjY291bnRCFwoVX3BpY3R1cmVfdXBsb2FkX2J5dGVzQhwKGl9jYWxsX3JlY29yZGluZ3Nfa2VlcF9kYXlzQh8KHV9waWN0dXJlX3VwbG9hZF9ieXRlc19wZXJfZGF5IsABChdBdXRvTW9kUHJvdmlkZXJTZXR0aW5ncxIKCgJpZBgBIAEoCRIPCgdlbmFibGVkGAIgASgIEg8KB2FwaV9rZXkYAyABKAkSEwoLYXBpX2tleV9zZXQYBCABKAgSFAoMYXBpX2tleV9oaW50GAUgASgJEg0KBW1vZGVsGAYgASgJEhIKCmFjY291bnRfaWQYByABKAkSDAoEbmFtZRgIIAEoCRILCgN1cmwYCSABKAkSDgoGaGVhZGVyGAogASgJImEKGlRlc3RBdXRvTW9kUHJvdmlkZXJSZXF1ZXN0EjIKCHByb3ZpZGVyGAEgASgLMiAuZnV3YS52MS5BdXRvTW9kUHJvdmlkZXJTZXR0aW5ncxIPCgdjb250ZW50GAIgASgJInMKG1Rlc3RBdXRvTW9kUHJvdmlkZXJSZXNwb25zZRIKCgJvaxgBIAEoCBINCgVlcnJvchgCIAEoCRISCgplbGFwc2VkX21zGAMgASgFEiUKBnNjb3JlcxgEIAMoCzIVLmZ1d2EudjEuQXV0b01vZFNjb3JlIjIKDEF1dG9Nb2RTY29yZRINCgVsYWJlbBgBIAEoCRITCgtwcm9iYWJpbGl0eRgCIAEoAiLDAQoPU3RhcnR1cFNldHRpbmdzEgwKBHBvcnQYASABKAUSEgoKZW5jcnlwdGlvbhgCIAEoCBITCgthZG1pbl90b2tlbhgDIAEoCBIUCgx3ZWJfYnVpbHRfaW4YBCABKAgSFQoNdGVsZW1ldHJ5X3VybBgFIAEoCRIOCgZob3N0ZWQYBiABKAgSDwoHdmVyc2lvbhgHIAEoCRISCgptZWRpYV9wb3J0GBQgASgFEhcKD21lZGlhX2FkZHJlc3NlcxgVIAMoCSLhAQoOSW5zdGFuY2VDb25maWcSKwoIc2V0dGluZ3MYASABKAsyGS5mdXdhLnYxLkluc3RhbmNlU2V0dGluZ3MSKwoIZGVmYXVsdHMYAiABKAsyGS5mdXdhLnYxLkluc3RhbmNlU2V0dGluZ3MSEgoKb3ZlcnJpZGRlbhgDIAMoCRIpCgdzdGFydHVwGAQgASgLMhguZnV3YS52MS5TdGFydHVwU2V0dGluZ3MSNgoUc3NvX3NlcnZpY2VfcHJvdmlkZXIYBSABKAsyGC5mdXdhLnYxLlNlcnZpY2VQcm92aWRlciIUChJHZXRTZXR0aW5nc1JlcXVlc3QiPgoTR2V0U2V0dGluZ3NSZXNwb25zZRInCgZjb25maWcYASABKAsyFy5mdXdhLnYxLkluc3RhbmNlQ29uZmlnIqUBChVVcGRhdGVTZXR0aW5nc1JlcXVlc3QSKwoIc2V0dGluZ3MYASABKAsyGS5mdXdhLnYxLkluc3RhbmNlU2V0dGluZ3MSLwoLdXBkYXRlX21hc2sYAiABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrEi4KCnJlc2V0X21hc2sYAyABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrIkEKFlVwZGF0ZVNldHRpbmdzUmVzcG9uc2USJwoGY29uZmlnGAEgASgLMhcuZnV3YS52MS5JbnN0YW5jZUNvbmZpZyIVChNHZXROb2RlVXNhZ2VSZXF1ZXN0Ir0BChRHZXROb2RlVXNhZ2VSZXNwb25zZRIQCghhY2NvdW50cxgBIAEoAxIPCgdzZXJ2ZXJzGAIgASgDEioKDHNlcnZlcl91c2FnZRgDIAMoCzIULmZ1d2EudjEuU2VydmVyVXNhZ2USLQoOZGVmYXVsdF9saW1pdHMYBCABKAsyFS5mdXdhLnYxLlNlcnZlckxpbWl0cxIQCghwaWN0dXJlcxgFIAEoAxIVCg1waWN0dXJlX2J5dGVzGAYgASgDIlIKFlNldFNlcnZlckxpbWl0c1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEiUKBmxpbWl0cxgCIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzIkAKF1NldFNlcnZlckxpbWl0c1Jlc3BvbnNlEiUKBmxpbWl0cxgBIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzIsgCCg5BY2NvdW50U3VtbWFyeRIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEg0KBWFkbWluGAIgASgIEhAKCGRpc2FibGVkGAMgASgIEhcKD2Rpc2FibGVkX3JlYXNvbhgEIAEoCRIvCgtkaXNhYmxlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKdHdvX2ZhY3RvchgGIAEoCBIuCgpjcmVhdGVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIwCgxsYXN0X3NlZW5fYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhAKCHNlc3Npb25zGAkgASgFEg8KB3NlcnZlcnMYCiABKAUSFQoNc2VydmVyc19vd25lZBgLIAEoBSJuChNMaXN0QWNjb3VudHNSZXF1ZXN0Eg0KBXF1ZXJ5GAEgASgJEiYKBmZpbHRlchgCIAEoDjIWLmZ1d2EudjEuQWNjb3VudEZpbHRlchIRCgliZWZvcmVfaWQYAyABKAkSDQoFbGltaXQYBCABKAUiewoUTGlzdEFjY291bnRzUmVzcG9uc2USKQoIYWNjb3VudHMYASADKAsyFy5mdXdhLnYxLkFjY291bnRTdW1tYXJ5EhAKCGhhc19tb3JlGAIgASgIEiYKBnRvdGFscxgDIAEoCzIWLmZ1d2EudjEuQWNjb3VudFRvdGFscyI+Cg1BY2NvdW50VG90YWxzEgsKA2FsbBgBIAEoAxIOCgZhZG1pbnMYAiABKAMSEAoIZGlzYWJsZWQYAyABKAMifAoUVXBkYXRlQWNjb3VudFJlcXVlc3QSEgoKYWNjb3VudF9pZBgBIAEoCRISCgVhZG1pbhgCIAEoCEgAiAEBEhUKCGRpc2FibGVkGAMgASgISAGIAQESDgoGcmVhc29uGAQgASgJQggKBl9hZG1pbkILCglfZGlzYWJsZWQiQQoVVXBkYXRlQWNjb3VudFJlc3BvbnNlEigKB2FjY291bnQYASABKAsyFy5mdXdhLnYxLkFjY291bnRTdW1tYXJ5Ik4KG1Jlc2V0QWNjb3VudFBhc3N3b3JkUmVxdWVzdBISCgphY2NvdW50X2lkGAEgASgJEhsKE3R1cm5fb2ZmX3R3b19mYWN0b3IYAiABKAgiMAocUmVzZXRBY2NvdW50UGFzc3dvcmRSZXNwb25zZRIQCghwYXNzd29yZBgBIAEoCSKrAQoOSW5zdGFuY2VTZXJ2ZXISHwoGc2VydmVyGAEgASgLMg8uZnV3YS52MS5TZXJ2ZXISHAoFb3duZXIYAiABKAsyDS5mdXdhLnYxLlVzZXISIwoFdXNhZ2UYAyABKAsyFC5mdXdhLnYxLlNlcnZlclVzYWdlEiUKBmxpbWl0cxgEIAEoCzIVLmZ1d2EudjEuU2VydmVyTGltaXRzEg4KBm1lbWJlchgFIAEoCCIcChpMaXN0SW5zdGFuY2VTZXJ2ZXJzUmVxdWVzdCJHChtMaXN0SW5zdGFuY2VTZXJ2ZXJzUmVzcG9uc2USKAoHc2VydmVycxgBIAMoCzIXLmZ1d2EudjEuSW5zdGFuY2VTZXJ2ZXIiNgoRTW92ZVNlcnZlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg4KBnJlZ2lvbhgCIAEoCSI1ChJNb3ZlU2VydmVyUmVzcG9uc2USHwoGc2VydmVyGAEgASgLMg8uZnV3YS52MS5TZXJ2ZXIiKAoTRXhwb3J0U2VydmVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiRQoURXhwb3J0U2VydmVyUmVzcG9uc2USDQoFY2h1bmsYASABKAwSDAoEc2l6ZRgCIAEoAxIQCghmaWxlbmFtZRgDIAEoCSJFChZTZXRBbm5vdW5jZW1lbnRSZXF1ZXN0EisKDGFubm91bmNlbWVudBgBIAEoCzIVLmZ1d2EudjEuQW5ub3VuY2VtZW50IkYKF1NldEFubm91bmNlbWVudFJlc3BvbnNlEisKDGFubm91bmNlbWVudBgBIAEoCzIVLmZ1d2EudjEuQW5ub3VuY2VtZW50KnEKC1Nzb0FjY291bnRzEhwKGFNTT19BQ0NPVU5UU19VTlNQRUNJRklFRBAAEhUKEVNTT19BQ0NPVU5UU19PUEVOEAESFwoTU1NPX0FDQ09VTlRTX0NMT1NFRBACEhQKEFNTT19BQ0NPVU5UU19PRkYQAyp7Cg1Mb2NhbEFjY291bnRzEh4KGkxPQ0FMX0FDQ09VTlRTX1VOU1BFQ0lGSUVEEAASFwoTTE9DQUxfQUNDT1VOVFNfT1BFThABEhkKFUxPQ0FMX0FDQ09VTlRTX0NMT1NFRBACEhYKEkxPQ0FMX0FDQ09VTlRTX09GRhADKoABCg5MaW5rZWRBY2NvdW50cxIfChtMSU5LRURfQUNDT1VOVFNfVU5TUEVDSUZJRUQQABIYChRMSU5LRURfQUNDT1VOVFNfT1BFThABEhoKFkxJTktFRF9BQ0NPVU5UU19DTE9TRUQQAhIXChNMSU5LRURfQUNDT1VOVFNfT0ZGEAMqZwoNQWNjb3VudEZpbHRlchIeChpBQ0NPVU5UX0ZJTFRFUl9VTlNQRUNJRklFRBAAEhkKFUFDQ09VTlRfRklMVEVSX0FETUlOUxABEhsKF0FDQ09VTlRfRklMVEVSX0RJU0FCTEVEEAIygAgKDEFkbWluU2VydmljZRJICgtHZXRTZXR0aW5ncxIbLmZ1d2EudjEuR2V0U2V0dGluZ3NSZXF1ZXN0GhwuZnV3YS52MS5HZXRTZXR0aW5nc1Jlc3BvbnNlElEKDlVwZGF0ZVNldHRpbmdzEh4uZnV3YS52MS5VcGRhdGVTZXR0aW5nc1JlcXVlc3QaHy5mdXdhLnYxLlVwZGF0ZVNldHRpbmdzUmVzcG9uc2USSwoMR2V0Tm9kZVVzYWdlEhwuZnV3YS52MS5HZXROb2RlVXNhZ2VSZXF1ZXN0Gh0uZnV3YS52MS5HZXROb2RlVXNhZ2VSZXNwb25zZRJUCg9TZXRTZXJ2ZXJMaW1pdHMSHy5mdXdhLnYxLlNldFNlcnZlckxpbWl0c1JlcXVlc3QaIC5mdXdhLnYxLlNldFNlcnZlckxpbWl0c1Jlc3BvbnNlEksKDExpc3RBY2NvdW50cxIcLmZ1d2EudjEuTGlzdEFjY291bnRzUmVxdWVzdBodLmZ1d2EudjEuTGlzdEFjY291bnRzUmVzcG9uc2USTgoNVXBkYXRlQWNjb3VudBIdLmZ1d2EudjEuVXBkYXRlQWNjb3VudFJlcXVlc3QaHi5mdXdhLnYxLlVwZGF0ZUFjY291bnRSZXNwb25zZRJjChRSZXNldEFjY291bnRQYXNzd29yZBIkLmZ1d2EudjEuUmVzZXRBY2NvdW50UGFzc3dvcmRSZXF1ZXN0GiUuZnV3YS52MS5SZXNldEFjY291bnRQYXNzd29yZFJlc3BvbnNlEmAKE0xpc3RJbnN0YW5jZVNlcnZlcnMSIy5mdXdhLnYxLkxpc3RJbnN0YW5jZVNlcnZlcnNSZXF1ZXN0GiQuZnV3YS52MS5MaXN0SW5zdGFuY2VTZXJ2ZXJzUmVzcG9uc2USTQoMRXhwb3J0U2VydmVyEhwuZnV3YS52MS5FeHBvcnRTZXJ2ZXJSZXF1ZXN0Gh0uZnV3YS52MS5FeHBvcnRTZXJ2ZXJSZXNwb25zZTABEkUKCk1vdmVTZXJ2ZXISGi5mdXdhLnYxLk1vdmVTZXJ2ZXJSZXF1ZXN0GhsuZnV3YS52MS5Nb3ZlU2VydmVyUmVzcG9uc2USVAoPU2V0QW5ub3VuY2VtZW50Eh8uZnV3YS52MS5TZXRBbm5vdW5jZW1lbnRSZXF1ZXN0GiAuZnV3YS52MS5TZXRBbm5vdW5jZW1lbnRSZXNwb25zZRJgChNUZXN0QXV0b01vZFByb3ZpZGVyEiMuZnV3YS52MS5UZXN0QXV0b01vZFByb3ZpZGVyUmVxdWVzdBokLmZ1d2EudjEuVGVzdEF1dG9Nb2RQcm92aWRlclJlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_sso, file_fuwa_v1_types, file_google_protobuf_field_mask, file_google_protobuf_timestamp]);
 
 /**
  * Everything about an instance an admin can change while it runs. Each setting
@@ -187,6 +187,23 @@ export type InstanceSettings = Message<"fuwa.v1.InstanceSettings"> & {
    * @generated from field: fuwa.v1.IdentityProvider sso_provider = 16;
    */
   ssoProvider?: IdentityProvider | undefined;
+
+  /**
+   * Moderation providers servers' AutoMod can use, one entry for each kind
+   * fuwa knows. Their API keys are never sent back.
+   *
+   * @generated from field: repeated fuwa.v1.AutoModProviderSettings automod_providers = 25;
+   */
+  automodProviders: AutoModProviderSettings[];
+
+  /**
+   * Servers may share channels with each other (SharedChannelService).
+   * Turning it off stops new codes and requests; channels already shared
+   * stay shared until either side ends them. FUWA_SHARED_CHANNELS.
+   *
+   * @generated from field: bool shared_channels = 30;
+   */
+  sharedChannels: boolean;
 };
 
 /**
@@ -195,6 +212,179 @@ export type InstanceSettings = Message<"fuwa.v1.InstanceSettings"> & {
  */
 export const InstanceSettingsSchema: GenMessage<InstanceSettings> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_admin, 0);
+
+/**
+ * One moderation provider, as the instance's admins set it up: one fuwa
+ * knows, or their own (docs/automod.md has what fuwa sends it and expects).
+ *
+ * @generated from message fuwa.v1.AutoModProviderSettings
+ */
+export type AutoModProviderSettings = Message<"fuwa.v1.AutoModProviderSettings"> & {
+  /**
+   * "typesafe-jev", "cloudflare-clef", or "custom-..." for one of the
+   * admins' own. "custom" adds a new one; the instance picks its id.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * Servers can pick it for their AutoMod.
+   *
+   * @generated from field: bool enabled = 2;
+   */
+  enabled: boolean;
+
+  /**
+   * Only ever sent in: empty keeps the saved key.
+   *
+   * @generated from field: string api_key = 3;
+   */
+  apiKey: string;
+
+  /**
+   * Whether a key is saved.
+   *
+   * @generated from field: bool api_key_set = 4;
+   */
+  apiKeySet: boolean;
+
+  /**
+   * The saved key's last four characters, to tell keys apart.
+   *
+   * @generated from field: string api_key_hint = 5;
+   */
+  apiKeyHint: string;
+
+  /**
+   * Empty for the provider's default ("jev-latest", "@cf/cloudflare/clef").
+   *
+   * @generated from field: string model = 6;
+   */
+  model: string;
+
+  /**
+   * Cloudflare's account id, which its address needs.
+   *
+   * @generated from field: string account_id = 7;
+   */
+  accountId: string;
+
+  /**
+   * The admins' own providers: what servers see it called.
+   *
+   * @generated from field: string name = 8;
+   */
+  name: string;
+
+  /**
+   * The admins' own providers: where it is, an https URL.
+   *
+   * @generated from field: string url = 9;
+   */
+  url: string;
+
+  /**
+   * The admins' own providers: the header the key goes in. Empty sends it
+   * as "Authorization: Bearer <key>"; no key sends none.
+   *
+   * @generated from field: string header = 10;
+   */
+  header: string;
+};
+
+/**
+ * Describes the message fuwa.v1.AutoModProviderSettings.
+ * Use `create(AutoModProviderSettingsSchema)` to create a new message.
+ */
+export const AutoModProviderSettingsSchema: GenMessage<AutoModProviderSettings> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 1);
+
+/**
+ * @generated from message fuwa.v1.TestAutoModProviderRequest
+ */
+export type TestAutoModProviderRequest = Message<"fuwa.v1.TestAutoModProviderRequest"> & {
+  /**
+   * @generated from field: fuwa.v1.AutoModProviderSettings provider = 1;
+   */
+  provider?: AutoModProviderSettings | undefined;
+
+  /**
+   * Up to 2000 characters.
+   *
+   * @generated from field: string content = 2;
+   */
+  content: string;
+};
+
+/**
+ * Describes the message fuwa.v1.TestAutoModProviderRequest.
+ * Use `create(TestAutoModProviderRequestSchema)` to create a new message.
+ */
+export const TestAutoModProviderRequestSchema: GenMessage<TestAutoModProviderRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 2);
+
+/**
+ * @generated from message fuwa.v1.TestAutoModProviderResponse
+ */
+export type TestAutoModProviderResponse = Message<"fuwa.v1.TestAutoModProviderResponse"> & {
+  /**
+   * It answered.
+   *
+   * @generated from field: bool ok = 1;
+   */
+  ok: boolean;
+
+  /**
+   * Why it didn't.
+   *
+   * @generated from field: string error = 2;
+   */
+  error: string;
+
+  /**
+   * @generated from field: int32 elapsed_ms = 3;
+   */
+  elapsedMs: number;
+
+  /**
+   * How sure it is of each label, highest first.
+   *
+   * @generated from field: repeated fuwa.v1.AutoModScore scores = 4;
+   */
+  scores: AutoModScore[];
+};
+
+/**
+ * Describes the message fuwa.v1.TestAutoModProviderResponse.
+ * Use `create(TestAutoModProviderResponseSchema)` to create a new message.
+ */
+export const TestAutoModProviderResponseSchema: GenMessage<TestAutoModProviderResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 3);
+
+/**
+ * @generated from message fuwa.v1.AutoModScore
+ */
+export type AutoModScore = Message<"fuwa.v1.AutoModScore"> & {
+  /**
+   * @generated from field: string label = 1;
+   */
+  label: string;
+
+  /**
+   * 0 to 1.
+   *
+   * @generated from field: float probability = 2;
+   */
+  probability: number;
+};
+
+/**
+ * Describes the message fuwa.v1.AutoModScore.
+ * Use `create(AutoModScoreSchema)` to create a new message.
+ */
+export const AutoModScoreSchema: GenMessage<AutoModScore> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 4);
 
 /**
  * How the process was started. These come only from the environment, since
@@ -270,7 +460,7 @@ export type StartupSettings = Message<"fuwa.v1.StartupSettings"> & {
  * Use `create(StartupSettingsSchema)` to create a new message.
  */
 export const StartupSettingsSchema: GenMessage<StartupSettings> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 1);
+  messageDesc(file_fuwa_v1_admin, 5);
 
 /**
  * @generated from message fuwa.v1.InstanceConfig
@@ -316,7 +506,7 @@ export type InstanceConfig = Message<"fuwa.v1.InstanceConfig"> & {
  * Use `create(InstanceConfigSchema)` to create a new message.
  */
 export const InstanceConfigSchema: GenMessage<InstanceConfig> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 2);
+  messageDesc(file_fuwa_v1_admin, 6);
 
 /**
  * @generated from message fuwa.v1.GetSettingsRequest
@@ -329,7 +519,7 @@ export type GetSettingsRequest = Message<"fuwa.v1.GetSettingsRequest"> & {
  * Use `create(GetSettingsRequestSchema)` to create a new message.
  */
 export const GetSettingsRequestSchema: GenMessage<GetSettingsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 3);
+  messageDesc(file_fuwa_v1_admin, 7);
 
 /**
  * @generated from message fuwa.v1.GetSettingsResponse
@@ -346,7 +536,7 @@ export type GetSettingsResponse = Message<"fuwa.v1.GetSettingsResponse"> & {
  * Use `create(GetSettingsResponseSchema)` to create a new message.
  */
 export const GetSettingsResponseSchema: GenMessage<GetSettingsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 4);
+  messageDesc(file_fuwa_v1_admin, 8);
 
 /**
  * @generated from message fuwa.v1.UpdateSettingsRequest
@@ -380,7 +570,7 @@ export type UpdateSettingsRequest = Message<"fuwa.v1.UpdateSettingsRequest"> & {
  * Use `create(UpdateSettingsRequestSchema)` to create a new message.
  */
 export const UpdateSettingsRequestSchema: GenMessage<UpdateSettingsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 5);
+  messageDesc(file_fuwa_v1_admin, 9);
 
 /**
  * @generated from message fuwa.v1.UpdateSettingsResponse
@@ -397,7 +587,7 @@ export type UpdateSettingsResponse = Message<"fuwa.v1.UpdateSettingsResponse"> &
  * Use `create(UpdateSettingsResponseSchema)` to create a new message.
  */
 export const UpdateSettingsResponseSchema: GenMessage<UpdateSettingsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 6);
+  messageDesc(file_fuwa_v1_admin, 10);
 
 /**
  * @generated from message fuwa.v1.GetNodeUsageRequest
@@ -410,7 +600,7 @@ export type GetNodeUsageRequest = Message<"fuwa.v1.GetNodeUsageRequest"> & {
  * Use `create(GetNodeUsageRequestSchema)` to create a new message.
  */
 export const GetNodeUsageRequestSchema: GenMessage<GetNodeUsageRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 7);
+  messageDesc(file_fuwa_v1_admin, 11);
 
 /**
  * @generated from message fuwa.v1.GetNodeUsageResponse
@@ -456,7 +646,7 @@ export type GetNodeUsageResponse = Message<"fuwa.v1.GetNodeUsageResponse"> & {
  * Use `create(GetNodeUsageResponseSchema)` to create a new message.
  */
 export const GetNodeUsageResponseSchema: GenMessage<GetNodeUsageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 8);
+  messageDesc(file_fuwa_v1_admin, 12);
 
 /**
  * @generated from message fuwa.v1.SetServerLimitsRequest
@@ -478,7 +668,7 @@ export type SetServerLimitsRequest = Message<"fuwa.v1.SetServerLimitsRequest"> &
  * Use `create(SetServerLimitsRequestSchema)` to create a new message.
  */
 export const SetServerLimitsRequestSchema: GenMessage<SetServerLimitsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 9);
+  messageDesc(file_fuwa_v1_admin, 13);
 
 /**
  * @generated from message fuwa.v1.SetServerLimitsResponse
@@ -497,7 +687,7 @@ export type SetServerLimitsResponse = Message<"fuwa.v1.SetServerLimitsResponse">
  * Use `create(SetServerLimitsResponseSchema)` to create a new message.
  */
 export const SetServerLimitsResponseSchema: GenMessage<SetServerLimitsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 10);
+  messageDesc(file_fuwa_v1_admin, 14);
 
 /**
  * An account as instance admins see it.
@@ -574,7 +764,7 @@ export type AccountSummary = Message<"fuwa.v1.AccountSummary"> & {
  * Use `create(AccountSummarySchema)` to create a new message.
  */
 export const AccountSummarySchema: GenMessage<AccountSummary> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 11);
+  messageDesc(file_fuwa_v1_admin, 15);
 
 /**
  * @generated from message fuwa.v1.ListAccountsRequest
@@ -612,7 +802,7 @@ export type ListAccountsRequest = Message<"fuwa.v1.ListAccountsRequest"> & {
  * Use `create(ListAccountsRequestSchema)` to create a new message.
  */
 export const ListAccountsRequestSchema: GenMessage<ListAccountsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 12);
+  messageDesc(file_fuwa_v1_admin, 16);
 
 /**
  * @generated from message fuwa.v1.ListAccountsResponse
@@ -641,7 +831,7 @@ export type ListAccountsResponse = Message<"fuwa.v1.ListAccountsResponse"> & {
  * Use `create(ListAccountsResponseSchema)` to create a new message.
  */
 export const ListAccountsResponseSchema: GenMessage<ListAccountsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 13);
+  messageDesc(file_fuwa_v1_admin, 17);
 
 /**
  * @generated from message fuwa.v1.AccountTotals
@@ -668,7 +858,7 @@ export type AccountTotals = Message<"fuwa.v1.AccountTotals"> & {
  * Use `create(AccountTotalsSchema)` to create a new message.
  */
 export const AccountTotalsSchema: GenMessage<AccountTotals> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 14);
+  messageDesc(file_fuwa_v1_admin, 18);
 
 /**
  * @generated from message fuwa.v1.UpdateAccountRequest
@@ -702,7 +892,7 @@ export type UpdateAccountRequest = Message<"fuwa.v1.UpdateAccountRequest"> & {
  * Use `create(UpdateAccountRequestSchema)` to create a new message.
  */
 export const UpdateAccountRequestSchema: GenMessage<UpdateAccountRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 15);
+  messageDesc(file_fuwa_v1_admin, 19);
 
 /**
  * @generated from message fuwa.v1.UpdateAccountResponse
@@ -719,7 +909,7 @@ export type UpdateAccountResponse = Message<"fuwa.v1.UpdateAccountResponse"> & {
  * Use `create(UpdateAccountResponseSchema)` to create a new message.
  */
 export const UpdateAccountResponseSchema: GenMessage<UpdateAccountResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 16);
+  messageDesc(file_fuwa_v1_admin, 20);
 
 /**
  * @generated from message fuwa.v1.ResetAccountPasswordRequest
@@ -741,7 +931,7 @@ export type ResetAccountPasswordRequest = Message<"fuwa.v1.ResetAccountPasswordR
  * Use `create(ResetAccountPasswordRequestSchema)` to create a new message.
  */
 export const ResetAccountPasswordRequestSchema: GenMessage<ResetAccountPasswordRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 17);
+  messageDesc(file_fuwa_v1_admin, 21);
 
 /**
  * @generated from message fuwa.v1.ResetAccountPasswordResponse
@@ -761,7 +951,7 @@ export type ResetAccountPasswordResponse = Message<"fuwa.v1.ResetAccountPassword
  * Use `create(ResetAccountPasswordResponseSchema)` to create a new message.
  */
 export const ResetAccountPasswordResponseSchema: GenMessage<ResetAccountPasswordResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 18);
+  messageDesc(file_fuwa_v1_admin, 22);
 
 /**
  * A community server as instance admins see it.
@@ -804,7 +994,7 @@ export type InstanceServer = Message<"fuwa.v1.InstanceServer"> & {
  * Use `create(InstanceServerSchema)` to create a new message.
  */
 export const InstanceServerSchema: GenMessage<InstanceServer> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 19);
+  messageDesc(file_fuwa_v1_admin, 23);
 
 /**
  * @generated from message fuwa.v1.ListInstanceServersRequest
@@ -817,7 +1007,7 @@ export type ListInstanceServersRequest = Message<"fuwa.v1.ListInstanceServersReq
  * Use `create(ListInstanceServersRequestSchema)` to create a new message.
  */
 export const ListInstanceServersRequestSchema: GenMessage<ListInstanceServersRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 20);
+  messageDesc(file_fuwa_v1_admin, 24);
 
 /**
  * @generated from message fuwa.v1.ListInstanceServersResponse
@@ -834,7 +1024,48 @@ export type ListInstanceServersResponse = Message<"fuwa.v1.ListInstanceServersRe
  * Use `create(ListInstanceServersResponseSchema)` to create a new message.
  */
 export const ListInstanceServersResponseSchema: GenMessage<ListInstanceServersResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 21);
+  messageDesc(file_fuwa_v1_admin, 25);
+
+/**
+ * @generated from message fuwa.v1.MoveServerRequest
+ */
+export type MoveServerRequest = Message<"fuwa.v1.MoveServerRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * The region's id; empty for the home region.
+   *
+   * @generated from field: string region = 2;
+   */
+  region: string;
+};
+
+/**
+ * Describes the message fuwa.v1.MoveServerRequest.
+ * Use `create(MoveServerRequestSchema)` to create a new message.
+ */
+export const MoveServerRequestSchema: GenMessage<MoveServerRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 26);
+
+/**
+ * @generated from message fuwa.v1.MoveServerResponse
+ */
+export type MoveServerResponse = Message<"fuwa.v1.MoveServerResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.Server server = 1;
+   */
+  server?: Server | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.MoveServerResponse.
+ * Use `create(MoveServerResponseSchema)` to create a new message.
+ */
+export const MoveServerResponseSchema: GenMessage<MoveServerResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_admin, 27);
 
 /**
  * @generated from message fuwa.v1.ExportServerRequest
@@ -851,7 +1082,7 @@ export type ExportServerRequest = Message<"fuwa.v1.ExportServerRequest"> & {
  * Use `create(ExportServerRequestSchema)` to create a new message.
  */
 export const ExportServerRequestSchema: GenMessage<ExportServerRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 22);
+  messageDesc(file_fuwa_v1_admin, 28);
 
 /**
  * One piece of an exported file. The first also says what the whole is.
@@ -884,7 +1115,7 @@ export type ExportServerResponse = Message<"fuwa.v1.ExportServerResponse"> & {
  * Use `create(ExportServerResponseSchema)` to create a new message.
  */
 export const ExportServerResponseSchema: GenMessage<ExportServerResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 23);
+  messageDesc(file_fuwa_v1_admin, 29);
 
 /**
  * @generated from message fuwa.v1.SetAnnouncementRequest
@@ -903,7 +1134,7 @@ export type SetAnnouncementRequest = Message<"fuwa.v1.SetAnnouncementRequest"> &
  * Use `create(SetAnnouncementRequestSchema)` to create a new message.
  */
 export const SetAnnouncementRequestSchema: GenMessage<SetAnnouncementRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 24);
+  messageDesc(file_fuwa_v1_admin, 30);
 
 /**
  * @generated from message fuwa.v1.SetAnnouncementResponse
@@ -922,7 +1153,7 @@ export type SetAnnouncementResponse = Message<"fuwa.v1.SetAnnouncementResponse">
  * Use `create(SetAnnouncementResponseSchema)` to create a new message.
  */
 export const SetAnnouncementResponseSchema: GenMessage<SetAnnouncementResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_admin, 25);
+  messageDesc(file_fuwa_v1_admin, 31);
 
 /**
  * Whether accounts that sign in through the instance's identity provider work.
@@ -1176,6 +1407,19 @@ export const AdminService: GenService<{
     output: typeof ExportServerResponseSchema;
   },
   /**
+   * Moves a server's data to another region (one of Node.regions): its
+   * file and recordings are copied to a shard there, then deleted where they
+   * were. Changes to it wait a moment meanwhile, and people in its calls
+   * reconnect. Only on an instance with more than one region.
+   *
+   * @generated from rpc fuwa.v1.AdminService.MoveServer
+   */
+  moveServer: {
+    methodKind: "unary";
+    input: typeof MoveServerRequestSchema;
+    output: typeof MoveServerResponseSchema;
+  },
+  /**
    * Puts a banner on every client of this instance, or takes it down.
    *
    * @generated from rpc fuwa.v1.AdminService.SetAnnouncement
@@ -1184,6 +1428,18 @@ export const AdminService: GenService<{
     methodKind: "unary";
     input: typeof SetAnnouncementRequestSchema;
     output: typeof SetAnnouncementResponseSchema;
+  },
+  /**
+   * Runs some text through a moderation provider, saved or not (an empty
+   * key uses the saved one), to see that it answers. The text goes to the
+   * provider's host.
+   *
+   * @generated from rpc fuwa.v1.AdminService.TestAutoModProvider
+   */
+  testAutoModProvider: {
+    methodKind: "unary";
+    input: typeof TestAutoModProviderRequestSchema;
+    output: typeof TestAutoModProviderResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_admin, 0);

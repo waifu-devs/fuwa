@@ -648,6 +648,8 @@ impl Core {
                 server_id: server_id.into(),
                 message_id: message_id.into(),
                 content: content.into(),
+                // The instance finds the channel; the web app names it.
+                channel_id: String::new(),
             })
         )
         .await?;
@@ -672,7 +674,11 @@ impl Core {
         let Some(api) = self.api(key) else { return Ok(()) };
         rpc!(
             api.messages(),
-            delete_message(pb::DeleteMessageRequest { server_id: server_id.into(), message_id: message_id.into() })
+            delete_message(pb::DeleteMessageRequest {
+                server_id: server_id.into(),
+                message_id: message_id.into(),
+                channel_id: channel_id.into(),
+            })
         )
         .await?;
         self.shared.instance(key, |i| {

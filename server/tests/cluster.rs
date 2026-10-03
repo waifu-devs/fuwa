@@ -181,6 +181,8 @@ struct Clients {
     invites: pb::invite_service_client::InviteServiceClient<Channel>,
     webhooks: pb::webhook_service_client::WebhookServiceClient<Channel>,
     agents: pb::agent_service_client::AgentServiceClient<Channel>,
+    shared: pb::shared_channel_service_client::SharedChannelServiceClient<Channel>,
+    automod: pb::auto_mod_service_client::AutoModServiceClient<Channel>,
 }
 
 async fn clients(part: &Part) -> Clients {
@@ -197,7 +199,9 @@ async fn clients(part: &Part) -> Clients {
         media: pb::media_service_client::MediaServiceClient::new(channel.clone()),
         invites: pb::invite_service_client::InviteServiceClient::new(channel.clone()),
         webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel.clone()),
-        agents: pb::agent_service_client::AgentServiceClient::new(channel),
+        agents: pb::agent_service_client::AgentServiceClient::new(channel.clone()),
+        shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel.clone()),
+        automod: pb::auto_mod_service_client::AutoModServiceClient::new(channel),
     }
 }
 
@@ -604,6 +608,33 @@ async fn a_split_instance_works_like_one() {
     c.messages.send_message(authed(&made.token, said)).await.unwrap();
     let mine = c.agents.list_agents(authed(&juan, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents;
     assert_eq!(mine[0].servers, 1);
+
+    // A moderation provider set up on the directory reaches the shards, key
+    // and all (they check messages), while clients only learn a key is set.
+    let jev = pb::AutoModProviderSettings {
+        id: "typesafe-jev".into(),
+        enabled: true,
+        api_key: "made-up-key-for-a-test".into(),
+        ..Default::default()
+    };
+    let update = pb::UpdateSettingsRequest {
+        settings: Some(pb::InstanceSettings { automod_providers: vec![jev], ..Default::default() }),
+        update_mask: Some(prost_types::FieldMask { paths: vec!["automod_providers".into()] }),
+        reset_mask: None,
+    };
+    let saved = c.admin.update_settings(authed(&juan, update)).await.unwrap().into_inner();
+    let shown = saved.config.unwrap().settings.unwrap().automod_providers;
+    assert!(shown.iter().all(|p| p.api_key.is_empty()));
+    let mut offered = Vec::new();
+    for _ in 0..50 {
+        let list = pb::ListAutoModRulesRequest { server_id: on_b.id.clone() };
+        offered = c.automod.list_auto_mod_rules(authed(&juan, list)).await.unwrap().into_inner().providers;
+        if !offered.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(offered[0].id, "typesafe-jev");
 
     // Deleting a server: the stream says so, and the directory forgets it.
     c.servers.delete_server(authed(&juan, pb::DeleteServerRequest { server_id: on_a.id.clone() })).await.unwrap();
@@ -1017,4 +1048,212 @@ async fn calls_ride_out_a_media_restart() {
     gateway.stop().await;
     shard.stop().await;
     directory.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn channels_are_shared_across_shards() {
+    let root = tempfile::tempdir().unwrap();
+    let cluster = start_cluster(root.path(), &[]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (mika, _) = sign_up(&mut c, "mika").await;
+    let (rin, _) = sign_up(&mut c, "rin").await;
+    let home = create_server(&mut c, &juan, "Home").await;
+    let guest = create_server(&mut c, &mika, "Guest").await;
+    assert_ne!(cluster.placement(&home.id), cluster.placement(&guest.id), "each on its own shard");
+    join(&mut c, &rin, &guest.id).await.unwrap();
+    let dev = general(&mut c, &juan, &home.id).await;
+
+    let code = c
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.id.clone(), channel_id: dev.id.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let preview = c
+        .shared
+        .preview_share(authed(&mika, pb::PreviewShareRequest { server_id: guest.id.clone(), code: code.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(preview.home_server.unwrap().name, "Home");
+    let asked = c
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.id.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    c.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.id.clone(), connection_id: asked.id, approve: true },
+        ))
+        .await
+        .unwrap();
+    let shown = c
+        .channels
+        .list_channels(authed(&rin, pb::ListChannelsRequest { server_id: guest.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.shared.is_some())
+        .unwrap();
+
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: guest.id.clone(), after_sequence: None }],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    send(&mut c, &juan, &home.id, &dev.id, "across shards").await;
+    let event = until(&mut stream, |e| matches!(e.payload, Some(Payload::MessageCreated(_)))).await;
+    let Some(Payload::MessageCreated(created)) = event.payload else { unreachable!() };
+    let message = created.message.unwrap();
+    assert_eq!((message.content.as_str(), message.channel_id.as_str()), ("across shards", shown.id.as_str()));
+
+    send(&mut c, &rin, &guest.id, &shown.id, "and back").await;
+    let at_home = c
+        .messages
+        .list_messages(authed(
+            &juan,
+            pb::ListMessagesRequest { server_id: home.id.clone(), channel_id: dev.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .messages;
+    let back = at_home.iter().find(|m| m.content == "and back").unwrap();
+    assert_eq!(back.shared.as_ref().unwrap().server.as_ref().unwrap().name, "Guest");
+    cluster.stop().await;
+}
+
+/// Servers live in the region their creator picked, and an admin can move one
+/// to another region: changes pause for a moment, live streams carry on, and
+/// nothing of it is left where it was.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn servers_live_in_their_region_and_move() {
+    let root = tempfile::tempdir().unwrap();
+    let (gateway_listener, gateway_addr) = listen().await;
+    let (listener, addr) = listen().await;
+    let home = [("FUWA_REGION", "us-east".to_string())];
+    let directory = start_directory(root.path(), &home, listener, addr, gateway_addr).await;
+    // Shard a doesn't say where it is: the home region. Shard b is in Europe,
+    // replicating to a bucket of its own.
+    let bucket = |name: &str| ("FUWA_REPLICA_PATH", root.path().join(name).to_str().unwrap().to_string());
+    let a = start_shard_with(&root.path().join("shard-a"), "a", &directory, &[bucket("bucket-us")]).await;
+    let eu = [("FUWA_REGION", "eu".to_string()), bucket("bucket-eu")];
+    let b = start_shard_with(&root.path().join("shard-b"), "b", &directory, &eu).await;
+    for shard in [&a, &b] {
+        shard.app().replica.as_ref().unwrap().start();
+    }
+    let (gateway, _gateway) = start_gateway(&root.path().join("gateway"), &directory, gateway_listener, gateway_addr);
+    let cluster = Cluster { directory, shards: vec![a, b], gateway, _gateway };
+    let mut c = clients(&cluster.gateway).await;
+
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    let regions: Vec<(&str, &str, bool)> =
+        node.regions.iter().map(|r| (r.id.as_str(), r.name.as_str(), r.home)).collect();
+    assert_eq!(regions, [("us-east", "US East", true), ("eu", "Europe", false)]);
+
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let make = |region: &str| {
+        let request = pb::CreateServerRequest { name: "Somewhere".into(), region: region.into(), ..Default::default() };
+        let mut servers = c.servers.clone();
+        let request = authed(&juan, request);
+        async move { servers.create_server(request).await.map(|r| r.into_inner().server.unwrap()) }
+    };
+    // New servers go to their region's shards.
+    let in_eu = make("eu").await.unwrap();
+    assert_eq!((cluster.placement(&in_eu.id).as_deref(), in_eu.region.as_str()), (Some("b"), "eu"));
+    for region in ["", "us-east"] {
+        let at_home = make(region).await.unwrap();
+        assert_eq!((cluster.placement(&at_home.id).as_deref(), at_home.region.as_str()), (Some("a"), ""));
+    }
+    assert_eq!(make("mars").await.unwrap_err().code(), Code::InvalidArgument);
+    assert_eq!(make("Not A Region").await.unwrap_err().code(), Code::InvalidArgument);
+
+    // A server at home, with a message, a recording's files and a live stream.
+    let server = make("").await.unwrap();
+    let channel = general(&mut c, &juan, &server.id).await;
+    send(&mut c, &juan, &server.id, &channel.id, "before").await;
+    let recording = format!("recordings/{}/01J9Z3K8X2V5W7Q4R6T8Y0B2C5", server.id);
+    let track = "01J9Z3K8X2V5W7Q4R6T8Y0B2C6.opus";
+    let shard_a = root.path().join("shard-a");
+    std::fs::create_dir_all(shard_a.join(&recording)).unwrap();
+    std::fs::write(shard_a.join(&recording).join(track), b"OggS").unwrap();
+    let cursors = vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }];
+    let mut stream =
+        c.events.subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors })).await.unwrap().into_inner();
+    assert!(next(&mut stream).await.ready.is_some());
+    // The home shard's replica has it.
+    let replicated = |bucket: &str| root.path().join(bucket).join("servers").join(&server.id).exists();
+    for _ in 0..50 {
+        if replicated("bucket-us") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(replicated("bucket-us"));
+
+    // Only admins move servers (the first account is one).
+    let (mika, _) = sign_up(&mut c, "mika").await;
+    let request = pb::MoveServerRequest { server_id: server.id.clone(), region: "eu".into() };
+    assert_eq!(c.admin.move_server(authed(&mika, request.clone())).await.unwrap_err().code(), Code::PermissionDenied);
+    let moved = c.admin.move_server(authed(ADMIN_TOKEN, request.clone())).await.unwrap().into_inner();
+    assert_eq!(moved.server.unwrap().region, "eu");
+    assert_eq!(cluster.placement(&server.id).as_deref(), Some("b"));
+    assert!(cluster.shards[1].app().servers.holds(&server.id) && !cluster.shards[0].app().servers.holds(&server.id));
+    assert_eq!(
+        c.admin.move_server(authed(ADMIN_TOKEN, request)).await.unwrap_err().code(),
+        Code::FailedPrecondition,
+        "it's already there"
+    );
+
+    // Everything came along, and it carries on in its new region.
+    let request = pb::GetServerRequest { server_id: server.id.clone() };
+    let got = c.servers.get_server(authed(&juan, request)).await.unwrap().into_inner();
+    assert_eq!(got.server.unwrap().region, "eu");
+    let shard_b = root.path().join("shard-b");
+    assert!(shard_b.join(&recording).join(track).exists());
+    send(&mut c, &juan, &server.id, &channel.id, "after").await;
+    let request =
+        pb::ListMessagesRequest { server_id: server.id.clone(), channel_id: channel.id.clone(), ..Default::default() };
+    let listed = c.messages.list_messages(authed(&juan, request)).await.unwrap().into_inner().messages;
+    assert_eq!(listed.iter().map(|m| m.content.as_str()).collect::<HashSet<_>>(), HashSet::from(["before", "after"]));
+    // The live stream followed it to its new shard.
+    let event = until(&mut stream, |e| matches!(&e.payload, Some(Payload::MessageCreated(_)))).await;
+    let Some(Payload::MessageCreated(created)) = event.payload else { unreachable!() };
+    assert_eq!(created.message.unwrap().content, "after");
+
+    // Nothing is left in the old region: not on its shard, nor in its bucket.
+    assert!(!shard_a.join("servers").join(format!("{}.db", server.id)).exists());
+    assert!(!shard_a.join(&recording).exists());
+    for _ in 0..50 {
+        if replicated("bucket-eu") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(replicated("bucket-eu"), "the new region's bucket has it");
+    assert!(!replicated("bucket-us"), "the old region's bucket doesn't");
+    assert!(root.path().join("bucket-eu").join(&recording).join(track).exists());
+    assert!(!root.path().join("bucket-us").join(&recording).exists());
+    assert!(cluster.directory.app().node().unwrap().moves().await.unwrap().is_empty(), "the move is over");
+
+    cluster.stop().await;
 }

@@ -45,6 +45,7 @@ import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { Accounts } from "./instance/Accounts";
 import { Announcement } from "./instance/Announcement";
 import { CALL_FIELDS, CALL_SECTION, CallSettings } from "./instance/Calls";
+import { MODERATION_FIELDS, MODERATION_SECTION, ModerationSettings } from "./instance/Moderation";
 import { Servers } from "./instance/Servers";
 import { SettingsScreen } from "./SettingsScreen";
 
@@ -60,6 +61,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "sso_provider", get: (s) => providerFingerprint(s.ssoProvider) },
   { path: "server_creation", get: (s) => s.serverCreation },
   { path: "agent_creation", get: (s) => s.agentCreation },
+  { path: "shared_channels", get: (s) => s.sharedChannels },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
   { path: "default_limits.channels", get: (s) => s.defaultLimits?.channels },
@@ -72,6 +74,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
+  ...MODERATION_FIELDS,
 ];
 
 const changedPaths = (draft: InstanceSettings, saved: InstanceSettings) =>
@@ -198,6 +201,7 @@ export function InstanceSettingsDialog({
                 { id: "server-creation", label: "Who can create servers" },
                 { id: "servers-per-account", label: "Servers per account" },
                 { id: "agent-creation", label: "Who can make agents", keywords: "bots integrations" },
+                { id: "shared-channels", label: "Shared channels", keywords: "share connect servers slack connect" },
               ],
             },
             {
@@ -231,6 +235,7 @@ export function InstanceSettingsDialog({
               settings: [{ id: "telemetry", label: "Anonymous usage signal and reports", keywords: "telemetry analytics errors performance" }],
             },
             CALL_SECTION,
+            MODERATION_SECTION,
           ],
         },
         {
@@ -465,6 +470,20 @@ export function InstanceSettingsDialog({
                   ]}
                 />
               </Setting>
+              <Setting
+                id="shared-channels"
+                title="Shared channels"
+                defaultLabel={defaults.sharedChannels ? "on" : "off"}
+                delay={0.24}
+                {...resetter("shared_channels")}
+              >
+                <Toggle
+                  checked={draft.sharedChannels}
+                  onChange={(on) => patch((d) => (d.sharedChannels = on))}
+                  label="Servers can share channels with each other"
+                  hint="Admins of two servers here can show one channel in both. Turned off, nobody can start a new one; channels already shared stay until either side ends them."
+                />
+              </Setting>
             </>
           )}
           {tab === "sso" && (
@@ -588,6 +607,9 @@ export function InstanceSettingsDialog({
             </>
           )}
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
+          {tab === "moderation" && saved && (
+            <ModerationSettings instanceKey={instanceKey} draft={draft} saved={saved} patch={patch} resetter={resetter} />
+          )}
           {tab === "privacy" && (
             <>
               <Setting id="telemetry" title="Anonymous usage signal and reports" defaultLabel={defaults.telemetry ? "on" : "off"} {...resetter("telemetry")}>
@@ -673,10 +695,14 @@ const CREATION_LABEL: Record<number, string> = {
   [ServerCreation.DISABLED]: "nobody",
 };
 
+/** Settings copied by a function of their own, beside the switch below. */
+const COPIED = [...CALL_FIELDS, { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) }];
+
 /** Copies the named settings from one draft into another. */
 function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: string[]) {
   for (const path of paths) {
-    CALL_FIELDS.find((f) => f.path === path)?.copy(into, from);
+    COPIED.find((f) => f.path === path)?.copy(into, from);
+    MODERATION_FIELDS.find((f) => f.path === path)?.copy(into, from);
     switch (path) {
       case "name":
         into.name = from.name;

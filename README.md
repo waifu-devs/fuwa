@@ -27,6 +27,10 @@ like, hosted or self-hosted, over the same protocol.
   encrypted the same way: only the people the channel's permissions let in can
   read them, on their own devices, and the server can't. See
   [docs/secure-channels.md](docs/secure-channels.md).
+- **Channels shared between servers.** Two communities can talk in one
+  channel, like Slack Connect: both admins agree, the messages live only on
+  the server that shared it, and each side keeps its own roles and
+  moderators. See [docs/shared-channels.md](docs/shared-channels.md).
 - **Usage tracked, limits optional.** Every server counts its members, channels,
   messages and storage. Limits are off unless the operator sets them.
 - **Live by design.** Every change is an event in the server's log; clients
@@ -122,6 +126,7 @@ the log filter are read only from the environment.
 | `FUWA_SSO_ACCOUNTS` | `off` | Single sign-on through the identity provider set up in instance settings: `open`, `closed` (existing SSO accounts only), `off` |
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
 | `FUWA_AGENT_CREATION` | `everyone` | Who can make agents (accounts programs drive): `everyone`, `admins`, `off` |
+| `FUWA_SHARED_CHANNELS` | `on` | Servers sharing a text channel with another server on this instance ([docs/shared-channels.md](docs/shared-channels.md)); `off` stops new shares |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |
 | `FUWA_ENCRYPTION_KEY` | unset | 64 hex characters (`openssl rand -hex 32`); encrypts every database at rest |
 | `FUWA_LIMIT_SERVERS_PER_ACCOUNT` | unlimited | Servers one account may own |
@@ -145,6 +150,9 @@ the log filter are read only from the environment.
 | `FUWA_MEDIA_ADDRESSES` | this machine's address | Where apps reach that port: `HOST`, `HOST:PORT`, or `udp/…` or `tcp/…` for one protocol (a TCP proxy), comma-separated |
 | `FUWA_ICE_URLS` | unset | STUN and TURN servers for people on strict networks, comma-separated `stun:`, `turn:` and `turns:` URLs |
 | `FUWA_TURN_SECRET` | unset | The TURN servers' shared secret (coturn's `static-auth-secret`); each call gets a password from it |
+| `FUWA_JEV_API_KEY` | unset | Turns on TypeSafe Jev for servers' AutoMod smart filter (also set from the app: Instance settings, Moderation) |
+| `FUWA_AUTOMOD_ALLOW_PRIVATE` | off | `1` lets instance admins add a moderation provider of their own at a private or internal address (your own network); off, those are refused when saved and when called |
+| `FUWA_CLEF_API_TOKEN`, `FUWA_CLEF_ACCOUNT_ID` | unset | Turn on Cloudflare Clef (Workers AI) the same way; set both |
 | `FUWA_S3_BUCKET` and the other `FUWA_S3_*` | unset | Split instances only: a bucket the directory and shards copy their files to as they change; see [Replicating to a bucket](#replicating-to-a-bucket) |
 | `FUWA_REPLICA_PATH` | unset | Split instances only: a folder to replicate to instead of a bucket |
 | `FUWA_RESTORE` | `off` | `if-empty`: restore a part from the replica when its data folder is empty |
@@ -397,6 +405,8 @@ the cluster key, apart from `/healthz`.
 | `FUWA_INTERNAL_URL` | shards | Where gateways and the directory reach this shard, like `http://shard-1:8080` |
 | `FUWA_MEDIA_URL` | directory, shards | Where the media parts are, like `http://media:8080`, comma-separated; calls are spread over them |
 | `FUWA_SHARD_ID` | shards | The shard's name (a-z, 0-9, `-`, `_`). Defaults to one made up on first start and kept in its data folder as `shard-id` |
+| `FUWA_REGION` | any part | The region it runs in, like `eu` or `us-west` (see [docs/regions.md](docs/regions.md)). The directory's is the home region; unset is the home region |
+| `FUWA_REGION_NAME` | any part | The region's name people see, like `Europe`. Common labels have one built in |
 
 The other variables work as above, read by the part that uses them: set
 `FUWA_PUBLIC_URL` (the gateways' address), the admin token, accounts, limits
@@ -462,7 +472,10 @@ that's what keeps clients connected.
 A shard that stays down is different: after the 30 seconds its servers answer
 "unavailable" and live streams following them end, so clients reconnect once
 it's back; everything else keeps working. Deleting an account and exporting
-someone's data are refused until every shard is up, so nothing is left out. To move a server to another shard,
+someone's data are refused until every shard is up, so nothing is left out. An
+instance admin can move a server to another region from the instance's Servers
+page, with a pause of a moment and nothing to stop (see
+[docs/regions.md](docs/regions.md)). To move a server to another shard by hand,
 stop both, move its files (`<id>.db` and any `<id>.db-log` or `-wal` beside
 it) from one `servers/` folder to the other, and start them; the directory
 learns where it went when the shard starts. Shards check sessions with the directory and remember the answer for a

@@ -117,6 +117,15 @@
     (`MEDIA_PURPOSE_EMOJI`) counted in the server's attachments, and every
     change sends the whole list (`EmojisUpdated`). Messages write them
     `<:name:id>` (`<a:name:id>` when they move).
+    Shared channels (`api/shared.rs`, docs/shared-channels.md): a channel's
+    home keeps it and every message (`channel_guests`, `share_codes`,
+    `channel_blocks`); a guest server shows it as a channel of its own
+    (`channel_links`) and keeps none of it. The guest's shard checks its own
+    roles and AutoMod and passes reads and writes to the home as
+    `cluster.v1.SharedCall`s (`App::shared`); the home's
+    `spawn_shared_fanout` passes message events back, published at the guest
+    as sequence 0. Message calls on a channel check `shared::link_of` first;
+    new channel kinds or message paths must too.
   - `webhooks.rs`: posting through a webhook over plain HTTP
     (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
     body), with each webhook's 30-a-minute limit (counted only for posts
@@ -127,12 +136,23 @@
     the message (`execute_webhook`): its `author_id` is the webhook's id and
     `Message.webhook` carries the name and picture it posted under. Webhook
     messages never ping @everyone, @here or roles, and nobody can edit them.
-  - `automod.rs`: what an AutoMod rule catches (words with `*` wildcards,
+  - `automod/`: what an AutoMod rule catches (words with `*` wildcards,
     pings, links to sites not allowed); `api/automod.rs` keeps the rules
     (`automod_rules`, one protobuf blob each) and `review` runs them inside
     the write that sends or edits a message: it blocks (an error starting
     "AutoMod: "), posts an alert message (`MESSAGE_KIND_AUTO_MOD_ALERT`) and
     times the author out. People with Manage Server are never caught.
+    `automod/providers.rs` is moderation services (`Provider`, registered in
+    `KINDS`: TypeSafe Jev and Cloudflare Clef, which both speak System One,
+    so one adapter): the instance's `automod_providers` setting holds their
+    keys (never sent to clients; shards get them in `WatchResponse`), and a
+    server's one PROVIDER rule ("Smart filter") picks one and a level per
+    label. `api/automod.rs`'s `ask` calls it before the message's write
+    (never inside it), with only the text (`providers::outgoing` strips
+    mentions and emoji ids), cut off at 3 seconds; a failure lets the
+    message through that rule and is counted in the anonymous report by
+    kind and provider id. The web pages are `settings/instance/Moderation.tsx`
+    and the Smart filter in `settings/server/AutoMod.tsx`.
   - `permissions.rs`: roles and permissions. `Rules::access` works out what a
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's
@@ -239,6 +259,20 @@
     away with `fuwa-not-ready` until every known shard has registered again
     (`Shards::caught_up`). A gateway's `/healthz` fails until it has reached
     the directory.
+    Regions (`docs/regions.md` is the design): every part may carry
+    `FUWA_REGION`; the directory's is the home region and keeps each shard's
+    (`shards.region`). A server's region is its shard's, stamped on its file
+    when opened (`server.region`); `create_server` picks the emptiest shard
+    of the region asked for (`Shards::emptiest_in`), never one elsewhere.
+    `moves.rs` moves a server between regions for an admin
+    (`AdminService.MoveServer`): the directory records it in `moves`, the new
+    shard pulls the files from the old one (`SendServer`, which freezes it:
+    writes answer `Error::Moving`, which gateways ride out), the directory
+    switches the placement, then the old shard lets go (`ReleaseServer`,
+    deleting its files, recordings and replica copies, and ending live
+    streams with `Misrouted` so gateways follow) and the new one starts
+    replicating. `sort_registration` keeps a restart mid-move from putting a
+    server in two places.
   - `web.rs`: serves the embedded web app (feature `web`, from `web/dist`), with
     `index.html` for any path the API doesn't answer so deep links work.
   - `tests/api.rs`: end-to-end tests against a running instance; `tests/web.rs`
@@ -318,9 +352,11 @@
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
     in both), `settings_keys.rs` the Keyboard page where they're changed,
     `server_settings.rs` a server's settings
-    (overview, invites, roles, emoji, webhooks, members, bans, audit log;
-    the server's name opens it; a cached view, so it redraws only when the
-    server changes, and its flourishes play once rather than loop),
+    (overview, welcome screen, invites, roles, emoji, integrations, members,
+    bans, AutoMod, audit log; the server's name opens it; a cached view, so
+    it redraws only when the server changes, and its flourishes play once
+    rather than loop; `save_bar` is the floating unsaved-changes bar pages
+    share),
     `server_settings/roles.rs` the Roles page (order, color, permissions
     and members of each role, saved together from a floating bar, over the
     role calls in `core/server_admin.rs`; you edit only roles below your own
@@ -328,7 +364,12 @@
     `server_settings/emoji.rs` the Emoji page (pictures dropped or picked,
     shrunk to 128 pixels and written as PNGs by `png.rs`, which compresses
     them itself so the app needs no image encoder), `server_settings/webhooks.rs`
-    the Webhooks page (a test post goes to the webhook's own instance only),
+    the webhooks on the Integrations page (a test post goes to the webhook's
+    own instance only), under the agents in `server_settings/agents.rs`
+    (added by username, removed by kicking), `server_settings/welcome.rs`
+    the Welcome screen editor beside a preview drawn like the welcome
+    dialog, `server_settings/automod.rs` the AutoMod rules (each tried with
+    `TestAutoModRule` as it's edited, before it's saved),
     `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),
@@ -493,7 +534,7 @@
   one event payload and keeps the usage totals in step: members and channels in
   the `usage` row, message totals through `servers::add_usage`. Invites are the
   exception: their codes are secrets, so making or revoking one writes only an
-  audit entry, never an event. AutoMod rules are the same: members mustn't
+  audit entry, never an event (shared channels' share codes too). AutoMod rules are the same: members mustn't
   see the words a rule looks for.
 - Writes can run more than once (after a clash), so the closure given to
   `ServerDb::write` or `db::write` does nothing outside its transaction. Reads

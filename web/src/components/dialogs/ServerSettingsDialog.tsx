@@ -22,6 +22,7 @@ import {
   LinkIcon,
   LoaderCircleIcon,
   LockIcon,
+  MapPinIcon,
   PartyPopperIcon,
   ScrollTextIcon,
   SettingsIcon,
@@ -32,6 +33,7 @@ import {
   UsersIcon,
   WebhookIcon,
   XIcon,
+  type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
@@ -47,6 +49,10 @@ import { AuditLog } from "@/components/settings/server/AuditLog";
 import { AutoMod } from "@/components/settings/server/AutoMod";
 import { Emoji } from "@/components/settings/server/Emoji";
 import { Webhooks } from "@/components/settings/server/Webhooks";
+import { SharedChannels } from "@/components/settings/server/SharedChannels";
+import { SharedGlyph } from "@/components/chat/Shared";
+import { SharedConnectionState } from "@/gen/fuwa/v1/channel_pb";
+import { listConnections } from "@/fuwa/actions";
 import { SingleSignOn } from "@/components/settings/server/SingleSignOn";
 import { ServerAgents } from "@/components/settings/server/ServerAgents";
 import { WelcomeScreenEditor } from "@/components/settings/server/WelcomeScreenEditor";
@@ -76,6 +82,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { displayName, formatBytes, formatDuration, initials } from "@/lib/format";
 import { ACCOUNT_AGES, timeLeft } from "@/lib/invites";
 import { has } from "@/lib/permissions";
+import { hasRegions, regionName } from "@/lib/regions";
 import { cn } from "@/lib/utils";
 import { Choice, Cap, SaveBar, Toggle, WithPreview } from "@/components/settings/controls";
 import { SettingsScreen } from "@/components/settings/SettingsScreen";
@@ -104,6 +111,14 @@ export function ServerSettingsDialog({
   const can = (id: string) => allowed.includes(id);
   const access = useAccess(instanceKey, server.id);
   const waiting = useFuwa((s) => s.instances[instanceKey]?.applications[server.id]?.length ?? 0);
+  // Other servers asking to show one of this server's channels, for the menu's badge.
+  const sharedRequests = useFuwa(
+    (s) => s.instances[instanceKey]?.shared[server.id]?.connections.filter((c) => c.home && c.state === SharedConnectionState.WAITING).length ?? 0,
+  );
+  const managesShared = allowed.includes("shared");
+  useEffect(() => {
+    if (open && managesShared) run(listConnections(instanceKey, server.id)).catch(() => {});
+  }, [open, managesShared, instanceKey, server.id]);
   const [tab, setTab] = useState(initialTab);
   useEffect(() => {
     if (open) setTab(initialTab);
@@ -222,6 +237,14 @@ export function ServerSettingsDialog({
         { id: "webhooks", label: "Webhooks", keywords: "address url token" },
       ],
     },
+    {
+      id: "shared",
+      label: "Shared channels",
+      icon: SharedGlyph as unknown as LucideIcon,
+      badge: sharedRequests,
+      description: "Channels shown in another server, or from one. Messages stay with the server the channel comes from.",
+      keywords: "share connect slack connect other server guest home code external partner",
+    },
     { id: "usage", label: "Usage", icon: ChartColumnIcon, description: "What the server holds, against its caps.", keywords: "storage members messages" },
     {
       id: "limits",
@@ -246,8 +269,8 @@ export function ServerSettingsDialog({
       id: "automod",
       label: "AutoMod",
       icon: BotIcon,
-      description: "Rules that catch messages as they're sent: blocked words, mention spam and links.",
-      keywords: "automod auto moderation filter blocked words banned words swear profanity spam mentions pings raid links urls block alert time out",
+      description: "Rules that catch messages as they're sent: blocked words, mention spam, links and a smart filter.",
+      keywords: "automod auto moderation filter blocked words banned words swear profanity spam mentions pings raid links urls block alert time out ai smart jev clef typesafe cloudflare hate scam",
     },
     { id: "audit-log", label: "Audit log", icon: ScrollTextIcon, description: "Every change people made here.", keywords: "history log moderation" },
   ].filter((s) => can(s.id));
@@ -279,6 +302,7 @@ export function ServerSettingsDialog({
           {has(access, Permission.MANAGE_WEBHOOKS) && <Webhooks instanceKey={instanceKey} serverId={server.id} />}
         </div>
       )}
+      {tab === "shared" && can("shared") && <SharedChannels instanceKey={instanceKey} serverId={server.id} />}
       {tab === "automod" && can("automod") && <AutoMod instanceKey={instanceKey} serverId={server.id} />}
       {tab === "invites" && can("invites") && <Invites instanceKey={instanceKey} serverId={server.id} />}
       {tab === "roles" && can("roles") && <Roles instanceKey={instanceKey} serverId={server.id} initial={target} />}
@@ -381,6 +405,22 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
             <Textarea id="settings-description" rows={4} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} className="rounded-xl" />
             <p className="text-sm text-muted-foreground">Shown in Browse. Markdown works.</p>
           </div>
+          {hasRegions(inst?.node?.regions) && (
+            <div data-setting="region" className="flex items-center gap-3 border-b border-border/70 py-5">
+              <motion.span
+                initial={{ scale: 0.6, rotate: -20 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ type: "spring", stiffness: 500, damping: 18 }}
+                className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary"
+              >
+                <MapPinIcon className="size-5" />
+              </motion.span>
+              <span className="min-w-0">
+                <span className="block font-extrabold">Region: {regionName(inst?.node?.regions, server.region)}</span>
+                <span className="block text-sm text-muted-foreground">Its messages, recordings and calls are kept there. An admin of this fuwa server can move it.</span>
+              </span>
+            </div>
+          )}
           <div data-setting="join-messages" className="flex flex-col gap-2 border-b border-border/70 py-5">
             <span className="font-extrabold">Join messages</span>
             <span className="text-sm text-muted-foreground">A hello in a channel whenever someone joins, so people can wave.</span>

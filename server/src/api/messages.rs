@@ -1,7 +1,7 @@
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, automod, respond, url, users};
+use super::{Api, Seat, automod, respond, shared, url, users};
 use crate::app::App;
 use crate::db::{is_unique_violation, query_all, query_one};
 use crate::error::{Error, Result};
@@ -132,6 +132,7 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 mention_role_ids: vec![],
                 auto_mod: None,
                 webhook: None,
+                shared: None,
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -157,7 +158,11 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
     Ok(message)
 }
 
-async fn load_message(conn: &turso::Connection, server_id: &str, message_id: &str) -> Result<Option<pb::Message>> {
+pub(super) async fn load_message(
+    conn: &turso::Connection,
+    server_id: &str,
+    message_id: &str,
+) -> Result<Option<pb::Message>> {
     query_one(
         conn,
         &format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE id = ?1"),
@@ -169,7 +174,7 @@ async fn load_message(conn: &turso::Connection, server_id: &str, message_id: &st
     .transpose()
 }
 
-fn check_content(content: &str, has_extras: bool) -> Result<()> {
+pub(super) fn check_content(content: &str, has_extras: bool) -> Result<()> {
     if content.trim().is_empty() && !has_extras {
         return Err(Error::invalid("a message needs text, an attachment or an embed"));
     }
@@ -179,7 +184,7 @@ fn check_content(content: &str, has_extras: bool) -> Result<()> {
     Ok(())
 }
 
-fn check_extras(attachments: &mut [pb::Attachment], embeds: &[pb::Embed]) -> Result<()> {
+pub(super) fn check_extras(attachments: &mut [pb::Attachment], embeds: &[pb::Embed]) -> Result<()> {
     if attachments.len() > MAX_ATTACHMENTS || embeds.len() > MAX_EMBEDS {
         return Err(Error::invalid(format!(
             "at most {MAX_ATTACHMENTS} attachments and {MAX_EMBEDS} embeds per message"
@@ -283,7 +288,7 @@ pub(super) fn check_webhook_message(app: &App, post: &mut WebhookMessage) -> Res
 
 /// Embeds link only to http(s), and their pictures come through the
 /// instance, so nobody who reads the message is seen by the site they're on.
-fn check_embed_links(app: &App, embeds: &mut [pb::Embed]) -> Result<()> {
+pub(super) fn check_embed_links(app: &App, embeds: &mut [pb::Embed]) -> Result<()> {
     for embed in embeds {
         embed.url = url("embed url", &embed.url)?;
         embed.thumbnail_url = app.picture_link(&url("embed thumbnail", &embed.thumbnail_url)?);
@@ -383,6 +388,106 @@ pub(super) async fn post_join(
     Ok(())
 }
 
+/// Stores a member's message, inside a write, and counts it. The caller
+/// sends its event.
+pub(super) async fn insert_message(conn: &turso::Connection, message: &pb::Message, now: i64) -> Result<()> {
+    let size = message.content.len() as i64;
+    let attachment_count = message.attachments.len() as i64;
+    conn.execute(
+        "INSERT INTO messages (id, channel_id, author_id, content, size, extras, attachment_count, reply_to_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        (
+            message.id.as_str(),
+            message.channel_id.as_str(),
+            message.author_id.as_str(),
+            message.content.as_str(),
+            size,
+            Extras::of(message),
+            attachment_count,
+            (!message.reply_to_id.is_empty()).then_some(message.reply_to_id.as_str()),
+            now,
+        ),
+    )
+    .await?;
+    store::add_usage(
+        conn,
+        UsageChange {
+            messages: 1,
+            messages_sent: 1,
+            message_bytes: size,
+            attachments: attachment_count,
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+/// Saves a message's new text, inside a write, and counts the change. The
+/// caller sends its event.
+pub(super) async fn save_edit(conn: &turso::Connection, message: &pb::Message, old_size: i64) -> Result<()> {
+    let now = message.edited_at.as_ref().map_or_else(now_ms, crate::id::millis);
+    conn.execute(
+        "UPDATE messages SET content = ?2, size = ?3, edited_at = ?4, extras = ?5 WHERE id = ?1",
+        (message.id.as_str(), message.content.as_str(), message.content.len() as i64, now, Extras::of(message)),
+    )
+    .await?;
+    store::add_usage(conn, UsageChange { message_bytes: message.content.len() as i64 - old_size, ..Default::default() })
+        .await
+}
+
+/// Deletes a message, inside a write, and takes it off the totals. The
+/// caller sends its event.
+pub(super) async fn remove_message(conn: &turso::Connection, message: &pb::Message) -> Result<()> {
+    conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
+    store::add_usage(
+        conn,
+        UsageChange {
+            messages: -1,
+            message_bytes: -(message.content.len() as i64),
+            attachments: -(message.attachments.len() as i64),
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+/// A page of a channel's messages, oldest first, and whether there are more
+/// beyond it. `plain` leaves out what isn't a message someone wrote (join
+/// messages, AutoMod alerts), as other servers showing the channel see it.
+pub(super) async fn page(
+    conn: &turso::Connection,
+    server_id: &str,
+    channel_id: &str,
+    limit: i32,
+    before_id: &str,
+    after_id: &str,
+    plain: bool,
+) -> Result<(Vec<pb::Message>, bool)> {
+    let limit = if limit <= 0 { 50 } else { limit.min(100) } as i64;
+    let (condition, cursor, newest_first) = match (before_id.is_empty(), after_id.is_empty()) {
+        (false, _) => ("AND id < ?2", before_id, true),
+        (true, false) => ("AND id > ?2", after_id, false),
+        (true, true) => ("AND ?2 = ''", "", true),
+    };
+    let order = if newest_first { "DESC" } else { "ASC" };
+    let kinds = if plain { "AND kind = 0" } else { "" };
+    let rows = query_all(
+        conn,
+        &format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages WHERE channel_id = ?1 {condition} {kinds} ORDER BY id {order} LIMIT ?3"
+        ),
+        (channel_id, cursor, limit + 1),
+        message_row(server_id),
+    )
+    .await?;
+    let has_more = rows.len() as i64 > limit;
+    let mut messages = rows.into_iter().take(limit as usize).map(with_extras).collect::<Result<Vec<_>>>()?;
+    if newest_first {
+        messages.reverse();
+    }
+    Ok((messages, has_more))
+}
+
 async fn authors(conn: &turso::Connection, messages: &[pb::Message]) -> Result<Vec<pb::User>> {
     users(conn, &messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>()).await
 }
@@ -393,103 +498,101 @@ impl MessageService for Api {
         &self,
         request: Request<pb::SendMessageRequest>,
     ) -> Result<Response<pb::SendMessageResponse>, Status> {
-        respond(async {
-            let account = self.account(request.metadata()).await?;
-            let mut req = request.into_inner();
-            let Seat { sdb, member, access } = self.membership(&account, &req.server_id).await?;
-            check_not_timed_out(&member)?;
-            access.require_in(&req.channel_id, Permission::SendMessages)?;
-            if !req.attachments.is_empty() {
-                access.require_in(&req.channel_id, Permission::AttachFiles)?;
-            }
-            if !req.embeds.is_empty() {
-                access.require_in(&req.channel_id, Permission::EmbedLinks)?;
-            }
-            check_content(&req.content, !req.attachments.is_empty() || !req.embeds.is_empty())?;
-            check_extras(&mut req.attachments, &req.embeds)?;
-            check_embed_links(&self.app, &mut req.embeds)?;
-            let limits = sdb.limits(&self.app.settings().limits).await?;
-            if let Some(limit) = limits.storage_bytes
-                && sdb.storage_bytes() >= limit
-            {
-                return Err(Error::ResourceExhausted("this server is out of storage".into()));
-            }
-            let message = sdb
-                .write(&account.id, async |conn, events| {
-                    let channel = load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
-                    if !matches!(
-                        pb::ChannelType::try_from(channel.r#type),
-                        Ok(pb::ChannelType::Text | pb::ChannelType::Announcement | pb::ChannelType::Thread)
-                    ) {
-                        return Err(Error::invalid("messages can only go in text channels"));
-                    }
-                    if !req.reply_to_id.is_empty() {
-                        let replied = load_message(conn, &sdb.id, &req.reply_to_id).await?;
-                        if replied.is_none_or(|m| m.channel_id != channel.id) {
-                            return Err(Error::NotFound("message being replied to"));
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let mut req = request.into_inner();
+                let Seat { sdb, member, access } = self.membership(&account, &req.server_id).await?;
+                check_not_timed_out(&member)?;
+                access.require_in(&req.channel_id, Permission::SendMessages)?;
+                if !req.attachments.is_empty() {
+                    access.require_in(&req.channel_id, Permission::AttachFiles)?;
+                }
+                if !req.embeds.is_empty() {
+                    access.require_in(&req.channel_id, Permission::EmbedLinks)?;
+                }
+                check_content(&req.content, !req.attachments.is_empty() || !req.embeds.is_empty())?;
+                check_extras(&mut req.attachments, &req.embeds)?;
+                check_embed_links(&self.app, &mut req.embeds)?;
+                if let Some(link) = shared::link_of(&sdb.read()?, &req.channel_id).await? {
+                    let message = shared::guest_send(&self.app, &sdb, &account, &member, &access, &link, req).await?;
+                    return Ok(pb::SendMessageResponse { message: Some(message) });
+                }
+                let limits = sdb.limits(&self.app.settings().limits).await?;
+                if let Some(limit) = limits.storage_bytes
+                    && sdb.storage_bytes() >= limit
+                {
+                    return Err(Error::ResourceExhausted("this server is out of storage".into()));
+                }
+                let pictures = automod::picture_links(&req.attachments, &req.embeds);
+                let asked =
+                    automod::ask(&self.app, &sdb, &member, &access, &req.channel_id, &req.content, &pictures).await;
+                let message = sdb
+                    .write(&account.id, async |conn, events| {
+                        let channel =
+                            load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
+                        if !matches!(
+                            pb::ChannelType::try_from(channel.r#type),
+                            Ok(pb::ChannelType::Text | pb::ChannelType::Announcement | pb::ChannelType::Thread)
+                        ) {
+                            return Err(Error::invalid("messages can only go in text channels"));
                         }
-                    }
-                    let verdict = automod::review(conn, &sdb.id, &member, &access, &channel, &req.content, events).await?;
-                    if let Some(why) = verdict.blocked {
-                        return Ok(Err(why));
-                    }
-                    let now = now_ms();
-                    let exempt = access.has_in(&channel.id, Permission::ManageMessages)
-                        || access.has_in(&channel.id, Permission::ManageChannels);
-                    if !exempt {
-                        check_slowmode(conn, &channel, &account.id, now).await?;
-                    }
-                    let (mentions_everyone, mention_role_ids) =
-                        mentions(conn, &sdb.id, &access, &channel.id, &req.content).await?;
-                    let message = pb::Message {
-                        id: new_id(),
-                        server_id: sdb.id.clone(),
-                        channel_id: channel.id.clone(),
-                        author_id: account.id.clone(),
-                        content: req.content.clone(),
-                        attachments: req.attachments.clone(),
-                        embeds: req.embeds.clone(),
-                        reply_to_id: req.reply_to_id.clone(),
-                        created_at: Some(timestamp(now)),
-                        edited_at: None,
-                        kind: pb::MessageKind::Unspecified as i32,
-                        mentions_everyone,
-                        mention_role_ids,
-                        auto_mod: None,
-                        webhook: None,
-                    };
-                    let extras = Extras::of(&message);
-                    let size = message.content.len() as i64;
-                    let attachment_count = message.attachments.len() as i64;
-                    conn.execute(
-                        "INSERT INTO messages (id, channel_id, author_id, content, size, extras, attachment_count, reply_to_id, created_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                        (
-                            message.id.as_str(),
-                            message.channel_id.as_str(),
-                            message.author_id.as_str(),
-                            message.content.as_str(),
-                            size,
-                            extras,
-                            attachment_count,
-                            (!message.reply_to_id.is_empty()).then_some(message.reply_to_id.as_str()),
-                            now,
-                        ),
-                    )
-                    .await?;
-                    store::add_usage(
-                        conn,
-                        UsageChange { messages: 1, messages_sent: 1, message_bytes: size, attachments: attachment_count, ..Default::default() },
-                    )
-                    .await?;
-                    events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
-                    Ok(Ok(message))
-                })
-                .await?
-                .map_err(Error::denied)?;
-            Ok(pb::SendMessageResponse { message: Some(message) })
-        }
-        .await)
+                        if !req.reply_to_id.is_empty() {
+                            let replied = load_message(conn, &sdb.id, &req.reply_to_id).await?;
+                            if replied.is_none_or(|m| m.channel_id != channel.id) {
+                                return Err(Error::NotFound("message being replied to"));
+                            }
+                        }
+                        let verdict = automod::review(
+                            conn,
+                            &sdb.id,
+                            &member,
+                            &access,
+                            &channel,
+                            &req.content,
+                            asked.as_ref(),
+                            events,
+                        )
+                        .await?;
+                        if let Some(why) = verdict.blocked {
+                            return Ok(Err(why));
+                        }
+                        let now = now_ms();
+                        let exempt = access.has_in(&channel.id, Permission::ManageMessages)
+                            || access.has_in(&channel.id, Permission::ManageChannels);
+                        if !exempt {
+                            check_slowmode(conn, &channel, &account.id, now).await?;
+                        }
+                        let (mentions_everyone, mention_role_ids) =
+                            mentions(conn, &sdb.id, &access, &channel.id, &req.content).await?;
+                        let message = pb::Message {
+                            id: new_id(),
+                            server_id: sdb.id.clone(),
+                            channel_id: channel.id.clone(),
+                            author_id: account.id.clone(),
+                            content: req.content.clone(),
+                            attachments: req.attachments.clone(),
+                            embeds: req.embeds.clone(),
+                            reply_to_id: req.reply_to_id.clone(),
+                            created_at: Some(timestamp(now)),
+                            edited_at: None,
+                            kind: pb::MessageKind::Unspecified as i32,
+                            mentions_everyone,
+                            mention_role_ids,
+                            auto_mod: None,
+                            webhook: None,
+                            shared: None,
+                        };
+                        insert_message(conn, &message, now).await?;
+                        events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
+                        Ok(Ok(message))
+                    })
+                    .await?
+                    .map_err(Error::denied)?;
+                Ok(pb::SendMessageResponse { message: Some(message) })
+            }
+            .await,
+        )
     }
 
     async fn get_message(
@@ -502,10 +605,17 @@ impl MessageService for Api {
                 let req = request.into_inner();
                 let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
                 let conn = sdb.read()?;
-                let message = load_message(&conn, &sdb.id, &req.message_id)
+                if let Some((link, guest)) =
+                    shared::locate(&self.app, &conn, &sdb.id, &account, &access, &req.channel_id, &req.message_id)
+                        .await?
+                {
+                    return shared::guest_get(&self.app, &sdb.id, &link, guest, &req.message_id).await;
+                }
+                let mut message = load_message(&conn, &sdb.id, &req.message_id)
                     .await?
                     .filter(|m| access.can_see(&m.channel_id))
                     .ok_or(Error::NotFound("message"))?;
+                shared::mark_guests(&conn, std::slice::from_mut(&mut message)).await?;
                 let author = authors(&conn, std::slice::from_ref(&message)).await?.into_iter().next();
                 Ok(pb::GetMessageResponse { message: Some(message), author })
             }
@@ -517,36 +627,26 @@ impl MessageService for Api {
         &self,
         request: Request<pb::ListMessagesRequest>,
     ) -> Result<Response<pb::ListMessagesResponse>, Status> {
-        respond(async {
-            let account = self.account(request.metadata()).await?;
-            let req = request.into_inner();
-            let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
-            access.require_in(&req.channel_id, Permission::ViewChannels)?;
-            let conn = sdb.read()?;
-            load_channel(&conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
-            let limit = if req.limit <= 0 { 50 } else { req.limit.min(100) } as i64;
-            let (condition, cursor, newest_first) = match (req.before_id.is_empty(), req.after_id.is_empty()) {
-                (false, _) => ("AND id < ?2", req.before_id.as_str(), true),
-                (true, false) => ("AND id > ?2", req.after_id.as_str(), false),
-                (true, true) => ("AND ?2 = ''", "", true),
-            };
-            let order = if newest_first { "DESC" } else { "ASC" };
-            let rows = query_all(
-                &conn,
-                &format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE channel_id = ?1 {condition} ORDER BY id {order} LIMIT ?3"),
-                (req.channel_id.as_str(), cursor, limit + 1),
-                message_row(&sdb.id),
-            )
-            .await?;
-            let has_more = rows.len() as i64 > limit;
-            let mut messages = rows.into_iter().take(limit as usize).map(with_extras).collect::<Result<Vec<_>>>()?;
-            if newest_first {
-                messages.reverse();
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let req = request.into_inner();
+                let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
+                access.require_in(&req.channel_id, Permission::ViewChannels)?;
+                let conn = sdb.read()?;
+                load_channel(&conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
+                if let Some(link) = shared::link_of(&conn, &req.channel_id).await? {
+                    let guest = shared::guest_of(&conn, &sdb.id, &account, &access, &link).await?;
+                    return shared::guest_list(&self.app, &sdb.id, &link, guest, &req).await;
+                }
+                let (mut messages, has_more) =
+                    page(&conn, &sdb.id, &req.channel_id, req.limit, &req.before_id, &req.after_id, false).await?;
+                shared::mark_guests(&conn, &mut messages).await?;
+                let authors = authors(&conn, &messages).await?;
+                Ok(pb::ListMessagesResponse { messages, authors, has_more })
             }
-            let authors = authors(&conn, &messages).await?;
-            Ok(pb::ListMessagesResponse { messages, authors, has_more })
-        }
-        .await)
+            .await,
+        )
     }
 
     async fn update_message(
@@ -559,6 +659,29 @@ impl MessageService for Api {
                 let req = request.into_inner();
                 let Seat { sdb, member, access } = self.membership(&account, &req.server_id).await?;
                 check_not_timed_out(&member)?;
+                let located = shared::locate(
+                    &self.app,
+                    &sdb.read()?,
+                    &sdb.id,
+                    &account,
+                    &access,
+                    &req.channel_id,
+                    &req.message_id,
+                )
+                .await?;
+                if let Some((link, guest)) = located {
+                    check_content(&req.content, true)?;
+                    let message = shared::guest_edit(&self.app, &sdb, &member, &access, &link, guest, &req).await?;
+                    return Ok(pb::UpdateMessageResponse { message: Some(message) });
+                }
+                // A provider is asked before the write, about new text the author wrote.
+                let before = load_message(&sdb.read()?, &sdb.id, &req.message_id).await?;
+                let asked = match before {
+                    Some(m) if m.author_id == account.id && m.content != req.content => {
+                        automod::ask(&self.app, &sdb, &member, &access, &m.channel_id, &req.content, &[]).await
+                    }
+                    _ => None,
+                };
                 let message = sdb
                     .write(&account.id, async |conn, events| {
                         let mut message = load_message(conn, &sdb.id, &req.message_id)
@@ -576,9 +699,17 @@ impl MessageService for Api {
                             let channel = load_channel(conn, &sdb.id, &message.channel_id)
                                 .await?
                                 .ok_or(Error::NotFound("channel"))?;
-                            let verdict =
-                                automod::review(conn, &sdb.id, &member, &access, &channel, &req.content, events)
-                                    .await?;
+                            let verdict = automod::review(
+                                conn,
+                                &sdb.id,
+                                &member,
+                                &access,
+                                &channel,
+                                &req.content,
+                                asked.as_ref(),
+                                events,
+                            )
+                            .await?;
                             if let Some(why) = verdict.blocked {
                                 return Ok(Err(why));
                             }
@@ -622,6 +753,20 @@ impl MessageService for Api {
                 let req = request.into_inner();
                 let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
                 access.require_not_timed_out()?;
+                let located = shared::locate(
+                    &self.app,
+                    &sdb.read()?,
+                    &sdb.id,
+                    &account,
+                    &access,
+                    &req.channel_id,
+                    &req.message_id,
+                )
+                .await?;
+                if let Some((link, guest)) = located {
+                    shared::guest_delete(&self.app, &sdb.id, &link, guest, &req.message_id).await?;
+                    return Ok(pb::DeleteMessageResponse {});
+                }
                 sdb.write(&account.id, async |conn, events| {
                     let message = load_message(conn, &sdb.id, &req.message_id)
                         .await?

@@ -182,7 +182,8 @@ same Caddyfile as above, with `h2c://127.0.0.1:8080` as the address.
    new 0.1.x releases deploy by themselves once Railway notices them.
 
 Keep it to one replica: every server's database is a file on that one volume.
-For more than one machine, see [Scaling out](../README.md#scaling-out).
+For more than one machine, see [Scaling out](../README.md#scaling-out), and
+for keeping communities' data in the EU or elsewhere, [Regions](regions.md).
 fuwa.chat's own [Railway config](../.railway/railway.ts) is a worked example:
 with its `SPLIT` setting on, the service with the domain becomes the gateways
 (several replicas), a `fuwa-directory` service takes over the volume, and each
@@ -289,6 +290,34 @@ Servers) and have old ones delete themselves
 On Railway, which has no public UDP, add a TCP proxy for port 50000 and set
 `FUWA_MEDIA_ADDRESSES=tcp/<proxy host>:<proxy port>`; a TURN server elsewhere
 helps people on strict networks.
+
+## Moderation providers
+
+Servers' AutoMod can ask a moderation service about each message (the "Smart
+filter" rule): TypeSafe Jev or Cloudflare Clef. Turn one on once for the whole
+instance in **Instance settings, Moderation**: paste the key, press **Try a
+sample scam** to check it answers, and switch it on. Every server can then pick
+it with one switch and choose what happens to hate, harassment, sexual content,
+violence, self-harm, scams and spam.
+
+- **TypeSafe Jev**: an API key from your TypeSafe account. Messages go to
+  `api.typesafe.ai` (US).
+- **Cloudflare Clef**: an API token with the Workers AI permission and your
+  account id. Messages go to `api.cloudflare.com`.
+- **Your own**: press **Add your own** and give it a name, an https address
+  and, if it needs one, a key and the header it goes in. It gets the same
+  requests Jev and Clef do; [automod.md](automod.md) has what fuwa sends and
+  what it expects back.
+
+You can also start with one on: `FUWA_JEV_API_KEY`, or `FUWA_CLEF_API_TOKEN`
+with `FUWA_CLEF_ACCOUNT_ID`. Keys live in node.db (sealed when
+`FUWA_ENCRYPTION_KEY` is set) and are never sent to apps. Only the instance
+talks to the provider, and it sends the message's text alone, with mentions
+and custom emoji swapped for placeholders: never who wrote it, where, or which
+server. The provider bills you for what it reads. When it's slow (over 3
+seconds) or down, messages go through and the servers' own rules still apply;
+those failures are counted in the anonymous hourly report, by kind and
+provider only.
 
 ## Updating
 
