@@ -465,7 +465,7 @@ const rowMotion = (index: number) => ({
 });
 
 /** Waiting or connected: a chip that swaps when the other side answers. */
-function StateChip({ connection }: { connection: SharedConnection }) {
+export function StateChip({ connection }: { connection: SharedConnection }) {
   const isWaiting = waiting(connection);
   return (
     <motion.span
@@ -828,7 +828,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 /** Asks before something that can't be taken back in one click. Shows the server's answer if it says no. */
-function ConfirmDialog({
+export function ConfirmDialog({
   open,
   onOpenChange,
   title,

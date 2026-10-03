@@ -620,6 +620,10 @@ message SharedCall {
     HomeUpdated updated = 13;
     // To the home: who its AutoMod sends the channel's messages to.
     GuestReaders readers = 14;
+    // From an instance admin, to the server either end: its connections, or
+    // ending one.
+    AdminShares admin_list = 15;
+    AdminEnd admin_end = 16;
   }
 }
 
@@ -631,6 +635,16 @@ message SharedReply {
   fuwa.v1.User author = 5;
   // For GuestReaders: as in PreviewShareResponse.checked_by.
   repeated string checked_by = 6;
+  // For AdminShares.
+  repeated fuwa.v1.SharedConnection connections = 7;
+}
+
+message AdminShares {}
+
+message AdminEnd {
+  string connection_id = 1;
+  // The instance admin's account; empty for the operator's admin token.
+  string actor_id = 2;
 }
 
 // A guest server's admins reading their Shared channels page.

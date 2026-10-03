@@ -47,6 +47,11 @@ Deleting the channel at the home, or either server, ends its connections
 too (`shared::take_channel`, `take_server`, `tell_ended`). A side that misses
 the news lets go the next time it hears "gone" from the other.
 
+Instance admins can end any of them too: the Servers page in Instance
+settings lists each server's shared channels, both ends (`ListServerShares`),
+and **End** works like that server's own Disconnect (`EndServerShare`). Its
+audit log notes an instance admin did it.
+
 ## What each side controls
 
 - **The home decides what guests may do**, at most send messages, embed links
@@ -121,5 +126,4 @@ admin disconnects them.
 - More than one guest server per channel.
 - Across instances (phase 2): the home instance relays everything, instances
   trust each other through signed instance keys, off by default.
-- An instance admin control to end any connection, the region in the preview
-  once regions land, and the desktop app's screens.
+- The region in the preview, and the desktop app's screens.
