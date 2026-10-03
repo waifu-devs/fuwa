@@ -91,6 +91,10 @@ message InstanceSettings {
   // its replica). Recording on one's own device is always up to them.
   // FUWA_CALL_RECORDINGS.
   bool call_recordings = 23;
+  // Days a finished server recording is kept before it deletes itself;
+  // unset keeps them until someone deletes them.
+  // FUWA_CALL_RECORDINGS_KEEP_DAYS.
+  optional int64 call_recordings_keep_days = 24;
   // Who may make agents (bot accounts). Agents already made keep working.
   // FUWA_AGENT_CREATION.
   AgentCreation agent_creation = 13;

@@ -152,6 +152,9 @@ message JoinVoiceResponse {
   // The caller's place: KeepVoice and rejoining name it.
   string session_id = 2;
   VoiceState state = 3;
+  // Asked to record on the server, but the server's recordings are as big
+  // as its cap allows (ServerLimits.recording_bytes): delete some first.
+  bool recordings_full = 4;
 }
 
 message LeaveVoiceRequest {
@@ -178,6 +181,9 @@ message KeepVoiceRequest {
 
 message KeepVoiceResponse {
   VoiceState state = 1;
+  // As in JoinVoiceResponse: recording on the server stopped, or didn't
+  // start, because the server's recordings are full.
+  bool recordings_full = 2;
 }
 
 message ListVoiceStatesRequest {
@@ -332,6 +338,12 @@ message ListRecordingsRequest {
 
 message ListRecordingsResponse {
   repeated Recording recordings = 1;
+  // What all of the server's recordings come to, in bytes, the one going on
+  // included, and the most they may (unset: no cap).
+  int64 used_bytes = 2;
+  optional int64 cap_bytes = 3;
+  // Days a finished recording is kept (unset: until someone deletes it).
+  optional int64 keep_days = 4;
 }
 
 message DownloadRecordingRequest {

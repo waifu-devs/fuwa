@@ -137,7 +137,8 @@ with a LIVE mark, and pop them out like cameras: the window is titled
 Anyone may record a call's sound on their own device: the app mixes
 everyone's sound as they hear it (at the volumes they gave people) with
 their own microphone as it goes out, records it with `MediaRecorder` (Opus,
-128 kbit/s) and saves the file when they stop or hang up. Nothing is sent
+128 kbit/s) and saves the file when they stop or hang up. What they hear
+includes the sound of screens others share, so that's in it too. Nothing is sent
 anywhere. Recording says `self_record` in the next keep, so everyone sees
 it: a mark by their name, a "Recording" pill on the channel, and a beep and
 a note when someone starts. That's a courtesy, not a lock: anyone can record
@@ -161,7 +162,18 @@ of them turns it off or leaves. Admins turn it off for the whole instance
 with `FUWA_CALL_RECORDINGS=off` (or the Calls page); `GetCallSettings` says
 whether it's on (`recordings`). It's on by default because RECORD is on no
 role until a server's admins grant it (only new servers' Admin role starts
-with it). There's no cap yet: recordings stay until someone deletes them.
+with it).
+
+Neither size nor age is capped by default. Instance admins can cap how much
+each server's recordings take, all channels together
+(`ServerLimits.recording_bytes`: `FUWA_LIMIT_RECORDING_STORAGE` for every
+server, or one server's own cap). At the cap the recording going on stops,
+no new one starts, and whoever asked hears why (`recordings_full` on
+JoinVoice and KeepVoice) until some are deleted; `ListRecordings` says what
+they take and the cap. And finished recordings can delete themselves after a
+number of days (`FUWA_CALL_RECORDINGS_KEEP_DAYS`, or the Calls page),
+files and replica copies included; the part holding each server looks for
+them hourly.
 
 The part keeping the channel's places listens through a bridge on the media
 part, like a program with ListenVoice, as nobody anyone sees, and writes
@@ -344,8 +356,6 @@ interruption.
 
 ## Next
 
-- **Caps on recordings**: how much a server may keep, as a server limit,
-  and recordings older than a set age deleted by themselves.
 - **The desktop app's calls**: str0m as the WebRTC client, cpal for the
   microphone and speakers, Opus, the frame encryption it already has, and
   then cameras, with each person's camera in a native window of its own.
