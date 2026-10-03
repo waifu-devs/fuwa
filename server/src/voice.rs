@@ -21,7 +21,7 @@ use crate::cpb;
 use crate::error::{Error, Result};
 use crate::id::{now_ms, timestamp};
 use crate::pb;
-use crate::rtc::{Bridged, Ending, Heard, Sfu};
+use crate::rtc::{Bridged, Ending, Heard, May, Sfu};
 
 /// What a bridge hears, wherever its media part is.
 pub type BridgeEvents = std::pin::Pin<Box<dyn futures::Stream<Item = Bridged> + Send>>;
@@ -47,6 +47,15 @@ impl Place {
 
     pub fn may_hear(&self) -> bool {
         !self.state.server_deaf
+    }
+
+    /// Whether the media part should pass their camera on.
+    pub fn may_video(&self) -> bool {
+        !self.state.video_suppress
+    }
+
+    pub fn may(&self) -> May {
+        May { speak: self.may_speak(), hear: self.may_hear(), video: self.may_video() }
     }
 }
 
@@ -230,9 +239,7 @@ impl MediaLink {
         let user_id = &place.state.user_id;
         match self {
             Self::Off(_) => Err(self.off()),
-            Self::Local(sfu) => {
-                sfu.open(&place.room, user_id, &place.session_id, offer, place.may_speak(), place.may_hear()).await
-            }
+            Self::Local(sfu) => sfu.open(&place.room, user_id, &place.session_id, offer, place.may()).await,
             Self::Remote(_) => {
                 let client = self.part(&place.room)?;
                 let request = cpb::OpenRequest {
@@ -242,6 +249,7 @@ impl MediaLink {
                     offer: offer.to_string(),
                     may_speak: place.may_speak(),
                     may_hear: place.may_hear(),
+                    may_video: place.may_video(),
                 };
                 // Opening twice only replaces the first connection, so a
                 // media part that's restarting is waited for.
@@ -289,8 +297,7 @@ impl MediaLink {
         match self {
             Self::Off(_) => Err(self.off()),
             Self::Local(sfu) => {
-                let heard =
-                    sfu.bridge(&place.room, user_id, &place.session_id, place.may_speak(), place.may_hear()).await?;
+                let heard = sfu.bridge(&place.room, user_id, &place.session_id, place.may()).await?;
                 Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(heard)))
             }
             Self::Remote(_) => {
@@ -341,7 +348,7 @@ impl MediaLink {
         }
     }
 
-    /// Passes on whether someone may speak and hear, saying whether their
+    /// Passes on what someone may do (speak, hear, film), saying whether their
     /// place's session has a connection on the media part (false when it
     /// can't be reached).
     pub async fn update(&self, place: &Place) -> bool {
@@ -349,7 +356,7 @@ impl MediaLink {
         let session = Some(place.session_id.as_str());
         let result = match self {
             Self::Off(_) => Ok(false),
-            Self::Local(sfu) => sfu.update(room, user_id, session, place.may_speak(), place.may_hear()).await,
+            Self::Local(sfu) => sfu.update(room, user_id, session, place.may()).await,
             Self::Remote(_) => match self.part(room) {
                 Ok(mut client) => client
                     .update(cpb::UpdateRequest {
@@ -358,6 +365,7 @@ impl MediaLink {
                         may_speak: place.may_speak(),
                         may_hear: place.may_hear(),
                         session_id: place.session_id.clone(),
+                        may_video: place.may_video(),
                     })
                     .await
                     .map(|r| r.into_inner().connected)

@@ -226,6 +226,8 @@ enum Permission {
   PERMISSION_MUTE_MEMBERS = 22;
   // Disconnect others from voice channels.
   PERMISSION_MOVE_MEMBERS = 23;
+  // Turn their camera on in voice channels.
+  PERMISSION_VIDEO = 24;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -747,6 +749,11 @@ message VoiceState {
   google.protobuf.Timestamp joined_at = 8;
   // They can't be heard here: they don't have SPEAK in this channel.
   bool suppress = 9;
+  // Their camera is on.
+  bool self_video = 10;
+  // They can't turn their camera on here: they don't have VIDEO in this
+  // channel. Never set in direct-message calls.
+  bool video_suppress = 11;
 }
 
 message ServerUpdated {

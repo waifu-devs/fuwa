@@ -1,8 +1,15 @@
-//! The media part: carries calls' sound over WebRTC, as an SFU (selective
-//! forwarding unit). Everyone in a room sends their microphone here once, and
-//! gets everyone else's sound back as tracks of their own; nothing is mixed,
-//! decoded or kept. Direct-message calls arrive end-to-end encrypted by the
-//! apps, and are passed on just the same.
+//! The media part: carries calls' sound and cameras over WebRTC, as an SFU
+//! (selective forwarding unit). Everyone in a room sends their microphone
+//! (and camera, when it's on) here once, and gets everyone else's back as
+//! tracks of their own; nothing is mixed, decoded or kept. Direct-message
+//! calls arrive end-to-end encrypted by the apps, and are passed on just the
+//! same.
+//!
+//! Cameras come in up to three sizes at once (simulcast: "h", "m" and "l",
+//! full, half and a quarter), and each viewer gets one: the size it asked for
+//! over the data channel (by what fits where it shows that camera), or the
+//! nearest one the camera is sending. Sizes switch on a keyframe, which the
+//! media part asks the camera's app for, so the picture never breaks up.
 //!
 //! It's WebRTC through [str0m], which does no I/O of its own: one task here
 //! owns every connection, reads the one UDP port (and TCP on the same port
@@ -34,7 +41,9 @@ use serde::{Deserialize, Serialize};
 use str0m::change::{SdpAnswer, SdpOffer, SdpPendingOffer};
 use str0m::channel::{ChannelData, ChannelId};
 use str0m::format::Codec;
-use str0m::media::{Direction, Frequency, KeyframeRequest, KeyframeRequestKind, MediaData, MediaKind, MediaTime, Mid};
+use str0m::media::{
+    Direction, Frequency, KeyframeRequest, KeyframeRequestKind, MediaData, MediaKind, MediaTime, Mid, Rid,
+};
 use str0m::net::{Protocol, Receive, TcpType};
 use str0m::rtp::Extension;
 use str0m::{Candidate, Event, IceConnectionState, Input, Output, Rtc};
@@ -141,6 +150,77 @@ enum Signal {
     /// Hung up from the instance's side: the app left, a moderator took
     /// them out, or they can't be in the call any more.
     Closed,
+    /// From the app: which size of each camera it wants, by the track's mid.
+    Layers {
+        layers: HashMap<String, Layer>,
+    },
+}
+
+/// One of a camera's simulcast sizes, as a viewer asks for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Layer {
+    /// Not showing it: nothing is sent.
+    #[serde(rename = "off")]
+    Off,
+    /// A quarter of the camera's size, for small tiles.
+    #[serde(rename = "l")]
+    Low,
+    /// Half.
+    #[serde(rename = "m")]
+    Medium,
+    /// Full size, for a camera shown big or popped out.
+    #[serde(rename = "h")]
+    High,
+}
+
+impl Layer {
+    const SENT: [Layer; 3] = [Layer::Low, Layer::Medium, Layer::High];
+
+    /// The size a simulcast rid stands for.
+    fn of(rid: &str) -> Option<Self> {
+        match rid {
+            "l" => Some(Self::Low),
+            "m" => Some(Self::Medium),
+            "h" => Some(Self::High),
+            _ => None,
+        }
+    }
+
+    fn rid(self) -> Option<Rid> {
+        match self {
+            Self::Off => None,
+            Self::Low => Some(Rid::from("l")),
+            Self::Medium => Some(Rid::from("m")),
+            Self::High => Some(Rid::from("h")),
+        }
+    }
+
+    fn bit(self) -> u8 {
+        1 << self as u8
+    }
+
+    /// The size to send a viewer who wants `want`, out of the ones a camera
+    /// is sending now (`fresh`, a set of [`Layer::bit`]s): the biggest that
+    /// isn't bigger than asked, or the smallest there is when they all are.
+    /// None when the viewer wants none, or nothing comes.
+    fn pick(want: Layer, fresh: u8) -> Option<Layer> {
+        if want == Layer::Off {
+            return None;
+        }
+        let sent = || Layer::SENT.into_iter().filter(|l| fresh & l.bit() != 0);
+        sent().filter(|l| *l <= want).max().or_else(|| sent().min())
+    }
+}
+
+/// What someone in a call may do there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct May {
+    /// Their sound is passed on.
+    pub speak: bool,
+    /// They get everyone else's.
+    pub hear: bool,
+    /// Their camera is passed on.
+    pub video: bool,
 }
 
 /// What a bridge hears, and how it ends.
@@ -201,8 +281,7 @@ enum Command {
         room: String,
         participant: String,
         session_id: String,
-        may_speak: bool,
-        may_hear: bool,
+        may: May,
         events: mpsc::Sender<Bridged>,
         reply: oneshot::Sender<Result<()>>,
     },
@@ -218,8 +297,7 @@ enum Command {
         participant: String,
         session_id: String,
         offer: String,
-        may_speak: bool,
-        may_hear: bool,
+        may: May,
         candidates: Vec<(Protocol, SocketAddr)>,
         reply: oneshot::Sender<Result<String>>,
     },
@@ -232,8 +310,7 @@ enum Command {
         room: String,
         participant: String,
         session_id: Option<String>,
-        may_speak: bool,
-        may_hear: bool,
+        may: May,
         reply: oneshot::Sender<bool>,
     },
 }
@@ -283,15 +360,7 @@ impl Sfu {
     }
 
     /// Takes someone's offer for a room and answers it.
-    pub async fn open(
-        &self,
-        room: &str,
-        participant: &str,
-        session_id: &str,
-        offer: &str,
-        may_speak: bool,
-        may_hear: bool,
-    ) -> Result<String> {
+    pub async fn open(&self, room: &str, participant: &str, session_id: &str, offer: &str, may: May) -> Result<String> {
         if offer.len() > 64 * 1024 {
             return Err(Error::invalid("that offer is too big"));
         }
@@ -302,8 +371,7 @@ impl Sfu {
             participant: participant.into(),
             session_id: session_id.into(),
             offer: offer.into(),
-            may_speak,
-            may_hear,
+            may,
             candidates,
             reply,
         })
@@ -329,8 +397,7 @@ impl Sfu {
         room: &str,
         participant: &str,
         session_id: &str,
-        may_speak: bool,
-        may_hear: bool,
+        may: May,
     ) -> Result<mpsc::Receiver<Bridged>> {
         let (events, heard) = mpsc::channel(BRIDGE_BUFFER);
         let (reply, answer) = oneshot::channel();
@@ -338,8 +405,7 @@ impl Sfu {
             room: room.into(),
             participant: participant.into(),
             session_id: session_id.into(),
-            may_speak,
-            may_hear,
+            may,
             events,
             reply,
         })
@@ -357,19 +423,12 @@ impl Sfu {
         answer.await.map_err(|_| Error::Unavailable("calls are restarting; try again".into()))?
     }
 
-    /// Changes whether someone may speak and hear, saying whether they (in
-    /// `session_id`, when given) have a connection here at all.
-    pub async fn update(
-        &self,
-        room: &str,
-        participant: &str,
-        session_id: Option<&str>,
-        may_speak: bool,
-        may_hear: bool,
-    ) -> Result<bool> {
+    /// Changes what someone may do, saying whether they (in `session_id`,
+    /// when given) have a connection here at all.
+    pub async fn update(&self, room: &str, participant: &str, session_id: Option<&str>, may: May) -> Result<bool> {
         let (reply, answer) = oneshot::channel();
         let (room, participant, session_id) = (room.into(), participant.into(), session_id.map(Into::into));
-        self.send(Command::Update { room, participant, session_id, may_speak, may_hear, reply }).await?;
+        self.send(Command::Update { room, participant, session_id, may, reply }).await?;
         answer.await.map_err(|_| Error::Unavailable("calls are restarting; try again".into()))
     }
 
@@ -500,9 +559,52 @@ struct TrackIn {
     kind: MediaKind,
 }
 
+/// A track someone sends here.
+struct Incoming {
+    track: Arc<TrackIn>,
+    /// When a keyframe was last asked for, of each size (none, l, m, h).
+    asked: [Option<Instant>; 4],
+    /// Whether the others got it yet: a camera's track goes out once its
+    /// first frame came, so cameras never turned on cost nobody anything.
+    shared: bool,
+    /// When each of a camera's sizes last arrived, by [`Layer`].
+    seen: [Option<Instant>; 4],
+}
+
+impl Incoming {
+    fn new(track: Arc<TrackIn>) -> Self {
+        let shared = track.kind == MediaKind::Audio;
+        Self { track, asked: [None; 4], shared, seen: [None; 4] }
+    }
+
+    /// The sizes that came lately, as [`Layer::bit`]s.
+    fn fresh(&self, now: Instant) -> u8 {
+        Layer::SENT
+            .into_iter()
+            .filter(|l| self.seen[*l as usize].is_some_and(|at| now.duration_since(at) < STALE_LAYER))
+            .fold(0, |bits, l| bits | l.bit())
+    }
+}
+
 struct TrackOut {
     from: Weak<TrackIn>,
     state: TrackState,
+    /// The camera size this viewer wants.
+    want: Layer,
+    /// The size it's getting now.
+    rid: Option<Rid>,
+    /// When it last asked the camera for a keyframe of another size.
+    asked: Option<Instant>,
+    /// Moves the camera's clock when sizes switch, so the viewer's stays even.
+    shift: i64,
+    /// The last frame's time on the viewer's clock (90 kHz).
+    last: Option<i64>,
+}
+
+impl TrackOut {
+    fn new(from: Weak<TrackIn>) -> Self {
+        Self { from, state: TrackState::ToOpen, want: Layer::Low, rid: None, asked: None, shift: 0, last: None }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -534,10 +636,9 @@ struct Client {
     rtc: Rtc,
     channel: Option<ChannelId>,
     pending: Option<SdpPendingOffer>,
-    tracks_in: Vec<(Arc<TrackIn>, Option<Instant>)>,
+    tracks_in: Vec<Incoming>,
     tracks_out: Vec<TrackOut>,
-    may_speak: bool,
-    may_hear: bool,
+    may: May,
     /// Signals waiting for the data channel to open.
     outbox: Vec<Signal>,
     /// Being let go: it hangs up at this time, and takes no part meanwhile.
@@ -546,6 +647,8 @@ struct Client {
     offers: VecDeque<Instant>,
     /// Sound it sent this second: (since, bytes).
     sent: (Instant, usize),
+    /// Camera it sent this second, every size together: (since, bytes).
+    filmed: (Instant, usize),
 }
 
 /// The most an app's offer may be.
@@ -558,9 +661,22 @@ const MAX_BYTES_PER_SECOND: usize = 80 * 1024;
 /// The largest frame of sound passed on: Opus frames are 1275 bytes at most,
 /// plus the encryption trailer in direct-message calls.
 pub const MAX_FRAME: usize = 1500;
+/// Camera one person may send a second, every size together: well above
+/// what browsers send for 1080p in three sizes (about 4 Mbit/s).
+const MAX_VIDEO_BYTES_PER_SECOND: usize = 1024 * 1024;
+/// The largest frame of camera passed on (a 1080p keyframe is about 200 KB).
+const MAX_VIDEO_FRAME: usize = 512 * 1024;
+/// A camera size that hasn't come for this long isn't being sent.
+const STALE_LAYER: Duration = Duration::from_millis(700);
+/// How often a viewer waiting for another size asks the camera for a keyframe.
+const SWITCH_ASK: Duration = Duration::from_millis(500);
+/// How often a camera is asked for a keyframe of one size at most.
+const KEYFRAME_EVERY: Duration = Duration::from_millis(300);
+/// The most camera sizes an app may ask for in one message.
+const MAX_LAYER_ASKS: usize = 2 * MAX_ROOM;
 
 /// Whether an app's offer asks for what calls allow: sending one audio
-/// track at most (video comes later), receiving the others' tracks, and the
+/// track and one video track at most, receiving the others' tracks, and the
 /// data channel. Anything else is turned down before it reaches str0m.
 fn offer_allowed(sdp: &str) -> bool {
     if sdp.len() > MAX_SDP {
@@ -577,18 +693,25 @@ fn offer_allowed(sdp: &str) -> bool {
         }
     }
     let sending = |kind: &str| sections.iter().filter(|(k, sends)| *k == kind && *sends).count();
-    sections.len() <= MAX_ROOM + 2
+    sections.len() <= 2 * MAX_ROOM + 3
         && sections.iter().all(|(k, _)| matches!(*k, "audio" | "video" | "application"))
         && sending("audio") <= 1
-        && sending("video") == 0
+        && sending("video") <= 1
         && sections.iter().filter(|(k, _)| *k == "application").count() <= 1
+}
+
+/// A camera frame's time in 90 kHz ticks.
+fn ticks(time: MediaTime) -> i64 {
+    (u128::from(time.numer()) * 90_000 / u128::from(time.denom().max(1))) as i64
 }
 
 /// What one connection's output means for the others.
 enum Propagated {
     TrackOpen(ClientId, Weak<TrackIn>),
-    Media(ClientId, Box<MediaData>),
-    Keyframe(KeyframeRequest, ClientId, Mid),
+    /// A frame, and which of its camera's sizes are coming (as [`Layer::bit`]s).
+    Media(ClientId, Box<MediaData>, u8),
+    /// Ask a sender for a keyframe: of its track `Mid`, in size `Rid`.
+    Keyframe(KeyframeRequest, ClientId, Mid, Option<Rid>),
 }
 
 impl Client {
@@ -701,6 +824,16 @@ impl Client {
                 }
                 self.tracks_out.retain(|t| !matches!(t.state, TrackState::Stopping(_)));
             }
+            Signal::Layers { layers } => {
+                if layers.len() > MAX_LAYER_ASKS {
+                    return;
+                }
+                for track in &mut self.tracks_out {
+                    if let Some(want) = track.mid().and_then(|mid| layers.get(&*mid)) {
+                        track.want = *want;
+                    }
+                }
+            }
             Signal::Replaced | Signal::Restarting | Signal::Closed => {}
         }
     }
@@ -737,8 +870,9 @@ impl Client {
                 }
             }
             Event::ChannelData(data) if Some(data.id) == self.channel => self.on_signal(data),
-            // One track of sound from each app; anything more it can't send.
-            Event::MediaAdded(added) if added.kind != MediaKind::Audio || !self.tracks_in.is_empty() => {}
+            // One track of sound and one of camera from each app; anything
+            // more it can't send.
+            Event::MediaAdded(added) if self.tracks_in.iter().any(|t| t.track.kind == added.kind) => {}
             Event::MediaAdded(added) => {
                 let track = Arc::new(TrackIn {
                     origin: self.id,
@@ -746,24 +880,42 @@ impl Client {
                     mid: added.mid,
                     kind: added.kind,
                 });
-                outputs.propagated.push_back(Propagated::TrackOpen(self.id, Arc::downgrade(&track)));
-                self.tracks_in.push((track, None));
+                let incoming = Incoming::new(track);
+                if incoming.shared {
+                    outputs.propagated.push_back(Propagated::TrackOpen(self.id, Arc::downgrade(&incoming.track)));
+                }
+                self.tracks_in.push(incoming);
             }
             Event::MediaData(data) => {
-                if !self.tracks_in.iter().any(|(t, _)| t.mid == data.mid) || !self.within_budget(data.data.len()) {
+                let Some(kind) = self.tracks_in.iter().find(|t| t.track.mid == data.mid).map(|t| t.track.kind) else {
+                    return;
+                };
+                if !self.within_budget(kind, data.data.len()) {
                     return;
                 }
                 if !data.contiguous {
-                    self.ask_keyframe(data.mid);
+                    self.ask_keyframe(data.mid, data.rid, KeyframeRequestKind::Fir);
                 }
-                if self.may_speak && self.leaving.is_none() {
-                    outputs.propagated.push_back(Propagated::Media(self.id, Box::new(data)));
+                let allowed = if kind == MediaKind::Video { self.may.video } else { self.may.speak };
+                if !allowed || self.leaving.is_some() {
+                    return;
                 }
+                let now = Instant::now();
+                let Some(incoming) = self.tracks_in.iter_mut().find(|t| t.track.mid == data.mid) else { return };
+                if let Some(layer) = data.rid.as_deref().and_then(Layer::of) {
+                    incoming.seen[layer as usize] = Some(now);
+                }
+                if !incoming.shared {
+                    incoming.shared = true;
+                    outputs.propagated.push_back(Propagated::TrackOpen(self.id, Arc::downgrade(&incoming.track)));
+                }
+                let fresh = incoming.fresh(now);
+                outputs.propagated.push_back(Propagated::Media(self.id, Box::new(data), fresh));
             }
             Event::KeyframeRequest(request) => {
-                let from = self.tracks_out.iter().find(|t| t.mid() == Some(request.mid)).and_then(|t| t.from.upgrade());
-                if let Some(from) = from {
-                    outputs.propagated.push_back(Propagated::Keyframe(request, from.origin, from.mid));
+                let Some(out) = self.tracks_out.iter().find(|t| t.mid() == Some(request.mid)) else { return };
+                if let Some(from) = out.from.upgrade() {
+                    outputs.propagated.push_back(Propagated::Keyframe(request, from.origin, from.mid, out.rid));
                 }
             }
             _ => {}
@@ -771,26 +923,33 @@ impl Client {
     }
 
     /// Whether a frame this size fits in what one person may send.
-    fn within_budget(&mut self, len: usize) -> bool {
-        if len > MAX_FRAME {
+    fn within_budget(&mut self, kind: MediaKind, len: usize) -> bool {
+        let (most, per_second, spent) = match kind {
+            MediaKind::Video => (MAX_VIDEO_FRAME, MAX_VIDEO_BYTES_PER_SECOND, &mut self.filmed),
+            MediaKind::Audio => (MAX_FRAME, MAX_BYTES_PER_SECOND, &mut self.sent),
+        };
+        if len > most {
             return false;
         }
         let now = Instant::now();
-        if now.duration_since(self.sent.0) >= Duration::from_secs(1) {
-            self.sent = (now, 0);
+        if now.duration_since(spent.0) >= Duration::from_secs(1) {
+            *spent = (now, 0);
         }
-        self.sent.1 += len;
-        self.sent.1 <= MAX_BYTES_PER_SECOND
+        spent.1 += len;
+        spent.1 <= per_second
     }
 
-    fn ask_keyframe(&mut self, mid: Mid) {
-        let Some((_, asked)) = self.tracks_in.iter_mut().find(|(t, _)| t.mid == mid) else { return };
-        if asked.is_some_and(|at| at.elapsed() < Duration::from_secs(1)) {
+    /// Asks this app for a keyframe on one of its tracks (of one size, for a
+    /// camera), not more often than [`KEYFRAME_EVERY`].
+    fn ask_keyframe(&mut self, mid: Mid, rid: Option<Rid>, kind: KeyframeRequestKind) {
+        let Some(incoming) = self.tracks_in.iter_mut().find(|t| t.track.mid == mid) else { return };
+        let slot = rid.as_deref().and_then(Layer::of).map_or(0, |l| l as usize);
+        if incoming.asked[slot].is_some_and(|at| at.elapsed() < KEYFRAME_EVERY) {
             return;
         }
-        *asked = Some(Instant::now());
+        incoming.asked[slot] = Some(Instant::now());
         if let Some(mut writer) = self.rtc.writer(mid) {
-            let _ = writer.request_keyframe(None, KeyframeRequestKind::Fir);
+            let _ = writer.request_keyframe(rid, kind);
         }
     }
 
@@ -802,22 +961,65 @@ impl Client {
         })
     }
 
-    fn forward(&mut self, origin: ClientId, data: &MediaData) {
-        if !self.may_hear || self.leaving.is_some() {
-            return;
+    /// Passes on a frame from `origin`, giving back the camera size to ask
+    /// it for a keyframe of, when this viewer is waiting to switch.
+    fn forward(&mut self, origin: ClientId, data: &MediaData, fresh: u8, now: Instant) -> Option<Rid> {
+        if !self.may.hear || self.leaving.is_some() {
+            return None;
         }
-        let Some(mid) = self.track_from(origin, data.mid) else { return };
-        let Some(writer) = self.rtc.writer(mid) else { return };
-        let Some(pt) = writer.match_params(data.params) else { return };
-        if let Err(err) = writer.write(pt, data.network_time, data.time, data.data.clone()) {
-            tracing::debug!(client = self.id, error = %err, "couldn't pass sound on");
+        let out = self.tracks_out.iter_mut().find(|out| {
+            out.from.upgrade().is_some_and(|from| from.origin == origin && from.mid == data.mid) && out.mid().is_some()
+        })?;
+        let mid = out.mid()?;
+        let mut ask = None;
+        let mut time = data.time;
+        if data.params.spec().codec.is_video() {
+            // A camera starts on a keyframe, so none goes to a track the
+            // viewer hasn't taken yet.
+            if out.want == Layer::Off || !matches!(out.state, TrackState::Open(_)) {
+                return None;
+            }
+            if let Some(rid) = data.rid {
+                let layer = Layer::of(&rid)?;
+                let target = Layer::pick(out.want, fresh)?;
+                let current = out.rid.as_deref().and_then(Layer::of);
+                let flowing = current.is_some_and(|c| fresh & c.bit() != 0);
+                let switch = data.is_keyframe() && current != Some(layer) && (layer == target || !flowing);
+                let getting = if switch { Some(layer) } else { current };
+                if getting != Some(target) && out.asked.is_none_or(|at| now.duration_since(at) >= SWITCH_ASK) {
+                    out.asked = Some(now);
+                    ask = target.rid();
+                }
+                if switch {
+                    out.rid = Some(rid);
+                    // Sizes may each keep their own clock: carry on from the
+                    // last frame the viewer got, a frame's time later.
+                    let at = ticks(data.time);
+                    if let Some(last) = out.last
+                        && (at + out.shift - last).abs() > 90_000
+                    {
+                        out.shift = last + 3_000 - at;
+                    }
+                } else if current != Some(layer) {
+                    return ask;
+                }
+            }
+            let at = ticks(data.time) + out.shift;
+            out.last = Some(at);
+            time = MediaTime::new(at.max(0) as u64, Frequency::NINETY_KHZ);
+        }
+        let writer = self.rtc.writer(mid)?;
+        let pt = writer.match_params(data.params)?;
+        if let Err(err) = writer.write(pt, data.network_time, time, data.data.clone()) {
+            tracing::debug!(client = self.id, error = %err, "couldn't pass a frame on");
             self.rtc.disconnect();
         }
+        ask
     }
 
     /// Passes on a frame of Opus a bridge said.
     fn forward_said(&mut self, origin: ClientId, from: Mid, now: Instant, time: MediaTime, frame: &[u8]) {
-        if !self.may_hear || self.leaving.is_some() {
+        if !self.may.hear || self.leaving.is_some() {
             return;
         }
         let Some(mid) = self.track_from(origin, from) else { return };
@@ -839,8 +1041,7 @@ struct Bridge {
     events: mpsc::Sender<Bridged>,
     /// Its sound, as everyone else gets it.
     track: Arc<TrackIn>,
-    may_speak: bool,
-    may_hear: bool,
+    may: May,
     queue: VecDeque<Vec<u8>>,
     /// When it started: its RTP clock counts from here.
     started: Instant,
@@ -856,7 +1057,7 @@ impl Bridge {
     }
 
     fn hear(&self, participant: &str, frame: &[u8], timestamp: u32) {
-        if !self.may_hear {
+        if !self.may.hear {
             return;
         }
         let heard = Heard { participant: participant.to_string(), frame: frame.to_vec(), timestamp };
@@ -1006,14 +1207,14 @@ impl Engine {
 
     fn on_command(&mut self, command: Command, now: Instant) {
         match command {
-            Command::Bridge { room, participant, session_id, may_speak, may_hear, events, reply } => {
-                let _ = reply.send(self.bridge(room, participant, session_id, may_speak, may_hear, events, now));
+            Command::Bridge { room, participant, session_id, may, events, reply } => {
+                let _ = reply.send(self.bridge(room, participant, session_id, may, events, now));
             }
             Command::Speak { room, participant, session_id, frames, reply } => {
                 let _ = reply.send(self.speak(&room, &participant, &session_id, frames));
             }
-            Command::Open { room, participant, session_id, offer, may_speak, may_hear, candidates, reply } => {
-                let answer = self.open(room, participant, session_id, &offer, may_speak, may_hear, candidates, now);
+            Command::Open { room, participant, session_id, offer, may, candidates, reply } => {
+                let answer = self.open(room, participant, session_id, &offer, may, candidates, now);
                 let _ = reply.send(answer);
             }
             Command::Close { room, participant, session_id } => {
@@ -1035,20 +1236,18 @@ impl Engine {
                     !closing
                 });
             }
-            Command::Update { room, participant, session_id, may_speak, may_hear, reply } => {
+            Command::Update { room, participant, session_id, may, reply } => {
                 let mut connected = false;
                 for client in &mut self.clients {
                     if client.room == room && client.participant == participant {
-                        client.may_speak = may_speak;
-                        client.may_hear = may_hear;
+                        client.may = may;
                         connected |=
                             client.leaving.is_none() && session_id.as_ref().is_none_or(|s| *s == client.session_id);
                     }
                 }
                 for bridge in &mut self.bridges {
                     if bridge.room == room && bridge.participant == participant {
-                        bridge.may_speak = may_speak;
-                        bridge.may_hear = may_hear;
+                        bridge.may = May { video: false, ..may };
                         connected |= session_id.as_ref().is_none_or(|s| *s == bridge.session_id);
                     }
                 }
@@ -1064,8 +1263,7 @@ impl Engine {
         participant: String,
         session_id: String,
         offer: &str,
-        may_speak: bool,
-        may_hear: bool,
+        may: May,
         candidates: Vec<(Protocol, SocketAddr)>,
         now: Instant,
     ) -> Result<String> {
@@ -1073,19 +1271,25 @@ impl Engine {
             return Err(Error::ResourceExhausted(format!("a call holds at most {MAX_ROOM} people")));
         }
         if !offer_allowed(offer) {
-            return Err(Error::invalid("a call sends one track of sound at most"));
+            return Err(Error::invalid("a call sends one track of sound and one of camera at most"));
         }
         let offer =
             SdpOffer::from_sdp_string(offer).map_err(|err| Error::invalid(format!("that offer isn't SDP: {err}")))?;
         // No audio level extension: it would tell this server, in the clear,
         // how loud each packet is, even in end-to-end encrypted calls, and
-        // apps work out who's speaking themselves.
+        // apps work out who's speaking themselves. Opus and VP8 only, so
+        // every app can take every other's frames as they are.
         let mut rtc = Rtc::builder()
             .set_ice_lite(true)
+            .clear_codecs()
+            .enable_opus(true, false)
+            .enable_vp8(true)
             .clear_extension_map()
             .set_extension(2, Extension::AbsoluteSendTime)
             .set_extension(3, Extension::TransportSequenceNumber)
             .set_extension(4, Extension::RtpMid)
+            .set_extension(10, Extension::RtpStreamId)
+            .set_extension(11, Extension::RepairedRtpStreamId)
             .build(now);
         for (proto, addr) in &candidates {
             let candidate = match proto {
@@ -1124,21 +1328,21 @@ impl Engine {
             pending: None,
             tracks_in: vec![],
             tracks_out: vec![],
-            may_speak,
-            may_hear,
+            may,
             outbox: vec![],
             leaving: None,
             offers: VecDeque::new(),
             sent: (now, 0),
+            filmed: (now, 0),
         };
-        // Everyone else's sound, offered once the data channel is up.
+        // Everyone else's sound and cameras, offered once the data channel is up.
         for other in self.clients.iter().filter(|c| c.room == client.room && c.leaving.is_none()) {
-            for (track, _) in &other.tracks_in {
-                client.tracks_out.push(TrackOut { from: Arc::downgrade(track), state: TrackState::ToOpen });
+            for incoming in other.tracks_in.iter().filter(|t| t.shared) {
+                client.tracks_out.push(TrackOut::new(Arc::downgrade(&incoming.track)));
             }
         }
         for bridge in self.bridges.iter().filter(|b| b.room == client.room) {
-            client.tracks_out.push(TrackOut { from: Arc::downgrade(&bridge.track), state: TrackState::ToOpen });
+            client.tracks_out.push(TrackOut::new(Arc::downgrade(&bridge.track)));
         }
         self.clients.push(client);
         Ok(answer.to_sdp_string())
@@ -1179,8 +1383,7 @@ impl Engine {
         room: String,
         participant: String,
         session_id: String,
-        may_speak: bool,
-        may_hear: bool,
+        may: May,
         events: mpsc::Sender<Bridged>,
         now: Instant,
     ) -> Result<()> {
@@ -1201,7 +1404,7 @@ impl Engine {
             kind: MediaKind::Audio,
         });
         for client in self.clients.iter_mut().filter(|c| c.room == room) {
-            client.tracks_out.push(TrackOut { from: Arc::downgrade(&track), state: TrackState::ToOpen });
+            client.tracks_out.push(TrackOut::new(Arc::downgrade(&track)));
         }
         self.bridges.push(Bridge {
             id,
@@ -1210,8 +1413,8 @@ impl Engine {
             session_id,
             events,
             track,
-            may_speak,
-            may_hear,
+            // Programs only ever get sound.
+            may: May { video: false, ..may },
             queue: VecDeque::new(),
             started: now,
             next: now,
@@ -1234,7 +1437,7 @@ impl Engine {
                 "more than a second of sound is waiting to go out; send it as it plays".into(),
             ));
         }
-        if !bridge.may_speak {
+        if !bridge.may.speak {
             return Ok(bridge.queue.len());
         }
         for frame in frames {
@@ -1313,14 +1516,25 @@ impl Engine {
             Propagated::TrackOpen(origin, track) => {
                 let Some(room) = origin_room(&self.clients, origin) else { return };
                 for client in self.clients.iter_mut().filter(|c| c.id != origin && c.room == room) {
-                    client.tracks_out.push(TrackOut { from: track.clone(), state: TrackState::ToOpen });
+                    client.tracks_out.push(TrackOut::new(track.clone()));
                 }
             }
-            Propagated::Media(origin, data) => {
+            Propagated::Media(origin, data, fresh) => {
                 let Some(from) = self.clients.iter().find(|c| c.id == origin) else { return };
                 let (room, participant) = (from.room.clone(), from.participant.clone());
+                let now = Instant::now();
+                let mut asks = Vec::new();
                 for client in self.clients.iter_mut().filter(|c| c.id != origin && c.room == room) {
-                    client.forward(origin, &data);
+                    if let Some(rid) = client.forward(origin, &data, fresh, now)
+                        && !asks.contains(&rid)
+                    {
+                        asks.push(rid);
+                    }
+                }
+                if let Some(from) = self.clients.iter_mut().find(|c| c.id == origin) {
+                    for rid in asks {
+                        from.ask_keyframe(data.mid, Some(rid), KeyframeRequestKind::Fir);
+                    }
                 }
                 // Programs get sound only, never a camera's frames.
                 let audio = data.params.spec().codec.is_audio();
@@ -1329,11 +1543,9 @@ impl Engine {
                     bridge.hear(&participant, &data.data, ticks as u32);
                 }
             }
-            Propagated::Keyframe(request, origin, mid) => {
-                if let Some(client) = self.clients.iter_mut().find(|c| c.id == origin)
-                    && let Some(mut writer) = client.rtc.writer(mid)
-                {
-                    let _ = writer.request_keyframe(None, request.kind);
+            Propagated::Keyframe(request, origin, mid, rid) => {
+                if let Some(client) = self.clients.iter_mut().find(|c| c.id == origin) {
+                    client.ask_keyframe(mid, rid, request.kind);
                 }
             }
         }
@@ -1362,7 +1574,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn offers_send_one_track_of_sound_at_most() {
+    fn offers_send_one_microphone_and_one_camera_at_most() {
         let sdp = |sections: &[(&str, &str)]| {
             let mut s = String::from("v=0\r\n");
             for (kind, dir) in sections {
@@ -1373,9 +1585,10 @@ mod tests {
         assert!(offer_allowed(&sdp(&[("audio", "sendonly"), ("application", "sendrecv")])));
         assert!(offer_allowed(&sdp(&[("audio", "sendrecv"), ("application", "sendrecv"), ("audio", "recvonly")])));
         assert!(!offer_allowed(&sdp(&[("audio", "sendonly"), ("audio", "sendrecv")])), "two microphones");
-        assert!(!offer_allowed(&sdp(&[("audio", "sendonly"), ("video", "sendonly")])), "video isn't here yet");
+        assert!(offer_allowed(&sdp(&[("audio", "sendonly"), ("video", "sendonly"), ("application", "sendrecv")])));
+        assert!(!offer_allowed(&sdp(&[("video", "sendonly"), ("video", "sendonly")])), "two cameras");
         assert!(!offer_allowed(&sdp(&[("text", "sendonly")])));
-        assert!(!offer_allowed(&sdp(&vec![("audio", "recvonly"); MAX_ROOM + 3])), "too many");
+        assert!(!offer_allowed(&sdp(&vec![("audio", "recvonly"); 2 * MAX_ROOM + 4])), "too many");
         assert!(!offer_allowed(&"a".repeat(MAX_SDP + 1)));
     }
 
@@ -1383,8 +1596,26 @@ mod tests {
     async fn programs_stay_out_of_direct_message_calls() {
         let config = MediaConfig { port: 0, addresses: vec![Advertised::parse("127.0.0.1").unwrap()] };
         let sfu = Sfu::start(config, CancellationToken::new()).await.unwrap();
-        assert!(sfu.bridge("d/conversation", "bot", "s1", true, true).await.is_err());
-        assert!(sfu.bridge("s/server/channel", "bot", "s1", true, true).await.is_ok());
+        let may = May { speak: true, hear: true, video: true };
+        assert!(sfu.bridge("d/conversation", "bot", "s1", may).await.is_err());
+        assert!(sfu.bridge("s/server/channel", "bot", "s1", may).await.is_ok());
+    }
+
+    #[test]
+    fn viewers_get_the_camera_size_nearest_what_they_asked() {
+        let (l, m, h) = (Layer::Low.bit(), Layer::Medium.bit(), Layer::High.bit());
+        assert_eq!(Layer::pick(Layer::High, l | m | h), Some(Layer::High));
+        assert_eq!(Layer::pick(Layer::Medium, l | m | h), Some(Layer::Medium));
+        assert_eq!(Layer::pick(Layer::Low, l | m | h), Some(Layer::Low));
+        // A camera short on upload drops its biggest size first.
+        assert_eq!(Layer::pick(Layer::High, l | m), Some(Layer::Medium));
+        // Asked for smaller than anything there: the smallest there is.
+        assert_eq!(Layer::pick(Layer::Low, m | h), Some(Layer::Medium));
+        assert_eq!(Layer::pick(Layer::Off, l | m | h), None);
+        assert_eq!(Layer::pick(Layer::High, 0), None);
+        let asked: HashMap<String, Layer> = serde_json::from_str(r#"{"1": "h", "2": "off", "3": "l"}"#).unwrap();
+        assert_eq!(asked["1"], Layer::High);
+        assert_eq!(asked["2"], Layer::Off);
     }
 
     #[test]
