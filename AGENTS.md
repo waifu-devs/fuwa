@@ -175,14 +175,19 @@
     subscribe, snapshot, apply, reconnect), `dms.rs` and `vault.rs` (one MLS
     device per install and account, through `fuwa-e2ee`'s `client` feature,
     kept in 0600 files under the app's data folder; signing out wipes it),
-    `linked.rs` (waifu.dev sign-in through the browser and a loopback page),
-    `config.rs` (saved instances and the app's settings), `permissions.rs`
+    `linked.rs` (waifu.dev sign-in through the browser and a loopback page;
+    the sign-in page must be https, or http on this computer),
+    `config.rs` (saved instances and the app's settings; no tokens),
+    `secrets.rs` (session tokens and the vault key in the system keychain,
+    named per data folder, with a 0600 file only where there's no keychain;
+    vault files are sealed with XChaCha20-Poly1305 under that key), `permissions.rs`
     (what you may do in a server, a port of `web/src/lib/permissions.ts`),
     `notifications.rs` (per channel and server levels and mutes, kept on the
     instance, and whether a message should notify), `account.rs` (profile,
     pictures, password, signed-in devices, rules, the welcome screen, creating
     channels), `moderation.rs` (time outs, kicks and bans, and who may do
-    them to whom: the permission plus outranking them). It runs on its own
+    them to whom: the permission plus outranking them), `server_admin.rs`
+    (a server's settings, invites, bans and audit log). It runs on its own
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
@@ -190,12 +195,17 @@
     place (and the keys they take first), `mentions.rs` finds mentions and
     makes them links, `menus.rs` the bell menus, `notify.rs` the system
     notifications (clicks come back through a channel), `settings_account.rs`
-    the profile and security pages, `moderate.rs` the time out, kick and ban
+    the profile and security pages, `server_settings.rs` a server's settings
+    (overview, invites, members, bans, audit log; the server's name opens
+    it), `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),
     `emoji_picker.rs` the picker by the composer, `embeds.rs` the cards apps
     post through webhooks; `http.rs` fetches pictures for `img` on the core's
-    runtime (GPUI's own client loads nothing); `motion.rs` is how things move (springs,
+    runtime (GPUI's own client loads nothing): from your instances, from
+    anywhere; from anyone else, only https to public addresses, checked
+    after DNS and on every redirect. Markdown goes through `text::markdown`,
+    whose links open only for http(s) and mailto. `motion.rs` is how things move (springs,
     rises, glides, all settling at once with reduced motion); `theme.rs` is
     the web app's palettes and the bundled font (M PLUS Rounded 1c, whose
     files name the family "Rounded Mplus 1c").

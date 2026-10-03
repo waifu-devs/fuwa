@@ -450,12 +450,9 @@ impl FuwaApp {
         if let Some(bio) = profile.as_ref().map(|pr| pr.bio.clone()).filter(|b| !b.is_empty()) {
             info = info.child(
                 div().flex().flex_col().gap(px(4.0)).child(section_title("About", &p)).child(
-                    gpui_kit::component::text::TextView::markdown(
-                        "profile-bio",
-                        crate::ui::text::images_as_links(&bio),
-                    )
-                    .selectable(true)
-                    .w_full(),
+                    crate::ui::text::markdown("profile-bio", crate::ui::text::images_as_links(&bio))
+                        .selectable(true)
+                        .w_full(),
                 ),
             );
         } else if profile.is_none() {
@@ -571,7 +568,7 @@ impl FuwaApp {
                     );
                     body = body.child(motion::rise(
                         div().w_full().min_w_0().text_sm().text_color(p.muted_foreground).child(
-                            gpui_kit::component::text::TextView::markdown("welcome-description", shown)
+                            crate::ui::text::markdown("welcome-description", shown)
                                 .markdown_extensions(crate::ui::emoji::markdown_extensions()),
                         ),
                         "welcome-description",

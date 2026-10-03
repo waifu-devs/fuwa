@@ -157,6 +157,20 @@ const PAGE: &str = r#"<!doctype html>
   });
 </script></body></html>"#;
 
+/// Whether a sign-in page an instance hands over may open in the browser:
+/// https, or http only on this computer (a local test instance).
+pub fn safe_sign_in_page(url: &str) -> bool {
+    let Ok(uri) = url.parse::<http::Uri>() else { return false };
+    match (uri.scheme_str(), uri.host()) {
+        (Some("https"), Some(_)) => true,
+        (Some("http"), Some(host)) => {
+            let host = host.trim_start_matches('[').trim_end_matches(']');
+            host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,5 +194,15 @@ mod tests {
         assert_eq!(get(format!("{origin}/auth/waifu/done?code=x&state=other")).await, StatusCode::NO_CONTENT);
         assert_eq!(get(format!("{origin}/auth/waifu/done?code=abc&state=mine")).await, StatusCode::NO_CONTENT);
         assert_eq!(callback.wait("mine").await, Returned::Code { code: "abc".into(), state: "mine".into() });
+    }
+
+    #[test]
+    fn sign_in_pages_must_be_https_or_this_computer() {
+        assert!(safe_sign_in_page("https://www.waifu.dev/authorize?x=1"));
+        assert!(safe_sign_in_page("http://127.0.0.1:3000/authorize"));
+        assert!(safe_sign_in_page("http://localhost/authorize"));
+        assert!(!safe_sign_in_page("http://evil.example/authorize"));
+        assert!(!safe_sign_in_page("file:///C:/Windows/System32/calc.exe"));
+        assert!(!safe_sign_in_page("ms-settings:"));
     }
 }

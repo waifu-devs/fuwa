@@ -24,6 +24,8 @@ path = "src/lib.rs"
 anyhow = "1"
 base64 = "0.22"
 bytes = "1"
+# Encrypts what the vault keeps on disk, with a key from the system keychain.
+chacha20poly1305 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 dirs = "6"
 futures = "0.3"
@@ -37,6 +39,9 @@ hyper = { version = "1", features = ["http1", "server"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "native-tokio", "webpki-tokio", "ring", "tls12", "logging"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "server", "tokio"] }
+# Session tokens and the vault key live in the system's keychain (Keychain,
+# Credential Manager, Secret Service).
+keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "tokio", "crypto-rust"] }
 # The system's own notifications, while the window is in the background.
 notify-rust = "4.18"
 open = "5"

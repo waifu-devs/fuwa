@@ -167,7 +167,9 @@ fn start_dms(
     });
     let (core, key, api, token, slot) = (core.clone(), key.to_owned(), api.clone(), token.to_owned(), slot.clone());
     tokio::spawn(async move {
-        match DmEngine::start(&key, api, user, &token, core.paths.vaults.clone(), core.shared.clone()).await {
+        match DmEngine::start(&key, api, user, &token, core.paths.vaults.clone(), core.vault_key, core.shared.clone())
+            .await
+        {
             Ok(engine) => {
                 core.shared.instance(&key, |i| {
                     i.dms.status = DmStatus::Ready;
