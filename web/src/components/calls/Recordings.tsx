@@ -140,6 +140,10 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
   const started = toDate(rec.startedAt);
   const length = live ? now - started.getTime() : Math.max(...rec.tracks.map((t) => Number(t.durationMs)), toDate(rec.endedAt).getTime() - started.getTime());
   const starter = useName(instanceKey, serverId, rec.startedBy);
+  const access = useAccess(instanceKey, serverId);
+  const mine = useFuwa((s) => s.instances[instanceKey]?.me?.id === rec.startedBy);
+  // Whoever started it, or someone who runs the channel.
+  const mayDelete = mine || hasIn(access, channel.id, Permission.MANAGE_CHANNELS);
   // Joined into one string, so the store only wakes this card when a name changes.
   const joinedNames = useFuwa((s) => rec.tracks.map((t) => nameIn(s, instanceKey, serverId, t.userId)).join("\u0000"));
   const names = useMemo(() => {
@@ -236,7 +240,7 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
               <FileArchiveIcon className="transition-transform group-hover:-translate-y-0.5" /> <span className="hidden sm:inline">All</span> .zip
             </Button>
             <AnimatePresence mode="wait" initial={false}>
-              {confirming ? (
+              {!mayDelete ? null : confirming ? (
                 <motion.div key="sure" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={SPRING} className="flex items-center gap-1">
                   <Button size="sm" variant="destructive" className="h-8 rounded-xl font-bold" disabled={deleting} onClick={() => void remove()}>
                     {deleting ? "Deleting…" : "Delete"}

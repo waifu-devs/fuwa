@@ -717,9 +717,16 @@ impl Api {
         metadata: &MetadataMap,
         req: pb::DeleteRecordingRequest,
     ) -> Result<pb::DeleteRecordingResponse> {
-        let seat = self.recorder(metadata, &req.server_id).await?;
+        let account = self.account(metadata).await?;
+        let seat = self.membership(&account, &req.server_id).await?;
         let row = crate::recordings::find(&seat.sdb, &req.recording_id).await?;
         seat.access.require_in(&row.channel_id, pb::Permission::Record)?;
+        // Whoever started it, or someone who runs the channel.
+        if row.started_by != account.id && !seat.access.has_in(&row.channel_id, pb::Permission::ManageChannels) {
+            return Err(Error::denied(
+                "only whoever started a recording, or someone who can manage the channel, can delete it",
+            ));
+        }
         let row = crate::recordings::finished(&self.app, &seat.sdb, row).await?;
         crate::recordings::delete(&self.app, &seat.sdb, &row).await?;
         Ok(pb::DeleteRecordingResponse {})
@@ -865,6 +872,7 @@ impl CallService for Api {
                     enabled,
                     ice_servers,
                     recordings: enabled && settings.call_recordings,
+                    screen_sound: enabled,
                 })
             }
             .await,

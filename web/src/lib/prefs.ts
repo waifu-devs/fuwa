@@ -91,6 +91,8 @@ export type Prefs = {
   popoutName: boolean;
   popoutGlow: boolean;
   popoutFit: PopoutFit;
+  /** Sharing a screen brings its sound too, where the browser can. */
+  shareSound: boolean;
 };
 
 const systemDark = () => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -142,6 +144,7 @@ export const DEFAULT_PREFS: Prefs = {
   popoutName: true,
   popoutGlow: true,
   popoutFit: "cover",
+  shareSound: true,
 };
 
 /** The defaults on this device: the theme starts light or dark like the system. */

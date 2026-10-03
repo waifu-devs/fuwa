@@ -12,7 +12,7 @@ import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { clock } from "./CallPanel";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceAvatar } from "./parts";
-import { CameraButton, LiveBadge, PopOutButton, RecordButton, ScreenButton, TileMedia } from "./Video";
+import { CameraButton, LiveBadge, PopOutButton, RecordButton, ScreenButton, ScreenSoundButton, TileMedia } from "./Video";
 
 /** The call going on in a conversation, if there is one. */
 export const useDmCall = (instanceKey: string, conversationId: string) => useFuwa((s) => s.instances[instanceKey]?.dms.calls[conversationId]);
@@ -196,6 +196,7 @@ function Screen({ instanceKey, user, self }: { instanceKey: string; user: User; 
         </span>
       </div>
       <PopOutButton popped={{ instance: instanceKey, userId: user.id, screen: true }} name={name} className="absolute top-2 right-2" />
+      <ScreenSoundButton userId={user.id} self={self} className="absolute top-2 left-2" />
     </motion.div>
   );
 }

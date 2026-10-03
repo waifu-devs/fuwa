@@ -912,6 +912,7 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     assert!(small < 30, "and it came soon: {sizes:?}");
     let mid = watching.seen[0].0.to_string();
     assert!(watching.heard.len() > 10, "and the sound");
+    assert_eq!(watching.screen_sounds_heard(0), 0, "no screen's sound until it's shared");
 
     // Shown big: it switches to full size, on a keyframe the media part asks for.
     watching.say(serde_json::json!({ "type": "layers", "layers": { &mid: "h" } }));
@@ -959,6 +960,21 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     let screen = watching.seen[from..].iter().find(|(_, f, _)| f.windows(6).any(|w| w == b"screen")).unwrap();
     assert_ne!(screen.0.to_string(), mid, "on its own track");
     assert!(screen.2, "starting on a keyframe");
+    // Its sound comes along, on a track of its own beside the voice.
+    let heard = watching.heard.len();
+    talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
+    assert!(watching.screen_sounds_heard(heard) > 10, "the screen's sound came through");
+    let talking = watching.heard[heard..].iter().find(|(_, f)| f.starts_with(b"frame")).unwrap().0;
+    let playing = watching.heard[heard..].iter().find(|(_, f)| f.starts_with(b"screen")).unwrap().0;
+    assert_ne!(talking, playing, "on its own track");
+    // Stopping the share stops its sound, while the voice goes on.
+    c.calls.keep_voice(authed(&mika, keep(true, false))).await.unwrap();
+    talk(&mut filming, &mut watching, Duration::from_millis(500)).await;
+    let heard = watching.heard.len();
+    talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
+    assert_eq!(watching.screen_sounds_heard(heard), 0, "no screen's sound once the share stops");
+    assert!(watching.heard.len() > heard + 10, "the voice goes on");
+    c.calls.keep_voice(authed(&mika, keep(true, true))).await.unwrap();
 
     // A channel that takes VIDEO away stops the camera there, and says so.
     let everyone = pb::PermissionOverwrite {

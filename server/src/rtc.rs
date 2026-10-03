@@ -221,7 +221,7 @@ pub struct May {
     pub hear: bool,
     /// Their camera is passed on.
     pub video: bool,
-    /// Their shared screen is passed on.
+    /// Their shared screen is passed on, and its sound.
     pub screen: bool,
 }
 
@@ -569,14 +569,17 @@ enum Source {
     Camera,
     /// A shared screen: an app's second video track.
     Screen,
+    /// A shared screen's sound: an app's second audio track.
+    ScreenSound,
 }
 
 /// What the stream of a track that goes out is named: whose it is, and
-/// `-screen` after a shared screen, so apps tell it from the camera (stream
-/// names keep only letters, digits and dashes on the way).
+/// `-screen` after a shared screen and its sound, so apps tell them from the
+/// camera and microphone (stream names keep only letters, digits and dashes
+/// on the way).
 fn stream_of(participant: &str, source: Source) -> String {
     match source {
-        Source::Screen => format!("{participant}-screen"),
+        Source::Screen | Source::ScreenSound => format!("{participant}-screen"),
         _ => participant.to_string(),
     }
 }
@@ -586,8 +589,9 @@ struct Incoming {
     track: Arc<TrackIn>,
     /// When a keyframe was last asked for, of each size (none, l, m, h).
     asked: [Option<Instant>; 4],
-    /// Whether the others got it yet: a camera's track goes out once its
-    /// first frame came, so cameras never turned on cost nobody anything.
+    /// Whether the others got it yet: a camera's (or a screen's sound's)
+    /// track goes out once its first frame came, so what's never turned on
+    /// costs nobody anything.
     shared: bool,
     /// When each of a camera's sizes last arrived, by [`Layer`].
     seen: [Option<Instant>; 4],
@@ -595,7 +599,7 @@ struct Incoming {
 
 impl Incoming {
     fn new(track: Arc<TrackIn>) -> Self {
-        let shared = track.kind == MediaKind::Audio;
+        let shared = track.source == Source::Microphone;
         Self { track, asked: [None; 4], shared, seen: [None; 4] }
     }
 
@@ -673,6 +677,8 @@ struct Client {
     filmed: (Instant, usize),
     /// Shared screen it sent this second, the same way.
     shown: (Instant, usize),
+    /// Its shared screen's sound this second.
+    played: (Instant, usize),
 }
 
 /// The most an app's offer may be.
@@ -699,9 +705,9 @@ const KEYFRAME_EVERY: Duration = Duration::from_millis(300);
 /// The most camera sizes an app may ask for in one message.
 const MAX_LAYER_ASKS: usize = 2 * MAX_ROOM;
 
-/// Whether an app's offer asks for what calls allow: sending one audio
-/// track and one video track at most, receiving the others' tracks, and the
-/// data channel. Anything else is turned down before it reaches str0m.
+/// Whether an app's offer asks for what calls allow: sending two audio
+/// tracks (microphone, screen's sound) and two video tracks (camera, screen)
+/// at most, receiving the others' tracks, and the data channel. Anything else is turned down before it reaches str0m.
 fn offer_allowed(sdp: &str) -> bool {
     if sdp.len() > MAX_SDP {
         return false;
@@ -717,9 +723,9 @@ fn offer_allowed(sdp: &str) -> bool {
         }
     }
     let sending = |kind: &str| sections.iter().filter(|(k, sends)| *k == kind && *sends).count();
-    sections.len() <= 3 * MAX_ROOM + 4
+    sections.len() <= 4 * MAX_ROOM + 5
         && sections.iter().all(|(k, _)| matches!(*k, "audio" | "video" | "application"))
-        && sending("audio") <= 1
+        && sending("audio") <= 2
         && sending("video") <= 2
         && sections.iter().filter(|(k, _)| *k == "application").count() <= 1
 }
@@ -894,13 +900,15 @@ impl Client {
                 }
             }
             Event::ChannelData(data) if Some(data.id) == self.channel => self.on_signal(data),
-            // One track of sound, one of camera and one of screen from each
-            // app (its first video track is the camera, the second the
-            // screen); anything more it can't send.
+            // A microphone, a camera, a screen and its sound from each app
+            // (its first audio track is the microphone, the second the
+            // screen's sound; its first video track the camera, the second
+            // the screen); anything more it can't send.
             Event::MediaAdded(added) => {
                 let has = |source| self.tracks_in.iter().any(|t| t.track.source == source);
                 let source = match added.kind {
                     MediaKind::Audio if !has(Source::Microphone) => Source::Microphone,
+                    MediaKind::Audio if !has(Source::ScreenSound) => Source::ScreenSound,
                     MediaKind::Video if !has(Source::Camera) => Source::Camera,
                     MediaKind::Video if !has(Source::Screen) => Source::Screen,
                     _ => return,
@@ -932,7 +940,7 @@ impl Client {
                 let allowed = match source {
                     Source::Microphone => self.may.speak,
                     Source::Camera => self.may.video,
-                    Source::Screen => self.may.screen,
+                    Source::Screen | Source::ScreenSound => self.may.screen,
                 };
                 if !allowed || self.leaving.is_some() {
                     return;
@@ -965,6 +973,7 @@ impl Client {
             Source::Camera => (MAX_VIDEO_FRAME, MAX_VIDEO_BYTES_PER_SECOND, &mut self.filmed),
             Source::Screen => (MAX_VIDEO_FRAME, MAX_VIDEO_BYTES_PER_SECOND, &mut self.shown),
             Source::Microphone => (MAX_FRAME, MAX_BYTES_PER_SECOND, &mut self.sent),
+            Source::ScreenSound => (MAX_FRAME, MAX_BYTES_PER_SECOND, &mut self.played),
         };
         if len > most {
             return false;
@@ -1309,7 +1318,9 @@ impl Engine {
             return Err(Error::ResourceExhausted(format!("a call holds at most {MAX_ROOM} people")));
         }
         if !offer_allowed(offer) {
-            return Err(Error::invalid("a call sends one track of sound and one of camera at most"));
+            return Err(Error::invalid(
+                "a call sends a microphone, a camera, a screen and its sound, one of each at most",
+            ));
         }
         let offer =
             SdpOffer::from_sdp_string(offer).map_err(|err| Error::invalid(format!("that offer isn't SDP: {err}")))?;
@@ -1373,6 +1384,7 @@ impl Engine {
             sent: (now, 0),
             filmed: (now, 0),
             shown: (now, 0),
+            played: (now, 0),
         };
         // Everyone else's sound and cameras, offered once the data channel is up.
         for other in self.clients.iter().filter(|c| c.room == client.room && c.leaving.is_none()) {
@@ -1562,6 +1574,8 @@ impl Engine {
             Propagated::Media(origin, data, fresh) => {
                 let Some(from) = self.clients.iter().find(|c| c.id == origin) else { return };
                 let (room, participant) = (from.room.clone(), from.participant.clone());
+                let voice =
+                    from.tracks_in.iter().any(|t| t.track.mid == data.mid && t.track.source == Source::Microphone);
                 let now = Instant::now();
                 let mut asks = Vec::new();
                 for client in self.clients.iter_mut().filter(|c| c.id != origin && c.room == room) {
@@ -1576,10 +1590,11 @@ impl Engine {
                         from.ask_keyframe(data.mid, Some(rid), KeyframeRequestKind::Fir);
                     }
                 }
-                // Programs get sound only, never a camera's frames.
-                let audio = data.params.spec().codec.is_audio();
+                // Programs (and recordings) get voices only: never a camera's
+                // frames, nor a screen's sound, which would talk over its
+                // sharer's voice on the same name.
                 let ticks = data.time.numer().saturating_mul(48_000) / u64::from(data.time.denom().max(1));
-                for bridge in self.bridges.iter().filter(|b| audio && b.room == room && b.participant != participant) {
+                for bridge in self.bridges.iter().filter(|b| voice && b.room == room && b.participant != participant) {
                     bridge.hear(&participant, &data.data, ticks as u32);
                 }
             }
@@ -1614,7 +1629,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn offers_send_one_microphone_one_camera_and_one_screen_at_most() {
+    fn offers_send_one_microphone_one_camera_and_one_screen_with_its_sound_at_most() {
         let sdp = |sections: &[(&str, &str)]| {
             let mut s = String::from("v=0\r\n");
             for (kind, dir) in sections {
@@ -1624,12 +1639,16 @@ mod tests {
         };
         assert!(offer_allowed(&sdp(&[("audio", "sendonly"), ("application", "sendrecv")])));
         assert!(offer_allowed(&sdp(&[("audio", "sendrecv"), ("application", "sendrecv"), ("audio", "recvonly")])));
-        assert!(!offer_allowed(&sdp(&[("audio", "sendonly"), ("audio", "sendrecv")])), "two microphones");
+        assert!(
+            offer_allowed(&sdp(&[("audio", "sendonly"), ("audio", "sendrecv")])),
+            "a microphone and a screen's sound"
+        );
+        assert!(!offer_allowed(&sdp(&[("audio", "sendonly"); 3])), "three sounds");
         assert!(offer_allowed(&sdp(&[("audio", "sendonly"), ("video", "sendonly"), ("application", "sendrecv")])));
         assert!(offer_allowed(&sdp(&[("video", "sendonly"), ("video", "sendonly")])), "a camera and a screen");
         assert!(!offer_allowed(&sdp(&[("video", "sendonly"); 3])), "three videos");
         assert!(!offer_allowed(&sdp(&[("text", "sendonly")])));
-        assert!(!offer_allowed(&sdp(&vec![("audio", "recvonly"); 3 * MAX_ROOM + 5])), "too many");
+        assert!(!offer_allowed(&sdp(&vec![("audio", "recvonly"); 4 * MAX_ROOM + 6])), "too many");
         assert!(!offer_allowed(&"a".repeat(MAX_SDP + 1)));
     }
 
