@@ -319,6 +319,7 @@ impl Gateway {
                 }
             })
             .layer(cors(self.clone()))
+            .layer(axum::middleware::from_fn(crate::web::no_store_by_default))
             .layer(axum::middleware::from_fn(crate::probes::turn_away))
     }
 

@@ -864,6 +864,7 @@ async fn browsers_can_call_over_grpc_web() {
         .unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(response.headers()["content-type"], "application/grpc-web+proto");
+    assert_eq!(response.headers()["cache-control"], "no-store");
     let body = response.bytes().await.unwrap();
     let length = u32::from_be_bytes(body[1..5].try_into().unwrap()) as usize;
     let reply = <pb::GetNodeResponse as prost::Message>::decode(&body[5..5 + length]).unwrap();
@@ -871,7 +872,10 @@ async fn browsers_can_call_over_grpc_web() {
     let trailers = String::from_utf8_lossy(&body[5 + length + 5..]).to_lowercase();
     assert!(trailers.contains("grpc-status:0"), "trailers: {trailers}");
 
-    assert_eq!(http.get(format!("{base}/healthz")).send().await.unwrap().text().await.unwrap(), "ok");
+    let health = http.get(format!("{base}/healthz")).send().await.unwrap();
+    // Nothing that doesn't say otherwise is kept by a shared cache.
+    assert_eq!(health.headers()["cache-control"], "no-store");
+    assert_eq!(health.text().await.unwrap(), "ok");
     if !fuwa_server::web::BUILT_IN {
         // With the web client built in, unknown paths open the app instead (see tests/web.rs).
         assert_eq!(http.get(format!("{base}/nope")).send().await.unwrap().status(), 404);

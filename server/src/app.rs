@@ -374,6 +374,7 @@ impl App {
             return router
                 .fallback(crate::web::handler(self.clone()))
                 .layer(cors(self.clone()))
+                .layer(axum::middleware::from_fn(crate::web::no_store_by_default))
                 .layer(axum::middleware::from_fn(crate::probes::turn_away));
         }
         if let Link::Directory(_) = &self.link {

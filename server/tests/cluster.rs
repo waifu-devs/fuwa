@@ -534,6 +534,8 @@ async fn a_split_instance_works_like_one() {
     let redirected = plain.get(&picture.url).send().await.unwrap();
     assert_eq!(redirected.status(), 308);
     assert_eq!(redirected.headers()["cache-control"], "private, max-age=31536000, immutable");
+    let health = http.get(format!("{}/healthz", cluster.gateway.url())).send().await.unwrap();
+    assert_eq!(health.headers()["cache-control"], "no-store");
     // Scanners' guesses stop at the gateway.
     for probe in ["/.env", "/wp-login.php", "/.git/HEAD"] {
         let response = http.get(format!("{}{probe}", cluster.gateway.url())).send().await.unwrap();
