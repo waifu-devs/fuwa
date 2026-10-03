@@ -9,7 +9,7 @@ use crate::db::EncryptionKey;
 use crate::pb;
 use crate::replica::{ReplicaConfig, Restore, S3Config, Target};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Config {
     /// Where node.db and the servers/ directory live. FUWA_DATA_PATH, default ~/.fuwa.
     pub data_path: PathBuf,
@@ -55,6 +55,40 @@ pub struct Config {
     /// Where the databases and pictures are continuously copied to:
     /// FUWA_S3_* (a bucket) or FUWA_REPLICA_PATH (a directory). None is off.
     pub replica: Option<ReplicaConfig>,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("data_path", &self.data_path)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("public_url", &self.public_url)
+            .field("node_name", &self.node_name)
+            .field("allowed_origins", &self.allowed_origins)
+            .field("encryption_key", &self.encryption_key)
+            .field("local_accounts", &self.local_accounts)
+            .field("linked_accounts", &self.linked_accounts)
+            .field("linked_issuer", &self.linked_issuer)
+            .field("server_creation", &self.server_creation)
+            .field("agent_creation", &self.agent_creation)
+            .field("admin_token", &Secret(&self.admin_token))
+            .field("limits", &self.limits)
+            .field("telemetry", &self.telemetry)
+            .field("web", &self.web)
+            .field("cluster", &self.cluster)
+            .field("replica", &self.replica)
+            .finish()
+    }
+}
+
+/// A secret that may be set, for `Debug`: whether it is, never what it is.
+pub struct Secret<'a>(pub &'a Option<String>);
+
+impl std::fmt::Debug for Secret<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() { "Some(***)" } else { "None" })
+    }
 }
 
 /// Whether a kind of account works here: standalone ones (username and
@@ -531,6 +565,10 @@ mod tests {
         let Target::Bucket { s3, prefix } = &railway.target else { panic!("not a bucket") };
         assert_eq!((s3.endpoint.as_str(), s3.path_style, prefix.as_str()), ("https://t3.storageapi.dev", false, ""));
         assert!(!format!("{railway:?}").contains("secret"));
+        let keyed = config(&[("FUWA_ADMIN_TOKEN", "admin-token-0123456789abcdef0123456789")]).unwrap();
+        let printed = format!("{keyed:?}");
+        assert!(!printed.contains("admin-token-0123") && !printed.contains("cluster-key-0123"), "{printed}");
+        assert!(printed.contains("admin_token: Some(***)") && printed.contains("key: Some(***)"));
 
         let aws = config(&[
             ("FUWA_S3_BUCKET", "b"),
