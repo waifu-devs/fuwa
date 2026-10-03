@@ -36,10 +36,9 @@ impl Api {
             }));
         }
         let guesses = format!("password:{}", account.id);
-        self.app.limiter.check(&guesses)?;
+        self.app.limiter.attempt(&guesses)?;
         let hash = self.app.node()?.password_hash(&account.id).await?;
         if !auth::verify_password(password.to_string(), hash).await? {
-            self.app.limiter.failed(&guesses);
             return Err(Error::denied("that password is wrong"));
         }
         self.app.limiter.succeeded(&guesses);
@@ -49,9 +48,8 @@ impl Api {
     /// Checks a two-step code (from the app, or a backup code, which it uses up).
     async fn confirm_code(&self, account: &Account, code: &str) -> Result<()> {
         let guesses = format!("two-factor:{}", account.id);
-        self.app.limiter.check(&guesses)?;
+        self.app.limiter.attempt(&guesses)?;
         if !twofactor::check(self.app.node()?, &account.id, code).await? {
-            self.app.limiter.failed(&guesses);
             return Err(Error::denied("that code didn't work"));
         }
         self.app.limiter.succeeded(&guesses);
@@ -289,10 +287,9 @@ impl AccountService for Api {
                     return Err(Error::FailedPrecondition("set up two-step sign-in first".into()));
                 };
                 let guesses = format!("two-factor:{}", account.id);
-                self.app.limiter.check(&guesses)?;
+                self.app.limiter.attempt(&guesses)?;
                 let code = twofactor::normalize(&request.get_ref().code);
                 let Some(step) = twofactor::matching_step(&pending, &code, now_ms()) else {
-                    self.app.limiter.failed(&guesses);
                     return Err(Error::denied("that code didn't work; check your device's clock"));
                 };
                 self.app.limiter.succeeded(&guesses);

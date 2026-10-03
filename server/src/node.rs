@@ -525,7 +525,8 @@ impl NodeDb {
         .await
     }
 
-    /// Replaces the password and ends every other session.
+    /// Replaces the password and ends every other session, and any sign-in
+    /// that got past the old password and is waiting on a code.
     pub async fn set_password(&self, id: &str, password_hash: &str, keep_session: &str) -> Result<()> {
         db::write(&self.db, async |conn| {
             conn.execute(
@@ -534,6 +535,7 @@ impl NodeDb {
             )
             .await?;
             conn.execute("DELETE FROM sessions WHERE account_id = ?1 AND token_hash != ?2", (id, keep_session)).await?;
+            conn.execute("DELETE FROM sign_in_tickets WHERE account_id = ?1", [id]).await?;
             Ok(())
         })
         .await
@@ -841,24 +843,26 @@ impl NodeDb {
         .await
     }
 
-    /// The account a sign-in waiting on a code is for, if it hasn't run out.
-    pub async fn ticket_account(&self, ticket_hash: &str) -> Result<Option<String>> {
-        let conn = self.read()?;
-        query_one(
-            &conn,
-            "SELECT account_id FROM sign_in_tickets WHERE ticket_hash = ?1 AND expires_at > ?2 AND attempts < ?3",
-            (ticket_hash, now_ms(), TICKET_ATTEMPTS),
-            |r| r.get::<String>(0),
-        )
-        .await
-    }
-
-    /// Counts a wrong code against a sign-in.
-    pub async fn ticket_failed(&self, ticket_hash: &str) -> Result<()> {
+    /// Counts a try at a sign-in waiting on a code and gives the account it's
+    /// for, or None when it has run out or used up its tries. The try is
+    /// counted before the code is checked, in the same write that finds the
+    /// sign-in, so codes sent all at once can't get past the limit.
+    pub async fn try_ticket(&self, ticket_hash: &str) -> Result<Option<String>> {
         db::write(&self.db, async |conn| {
-            conn.execute("UPDATE sign_in_tickets SET attempts = attempts + 1 WHERE ticket_hash = ?1", [ticket_hash])
+            let counted = conn
+                .execute(
+                    "UPDATE sign_in_tickets SET attempts = attempts + 1
+                     WHERE ticket_hash = ?1 AND attempts < ?2 AND expires_at > ?3",
+                    (ticket_hash, TICKET_ATTEMPTS, now_ms()),
+                )
                 .await?;
-            Ok(())
+            if counted == 0 {
+                return Ok(None);
+            }
+            query_one(conn, "SELECT account_id FROM sign_in_tickets WHERE ticket_hash = ?1", [ticket_hash], |r| {
+                r.get::<String>(0)
+            })
+            .await
         })
         .await
     }

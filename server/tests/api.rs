@@ -1445,6 +1445,75 @@ async fn two_step_sign_in() {
     instance.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn guesses_sent_at_once_are_all_counted() {
+    use fuwa_server::twofactor;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let password = "correct horse battery";
+    let setup = c
+        .account
+        .set_up_two_factor(authed(&juan, pb::SetUpTwoFactorRequest { password: password.into() }))
+        .await
+        .unwrap()
+        .into_inner();
+    let now = fuwa_server::id::now_ms();
+    let code = twofactor::code_for(&setup.secret, now).unwrap();
+    c.account.enable_two_factor(authed(&juan, pb::EnableTwoFactorRequest { code })).await.unwrap();
+
+    // A ticket takes five codes, however many arrive at once.
+    let ticket = sign_in(&mut c, "juan", password).await.unwrap().two_factor_ticket;
+    let guesses = (0..20).map(|_| {
+        let mut auth = c.auth.clone();
+        let ticket = ticket.clone();
+        tokio::spawn(async move {
+            let request = pb::VerifyTwoFactorRequest { ticket, code: "zzzz-zzzz".into() };
+            auth.verify_two_factor(request).await.unwrap_err().code()
+        })
+    });
+    let codes: Vec<Code> = futures::future::join_all(guesses).await.into_iter().map(|r| r.unwrap()).collect();
+    assert_eq!(codes.iter().filter(|c| **c == Code::PermissionDenied).count(), 5, "{codes:?}");
+    assert!(codes.iter().all(|c| matches!(c, Code::PermissionDenied | Code::FailedPrecondition)));
+
+    // Passwords too: ten tries, then a wait, even when sent all at once.
+    let guesses = (0..15).map(|_| {
+        let mut auth = c.auth.clone();
+        tokio::spawn(async move {
+            let request = pb::SignInRequest { username: "juan".into(), password: "wrong password".into() };
+            auth.sign_in(request).await.unwrap_err().code()
+        })
+    });
+    let codes: Vec<Code> = futures::future::join_all(guesses).await.into_iter().map(|r| r.unwrap()).collect();
+    assert_eq!(codes.iter().filter(|c| **c == Code::Unauthenticated).count(), 10, "{codes:?}");
+    assert_eq!(codes.iter().filter(|c| **c == Code::ResourceExhausted).count(), 5);
+    let locked = sign_in(&mut c, "juan", password).await.unwrap_err();
+    assert_eq!(locked.code(), Code::ResourceExhausted, "even the right password waits");
+
+    // Changing the password counts guesses at the current one the same way.
+    for _ in 0..10 {
+        let wrong = c
+            .auth
+            .change_password(authed(
+                &juan,
+                pb::ChangePasswordRequest { current_password: "nope nope".into(), new_password: "another one".into() },
+            ))
+            .await;
+        assert_eq!(wrong.unwrap_err().code(), Code::PermissionDenied);
+    }
+    let blocked = c
+        .auth
+        .change_password(authed(
+            &juan,
+            pb::ChangePasswordRequest { current_password: password.into(), new_password: "another one".into() },
+        ))
+        .await;
+    assert_eq!(blocked.unwrap_err().code(), Code::ResourceExhausted);
+
+    instance.stop().await;
+}
+
 #[tokio::test]
 async fn profiles_nicknames_and_notification_settings() {
     let dir = tempfile::tempdir().unwrap();
