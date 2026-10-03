@@ -220,6 +220,64 @@ If a proxy in front of fuwa sets its own `Content-Security-Policy`, let scripts
 use `'wasm-unsafe-eval'`, which the app's encryption needs (see
 [docs/e2ee.md](e2ee.md)).
 
+## Calls
+
+Voice channels and calls in direct messages need one more port open to the
+internet, UDP and TCP: `50000` unless you set `FUWA_MEDIA_PORT`. Sound goes
+straight between the apps and that port, not through your reverse proxy.
+fuwa tells apps to reach it on the machine's own address; behind NAT or in
+Docker, give it the public one with `FUWA_MEDIA_ADDRESSES`.
+
+With Docker Compose, add to the `fuwa` service:
+
+```yaml
+    ports:
+      - "50000:50000/udp"
+      - "50000:50000/tcp"
+    environment:
+      FUWA_MEDIA_ADDRESSES: 203.0.113.5   # your server's public IP (or its name)
+```
+
+With the binary, open the port in your firewall (`sudo ufw allow 50000`).
+
+Addresses can be `HOST`, `HOST:PORT` (when a port forward changes it), or
+start with `udp/` or `tcp/` for only that protocol, comma-separated. Apps use
+UDP when they can and TCP on the same port when a network blocks UDP.
+
+People on networks that block both (some offices and schools) get through
+with a TURN server, such as [coturn](https://github.com/coturn/coturn) with
+`use-auth-secret`. Give fuwa its addresses and secret, from the instance
+settings' **Calls** page or `FUWA_ICE_URLS`
+(`turn:turn.example.com:3478?transport=udp,turns:turn.example.com:5349`) and
+`FUWA_TURN_SECRET`. Apps get a new password for each call that lasts an hour
+and names no account. In coturn's config, keep the relay away from your own
+network, so nobody can use it to reach machines behind it:
+
+```
+no-multicast-peers
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=100.64.0.0-100.127.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=::1
+denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+```
+
+Apps only ever connect to your instance's media port (and TURN server), never
+to each other, so nobody in a call learns anyone else's address. Calls in
+direct messages are end-to-end encrypted: the instance forwards sound it
+can't read. `FUWA_CALLS=off` (or the Calls page) turns calls off;
+`FUWA_MEDIA_PORT=off` stops this process carrying them. How calls work, and
+ride out restarts, is in [calls.md](calls.md).
+
+On Railway, which has no public UDP, add a TCP proxy for port 50000 and set
+`FUWA_MEDIA_ADDRESSES=tcp/<proxy host>:<proxy port>`; a TURN server elsewhere
+helps people on strict networks.
+
 ## Updating
 
 Back up first (see below). Then, with Docker Compose:
