@@ -493,4 +493,27 @@ impl App {
             cpb::ChannelExistsRequest { server_id: server_id.to_string(), channel_id: channel_id.to_string() };
         Ok(shards.client(&shard_id)?.channel_exists(request).await?.into_inner().exists)
     }
+
+    // ─────────────── Between shared channels' servers ───────────────
+
+    /// A call between the two ends of a shared channel, answered where the
+    /// server it's for is kept: here, or on its shard through the directory
+    /// (shards don't know each other).
+    pub async fn shared(self: &Arc<Self>, call: cpb::SharedCall) -> Result<cpb::SharedReply> {
+        if self.servers.holds(&call.server_id) {
+            return crate::api::shared_call(self, call).await;
+        }
+        match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::PassSharedRequest { call: Some(call) };
+                Ok(link.directory().pass_shared(request).await?.into_inner().reply.unwrap_or_default())
+            }
+            Link::Directory(shards) => {
+                let shard_id = self.index.placement(&call.server_id).ok_or(Error::NotFound("server"))?;
+                let request = cpb::SharedRequest { call: Some(call) };
+                Ok(shards.client(&shard_id)?.shared(request).await?.into_inner().reply.unwrap_or_default())
+            }
+            Link::Alone => Err(Error::NotFound("server")),
+        }
+    }
 }

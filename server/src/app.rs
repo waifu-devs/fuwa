@@ -211,6 +211,10 @@ impl App {
             app.sweep_media(crate::id::now_ms()).await?;
         }
         crate::cluster::shard::connect(&app).await;
+        // Shared channels' messages reach the servers showing them from the start.
+        if matches!(app.link, Link::Alone | Link::Shard(_)) {
+            crate::api::spawn_shared_fanout(app.clone());
+        }
         Ok(app)
     }
 
@@ -334,6 +338,7 @@ impl App {
             .add_service(DirectMessageServiceServer::new(api.clone()))
             .add_service(crate::pb::call_service_server::CallServiceServer::new(api.clone()))
             .add_service(crate::pb::secure_channel_service_server::SecureChannelServiceServer::new(api.clone()))
+            .add_service(crate::pb::shared_channel_service_server::SharedChannelServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
             .add_service(reflection);
@@ -424,6 +429,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         server_creation: settings.server_creation as i32,
         agent_creation: settings.agent_creation as i32,
         telemetry: settings.telemetry,
+        shared_channels: settings.shared_channels,
         announcement,
         build: Some(pb::Build {
             version: crate::VERSION.into(),

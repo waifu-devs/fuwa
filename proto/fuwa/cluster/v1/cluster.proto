@@ -3,8 +3,10 @@ syntax = "proto3";
 package fuwa.cluster.v1;
 
 import "fuwa/v1/admin.proto";
+import "fuwa/v1/channel.proto";
 import "fuwa/v1/invite.proto";
 import "fuwa/v1/media.proto";
+import "fuwa/v1/message.proto";
 import "fuwa/v1/types.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -68,6 +70,9 @@ service DirectoryService {
   // The shard has a checked copy of the files TakeServers sent; the
   // directory moves its own out of the way, to handed-over/.
   rpc HandedOver(HandedOverRequest) returns (HandedOverResponse);
+  // Passes a call between the two ends of a shared channel on to the shard
+  // holding the server it's for.
+  rpc PassShared(PassSharedRequest) returns (PassSharedResponse);
 }
 
 // Run by each shard, which keeps some of the servers' files.
@@ -88,6 +93,10 @@ service ShardService {
   rpc ChannelExists(ChannelExistsRequest) returns (ChannelExistsResponse);
   // Where an invite leads, for the directory's GetInvite.
   rpc DescribeInvite(DescribeInviteRequest) returns (DescribeInviteResponse);
+  // A call from the other end of a shared channel, for one of this shard's
+  // servers: a guest server's people reading and writing in the home's
+  // channel, or the home telling a guest what changed.
+  rpc Shared(SharedRequest) returns (SharedResponse);
 
   // Moving a server to another shard (and so maybe another region), run by
   // the directory: it asks the new shard to AdoptServer, which takes the
@@ -564,4 +573,139 @@ message DescribeInviteRequest {
 
 message DescribeInviteResponse {
   fuwa.v1.GetInviteResponse invite = 1;
+}
+
+message PassSharedRequest {
+  SharedCall call = 1;
+}
+
+message PassSharedResponse {
+  SharedReply reply = 1;
+}
+
+message SharedRequest {
+  SharedCall call = 1;
+}
+
+message SharedResponse {
+  SharedReply reply = 1;
+}
+
+// Between the servers at the two ends of a shared channel. Shards only trust
+// each other's word through the cluster key: the guest's shard has checked
+// what its people may do in the guest server, and the home's shard checks
+// the rest (the connection, what it allows, blocks, slow mode, AutoMod).
+message SharedCall {
+  // The server it's for: the home, or a guest.
+  string server_id = 1;
+  oneof call {
+    // To the home.
+    ShareLookup lookup = 2;
+    ShareAsk ask = 3;
+    GuestSend send = 4;
+    GuestList list = 5;
+    GuestGet get = 6;
+    GuestEdit edit = 7;
+    GuestDelete delete = 8;
+    // The guest ended the connection, or withdrew its request.
+    GuestLeft left = 9;
+    // To a guest.
+    HomeApproved approved = 10;
+    // The home ended the connection: turned the request down, disconnected,
+    // or deleted the channel or itself.
+    HomeEnded ended = 11;
+    // What just happened in the channel, for the guest's people to see live.
+    HomeEvents events = 12;
+    // What the guest's people may do changed.
+    HomeUpdated updated = 13;
+  }
+}
+
+message SharedReply {
+  fuwa.v1.PreviewShareResponse preview = 1;
+  fuwa.v1.SharedConnection connection = 2;
+  fuwa.v1.Message message = 3;
+  fuwa.v1.ListMessagesResponse page = 4;
+  fuwa.v1.User author = 5;
+}
+
+// Someone in a guest server, acting in the channel it shows.
+message Guest {
+  string connection_id = 1;
+  fuwa.v1.User user = 2;
+  // Their server as it is now.
+  fuwa.v1.SharedServer server = 3;
+  // They can manage messages in the guest's channel: they may delete
+  // messages the guest server's people wrote.
+  bool moderator = 4;
+}
+
+message ShareLookup {
+  string code = 1;
+  // The server that would show it.
+  string guest_server_id = 2;
+}
+
+message ShareAsk {
+  string code = 1;
+  // The connection's id, made by the guest.
+  string connection_id = 2;
+  fuwa.v1.SharedServer guest = 3;
+  string asked_by_id = 4;
+}
+
+message GuestSend {
+  Guest guest = 1;
+  string content = 2;
+  repeated fuwa.v1.Attachment attachments = 3;
+  repeated fuwa.v1.Embed embeds = 4;
+  string reply_to_id = 5;
+}
+
+message GuestList {
+  Guest guest = 1;
+  int32 limit = 2;
+  string before_id = 3;
+  string after_id = 4;
+}
+
+message GuestGet {
+  Guest guest = 1;
+  string message_id = 2;
+}
+
+message GuestEdit {
+  Guest guest = 1;
+  string message_id = 2;
+  string content = 3;
+}
+
+message GuestDelete {
+  Guest guest = 1;
+  string message_id = 2;
+}
+
+message GuestLeft {
+  string connection_id = 1;
+  string guest_server_id = 2;
+  string actor_id = 3;
+}
+
+message HomeApproved {
+  fuwa.v1.SharedConnection connection = 1;
+  string actor_id = 2;
+}
+
+message HomeEnded {
+  string connection_id = 1;
+  string actor_id = 2;
+}
+
+message HomeEvents {
+  string connection_id = 1;
+  repeated fuwa.v1.Event events = 2;
+}
+
+message HomeUpdated {
+  fuwa.v1.SharedConnection connection = 1;
 }

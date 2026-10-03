@@ -76,6 +76,9 @@ fn seen_channel(access: &Access, channel_id: &str) -> Result<()> {
 /// A channel webhooks can post in: a text or announcement channel of the server.
 async fn postable(conn: &turso::Connection, server_id: &str, channel_id: &str) -> Result<pb::Channel> {
     let channel = load_channel(conn, server_id, channel_id).await?.ok_or(Error::NotFound("channel"))?;
+    if channel.shared.as_ref().is_some_and(|s| !s.home) {
+        return Err(Error::invalid("webhooks can't post in a channel shared from another server"));
+    }
     match pb::ChannelType::try_from(channel.r#type) {
         Ok(pb::ChannelType::Text | pb::ChannelType::Announcement) => Ok(channel),
         _ => Err(Error::invalid("webhooks can only post in text and announcement channels")),

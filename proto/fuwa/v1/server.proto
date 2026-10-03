@@ -288,6 +288,21 @@ enum AuditAction {
   AUDIT_ACTION_WEBHOOK_DELETE = 34;
   // Someone added an agent: it's the target.
   AUDIT_ACTION_AGENT_ADD = 35;
+  // Shared channels (SharedChannelService). Code actions have the code as
+  // their target; connection actions the other server's id, with the
+  // channel's name, and the change names the other server.
+  AUDIT_ACTION_SHARE_CODE_CREATE = 40;
+  AUDIT_ACTION_SHARE_CODE_DELETE = 41;
+  // This server asked to show another server's channel.
+  AUDIT_ACTION_SHARED_CHANNEL_REQUEST = 42;
+  AUDIT_ACTION_SHARED_CHANNEL_APPROVE = 43;
+  // Ended from either side, or a request turned down or withdrawn.
+  AUDIT_ACTION_SHARED_CHANNEL_DISCONNECT = 44;
+  AUDIT_ACTION_SHARED_CHANNEL_UPDATE = 45;
+  // Someone from another server kept out of a shared channel, or let back:
+  // they're the target.
+  AUDIT_ACTION_SHARED_CHANNEL_BLOCK = 46;
+  AUDIT_ACTION_SHARED_CHANNEL_UNBLOCK = 47;
 }
 
 // One thing someone did with a moderator's or manager's permission.

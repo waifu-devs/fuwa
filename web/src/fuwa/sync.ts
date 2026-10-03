@@ -18,7 +18,10 @@ import {
   removeServer,
   store,
   updateInstance,
+  upsertMessage,
   withChannels,
+  withSharedAuthors,
+  withUsers,
 } from "./store";
 
 /**
@@ -317,12 +320,56 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
         Effect.ensuring(Effect.sync(() => relisting.delete(serverId))),
       );
 
+    // A server's shared channels changed: read them again where a manager has them open.
+    const relistShared = (serverId: string) =>
+      call((signal) => api.shared.listConnections({ serverId }, { signal })).pipe(
+        Effect.tap((res) =>
+          Effect.sync(() =>
+            updateInstance(key, (i) =>
+              i.shared[serverId]
+                ? { ...i, shared: { ...i.shared, [serverId]: res }, users: withUsers(i.users, res.blocks.map((b) => b.user)) }
+                : i,
+            ),
+          ),
+        ),
+        Effect.ignore,
+      );
+
+    // What's said in a channel shown from another server arrives live but isn't
+    // in this server's log, so after a gap the channels open here read their
+    // latest messages again from the home.
+    const rereadShown = (serverId: string) =>
+      Effect.forEach(
+        (store.get().instances[key]?.channels[serverId] ?? []).filter(
+          (c) => c.shared && !c.shared.home && store.get().instances[key]?.messages[c.id],
+        ),
+        (channel) =>
+          call((signal) => api.messages.listMessages({ serverId, channelId: channel.id, limit: 50 }, { signal })).pipe(
+            Effect.tap((res) =>
+              Effect.sync(() =>
+                updateInstance(key, (i) => {
+                  const loaded = i.messages[channel.id];
+                  if (!loaded) return i;
+                  return {
+                    ...i,
+                    users: withSharedAuthors(withUsers(i.users, res.authors), res.messages),
+                    messages: { ...i.messages, [channel.id]: { ...loaded, items: res.messages.reduce(upsertMessage, loaded.items) } },
+                  };
+                }),
+              ),
+            ),
+            Effect.ignore,
+          ),
+        { concurrency: 2, discard: true },
+      );
+
     const handle = (res: SubscribeResponse) =>
       Effect.gen(function* () {
         if (res.ready) {
           for (const head of res.ready.servers) {
             if (cursors.has(head.serverId)) {
               yield* FiberSet.run(snapshots, relistVoice(head.serverId));
+              yield* FiberSet.run(snapshots, rereadShown(head.serverId));
               const from = resumedFrom.get(head.serverId);
               if (from !== undefined && head.sequence > from) yield* FiberSet.run(snapshots, relist(head.serverId));
               continue;
@@ -361,6 +408,7 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           dmEngine(key)?.onServerEvent(event);
           const kind = event.payload.case;
           if (kind === "channelCreated" || kind === "channelUpdated" || kind === "channelDeleted") relisting.get(sid)?.push(event);
+          if (kind === "sharedChannelsUpdated" && store.get().instances[key]?.shared[sid]) yield* FiberSet.run(snapshots, relistShared(sid));
         }
         if (removed?.name) onRemoved(removed.name, removed.reason);
         const gone =

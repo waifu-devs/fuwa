@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use tonic::{Request, Response, Status};
 
-use super::{Api, PictureOwner, Seat, respond, text};
+use super::{Api, PictureOwner, Seat, respond, shared, text};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
@@ -17,7 +17,7 @@ const MAX_OVERWRITES: usize = 100;
 
 /// Channel names read like `#general`: lowercase, words joined by dashes.
 /// Categories and voice channels keep their name as typed ("Lounge").
-fn channel_name(name: &str, kind: pb::ChannelType) -> Result<String> {
+pub(super) fn channel_name(name: &str, kind: pb::ChannelType) -> Result<String> {
     let name = text("name", name, 1, 100)?;
     if matches!(kind, pb::ChannelType::Category | pb::ChannelType::Voice) {
         return Ok(name);
@@ -101,6 +101,7 @@ impl ChannelService for Api {
                             updated_at: Some(timestamp(now)),
                             slowmode_seconds: 0,
                             permission_overwrites: vec![],
+                            shared: None,
                         };
                         conn.execute(
                             "INSERT INTO channels (id, name, type, parent_id, topic, position, created_at, updated_at)
@@ -262,7 +263,7 @@ impl ChannelService for Api {
             let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
             access.require_in(&req.channel_id, Permission::ManageChannels)?;
             // Alone, so no message lands in the channel while it goes.
-            let (server, pictures) = sdb.write_alone(&account.id, async |conn, events| {
+            let (server, pictures, ended) = sdb.write_alone(&account.id, async |conn, events| {
                 let channel = load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
                 // Its messages go with it; take them off the usage totals first.
                 let (messages, bytes, attachments) = query_one(
@@ -282,6 +283,7 @@ impl ChannelService for Api {
                 })
                 .await?;
                 conn.execute("DELETE FROM webhooks WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
+                let ended = shared::take_channel(conn, &req.channel_id).await?;
                 conn.execute("DELETE FROM channels WHERE id = ?1", [req.channel_id.as_str()]).await?;
                 conn.execute("DELETE FROM channel_overwrites WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 // A deleted category's channels move to the top level.
@@ -309,9 +311,9 @@ impl ChannelService for Api {
                 if conn.execute("UPDATE server SET system_channel_id = NULL, updated_at = ?2 WHERE system_channel_id = ?1", (req.channel_id.as_str(), now_ms())).await? > 0 {
                     let server = store::load_server(conn).await?;
                     events.push(Payload::ServerUpdated(pb::ServerUpdated { server: Some(server.clone()) }));
-                    return Ok((Some(server), pictures));
+                    return Ok((Some(server), pictures, ended));
                 }
-                Ok((None, pictures))
+                Ok((None, pictures, ended))
             })
             .await?;
             if let Some(server) = server {
@@ -321,6 +323,7 @@ impl ChannelService for Api {
                 self.drop_picture(&picture, "", PictureOwner::Server(&sdb.id)).await;
             }
             self.forget_notifications(&sdb.id, Some(&req.channel_id), None).await;
+            shared::tell_ended(&self.app, &sdb.id, &account.id, ended).await;
             Ok(pb::DeleteChannelResponse {})
         }
         .await)

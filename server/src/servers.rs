@@ -41,6 +41,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0014_recording_limits.sql"),
     include_str!("../migrations/server/0015_secure_channels.sql"),
     include_str!("../migrations/server/0016_region.sql"),
+    include_str!("../migrations/server/0017_shared_channels.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -1077,6 +1078,7 @@ impl Servers {
                     updated_at: Some(timestamp(now)),
                     slowmode_seconds: 0,
                     permission_overwrites: vec![],
+                    shared: None,
                 };
                 conn.execute(
                     "INSERT INTO channels (id, name, type, position, created_at, updated_at) VALUES (?1, ?2, ?3, 0, ?4, ?4)",
@@ -1224,6 +1226,7 @@ pub fn channel_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Channe
             updated_at: Some(timestamp(r.get(7)?)),
             slowmode_seconds: r.get(8)?,
             permission_overwrites: vec![],
+            shared: None,
         })
     }
 }
@@ -1241,7 +1244,65 @@ pub async fn load_channel(conn: &Connection, server_id: &str, channel_id: &str) 
         return Ok(None);
     };
     permissions::attach_overwrites(conn, std::slice::from_mut(&mut channel)).await?;
+    attach_shared(conn, std::slice::from_mut(&mut channel)).await?;
     Ok(Some(channel))
+}
+
+/// Says which channels are shared with other servers, and which show
+/// another server's (docs/shared-channels.md).
+pub async fn attach_shared(conn: &Connection, channels: &mut [pb::Channel]) -> Result<()> {
+    let guests = query_all(
+        conn,
+        "SELECT channel_id, guest_server_id, guest_name, guest_icon_url FROM channel_guests WHERE active = 1 ORDER BY created_at",
+        (),
+        |r| Ok((r.get::<String>(0)?, pb::SharedServer { id: r.get(1)?, name: r.get(2)?, icon_url: r.get(3)? })),
+    )
+    .await?;
+    let links = query_all(
+        conn,
+        "SELECT channel_id, home_server_id, home_server_name, home_server_icon_url, home_channel_name
+         FROM channel_links WHERE active = 1 AND channel_id IS NOT NULL",
+        (),
+        |r| {
+            Ok((
+                r.get::<String>(0)?,
+                pb::SharedServer { id: r.get(1)?, name: r.get(2)?, icon_url: r.get(3)? },
+                r.get::<String>(4)?,
+            ))
+        },
+    )
+    .await?;
+    if guests.is_empty() && links.is_empty() {
+        return Ok(());
+    }
+    let this = if guests.is_empty() {
+        None
+    } else {
+        let server = load_server(conn).await?;
+        Some(pb::SharedServer { id: server.id, name: server.name, icon_url: server.icon_url })
+    };
+    for channel in channels.iter_mut() {
+        if let Some((_, home, home_channel_name)) = links.iter().find(|(id, ..)| *id == channel.id) {
+            channel.shared = Some(pb::SharedChannel {
+                home: false,
+                home_server: Some(home.clone()),
+                home_channel_name: home_channel_name.clone(),
+                guests: vec![],
+            });
+            continue;
+        }
+        let shown_in: Vec<pb::SharedServer> =
+            guests.iter().filter(|(id, _)| *id == channel.id).map(|(_, server)| server.clone()).collect();
+        if !shown_in.is_empty() {
+            channel.shared = Some(pb::SharedChannel {
+                home: true,
+                home_server: this.clone(),
+                home_channel_name: channel.name.clone(),
+                guests: shown_in,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Every channel with its overwrites, in display order.
@@ -1254,6 +1315,7 @@ pub async fn load_channels(conn: &Connection, server_id: &str) -> Result<Vec<pb:
     )
     .await?;
     permissions::attach_overwrites(conn, &mut channels).await?;
+    attach_shared(conn, &mut channels).await?;
     Ok(channels)
 }
 

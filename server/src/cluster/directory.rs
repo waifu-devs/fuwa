@@ -760,4 +760,12 @@ impl DirectoryService for Internal {
             .await,
         )
     }
+
+    async fn pass_shared(
+        &self,
+        request: Request<cpb::PassSharedRequest>,
+    ) -> Result<Response<cpb::PassSharedResponse>, Status> {
+        let call = request.into_inner().call.ok_or_else(|| Status::invalid_argument("call is required"))?;
+        respond(self.app.shared(call).await.map(|reply| cpb::PassSharedResponse { reply: Some(reply) }))
+    }
 }

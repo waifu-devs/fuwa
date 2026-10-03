@@ -181,6 +181,7 @@ struct Clients {
     invites: pb::invite_service_client::InviteServiceClient<Channel>,
     webhooks: pb::webhook_service_client::WebhookServiceClient<Channel>,
     agents: pb::agent_service_client::AgentServiceClient<Channel>,
+    shared: pb::shared_channel_service_client::SharedChannelServiceClient<Channel>,
     automod: pb::auto_mod_service_client::AutoModServiceClient<Channel>,
 }
 
@@ -199,6 +200,7 @@ async fn clients(part: &Part) -> Clients {
         invites: pb::invite_service_client::InviteServiceClient::new(channel.clone()),
         webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel.clone()),
         agents: pb::agent_service_client::AgentServiceClient::new(channel.clone()),
+        shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel.clone()),
         automod: pb::auto_mod_service_client::AutoModServiceClient::new(channel),
     }
 }
@@ -1074,6 +1076,98 @@ async fn calls_ride_out_a_media_restart() {
     gateway.stop().await;
     shard.stop().await;
     directory.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn channels_are_shared_across_shards() {
+    let root = tempfile::tempdir().unwrap();
+    let cluster = start_cluster(root.path(), &[]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (mika, _) = sign_up(&mut c, "mika").await;
+    let (rin, _) = sign_up(&mut c, "rin").await;
+    let home = create_server(&mut c, &juan, "Home").await;
+    let guest = create_server(&mut c, &mika, "Guest").await;
+    assert_ne!(cluster.placement(&home.id), cluster.placement(&guest.id), "each on its own shard");
+    join(&mut c, &rin, &guest.id).await.unwrap();
+    let dev = general(&mut c, &juan, &home.id).await;
+
+    let code = c
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.id.clone(), channel_id: dev.id.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let preview = c
+        .shared
+        .preview_share(authed(&mika, pb::PreviewShareRequest { server_id: guest.id.clone(), code: code.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(preview.home_server.unwrap().name, "Home");
+    let asked = c
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.id.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    c.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.id.clone(), connection_id: asked.id, approve: true },
+        ))
+        .await
+        .unwrap();
+    let shown = c
+        .channels
+        .list_channels(authed(&rin, pb::ListChannelsRequest { server_id: guest.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.shared.is_some())
+        .unwrap();
+
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: guest.id.clone(), after_sequence: None }],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    send(&mut c, &juan, &home.id, &dev.id, "across shards").await;
+    let event = until(&mut stream, |e| matches!(e.payload, Some(Payload::MessageCreated(_)))).await;
+    let Some(Payload::MessageCreated(created)) = event.payload else { unreachable!() };
+    let message = created.message.unwrap();
+    assert_eq!((message.content.as_str(), message.channel_id.as_str()), ("across shards", shown.id.as_str()));
+
+    send(&mut c, &rin, &guest.id, &shown.id, "and back").await;
+    let at_home = c
+        .messages
+        .list_messages(authed(
+            &juan,
+            pb::ListMessagesRequest { server_id: home.id.clone(), channel_id: dev.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .messages;
+    let back = at_home.iter().find(|m| m.content == "and back").unwrap();
+    assert_eq!(back.shared.as_ref().unwrap().server.as_ref().unwrap().name, "Guest");
+    cluster.stop().await;
 }
 
 /// Servers live in the region their creator picked, and an admin can move one
