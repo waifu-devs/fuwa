@@ -14,7 +14,9 @@ use crate::ui::app::{Dialog, FuwaApp};
 use crate::ui::motion;
 use crate::ui::text::safety_rows;
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::{card, error_line, icon, icon_button, labeled, pal, primary_button, soft_button};
+use crate::ui::widgets::{
+    card, danger_button, error_line, icon, icon_button, labeled, pal, primary_button, soft_button,
+};
 
 /// What a server or instance calls its identity provider, for "Continue with …".
 pub fn provider_name(name: &str) -> &str {
@@ -379,10 +381,13 @@ impl FuwaApp {
                             .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))),
                     )
                     .when_some(action, |el, label| {
-                        let button = primary_button("dialog-ok", label, &p)
-                            .when(danger, |el| el.bg(p.destructive))
-                            .when(busy, |el| el.opacity(0.7))
-                            .on_click(cx.listener(|this, _, window, cx| this.confirm_dialog(window, cx)));
+                        let button = if danger {
+                            danger_button("dialog-ok", label, &p)
+                        } else {
+                            primary_button("dialog-ok", label, &p)
+                        }
+                        .when(busy, |el| el.opacity(0.7))
+                        .on_click(cx.listener(|this, _, window, cx| this.confirm_dialog(window, cx)));
                         el.child(button)
                     }),
             );

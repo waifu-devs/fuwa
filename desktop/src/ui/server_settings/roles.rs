@@ -925,8 +925,7 @@ impl ServerSettingsView {
                                     },
                                 )))
                                 .child(
-                                    primary_button("role-delete-yes", if busy { "Deleting…" } else { "Delete" }, p)
-                                        .bg(p.destructive)
+                                    danger_button("role-delete-yes", if busy { "Deleting…" } else { "Delete" }, p)
                                         .child(icon("trash").size(px(15.0)))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             if !this.roles.saving {

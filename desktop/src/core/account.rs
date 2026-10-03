@@ -266,6 +266,12 @@ impl Core {
 
 /// Sends an upload's bytes: a plain `PUT` to the link the instance handed out.
 async fn put(url: &str, content_type: &str, bytes: Vec<u8>) -> Result<(), Problem> {
+    send(http::Method::PUT, url, content_type, bytes).await
+}
+
+/// Sends `bytes` to an instance's own address (an upload, a webhook) and
+/// turns a refusal into a [`Problem`] with what the instance said.
+pub(crate) async fn send(method: http::Method, url: &str, content_type: &str, bytes: Vec<u8>) -> Result<(), Problem> {
     let unreachable = || Problem::new(Code::Unavailable, "Couldn't reach this instance right now.");
     let roots = match hyper_rustls::HttpsConnectorBuilder::new().with_native_roots() {
         Ok(roots) => roots,
@@ -274,27 +280,33 @@ async fn put(url: &str, content_type: &str, bytes: Vec<u8>) -> Result<(), Proble
     let connector = roots.https_or_http().enable_http1().build();
     let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
         .build::<_, Full<Bytes>>(connector);
-    let request = http::Request::put(url)
+    let request = http::Request::builder()
+        .method(method)
+        .uri(url)
         .header(http::header::CONTENT_TYPE, content_type)
         .body(Full::new(Bytes::from(bytes)))
         .map_err(|_| unreachable())?;
     let response = tokio::time::timeout(std::time::Duration::from_secs(120), client.request(request))
         .await
-        .map_err(|_| Problem::new(Code::DeadlineExceeded, "The upload took too long."))?
+        .map_err(|_| Problem::new(Code::DeadlineExceeded, "That took too long."))?
         .map_err(|_| unreachable())?;
     let status = response.status();
     if status.is_success() {
         return Ok(());
     }
     let body = response.into_body().collect().await.map(|b| b.to_bytes()).unwrap_or_default();
-    let text = String::from_utf8_lossy(&body).trim().to_owned();
+    // Webhooks answer `{"message": …}`; uploads answer plain text.
+    let text = serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(str::to_owned))
+        .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_owned());
     let code = match status.as_u16() {
         400 | 415 => Code::InvalidArgument,
         404 | 410 => Code::NotFound,
-        413 => Code::ResourceExhausted,
+        413 | 429 => Code::ResourceExhausted,
         _ => Code::Unavailable,
     };
-    let message = if text.is_empty() { "The upload didn't go through.".to_owned() } else { text };
+    let message = if text.is_empty() { "That didn't go through.".to_owned() } else { text };
     Err(Problem::new(code, message))
 }
 
