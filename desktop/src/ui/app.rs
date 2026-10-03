@@ -30,7 +30,6 @@ actions!(fuwa, [CloseOverlay, OpenSettings, AddInstance]);
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("escape", CloseOverlay, Some("Fuwa")),
-        KeyBinding::new("secondary-,", OpenSettings, Some("Fuwa")),
         KeyBinding::new("secondary-shift-n", AddInstance, Some("Fuwa")),
     ]);
 }
@@ -233,6 +232,11 @@ pub struct FuwaApp {
     pub arrange_slots: Vec<crate::ui::arrange::Slot>,
     pub dragging: Option<String>,
     pub landed: Option<(String, Instant)>,
+    /// The quick switcher, and the shortcut sheet, when open.
+    pub switcher: Option<crate::ui::keys::Switcher>,
+    pub sheet_open: bool,
+    /// How many things that take focus were open last frame.
+    covers: usize,
     /// The page's color before the theme changed, fading out over the new one.
     theme_fade: Option<(gpui_kit::Rgba, Instant)>,
     _subscriptions: Vec<Subscription>,
@@ -383,12 +387,17 @@ impl FuwaApp {
             dragging: None,
             landed: None,
             theme_fade: None,
+            switcher: None,
+            sheet_open: false,
+            covers: 0,
             emoji_open: false,
             emoji_query,
             profile: None,
             rules: None,
             _subscriptions: subscriptions,
         };
+        // Shortcuts are read on the way to whatever has focus, so something always has it.
+        app.focus.focus(window, cx);
         if first.is_none() {
             app.open_connect(false, window, cx);
         }
@@ -1340,7 +1349,16 @@ impl FuwaApp {
     }
 
     fn close_overlay(&mut self, _: &CloseOverlay, window: &mut Window, cx: &mut Context<Self>) {
-        if self.menu.is_some() {
+        // Bindings run before the window's key handler, so a shortcut being
+        // changed gets its Escape (stop listening) from here.
+        if self.forward_to_recording("escape", cx) {
+            return;
+        }
+        if self.switcher.is_some() {
+            self.close_switcher(window, cx);
+        } else if self.sheet_open {
+            self.sheet_open = false;
+        } else if self.menu.is_some() {
             self.menu = None;
         } else if self.dialog.is_some() {
             self.dialog = None;
@@ -1353,7 +1371,7 @@ impl FuwaApp {
                 self.connect = None;
             }
         } else {
-            window.blur(cx);
+            self.focus.focus(window, cx);
         }
         cx.notify();
     }
@@ -1374,6 +1392,22 @@ impl FuwaApp {
     fn render_root(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let p = pal(cx);
         window.set_rem_size(px(16.0 * self.prefs.text_scale.clamp(0.8, 1.4)));
+        // When something that takes focus closes (a dialog, a page, the
+        // switcher), the window takes focus back, or no shortcut would reach it.
+        let covers = [
+            self.dialog.is_some(),
+            self.connect.is_some(),
+            self.settings.is_some(),
+            self.server_settings.is_some(),
+            self.switcher.is_some(),
+        ]
+        .into_iter()
+        .filter(|c| *c)
+        .count();
+        if covers < self.covers || window.focused(cx).is_none() {
+            self.focus.focus(window, cx);
+        }
+        self.covers = covers;
         let empty = self.core.shared.read(|s| s.order.is_empty());
         let behind = crate::ui::backdrop::layers(&theme::backdrop(cx), &p, window, cx);
 
@@ -1381,9 +1415,14 @@ impl FuwaApp {
             .id("fuwa")
             .key_context("Fuwa")
             .track_focus(&self.focus)
+            .capture_key_down(cx.listener(Self::on_key))
             .on_action(cx.listener(Self::close_overlay))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)))
-            .on_action(cx.listener(|this, _: &AddInstance, window, cx| this.open_connect(true, window, cx)))
+            .on_action(cx.listener(|this, _: &AddInstance, window, cx| {
+                if !this.forward_to_recording("secondary-shift-n", cx) {
+                    this.open_connect(true, window, cx)
+                }
+            }))
             .size_full()
             .relative()
             .overflow_hidden()
@@ -1417,6 +1456,8 @@ impl FuwaApp {
         .when_some(self.settings.clone(), |el, settings| el.child(settings))
         .when_some(self.server_settings.clone(), |el, settings| el.child(settings))
         .when_some(self.render_dialog(window, cx), |el, d| el.child(d))
+        .when_some(self.render_sheet(cx), |el, sheet| el.child(sheet))
+        .when_some(self.render_switcher(cx), |el, switcher| el.child(switcher))
         .child(self.render_toasts(window, cx))
         .when_some(self.theme_fade.filter(|(_, at)| at.elapsed() < THEME_FADE), |el, (color, at)| {
             // A new theme washes in: the old page color fades away over it.

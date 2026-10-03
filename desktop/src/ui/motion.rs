@@ -38,6 +38,14 @@ pub fn slide_in<E: IntoElement + Styled + 'static>(el: E, id: impl Into<ElementI
     })
 }
 
+/// Rises from below the window's edge with a spring, like a sheet pulled up.
+pub fn sheet_up<E: IntoElement + Styled + 'static>(el: E, id: impl Into<ElementId>) -> impl IntoElement {
+    let (duration, easing) = sampled_easing(SpringConfig::new(420.0, 38.0, 1.0), 0.002);
+    el.with_animation(id, Animation::new(duration).with_easing(easing), move |el, t| {
+        el.relative().top(px((1.0 - t) * 640.0))
+    })
+}
+
 /// Fades in, nothing else.
 pub fn fade_in<E: IntoElement + Styled + 'static>(
     el: E,

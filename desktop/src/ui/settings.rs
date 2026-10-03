@@ -29,7 +29,7 @@ pub enum SettingsEvent {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Page {
+pub(crate) enum Page {
     Profile,
     Security,
     Appearance,
@@ -59,7 +59,8 @@ const PAGES: [(Page, &str, &str); 8] = [
 
 pub struct SettingsView {
     pub(crate) core: Arc<Core>,
-    page: Page,
+    pub(crate) page: Page,
+    pub(crate) keys: crate::ui::settings_keys::Keys,
     pub(crate) account: AccountForm,
     pub(crate) look: Look,
 }
@@ -69,7 +70,7 @@ impl EventEmitter<SettingsEvent> for SettingsView {}
 impl SettingsView {
     pub fn new(core: Arc<Core>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let look = Look::new(&core.prefs(), window, cx);
-        Self { core, page: Page::Appearance, account: AccountForm::new(window, cx), look }
+        Self { core, page: Page::Appearance, keys: Default::default(), account: AccountForm::new(window, cx), look }
     }
 
     pub(crate) fn set(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Prefs)) {
@@ -315,44 +316,11 @@ impl SettingsView {
                     body.into_any_element(),
                 )
             }
-            Page::Keyboard => {
-                let keys = [
-                    ("Send", "Enter"),
-                    ("New line", "Shift + Enter"),
-                    ("Edit your last message", "↑ in an empty box"),
-                    ("Mention someone", "@, then ↑ ↓ and Enter"),
-                    ("Stop editing", "Esc"),
-                    ("Settings", if cfg!(target_os = "macos") { "⌘ + ," } else { "Ctrl + ," }),
-                    ("Add an instance", if cfg!(target_os = "macos") { "⌘ + Shift + N" } else { "Ctrl + Shift + N" }),
-                    ("Close what's open", "Esc"),
-                ];
-                let mut list =
-                    div().flex().flex_col().rounded(corner(16.0)).border_1().border_color(p.border).overflow_hidden();
-                for (n, (what, key)) in keys.iter().enumerate() {
-                    list = list.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .px(px(16.0))
-                            .h(px(48.0))
-                            .when(n > 0, |el| el.border_t_1().border_color(p.border))
-                            .child(div().flex_1().child(*what))
-                            .child(
-                                div()
-                                    .px(px(10.0))
-                                    .py(px(3.0))
-                                    .rounded(corner(8.0))
-                                    .bg(p.secondary)
-                                    .border_1()
-                                    .border_color(p.border)
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(*key),
-                            ),
-                    );
-                }
-                ("Keyboard".into(), "Shortcuts that work everywhere in the app.".into(), list.into_any_element())
-            }
+            Page::Keyboard => (
+                "Keyboard".into(),
+                "Shortcuts that work everywhere in the app. Click one to change it.".into(),
+                self.keyboard_page(prefs, p, cx),
+            ),
             Page::About => {
                 let body = div()
                     .flex()

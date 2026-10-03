@@ -285,7 +285,12 @@
     main thread when asked, dimming, a texture made here as a PNG or SVG
     tile and repeated), `effects.rs` the moving effects (the web's shaders
     redrawn with shadows, paths and quads, 30 frames a second while the
-    window is in front, one still frame otherwise), `server_settings.rs` a server's settings
+    window is in front, one still frame otherwise), `keys.rs` the
+    keyboard shortcuts (one handler on the window, the quick switcher and
+    the shortcut sheet) over `core/keybinds.rs` (the web's
+    `lib/keybinds.ts` list and combo format, so a saved combo means the same
+    in both), `settings_keys.rs` the Keyboard page where they're changed,
+    `server_settings.rs` a server's settings
     (overview, invites, members, bans, audit log; the server's name opens
     it), `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
