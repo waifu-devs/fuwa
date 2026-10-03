@@ -149,24 +149,69 @@ async fn serve(app: Arc<App>, signature: String, url: String) -> Response {
     if !app.picture_key().signed(&signature, &url) {
         return failed(StatusCode::NOT_FOUND, "not found");
     }
-    if let Some(picture) = CACHE.get(&url) {
-        return picture.respond();
-    }
-    let Ok(_turn) = FETCHES.acquire().await else { return failed(StatusCode::SERVICE_UNAVAILABLE, "shutting down") };
-    if let Some(picture) = CACHE.get(&url) {
-        return picture.respond();
-    }
-    match tokio::time::timeout(FETCH_TIMEOUT, fetch(&url)).await {
-        Ok(Ok(picture)) => {
-            CACHE.put(&url, picture.clone());
-            picture.respond()
-        }
-        Ok(Err(reason)) => {
+    match cached(&url).await {
+        Ok(picture) => picture.respond(),
+        Err(Missing::ShuttingDown) => failed(StatusCode::SERVICE_UNAVAILABLE, "shutting down"),
+        Err(Missing::Failed(reason)) => {
             tracing::debug!(reason, "couldn't fetch a picture from another site");
             failed(StatusCode::NOT_FOUND, "couldn't fetch that picture")
         }
-        Err(_) => failed(StatusCode::GATEWAY_TIMEOUT, "that picture took too long to fetch"),
+        Err(Missing::TimedOut) => failed(StatusCode::GATEWAY_TIMEOUT, "that picture took too long to fetch"),
     }
+}
+
+/// Why a picture from elsewhere couldn't be had.
+enum Missing {
+    ShuttingDown,
+    Failed(&'static str),
+    TimedOut,
+}
+
+/// The picture at `url`, from the cache or fetched (and then cached).
+async fn cached(url: &str) -> Result<Picture, Missing> {
+    if let Some(picture) = CACHE.get(url) {
+        return Ok(picture);
+    }
+    let Ok(_turn) = FETCHES.acquire().await else { return Err(Missing::ShuttingDown) };
+    if let Some(picture) = CACHE.get(url) {
+        return Ok(picture);
+    }
+    match tokio::time::timeout(FETCH_TIMEOUT, fetch(url)).await {
+        Ok(Ok(picture)) => {
+            CACHE.put(url, picture.clone());
+            Ok(picture)
+        }
+        Ok(Err(reason)) => Err(Missing::Failed(reason)),
+        Err(_) => Err(Missing::TimedOut),
+    }
+}
+
+/// The bytes and type of the picture a message links to, for the server
+/// itself to read (AutoMod providers that look at pictures): an upload on
+/// this instance from its files, a link it rewrote or any other link
+/// fetched like readers' pictures are (public addresses only, at most
+/// [`MAX_BYTES`], cached). `None` when it isn't a picture or can't be had.
+pub async fn picture(app: &App, url: &str) -> Option<(&'static str, Bytes)> {
+    let parsed = Url::parse(url).ok()?;
+    let public_url = app.settings().public_url.clone();
+    let own = Url::parse(&public_url).is_ok_and(|own| own.origin() == parsed.origin());
+    if own && let Some(id) = crate::media::id_in_url(url) {
+        // Uploads are kept where node.db is; elsewhere they're left out.
+        let bytes = tokio::fs::read(app.media().ok()?.path(&id)).await.ok()?;
+        let kind = crate::media::sniff(&bytes[..bytes.len().min(16)])?;
+        return Some((kind, bytes.into()));
+    }
+    let inner = match parsed.path().strip_prefix(PATH) {
+        Some(signature) => {
+            let inner = wanted(parsed.query().map(str::to_string));
+            if !app.picture_key().signed(signature, &inner) {
+                return None;
+            }
+            inner
+        }
+        None => url.to_string(),
+    };
+    cached(&inner).await.ok().map(|picture| (picture.content_type, picture.bytes))
 }
 
 fn failed(status: StatusCode, message: &str) -> Response {
