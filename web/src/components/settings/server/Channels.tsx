@@ -322,7 +322,7 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
   const category = channel.type === ChannelType.CATEGORY;
   /** Categories and voice channels keep their names as typed. */
   const free = category || channel.type === ChannelType.VOICE;
-  const texty = channel.type === ChannelType.TEXT || channel.type === ChannelType.ANNOUNCEMENT;
+  const texty = channel.type === ChannelType.TEXT || channel.type === ChannelType.ANNOUNCEMENT || channel.type === ChannelType.SECURE;
   const [draft, setDraft] = useState(() => draftOf(channel));
   const base = useMemo(() => draftOf(channel), [channel]);
   const save = useAction(updateChannel);

@@ -101,6 +101,25 @@ export function onDirectMessage(key: string, conversationId: string, author: Use
   }
 }
 
+/**
+ * A message in a secure channel this device just opened: the server never
+ * saw what it says, so only the device can tell whether it mentions you.
+ * Otherwise it chimes and notifies like any channel's message.
+ */
+export function onSecureMessage(key: string, serverId: string, channelId: string, authorId: string, content: string, at: number) {
+  if (Date.now() - at > FRESH_MS) return;
+  const s = store.get();
+  const inst = s.instances[key];
+  if (!inst?.me || authorId === inst.me.id) return;
+  const looking = !document.hidden && s.focus?.instance === key && s.focus.channel === channelId;
+  const settings = effectiveNotifications(inst, serverId, channelId);
+  const mention = pingsMe(inst, serverId, { authorId, content, mentionsEveryone: false, mentionRoleIds: [] }, settings.suppressEveryone);
+  const alert = shouldAlert(settings, mention, getPrefs());
+  if (alert.sound && !looking) playSome(mention ? "mention" : "message", mention ? 600 : 1500);
+  if (!alert.notify || (!document.hidden && document.hasFocus())) return;
+  notify(inst, serverId, channelId, authorId, content, mention);
+}
+
 /** Tells you when an owner or admin took you out of a server. Called with its name, which is gone from the store by then. */
 export function onRemoved(serverName: string, reason: LeaveReason) {
   if (reason === LeaveReason.KICKED) toast(`You were removed from ${serverName}`);

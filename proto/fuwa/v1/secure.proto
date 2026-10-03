@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Secure channels: channels in a community server whose messages are
+// end-to-end encrypted with MLS (RFC 9420), like direct messages. Only the
+// devices of the people who can see the channel can read them; the server
+// keeps and passes along ciphertext and never holds a key that opens it.
+//
+// Each secure channel is an MLS group whose group id is the channel's id and
+// whose members are the signed-in devices (DirectMessageService's devices
+// and key packages) of everyone the channel's permissions let see it. The
+// apps keep the group in step with the permissions: before sending, a device
+// adds the devices of people who can see the channel and removes everyone
+// else's. As with direct messages, the server takes a record only for the
+// group's current epoch, so devices never fork it. What a message says is a
+// DirectMessageContent, inside the encryption. See docs/secure-channels.md.
+service SecureChannelService {
+  // The channel's group as the server knows it, and who may be in it.
+  // VIEW_CHANNELS.
+  rpc GetSecureChannel(GetSecureChannelRequest) returns (GetSecureChannelResponse);
+  // The group as the last commit left it, for joining by yourself.
+  // VIEW_CHANNELS.
+  rpc GetSecureGroupInfo(GetSecureGroupInfoRequest) returns (GetSecureGroupInfoResponse);
+  // The channel's records, oldest first. VIEW_CHANNELS.
+  rpc ListSecureRecords(ListSecureRecordsRequest) returns (ListSecureRecordsResponse);
+  // Welcomes for the calling device: secure channels in this server it was
+  // added to, among those it can see.
+  rpc ListSecureWelcomes(ListSecureWelcomesRequest) returns (ListSecureWelcomesResponse);
+  // Adds a commit (devices coming in or going). It must be for the group's
+  // current epoch, which it then moves on; a commit for an older one fails
+  // with FAILED_PRECONDITION: catch up and try again. VIEW_CHANNELS.
+  rpc PostSecureCommit(PostSecureCommitRequest) returns (PostSecureCommitResponse);
+  // Adds an encrypted message, for the current epoch like a commit.
+  // SEND_MESSAGES; slow mode applies.
+  rpc PostSecureMessage(PostSecureMessageRequest) returns (PostSecureMessageResponse);
+  // Deletes a message: its ciphertext goes, a gap stays. Your own, or anyone's
+  // with MANAGE_MESSAGES.
+  rpc DeleteSecureRecord(DeleteSecureRecordRequest) returns (DeleteSecureRecordResponse);
+}
+
+enum SecureRecordKind {
+  SECURE_RECORD_KIND_UNSPECIFIED = 0;
+  // Changes which devices are in the group and moves it to the next epoch.
+  SECURE_RECORD_KIND_COMMIT = 1;
+  // An encrypted message.
+  SECURE_RECORD_KIND_MESSAGE = 2;
+}
+
+// One entry in a secure channel's log. Devices read them in order. The same
+// fields, under the same numbers, as a direct message's ConversationRecord.
+message SecureRecord {
+  string channel_id = 1;
+  // Its place in the channel: 1, 2, 3...
+  int64 sequence = 2;
+  SecureRecordKind kind = 3;
+  // The epoch it was made in.
+  int64 epoch = 4;
+  // Who sent it, as the server knows (the record itself says, signed).
+  string sender_id = 5;
+  string sender_device_id = 6;
+  // The MLS message. Empty once deleted.
+  bytes data = 7;
+  google.protobuf.Timestamp created_at = 8;
+  // When it was deleted.
+  google.protobuf.Timestamp deleted_at = 9;
+  // Who deleted it, when it wasn't its sender.
+  string deleted_by = 10;
+}
+
+message GetSecureChannelRequest {
+  string server_id = 1;
+  string channel_id = 2;
+}
+
+message GetSecureChannelResponse {
+  // The epoch the next record must be in. Zero until the first commit.
+  int64 epoch = 1;
+  // The latest record's sequence; zero before any.
+  int64 last_sequence = 2;
+  // The people whose devices belong in the group: every member (not agents,
+  // who have no devices) the channel's permissions let see it now.
+  repeated string member_ids = 3;
+}
+
+message GetSecureGroupInfoRequest {
+  string server_id = 1;
+  string channel_id = 2;
+}
+
+message GetSecureGroupInfoResponse {
+  // The epoch it describes. Zero, with no group info, before the first commit.
+  int64 epoch = 1;
+  // An MLSMessage carrying a GroupInfo, with the ratchet tree.
+  bytes group_info = 2;
+}
+
+message ListSecureRecordsRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  int64 after_sequence = 3;
+  // 1 to 500; defaults to 100.
+  int32 limit = 4;
+}
+
+message ListSecureRecordsResponse {
+  repeated SecureRecord records = 1;
+  bool has_more = 2;
+}
+
+message ListSecureWelcomesRequest {
+  string server_id = 1;
+}
+
+message ListSecureWelcomesResponse {
+  repeated SecureWelcome welcomes = 1;
+}
+
+// A device was added to a secure channel: what it joins with.
+message SecureWelcome {
+  string channel_id = 1;
+  // The commit that added it: the device reads the records after it.
+  int64 sequence = 2;
+  // An MLSMessage carrying a Welcome.
+  bytes data = 3;
+}
+
+message PostSecureCommitRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // An MLSMessage carrying the commit, for the group's current epoch.
+  bytes commit = 3;
+  // The group as the commit leaves it, with its ratchet tree.
+  bytes group_info = 4;
+  // For the devices the commit adds, named in welcome_device_ids.
+  bytes welcome = 5;
+  repeated string welcome_device_ids = 6;
+}
+
+message PostSecureCommitResponse {
+  SecureRecord record = 1;
+}
+
+message PostSecureMessageRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // An MLSMessage carrying an encrypted application message.
+  bytes message = 3;
+}
+
+message PostSecureMessageResponse {
+  SecureRecord record = 1;
+}
+
+message DeleteSecureRecordRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  int64 sequence = 3;
+}
+
+message DeleteSecureRecordResponse {}
+
+// A record was added to a secure channel. Only people who can see the
+// channel get it.
+message SecureRecordAdded {
+  SecureRecord record = 1;
+}
+
+// A secure channel's message was deleted: its ciphertext is gone.
+message SecureRecordDeleted {
+  string channel_id = 1;
+  int64 sequence = 2;
+  // Who deleted it, when it wasn't its sender.
+  string deleted_by = 3;
+}

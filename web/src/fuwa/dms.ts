@@ -76,3 +76,10 @@ export const markDmRead = (key: string, id: string) => dmEngine(key)?.markRead(i
 
 /** Marks the conversation's safety number as checked with the other person, or not ("" ). */
 export const verifyDm = (key: string, id: string, safety: string) => ready(key).verify(id, safety);
+
+/** Starts following a secure channel and gets it ready to write in: catches up, and brings everyone who can see it in. */
+export async function prepareSecureChannel(key: string, serverId: string, channelId: string) {
+  const dms = ready(key);
+  void dms.followChannel(serverId, channelId);
+  await prepareConversation(key, channelId);
+}

@@ -239,8 +239,14 @@ impl Api {
         ids.sort_unstable();
         ids.dedup();
         let devices = dms.devices(&ids).await?;
-        if devices.iter().any(|device| device.account_id != account.id && !partners.contains(&device.account_id)) {
-            return Err(Error::denied("you can only add the devices of people you have a conversation with"));
+        // Secure channels add the devices of people who share a server with
+        // you, the same people you could open a conversation with.
+        if devices.iter().any(|device| {
+            device.account_id != account.id
+                && !partners.contains(&device.account_id)
+                && !self.app.index.share_a_server(&account.id, &device.account_id)
+        }) {
+            return Err(Error::denied("you can only add the devices of people you share a server with"));
         }
         let mut owners: Vec<&str> = devices.iter().map(|device| device.account_id.as_str()).collect();
         owners.sort_unstable();
