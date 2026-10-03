@@ -5,11 +5,12 @@ use prost::Message as _;
 use tonic::{Request, Response, Status};
 
 use super::{Api, respond, text};
-use crate::automod;
+use crate::automod::{self, providers};
 use crate::error::{Error, Result};
 use crate::id::{millis, new_id, now_ms, timestamp};
 use crate::pb::{
-    self, AutoModActionKind as Kind, AutoModTrigger as Trigger, Permission, auto_mod_service_server::AutoModService,
+    self, AutoModActionKind as Kind, AutoModLevel as Level, AutoModTrigger as Trigger, Permission,
+    auto_mod_service_server::AutoModService,
 };
 use crate::permissions::Access;
 use crate::servers::{self as store, Audit, Payload, UsageChange, load_channel};
@@ -25,6 +26,8 @@ const MAX_BLOCK_MESSAGE: usize = 150;
 const MAX_MENTION_LIMIT: i32 = 50;
 const MIN_TIME_OUT: i32 = 60;
 const MAX_TIME_OUT: i32 = 28 * 24 * 60 * 60;
+/// How long a provider rule times people out unless it says.
+const DEFAULT_TIME_OUT: i32 = 10 * 60;
 
 /// What a rule is called when nobody names it.
 fn default_name(trigger: Trigger) -> &'static str {
@@ -32,6 +35,7 @@ fn default_name(trigger: Trigger) -> &'static str {
         Trigger::Keywords => "Blocked words",
         Trigger::MentionSpam => "Mention spam",
         Trigger::Links => "Links",
+        Trigger::Provider => "Smart filter",
         Trigger::Unspecified => "Rule",
     }
 }
@@ -55,12 +59,52 @@ fn checked_list(what: &str, list: &[String], max_items: usize, max_len: usize) -
     Ok(out)
 }
 
+/// A provider rule's labels as they may be saved: each one fuwa knows, once,
+/// with a level and a threshold. Labels left out start at their defaults, so
+/// a rule with none is the provider's default set.
+fn checked_labels(labels: &[pb::AutoModLabelRule]) -> Result<Vec<pb::AutoModLabelRule>> {
+    let mut out: Vec<pb::AutoModLabelRule> = Vec::new();
+    for given in labels {
+        let label =
+            providers::label(given.label.trim()).ok_or_else(|| Error::invalid("that isn't a label fuwa knows"))?;
+        if out.iter().any(|l| l.label == label.id) {
+            return Err(Error::invalid("a rule sets each label once"));
+        }
+        let level = match Level::try_from(given.level) {
+            Ok(Level::Unspecified) | Err(_) => Level::Off,
+            Ok(level) => level,
+        };
+        let threshold = match given.threshold {
+            0 => automod::DEFAULT_THRESHOLD,
+            t if (50..=99).contains(&t) => t,
+            _ => return Err(Error::invalid("a label's threshold is 50 to 99 percent")),
+        };
+        out.push(pb::AutoModLabelRule { label: label.id.into(), level: level as i32, threshold });
+    }
+    for label in providers::LABELS {
+        if !out.iter().any(|l| l.label == label.id) {
+            out.push(pb::AutoModLabelRule {
+                label: label.id.into(),
+                level: label.default_level as i32,
+                threshold: automod::DEFAULT_THRESHOLD,
+            });
+        }
+    }
+    out.sort_by_key(|l| providers::LABELS.iter().position(|label| label.id == l.label));
+    Ok(out)
+}
+
 /// A rule as it may be saved, checked against the server it's for. Fields
 /// that don't belong to its trigger are cleared.
-async fn checked_rule(conn: &turso::Connection, server_id: &str, rule: pb::AutoModRule) -> Result<pb::AutoModRule> {
+async fn checked_rule(
+    conn: &turso::Connection,
+    server_id: &str,
+    settings: &crate::settings::Settings,
+    rule: pb::AutoModRule,
+) -> Result<pb::AutoModRule> {
     let trigger = match Trigger::try_from(rule.trigger) {
-        Ok(trigger @ (Trigger::Keywords | Trigger::MentionSpam | Trigger::Links)) => trigger,
-        _ => return Err(Error::invalid("a rule looks for keywords, mention spam or links")),
+        Ok(trigger @ (Trigger::Keywords | Trigger::MentionSpam | Trigger::Links | Trigger::Provider)) => trigger,
+        _ => return Err(Error::invalid("a rule looks for keywords, mention spam or links, or asks a provider")),
     };
     let name = match rule.name.trim() {
         "" => default_name(trigger).to_string(),
@@ -80,6 +124,7 @@ async fn checked_rule(conn: &turso::Connection, server_id: &str, rule: pb::AutoM
             }
             (vec![], vec![], rule.mention_limit)
         }
+        Trigger::Provider => (vec![], vec![], 0),
         _ => {
             let sites: Vec<String> = rule.allowed.iter().map(|s| automod::site(s)).collect();
             if sites.iter().any(|s| !s.is_empty() && !s.contains('.')) {
@@ -88,7 +133,37 @@ async fn checked_rule(conn: &turso::Connection, server_id: &str, rule: pb::AutoM
             (vec![], checked_list("allowed sites", &sites, MAX_ALLOWED, 253)?, 0)
         }
     };
-    if rule.actions.is_empty() {
+    let (provider, labels) = match trigger {
+        Trigger::Provider => {
+            let provider = rule.provider.trim();
+            let kind = providers::kind(provider).ok_or_else(|| Error::invalid("pick a provider for the rule"))?;
+            // A rule already on keeps its provider when admins switch it off
+            // (it then lets messages through); a new or changed one needs it.
+            if rule.enabled && settings.automod_provider(kind.id).is_none() {
+                return Err(Error::FailedPrecondition(format!(
+                    "{} isn't turned on for this instance; its admins set providers up",
+                    kind.name
+                )));
+            }
+            (kind.id.to_string(), checked_labels(&rule.labels)?)
+        }
+        _ => (String::new(), vec![]),
+    };
+    let mut rule = rule;
+    if trigger == Trigger::Provider {
+        let highest = labels.iter().map(|l| l.level).max().unwrap_or_default();
+        let has = |kind: Kind| rule.actions.iter().any(|a| a.kind == kind as i32);
+        if labels.iter().any(|l| l.level == Level::Flag as i32) && !has(Kind::Alert) {
+            return Err(Error::invalid("pick a channel for flagged messages"));
+        }
+        if highest == Level::TimeOut as i32 && !has(Kind::TimeOut) {
+            rule.actions.push(pb::AutoModAction {
+                kind: Kind::TimeOut as i32,
+                duration_seconds: DEFAULT_TIME_OUT,
+                ..Default::default()
+            });
+        }
+    } else if rule.actions.is_empty() {
         return Err(Error::invalid("a rule needs something to do: block, alert or time out"));
     }
     let mut actions: Vec<pb::AutoModAction> = Vec::new();
@@ -159,7 +234,69 @@ async fn checked_rule(conn: &turso::Connection, server_id: &str, rule: pb::AutoM
         creator_id: String::new(),
         created_at: None,
         updated_at: None,
+        provider,
+        labels,
     })
+}
+
+/// What a server's provider rule's provider said about a message, asked
+/// before the write that sends it (a provider can take a while, and a write
+/// mustn't wait on one).
+pub(super) struct Asked {
+    rule_id: String,
+    provider: &'static str,
+    scores: providers::Scores,
+}
+
+/// Asks the provider of the server's provider rule about a message, when the
+/// rule is on, its provider is set up and the message isn't left alone.
+/// `None` when nothing was asked or the provider didn't answer (counted in
+/// the anonymous report): the message then goes through that rule unchecked.
+pub(super) async fn ask(
+    app: &crate::app::App,
+    sdb: &store::ServerDb,
+    member: &pb::Member,
+    access: &Access,
+    channel_id: &str,
+    content: &str,
+) -> Option<Asked> {
+    if access.has(Permission::ManageServer) || content.trim().is_empty() {
+        return None;
+    }
+    let conn = sdb.read().ok()?;
+    let rules = store::load_automod(&conn).await.ok()?;
+    let rule = rules.into_iter().find(|r| r.enabled && r.trigger == Trigger::Provider as i32)?;
+    if rule.labels.iter().all(|l| l.level < Level::Flag as i32)
+        || rule.exempt_role_ids.iter().any(|id| member.role_ids.contains(id))
+    {
+        return None;
+    }
+    let channel = load_channel(&conn, &sdb.id, channel_id).await.ok()??;
+    if rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id) {
+        return None;
+    }
+    drop(conn);
+    let setup = app.settings().automod_provider(&rule.provider)?.clone();
+    let provider = setup.kind()?.name;
+    let (answer, _) = providers::check(&setup, content).await;
+    Some(Asked { rule_id: rule.id, provider, scores: answer.ok()? })
+}
+
+/// What a caught rule does: its own actions, or for a provider rule the ones
+/// the strongest label it reached calls for.
+fn effective(rule: &pb::AutoModRule, level: Option<Level>) -> pb::AutoModRule {
+    let Some(level) = level else { return rule.clone() };
+    let mut rule = rule.clone();
+    rule.actions.retain(|action| match Kind::try_from(action.kind).unwrap_or(Kind::Unspecified) {
+        Kind::Alert => true,
+        Kind::Block => level as i32 >= Level::Block as i32,
+        Kind::TimeOut => level == Level::TimeOut,
+        Kind::Unspecified => false,
+    });
+    if level as i32 >= Level::Block as i32 && !rule.actions.iter().any(|a| a.kind == Kind::Block as i32) {
+        rule.actions.push(pb::AutoModAction { kind: Kind::Block as i32, ..Default::default() });
+    }
+    rule
 }
 
 /// How many of a server's rules look for `trigger`, besides the rule `except`.
@@ -175,8 +312,10 @@ pub(super) struct Verdict {
 }
 
 /// Runs a server's rules over a message about to be sent or saved, inside
-/// that write: posts alerts and times its author out as the rules say. The
+/// that write: posts alerts and times its author out as the rules say. A
+/// provider rule goes by what `ask` brought back before the write. The
 /// caller doesn't save the message when it comes back blocked.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn review(
     conn: &turso::Connection,
     server_id: &str,
@@ -184,6 +323,7 @@ pub(super) async fn review(
     access: &Access,
     channel: &pb::Channel,
     content: &str,
+    asked: Option<&Asked>,
     events: &mut Vec<Payload>,
 ) -> Result<Verdict> {
     // Managers and administrators are trusted, as on Discord.
@@ -200,7 +340,12 @@ pub(super) async fn review(
         if exempt {
             continue;
         }
-        if let Some(hit) = automod::check(&rule, content) {
+        if rule.trigger == Trigger::Provider as i32 {
+            let answer = asked.filter(|a| a.rule_id == rule.id);
+            if let Some((level, hit)) = answer.and_then(|a| automod::provider_hit(&rule, &a.scores)) {
+                caught.push((effective(&rule, Some(level)), hit));
+            }
+        } else if let Some(hit) = automod::check(&rule, content) {
             caught.push((rule, hit));
         }
     }
@@ -253,6 +398,7 @@ pub(super) async fn review(
                 matched: hit.matched.clone(),
                 blocked: blocked.is_some(),
                 timed_out_seconds: action(rule, Kind::TimeOut).map_or(0, |a| a.duration_seconds),
+                provider: asked.filter(|a| a.rule_id == rule.id).map(|a| a.provider.to_string()).unwrap_or_default(),
             }),
             ..Default::default()
         };
@@ -273,7 +419,15 @@ impl AutoModService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let sdb = self.with(&account, &request.get_ref().server_id, Permission::ManageServer).await?.sdb;
-                Ok(pb::ListAutoModRulesResponse { rules: store::load_automod(&sdb.read()?).await? })
+                let providers = self
+                    .app
+                    .settings()
+                    .automod_providers
+                    .iter()
+                    .filter(|setup| setup.usable())
+                    .filter_map(|setup| setup.offer())
+                    .collect();
+                Ok(pb::ListAutoModRulesResponse { rules: store::load_automod(&sdb.read()?).await?, providers })
             }
             .await,
         )
@@ -289,9 +443,10 @@ impl AutoModService for Api {
                 let req = request.into_inner();
                 let sdb = self.with(&account, &req.server_id, Permission::ManageServer).await?.sdb;
                 let draft = req.rule.unwrap_or_default();
+                let settings = self.app.settings();
                 let rule = sdb
                     .write(&account.id, async |conn, _events| {
-                        let mut rule = checked_rule(conn, &sdb.id, draft.clone()).await?;
+                        let mut rule = checked_rule(conn, &sdb.id, &settings, draft.clone()).await?;
                         let rules = store::load_automod(conn).await?;
                         let before = rules.iter().find(|r| r.id == rule.id).cloned();
                         if !rule.id.is_empty() && before.is_none() {
@@ -337,7 +492,8 @@ impl AutoModService for Api {
                                 .change("keywords", before.keywords.len(), rule.keywords.len())
                                 .change("allowed", before.allowed.len(), rule.allowed.len())
                                 .change("mention_limit", before.mention_limit, rule.mention_limit)
-                                .change("actions", before.actions.len(), rule.actions.len());
+                                .change("actions", before.actions.len(), rule.actions.len())
+                                .change("provider", &before.provider, &rule.provider);
                         }
                         store::audit(conn, &account.id, entry).await?;
                         Ok(rule)
@@ -386,10 +542,34 @@ impl AutoModService for Api {
                     return Err(Error::invalid("that's longer than a message can be"));
                 }
                 let rule = req.rule.unwrap_or_default();
+                if rule.trigger == Trigger::Provider as i32 {
+                    let settings = self.app.settings();
+                    let setup = settings.automod_provider(rule.provider.trim()).ok_or_else(|| {
+                        Error::FailedPrecondition("that provider isn't turned on for this instance".into())
+                    })?;
+                    let rule = pb::AutoModRule { labels: checked_labels(&rule.labels)?, ..rule };
+                    let (answer, took) = providers::check(setup, &req.content).await;
+                    let elapsed_ms = took.as_millis().min(i32::MAX as u128) as i32;
+                    return Ok(match answer {
+                        Ok(scores) => {
+                            let hit = automod::provider_hit(&rule, &scores).map(|(_, hit)| hit);
+                            pb::TestAutoModRuleResponse {
+                                matched: hit.is_some(),
+                                matches: hit.map(|h| h.matched).unwrap_or_default(),
+                                error: String::new(),
+                                elapsed_ms,
+                            }
+                        }
+                        Err(failure) => {
+                            pb::TestAutoModRuleResponse { error: failure.to_string(), elapsed_ms, ..Default::default() }
+                        }
+                    });
+                }
                 let hit = automod::check(&rule, &req.content);
                 Ok(pb::TestAutoModRuleResponse {
                     matched: hit.is_some(),
                     matches: hit.map(|h| h.matched).unwrap_or_default(),
+                    ..Default::default()
                 })
             }
             .await,

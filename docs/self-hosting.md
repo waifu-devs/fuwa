@@ -287,6 +287,30 @@ On Railway, which has no public UDP, add a TCP proxy for port 50000 and set
 `FUWA_MEDIA_ADDRESSES=tcp/<proxy host>:<proxy port>`; a TURN server elsewhere
 helps people on strict networks.
 
+## Moderation providers
+
+Servers' AutoMod can ask a moderation service about each message (the "Smart
+filter" rule): TypeSafe Jev or Cloudflare Clef. Turn one on once for the whole
+instance in **Instance settings, Moderation**: paste the key, press **Try a
+sample scam** to check it answers, and switch it on. Every server can then pick
+it with one switch and choose what happens to hate, harassment, sexual content,
+violence, self-harm, scams and spam.
+
+- **TypeSafe Jev**: an API key from your TypeSafe account. Messages go to
+  `api.typesafe.ai` (US).
+- **Cloudflare Clef**: an API token with the Workers AI permission and your
+  account id. Messages go to `api.cloudflare.com`.
+
+You can also start with one on: `FUWA_JEV_API_KEY`, or `FUWA_CLEF_API_TOKEN`
+with `FUWA_CLEF_ACCOUNT_ID`. Keys live in node.db (sealed when
+`FUWA_ENCRYPTION_KEY` is set) and are never sent to apps. Only the instance
+talks to the provider, and it sends the message's text alone, with mentions
+and custom emoji swapped for placeholders: never who wrote it, where, or which
+server. The provider bills you for what it reads. When it's slow (over 3
+seconds) or down, messages go through and the servers' own rules still apply;
+those failures are counted in the anonymous hourly report, by kind and
+provider only.
+
 ## Updating
 
 Back up first (see below). Then, with Docker Compose:

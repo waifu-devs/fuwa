@@ -391,6 +391,31 @@ enum AutoModTrigger {
   AUTO_MOD_TRIGGER_MENTION_SPAM = 2;
   // Links to sites the server doesn't allow.
   AUTO_MOD_TRIGGER_LINKS = 3;
+  // A moderation provider the instance set up (such as TypeSafe Jev or
+  // Cloudflare Clef) reads the message and says what kind it is.
+  AUTO_MOD_TRIGGER_PROVIDER = 4;
+}
+
+// What a PROVIDER rule does about one kind of message, from least to most.
+enum AutoModLevel {
+  AUTO_MOD_LEVEL_UNSPECIFIED = 0;
+  // Nothing.
+  AUTO_MOD_LEVEL_OFF = 1;
+  // An alert goes to the rule's alert channel; the message is sent.
+  AUTO_MOD_LEVEL_FLAG = 2;
+  // The message isn't sent (and an alert goes out, when the rule has a channel).
+  AUTO_MOD_LEVEL_BLOCK = 3;
+  // Blocked, and its author is timed out for the rule's TIME_OUT duration.
+  AUTO_MOD_LEVEL_TIME_OUT = 4;
+}
+
+// One kind of message a PROVIDER rule looks for.
+message AutoModLabelRule {
+  // A label the provider offers, such as "hate" or "scam".
+  string label = 1;
+  AutoModLevel level = 2;
+  // How sure the provider must be, 50 to 99 percent.
+  int32 threshold = 3;
 }
 
 enum AutoModActionKind {
@@ -441,6 +466,13 @@ message AutoModRule {
   string creator_id = 12;
   google.protobuf.Timestamp created_at = 13;
   google.protobuf.Timestamp updated_at = 14;
+  // PROVIDER: which of the instance's moderation providers reads messages
+  // (an AutoModProvider id). One PROVIDER rule per server.
+  string provider = 15;
+  // PROVIDER: what happens for each kind of message. Its ALERT action says
+  // where flags go and its TIME_OUT action for how long; both are optional
+  // until a label needs them.
+  repeated AutoModLabelRule labels = 16;
 }
 
 // What an AutoMod alert tells moderators.
@@ -458,6 +490,8 @@ message AutoModAlert {
   bool blocked = 7;
   // Its author was timed out for this long. Zero when they weren't.
   int32 timed_out_seconds = 8;
+  // PROVIDER: the provider's name, such as "TypeSafe Jev".
+  string provider = 9;
 }
 
 // What people read and answer on their way into a server.

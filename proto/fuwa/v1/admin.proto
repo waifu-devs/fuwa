@@ -43,6 +43,11 @@ service AdminService {
 
   // Puts a banner on every client of this instance, or takes it down.
   rpc SetAnnouncement(SetAnnouncementRequest) returns (SetAnnouncementResponse);
+
+  // Runs some text through a moderation provider, saved or not (an empty
+  // key uses the saved one), to see that it answers. The text goes to the
+  // provider's host.
+  rpc TestAutoModProvider(TestAutoModProviderRequest) returns (TestAutoModProviderResponse);
 }
 
 // Everything about an instance an admin can change while it runs. Each setting
@@ -102,6 +107,49 @@ message InstanceSettings {
   SsoAccounts sso_accounts = 15;
   // The provider for sso_accounts. Its client secret is never sent back.
   IdentityProvider sso_provider = 16;
+  // Moderation providers servers' AutoMod can use, one entry for each kind
+  // fuwa knows. Their API keys are never sent back.
+  repeated AutoModProviderSettings automod_providers = 24;
+}
+
+// One moderation provider, as the instance's admins set it up.
+message AutoModProviderSettings {
+  // "typesafe-jev" or "cloudflare-clef".
+  string id = 1;
+  // Servers can pick it for their AutoMod.
+  bool enabled = 2;
+  // Only ever sent in: empty keeps the saved key.
+  string api_key = 3;
+  // Whether a key is saved.
+  bool api_key_set = 4;
+  // The saved key's last four characters, to tell keys apart.
+  string api_key_hint = 5;
+  // Empty for the provider's default ("jev-latest", "@cf/cloudflare/clef").
+  string model = 6;
+  // Cloudflare's account id, which its address needs.
+  string account_id = 7;
+}
+
+message TestAutoModProviderRequest {
+  AutoModProviderSettings provider = 1;
+  // Up to 2000 characters.
+  string content = 2;
+}
+
+message TestAutoModProviderResponse {
+  // It answered.
+  bool ok = 1;
+  // Why it didn't.
+  string error = 2;
+  int32 elapsed_ms = 3;
+  // How sure it is of each label, highest first.
+  repeated AutoModScore scores = 4;
+}
+
+message AutoModScore {
+  string label = 1;
+  // 0 to 1.
+  float probability = 2;
 }
 
 // Whether accounts that sign in through the instance's identity provider work.

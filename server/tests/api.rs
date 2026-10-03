@@ -4413,6 +4413,137 @@ async fn automod_catches_messages() {
 }
 
 #[tokio::test]
+async fn automod_providers_are_set_up_once_and_picked_per_server() {
+    use pb::{AutoModActionKind as Kind, AutoModLevel as Level, AutoModTrigger as Trigger};
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (member, _, _) = sign_up(&mut c, "member").await;
+    let server = create_server(&mut c, &owner, "Smart", true).await;
+    join(&mut c, &member, &server.id).await;
+    let general = new_channel(&mut c, &owner, &server.id, "general", pb::ChannelType::Text).await;
+    let mods = new_channel(&mut c, &owner, &server.id, "mod-log", pb::ChannelType::Text).await;
+    let list = async |c: &mut Clients| {
+        c.automod
+            .list_auto_mod_rules(authed(&owner, pb::ListAutoModRulesRequest { server_id: server.id.clone() }))
+            .await
+            .unwrap()
+            .into_inner()
+    };
+    let smart = pb::AutoModRule {
+        enabled: true,
+        trigger: Trigger::Provider as i32,
+        provider: "cloudflare-clef".into(),
+        actions: vec![pb::AutoModAction {
+            kind: Kind::Alert as i32,
+            channel_id: mods.id.clone(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    // Every provider fuwa knows is listed, none on, and servers can't pick one yet.
+    let settings = c.admin.get_settings(authed(&admin, pb::GetSettingsRequest {})).await.unwrap().into_inner();
+    let providers = settings.config.unwrap().settings.unwrap().automod_providers;
+    assert_eq!(providers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["typesafe-jev", "cloudflare-clef"]);
+    assert!(providers.iter().all(|p| !p.enabled && !p.api_key_set));
+    assert!(list(&mut c).await.providers.is_empty());
+    let early = save_rule(&mut c, &owner, &server.id, smart.clone()).await.unwrap_err();
+    assert_eq!(early.code(), Code::FailedPrecondition);
+
+    // Turning one on needs its key (and Cloudflare's account id); the key never comes back.
+    let clef = |key: &str| pb::AutoModProviderSettings {
+        id: "cloudflare-clef".into(),
+        enabled: true,
+        api_key: key.into(),
+        account_id: "0".repeat(32),
+        ..Default::default()
+    };
+    let update = |providers: Vec<pb::AutoModProviderSettings>| {
+        settings_update(
+            pb::InstanceSettings { automod_providers: providers, ..Default::default() },
+            &["automod_providers"],
+            &[],
+        )
+    };
+    let keyless = c.admin.update_settings(authed(&admin, update(vec![clef("")]))).await.unwrap_err();
+    assert_eq!(keyless.code(), Code::InvalidArgument);
+    let denied = c.admin.update_settings(authed(&owner, update(vec![clef("not-a-real-token-1234")]))).await;
+    assert_eq!(denied.unwrap_err().code(), Code::PermissionDenied);
+    let saved = c
+        .admin
+        .update_settings(authed(&admin, update(vec![clef("not-a-real-token-1234")])))
+        .await
+        .unwrap()
+        .into_inner()
+        .config
+        .unwrap()
+        .settings
+        .unwrap()
+        .automod_providers;
+    let shown = saved.iter().find(|p| p.id == "cloudflare-clef").unwrap();
+    assert!(shown.enabled && shown.api_key_set && shown.api_key.is_empty());
+    assert_eq!(shown.api_key_hint, "1234");
+    // Saving what came back (no key) keeps the key.
+    let again = c.admin.update_settings(authed(&admin, update(saved.clone()))).await.unwrap().into_inner();
+    let kept = again.config.unwrap().settings.unwrap().automod_providers;
+    assert!(kept.iter().find(|p| p.id == "cloudflare-clef").unwrap().api_key_set);
+
+    // Servers now see it, with where checked messages go and a default level per label.
+    let offered = list(&mut c).await.providers;
+    assert_eq!(offered.len(), 1);
+    assert_eq!((offered[0].name.as_str(), offered[0].host.as_str()), ("Cloudflare Clef", "api.cloudflare.com"));
+    assert!(offered[0].labels.iter().any(|l| l.id == "hate" && l.default_level == Level::Block as i32));
+
+    // One switch: a rule with no labels gets the defaults. Flags need a channel.
+    let rule = save_rule(&mut c, &owner, &server.id, smart.clone()).await.unwrap();
+    assert_eq!(rule.name, "Smart filter");
+    assert_eq!(rule.labels.len(), offered[0].labels.len());
+    assert!(rule.labels.iter().all(|l| l.threshold == 80));
+    let no_channel = save_rule(&mut c, &owner, &server.id, pb::AutoModRule { actions: vec![], ..rule.clone() }).await;
+    assert_eq!(no_channel.unwrap_err().code(), Code::InvalidArgument);
+    let other = save_rule(&mut c, &owner, &server.id, pb::AutoModRule { id: String::new(), ..rule.clone() }).await;
+    assert_eq!(other.unwrap_err().code(), Code::FailedPrecondition);
+
+    // The key is made up, so the provider turns it down (or can't be reached):
+    // messages still go through, and the test says why.
+    send(&mut c, &member, &server.id, &general.id, "hello there").await.unwrap();
+    let tried = c
+        .automod
+        .test_auto_mod_rule(authed(
+            &owner,
+            pb::TestAutoModRuleRequest {
+                server_id: server.id.clone(),
+                rule: Some(rule.clone()),
+                content: "hello there".into(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(!tried.matched && !tried.error.is_empty());
+    let tested = c
+        .admin
+        .test_auto_mod_provider(authed(
+            &admin,
+            pb::TestAutoModProviderRequest { provider: Some(clef("")), content: "hello".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(!tested.ok && !tested.error.is_empty());
+
+    // Turned off on the instance: servers no longer see it, and their rule lets messages through.
+    let off = pb::AutoModProviderSettings { enabled: false, ..clef("") };
+    c.admin.update_settings(authed(&admin, update(vec![off]))).await.unwrap();
+    assert!(list(&mut c).await.providers.is_empty());
+    send(&mut c, &member, &server.id, &general.id, "still here").await.unwrap();
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn custom_emoji_and_the_welcome_screen() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[("FUWA_LIMIT_EMOJIS", "2")]).await;

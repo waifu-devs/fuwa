@@ -139,6 +139,8 @@ the log filter are read only from the environment.
 | `FUWA_MEDIA_ADDRESSES` | this machine's address | Where apps reach that port: `HOST`, `HOST:PORT`, or `udp/…` or `tcp/…` for one protocol (a TCP proxy), comma-separated |
 | `FUWA_ICE_URLS` | unset | STUN and TURN servers for people on strict networks, comma-separated `stun:`, `turn:` and `turns:` URLs |
 | `FUWA_TURN_SECRET` | unset | The TURN servers' shared secret (coturn's `static-auth-secret`); each call gets a password from it |
+| `FUWA_JEV_API_KEY` | unset | Turns on TypeSafe Jev for servers' AutoMod smart filter (also set from the app: Instance settings, Moderation) |
+| `FUWA_CLEF_API_TOKEN`, `FUWA_CLEF_ACCOUNT_ID` | unset | Turn on Cloudflare Clef (Workers AI) the same way; set both |
 | `FUWA_S3_BUCKET` and the other `FUWA_S3_*` | unset | Split instances only: a bucket the directory and shards copy their files to as they change; see [Replicating to a bucket](#replicating-to-a-bucket) |
 | `FUWA_REPLICA_PATH` | unset | Split instances only: a folder to replicate to instead of a bucket |
 | `FUWA_RESTORE` | `off` | `if-empty`: restore a part from the replica when its data folder is empty |
