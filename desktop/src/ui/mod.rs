@@ -29,6 +29,7 @@ mod settings;
 mod settings_account;
 mod settings_keys;
 mod settings_look;
+mod settings_privacy;
 mod sidebar;
 pub mod text;
 pub mod theme;
@@ -49,6 +50,7 @@ pub fn run() -> anyhow::Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "fuwa_desktop=info,warn".into()),
         )
         .init();
+    crate::core::reports::catch_panics();
 
     let paths = Paths::from_env();
     std::fs::create_dir_all(&paths.config).with_context(|| format!("couldn't make {}", paths.config.display()))?;

@@ -185,11 +185,14 @@ pub async fn run(config: Config, address: SocketAddr) -> Result<(), String> {
     let gateway = Gateway::new(config).map_err(|err| err.to_string())?;
     tracing::info!(version = crate::VERSION, role = "gateway", %address, directory = %gateway.directory_url, "fuwa is up");
     crate::app::spawn_signal_handler(gateway.shutdown.clone());
+    let reports = crate::reports::spawn(gateway.clone(), &gateway.config, None, gateway.shutdown.clone());
     let shutdown = gateway.shutdown.clone();
-    axum::serve(listener, gateway.router())
+    let served = axum::serve(listener, gateway.router())
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
         .await
-        .map_err(|err| format!("server error: {err}"))
+        .map_err(|err| format!("server error: {err}"));
+    crate::reports::finish(reports).await;
+    served
 }
 
 impl Gateway {

@@ -19,6 +19,7 @@ use tonic::{Code, Status};
 use tonic_web::{GrpcWebCall, GrpcWebClientLayer, GrpcWebClientService};
 use tower::{Layer, Service};
 
+use crate::core::reports;
 use crate::pb;
 
 /// How long a call may take before it counts as lost.
@@ -71,34 +72,47 @@ pub struct Api {
 }
 
 macro_rules! clients {
-    ($($name:ident => $client:ty),* $(,)?) => {
+    ($($name:ident => $service:literal $client:ty),* $(,)?) => {
         impl Api {
             $(pub fn $name(&self) -> $client {
                 <$client>::with_origin(self.transport.clone(), self.origin.clone())
                     .max_decoding_message_size(32 * 1024 * 1024)
             })*
         }
+        $(impl GrpcService for $client {
+            const NAME: &'static str = $service;
+        })*
     };
 }
 
+/// A client's gRPC service, as the protocol names it ("MessageService").
+pub trait GrpcService {
+    const NAME: &'static str;
+}
+
+/// The service a client calls, for naming its calls in reports.
+pub fn service_of<C: GrpcService>(_: &C) -> &'static str {
+    C::NAME
+}
+
 clients! {
-    node => pb::node_service_client::NodeServiceClient<Transport>,
-    auth => pb::auth_service_client::AuthServiceClient<Transport>,
-    account => pb::account_service_client::AccountServiceClient<Transport>,
-    servers => pb::server_service_client::ServerServiceClient<Transport>,
-    channels => pb::channel_service_client::ChannelServiceClient<Transport>,
-    messages => pb::message_service_client::MessageServiceClient<Transport>,
-    events => pb::event_service_client::EventServiceClient<Transport>,
-    roles => pb::role_service_client::RoleServiceClient<Transport>,
-    emojis => pb::emoji_service_client::EmojiServiceClient<Transport>,
-    webhooks => pb::webhook_service_client::WebhookServiceClient<Transport>,
-    agents => pb::agent_service_client::AgentServiceClient<Transport>,
-    invites => pb::invite_service_client::InviteServiceClient<Transport>,
-    dms => pb::direct_message_service_client::DirectMessageServiceClient<Transport>,
-    media => pb::media_service_client::MediaServiceClient<Transport>,
-    join => pb::join_service_client::JoinServiceClient<Transport>,
-    calls => pb::call_service_client::CallServiceClient<Transport>,
-    sso => pb::sso_service_client::SsoServiceClient<Transport>,
+    node => "NodeService" pb::node_service_client::NodeServiceClient<Transport>,
+    auth => "AuthService" pb::auth_service_client::AuthServiceClient<Transport>,
+    account => "AccountService" pb::account_service_client::AccountServiceClient<Transport>,
+    servers => "ServerService" pb::server_service_client::ServerServiceClient<Transport>,
+    channels => "ChannelService" pb::channel_service_client::ChannelServiceClient<Transport>,
+    messages => "MessageService" pb::message_service_client::MessageServiceClient<Transport>,
+    events => "EventService" pb::event_service_client::EventServiceClient<Transport>,
+    roles => "RoleService" pb::role_service_client::RoleServiceClient<Transport>,
+    emojis => "EmojiService" pb::emoji_service_client::EmojiServiceClient<Transport>,
+    webhooks => "WebhookService" pb::webhook_service_client::WebhookServiceClient<Transport>,
+    agents => "AgentService" pb::agent_service_client::AgentServiceClient<Transport>,
+    invites => "InviteService" pb::invite_service_client::InviteServiceClient<Transport>,
+    dms => "DirectMessageService" pb::direct_message_service_client::DirectMessageServiceClient<Transport>,
+    media => "MediaService" pb::media_service_client::MediaServiceClient<Transport>,
+    join => "JoinService" pb::join_service_client::JoinServiceClient<Transport>,
+    calls => "CallService" pb::call_service_client::CallServiceClient<Transport>,
+    sso => "SsoService" pb::sso_service_client::SsoServiceClient<Transport>,
 }
 
 impl Api {
@@ -162,11 +176,7 @@ impl std::error::Error for Problem {}
 impl From<Status> for Problem {
     fn from(status: Status) -> Self {
         let message = match status.code() {
-            Code::Unavailable | Code::Unknown
-                if status.message().contains("error trying to connect")
-                    || status.message().contains("tcp connect")
-                    || status.message().contains("dns error") =>
-            {
+            Code::Unavailable | Code::Unknown if unreachable(&status) => {
                 "Couldn't reach this instance. Check the address and your connection.".to_owned()
             }
             Code::Unavailable if status.message().is_empty() => "The instance isn't answering right now.".to_owned(),
@@ -189,13 +199,19 @@ fn capitalize(text: &str) -> String {
 }
 
 /// Makes a call on a fresh client (`rpc!(api.node(), get_node(request))`),
-/// with the timeout every call gets; see [`call`].
+/// with the timeout every call gets, timed for the anonymous reports; see
+/// [`call_named`].
 #[macro_export]
 macro_rules! rpc {
     ($client:expr, $method:ident($request:expr) $(,)?) => {{
+        // Named once per place it's called from: "rpc:MessageService/SendMessage".
+        static METRIC: std::sync::OnceLock<Box<str>> = std::sync::OnceLock::new();
         let mut client = $client;
         let request = $request;
-        $crate::core::api::call(async move { client.$method(request).await })
+        let metric = METRIC.get_or_init(|| {
+            $crate::core::reports::rpc_metric($crate::core::api::service_of(&client), stringify!($method))
+        });
+        $crate::core::api::call_named(metric, async move { client.$method(request).await })
     }};
 }
 
@@ -206,6 +222,47 @@ pub async fn call<T>(future: impl Future<Output = Result<tonic::Response<T>, Sta
         Ok(Err(status)) => Err(status.into()),
         Err(_) => Err(Problem::new(Code::DeadlineExceeded, "The instance took too long to answer.")),
     }
+}
+
+/// [`call`], timed as `metric` ("rpc:Service/Method"), counting the failures
+/// that happened inside the instance (not the ones on the way to it) as
+/// `rpc_internal` at that method.
+pub async fn call_named<T>(
+    metric: &'static str,
+    future: impl Future<Output = Result<tonic::Response<T>, Status>>,
+) -> Result<T, Problem> {
+    if !reports::enabled() {
+        return call(future).await;
+    }
+    let started = std::time::Instant::now();
+    let result = match tokio::time::timeout(CALL_TIMEOUT, future).await {
+        Ok(Ok(response)) => Ok(response.into_inner()),
+        Ok(Err(status)) => {
+            if broke_inside(&status) {
+                reports::error("rpc_internal", metric.strip_prefix("rpc:").unwrap_or(metric));
+            }
+            Err(status.into())
+        }
+        Err(_) => Err(Problem::new(Code::DeadlineExceeded, "The instance took too long to answer.")),
+    };
+    reports::timing(metric, started.elapsed());
+    result
+}
+
+/// A failure inside the instance: Internal, DataLoss, or Unknown when it
+/// isn't the connection failing.
+fn broke_inside(status: &Status) -> bool {
+    match status.code() {
+        Code::Internal | Code::DataLoss => true,
+        Code::Unknown => !unreachable(status),
+        _ => false,
+    }
+}
+
+/// The instance couldn't be reached at all.
+fn unreachable(status: &Status) -> bool {
+    let message = status.message();
+    message.contains("error trying to connect") || message.contains("tcp connect") || message.contains("dns error")
 }
 
 /// The address of an instance as people type it ("fuwa.chat",

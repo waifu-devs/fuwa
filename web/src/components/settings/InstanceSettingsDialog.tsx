@@ -227,7 +227,7 @@ export function InstanceSettingsDialog({
               label: "Privacy",
               icon: ShieldCheckIcon,
               description: "What this instance tells Waifu Devs.",
-              settings: [{ id: "telemetry", label: "Anonymous usage signal", keywords: "telemetry analytics" }],
+              settings: [{ id: "telemetry", label: "Anonymous usage signal and reports", keywords: "telemetry analytics errors performance" }],
             },
             CALL_SECTION,
           ],
@@ -586,15 +586,15 @@ export function InstanceSettingsDialog({
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
           {tab === "privacy" && (
             <>
-              <Setting id="telemetry" title="Anonymous usage signal" defaultLabel={defaults.telemetry ? "on" : "off"} {...resetter("telemetry")}>
+              <Setting id="telemetry" title="Anonymous usage signal and reports" defaultLabel={defaults.telemetry ? "on" : "off"} {...resetter("telemetry")}>
                 <Toggle
                   checked={draft.telemetry}
                   onChange={(telemetry) => patch((d) => (d.telemetry = telemetry))}
-                  label="Send it once a day"
-                  hint="Helps Waifu Devs see how fuwa is used. Counts only: no names, messages, ids or addresses."
+                  label="Send the usage signal daily and error reports hourly"
+                  hint="Helps Waifu Devs see how fuwa is used and fix what breaks. Counts only: no names, messages, ids or addresses. Off, apps on this instance send no reports either."
                 />
                 <ul className="grid gap-1.5 text-xs text-muted-foreground sm:grid-cols-2">
-                  {["How many accounts, servers, channels and messages", "Storage used, in bytes", "Which account and server options are on", "fuwa version, OS and a random install id"].map(
+                  {["How many accounts, servers, channels and messages", "Storage used, in bytes", "Which account and server options are on", "fuwa version, OS and a random install id", "Kinds of errors and where, and how long requests took (server and apps)"].map(
                     (line, n) => (
                       <motion.li
                         key={line}

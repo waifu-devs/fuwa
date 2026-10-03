@@ -16,7 +16,7 @@ import { hasIn } from "@/lib/permissions";
 import { setTitle } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceFlags } from "./parts";
-import { CameraButton, LiveBadge, PopOutButton, RecordButton, ScreenButton, TileMedia } from "./Video";
+import { CameraButton, LiveBadge, PopOutButton, RecordButton, ScreenButton, ScreenSoundButton, TileMedia } from "./Video";
 import { RecordingsButton } from "./Recordings";
 import { useVoiceIn } from "./VoiceUsers";
 
@@ -265,6 +265,7 @@ function ScreenTile({ instanceKey, serverId, state, self }: { instanceKey: strin
         </span>
       </div>
       <PopOutButton popped={{ instance: instanceKey, userId: state.userId, serverId, screen: true }} name={name} className="absolute top-2 right-2" />
+      <ScreenSoundButton userId={state.userId} self={self} className="absolute top-2 left-2" />
     </motion.li>
   );
 }

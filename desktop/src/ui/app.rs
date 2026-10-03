@@ -839,6 +839,7 @@ impl FuwaApp {
         if self.settings.is_some() {
             return;
         }
+        crate::core::reports::used("settings.open");
         let core = self.core.clone();
         let view = cx.new(|cx| SettingsView::new(core, window, cx));
         self._subscriptions.push(cx.subscribe_in(

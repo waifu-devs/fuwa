@@ -21,7 +21,8 @@ const CELL: f32 = 336.0;
 /// A picture on its way up.
 struct Pending {
     id: u64,
-    path: PathBuf,
+    /// What it'll look like, once it's been checked and shrunk.
+    preview: Option<Arc<Image>>,
     name: String,
     /// The emoji it became, kept out of the list while the check shows.
     done: Option<String>,
@@ -65,6 +66,115 @@ impl Emojis {
         };
         (emojis, subscriptions)
     }
+}
+
+/// The biggest file taken as an emoji, checked before it's read.
+const MAX_BYTES: u64 = 10 * 1024 * 1024;
+/// The longest side a picture may have before it's decoded.
+const MAX_SIDE: u32 = 4096;
+/// How many pixels a moving picture may hold over all its frames (about 256 MB decoded).
+const MAX_FRAME_PIXELS: u64 = 64 * 1024 * 1024;
+
+fn be16(b: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from(u16::from_be_bytes(b.get(at..at + 2)?.try_into().ok()?)))
+}
+
+fn le16(b: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from(u16::from_le_bytes(b.get(at..at + 2)?.try_into().ok()?)))
+}
+
+fn le24(b: &[u8], at: usize) -> Option<u32> {
+    let x = b.get(at..at + 3)?;
+    Some(u32::from(x[0]) | u32::from(x[1]) << 8 | u32::from(x[2]) << 16)
+}
+
+/// A picture's size (and frames, for a GIF) read from its header, so a
+/// picture made to be huge once decoded is refused before it is.
+fn header_size(b: &[u8], kind: &str) -> Option<(u32, u32, u64)> {
+    match kind {
+        "image/png" => {
+            (b.get(..8)? == b"\x89PNG\r\n\x1a\n" && b.get(12..16)? == b"IHDR").then_some(())?;
+            Some((be16(b, 16)? << 16 | be16(b, 18)?, be16(b, 20)? << 16 | be16(b, 22)?, 1))
+        }
+        "image/jpeg" => {
+            let mut at = 2;
+            while at + 9 < b.len() {
+                if b[at] != 0xff {
+                    return None;
+                }
+                let marker = b[at + 1];
+                if marker == 0xff {
+                    at += 1;
+                    continue;
+                }
+                if (0xc0..=0xcf).contains(&marker) && ![0xc4, 0xc8, 0xcc].contains(&marker) {
+                    return Some((be16(b, at + 7)?, be16(b, at + 5)?, 1));
+                }
+                at += 2 + be16(b, at + 2)? as usize;
+            }
+            None
+        }
+        "image/webp" => {
+            (b.get(..4)? == b"RIFF" && b.get(8..12)? == b"WEBP").then_some(())?;
+            match b.get(12..16)? {
+                b"VP8 " => Some((le16(b, 26)? & 0x3fff, le16(b, 28)? & 0x3fff, 1)),
+                b"VP8L" => {
+                    let x = b.get(21..25)?;
+                    let w = 1 + (u32::from(x[0]) | (u32::from(x[1]) & 0x3f) << 8);
+                    let h = 1 + (u32::from(x[1]) >> 6 | u32::from(x[2]) << 2 | (u32::from(x[3]) & 0xf) << 10);
+                    Some((w, h, 1))
+                }
+                b"VP8X" => Some((1 + le24(b, 24)?, 1 + le24(b, 27)?, 1)),
+                _ => None,
+            }
+        }
+        "image/gif" => {
+            (b.get(..4)? == b"GIF8").then_some(())?;
+            let (w, h) = (le16(b, 6)?, le16(b, 8)?);
+            let mut at = 13 + if b[10] & 0x80 != 0 { 3 << ((b[10] & 7) + 1) } else { 0 };
+            let skip_blocks = |mut at: usize| -> Option<usize> {
+                loop {
+                    let len = *b.get(at)? as usize;
+                    at += 1 + len;
+                    if len == 0 {
+                        return Some(at);
+                    }
+                }
+            };
+            let mut frames = 0u64;
+            loop {
+                match *b.get(at)? {
+                    0x21 => at = skip_blocks(at + 2)?,
+                    0x2c => {
+                        frames += 1;
+                        let flags = *b.get(at + 9)?;
+                        at += 10 + if flags & 0x80 != 0 { 3 << ((flags & 7) + 1) } else { 0 };
+                        at = skip_blocks(at + 1)?;
+                    }
+                    0x3b => return Some((w, h, frames.max(1))),
+                    _ => return None,
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Why a picture can't be an emoji, judged from its header alone.
+fn too_big(bytes: &[u8], kind: &str) -> Option<String> {
+    let Some((w, h, frames)) = header_size(bytes, kind) else {
+        return Some("That picture couldn't be read.".into());
+    };
+    if w == 0 || h == 0 {
+        return Some("That picture couldn't be read.".into());
+    }
+    if w > MAX_SIDE || h > MAX_SIDE {
+        return Some(format!("{w}×{h} is too big; {MAX_SIDE} a side at most."));
+    }
+    if frames * u64::from(w) * u64::from(h) > MAX_FRAME_PIXELS {
+        return Some("That moving picture has too many frames for its size.".into());
+    }
+    None
 }
 
 /// A picture made at most [`SIDE`] pixels on its longest side, as a PNG. GIFs
@@ -174,43 +284,78 @@ impl ServerSettingsView {
             taken.insert(name.to_lowercase());
             let id = self.emojis.next;
             self.emojis.next += 1;
-            self.emojis.pending.push(Pending { id, path: path.clone(), name: name.clone(), done: None, error: None });
+            self.emojis.pending.push(Pending { id, preview: None, name: name.clone(), done: None, error: None });
 
-            let (core, key, sid, svg) = (self.core.clone(), self.key.clone(), self.server.clone(), cx.svg_renderer());
+            // First read, check and shrink it; only then is it shown or sent.
+            let svg = cx.svg_renderer();
             self.run(
                 cx,
                 async move {
-                    let bytes = tokio::fs::read(&path).await.map_err(|err| {
+                    let unreadable = |err: std::io::Error| {
                         Problem::new(tonic::Code::NotFound, format!("Couldn't read that file: {err}"))
-                    })?;
-                    let (bytes, kind) = tokio::task::spawn_blocking(move || shrink(bytes, kind, svg))
+                    };
+                    let size = tokio::fs::metadata(&path).await.map_err(unreadable)?.len();
+                    if size > MAX_BYTES {
+                        return Err(Problem::new(
+                            tonic::Code::InvalidArgument,
+                            format!("That file is over {} MB.", MAX_BYTES / (1024 * 1024)),
+                        ));
+                    }
+                    let bytes = tokio::fs::read(&path).await.map_err(unreadable)?;
+                    if let Some(why) = too_big(&bytes, kind) {
+                        return Err(Problem::new(tonic::Code::InvalidArgument, why));
+                    }
+                    tokio::task::spawn_blocking(move || shrink(bytes, kind, svg))
                         .await
                         .map_err(|_| Problem::new(tonic::Code::Internal, "That picture couldn't be read."))?
-                        .map_err(|msg| Problem::new(tonic::Code::InvalidArgument, msg))?;
-                    core.add_emoji(&key, &sid, &name, kind, bytes).await
+                        .map_err(|msg| Problem::new(tonic::Code::InvalidArgument, msg))
                 },
                 move |this, result, cx| {
-                    let Some(p) = this.emojis.pending.iter_mut().find(|p| p.id == id) else { return };
                     match result {
-                        Ok(emoji) => {
-                            p.done = Some(emoji.id);
-                            // The check shows for a moment, then the emoji takes its place.
-                            cx.spawn(async move |this, cx| {
-                                cx.background_executor().timer(Duration::from_millis(600)).await;
-                                let _ = this.update(cx, |this, cx| {
-                                    this.emojis.pending.retain(|p| p.id != id);
-                                    cx.notify();
-                                });
-                            })
-                            .detach();
+                        Ok((bytes, kind)) => this.send_emoji(id, name, bytes, kind, cx),
+                        Err(err) => {
+                            if let Some(p) = this.emojis.pending.iter_mut().find(|p| p.id == id) {
+                                p.error = Some(err.message);
+                            }
                         }
-                        Err(err) => p.error = Some(err.message),
                     }
                     cx.notify();
                 },
             );
         }
         cx.notify();
+    }
+
+    fn send_emoji(&mut self, id: u64, name: String, bytes: Vec<u8>, kind: &'static str, cx: &mut Context<Self>) {
+        let format = match kind {
+            "image/gif" => ImageFormat::Gif,
+            "image/png" => ImageFormat::Png,
+            "image/jpeg" => ImageFormat::Jpeg,
+            _ => ImageFormat::Webp,
+        };
+        if let Some(p) = self.emojis.pending.iter_mut().find(|p| p.id == id) {
+            p.preview = Some(Arc::new(Image::from_bytes(format, bytes.clone())));
+        }
+        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
+        self.run(cx, async move { core.add_emoji(&key, &sid, &name, kind, bytes).await }, move |this, result, cx| {
+            let Some(p) = this.emojis.pending.iter_mut().find(|p| p.id == id) else { return };
+            match result {
+                Ok(emoji) => {
+                    p.done = Some(emoji.id);
+                    // The check shows for a moment, then the emoji takes its place.
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(Duration::from_millis(600)).await;
+                        let _ = this.update(cx, |this, cx| {
+                            this.emojis.pending.retain(|p| p.id != id);
+                            cx.notify();
+                        });
+                    })
+                    .detach();
+                }
+                Err(err) => p.error = Some(err.message),
+            }
+            cx.notify();
+        });
     }
 
     fn start_rename(&mut self, emoji: &pb::Emoji, window: &mut Window, cx: &mut Context<Self>) {
@@ -499,7 +644,17 @@ impl ServerSettingsView {
                 .border_color(if failed { alpha(p.destructive, 0.5) } else { p.border.into() })
                 .when(failed, |el| el.bg(alpha(p.destructive, 0.05)))
                 .children(bar)
-                .child(img(pending.path.clone()).size(px(40.0)).flex_none().object_fit(ObjectFit::Contain))
+                .child(match pending.preview.clone() {
+                    Some(picture) => {
+                        img(picture).size(px(40.0)).flex_none().object_fit(ObjectFit::Contain).into_any_element()
+                    }
+                    None => div()
+                        .size(px(40.0))
+                        .flex_none()
+                        .rounded(corner(10.0))
+                        .bg(alpha(p.muted, 0.6))
+                        .into_any_element(),
+                })
                 .child(
                     div()
                         .relative()
@@ -673,5 +828,52 @@ impl ServerSettingsView {
             8.0,
         )
         .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gif(w: u16, h: u16, frames: usize) -> Vec<u8> {
+        let mut b = b"GIF89a".to_vec();
+        b.extend_from_slice(&w.to_le_bytes());
+        b.extend_from_slice(&h.to_le_bytes());
+        b.extend_from_slice(&[0, 0, 0]);
+        // A comment, then the frames: each a descriptor, a code size and one tiny block.
+        b.extend_from_slice(&[0x21, 0xfe, 2, b'h', b'i', 0]);
+        for _ in 0..frames {
+            b.push(0x2c);
+            b.extend_from_slice(&[0, 0, 0, 0]);
+            b.extend_from_slice(&w.to_le_bytes());
+            b.extend_from_slice(&h.to_le_bytes());
+            b.extend_from_slice(&[0, 2, 1, 0x44, 0]);
+        }
+        b.push(0x3b);
+        b
+    }
+
+    #[test]
+    fn pictures_are_sized_from_their_headers() {
+        let png = crate::ui::png::png(300, 20, &vec![0; 300 * 20 * 4], false);
+        assert_eq!(header_size(&png, "image/png"), Some((300, 20, 1)));
+
+        let mut jpeg = vec![0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0];
+        jpeg.extend_from_slice(&[0xff, 0xc0, 0, 17, 8, 0x01, 0x2c, 0x02, 0x58, 3]);
+        jpeg.extend_from_slice(&[0; 12]);
+        assert_eq!(header_size(&jpeg, "image/jpeg"), Some((600, 300, 1)));
+
+        assert_eq!(header_size(&gif(64, 32, 3), "image/gif"), Some((64, 32, 3)));
+        assert_eq!(header_size(b"nonsense at all", "image/png"), None);
+    }
+
+    #[test]
+    fn huge_pictures_are_refused_before_decoding() {
+        assert!(too_big(&gif(128, 128, 10), "image/gif").is_none());
+        assert!(too_big(&gif(2048, 2048, 40), "image/gif").is_some(), "too many big frames");
+        let mut png = crate::ui::png::png(1, 1, &[0; 4], false);
+        png[16..20].copy_from_slice(&50_000u32.to_be_bytes());
+        assert!(too_big(&png, "image/png").is_some(), "a header claiming 50000 pixels wide");
+        assert!(too_big(b"GIF89a", "image/gif").is_some(), "cut short");
     }
 }

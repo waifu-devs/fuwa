@@ -6,8 +6,9 @@ import { dmEngine } from "@/e2ee/engine";
 import { toFuwaError, type FuwaError } from "@/fuwa/errors";
 import { engine } from "@/fuwa/sync";
 import { store } from "@/fuwa/store";
-import { getPrefs, subscribePrefs } from "@/lib/prefs";
+import { getPrefs, setPrefs, subscribePrefs } from "@/lib/prefs";
 import { cue } from "@/lib/sounds";
+import { reportTiming, reportUsage } from "@/lib/reports";
 import { toast } from "@/lib/ui";
 import { Mic, micProblem, Speakers } from "./audio";
 import { canEncryptCalls, encryptedConfig, FrameCrypto } from "./frames";
@@ -20,6 +21,7 @@ import {
   getVideos,
   onWantsChange,
   openCamera,
+  isScreen,
   openScreen,
   ownerOf,
   SCREEN_ENCODINGS,
@@ -83,6 +85,11 @@ class Session {
   private video: RTCRtpTransceiver | null = null;
   private screen: MediaStreamTrack | null = null;
   private screenVideo: RTCRtpTransceiver | null = null;
+  /** The shared screen's sound, and its place in the connection. */
+  private screenAudio: MediaStreamTrack | null = null;
+  private screenSound: RTCRtpTransceiver | null = null;
+  /** Shared screens whose sound is coming in, by feed. */
+  private screenFeeds = new Set<string>();
   private recorder: MediaRecorder | null = null;
   /** The channel doesn't allow recording (no RECORD there). */
   recordSuppressed = false;
@@ -99,6 +106,8 @@ class Session {
   private secretPoll: ReturnType<typeof setInterval> | null = null;
   private unwatch: (() => void) | null = null;
   private broken: ReturnType<typeof setTimeout> | null = null;
+  /** When joining (or joining again) started, for anonymous reports of how long it takes. */
+  private waitingSince = performance.now();
   private connecting: Promise<void> | null = null;
   private attempt = 0;
   private stopped = false;
@@ -110,6 +119,8 @@ class Session {
     this.me = store.get().instances[target.instance]?.me?.id ?? "";
     this.speakers = new Speakers(
       (userId) => {
+        // A shared screen's sound has its own volume, and can be turned off.
+        if (isScreen(userId) && getCalls().quietScreens[ownerOf(userId)]) return 0;
         const p = getPrefs();
         return (p.userVolumes[`${target.instance}/${userId}`] ?? 100) / 100;
       },
@@ -127,7 +138,7 @@ class Session {
     const settings = await this.api.calls.getCallSettings({});
     if (!settings.enabled) throw new Error("Calls are switched off on this instance.");
     this.settings = settings;
-    setCalls(() => ({ serverRecordings: settings.recordings }));
+    setCalls(() => ({ serverRecordings: settings.recordings, screenSoundOffered: settings.screenSound }));
     if (this.target.kind === "dm") {
       if (!canEncryptCalls()) throw new Error("This browser can't encrypt calls. Try a recent Chrome, Edge, Firefox or Safari.");
       const dms = dmEngine(this.target.instance);
@@ -231,6 +242,15 @@ class Session {
     this.frames?.send(screenVideo.sender, this.me, "video");
     preferVp8(screenVideo);
     if (this.screen) void screenVideo.sender.replaceTrack(this.screen).catch(() => {});
+    // And its sound, the second audio track (where the instance takes one):
+    // empty until a share brings sound, and nobody gets it until then.
+    if (this.settings?.screenSound) {
+      const screenSound = pc.addTransceiver("audio", { direction: "sendonly", sendEncodings: [{ maxBitrate: 128_000 }] });
+      this.screenSound = screenSound;
+      this.frames?.send(screenSound.sender, this.me);
+      preferOpus(screenSound);
+      if (this.screenAudio) void screenSound.sender.replaceTrack(this.screenAudio).catch(() => {});
+    }
     const channel = pc.createDataChannel(CHANNEL, { ordered: true });
     this.channel = channel;
     channel.onmessage = (e) => void this.onSignal(pc, e.data);
@@ -247,6 +267,14 @@ class Session {
         this.sayLayers();
         return;
       }
+      if (isScreen(userId)) {
+        // A shared screen's sound: beside its sharer's voice, never mixed into it.
+        this.frames?.receive(e.receiver, ownerOf(userId));
+        this.speakers.add(userId, new MediaStream([e.track]));
+        this.screenFeeds.add(userId);
+        setCalls((s) => ({ screenSounds: { ...s.screenSounds, [ownerOf(userId)]: true } }));
+        return;
+      }
       this.frames?.receive(e.receiver, userId);
       this.speakers.add(userId, new MediaStream([e.track]));
       if (!this.heard.has(userId) && getCalls().call?.status === "connected") cue("someoneJoined");
@@ -259,6 +287,9 @@ class Session {
         if (this.broken) clearTimeout(this.broken);
         this.broken = null;
         const before = getCalls().call;
+        if (before?.status === "connecting" || before?.status === "reconnecting") {
+          reportTiming(before.status === "connecting" ? "call.connect" : "call.reconnect", performance.now() - this.waitingSince);
+        }
         setCalls((s) => ({ call: s.call && { ...s.call, status: "connected", since: s.call.since ?? Date.now() } }));
         if (before?.status === "connecting") cue("connect");
       } else if (state === "failed") {
@@ -291,6 +322,10 @@ class Session {
   private trackGone(userId: string, stream: MediaStream, track: MediaStreamTrack) {
     if (track.kind === "video") {
       if (getVideos().remote[userId]?.track === track) setRemoteVideo(userId, null);
+      return;
+    }
+    if (isScreen(userId)) {
+      this.dropScreenSound(userId);
       return;
     }
     if (stream.getAudioTracks().length) return;
@@ -374,22 +409,60 @@ class Session {
     }
   }
 
-  /** Shares a screen or stops, the same way as the camera. */
-  async setScreen(on: boolean) {
+  private dropScreenSound(feed: string) {
+    if (!this.screenFeeds.delete(feed)) return;
+    this.speakers.remove(feed);
+    this.setSpeaking(feed, false);
+    setCalls((s) => {
+      const { [ownerOf(feed)]: _, ...rest } = s.screenSounds;
+      return { screenSounds: rest };
+    });
+  }
+
+  /**
+   * Shares a screen or stops, the same way as the camera. With `sound`, its
+   * sound goes too, where the browser and the instance can; where they
+   * can't, it says why rather than sharing in silence without a word.
+   */
+  async setScreen(on: boolean, sound = false) {
     if (on && !this.screen) {
-      const track = await openScreen();
-      if (this.stopped || !getCalls().selfStream) return track.stop();
-      this.screen = track;
+      const offered = !!this.settings?.screenSound;
+      const shared = await openScreen(sound && offered);
+      if (this.stopped || !getCalls().selfStream) {
+        shared.video.stop();
+        shared.audio?.stop();
+        return;
+      }
+      this.screen = shared.video;
+      this.screenAudio = shared.audio;
+      const track = shared.video;
       // Stopped in the browser's own "Stop sharing" bar.
       track.onended = () => {
         if (this.screen === track) void setScreen(false);
       };
+      if (sound && !offered) toast("This server passes the picture on, not the sound: it needs a newer fuwa for that.");
+      else if (shared.silent) toast(shared.silent);
+      if (shared.audio) reportUsage("call.screen_sound");
+      else if (shared.silent) reportUsage("call.screen_sound_missing");
     } else if (!on && this.screen) {
       this.screen.stop();
       this.screen = null;
+      this.screenAudio?.stop();
+      this.screenAudio = null;
     }
     setLocalScreen(this.screen);
-    await this.screenVideo?.sender.replaceTrack(this.screen).catch(() => {});
+    setCalls(() => ({ screenSound: this.screenAudio ? this.screenAudio.enabled : null }));
+    await Promise.all([
+      this.screenVideo?.sender.replaceTrack(this.screen).catch(() => {}),
+      this.screenSound?.sender.replaceTrack(this.screenAudio).catch(() => {}),
+    ]);
+  }
+
+  /** Turns your shared screen's sound off or back on, without stopping the share. */
+  setScreenSound(on: boolean) {
+    if (!this.screenAudio) return;
+    this.screenAudio.enabled = on;
+    setCalls(() => ({ screenSound: on }));
   }
 
   private async onSignal(pc: RTCPeerConnection, data: unknown) {
@@ -434,6 +507,7 @@ class Session {
     if (this.broken) clearTimeout(this.broken);
     this.broken = null;
     setCalls((s) => ({ call: s.call && { ...s.call, status: "reconnecting" } }));
+    this.waitingSince = performance.now();
     const tryAgain = async (delay: number) => {
       if (this.stopped) return;
       try {
@@ -494,9 +568,11 @@ class Session {
   private teardown() {
     for (const id of [...this.heard]) this.speakers.remove(id);
     this.heard.clear();
+    for (const feed of [...this.screenFeeds]) this.dropScreenSound(feed);
     clearRemoteVideos();
     this.video = null;
     this.screenVideo = null;
+    this.screenSound = null;
     this.channel?.close();
     this.pc?.close();
     this.channel = null;
@@ -523,6 +599,8 @@ class Session {
     setLocalVideo(null);
     this.screen?.stop();
     this.screen = null;
+    this.screenAudio?.stop();
+    this.screenAudio = null;
     setLocalScreen(null);
     this.speakers.close();
     this.frames?.close();
@@ -608,7 +686,8 @@ export async function joinCall(target: CallTarget) {
   if (session) await hangUp(null);
   const s = new Session(target);
   session = s;
-  setCalls(() => ({ call: { target, status: "connecting", since: null, problem: null }, speaking: {}, ended: null, selfVideo: false, selfStream: false, selfRecord: false, serverRecord: false }));
+  reportUsage(target.kind === "voice" ? "call.join_voice" : "call.join_dm");
+  setCalls(() => ({ call: { target, status: "connecting", since: null, problem: null }, speaking: {}, ended: null, selfVideo: false, selfStream: false, selfRecord: false, serverRecord: false, screenSound: null, screenSounds: {}, quietScreens: {} }));
   try {
     await s.start();
   } catch (err) {
@@ -624,7 +703,7 @@ export async function hangUp(why: string | null, tell = true) {
   const s = session;
   if (!s) return;
   session = null;
-  setCalls(() => ({ call: null, speaking: {}, ended: why, selfVideo: false, selfStream: false, selfRecord: false, serverRecord: false }));
+  setCalls(() => ({ call: null, speaking: {}, ended: why, selfVideo: false, selfStream: false, selfRecord: false, serverRecord: false, screenSound: null, screenSounds: {}, quietScreens: {} }));
   cue("disconnect");
   if (why) toast(why);
   await s.stop(tell);
@@ -654,6 +733,7 @@ export async function setCamera(on: boolean) {
   const s = session;
   if (!s || getCalls().selfVideo === on) return;
   if (on && s.videoSuppressed) return void toast("You can't turn your camera on in this channel.");
+  if (on) reportUsage("call.camera");
   setCalls(() => ({ selfVideo: on }));
   try {
     await s.setCamera(on);
@@ -672,9 +752,10 @@ export async function setScreen(on: boolean) {
   const s = session;
   if (!s || getCalls().selfStream === on) return;
   if (on && s.videoSuppressed) return void toast("You can't share your screen in this channel.");
+  if (on) reportUsage("call.screen_share");
   setCalls(() => ({ selfStream: on }));
   try {
-    await s.setScreen(on);
+    await s.setScreen(on, getPrefs().shareSound);
     cue(on ? "unmute" : "mute");
   } catch (err) {
     setCalls(() => ({ selfStream: false }));
@@ -685,6 +766,29 @@ export async function setScreen(on: boolean) {
 }
 
 export const toggleScreen = () => setScreen(!getCalls().selfStream);
+
+/** Starts sharing your screen, with its sound or without (and remembers which you like). */
+export async function shareScreen(sound: boolean) {
+  setPrefs({ shareSound: sound });
+  await setScreen(true);
+}
+
+/** Turns your shared screen's sound off, or back on, while you share. */
+export function setScreenSound(on: boolean) {
+  const s = session;
+  if (!s || getCalls().screenSound === null || getCalls().screenSound === on) return;
+  s.setScreenSound(on);
+  cue(on ? "unmute" : "mute");
+}
+
+/** Turns someone's shared screen's sound off for you, or back on. */
+export function toggleScreenQuiet(userId: string) {
+  setCalls((s) => {
+    const { [userId]: was, ...rest } = s.quietScreens;
+    return { quietScreens: was ? rest : { ...rest, [userId]: true } };
+  });
+  session?.applyVolumes();
+}
 
 /** Starts or stops recording the call you're in, on this device. Everyone in it sees that you are. */
 export function setRecording(on: boolean) {

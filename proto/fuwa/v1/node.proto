@@ -4,13 +4,73 @@ package fuwa.v1;
 
 import "fuwa/v1/types.proto";
 
-// What this instance is and what it lets clients do. Needs no account.
+// What this instance is and what it lets clients do. GetNode needs no account.
 service NodeService {
   rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+  // An app's anonymous report of what went wrong and what was slow since its
+  // last one. The instance adds it to its own counts and sends the total to
+  // Waifu Devs with its hourly report, so an app never talks to anyone but its
+  // instance. Needs a signed-in account, only so one account can send at most
+  // one a minute; who sent it is never kept or passed on. Taken and dropped
+  // while the instance's telemetry (Node.telemetry) is off.
+  rpc SendReport(SendReportRequest) returns (SendReportResponse);
 }
 
 message GetNodeRequest {}
 
 message GetNodeResponse {
   Node node = 1;
+}
+
+message SendReportRequest {
+  AppReport report = 1;
+}
+
+message SendReportResponse {}
+
+// Counts, never content: no message text, file names, names, ids or
+// addresses. Labels are short and plain (letters, digits and `_.:/#@-`);
+// anything else is refused.
+message AppReport {
+  // "web" or "desktop".
+  string app = 1;
+  // The app's version, such as "0.4.2".
+  string version = 2;
+  // What it runs in: a browser family ("chromium", "firefox", "safari",
+  // "other") for the web app, "native" for the desktop app.
+  string platform = 3;
+  // The OS family: "windows", "macos", "linux", "android", "ios",
+  // "chromeos" or "other".
+  string os = 4;
+  // Up to 64 of each.
+  repeated ReportError errors = 5;
+  repeated ReportTiming timings = 6;
+  repeated ReportUsage usage = 7;
+}
+
+// One kind of failure in one place, and how many times it happened.
+message ReportError {
+  // What kind, such as "TypeError", "panic" or "rpc_internal".
+  string kind = 1;
+  // Where in the app, such as "settings/roles" or "chat.send".
+  string place = 2;
+  uint32 count = 3;
+}
+
+// How long something took, as counts per bucket. Bucket i holds durations up
+// to REPORT_BOUNDS_MS[i] milliseconds (5, 10, 25, 50, 100, 250, 500, 1000,
+// 2500, 5000, 10000, 30000), and the 13th holds anything longer.
+message ReportTiming {
+  // Such as "startup", "catch_up", "call.connect" or "frame.long".
+  string metric = 1;
+  repeated uint32 buckets = 2;
+  // All the durations added up, in milliseconds.
+  uint64 sum_ms = 3;
+}
+
+// How many times a feature was used.
+message ReportUsage {
+  // Such as "message.send" or "call.screen_share".
+  string feature = 1;
+  uint32 count = 2;
 }

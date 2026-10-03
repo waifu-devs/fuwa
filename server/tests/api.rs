@@ -5447,3 +5447,36 @@ async fn https_instances_ask_browsers_to_keep_to_https() {
     assert_eq!(home.headers()["strict-transport-security"], "max-age=63072000");
     https.stop().await;
 }
+
+#[tokio::test]
+async fn apps_send_reports_through_their_instance() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let report = || pb::SendReportRequest {
+        report: Some(pb::AppReport {
+            app: "web".into(),
+            version: "0.1.0".into(),
+            platform: "firefox".into(),
+            os: "linux".into(),
+            errors: vec![pb::ReportError { kind: "TypeError".into(), place: "chat".into(), count: 1 }],
+            timings: vec![pb::ReportTiming { metric: "startup".into(), buckets: vec![0; 13], sum_ms: 0 }],
+            usage: vec![pb::ReportUsage { feature: "message.send".into(), count: 4 }],
+        }),
+    };
+
+    // Only signed-in apps, so each account can be held to one a minute.
+    let refused = c.node.send_report(report()).await.unwrap_err();
+    assert_eq!(refused.code(), tonic::Code::Unauthenticated);
+
+    let (token, _, _) = sign_up(&mut c, "reporter").await;
+    let mut bad = report();
+    bad.report.as_mut().unwrap().errors[0].place = "a message body with spaces".into();
+    assert_eq!(c.node.send_report(authed(&token, bad)).await.unwrap_err().code(), tonic::Code::InvalidArgument);
+
+    // Telemetry is off here: taken, then dropped.
+    c.node.send_report(authed(&token, report())).await.unwrap();
+    let again = c.node.send_report(authed(&token, report())).await.unwrap_err();
+    assert_eq!(again.code(), tonic::Code::ResourceExhausted);
+    instance.stop().await;
+}

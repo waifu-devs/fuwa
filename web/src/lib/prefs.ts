@@ -64,6 +64,8 @@ export type Prefs = {
   /** Extra shortcuts someone added, on top of the defaults. */
   customKeybinds: CustomKeybind[];
   developerMode: boolean;
+  /** Anonymous reports of errors and slow paths, sent to your instance (see lib/reports.ts). */
+  shareReports: boolean;
   /** Voice and audio. Device ids are this browser's; "" is the system default. */
   inputDevice: string;
   outputDevice: string;
@@ -89,6 +91,8 @@ export type Prefs = {
   popoutName: boolean;
   popoutGlow: boolean;
   popoutFit: PopoutFit;
+  /** Sharing a screen brings its sound too, where the browser can. */
+  shareSound: boolean;
 };
 
 const systemDark = () => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -122,6 +126,7 @@ export const DEFAULT_PREFS: Prefs = {
   keybinds: {},
   customKeybinds: [],
   developerMode: false,
+  shareReports: true,
   inputDevice: "",
   outputDevice: "",
   inputVolume: 100,
@@ -139,6 +144,7 @@ export const DEFAULT_PREFS: Prefs = {
   popoutName: true,
   popoutGlow: true,
   popoutFit: "cover",
+  shareSound: true,
 };
 
 /** The defaults on this device: the theme starts light or dark like the system. */
@@ -208,6 +214,7 @@ function sanitize(p: Prefs): Prefs {
       p.userVolumes && typeof p.userVolumes === "object"
         ? Object.fromEntries(Object.entries(p.userVolumes).filter(([, v]) => typeof v === "number" && v >= 0 && v <= 200))
         : {},
+    shareReports: p.shareReports !== false,
     keybinds: p.keybinds && typeof p.keybinds === "object" ? p.keybinds : {},
     customKeybinds: Array.isArray(p.customKeybinds)
       ? p.customKeybinds.filter((k) => typeof k?.id === "string" && typeof k.action === "string" && typeof k.combo === "string")
