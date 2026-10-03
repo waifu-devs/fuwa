@@ -70,6 +70,8 @@ export type DmState = {
   blocked: Record<string, string>;
   /** Conversations this device is still joining. */
   joining: Record<string, boolean>;
+  /** Whether each secure channel passes earlier messages on to people added later, as last heard. */
+  secureHistory: Record<string, boolean>;
   /** Calls going on in conversations, by conversation id. */
   calls: Record<string, DmCall>;
 };
@@ -87,6 +89,7 @@ export const emptyDms = (): DmState => ({
   verified: {},
   blocked: {},
   joining: {},
+  secureHistory: {},
   calls: {},
 });
 

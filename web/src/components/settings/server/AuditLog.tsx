@@ -106,6 +106,7 @@ const FIELD: Record<string, string> = {
   system_channel_id: "Join messages",
   topic: "Topic",
   encryption: "End-to-end encryption",
+  share_history: "Shares earlier messages",
   parent_id: "Category",
   position: "Position",
   slowmode_seconds: "Slow mode",

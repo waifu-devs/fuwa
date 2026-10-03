@@ -463,6 +463,23 @@ async fn a_secure_channel_follows_its_permissions() {
         .unwrap()
         .into_inner();
     assert!(info.group_info.is_empty());
+    // Sharing history is off until someone with Manage Channels turns it on;
+    // the setting goes in the log so devices read it in order.
+    let history = pb::SetSecureHistoryRequest { server_id: sid.clone(), channel_id: cid.clone(), share_history: true };
+    let refused = secure.set_secure_history(authed(&mika.token, history.clone())).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    let setting = secure.set_secure_history(authed(&juan.token, history)).await.unwrap().into_inner().record.unwrap();
+    assert_eq!((setting.kind, setting.share_history), (pb::SecureRecordKind::Settings as i32, true));
+    let state = secure
+        .get_secure_channel(authed(
+            &mika.token,
+            pb::GetSecureChannelRequest { server_id: sid.clone(), channel_id: cid.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(state.share_history);
+
     // Juan's device starts a new group and brings Mika's in.
     juan.device.forget(&cid).unwrap();
     mika.device.forget(&cid).unwrap();
@@ -493,7 +510,31 @@ async fn a_secure_channel_follows_its_permissions() {
         .into_inner()
         .record
         .unwrap();
-    assert_eq!((started.sequence, started.epoch), (marker.sequence + 1, 0));
+    assert_eq!((started.sequence, started.epoch), (setting.sequence + 1, 0));
+
+    // Right after its own commit with a welcome, Juan's device passes earlier
+    // messages on, once; the server takes it without reading it.
+    juan.device.process(&cid, &started.data, true, &permitted).unwrap();
+    let shared = juan.device.encrypt(&cid, b"earlier messages").unwrap();
+    let post = pb::PostSecureHistoryRequest { server_id: sid.clone(), channel_id: cid.clone(), message: shared };
+    let refused = secure.post_secure_history(authed(&mika.token, post.clone())).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    let history =
+        secure.post_secure_history(authed(&juan.token, post.clone())).await.unwrap().into_inner().record.unwrap();
+    assert_eq!(history.kind, pb::SecureRecordKind::History as i32);
+    let again = secure.post_secure_history(authed(&juan.token, post)).await.unwrap_err();
+    assert_eq!(again.code(), Code::FailedPrecondition);
+    let welcomes = secure
+        .list_secure_welcomes(authed(&mika.token, pb::ListSecureWelcomesRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .welcomes;
+    mika.device.join_from_welcome(&cid, &welcomes[0].data, &permitted).unwrap();
+    assert!(matches!(
+        mika.device.process(&cid, &history.data, false, &permitted).unwrap(),
+        Processed::Message { plaintext, .. } if plaintext == b"earlier messages"
+    ));
 
     // Deleting the channel takes everything it kept.
     channels

@@ -187,6 +187,11 @@ impl Device {
         self.0.encrypt(conversation_id, plaintext).map_err(thrown)
     }
 
+    /// Signs a payload with this device's signature key (see `verify`).
+    pub fn sign(&self, payload: &[u8]) -> Result<Vec<u8>> {
+        self.0.sign(payload).map_err(thrown)
+    }
+
     /// Opens the next record: `{ kind: "message", sender, plaintext }`,
     /// `{ kind: "commit", by?, added, removed, removedMe }`, `{ kind: "stale" }`
     /// or `{ kind: "own" }`.
@@ -214,6 +219,12 @@ impl Device {
 pub fn sha256(bytes: &[u8]) -> String {
     use sha2::Digest;
     sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Whether a device with this signing key signed the payload (`Device.sign`).
+#[wasm_bindgen]
+pub fn verify(signature_key: &[u8], payload: &[u8], signature: &[u8]) -> bool {
+    fuwa_e2ee::verify(signature_key, payload, signature)
 }
 
 /// A device's id from its signing key.
