@@ -260,7 +260,7 @@ impl ServerSettingsView {
                     this.error = None;
                     cx.notify();
                 },
-                |this, cx| this.save_welcome(cx),
+                |this, _, cx| this.save_welcome(cx),
             ));
         }
 

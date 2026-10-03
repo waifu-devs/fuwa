@@ -37,6 +37,7 @@ mod automod;
 mod channels;
 mod emoji;
 mod roles;
+pub(crate) use roles::switch;
 mod webhooks;
 mod welcome;
 
@@ -114,7 +115,9 @@ impl Page {
             }
             Page::Members => "Everyone here. Time out, kick or ban the people you rank above.",
             Page::Bans => "Who's kept out, and why.",
-            Page::AutoMod => "Rules that catch messages as they're sent: blocked words, mention spam and links.",
+            Page::AutoMod => {
+                "Rules that catch messages as they're sent: blocked words, mention spam, links and a smart filter."
+            }
             Page::AuditLog => "Every change people made here with their permissions.",
         }
     }
@@ -1409,7 +1412,7 @@ impl Render for ServerSettingsView {
 /// A member, what you may do to them, their roles (name and color), and whether they own the server.
 type MemberRow = (pb::Member, Vec<P>, Vec<(String, Option<u32>)>, bool);
 
-fn amber(p: &Palette) -> Hsla {
+pub(crate) fn amber(p: &Palette) -> Hsla {
     hsla(0.11, 0.9, if p.dark { 0.62 } else { 0.42 }, 1.0)
 }
 
@@ -1426,7 +1429,7 @@ fn row(p: &Palette) -> gpui_kit::Div {
         .border_color(p.border)
 }
 
-fn pill(text: &str, color: Hsla) -> gpui_kit::Div {
+pub(crate) fn pill(text: &str, color: Hsla) -> gpui_kit::Div {
     div()
         .flex_none()
         .px(px(7.0))
@@ -1446,14 +1449,14 @@ fn chip_text(text: String, fg: Hsla, bg: Hsla) -> gpui_kit::Div {
 }
 
 /// The floating "n changes not saved" bar, with Discard and Save.
-fn save_bar(
+pub(crate) fn save_bar<V: 'static>(
     id: &str,
     n: usize,
     saving: bool,
     p: &Palette,
-    cx: &mut Context<ServerSettingsView>,
-    discard: impl Fn(&mut ServerSettingsView, &mut Window, &mut Context<ServerSettingsView>) + 'static,
-    save: impl Fn(&mut ServerSettingsView, &mut Context<ServerSettingsView>) + 'static,
+    cx: &mut Context<V>,
+    discard: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
+    save: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
 ) -> AnyElement {
     motion::rise(
         div()
@@ -1492,9 +1495,9 @@ fn save_bar(
                     p,
                 )
                 .when(saving, |el| el.opacity(0.6))
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_click(cx.listener(move |this, _, window, cx| {
                     if !saving {
-                        save(this, cx)
+                        save(this, window, cx)
                     }
                 })),
             ),
@@ -1506,14 +1509,14 @@ fn save_bar(
 }
 
 /// A circle that turns while something's on its way.
-fn spinner(id: impl Into<SharedString>, size: f32, window: &Window) -> AnyElement {
+pub(crate) fn spinner(id: impl Into<SharedString>, size: f32, window: &Window) -> AnyElement {
     motion::ambient(icon("loader-circle").size(px(size)), id.into(), Duration::from_millis(900), window, |el, t| {
         el.rotate(gpui_kit::radians(t * std::f32::consts::TAU))
     })
 }
 
 /// Grey bars that pulse while a list loads.
-fn shimmer_rows(n: usize, p: &Palette) -> impl IntoElement {
+pub(crate) fn shimmer_rows(n: usize, p: &Palette) -> impl IntoElement {
     use gpui_kit::{Animation, AnimationExt as _};
     let base = alpha(p.muted_foreground, 0.1);
     div().flex().flex_col().gap(px(8.0)).children((0..n).map(move |k| {
@@ -1595,7 +1598,7 @@ fn text_chips(
         .into_any_element()
 }
 
-fn chip(id: SharedString, label: &str, on: bool, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
+pub(crate) fn chip(id: SharedString, label: &str, on: bool, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
     let hover = mix(p.secondary, p.primary, 0.16);
     div()
         .id(id)

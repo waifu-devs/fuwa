@@ -369,12 +369,19 @@
     (added by username, removed by kicking), `server_settings/welcome.rs`
     the Welcome screen editor beside a preview drawn like the welcome
     dialog, `server_settings/automod.rs` the AutoMod rules (each tried with
-    `TestAutoModRule` as it's edited, before it's saved),
+    `TestAutoModRule` as it's edited, before it's saved; the Smart filter
+    picks one of the instance's providers, a level and "how sure" per label,
+    and pictures where the provider reads them),
     `server_settings/channels.rs` the Channels page (moved a place at a
     time with `core/arrange.rs`'s `step`, each one's name, topic, category
     and slow mode, and who can see and do what in it, saved as one
     `SetChannelPermissions`; the New button opens the app's new-channel
     dialog and stays in settings),
+    `instance_settings.rs` an instance's settings for its admins (the gear
+    by the instance's name; Privacy and Moderation so far, where the
+    providers servers' smart filters ask are set up and tried, over
+    `core/instance_admin.rs`; a cached view like server settings, sharing
+    its `save_bar`, `switch` and chips),
     `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),
