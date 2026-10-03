@@ -1,11 +1,13 @@
 import { FolderIcon, GripVerticalIcon, HashIcon, LoaderCircleIcon, LockIcon, PlusIcon, SnailIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
-import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { deleteChannel, reorderChannels, run, updateChannel } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
-import { CHANNEL_ICON, groupChannels } from "@/components/ChannelSidebar";
+import { CHANNEL_ICON } from "@/components/ChannelSidebar";
+import { useArrange } from "@/hooks/use-arrange";
+import { layoutOf, placements, step, type Layout } from "@/lib/arrange";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { SPRING } from "@/components/motion";
 import { Row, Segmented } from "@/components/settings/account/common";
@@ -31,30 +33,10 @@ import { cn } from "@/lib/utils";
 const SLOW = [0, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600];
 const slowLabel = (seconds: number) => (seconds ? formatDuration(seconds) : "Off");
 
-type Layout = { loose: string[]; categories: { id: string; children: string[] }[] };
-
-function layoutOf(channels: Channel[]): Layout {
-  const groups = groupChannels(channels);
-  return {
-    loose: groups[0]!.channels.map((c) => c.id),
-    categories: groups.slice(1).map((g) => ({ id: g.category!.id, children: g.channels.map((c) => c.id) })),
-  };
-}
-
-/** The layout as the server takes it: every channel once, in display order, each with its category. */
-function placements(layout: Layout) {
-  return [
-    ...layout.loose.map((channelId) => ({ channelId, parentId: "" })),
-    ...layout.categories.flatMap((c) => [{ channelId: c.id, parentId: "" }, ...c.children.map((channelId) => ({ channelId, parentId: c.id }))]),
-  ];
-}
-
-const same = (a: Layout, b: Layout) => JSON.stringify(placements(a)) === JSON.stringify(placements(b));
-
 /**
  * Every channel, dragged into order by its handle (or moved with the arrow
- * keys), and the chosen one's settings beside the list: name, topic,
- * category, slow mode, or deleting it.
+ * keys), into and out of categories, and the chosen one's settings beside the
+ * list: name, topic, category, slow mode, or deleting it.
  */
 export function Channels({ instanceKey, serverId, initial }: { instanceKey: string; serverId: string; initial?: string | null }) {
   const inst = useInstance(instanceKey);
@@ -62,18 +44,12 @@ export function Channels({ instanceKey, serverId, initial }: { instanceKey: stri
   const arrange = has(access, Permission.MANAGE_CHANNELS);
   const channels = useMemo(() => inst?.channels[serverId] ?? [], [inst?.channels, serverId]);
   const byId = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels]);
-  const [layout, setLayout] = useState(() => layoutOf(channels));
-  const latest = useRef(layout);
-  latest.current = layout;
-  const dragging = useRef(false);
-  const [selected, setSelected] = useState<string | null>(initial ?? layoutOf(channels).loose[0] ?? null);
+  const layout = useMemo(() => layoutOf(channels), [channels]);
+  const list = useRef<HTMLDivElement>(null);
+  const [selected, setSelected] = useState<string | null>(initial ?? layout.loose[0] ?? null);
   const [creating, setCreating] = useState<string | null>(null);
   const editor = useRef<HTMLDivElement>(null);
 
-  // Follow changes from elsewhere, except mid-drag.
-  useEffect(() => {
-    if (!dragging.current) setLayout(layoutOf(channels));
-  }, [channels]);
   useEffect(() => {
     if (initial) setSelected(initial);
   }, [initial]);
@@ -81,45 +57,15 @@ export function Channels({ instanceKey, serverId, initial }: { instanceKey: stri
     if (selected && !byId.has(selected)) setSelected(null);
   }, [byId, selected]);
 
-  const commit = (next: Layout) => {
-    dragging.current = false;
-    const stored = layoutOf(channels);
-    if (same(next, stored)) return;
-    run(reorderChannels(instanceKey, serverId, placements(next))).catch((err: FuwaError) => {
-      toast(err.message);
-      setLayout(layoutOf(channels));
-    });
-  };
+  const save = (next: Layout) => void run(reorderChannels(instanceKey, serverId, placements(next))).catch((err: FuwaError) => toast(err.message));
+  useArrange({ container: list, enabled: arrange, layout, onArrange: save, handle: "[data-arrange-handle]" });
 
-  const setLoose = (loose: string[]) => {
-    dragging.current = true;
-    setLayout((l) => ({ ...l, loose }));
-  };
-  const setCategories = (ids: string[]) => {
-    dragging.current = true;
-    setLayout((l) => ({ ...l, categories: ids.map((id) => l.categories.find((c) => c.id === id)!) }));
-  };
-  const setChildren = (category: string, children: string[]) => {
-    dragging.current = true;
-    setLayout((l) => ({ ...l, categories: l.categories.map((c) => (c.id === category ? { ...c, children } : c)) }));
-  };
-
-  /** Arrow keys on a handle move the item one place and save. */
-  const nudge = (list: string[], id: string, by: -1 | 1): string[] | null => {
-    const at = list.indexOf(id);
-    const to = at + by;
-    if (at === -1 || to < 0 || to >= list.length) return null;
-    const next = [...list];
-    [next[at], next[to]] = [next[to]!, next[at]!];
-    return next;
-  };
-  const moveKey = (e: KeyboardEvent, apply: (by: -1 | 1) => Layout | null) => {
+  /** Arrow keys on a handle move the item one place (across categories too) and save. */
+  const moveKey = (e: KeyboardEvent, id: string) => {
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
     e.preventDefault();
-    const next = apply(e.key === "ArrowUp" ? -1 : 1);
-    if (!next) return;
-    setLayout(next);
-    commit(next);
+    const next = step(layout, id, e.key === "ArrowUp" ? -1 : 1);
+    if (next) save(next);
   };
 
   const pick = (id: string) => {
@@ -127,30 +73,31 @@ export function Channels({ instanceKey, serverId, initial }: { instanceKey: stri
     if (window.matchMedia("(max-width: 1023px)").matches) setTimeout(() => editor.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
 
-  const item = (id: string, list: string[], onMove: (by: -1 | 1) => Layout | null) => {
+  const item = (id: string, parent: string, list: string[]) => {
     const channel = byId.get(id);
     if (!channel) return null;
     return (
       <ChannelItem
         key={id}
         channel={channel}
+        parent={parent}
         active={selected === id}
         onPick={() => pick(id)}
-        onDragEnd={() => commit(latest.current)}
-        onKeyMove={(e) => moveKey(e, onMove)}
+        onKeyMove={(e) => moveKey(e, id)}
         position={`${list.indexOf(id) + 1} of ${list.length}`}
         movable={arrange}
         locked={isPrivate(channel, serverId)}
       />
     );
   };
+  const ids = layout.categories.map((c) => c.id);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] lg:gap-8">
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
-            {arrange ? "Drag by the handle, or focus it and use the arrow keys." : "Pick a channel to change who can see and use it."}
+            {arrange ? "Drag by the handle, into or out of categories, or focus it and use the arrow keys." : "Pick a channel to change who can see and use it."}
           </p>
           {arrange && (
             <Button type="button" size="sm" onClick={() => setCreating("")} className="btn shrink-0 rounded-xl font-bold">
@@ -158,49 +105,27 @@ export function Channels({ instanceKey, serverId, initial }: { instanceKey: stri
             </Button>
           )}
         </div>
-        <div className="rounded-2xl border bg-background/40 p-2">
-          <Reorder.Group axis="y" values={layout.loose} onReorder={setLoose} className="flex flex-col gap-0.5">
-            {layout.loose.map((id) => item(id, layout.loose, (by) => {
-              const loose = nudge(layout.loose, id, by);
-              return loose && { ...layout, loose };
-            }))}
-          </Reorder.Group>
-          <Reorder.Group axis="y" values={layout.categories.map((c) => c.id)} onReorder={setCategories} className="flex flex-col">
-            {layout.categories.map((category) => {
-              const channel = byId.get(category.id);
-              if (!channel) return null;
-              const ids = layout.categories.map((c) => c.id);
-              return (
-                <CategoryItem
-                  key={category.id}
-                  channel={channel}
-                  active={selected === category.id}
-                  onPick={() => pick(category.id)}
-                  onAdd={() => setCreating(category.id)}
-                  onDragEnd={() => commit(latest.current)}
-                  onKeyMove={(e) =>
-                    moveKey(e, (by) => {
-                      const order = nudge(ids, category.id, by);
-                      return order && { ...layout, categories: order.map((id) => layout.categories.find((c) => c.id === id)!) };
-                    })
-                  }
-                  position={`${ids.indexOf(category.id) + 1} of ${ids.length}`}
-                  movable={arrange}
-                  locked={isPrivate(channel, serverId)}
-                  canAdd={hasIn(access, category.id, Permission.MANAGE_CHANNELS)}
-                >
-                  <Reorder.Group axis="y" values={category.children} onReorder={(children) => setChildren(category.id, children)} className="flex min-h-2 flex-col gap-0.5 pl-3">
-                    {category.children.map((id) =>
-                      item(id, category.children, (by) => {
-                        const children = nudge(category.children, id, by);
-                        return children && { ...layout, categories: layout.categories.map((c) => (c.id === category.id ? { ...c, children } : c)) };
-                      }),
-                    )}
-                  </Reorder.Group>
-                </CategoryItem>
-              );
-            })}
-          </Reorder.Group>
+        <div ref={list} className="relative flex flex-col gap-0.5 rounded-2xl border bg-background/40 p-2">
+          {layout.loose.map((id) => item(id, "", layout.loose))}
+          {layout.categories.flatMap((category) => {
+            const channel = byId.get(category.id);
+            if (!channel) return [];
+            return [
+              <CategoryItem
+                key={category.id}
+                channel={channel}
+                active={selected === category.id}
+                onPick={() => pick(category.id)}
+                onAdd={() => setCreating(category.id)}
+                onKeyMove={(e) => moveKey(e, category.id)}
+                position={`${ids.indexOf(category.id) + 1} of ${ids.length}`}
+                movable={arrange}
+                locked={isPrivate(channel, serverId)}
+                canAdd={hasIn(access, category.id, Permission.MANAGE_CHANNELS)}
+              />,
+              ...category.children.map((id) => item(id, category.id, category.children)),
+            ];
+          })}
         </div>
       </div>
       <div ref={editor} className="min-w-0 scroll-mt-4">
@@ -232,7 +157,6 @@ type ItemProps = {
   channel: Channel;
   active: boolean;
   onPick: () => void;
-  onDragEnd: () => void;
   onKeyMove: (e: KeyboardEvent) => void;
   position: string;
   /** You can rearrange channels. */
@@ -241,15 +165,12 @@ type ItemProps = {
   locked: boolean;
 };
 
-function Grip({ controls, label, onKeyMove }: { controls: ReturnType<typeof useDragControls>; label: string; onKeyMove: (e: KeyboardEvent) => void }) {
+function Grip({ label, onKeyMove }: { label: string; onKeyMove: (e: KeyboardEvent) => void }) {
   return (
     <button
       type="button"
+      data-arrange-handle
       aria-label={label}
-      onPointerDown={(e) => {
-        e.preventDefault();
-        controls.start(e);
-      }}
       onKeyDown={onKeyMove}
       className="grid size-7 shrink-0 cursor-grab touch-none place-items-center rounded-md text-muted-foreground/60 transition hover:bg-muted hover:text-foreground focus-visible:text-foreground active:cursor-grabbing"
     >
@@ -258,20 +179,18 @@ function Grip({ controls, label, onKeyMove }: { controls: ReturnType<typeof useD
   );
 }
 
-function ChannelItem({ channel, active, onPick, onDragEnd, onKeyMove, position, movable, locked }: ItemProps) {
-  const controls = useDragControls();
+function ChannelItem({ channel, parent, active, onPick, onKeyMove, position, movable, locked }: ItemProps & { parent: string }) {
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
   return (
-    <Reorder.Item
-      value={channel.id}
-      dragListener={false}
-      dragControls={controls}
-      onDragEnd={onDragEnd}
-      whileDrag={{ scale: 1.03, boxShadow: "0 12px 30px -12px rgb(0 0 0 / 0.45)", zIndex: 10 }}
+    <motion.div
+      layout="position"
+      data-arrange="channel"
+      data-id={channel.id}
+      data-parent={parent}
       transition={SPRING}
-      className="relative flex items-center gap-0.5 rounded-lg bg-background"
+      className={cn("relative flex items-center gap-0.5 rounded-lg bg-background", parent && "ml-3")}
     >
-      {movable && <Grip controls={controls} label={`Move #${channel.name}, ${position}`} onKeyMove={onKeyMove} />}
+      {movable && <Grip label={`Move #${channel.name}, ${position}`} onKeyMove={onKeyMove} />}
       <button
         type="button"
         onClick={onPick}
@@ -290,7 +209,7 @@ function ChannelItem({ channel, active, onPick, onDragEnd, onKeyMove, position, 
           </span>
         )}
       </button>
-    </Reorder.Item>
+    </motion.div>
   );
 }
 
@@ -319,53 +238,45 @@ function CategoryItem({
   active,
   onPick,
   onAdd,
-  onDragEnd,
   onKeyMove,
   position,
   movable,
   locked,
   canAdd,
-  children,
-}: ItemProps & { onAdd: () => void; canAdd: boolean; children: React.ReactNode }) {
-  const controls = useDragControls();
+}: ItemProps & { onAdd: () => void; canAdd: boolean }) {
   return (
-    <Reorder.Item
-      value={channel.id}
-      dragListener={false}
-      dragControls={controls}
-      onDragEnd={onDragEnd}
-      whileDrag={{ scale: 1.02, boxShadow: "0 16px 40px -16px rgb(0 0 0 / 0.5)", zIndex: 10 }}
+    <motion.div
+      layout="position"
+      data-arrange="category"
+      data-id={channel.id}
       transition={SPRING}
-      className="relative mt-2 rounded-xl bg-background pb-1"
+      className="group relative mt-2 flex items-center gap-0.5 rounded-lg bg-background"
     >
-      <div className="group flex items-center gap-0.5">
-        {movable && <Grip controls={controls} label={`Move category ${channel.name}, ${position}`} onKeyMove={onKeyMove} />}
+      {movable && <Grip label={`Move category ${channel.name}, ${position}`} onKeyMove={onKeyMove} />}
+      <button
+        type="button"
+        onClick={onPick}
+        className={cn(
+          "relative flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 text-left text-xs font-bold tracking-wide uppercase transition-colors group-data-[drop-into]:text-primary",
+          active ? "text-primary" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+        )}
+      >
+        {active && <motion.span layoutId="channels-editing" transition={SPRING} className="absolute inset-0 rounded-lg bg-primary/12" />}
+        <FolderIcon className="relative size-3.5 shrink-0" />
+        <span className="relative truncate">{channel.name}</span>
+        <PrivateMark on={locked} />
+      </button>
+      {canAdd && (
         <button
           type="button"
-          onClick={onPick}
-          className={cn(
-            "relative flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 text-left text-xs font-bold tracking-wide uppercase transition-colors",
-            active ? "text-primary" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
-          )}
+          aria-label={`Create a channel in ${channel.name}`}
+          onClick={onAdd}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:rotate-90 hover:bg-muted hover:text-foreground"
         >
-          {active && <motion.span layoutId="channels-editing" transition={SPRING} className="absolute inset-0 rounded-lg bg-primary/12" />}
-          <FolderIcon className="relative size-3.5 shrink-0" />
-          <span className="relative truncate">{channel.name}</span>
-          <PrivateMark on={locked} />
+          <PlusIcon className="size-3.5" />
         </button>
-        {canAdd && (
-          <button
-            type="button"
-            aria-label={`Create a channel in ${channel.name}`}
-            onClick={onAdd}
-            className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:rotate-90 hover:bg-muted hover:text-foreground"
-          >
-            <PlusIcon className="size-3.5" />
-          </button>
-        )}
-      </div>
-      {children}
-    </Reorder.Item>
+      )}
+    </motion.div>
   );
 }
 

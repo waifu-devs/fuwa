@@ -291,6 +291,16 @@
     and Access (rules and questions, welcome screen, roles, channels and their permissions,
     emoji, invites, AutoMod, applications, members, bans, audit log, ownership), shown by `dialogs/ServerSettingsDialog.tsx`,
     which also says which pages your permissions open (`useServerSettingsTabs`).
+  - Arranging channels: with Manage Channels, rows in the sidebar
+    (`ChannelSidebar.tsx`) and in the Channels settings page drag into order,
+    into and out of categories, through `hooks/use-arrange.ts`. It works on
+    the DOM (rows marked `data-arrange`, `data-id`, `data-parent`) and moves
+    a copy, the drop line and the category ring by `transform`, so the list
+    renders only once, on the drop. `lib/arrange.ts` is the layout (loose
+    channels, then each category and its channels), what a drop or an arrow
+    key does to it, and the order `ChannelService.ReorderChannels` takes;
+    `reorderChannels` shows the new order at once and puts it back if the
+    server says no.
   - Invites: `dialogs/InviteDialog.tsx` makes and copies a link (from the
     server menu or a channel), `pages/InvitePage.tsx` is where a link lands
     (`/invite/<code>` on the instance, which goes to `/<instance>/invite/<code>`),

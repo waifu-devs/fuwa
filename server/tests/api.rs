@@ -2132,6 +2132,22 @@ async fn server_settings_and_moderation() {
         ordered.iter().map(|ch| (ch.name.as_str(), ch.position, ch.parent_id.as_str())).collect::<Vec<_>>(),
         [("welcome", 0, ""), ("Lounge", 1, ""), ("general", 2, lounge.id.as_str())]
     );
+    // Only people who can manage channels move them around.
+    let everyone_out = vec![place(&general.id, ""), place(&welcome.id, ""), place(&lounge.id, "")];
+    let viewer = c
+        .channels
+        .reorder_channels(authed(
+            &aoi,
+            pb::ReorderChannelsRequest { server_id: sid.clone(), channels: everyone_out.clone() },
+        ))
+        .await;
+    assert_eq!(viewer.unwrap_err().code(), Code::PermissionDenied);
+    // A channel leaves its category and goes to the top in the same move.
+    let out = c.channels.reorder_channels(reorder(everyone_out)).await.unwrap().into_inner().channels;
+    assert_eq!(
+        out.iter().map(|ch| (ch.name.as_str(), ch.position, ch.parent_id.as_str())).collect::<Vec<_>>(),
+        [("general", 0, ""), ("welcome", 1, ""), ("Lounge", 2, "")]
+    );
 
     // Deleting the system channel stops join messages.
     c.channels
@@ -2160,6 +2176,7 @@ async fn server_settings_and_moderation() {
         [
             A::ChannelDelete,
             A::ChannelsReorder,
+            A::ChannelsReorder,
             A::MemberUnban,
             A::MemberBan,
             A::MemberKick,
@@ -2175,11 +2192,11 @@ async fn server_settings_and_moderation() {
             A::ChannelCreate,
         ]
     );
-    let ban = &log.entries[3];
+    let ban = &log.entries[4];
     assert_eq!((ban.reason.as_str(), ban.target_id.as_str()), ("raiding", aoi_user.id.as_str()));
-    let deleted = &log.entries[5];
+    let deleted = &log.entries[6];
     assert_eq!((deleted.target_id.as_str(), deleted.channel_name.as_str()), (aoi_user.id.as_str(), "general"));
-    let server_change = &log.entries[12];
+    let server_change = &log.entries[13];
     assert_eq!(
         server_change.changes.iter().map(|ch| ch.field.as_str()).collect::<Vec<_>>(),
         ["default_notifications", "system_channel_id"]
@@ -2223,7 +2240,7 @@ async fn server_settings_and_moderation() {
         },
     )
     .await;
-    assert_eq!(second_page.entries.len(), 5);
+    assert_eq!(second_page.entries.len(), 6);
     assert!(!second_page.has_more);
     let hidden = c
         .servers
