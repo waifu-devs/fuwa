@@ -8,6 +8,7 @@ use gpui_kit::{
 };
 
 use gpui_kit::component::Icon;
+use gpui_kit::prelude::FluentBuilder as _;
 
 use crate::core::store::Connection;
 use crate::pb;
@@ -244,6 +245,35 @@ pub fn icon_button_in(id: impl Into<ElementId>, name: &str, p: &Palette, color: 
         .hover(move |s| s.bg(hover).text_color(fg))
         .active(move |s| s.top(px(1.0)))
         .child(icon(name).size(px(18.0)))
+}
+
+/// Whether an account is an agent: one a program drives.
+pub fn is_agent(user: Option<&pb::User>) -> bool {
+    user.is_some_and(|u| u.kind == pb::AccountKind::Agent as i32)
+}
+
+/// The little tag on what isn't a person: "APP" for a webhook, "AGENT" (with
+/// a robot) for an account a program drives, "BOT" for AutoMod. It pops in.
+pub fn app_badge(id: impl Into<ElementId>, label: &'static str, p: &Palette) -> impl IntoElement {
+    use gpui_kit::{Animation, AnimationExt as _};
+    let (duration, easing) = gpui_kit::sampled_easing(gpui_kit::SpringConfig::new(600.0, 18.0, 1.0), 0.002);
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(px(2.0))
+        .px(px(5.0))
+        .h(px(15.0))
+        .rounded(px(5.0))
+        .bg(alpha(p.primary, 0.15))
+        .text_color(p.primary)
+        .text_size(px(10.0))
+        .font_weight(FontWeight::EXTRA_BOLD)
+        .when(label == "AGENT", |el| el.child(icon("bot").size(px(10.0))))
+        .child(label)
+        .with_animation(id, Animation::new(duration).with_easing(easing), |el, t| {
+            el.opacity(t.clamp(0.0, 1.0)).mt(px((1.0 - t) * 3.0))
+        })
 }
 
 /// A small heading over a group of things in a sidebar.

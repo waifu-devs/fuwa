@@ -154,6 +154,14 @@ impl Core {
         Ok(res.form.map(|f| f.rules).unwrap_or_default())
     }
 
+    /// A server's welcome screen, with only the channels you can see.
+    pub async fn welcome_screen(&self, key: &str, server_id: &str) -> Result<pb::WelcomeScreen, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res =
+            rpc!(api.join(), get_welcome_screen(pb::GetWelcomeScreenRequest { server_id: server_id.into() })).await?;
+        Ok(res.welcome_screen.unwrap_or_default())
+    }
+
     /// Agrees to a server's rules, which lets a new member talk.
     pub async fn agree_to_rules(&self, key: &str, server_id: &str) -> Result<(), Problem> {
         let api = self.api(key).ok_or_else(missing)?;

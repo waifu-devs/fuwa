@@ -18,6 +18,8 @@ pub struct Look {
     pub people: HashMap<String, String>,
     /// Role ids to names.
     pub roles: HashMap<String, String>,
+    /// The server's emoji: ids to pictures.
+    pub emojis: HashMap<String, String>,
 }
 
 impl Look {
@@ -34,7 +36,8 @@ impl Look {
             })
             .collect();
         let roles = i.roles.get(server_id).into_iter().flatten().map(|r| (r.id.clone(), r.name.clone())).collect();
-        Self { people, roles }
+        let emojis = i.emojis.get(server_id).into_iter().flatten().map(|e| (e.id.clone(), e.url.clone())).collect();
+        Self { people, roles, emojis }
     }
 }
 
@@ -90,7 +93,7 @@ pub fn mention_links(source: &str, look: &Look) -> String {
                 continue;
             }
             // A server's own emoji, `<:name:id>` (or `<a:name:id>` when it
-            // moves), shows as its :name: for now.
+            // moves): its picture, or its :name: once it's gone.
             if plain
                 && (rest.starts_with("<:") || rest.starts_with("<a:"))
                 && let Some(end) = rest.find('>')
@@ -100,7 +103,15 @@ pub fn mention_links(source: &str, look: &Look) -> String {
                 && id.len() == 26
                 && id.chars().all(|c| c.is_ascii_alphanumeric())
             {
-                out.push_str(&format!(":{}:", escape(name)));
+                match look.emojis.get(&id.to_uppercase()).filter(|url| url.starts_with("http")) {
+                    Some(url) => out.push_str(&format!(
+                        "![:{}:]({}{})",
+                        escape(name),
+                        crate::ui::emoji::SCHEME,
+                        url.replace(' ', "%20")
+                    )),
+                    None => out.push_str(&format!(":{}:", escape(name))),
+                }
                 i += end + 1;
                 prev = Some('>');
                 continue;
@@ -186,9 +197,18 @@ pub fn token(text: &str, caret: usize) -> Option<(usize, String)> {
 /// One choice in the @ list.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pick {
-    Member { user: Box<pb::User>, name: String },
-    Role { id: String, name: String, color: Option<u32> },
+    Member {
+        user: Box<pb::User>,
+        name: String,
+    },
+    Role {
+        id: String,
+        name: String,
+        color: Option<u32>,
+    },
     Everyone(&'static str),
+    /// After a colon: an emoji.
+    Emoji(crate::ui::emoji::Choice),
 }
 
 impl Pick {
@@ -198,6 +218,7 @@ impl Pick {
             Pick::Member { user, .. } => format!("@{}", user.username),
             Pick::Role { name, .. } => format!("@{name}"),
             Pick::Everyone(name) => format!("@{name}"),
+            Pick::Emoji(choice) => choice.insert.clone(),
         }
     }
 
@@ -206,6 +227,7 @@ impl Pick {
             Pick::Member { user, .. } => format!("u-{}", user.id),
             Pick::Role { id, .. } => format!("r-{id}"),
             Pick::Everyone(name) => (*name).to_owned(),
+            Pick::Emoji(choice) => format!("e-{}", choice.name),
         }
     }
 }
@@ -289,6 +311,7 @@ mod tests {
         Look {
             people: [("mika".to_owned(), "Mika Sato".to_owned())].into_iter().collect(),
             roles: [(ROLE.to_owned(), "Mods".to_owned())].into_iter().collect(),
+            emojis: [(ROLE.to_owned(), "https://x/e.webp".to_owned())].into_iter().collect(),
         }
     }
 
@@ -305,8 +328,11 @@ mod tests {
         assert_eq!(mention_links("a@mika.dev", &l), "a@mika.dev");
         assert_eq!(mention_links("@mikasa", &l), "@mikasa");
         assert_eq!(mention_links("@here.", &l), format!("[@here]({SCHEME}everyone/here)."));
-        assert_eq!(mention_links(&format!("nice <:blob_cat:{ROLE}>!"), &l), "nice :blob\\_cat:!");
-        assert_eq!(mention_links(&format!("<a:party:{ROLE}>"), &l), ":party:");
+        assert_eq!(
+            mention_links(&format!("nice <:blob_cat:{ROLE}>!"), &l),
+            "nice ![:blob\\_cat:](fuwa-emoji:https://x/e.webp)!"
+        );
+        assert_eq!(mention_links("<a:party:01J9AAAAAAAAAAAAAAAAAAAAAA>", &l), ":party:");
     }
 
     #[test]
