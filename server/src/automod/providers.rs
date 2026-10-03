@@ -493,7 +493,10 @@ fn private_ip(ip: IpAddr) -> bool {
             || ip.is_broadcast()
             || ip.is_multicast()
             || a == 0
+            || a >= 240
             || (a == 100 && b & 0xc0 == 64)
+            || (a == 192 && b == 0 && ip.octets()[2] == 0)
+            || (a == 198 && b & 0xfe == 18)
     }
     match ip {
         IpAddr::V4(ip) => v4(ip),
@@ -502,8 +505,9 @@ fn private_ip(ip: IpAddr) -> bool {
             if let Some(mapped) = ip.to_ipv4_mapped() {
                 return v4(mapped);
             }
-            // NAT64 (64:ff9b::/96) carries an IPv4 address too.
-            if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+            // NAT64 (64:ff9b::/96) and the old IPv4-compatible ::a.b.c.d
+            // carry an IPv4 address too.
+            if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] || (s[..6] == [0; 6] && !ip.is_loopback() && !ip.is_unspecified()) {
                 let [_, _, _, _, _, _, _, _, _, _, _, _, a, b, c, d] = ip.octets();
                 return v4(Ipv4Addr::new(a, b, c, d));
             }
@@ -619,6 +623,8 @@ pub async fn check(setup: &Setup, text: &str) -> (std::result::Result<Scores, Fa
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .dns_resolver(Arc::new(PublicOnly))
+        // A proxy would look names up itself, past PublicOnly.
+        .no_proxy()
         .https_only(true)
         .redirect(reqwest::redirect::Policy::none())
         .timeout(TIMEOUT)
@@ -935,6 +941,10 @@ mod tests {
             "https://[::ffff:127.0.0.1]/",
             "https://[::ffff:10.0.0.1]/",
             "https://[64:ff9b::a00:1]/",
+            "https://[::7f00:1]/",
+            "https://192.0.0.8/",
+            "https://198.18.0.1/",
+            "https://240.0.0.1/",
             "https://localhost/",
             "https://LOCALHOST./",
             "https://api.localhost/",
