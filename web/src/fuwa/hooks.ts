@@ -1,4 +1,5 @@
 import type { Effect } from "effect";
+import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Channel, Member, Role } from "@/gen/fuwa/v1/types_pb";
 import { accessOf, NO_ACCESS, type Access } from "@/lib/permissions";
@@ -78,7 +79,17 @@ export function useAccess(key: string, serverId: string): Access {
   return useMemo(
     () =>
       ownerId && meId
-        ? accessOf(serverId, ownerId, roles, channels, meId, member?.roleIds ?? [], !!member?.pending && hasRules)
+        ? accessOf(
+            serverId,
+            ownerId,
+            roles,
+            channels,
+            meId,
+            member?.roleIds ?? [],
+            !!member?.pending && hasRules,
+            // As the server works it out: a timed-out member only reads.
+            !!member?.timedOutUntil && timestampDate(member.timedOutUntil).getTime() > Date.now(),
+          )
         : NO_ACCESS,
     [serverId, ownerId, meId, member, roles, channels, hasRules],
   );
