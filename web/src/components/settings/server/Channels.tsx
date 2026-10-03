@@ -12,6 +12,7 @@ import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { SPRING } from "@/components/motion";
 import { Row, Segmented } from "@/components/settings/account/common";
 import { ChannelPermissions } from "@/components/settings/server/ChannelPermissions";
+import { ChannelShare, useSharingOn } from "@/components/settings/server/SharedChannels";
 import { SaveBar } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import {
@@ -280,15 +281,25 @@ function CategoryItem({
   );
 }
 
-type Tab = "overview" | "permissions";
+type Tab = "overview" | "permissions" | "share";
+
+/** The parts of a channel's settings you may open there. */
+function useChannelTabs(instanceKey: string, serverId: string, channel: Channel): { value: Tab; label: string }[] {
+  const access = useAccess(instanceKey, serverId);
+  const sharingOn = useSharingOn(instanceKey);
+  const texty = channel.type === ChannelType.TEXT || channel.type === ChannelType.ANNOUNCEMENT;
+  // Sharing takes managing the server and the channel, while the instance allows it (or it's shared already).
+  const share = texty && has(access, Permission.MANAGE_SERVER) && hasIn(access, channel.id, Permission.MANAGE_CHANNELS) && (sharingOn || !!channel.shared);
+  return [
+    ...(hasIn(access, channel.id, Permission.MANAGE_CHANNELS) ? [{ value: "overview" as const, label: "Overview" }] : []),
+    ...(hasIn(access, channel.id, Permission.MANAGE_ROLES) ? [{ value: "permissions" as const, label: "Permissions" }] : []),
+    ...(share ? [{ value: "share" as const, label: "Share" }] : []),
+  ];
+}
 
 /** One channel's settings: what it is (with Manage Channels there), and who can do what in it (with Manage Roles there). */
 function ChannelSettings({ instanceKey, serverId, channel, channels }: { instanceKey: string; serverId: string; channel: Channel; channels: Channel[] }) {
-  const access = useAccess(instanceKey, serverId);
-  const tabs = [
-    ...(hasIn(access, channel.id, Permission.MANAGE_CHANNELS) ? [{ value: "overview" as const, label: "Overview" }] : []),
-    ...(hasIn(access, channel.id, Permission.MANAGE_ROLES) ? [{ value: "permissions" as const, label: "Permissions" }] : []),
-  ];
+  const tabs = useChannelTabs(instanceKey, serverId, channel);
   const [tab, setTab] = useState<Tab>(tabs[0]?.value ?? "overview");
   const shown = tabs.some((t) => t.value === tab) ? tab : tabs[0]?.value;
   const Icon = channel.type === ChannelType.CATEGORY ? FolderIcon : (CHANNEL_ICON[channel.type] ?? HashIcon);
@@ -304,6 +315,7 @@ function ChannelSettings({ instanceKey, serverId, channel, channels }: { instanc
       <AnimatePresence mode="wait" initial={false}>
         <motion.div key={shown} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}>
           {shown === "overview" && <ChannelEditor instanceKey={instanceKey} serverId={serverId} channel={channel} channels={channels} />}
+          {shown === "share" && <ChannelShare instanceKey={instanceKey} serverId={serverId} channel={channel} />}
           {shown === "permissions" && <ChannelPermissions instanceKey={instanceKey} serverId={serverId} channel={channel} channels={channels} />}
           {!shown && <p className="py-10 text-center text-sm text-muted-foreground">You can't change this one.</p>}
         </motion.div>

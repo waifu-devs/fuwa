@@ -23,6 +23,7 @@ const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boole
   channels: (a) => [...a.channels.values()].some((bits) => bits & (bit(Permission.MANAGE_CHANNELS) | bit(Permission.MANAGE_ROLES))),
   emoji: (a) => has(a, Permission.MANAGE_EMOJI),
   integrations: (a) => has(a, Permission.MANAGE_WEBHOOKS) || has(a, Permission.MANAGE_SERVER),
+  shared: (a) => has(a, Permission.MANAGE_SERVER),
   usage: (a, admin) => admin || has(a, Permission.MANAGE_SERVER),
   limits: (_, admin) => admin,
   applications: (a) => has(a, Permission.KICK_MEMBERS),

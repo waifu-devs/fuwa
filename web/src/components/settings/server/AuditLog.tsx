@@ -33,6 +33,12 @@ import {
   UserXIcon,
   WebhookIcon,
   UnplugIcon,
+  KeyRoundIcon,
+  KeySquareIcon,
+  SendIcon,
+  HandshakeIcon,
+  SlidersHorizontalIcon,
+  BanIcon,
   type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -95,6 +101,14 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.WEBHOOK_UPDATE]: { label: "Webhook changes", icon: WebhookIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.WEBHOOK_DELETE]: { label: "Deleted webhooks", icon: UnplugIcon, tint: "bg-destructive/15 text-destructive" },
   [AuditAction.AGENT_ADD]: { label: "Agents added", icon: BotIcon, tint: "bg-violet-500/15 text-violet-500" },
+  [AuditAction.SHARE_CODE_CREATE]: { label: "New share codes", icon: KeyRoundIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.SHARE_CODE_DELETE]: { label: "Deleted share codes", icon: KeySquareIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.SHARED_CHANNEL_REQUEST]: { label: "Shared channel requests", icon: SendIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.SHARED_CHANNEL_APPROVE]: { label: "Shared channels approved", icon: HandshakeIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.SHARED_CHANNEL_DISCONNECT]: { label: "Shared channels ended", icon: UnplugIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.SHARED_CHANNEL_UPDATE]: { label: "Shared channel changes", icon: SlidersHorizontalIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.SHARED_CHANNEL_BLOCK]: { label: "Kept out of shared channels", icon: BanIcon, tint: "bg-orange-500/15 text-orange-500" },
+  [AuditAction.SHARED_CHANNEL_UNBLOCK]: { label: "Let back into shared channels", icon: UndoIcon, tint: "bg-emerald-500/15 text-emerald-500" },
 };
 
 const FIELD: Record<string, string> = {
@@ -132,6 +146,7 @@ const FIELD: Record<string, string> = {
   keywords: "Words",
   allowed: "Allowed",
   mention_limit: "Ping limit",
+  server: "Server",
   actions: "Actions",
 };
 
@@ -613,6 +628,48 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
       return <>{actor} deleted the webhook <b>{change("name")?.before}</b></>;
     case AuditAction.AGENT_ADD:
       return <>{actor} added the agent {target}</>;
+    case AuditAction.SHARE_CODE_CREATE:
+      return <>{actor} made a share code for <b>#{entry.channelName}</b></>;
+    case AuditAction.SHARE_CODE_DELETE:
+      return <>{actor} deleted a share code for <b>#{entry.channelName}</b></>;
+    case AuditAction.SHARED_CHANNEL_REQUEST:
+      return (
+        <>
+          {actor} asked to add <b>#{entry.channelName}</b> from <b>{change("server")?.after || "another server"}</b>
+        </>
+      );
+    case AuditAction.SHARED_CHANNEL_APPROVE:
+      return (
+        <>
+          {actor} shared <b>#{entry.channelName}</b> with <b>{change("server")?.after || "another server"}</b>
+        </>
+      );
+    case AuditAction.SHARED_CHANNEL_DISCONNECT:
+      return (
+        <>
+          {actor} ended sharing <b>#{entry.channelName}</b>
+          {change("server")?.after && (
+            <>
+              {" "}
+              with <b>{change("server")!.after}</b>
+            </>
+          )}
+        </>
+      );
+    case AuditAction.SHARED_CHANNEL_UPDATE:
+      return <>{actor} changed what the other server's people may do in <b>#{entry.channelName}</b></>;
+    case AuditAction.SHARED_CHANNEL_BLOCK:
+      return (
+        <>
+          {actor} kept {target} out of <b>#{entry.channelName}</b>
+        </>
+      );
+    case AuditAction.SHARED_CHANNEL_UNBLOCK:
+      return (
+        <>
+          {actor} let {target} back into <b>#{entry.channelName}</b>
+        </>
+      );
     default:
       return <>{actor} did something</>;
   }

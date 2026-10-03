@@ -40,6 +40,7 @@ import { Count, SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { UserPanel } from "@/components/UserPanel";
 import { CallPanel } from "@/components/calls/CallPanel";
+import { SharedBadge } from "@/components/chat/Shared";
 import { VoiceUsers } from "@/components/calls/VoiceUsers";
 import { joinCall } from "@/calls/engine";
 import {
@@ -552,6 +553,7 @@ function ChannelRow({
           </AnimatePresence>
         </span>
         <span className="truncate">{channel.name}</span>
+        <SharedBadge channel={channel} />
         {onInvite && (
           <span
             role="button"
