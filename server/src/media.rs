@@ -243,7 +243,7 @@ async fn serve(app: Arc<App>, id: String, headers: HeaderMap) -> Response {
         let mut response = StatusCode::PERMANENT_REDIRECT.into_response();
         let h = response.headers_mut();
         h.insert(header::LOCATION, HeaderValue::from_str(&location).expect("ids are valid headers"));
-        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=31536000, immutable"));
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static(PICTURE_CACHE));
         return response;
     }
     // A file never changes under its id, so the id is its version.
@@ -268,11 +268,18 @@ async fn serve(app: Arc<App>, id: String, headers: HeaderMap) -> Response {
     response
 }
 
-/// What every picture is served with: cached for good under its id, shown
-/// on other sites (any fuwa client), but never run as a page.
+/// How long pictures are kept: for good, since a file never changes under its
+/// id, but only by the browser that fetched it. A shared cache (Railway's CDN
+/// in front of fuwa.chat) would keep serving a picture after it's deleted,
+/// a moderator's removal included.
+pub const PICTURE_CACHE: &str = "private, max-age=31536000, immutable";
+
+/// What every picture is served with: cached for good under its id (by
+/// browsers only), shown on other sites (any fuwa client), but never run as
+/// a page.
 pub fn picture_headers(h: &mut HeaderMap, etag: &str) {
     h.insert(header::ETAG, HeaderValue::from_str(etag).expect("ids are valid headers"));
-    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=31536000, immutable"));
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static(PICTURE_CACHE));
     h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     h.insert("cross-origin-resource-policy", HeaderValue::from_static("cross-origin"));
     h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; sandbox"));

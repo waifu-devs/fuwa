@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "description": "Turn away scanners' guesses (WordPress, phpMyAdmin, .env, .git, actuator and the like)",
+      "priority": 10,
+      "enabled": true,
+      "if": {
+        "and": [
+          {
+            "not": {
+              "or": [
+                {
+                  "attr": "http.path",
+                  "op": "matches",
+                  "value": "/.well-known/*"
+                },
+                {
+                  "attr": "http.path",
+                  "op": "matches",
+                  "value": "/.railway/*"
+                }
+              ]
+            }
+          },
+          {
+            "or": [
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*/.*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*.php"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*.php/*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*.asp"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*.aspx"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*.jsp"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*.cgi"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*.sql"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*.bak"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*.env"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*.ini"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*/wp-admin*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*/wp-content/*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*/wp-includes/*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*/wp-json*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*/phpmyadmin*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "*/phpMyAdmin*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/pma/*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/adminer*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/actuator*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/cgi-bin/*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/vendor/*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/boaform/*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/HNAP1*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/_ignition/*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/telescope/*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/server-status*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/solr/*"
+              },
+              {
+                "attr": "http.path",
+                "op": "matches",
+                "value": "/Autodiscover/*"
+              }
+            ]
+          }
+        ]
+      },
+      "then": {
+        "action": "block",
+        "params": {
+          "status": 404,
+          "body": "not found\n"
+        }
+      }
+    }
+  ]
+}

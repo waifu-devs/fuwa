@@ -50,6 +50,10 @@ async fn the_app_opens_on_any_address() {
     let deep = http.get(format!("{base}/fuwa.waifu.dev/01ABC/01DEF")).send().await.unwrap();
     assert_eq!(deep.status(), 200);
     assert_eq!(deep.text().await.unwrap(), html);
+    // A scanner's guess doesn't, even though any other path would.
+    for probe in ["/.env", "/wp-config.php", "/.DS_Store", "/phpmyadmin/"] {
+        assert_eq!(http.get(format!("{base}{probe}")).send().await.unwrap().status(), 404, "{probe}");
+    }
 
     // Built assets are cached for good; a missing one is a real 404.
     let script = html.split(r#"src=""#).nth(1).unwrap().split('"').next().unwrap();

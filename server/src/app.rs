@@ -383,7 +383,11 @@ impl App {
         }
         if !self.config.cluster.is_split() {
             // The web app (when it's on) answers every other GET, so its own addresses work on reload.
-            return router.fallback(crate::web::handler(self.clone())).layer(cors(self.clone()));
+            return router
+                .fallback(crate::web::handler(self.clone()))
+                .layer(cors(self.clone()))
+                .layer(axum::middleware::from_fn(crate::web::no_store_by_default))
+                .layer(axum::middleware::from_fn(crate::probes::turn_away));
         }
         if let Link::Directory(_) = &self.link {
             let wait = crate::cluster::directory::wait_for_shards;

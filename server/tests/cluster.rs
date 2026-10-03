@@ -542,11 +542,20 @@ async fn a_split_instance_works_like_one() {
     let fetched = http.get(&picture.url).send().await.unwrap();
     assert_eq!(fetched.status(), 200);
     assert_eq!(fetched.headers()["content-type"], "image/png");
-    assert_eq!(fetched.headers()["cache-control"], "public, max-age=31536000, immutable");
+    assert_eq!(fetched.headers()["cache-control"], "private, max-age=31536000, immutable");
     assert_eq!(fetched.bytes().await.unwrap().to_vec(), png);
     let plain = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
     let redirected = plain.get(&picture.url).send().await.unwrap();
     assert_eq!(redirected.status(), 308);
+    assert_eq!(redirected.headers()["cache-control"], "private, max-age=31536000, immutable");
+    let health = http.get(format!("{}/healthz", cluster.gateway.url())).send().await.unwrap();
+    assert_eq!(health.headers()["cache-control"], "no-store");
+    // Scanners' guesses stop at the gateway.
+    for probe in ["/.env", "/wp-login.php", "/.git/HEAD"] {
+        let response = http.get(format!("{}{probe}", cluster.gateway.url())).send().await.unwrap();
+        assert_eq!(response.status(), 404, "{probe}");
+        assert_eq!(response.text().await.unwrap(), "not found\n");
+    }
     assert_eq!(redirected.headers()["location"], format!("/media/servers/{}/{}", on_b.id, picture.id).as_str());
     let elsewhere = format!("{}/media/servers/{}/{}", cluster.gateway.url(), on_a.id, picture.id);
     assert_eq!(http.get(&elsewhere).send().await.unwrap().status(), 404, "only under its own server");

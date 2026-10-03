@@ -27,6 +27,11 @@ jobs:
         with:
           command: plan
           railway-token: ${{ secrets.RAILWAY_TOKEN }}
+      # The CDN and edge rules railway.ts can't declare yet (.railway/edge.mjs): what
+      # merging would change. Changes nothing.
+      - run: node .railway/edge.mjs check fuwa
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
   apply:
     if: github.event.action == 'closed' && github.event.pull_request.merged && github.event.pull_request.head.repo.full_name == github.repository
@@ -39,3 +44,7 @@ jobs:
         with:
           command: apply
           railway-token: ${{ secrets.RAILWAY_TOKEN }}
+      # After the config apply, so it never moves the environment under a pinned plan.
+      - run: node .railway/edge.mjs apply fuwa
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

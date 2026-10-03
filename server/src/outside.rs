@@ -216,8 +216,8 @@ pub async fn picture(app: &App, url: &str) -> Option<(&'static str, Bytes)> {
 
 fn failed(status: StatusCode, message: &str) -> Response {
     let mut response = (status, format!("{message}\n")).into_response();
-    // Try again later, not on every scroll.
-    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=300"));
+    // Try again later, not on every scroll. Browsers only, as with every picture.
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=300"));
     response
 }
 
@@ -233,7 +233,8 @@ impl Picture {
         let mut response = self.bytes.into_response();
         let h = response.headers_mut();
         h.insert(header::CONTENT_TYPE, HeaderValue::from_static(self.content_type));
-        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=86400"));
+        // Browsers only: a message taken down shouldn't leave its pictures in a shared cache.
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=86400"));
         h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
         h.insert("cross-origin-resource-policy", HeaderValue::from_static("cross-origin"));
         h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; sandbox"));

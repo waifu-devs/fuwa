@@ -11,6 +11,15 @@ import { bucket, defineRailway, image, project, ref, service, volume } from "rai
  * Before turning SPLIT on, also FUWA_CLUSTER_KEY (`openssl rand -hex 32`), the secret the
  * parts send each other; that one can change later, and every part restarts with it.
  * The DNS records for fuwa.chat live with its registrar.
+ *
+ * The CDN and edge rules aren't something Railway configuration can declare yet, so
+ * .railway/edge.mjs sets them through Railway's API, from the same workflow: on the `fuwa`
+ * gateways only (the service with the fuwa.chat domain), the CDN with Railway's defaults
+ * (HTML only when a page says so) and .railway/edge-rules.json, which turns scanners'
+ * guesses away at the edge. The CDN only keeps the web app's built assets: gRPC-Web calls
+ * are POSTs, which it never caches or buffers, pictures say `private`, and everything else
+ * `no-store`. fuwa turns the same paths away itself (server/src/probes.rs). The other parts
+ * have no public domain, and `fuwa-media`'s TCP proxy doesn't go through the edge.
  */
 
 /** Railway's US East (Virginia) region, where the site runs too. */
