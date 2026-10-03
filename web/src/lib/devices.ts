@@ -51,12 +51,13 @@ export function deviceName(d: Device) {
   return "An unknown device";
 }
 
+const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
 /** "Active now", "Active 5 minutes ago", "Active 3 days ago". */
 export function activeAgo(date: Date, now = Date.now()) {
   const minutes = Math.max(0, Math.round((now - date.getTime()) / 60_000));
   // Sessions note their use every few minutes.
   if (minutes < 6) return "Active now";
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
   if (minutes < 60) return `Active ${rtf.format(-minutes, "minute")}`;
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `Active ${rtf.format(-hours, "hour")}`;

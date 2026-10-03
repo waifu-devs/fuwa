@@ -3,7 +3,7 @@ import { CompassIcon, HashIcon, SettingsIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState, type Ref } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
-import { useInstance } from "@/fuwa/hooks";
+import { useFuwa, type InstanceState } from "@/fuwa/store";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
 import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
@@ -12,11 +12,30 @@ import { UserPanel } from "@/components/UserPanel";
 import { CallPanel } from "@/components/calls/CallPanel";
 import { DmList } from "@/components/dm/DmList";
 import { HostedBadge } from "@/components/HostedBadge";
-import { InstanceSettingsDialog } from "@/components/settings/InstanceSettingsDialog";
+import { lazyComponent } from "@/components/lazy";
+
+const InstanceSettingsDialog = lazyComponent(
+  () => import("@/components/settings/InstanceSettingsDialog").then((m) => m.InstanceSettingsDialog),
+  (p) => p.open,
+);
+
+/** What the sidebar draws, the same object until one of these changes (not for every message). */
+type SidebarView = Pick<InstanceState, "node" | "url" | "connection" | "admin" | "servers">;
+const views = new WeakMap<InstanceState["servers"], SidebarView>();
+function sidebarView(i: InstanceState): SidebarView {
+  const v = views.get(i.servers);
+  if (v && v.node === i.node && v.url === i.url && v.connection === i.connection && v.admin === i.admin) return v;
+  const next = { node: i.node, url: i.url, connection: i.connection, admin: i.admin, servers: i.servers };
+  views.set(i.servers, next);
+  return next;
+}
 
 /** The sidebar on an instance's home: what it is, your conversations and your servers there. */
 export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
-  const inst = useInstance(instanceKey);
+  const inst = useFuwa((s) => {
+    const i = s.instances[instanceKey];
+    return i && sidebarView(i);
+  });
   const { compact, setNavOpen } = useLayout();
   const [settings, setSettings] = useState(false);
   const address = useAddress(instanceKey);

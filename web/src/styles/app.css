@@ -446,11 +446,27 @@ body {
 /* Messages from the same person run together; the hover timestamp sits in the gutter. */
 .message-row { transition: background-color 0.15s ease; }
 .message-row:hover { background: color-mix(in srgb, var(--muted) 45%, transparent); }
-.message-row .gutter-time { opacity: 0; transition: opacity 0.15s ease; }
-.message-row:hover .gutter-time { opacity: 1; }
-.message-row .message-tools { opacity: 0; transform: translateY(4px) scale(0.96); transition: opacity 0.15s ease, transform 0.2s cubic-bezier(0.3, 1.6, 0.5, 1); pointer-events: none; }
+/*
+ * The hover time and tools are taken out of the page (display: none) while
+ * hidden, not just made transparent: a long channel would otherwise have a
+ * see-through layer per message for the browser to sort out on every frame of
+ * any animation. @starting-style keeps their fade and pop as they appear.
+ */
+.message-row .gutter-time { display: none; transition: opacity 0.15s ease, display 0.15s allow-discrete; }
+.message-row:hover .gutter-time { display: block; opacity: 1; }
+.message-row .message-tools {
+  display: none;
+  opacity: 0;
+  transform: translateY(4px) scale(0.96);
+  transition: opacity 0.15s ease, transform 0.2s cubic-bezier(0.3, 1.6, 0.5, 1), display 0.2s allow-discrete;
+}
 .message-row:hover .message-tools,
-.message-row:focus-within .message-tools { opacity: 1; transform: none; pointer-events: auto; }
+.message-row:focus-within .message-tools { display: flex; opacity: 1; transform: none; }
+@starting-style {
+  .message-row:hover .gutter-time { opacity: 0; }
+  .message-row:hover .message-tools,
+  .message-row:focus-within .message-tools { opacity: 0; transform: translateY(4px) scale(0.96); }
+}
 
 /* Chat Markdown is tighter than a profile bio. */
 .markdown.chat > * + * { margin-top: 0.3em; }
@@ -528,6 +544,9 @@ body[data-settings-open] #root { scale: 0.94; filter: blur(3px); opacity: 0.4; }
 :root[data-density="spacious"] { --density: 1.6; }
 .chat-text { font-size: var(--chat-font); }
 .row-y { padding-block: calc(0.375rem * var(--density)); }
+/* A line of the (windowed) members list glides when its place changes, on the compositor. */
+.member-line { transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
+@media (prefers-reduced-motion: reduce) { .member-line { transition: none; } }
 .message-row { padding-block: calc(0.125rem * var(--density)); }
 .message-row.first { margin-top: calc(0.75rem * var(--density)); padding-top: calc(0.25rem * var(--density)); }
 .message-row.compact { padding-block: calc(0.0625rem * var(--density)); }

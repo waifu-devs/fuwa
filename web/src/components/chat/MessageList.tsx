@@ -17,6 +17,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import {
   forwardRef,
+  memo,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -38,8 +39,8 @@ import {
   type User,
 } from "@/gen/fuwa/v1/types_pb";
 import { deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
-import { useAccess, useInstance, useRoles } from "@/fuwa/hooks";
-import type { PendingMessage } from "@/fuwa/store";
+import { useAccess, useRoles } from "@/fuwa/hooks";
+import { useFuwa, type PendingMessage } from "@/fuwa/store";
 import { sendsMessage } from "@/components/chat/Composer";
 import { Mention, remarkMentions, ServerLookProvider, useRoleColor, useServerLook, type ServerLook } from "@/components/chat/mentions";
 import { Markdown, type MarkdownExtension } from "@/components/Markdown";
@@ -52,9 +53,9 @@ import { Embeds } from "@/components/chat/Embeds";
 import { AppBadge } from "@/components/AppBadge";
 import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
 import { comboLabel } from "@/lib/keybinds";
-import { pingsMe, useNotificationSettings } from "@/lib/notifications";
+import { pingsUser, useNotificationSettings } from "@/lib/notifications";
 import { hasIn } from "@/lib/permissions";
-import { usePrefs, type MessageDisplay } from "@/lib/prefs";
+import { usePrefs, type Clock, type MessageDisplay } from "@/lib/prefs";
 import { copy } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -71,28 +72,64 @@ type Row =
 
 export type MessageListHandle = { editLast: () => void };
 
+/** Rows drawn when a channel opens; older ones already loaded come in as you scroll up. */
+const FIRST_ROWS = 80;
+/** How many more rows each scroll to the top reveals before asking the server for older messages. */
+const MORE_ROWS = 80;
+
+/*
+ * Rows keep the same props while their message is unchanged, so memoized
+ * rows skip rendering when something else in the channel changes. A
+ * message's date and a webhook's author are made once per (immutable) object.
+ */
+const dates = new WeakMap<Message, Date>();
+const dateOf = (m: Message) => {
+  let d = dates.get(m);
+  if (!d) dates.set(m, (d = toDate(m.createdAt)));
+  return d;
+};
+const webhookAuthors = new WeakMap<MessageWebhook, User>();
+const webhookAuthorOf = (w: MessageWebhook) => {
+  let u = webhookAuthors.get(w);
+  if (!u) webhookAuthors.set(w, (u = webhookAuthor(w)));
+  return u;
+};
+
+/** What a row can do to its message, the same object for the whole channel. */
+type RowActions = {
+  edit: (id: string) => void;
+  cancelEdit: () => void;
+  save: (id: string, content: string) => Promise<void>;
+  remove: (id: string) => Promise<void>;
+  wave: (username: string) => Promise<void>;
+  retry: (pending: PendingMessage) => void;
+  dismiss: (nonce: string) => void;
+};
+
 export const MessageList = forwardRef<
   MessageListHandle,
   { instanceKey: string; serverId: string; channel: Channel }
 >(function MessageList({ instanceKey, serverId, channel }, ref) {
-  const inst = useInstance(instanceKey);
+  // Only the pieces this list draws, so events elsewhere on the instance don't re-render it.
+  const state = useFuwa((s) => s.instances[instanceKey]?.messages[channel.id]);
+  const pending = useFuwa((s) => s.instances[instanceKey]?.pending[channel.id] ?? EMPTY);
+  const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? EMPTY);
+  const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[serverId] ?? EMPTY);
+  const users = useFuwa((s) => s.instances[instanceKey]?.users);
+  const me = useFuwa((s) => s.instances[instanceKey]?.me ?? undefined);
+  const ownerId = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.ownerId ?? "");
+  const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId] ?? EMPTY);
   const access = useAccess(instanceKey, serverId);
   const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
   const canSend = hasIn(access, channel.id, Permission.SEND_MESSAGES);
   const roles = useRoles(instanceKey, serverId);
-  const state = inst?.messages[channel.id];
   const items = state?.items ?? EMPTY;
-  const pending = inst?.pending[channel.id] ?? EMPTY;
-  const members = inst?.members[serverId] ?? EMPTY;
-  const emojis = inst?.emojis[serverId] ?? EMPTY;
-  const users = inst?.users;
-  const me = inst?.me;
   const [editing, setEditing] = useState<string | null>(null);
   const display = usePrefs((p) => p.messageDisplay);
   const developer = usePrefs((p) => p.developerMode);
   const suppressEveryone = useNotificationSettings(instanceKey, serverId)?.suppressEveryone ?? false;
-  // Times follow the clock setting; reading it here re-renders the rows when it changes.
-  usePrefs((p) => p.clock);
+  // Times follow the clock setting: a new clock re-renders every row.
+  const clock = usePrefs((p) => p.clock);
 
   useImperativeHandle(ref, () => ({
     editLast() {
@@ -107,7 +144,6 @@ export const MessageList = forwardRef<
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
   const myRoleIds = memberById.get(me?.id ?? "")?.roleIds;
-  const ownerId = inst?.servers.find((s) => s.id === serverId)?.ownerId ?? "";
   const look = useMemo<ServerLook>(
     () => ({
       instanceKey,
@@ -120,11 +156,30 @@ export const MessageList = forwardRef<
     [instanceKey, ownerId, roles, members, emojis, me, myRoleIds],
   );
 
+  const actions = useMemo<RowActions>(
+    () => ({
+      edit: setEditing,
+      cancelEdit: () => setEditing(null),
+      save: async (id, content) => {
+        await run(editMessage(instanceKey, serverId, channel.id, id, encodeEmoji(content, emojis)));
+        setEditing(null);
+      },
+      remove: (id) => run(deleteMessage(instanceKey, serverId, channel.id, id)),
+      wave: (username) => run(sendMessage(instanceKey, serverId, channel.id, `👋 @${username}`)),
+      retry: (p) => {
+        dismissPending(instanceKey, channel.id, p.nonce);
+        run(sendMessage(instanceKey, serverId, channel.id, p.content)).catch(() => {});
+      },
+      dismiss: (nonce) => dismissPending(instanceKey, channel.id, nonce),
+    }),
+    [instanceKey, serverId, channel.id, emojis],
+  );
+
   const rows = useMemo(() => {
     const out: Row[] = [];
     let prev: { author: string; at: Date } | null = null;
     for (const message of items) {
-      const date = toDate(message.createdAt);
+      const date = dateOf(message);
       if (!prev || !sameDay(prev.at, date)) {
         out.push({ kind: "day", key: `day-${date.toDateString()}`, date });
         prev = null;
@@ -148,6 +203,14 @@ export const MessageList = forwardRef<
     return out;
   }, [items, pending, me?.id]);
 
+  // ── Drawing only the latest rows: a long channel opens with FIRST_ROWS, and scrolling up reveals the rest.
+  const [hidden, setHidden] = useState<number | null>(null);
+  const ready = !!state && !state.loading;
+  const skipped = hidden ?? (ready ? Math.max(0, rows.length - FIRST_ROWS) : 0);
+  if (hidden === null && ready) setHidden(skipped);
+  const shown = skipped ? rows.slice(skipped) : rows;
+  const rowCount = useRef(rows.length);
+
   // ── Scrolling: stick to the bottom while you're there, keep your place when older messages load above.
   const scroller = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -155,7 +218,8 @@ export const MessageList = forwardRef<
   const [showJump, setShowJump] = useState(false);
   const [missed, setMissed] = useState(0);
   const lastCount = useRef(0);
-  const firstId = useRef<string | undefined>(undefined);
+  const firstKey = useRef<string | undefined>(undefined);
+  const lastShown = useRef(0);
 
   /** Ids already on screen when the channel opened, so only new arrivals animate in. */
   const initial = useRef<Set<string> | null>(null);
@@ -170,17 +234,21 @@ export const MessageList = forwardRef<
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const prepended = firstId.current !== undefined && items[0]?.id !== firstId.current && items.length > lastCount.current;
+    // Day dividers keep their key when older messages of the same day come in, so look past them.
+    const top = shown.find((r) => r.kind !== "day")?.key;
+    const prepended = firstKey.current !== undefined && top !== firstKey.current && shown.length > lastShown.current;
     if (atBottom.current) {
       el.scrollTop = el.scrollHeight;
     } else if (prepended) {
       el.scrollTop = el.scrollHeight - fromBottom.current;
-    } else if (rows.length > lastCount.current) {
+    } else if (items.length > lastCount.current) {
       setMissed((n) => n + (items.length - lastCount.current));
     }
-    firstId.current = items[0]?.id;
+    firstKey.current = top;
+    lastShown.current = shown.length;
+    rowCount.current = rows.length;
     lastCount.current = items.length;
-  }, [rows, items]);
+  }, [shown, items, rows]);
 
   const onScroll = useCallback(() => {
     const el = scroller.current;
@@ -190,10 +258,13 @@ export const MessageList = forwardRef<
     atBottom.current = bottom;
     setShowJump(!bottom && el.scrollHeight - el.scrollTop - el.clientHeight > 400);
     if (bottom) setMissed(0);
-    if (el.scrollTop < 300 && state?.hasMore && !state.loading) {
-      run(loadMessages(instanceKey, serverId, channel.id, true)).catch(() => {});
+    // Back at the bottom after reading far up: let go of the rows far above, so new messages stay cheap.
+    if (bottom && rowCount.current - skipped > FIRST_ROWS + MORE_ROWS) setHidden(rowCount.current - FIRST_ROWS);
+    if (el.scrollTop < 300) {
+      if (skipped > 0) setHidden(Math.max(0, skipped - MORE_ROWS));
+      else if (state?.hasMore && !state.loading) run(loadMessages(instanceKey, serverId, channel.id, true)).catch(() => {});
     }
-  }, [instanceKey, serverId, channel.id, state?.hasMore, state?.loading]);
+  }, [instanceKey, serverId, channel.id, state?.hasMore, state?.loading, skipped]);
 
   const jump = () => {
     const el = scroller.current;
@@ -203,7 +274,9 @@ export const MessageList = forwardRef<
     setMissed(0);
   };
 
-  const beginning = state && !state.loading && !state.hasMore;
+  const beginning = state && !state.loading && !state.hasMore && skipped === 0;
+  const meId = me?.id;
+  const meMember = memberById.get(meId ?? "");
 
   return (
     <ServerLookProvider value={look}>
@@ -219,8 +292,9 @@ export const MessageList = forwardRef<
           {beginning && <Beginning channel={channel} />}
           {!state && <Skeleton rows={6} />}
           {state?.loading && items.length === 0 && <Skeleton rows={6} />}
-          <AnimatePresence initial={false}>
-            {rows.map((row) => {
+          {/* Rows don't animate their layout, so a new arrival needn't re-render every row (the default does). */}
+          <AnimatePresence initial={false} presenceAffectsLayout={false}>
+            {shown.map((row) => {
               if (row.kind === "day") return <DayDivider key={row.key} date={row.date} />;
               if (row.kind === "pending")
                 return (
@@ -229,17 +303,13 @@ export const MessageList = forwardRef<
                     pending={row.pending}
                     first={row.first}
                     display={display}
-                    me={me ?? undefined}
-                    member={memberById.get(me?.id ?? "")}
-                    onRetry={() => {
-                      dismissPending(instanceKey, channel.id, row.pending.nonce);
-                      run(sendMessage(instanceKey, serverId, channel.id, row.pending.content)).catch(() => {});
-                    }}
-                    onDismiss={() => dismissPending(instanceKey, channel.id, row.pending.nonce)}
+                    me={me}
+                    member={meMember}
+                    actions={actions}
                   />
                 );
               const author = row.message.webhook
-                ? webhookAuthor(row.message.webhook)
+                ? webhookAuthorOf(row.message.webhook)
                 : (memberById.get(row.message.authorId)?.user ?? users?.[row.message.authorId]);
               if (row.kind === "automod")
                 return (
@@ -250,10 +320,11 @@ export const MessageList = forwardRef<
                     author={author}
                     member={memberById.get(row.message.authorId)}
                     instanceKey={instanceKey}
-                    channelName={inst?.channels[serverId]?.find((c) => c.id === row.message.autoMod?.channelId)?.name}
+                    channelName={channels.find((c) => c.id === row.message.autoMod?.channelId)?.name}
                     animate={!initial.current?.has(row.message.id)}
                     canDelete={manager}
-                    onDelete={() => run(deleteMessage(instanceKey, serverId, channel.id, row.message.id))}
+                    actions={actions}
+                    clock={clock}
                   />
                 );
               if (row.kind === "join")
@@ -265,11 +336,12 @@ export const MessageList = forwardRef<
                     author={author}
                     member={memberById.get(row.message.authorId)}
                     instanceKey={instanceKey}
-                    mine={row.message.authorId === me?.id}
+                    mine={row.message.authorId === meId}
                     animate={!initial.current?.has(row.message.id)}
                     canDelete={manager}
-                    onWave={canSend ? () => run(sendMessage(instanceKey, serverId, channel.id, `👋 @${author?.username ?? ""}`)) : undefined}
-                    onDelete={() => run(deleteMessage(instanceKey, serverId, channel.id, row.message.id))}
+                    canWave={canSend}
+                    actions={actions}
+                    clock={clock}
                   />
                 );
               return (
@@ -282,19 +354,14 @@ export const MessageList = forwardRef<
                   date={row.date}
                   author={author}
                   member={memberById.get(row.message.authorId)}
-                  mine={row.message.authorId === me?.id}
-                  mentionsMe={!!inst && pingsMe(inst, serverId, row.message, suppressEveryone)}
+                  mine={row.message.authorId === meId}
+                  mentionsMe={pingsUser(me, myRoleIds ?? EMPTY, row.message, suppressEveryone)}
                   instanceKey={instanceKey}
-                  canDelete={manager || row.message.authorId === me?.id}
+                  canDelete={manager || row.message.authorId === meId}
                   animate={!initial.current?.has(row.message.id)}
                   editing={editing === row.message.id}
-                  onEdit={() => setEditing(row.message.id)}
-                  onCancelEdit={() => setEditing(null)}
-                  onSave={async (content) => {
-                    await run(editMessage(instanceKey, serverId, channel.id, row.message.id, encodeEmoji(content, emojis)));
-                    setEditing(null);
-                  }}
-                  onDelete={() => run(deleteMessage(instanceKey, serverId, channel.id, row.message.id))}
+                  actions={actions}
+                  clock={clock}
                 />
               );
             })}
@@ -496,7 +563,10 @@ export function MessageBody({ content, display, className }: { content: string; 
   );
 }
 
-function MessageRow({
+/** A row's `clock` is only there so a new clock setting redraws its times. */
+type Redraw = { clock: Clock };
+
+const MessageRow = memo(function MessageRow({
   message,
   first,
   display,
@@ -510,11 +580,8 @@ function MessageRow({
   canDelete,
   animate,
   editing,
-  onEdit,
-  onCancelEdit,
-  onSave,
-  onDelete,
-}: {
+  actions,
+}: Redraw & {
   message: Message;
   first: boolean;
   display: MessageDisplay;
@@ -528,17 +595,13 @@ function MessageRow({
   canDelete: boolean;
   animate: boolean;
   editing: boolean;
-  onEdit: () => void;
-  onCancelEdit: () => void;
-  onSave: (content: string) => Promise<void>;
-  onDelete: () => Promise<void>;
+  actions: RowActions;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState(false);
   const edited = !!message.editedAt;
   return (
     <motion.div
-      layout="position"
       {...(animate ? enter : {})}
       exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
@@ -552,7 +615,7 @@ function MessageRow({
     >
       <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey} app={!!message.webhook}>
         {editing ? (
-          <EditBox initial={message.content.replace(EMOJI_TOKEN, ":$2:")} onCancel={onCancelEdit} onSave={onSave} />
+          <EditBox initial={message.content.replace(EMOJI_TOKEN, ":$2:")} onCancel={actions.cancelEdit} onSave={(content) => actions.save(message.id, content)} />
         ) : (
           <>
             {message.content && <MessageBody content={message.content} display={display} />}
@@ -577,7 +640,7 @@ function MessageRow({
               className="flex items-center gap-0.5"
             >
               <span className="px-2 text-xs font-bold text-destructive">Delete?</span>
-              <ToolButton label="Delete" danger onClick={() => onDelete().catch(() => setConfirming(false))}>
+              <ToolButton label="Delete" danger onClick={() => actions.remove(message.id).catch(() => setConfirming(false))}>
                 <CheckIcon />
               </ToolButton>
               <ToolButton label="Keep" onClick={() => setConfirming(false)}>
@@ -613,7 +676,7 @@ function MessageRow({
                 </ToolButton>
               )}
               {mine && (
-                <ToolButton label="Edit" onClick={onEdit}>
+                <ToolButton label="Edit" onClick={() => actions.edit(message.id)}>
                   <PencilIcon />
                 </ToolButton>
               )}
@@ -628,7 +691,7 @@ function MessageRow({
       )}
     </motion.div>
   );
-}
+});
 
 /** The words in `text` that set a rule off, marked. */
 function marked(text: string, matched: string[]): ReactNode {
@@ -653,7 +716,7 @@ const TRIGGER_LABEL: Record<number, string> = {
 };
 
 /** What AutoMod caught, for the mods in the alert channel: who, where, what it said and what was done. */
-function AutoModAlertRow({
+const AutoModAlertRow = memo(function AutoModAlertRow({
   message,
   date,
   author,
@@ -662,8 +725,8 @@ function AutoModAlertRow({
   channelName,
   animate,
   canDelete,
-  onDelete,
-}: {
+  actions,
+}: Redraw & {
   message: Message;
   date: Date;
   author: User | undefined;
@@ -672,7 +735,7 @@ function AutoModAlertRow({
   channelName: string | undefined;
   animate: boolean;
   canDelete: boolean;
-  onDelete: () => Promise<void>;
+  actions: RowActions;
 }) {
   const alert = message.autoMod;
   const color = useRoleColor(member);
@@ -680,7 +743,6 @@ function AutoModAlertRow({
   if (!alert) return null;
   return (
     <motion.div
-      layout="position"
       {...(animate ? enter : {})}
       exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
@@ -745,7 +807,7 @@ function AutoModAlertRow({
           {confirming ? (
             <span className="flex items-center gap-0.5">
               <span className="px-2 text-xs font-bold text-destructive">Delete?</span>
-              <ToolButton label="Delete" danger onClick={() => onDelete().catch(() => setConfirming(false))}>
+              <ToolButton label="Delete" danger onClick={() => actions.remove(message.id).catch(() => setConfirming(false))}>
                 <CheckIcon />
               </ToolButton>
               <ToolButton label="Keep" onClick={() => setConfirming(false)}>
@@ -761,7 +823,7 @@ function AutoModAlertRow({
       )}
     </motion.div>
   );
-}
+});
 
 /** Ways to say someone joined, picked by who they are so each join keeps its line. */
 const JOIN_LINES: ((name: ReactNode) => ReactNode)[] = [
@@ -781,7 +843,7 @@ export const joinLine = (userId: string, name: ReactNode) => JOIN_LINES[hueOf(us
 const waved = new Set<string>();
 
 /** "Someone joined", with a button to wave at them. */
-function JoinRow({
+const JoinRow = memo(function JoinRow({
   message,
   date,
   author,
@@ -790,9 +852,9 @@ function JoinRow({
   mine,
   animate,
   canDelete,
-  onWave,
-  onDelete,
-}: {
+  canWave,
+  actions,
+}: Redraw & {
   message: Message;
   date: Date;
   author: User | undefined;
@@ -801,11 +863,11 @@ function JoinRow({
   mine: boolean;
   animate: boolean;
   canDelete: boolean;
-  /** Unset where you can't send messages, such as before agreeing to the rules. */
-  onWave?: () => Promise<void>;
-  onDelete: () => Promise<void>;
+  /** False where you can't send messages, such as before agreeing to the rules. */
+  canWave: boolean;
+  actions: RowActions;
 }) {
-  const [done, setDone] = useState(waved.has(message.id));
+  const [done, setDone] = useState(() => waved.has(message.id));
   const [waving, setWaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const color = useRoleColor(member);
@@ -818,7 +880,6 @@ function JoinRow({
   );
   return (
     <motion.div
-      layout="position"
       {...(animate ? enter : {})}
       exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
@@ -833,7 +894,7 @@ function JoinRow({
           {formatStamp(date)}
         </time>
       </p>
-      {!mine && author && onWave && (
+      {!mine && author && canWave && (
         <motion.button
           type="button"
           disabled={done || waving}
@@ -841,7 +902,7 @@ function JoinRow({
           onClick={async () => {
             setWaving(true);
             try {
-              await onWave();
+              await actions.wave(author.username);
               waved.add(message.id);
               setDone(true);
             } finally {
@@ -870,7 +931,7 @@ function JoinRow({
           {confirming ? (
             <span className="flex items-center gap-0.5">
               <span className="px-2 text-xs font-bold text-destructive">Delete?</span>
-              <ToolButton label="Delete" danger onClick={() => onDelete().catch(() => setConfirming(false))}>
+              <ToolButton label="Delete" danger onClick={() => actions.remove(message.id).catch(() => setConfirming(false))}>
                 <CheckIcon />
               </ToolButton>
               <ToolButton label="Keep" onClick={() => setConfirming(false)}>
@@ -886,7 +947,7 @@ function JoinRow({
       )}
     </motion.div>
   );
-}
+});
 
 export function ToolButton({
   label,
@@ -967,28 +1028,27 @@ export function EditBox({ initial, onCancel, onSave }: { initial: string; onCanc
   );
 }
 
-function PendingRow({
+const PendingRow = memo(function PendingRow({
   pending,
   first,
   display,
   me,
   member,
-  onRetry,
-  onDismiss,
+  actions,
 }: {
   pending: PendingMessage;
   first: boolean;
   display: MessageDisplay;
   me: User | undefined;
   member: Member | undefined;
-  onRetry: () => void;
-  onDismiss: () => void;
+  actions: RowActions;
 }) {
+  const onRetry = () => actions.retry(pending);
+  const onDismiss = () => actions.dismiss(pending.nonce);
   // A message AutoMod stopped: why, without a retry that would only be stopped again.
   const blocked = pending.failed?.startsWith("AutoMod: ") ? pending.failed.slice("AutoMod: ".length) : null;
   return (
     <motion.div
-      layout="position"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: pending.failed ? 1 : 0.55, y: 0 }}
       exit={{ opacity: 0 }}
@@ -1035,4 +1095,4 @@ function PendingRow({
       </MessageLine>
     </motion.div>
   );
-}
+});

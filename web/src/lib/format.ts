@@ -81,8 +81,15 @@ export function hueOf(id: string) {
 }
 
 /** Whether a message mentions someone by @username. */
+const mentionPatterns = new Map<string, RegExp>();
 export function mentions(content: string, username: string) {
-  return new RegExp(`(^|[^\\w@])@${username.replace(/[.]/g, "\\.")}\\b`, "i").test(content);
+  // A chat checks every message against your name, so the pattern is made once per name.
+  let pattern = mentionPatterns.get(username);
+  if (!pattern) {
+    pattern = new RegExp(`(^|[^\\w@])@${username.replace(/[.]/g, "\\.")}\\b`, "i");
+    mentionPatterns.set(username, pattern);
+  }
+  return pattern.test(content);
 }
 
 /** Someone's custom status, unless it has run out. */

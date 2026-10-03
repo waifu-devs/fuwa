@@ -188,10 +188,14 @@ const PICTOGRAPH = /\p{Extended_Pictographic}/u;
  * Whether a message is only emoji (up to 27, like Discord), so they're
  * drawn big. Server emoji count by their tokens.
  */
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
 export function onlyEmoji(content: string) {
   const rest = content.replace(EMOJI_TOKEN, " ").trim();
+  // Most messages have a letter or digit in them, which no emoji is: no need to split them up.
+  if (/[A-Za-z0-9]/.test(rest)) return false;
   const tokens = (content.match(EMOJI_TOKEN) ?? []).length;
-  const segments = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(rest)].map((s) => s.segment).filter((s) => s.trim());
+  const segments = [...graphemes.segment(rest)].map((s) => s.segment).filter((s) => s.trim());
   if (!segments.every((s) => PICTOGRAPH.test(s) || /\p{Regional_Indicator}/u.test(s))) return false;
   const count = tokens + segments.length;
   return count > 0 && count <= 27;

@@ -1,0 +1,6 @@
+{
+  "noScore": true,
+  "share": false,
+  "supplyChain": { "enabled": false },
+  "ignore": { "files": ["src/gen/**", "src/e2ee/pkg/**"] }
+}

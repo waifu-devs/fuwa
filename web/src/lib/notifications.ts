@@ -1,6 +1,6 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { useEffect, useState } from "react";
-import { NotificationLevel, type Message, type NotificationSettings } from "@/gen/fuwa/v1/types_pb";
+import { NotificationLevel, type Message, type NotificationSettings, type User } from "@/gen/fuwa/v1/types_pb";
 import { notificationKey, useFuwa, type InstanceState } from "@/fuwa/store";
 import { mentions } from "@/lib/format";
 import type { Prefs } from "@/lib/prefs";
@@ -59,12 +59,22 @@ export function pingsMe(
   suppressEveryone: boolean,
 ) {
   const me = inst.me;
+  const mine = me ? inst.members[serverId]?.find((m) => m.user?.id === me.id)?.roleIds : undefined;
+  return pingsUser(me ?? undefined, mine ?? [], message, suppressEveryone);
+}
+
+/** `pingsMe`, for callers that already know who you are and your roles (a message list checks every message). */
+export function pingsUser(
+  me: Pick<User, "id" | "username"> | undefined,
+  myRoleIds: readonly string[],
+  message: Pick<Message, "authorId" | "content" | "mentionsEveryone" | "mentionRoleIds">,
+  suppressEveryone: boolean,
+) {
   if (!me || message.authorId === me.id) return false;
   if (mentions(message.content, me.username)) return true;
   if (message.mentionsEveryone && !suppressEveryone) return true;
   if (!message.mentionRoleIds.length) return false;
-  const mine = inst.members[serverId]?.find((m) => m.user?.id === me.id)?.roleIds ?? [];
-  return message.mentionRoleIds.some((id) => mine.includes(id));
+  return message.mentionRoleIds.some((id) => myRoleIds.includes(id));
 }
 
 /** A clock that ticks every `ms`, so timed mutes run out on screen. */
