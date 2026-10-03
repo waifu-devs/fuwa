@@ -41,6 +41,14 @@ that turns fuwa's questions into another provider's.
   To run a classifier on your own network, start the instance with
   `FUWA_AUTOMOD_ALLOW_PRIVATE=1`.
 - fuwa reads at most 64 KB of an answer.
+- Admins can cap how many times a day (UTC) each server's Smart filter asks
+  its provider (Instance settings, Moderation, or
+  `FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY`); there's no cap unless set. Past it,
+  that server's messages go through the Smart filter unchecked until
+  midnight UTC, like when the provider is down, and its other rules still
+  apply: a limit that blocked messages would stop a busy server talking. Each
+  server's Usage page shows the day's count. It's counted where the server
+  lives, in memory, so a restart starts the day's count again.
 
 ## The request
 

@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { Setting, SPRING } from "../controls";
+import { Cap, Setting, SPRING } from "../controls";
 
 type Reset = { changed: boolean; onReset: () => void; resetting: boolean };
 
@@ -77,6 +77,11 @@ export const MODERATION_FIELDS: { path: string; get: (s: InstanceSettings) => un
     get: (s) => JSON.stringify(s.automodProviders.map(fingerprint)),
     copy: (into, from) => (into.automodProviders = from.automodProviders.map((p) => clone(AutoModProviderSettingsSchema, p))),
   },
+  {
+    path: "automod_checks_per_day",
+    get: (s) => s.automodChecksPerDay,
+    copy: (into, from) => (into.automodChecksPerDay = from.automodChecksPerDay),
+  },
 ];
 
 export const MODERATION_SECTION = {
@@ -89,6 +94,7 @@ export const MODERATION_SECTION = {
     { id: "automod-typesafe-jev", label: "TypeSafe Jev", keywords: "automod ai moderation key" },
     { id: "automod-cloudflare-clef", label: "Cloudflare Clef", keywords: "automod ai moderation workers token account" },
     { id: "automod-custom", label: "Your own provider", keywords: "automod custom webhook classifier own endpoint" },
+    { id: "automod-checks-per-day", label: "Checks per server per day", keywords: "automod limit cap budget cost quota daily" },
   ],
 };
 
@@ -100,12 +106,15 @@ export function ModerationSettings({
   instanceKey,
   draft,
   saved,
+  defaults,
   patch,
   resetter,
 }: {
   instanceKey: string;
   draft: InstanceSettings;
   saved: InstanceSettings;
+  /** What the instance does unless changed, from its environment. */
+  defaults?: InstanceSettings;
   patch: (fn: (d: InstanceSettings) => void) => void;
   resetter: (...paths: string[]) => Reset;
 }) {
@@ -139,6 +148,21 @@ export function ModerationSettings({
           through and the servers' own rules still apply.
         </p>
       </motion.div>
+      <Setting
+        id="automod-checks-per-day"
+        title="Checks per server per day"
+        hint={
+          <>
+            How many messages each server's smart filter may send to its provider in a day (UTC), so one busy server can't run up your bill. Once a server
+            uses them, its messages <b className="text-foreground">go through the smart filter unchecked</b> until midnight UTC, like when the provider is down:
+            blocking every message instead would stop a busy server talking. Its own rules still apply, and its Usage page shows how many are left.
+          </>
+        }
+        defaultLabel={defaults?.automodChecksPerDay === undefined ? "no limit" : `${defaults.automodChecksPerDay.toLocaleString()} a day`}
+        {...resetter("automod_checks_per_day")}
+      >
+        <Cap label="Up to" placeholder="1000" value={draft.automodChecksPerDay} onChange={(v) => patch((d) => (d.automodChecksPerDay = v))} />
+      </Setting>
       <AnimatePresence initial={false}>
         {draft.automodProviders.map((provider, n) => (
           <motion.div

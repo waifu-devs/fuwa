@@ -4718,6 +4718,82 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
 }
 
 #[tokio::test]
+async fn smart_filter_checks_stop_at_the_daily_limit() {
+    use pb::{AutoModActionKind as Kind, AutoModTrigger as Trigger};
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(
+        dir.path(),
+        &[
+            ("FUWA_CLEF_API_TOKEN", "not-a-real-token-1234"),
+            ("FUWA_CLEF_ACCOUNT_ID", "00000000000000000000000000000000"),
+            ("FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY", "2"),
+        ],
+    )
+    .await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (member, _, _) = sign_up(&mut c, "member").await;
+    let server = create_server(&mut c, &owner, "Capped", true).await;
+    join(&mut c, &member, &server.id).await;
+    let general = new_channel(&mut c, &owner, &server.id, "general", pb::ChannelType::Text).await;
+    let mods = new_channel(&mut c, &owner, &server.id, "mod-log", pb::ChannelType::Text).await;
+    let smart = pb::AutoModRule {
+        enabled: true,
+        trigger: Trigger::Provider as i32,
+        provider: "cloudflare-clef".into(),
+        actions: vec![pb::AutoModAction {
+            kind: Kind::Alert as i32,
+            channel_id: mods.id.clone(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let rule = save_rule(&mut c, &owner, &server.id, smart).await.unwrap();
+
+    // The limit is the instance's, shown with each server's usage.
+    let shown = c
+        .servers
+        .get_server_usage(authed(&owner, pb::GetServerUsageRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(shown.limits.unwrap().automod_checks_per_day, Some(2));
+    assert_eq!(shown.own_limits.unwrap().automod_checks_per_day, None);
+    let settings = c.admin.get_settings(authed(&admin, pb::GetSettingsRequest {})).await.unwrap().into_inner();
+    assert_eq!(settings.config.unwrap().settings.unwrap().automod_checks_per_day, Some(2));
+
+    // Each message the filter checks counts, and past the limit messages go
+    // through unchecked, without asking.
+    for text in ["one", "two", "three", "four"] {
+        send(&mut c, &member, &server.id, &general.id, text).await.unwrap();
+    }
+    assert_eq!(usage(&mut c, &owner, &server.id).await.automod_checks_today, 2);
+    let tried = c
+        .automod
+        .test_auto_mod_rule(authed(
+            &owner,
+            pb::TestAutoModRuleRequest { server_id: server.id.clone(), rule: Some(rule), content: "hi".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(tried.error.contains("today's 2 Smart filter checks are used up"), "{tried:?}");
+    assert_eq!(usage(&mut c, &owner, &server.id).await.automod_checks_today, 2);
+
+    // Admins raise it from the app.
+    let raised = settings_update(
+        pb::InstanceSettings { automod_checks_per_day: Some(3), ..Default::default() },
+        &["automod_checks_per_day"],
+        &[],
+    );
+    c.admin.update_settings(authed(&admin, raised)).await.unwrap();
+    send(&mut c, &member, &server.id, &general.id, "five").await.unwrap();
+    assert_eq!(usage(&mut c, &owner, &server.id).await.automod_checks_today, 3);
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn custom_emoji_and_the_welcome_screen() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[("FUWA_LIMIT_EMOJIS", "2")]).await;
