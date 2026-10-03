@@ -1465,6 +1465,14 @@ async fn servers_live_in_their_region_and_move() {
         ..Default::default()
     };
     c.servers.update_server(authed(&juan, request)).await.unwrap();
+    // Once used it's still that server's alone: another server reusing it
+    // would lose it when this one replaces it, or when its shard sweeps it.
+    let request = pb::UpdateServerRequest {
+        server_id: in_eu.id.clone(),
+        icon_url: Some(direct.url.clone()),
+        ..Default::default()
+    };
+    assert_eq!(c.servers.update_server(authed(&juan, request)).await.unwrap_err().code(), Code::PermissionDenied);
     // A wrong-sized upload is turned away and nothing is kept.
     let short = reserve(pb::MediaPurpose::Emoji, &server.id, &juan).await.unwrap();
     assert_eq!(http.put(&short.upload_url).body(with_text[..200].to_vec()).send().await.unwrap().status(), 400);

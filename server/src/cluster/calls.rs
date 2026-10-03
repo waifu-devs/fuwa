@@ -179,10 +179,12 @@ impl App {
         if row.account_id != account_id || row.purpose != purpose {
             return Err(Error::denied("upload that picture yourself to use it here"));
         }
-        // An upload made for a server is only ever that server's (it may be
-        // kept in that server's region).
-        if !row.used && row.server_id.is_some() && row.server_id.as_deref() != server_id {
-            return Err(Error::denied("that picture was uploaded for another server; upload it here"));
+        // A picture made for or used by a server is only ever that server's:
+        // it may be kept in that server's region, and it's deleted when that
+        // server replaces it or stops using it, so another server can't
+        // share it.
+        if row.server_id.is_some() && row.server_id.as_deref() != server_id {
+            return Err(Error::denied("that picture belongs to another server; upload it here"));
         }
         if !row.stored {
             return Err(Error::FailedPrecondition("that picture hasn't finished uploading".into()));
