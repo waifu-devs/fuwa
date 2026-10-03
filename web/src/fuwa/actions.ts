@@ -910,6 +910,16 @@ export const moveServer = (key: string, serverId: string, region: string) =>
     return server!;
   });
 
+/** A server's shared channels, both ends, for an instance admin. */
+export const listServerShares = (key: string, serverId: string) =>
+  call((signal) => api(key).admin.listServerShares({ serverId }, { signal })).pipe(Effect.map((r) => r.connections));
+
+/** Ends one of a server's shared channels as an instance admin. */
+export const endServerShare = (key: string, serverId: string, connectionId: string) =>
+  call((signal) => api(key).admin.endServerShare({ serverId, connectionId }, { signal })).pipe(
+    Effect.tap(() => (store.get().instances[key]?.shared[serverId] ? relistShared(key, serverId) : Effect.void)),
+  );
+
 /** Runs some text through a moderation provider as the form has it (an empty key uses the saved one). */
 export const testAutoModProvider = (key: string, provider: AutoModProviderSettings, content: string) =>
   call((signal) => api(key).admin.testAutoModProvider({ provider, content }, { signal }));

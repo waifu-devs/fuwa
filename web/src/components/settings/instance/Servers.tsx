@@ -15,17 +15,21 @@ import {
   ServerIcon as ServersIcon,
   Trash2Icon,
   TriangleAlertIcon,
+  UnlinkIcon,
   UsersIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { InstanceServer } from "@/gen/fuwa/v1/admin_pb";
+import { SharedConnectionState, type SharedConnection } from "@/gen/fuwa/v1/channel_pb";
 import type { ServerLimits } from "@/gen/fuwa/v1/types_pb";
 import type { Region } from "@/gen/fuwa/v1/types_pb";
-import { deleteServer, exportServer, listInstanceServers, moveServer, nodeUsage, run, serverUsage, setServerLimits } from "@/fuwa/actions";
+import { deleteServer, endServerShare, exportServer, listInstanceServers, listServerShares, moveServer, nodeUsage, run, serverUsage, setServerLimits } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
+import { SharedGlyph } from "@/components/chat/Shared";
+import { ConfirmDialog, StateChip } from "@/components/settings/server/SharedChannels";
 import { Count, CountUp, SPRING } from "@/components/motion";
 import { Segmented } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
@@ -410,6 +414,8 @@ function Details({
 
       {hasRegions(regions) && <MoveRegion instanceKey={instanceKey} server={s} regions={regions} onMoved={onMoved} />}
 
+      <Shares instanceKey={instanceKey} serverId={s.id} />
+
       <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
         {entry.member && (
           <Button
@@ -441,6 +447,88 @@ function Details({
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/**
+ * A server's shared channels, both ends, each of which an instance admin can
+ * end. Hidden while it has none.
+ */
+function Shares({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
+  const [shares, setShares] = useState<SharedConnection[] | null>(null);
+  const [ending, setEnding] = useState<SharedConnection | null>(null);
+
+  useEffect(() => {
+    run(listServerShares(instanceKey, serverId)).then(setShares, (e: FuwaError) => toast(e.message));
+  }, [instanceKey, serverId]);
+
+  if (!shares?.length) return null;
+  const other = (c: SharedConnection) => c.server?.name ?? "another server";
+  const channel = (c: SharedConnection) => `#${c.homeChannelName || "a channel"}`;
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">Shared channels</p>
+      <ul className="flex flex-col gap-2">
+        <AnimatePresence initial={false}>
+          {shares.map((c, n) => (
+            <motion.li
+              key={c.id}
+              layout
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, x: -16, height: 0, marginTop: -8 }}
+              transition={{ ...SPRING, delay: n * 0.04 }}
+              className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-muted/50 px-3 py-2"
+            >
+              <span className="relative shrink-0">
+                {c.server && <ServerIcon server={c.server} className="size-8 rounded-lg" />}
+                <span className="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-background text-primary">
+                  <SharedGlyph className="size-2.5" />
+                </span>
+              </span>
+              <p className="min-w-0 flex-1 basis-40 text-sm">
+                {c.home ? (
+                  <>
+                    <b>{channel(c)}</b> shown in <b>{other(c)}</b>
+                  </>
+                ) : (
+                  <>
+                    <b>{channel(c)}</b> from <b>{other(c)}</b>
+                  </>
+                )}
+              </p>
+              <StateChip connection={c} />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setEnding(c)}
+                className="group rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive"
+              >
+                <UnlinkIcon className="transition-transform group-hover:-rotate-12" /> End
+              </Button>
+            </motion.li>
+          ))}
+        </AnimatePresence>
+      </ul>
+      <ConfirmDialog
+        open={ending !== null}
+        onOpenChange={(open) => !open && setEnding(null)}
+        title={ending ? `End ${channel(ending)} ${ending.state === SharedConnectionState.WAITING ? "request" : "sharing"}?` : ""}
+        body={
+          ending
+            ? `It goes away from ${ending.home ? other(ending) : "this server"}. Messages stay with ${ending.home ? "this server" : other(ending)}, and both servers' admins see it in the audit log.`
+            : ""
+        }
+        action="End it"
+        onConfirm={async () => {
+          if (!ending) return;
+          await run(endServerShare(instanceKey, serverId, ending.id));
+          setShares((list) => list?.filter((x) => x.id !== ending.id) ?? null);
+          toast(`Ended ${channel(ending)} with ${other(ending)}`);
+        }}
+      />
     </div>
   );
 }

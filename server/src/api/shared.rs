@@ -645,6 +645,14 @@ pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::S
         Call::Events(events) => guest_events(app, &sdb, events).await,
         Call::Updated(updated) => guest_updated(&sdb, updated).await,
         Call::Readers(readers) => home_readers(app, &sdb, readers).await,
+        Call::AdminList(_) => {
+            Ok(cpb::SharedReply { connections: Box::pin(connections_of(app, &sdb)).await?, ..Default::default() })
+        }
+        Call::AdminEnd(end) => {
+            // Boxed: ending it calls the other end, which comes back through here.
+            Box::pin(end_connection(app, &sdb, &end.actor_id, &end.connection_id, true)).await?;
+            Ok(cpb::SharedReply::default())
+        }
     }
 }
 
@@ -1197,6 +1205,71 @@ async fn guest_updated(sdb: &ServerDb, updated: cpb::HomeUpdated) -> Result<cpb:
     })
     .await?;
     Ok(cpb::SharedReply::default())
+}
+
+/// A server's connections, both ends, as its Shared channels page shows them.
+/// Each side sees who reads the channel's messages: the home its own
+/// providers, a guest the home's, asked of it now.
+async fn connections_of(app: &Arc<App>, sdb: &ServerDb) -> Result<Vec<pb::SharedConnection>> {
+    let conn = sdb.read()?;
+    let channels: HashMap<String, pb::Channel> =
+        store::load_channels(&conn, &sdb.id).await?.into_iter().map(|c| (c.id.clone(), c)).collect();
+    let mut connections: Vec<pb::SharedConnection> = Vec::new();
+    let mut readers: HashMap<String, Vec<String>> = HashMap::new();
+    for row in all_guests(&conn).await? {
+        let channel = channels.get(&row.channel_id);
+        let mut connection = home_connection(&row, &channel.map(|c| c.name.clone()).unwrap_or_default());
+        if let Some(channel) = channel {
+            if !readers.contains_key(&channel.id) {
+                readers.insert(channel.id.clone(), automod::readers(app, &conn, channel).await?);
+            }
+            connection.checked_by = readers[&channel.id].clone();
+        }
+        connections.push(connection);
+    }
+    let mut links: Vec<pb::SharedConnection> = all_links(&conn).await?.iter().map(guest_connection).collect();
+    drop(conn);
+    ask_readers(app, &sdb.id, &mut links).await;
+    connections.extend(links);
+    Ok(connections)
+}
+
+/// Ends one of a server's connections, at whichever end it is: the server
+/// it's shown in goes (at the home), or its channel here goes (at a guest).
+/// `by_admin` marks an instance admin's doing in the audit log.
+async fn end_connection(
+    app: &Arc<App>,
+    sdb: &ServerDb,
+    actor_id: &str,
+    connection_id: &str,
+    by_admin: bool,
+) -> Result<()> {
+    let by = |audit: Audit| if by_admin { audit.change("by", "", "an instance admin") } else { audit };
+    let (ended, channel_id) = sdb
+        .write(actor_id, async |conn, events| {
+            if let Some(row) = guest_by_id(conn, connection_id).await? {
+                let channel = load_channel(conn, &sdb.id, &row.channel_id).await?.map(|c| c.name).unwrap_or_default();
+                drop_guest(conn, &sdb.id, &row.id, events).await?;
+                let audit = Audit::new(pb::AuditAction::SharedChannelDisconnect, &row.server.id)
+                    .channel(channel)
+                    .change("server", "", &row.server.name);
+                store::audit(conn, actor_id, by(audit)).await?;
+                return Ok((Ended { guests: vec![(row.id, row.server.id)], links: vec![] }, None));
+            }
+            let link = link_by_id(conn, connection_id).await?.ok_or(Error::NotFound("connection"))?;
+            let channel_id = drop_link(conn, &sdb.id, &link.id, events).await?;
+            let audit = Audit::new(pb::AuditAction::SharedChannelDisconnect, &link.home.id)
+                .channel(&link.home_channel_name)
+                .change("server", "", &link.home.name);
+            store::audit(conn, actor_id, by(audit)).await?;
+            Ok((Ended { guests: vec![], links: vec![(link.id, link.home.id)] }, channel_id))
+        })
+        .await?;
+    if let Some(channel_id) = channel_id {
+        app.forget_notifications(&sdb.id, Some(&channel_id), None).await;
+    }
+    tell_ended(app, &sdb.id, actor_id, ended).await;
+    Ok(())
 }
 
 // ─────────────── When channels and servers go ───────────────
@@ -1766,27 +1839,11 @@ impl SharedChannelService for Api {
                 let account = self.account(request.metadata()).await?;
                 let Seat { sdb, .. } =
                     self.with(&account, &request.get_ref().server_id, Permission::ManageServer).await?;
+                let connections = connections_of(&self.app, &sdb).await?;
                 let conn = sdb.read()?;
-                let channels: HashMap<String, pb::Channel> =
-                    store::load_channels(&conn, &sdb.id).await?.into_iter().map(|c| (c.id.clone(), c)).collect();
-                let name = |id: &str| channels.get(id).map(|c| c.name.clone()).unwrap_or_default();
-                let mut connections: Vec<pb::SharedConnection> = Vec::new();
-                // Each side sees who reads the channel's messages: the home its
-                // own providers, a guest the home's, asked of it now.
-                let mut readers: HashMap<String, Vec<String>> = HashMap::new();
-                for row in all_guests(&conn).await? {
-                    let mut connection = home_connection(&row, &name(&row.channel_id));
-                    if let Some(channel) = channels.get(&row.channel_id) {
-                        if !readers.contains_key(&channel.id) {
-                            readers.insert(channel.id.clone(), automod::readers(&self.app, &conn, channel).await?);
-                        }
-                        connection.checked_by = readers[&channel.id].clone();
-                    }
-                    connections.push(connection);
-                }
-                let mut links: Vec<pb::SharedConnection> = all_links(&conn).await?.iter().map(guest_connection).collect();
-                ask_readers(&self.app, &sdb.id, &mut links).await;
-                connections.extend(links);
+                let names: HashMap<String, String> =
+                    store::load_channels(&conn, &sdb.id).await?.into_iter().map(|c| (c.id, c.name)).collect();
+                let name = |id: &str| names.get(id).cloned().unwrap_or_default();
                 let codes = query_all(
                     &conn,
                     "SELECT code, channel_id, creator_id, created_at, expires_at FROM share_codes WHERE expires_at > ?1 ORDER BY created_at DESC",
@@ -1897,41 +1954,7 @@ impl SharedChannelService for Api {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
                 let Seat { sdb, .. } = self.with(&account, &req.server_id, Permission::ManageServer).await?;
-                let (ended, channel_id) = sdb
-                    .write(&account.id, async |conn, events| {
-                        // At the home: the server it's shown in goes.
-                        if let Some(row) = guest_by_id(conn, &req.connection_id).await? {
-                            let channel =
-                                load_channel(conn, &sdb.id, &row.channel_id).await?.map(|c| c.name).unwrap_or_default();
-                            drop_guest(conn, &sdb.id, &row.id, events).await?;
-                            store::audit(
-                                conn,
-                                &account.id,
-                                Audit::new(pb::AuditAction::SharedChannelDisconnect, &row.server.id)
-                                    .channel(channel)
-                                    .change("server", "", &row.server.name),
-                            )
-                            .await?;
-                            return Ok((Ended { guests: vec![(row.id, row.server.id)], links: vec![] }, None));
-                        }
-                        // At a guest: its channel goes.
-                        let link = link_by_id(conn, &req.connection_id).await?.ok_or(Error::NotFound("connection"))?;
-                        let channel_id = drop_link(conn, &sdb.id, &link.id, events).await?;
-                        store::audit(
-                            conn,
-                            &account.id,
-                            Audit::new(pb::AuditAction::SharedChannelDisconnect, &link.home.id)
-                                .channel(&link.home_channel_name)
-                                .change("server", "", &link.home.name),
-                        )
-                        .await?;
-                        Ok((Ended { guests: vec![], links: vec![(link.id, link.home.id)] }, channel_id))
-                    })
-                    .await?;
-                if let Some(channel_id) = channel_id {
-                    self.app.forget_notifications(&sdb.id, Some(&channel_id), None).await;
-                }
-                tell_ended(&self.app, &sdb.id, &account.id, ended).await;
+                end_connection(&self.app, &sdb, &account.id, &req.connection_id, false).await?;
                 Ok(pb::DisconnectResponse {})
             }
             .await,

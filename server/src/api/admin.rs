@@ -356,6 +356,44 @@ impl AdminService for Api {
         )
     }
 
+    async fn list_server_shares(
+        &self,
+        request: Request<pb::ListServerSharesRequest>,
+    ) -> Result<Response<pb::ListServerSharesResponse>, Status> {
+        respond(
+            async {
+                self.require_instance_admin(request.metadata()).await?;
+                let call = crate::cpb::shared_call::Call::AdminList(crate::cpb::AdminShares {});
+                let reply = self
+                    .app
+                    .shared(crate::cpb::SharedCall { server_id: request.into_inner().server_id, call: Some(call) })
+                    .await?;
+                Ok(pb::ListServerSharesResponse { connections: reply.connections })
+            }
+            .await,
+        )
+    }
+
+    async fn end_server_share(
+        &self,
+        request: Request<pb::EndServerShareRequest>,
+    ) -> Result<Response<pb::EndServerShareResponse>, Status> {
+        respond(
+            async {
+                let viewer = self.require_instance_admin(request.metadata()).await?;
+                let req = request.into_inner();
+                let end = crate::cpb::AdminEnd {
+                    connection_id: req.connection_id,
+                    actor_id: viewer.account().map(|a| a.id.clone()).unwrap_or_default(),
+                };
+                let call = crate::cpb::shared_call::Call::AdminEnd(end);
+                self.app.shared(crate::cpb::SharedCall { server_id: req.server_id, call: Some(call) }).await?;
+                Ok(pb::EndServerShareResponse {})
+            }
+            .await,
+        )
+    }
+
     async fn move_server(
         &self,
         request: Request<pb::MoveServerRequest>,

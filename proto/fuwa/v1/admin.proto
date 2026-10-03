@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package fuwa.v1;
 
+import "fuwa/v1/channel.proto";
 import "fuwa/v1/sso.proto";
 import "fuwa/v1/types.proto";
 import "google/protobuf/field_mask.proto";
@@ -45,6 +46,13 @@ service AdminService {
   // were. Changes to it wait a moment meanwhile, and people in its calls
   // reconnect. Only on an instance with more than one region.
   rpc MoveServer(MoveServerRequest) returns (MoveServerResponse);
+  // A server's shared channels: the ones it shows other servers and the ones
+  // it shows from them, waiting or connected.
+  rpc ListServerShares(ListServerSharesRequest) returns (ListServerSharesResponse);
+  // Ends one of a server's shared channels, or a request for one, as its own
+  // admins' Disconnect does: it goes from the other server, and messages stay
+  // at the channel's home. Its audit log says an instance admin did it.
+  rpc EndServerShare(EndServerShareRequest) returns (EndServerShareResponse);
 
   // Puts a banner on every client of this instance, or takes it down.
   rpc SetAnnouncement(SetAnnouncementRequest) returns (SetAnnouncementResponse);
@@ -393,6 +401,22 @@ message MoveServerRequest {
 message MoveServerResponse {
   Server server = 1;
 }
+
+message ListServerSharesRequest {
+  string server_id = 1;
+}
+
+message ListServerSharesResponse {
+  // From the server's side, as its own Shared channels page shows them.
+  repeated SharedConnection connections = 1;
+}
+
+message EndServerShareRequest {
+  string server_id = 1;
+  string connection_id = 2;
+}
+
+message EndServerShareResponse {}
 
 message ExportServerRequest {
   string server_id = 1;

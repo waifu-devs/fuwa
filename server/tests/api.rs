@@ -6402,3 +6402,79 @@ async fn shared_preview_names_outside_providers() {
     save_rule(&mut c, &juan, &home, pb::AutoModRule { enabled: false, ..rule }).await.unwrap();
     assert_eq!(listed(&mut c, &mika, &guest).await, [Vec::<String>::new()]);
 }
+
+#[tokio::test]
+async fn instance_admins_end_any_share() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let code = c
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let asked = c
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    c.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id.clone(), approve: true },
+        ))
+        .await
+        .unwrap();
+
+    // Only instance admins, even for a server's own owner.
+    let list = |server_id: &str| pb::ListServerSharesRequest { server_id: server_id.into() };
+    let denied = c.admin.list_server_shares(authed(&juan, list(&home))).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let end = pb::EndServerShareRequest { server_id: guest.clone(), connection_id: asked.id.clone() };
+    let denied = c.admin.end_server_share(authed(&mika, end.clone())).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+
+    // They see each server's side, members or not.
+    let at_home = c.admin.list_server_shares(authed(&admin, list(&home))).await.unwrap().into_inner().connections;
+    assert_eq!(at_home.len(), 1);
+    assert!(at_home[0].home && at_home[0].server.as_ref().unwrap().name == "Guest");
+    let at_guest = c.admin.list_server_shares(authed(&admin, list(&guest))).await.unwrap().into_inner().connections;
+    assert_eq!(at_guest.len(), 1);
+    assert!(!at_guest[0].home && at_guest[0].state == pb::SharedConnectionState::Active as i32);
+
+    // Ending it from the guest's side takes it from both.
+    c.admin.end_server_share(authed(&admin, end.clone())).await.unwrap();
+    assert!(
+        c.admin.list_server_shares(authed(&admin, list(&guest))).await.unwrap().into_inner().connections.is_empty()
+    );
+    assert!(c.admin.list_server_shares(authed(&admin, list(&home))).await.unwrap().into_inner().connections.is_empty());
+    assert!(list_channels(&mut c, &mika, &guest).await.iter().all(|ch| ch.shared.is_none()));
+    let gone = c.admin.end_server_share(authed(&admin, end)).await.unwrap_err();
+    assert_eq!(gone.code(), Code::NotFound);
+
+    // The guest's audit log says an instance admin did it.
+    let log =
+        audit_log(&mut c, &mika, pb::ListAuditLogRequest { server_id: guest.clone(), ..Default::default() }).await;
+    let entry = log
+        .entries
+        .iter()
+        .find(|e| e.action == pb::AuditAction::SharedChannelDisconnect as i32)
+        .expect("the disconnect is logged");
+    assert!(entry.changes.iter().any(|ch| ch.field == "by" && ch.after == "an instance admin"), "{entry:?}");
+}
