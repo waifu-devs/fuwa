@@ -175,6 +175,37 @@ impl FuwaApp {
             })))
             .into_any_element();
 
+        // Kept out until they sign in through the server's provider: the way
+        // back in, where the channels were.
+        if self.sso_locked(key, server_id).is_some() {
+            let (k, sid) = (key.to_owned(), server.id.clone());
+            let provider = crate::ui::overlay::provider_name(&server.sso_name).to_owned();
+            let hover = alpha(p.primary, 0.18);
+            let row = div()
+                .id("sso-sidebar-locked")
+                .mx(px(8.0))
+                .mt(px(8.0))
+                .px(px(12.0))
+                .py(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .rounded(px(12.0))
+                .bg(alpha(p.primary, 0.1))
+                .text_color(p.primary)
+                .text_sm()
+                .font_weight(FontWeight::BOLD)
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover))
+                // To the gate, which names the provider's host before anything opens.
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.navigate(Nav::Server { key: k.clone(), server: sid.clone() }, window, cx)
+                }))
+                .child(icon("lock-keyhole").size(px(16.0)).flex_none())
+                .child(div().flex_1().min_w_0().child(format!("Sign in with {provider} to see the channels")));
+            let row = motion::rise(row, SharedString::from(format!("sso-row|{key}|{server_id}")), Duration::ZERO, 6.0);
+            return (header, div().child(row).into_any_element());
+        }
         let Some(channels) = channels else {
             return (header, loading_rows(&p).into_any_element());
         };

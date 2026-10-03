@@ -98,6 +98,7 @@ clients! {
     media => pb::media_service_client::MediaServiceClient<Transport>,
     join => pb::join_service_client::JoinServiceClient<Transport>,
     calls => pb::call_service_client::CallServiceClient<Transport>,
+    sso => pb::sso_service_client::SsoServiceClient<Transport>,
 }
 
 impl Api {

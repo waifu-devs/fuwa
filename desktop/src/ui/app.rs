@@ -111,6 +111,16 @@ pub enum Dialog {
         key: String,
         server: String,
     },
+    /// Joining a server that asks people to sign in through its identity
+    /// provider first, found from an invite.
+    SsoJoin {
+        key: String,
+        server: String,
+        name: String,
+        provider: String,
+        host: String,
+        code: String,
+    },
     /// Time out, kick or ban someone, with a reason for the audit log.
     Moderate {
         key: String,
@@ -211,6 +221,10 @@ pub struct FuwaApp {
     pub welcome: Option<crate::pb::WelcomeScreen>,
     /// Servers checked for a welcome screen to greet you with, this run.
     pub welcome_checked: HashSet<String>,
+    /// The server whose sign-in page is open in the browser, and which try
+    /// that is: clicking again starts over, and the old one's answer is dropped.
+    pub sso_waiting: Option<String>,
+    pub sso_try: u64,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -352,6 +366,8 @@ impl FuwaApp {
             menu: None,
             welcome: None,
             welcome_checked: HashSet::new(),
+            sso_waiting: None,
+            sso_try: 0,
             emoji_open: false,
             emoji_query,
             profile: None,
@@ -1014,9 +1030,69 @@ impl FuwaApp {
             }
             Dialog::JoinInvite { key } => {
                 self.dialog_busy = true;
+                cx.notify();
+                // A server that asks for its provider's sign-in says so before
+                // anyone is sent there; any other joins straight away.
+                let found = core.spawn({
+                    let (core, key) = (core.clone(), key.clone());
+                    async move {
+                        let (code, server) = core.open_invite(&key, &value).await?;
+                        if server.sso_required {
+                            return Ok(Err((code, server)));
+                        }
+                        core.join_with_invite(&key, &server.id, &code).await.map(Ok)
+                    }
+                });
+                cx.spawn_in(window, async move |this, cx| {
+                    let Ok(result) = found.await else { return };
+                    let _ = this.update_in(cx, |this, window, cx| {
+                        this.dialog_busy = false;
+                        match result {
+                            Ok(Ok(server)) => {
+                                this.dialog = None;
+                                this.navigate(Nav::Server { key, server: server.id }, window, cx);
+                            }
+                            Ok(Err((code, server))) => {
+                                this.dialog_error = None;
+                                this.dialog = Some(Dialog::SsoJoin {
+                                    key,
+                                    server: server.id,
+                                    name: server.name,
+                                    provider: server.sso_name,
+                                    host: server.sso_host,
+                                    code,
+                                });
+                            }
+                            Err(err) => this.dialog_error = Some(err.message),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
+            }
+            Dialog::SsoJoin { key, server, code, .. } => {
+                self.dialog_busy = true;
                 let rx = core.spawn({
                     let (core, key) = (core.clone(), key.clone());
-                    async move { core.join_by_invite(&key, &value).await }
+                    async move {
+                        // Members signing in again come back with their
+                        // membership; anyone else joins once they have.
+                        if core
+                            .server_sso(&key, &server, Some(code.clone()), crate::ui::open_in_browser)
+                            .await?
+                            .is_none()
+                        {
+                            return core.join_with_invite(&key, &server, &code).await;
+                        }
+                        core.shared.read(|s| s.instance(&key).and_then(|i| i.server(&server).cloned())).ok_or_else(
+                            || {
+                                crate::core::api::Problem::new(
+                                    tonic::Code::NotFound,
+                                    "That server isn't here any more.",
+                                )
+                            },
+                        )
+                    }
                 });
                 self.after_dialog(rx, key, window, cx);
             }
@@ -1168,6 +1244,55 @@ impl FuwaApp {
             cx.notify();
         });
         cx.notify();
+    }
+
+    // ───────────────────────── Single sign-on ─────────────────────────
+
+    /// The server, while you're kept out of its channels until you sign in
+    /// through its identity provider.
+    pub(crate) fn sso_locked(&self, key: &str, server: &str) -> Option<crate::pb::Server> {
+        self.core.shared.read(|s| {
+            let i = s.instance(key)?;
+            let found = i.server(server)?;
+            crate::core::sso::locked(found, i.my_member(server), crate::core::dms::now_ms()).then(|| found.clone())
+        })
+    }
+
+    /// Signs in through a server's provider in the browser, so its channels
+    /// come back; they arrive through the event stream.
+    pub(crate) fn sign_in_server(&mut self, key: String, server: String, cx: &mut Context<Self>) {
+        self.sso_try += 1;
+        let attempt = self.sso_try;
+        self.sso_waiting = Some(server.clone());
+        cx.notify();
+        let (name, provider) = self
+            .core
+            .shared
+            .read(|s| s.instance(&key).and_then(|i| i.server(&server)).map(|s| (s.name.clone(), s.sso_name.clone())))
+            .unwrap_or_default();
+        let core = self.core.clone();
+        self.run(
+            cx,
+            async move { core.server_sso(&key, &server, None, crate::ui::open_in_browser).await },
+            move |this, result, cx| {
+                if this.sso_try != attempt {
+                    return;
+                }
+                this.sso_waiting = None;
+                match result {
+                    Ok(_) => this.toast(
+                        "shield-check",
+                        format!("Signed in with {}", crate::ui::overlay::provider_name(&provider)),
+                        format!("Welcome back to {name}."),
+                        None,
+                        None,
+                        cx,
+                    ),
+                    Err(err) => this.toast("lock-keyhole", "Couldn't sign you in".into(), err.message, None, None, cx),
+                }
+                cx.notify();
+            },
+        );
     }
 
     fn after_dialog(
