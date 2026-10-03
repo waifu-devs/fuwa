@@ -2758,6 +2758,45 @@ async fn fetch(instance: &Instance, url: &str) -> (reqwest::StatusCode, reqwest:
 }
 
 #[tokio::test]
+async fn pictures_kept_from_before_lose_their_metadata_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let background = pb::MediaPurpose::Background;
+    let url = upload(&mut c, &instance, &juan, background, png(300, 1)).await;
+    let keep = |url: &str| authed(&juan, pb::KeepBackgroundRequest { url: url.into() });
+    c.media.keep_background(keep(&url)).await.unwrap();
+    instance.stop().await;
+
+    // As if it had been kept before uploads were cleaned: with a text chunk
+    // saying where it was taken.
+    let id = url.rsplit('/').next().unwrap().to_string();
+    let text = [&b"\0\0\0\x0btEXt"[..], b"GPS\0here!!!", &[0, 0, 0, 0]].concat();
+    let clean = png(300, 1);
+    let tagged = [&clean[..clean.len() - 12], &text, &clean[clean.len() - 12..]].concat();
+    std::fs::write(dir.path().join("media").join(&id), &tagged).unwrap();
+
+    // The pass runs once per data folder, in the background after start-up.
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let marker = dir.path().join(".pictures-cleaned-1");
+    assert!(!marker.exists());
+    fuwa_server::media::backfill::spawn(instance.app.clone());
+    for _ in 0..100 {
+        if marker.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(marker.exists(), "the pass finished");
+    assert_eq!(fetch(&instance, &url).await.2, clean);
+    let kept = c.media.keep_background(keep(&url)).await.unwrap().into_inner().media.unwrap();
+    assert_eq!(kept.size, 300, "its size as kept now");
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn backgrounds_are_kept_listed_and_deleted() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[("FUWA_PUBLIC_URL", "https://chat.example.com")]).await;

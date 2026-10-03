@@ -34,6 +34,7 @@ use crate::error::Result;
 use crate::id::now_ms;
 use crate::pb;
 
+pub mod backfill;
 mod strip;
 
 /// How long an upload link works.
@@ -154,12 +155,11 @@ pub fn sniff(head: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// Takes a JPEG's, PNG's or WebP's metadata out of the file at `path`, in
-/// place, and says its new size; `None` for types kept as they came (GIF,
-/// AVIF). A file whose metadata can't be found is an error, so it isn't kept
-/// with it.
-async fn without_metadata(path: &Path, content_type: &str) -> std::io::Result<Option<i64>> {
-    if !matches!(content_type, "image/jpeg" | "image/png" | "image/webp") {
+/// Takes a picture's metadata out of the file at `path`, in place, and says
+/// its new size; `None` for types kept as they came. A file whose metadata
+/// can't be found is an error, so it isn't kept with it.
+pub(crate) async fn without_metadata(path: &Path, content_type: &str) -> std::io::Result<Option<i64>> {
+    if !matches!(content_type, "image/jpeg" | "image/png" | "image/webp" | "image/gif" | "image/avif") {
         return Ok(None);
     }
     let path = path.to_path_buf();

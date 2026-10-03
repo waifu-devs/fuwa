@@ -1428,6 +1428,24 @@ impl NodeDb {
         .await
     }
 
+    /// Every stored picture here, and what it is.
+    pub async fn stored_media(&self) -> Result<Vec<(String, String)>> {
+        let conn = self.read()?;
+        query_all(&conn, "SELECT id, content_type FROM media WHERE stored_at IS NOT NULL ORDER BY id", (), |r| {
+            Ok((r.get::<String>(0)?, r.get::<String>(1)?))
+        })
+        .await
+    }
+
+    /// Records a stored picture's new size, once its metadata was taken out.
+    pub async fn set_media_size(&self, id: &str, size: i64) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("UPDATE media SET size = ?2 WHERE id = ?1 AND stored_at IS NOT NULL", (id, size)).await?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn media(&self, id: &str) -> Result<Option<MediaRow>> {
         media_by_id(&self.read()?, id).await
     }
