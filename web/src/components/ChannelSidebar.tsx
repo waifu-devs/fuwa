@@ -25,17 +25,21 @@ import { useEffect, useMemo, useState, type Ref } from "react";
 import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { leaveServer, listApplications, run, updateNotifications } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
-import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
+import { useAccess, useAction } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { InviteDialog } from "@/components/dialogs/InviteDialog";
-import { ServerSettingsDialog, useServerSettingsTabs } from "@/components/dialogs/ServerSettingsDialog";
+import { useServerSettingsTabs } from "@/components/dialogs/serverSettingsTabs";
+import { lazyComponent } from "@/components/lazy";
 import { RulesDialog } from "@/components/join/Rules";
 import { WelcomeGate } from "@/components/join/Welcome";
 import { useLayout } from "@/components/Shell";
 import { Count, SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { UserPanel } from "@/components/UserPanel";
+import { CallPanel } from "@/components/calls/CallPanel";
+import { VoiceUsers } from "@/components/calls/VoiceUsers";
+import { joinCall } from "@/calls/engine";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,6 +55,11 @@ import { has, hasIn, isPrivate } from "@/lib/permissions";
 import { usePrefs } from "@/lib/prefs";
 import { copy, openSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
+
+const ServerSettingsDialog = lazyComponent(
+  () => import("@/components/dialogs/ServerSettingsDialog").then((m) => m.ServerSettingsDialog),
+  (p) => p.open,
+);
 
 export const CHANNEL_ICON: Partial<Record<ChannelType, typeof HashIcon>> = {
   [ChannelType.ANNOUNCEMENT]: MegaphoneIcon,
@@ -113,12 +122,14 @@ function ServerNotificationItems({ instanceKey, serverId }: { instanceKey: strin
 }
 
 export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
-  const inst = useInstance(instanceKey);
+  // Only what the sidebar shows, so messages and member changes elsewhere don't re-render it.
+  const known = useFuwa((s) => !!s.instances[instanceKey]);
+  const nodeName = useFuwa((s) => s.instances[instanceKey]?.node?.name);
   const params = useParams({ strict: false }) as { channel?: string };
   const navigate = useNavigate();
-  const server = inst?.servers.find((s) => s.id === serverId);
-  const channels = inst?.channels[serverId];
-  const synced = inst?.synced[serverId];
+  const server = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId));
+  const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId]);
+  const synced = useFuwa((s) => s.instances[instanceKey]?.synced[serverId]);
   const access = useAccess(instanceKey, serverId);
   const owner = access.owner;
   const settingsTabs = useServerSettingsTabs(instanceKey, serverId);
@@ -138,12 +149,12 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   const [welcoming, setWelcoming] = useState(false);
   // People waiting to be let in, for whoever can let them in.
   const reviews = !!server?.applications && has(access, Permission.KICK_MEMBERS);
-  const waiting = inst?.applications[serverId]?.length ?? 0;
+  const waiting = useFuwa((s) => s.instances[instanceKey]?.applications[serverId]?.length ?? 0);
   useEffect(() => {
     if (reviews) run(listApplications(instanceKey, serverId)).catch(() => {});
   }, [reviews, instanceKey, serverId]);
 
-  if (!inst) return null;
+  if (!known) return null;
   return (
     <>
       <DropdownMenu>
@@ -162,7 +173,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                     <Count value={Number(server.memberCount)} /> {server.memberCount === 1n ? "member" : "members"} ·{" "}
                   </>
                 )}
-                {inst.node?.name ?? <Private text={instanceKey} />}
+                {nodeName ?? <Private text={instanceKey} />}
               </span>
             </span>
             <ChevronDownIcon className="size-4 transition-transform duration-300 group-data-[state=open]:rotate-180" />
@@ -311,6 +322,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                             instanceKey={instanceKey}
                             channel={c}
                             active={params.channel === c.id}
+                            canConnect={hasIn(access, c.id, Permission.CONNECT)}
                             onEdit={
                               hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)
                                 ? () => setSettings({ tab: "channels", target: c.id })
@@ -330,6 +342,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
           })
         )}
       </div>
+      <CallPanel />
       <UserPanel instanceKey={instanceKey} />
 
       <InviteDialog
@@ -370,8 +383,11 @@ function ChannelRow({
   ref,
   onEdit,
   onInvite,
+  canConnect,
 }: {
   instanceKey: string;
+  /** A voice channel you may join. */
+  canConnect?: boolean;
   channel: Channel;
   active: boolean;
   index: number;
@@ -387,6 +403,7 @@ function ChannelRow({
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
   const dot = unread > 0 && !active;
   const locked = isPrivate(channel, channel.serverId);
+  const voice = channel.type === ChannelType.VOICE;
   return (
     <motion.li
       ref={ref}
@@ -407,7 +424,11 @@ function ChannelRow({
       <Link
         to="/$instance/$server/$channel"
         params={{ instance: instanceKey, server: channel.serverId, channel: channel.id }}
-        onClick={() => compact && setNavOpen(false)}
+        onClick={() => {
+          if (compact) setNavOpen(false);
+          // A voice channel joins as it opens, as Discord's do, when you may connect there.
+          if (voice && canConnect) void joinCall({ kind: "voice", instance: instanceKey, serverId: channel.serverId, channelId: channel.id });
+        }}
         className={cn(
           "row-y group relative flex items-center gap-1.5 rounded-lg px-2 text-[0.94rem] transition-colors",
           active ? "font-bold text-primary" : unread ? "font-bold text-foreground" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
@@ -512,6 +533,7 @@ function ChannelRow({
           )}
         </AnimatePresence>
       </Link>
+      {voice && <VoiceUsers instanceKey={instanceKey} serverId={channel.serverId} channelId={channel.id} />}
     </motion.li>
   );
 }

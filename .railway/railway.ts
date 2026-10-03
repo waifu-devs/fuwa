@@ -29,6 +29,8 @@ const ANYTIME = [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, startHour: 0, endHour
 const VOLUME_MB = 5000;
 /** Volumes a Hobby plan project can have: the directory's, and one per shard. */
 const MAX_VOLUMES = 10;
+/** The port calls' sound uses (FUWA_MEDIA_PORT), reached through a Railway TCP proxy. */
+const MEDIA_PORT = 50000;
 /**
  * How long a split part has to finish what it's doing once told to stop: calls a gateway
  * holds while another part restarts wait up to 30 seconds.
@@ -46,6 +48,8 @@ const DRAIN = 45;
  *   `fuwa-data` volume the single process used. Always one.
  * - `fuwa-shard-1` to `fuwa-shard-<shards>`, the community servers, each shard on a
  *   volume of its own. New servers go to the shard holding the fewest.
+ * - `fuwa-media`, which carries calls' sound (docs/calls.md). Always one: an app's
+ *   connection to it comes in through its TCP proxy, which reaches one replica.
  *
  * The first time it's set, the first shard to start takes the single process's servers
  * from the directory, so nothing has to be copied by hand. Raise `shards` to spread new
@@ -137,6 +141,25 @@ export default defineRailway((ctx) => {
   });
   const internalUrl = (name: string) => `http://\${{${name}.RAILWAY_PRIVATE_DOMAIN}}:${PORT}`;
 
+  // Calls' sound. Railway has no public UDP, so apps reach it over TCP (ICE-TCP)
+  // through a TCP proxy, whose address it hands them. It keeps nothing: on a deploy or
+  // restart it tells every app in a call, and they join again on the new one with their
+  // places kept (docs/calls.md, "Restarts").
+  const media = service("fuwa-media", {
+    source: fuwaImage(),
+    healthcheck: "/healthz",
+    regions: { [REGION]: 1 },
+    tcp: [MEDIA_PORT],
+    deploy: { drainingSeconds: 5 },
+    env: {
+      ...part("media"),
+      FUWA_MEDIA_PORT: String(MEDIA_PORT),
+      FUWA_MEDIA_ADDRESSES: "tcp/${{RAILWAY_TCP_PROXY_DOMAIN}}:${{RAILWAY_TCP_PROXY_PORT}}",
+    },
+  });
+  // Where the directory (calls in direct messages) and shards (voice channels) open calls.
+  const mediaUrl = { FUWA_MEDIA_URL: internalUrl(media.name) };
+
   const directory = service("fuwa-directory", {
     source: fuwaImage(),
     healthcheck: "/healthz",
@@ -153,6 +176,7 @@ export default defineRailway((ctx) => {
       FUWA_HOSTING: "hosted",
       FUWA_ENCRYPTION_KEY: ctx.shared.FUWA_ENCRYPTION_KEY,
       ...replicated,
+      ...mediaUrl,
     },
   });
 
@@ -174,6 +198,7 @@ export default defineRailway((ctx) => {
         // The same key as the directory's, so server files can move between shards.
         FUWA_ENCRYPTION_KEY: ctx.shared.FUWA_ENCRYPTION_KEY,
         ...replicated,
+        ...mediaUrl,
       },
     });
     return [shardData, shard];
@@ -196,10 +221,5 @@ export default defineRailway((ctx) => {
     },
   });
 
-  // Room for later: calls (WebRTC) get a `media` part of their own. Like the gateways it
-  // keeps nothing on a volume, so its deploys overlap too: the old one takes no new calls
-  // and lets the ones on it end (with a long drainingSeconds) while new calls start on the
-  // new one.
-
-  return project("fuwa", { resources: [data, replica, directory, ...shardParts.flat(), gateway] });
+  return project("fuwa", { resources: [data, replica, directory, ...shardParts.flat(), gateway, media] });
 });

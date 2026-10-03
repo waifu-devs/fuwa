@@ -14,7 +14,9 @@ export type ReduceMotion = "system" | "always" | "never";
 export type Clock = "auto" | "12h" | "24h";
 export type SendWith = "enter" | "mod-enter";
 export type NotifyFor = "mentions" | "all";
-export type Sound = "message" | "mention" | "join";
+export type Sound = "message" | "mention" | "join" | "call" | "ring";
+/** How your microphone decides when you're talking. */
+export type InputMode = "voice" | "ptt";
 /** Where role colors show: on names, as a dot beside them, or not at all. */
 export type RoleColors = "names" | "beside" | "off";
 
@@ -54,6 +56,23 @@ export type Prefs = {
   /** Extra shortcuts someone added, on top of the defaults. */
   customKeybinds: CustomKeybind[];
   developerMode: boolean;
+  /** Voice and audio. Device ids are this browser's; "" is the system default. */
+  inputDevice: string;
+  outputDevice: string;
+  /** Microphone and call volume, in percent (up to 200). */
+  inputVolume: number;
+  outputVolume: number;
+  inputMode: InputMode;
+  /** Voice activity: pick the level by itself, or use `sensitivity` (in dB). */
+  autoSensitivity: boolean;
+  sensitivity: number;
+  /** How long push to talk keeps going after the key comes up, in milliseconds. */
+  pttRelease: number;
+  echoCancellation: boolean;
+  noiseSuppression: boolean;
+  autoGainControl: boolean;
+  /** How loud each person is for you, in percent, by "instance/user id". Missing means 100. */
+  userVolumes: Record<string, number>;
 };
 
 const systemDark = () => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -76,7 +95,7 @@ export const DEFAULT_PREFS: Prefs = {
   desktopNotifications: false,
   notifyFor: "mentions",
   unreadBadge: true,
-  sounds: { message: true, mention: true, join: false },
+  sounds: { message: true, mention: true, join: false, call: true, ring: true },
   volume: 60,
   streamer: false,
   streamerHidePersonal: true,
@@ -85,6 +104,18 @@ export const DEFAULT_PREFS: Prefs = {
   keybinds: {},
   customKeybinds: [],
   developerMode: false,
+  inputDevice: "",
+  outputDevice: "",
+  inputVolume: 100,
+  outputVolume: 100,
+  inputMode: "voice",
+  autoSensitivity: true,
+  sensitivity: -50,
+  pttRelease: 200,
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  userVolumes: {},
 };
 
 /** The defaults on this device: the theme starts light or dark like the system. */
@@ -134,6 +165,17 @@ function sanitize(p: Prefs): Prefs {
     sendWith: oneOf(p.sendWith, ["enter", "mod-enter"], d.sendWith),
     notifyFor: oneOf(p.notifyFor, ["mentions", "all"], d.notifyFor),
     volume: clamp(p.volume, 0, 100, d.volume),
+    inputDevice: typeof p.inputDevice === "string" ? p.inputDevice : "",
+    outputDevice: typeof p.outputDevice === "string" ? p.outputDevice : "",
+    inputVolume: clamp(p.inputVolume, 0, 200, d.inputVolume),
+    outputVolume: clamp(p.outputVolume, 0, 200, d.outputVolume),
+    inputMode: oneOf(p.inputMode, ["voice", "ptt"], d.inputMode),
+    sensitivity: clamp(p.sensitivity, -100, 0, d.sensitivity),
+    pttRelease: clamp(p.pttRelease, 0, 2000, d.pttRelease),
+    userVolumes:
+      p.userVolumes && typeof p.userVolumes === "object"
+        ? Object.fromEntries(Object.entries(p.userVolumes).filter(([, v]) => typeof v === "number" && v >= 0 && v <= 200))
+        : {},
     keybinds: p.keybinds && typeof p.keybinds === "object" ? p.keybinds : {},
     customKeybinds: Array.isArray(p.customKeybinds)
       ? p.customKeybinds.filter((k) => typeof k?.id === "string" && typeof k.action === "string" && typeof k.combo === "string")

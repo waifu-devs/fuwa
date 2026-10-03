@@ -3,8 +3,8 @@ import { CompassIcon, GlobeIcon, PlusIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState, type ReactNode, type Ref } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
-import { useFuwa, type InstanceState } from "@/fuwa/store";
-import { useInstances } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
+import { useRailInstances, type RailInstance } from "@/fuwa/hooks";
 import { AddInstanceDialog } from "@/components/dialogs/AddInstanceDialog";
 import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, FuwaMark, ServerIcon } from "@/components/Icons";
@@ -29,7 +29,7 @@ import { hostedByUs } from "@/lib/hosted";
  * it lives on, so hosted and self-hosted servers sit side by side.
  */
 export function Rail() {
-  const instances = useInstances();
+  const instances = useRailInstances();
   const params = useParams({ strict: false }) as { instance?: string; server?: string };
   const [creating, setCreating] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -118,7 +118,7 @@ function Pop({ children, className, ref }: { children: ReactNode; className?: st
   );
 }
 
-function InstanceGroup({ inst, params }: { inst: InstanceState; params: { instance?: string; server?: string } }) {
+function InstanceGroup({ inst, params }: { inst: RailInstance; params: { instance?: string; server?: string } }) {
   const here = params.instance === inst.key;
   const address = useAddress(inst.key);
   const label = inst.node?.name ?? address;
@@ -179,7 +179,7 @@ function InstanceGroup({ inst, params }: { inst: InstanceState; params: { instan
   );
 }
 
-function ServerButton({ inst, server, active }: { inst: InstanceState; server: Server; active: boolean }) {
+function ServerButton({ inst, server, active }: { inst: RailInstance; server: Server; active: boolean }) {
   const now = useNow();
   const unread = useFuwa((s) => {
     const i = s.instances[inst.key];

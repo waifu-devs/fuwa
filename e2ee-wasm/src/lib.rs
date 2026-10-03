@@ -121,6 +121,14 @@ impl Device {
         self.0.epoch(conversation_id).map(|epoch| epoch as f64).map_err(thrown)
     }
 
+    /// `{ epoch, secret }`: the group's exported secret at its current
+    /// epoch (see `Device::export_secret`).
+    #[wasm_bindgen(js_name = exportSecret)]
+    pub fn export_secret(&self, conversation_id: &str, label: &str, length: u32) -> Result<JsValue> {
+        let (epoch, secret) = self.0.export_secret(conversation_id, label, length as usize).map_err(thrown)?;
+        Ok(object(&[("epoch", JsValue::from_f64(epoch as f64)), ("secret", bytes(&secret))]))
+    }
+
     #[wasm_bindgen(js_name = hasPendingCommit)]
     pub fn has_pending_commit(&self, conversation_id: &str) -> Result<bool> {
         self.0.has_pending_commit(conversation_id).map_err(thrown)

@@ -8,7 +8,9 @@
 //!   pictures) and knows which shard holds each community server;
 //! - each **shard** keeps some of the servers' files and their live events;
 //! - **gateways** are what clients reach: they hold nothing, serve the web app,
-//!   and pass each call to the directory or to the shard holding its server.
+//!   and pass each call to the directory or to the shard holding its server;
+//! - **media** parts carry calls' sound (WebRTC, see `rtc.rs`); they hold
+//!   nothing, and the shards and directory open and close calls on them.
 //!
 //! Adding shards spreads servers (and their traffic) across machines; adding
 //! gateways spreads connections. Every internal call carries the cluster key.
@@ -17,6 +19,7 @@ pub mod calls;
 pub mod directory;
 pub mod gateway;
 pub mod index;
+pub mod media;
 pub mod shard;
 
 use std::path::Path;
@@ -48,6 +51,8 @@ pub enum Role {
     Gateway,
     Directory,
     Shard,
+    /// Carries calls' sound (WebRTC); keeps nothing.
+    Media,
 }
 
 impl Role {
@@ -57,6 +62,7 @@ impl Role {
             Self::Gateway => "gateway",
             Self::Directory => "directory",
             Self::Shard => "shard",
+            Self::Media => "media",
         }
     }
 }
@@ -64,7 +70,7 @@ impl Role {
 /// How this process fits into a split instance.
 #[derive(Clone)]
 pub struct ClusterConfig {
-    /// FUWA_ROLE: all (default) | gateway | directory | shard.
+    /// FUWA_ROLE: all (default) | gateway | directory | shard | media.
     pub role: Role,
     /// FUWA_CLUSTER_KEY: the shared secret on every internal call. Required
     /// unless the role is all.
@@ -105,7 +111,10 @@ impl ClusterConfig {
             Some("gateway") => Role::Gateway,
             Some("directory") => Role::Directory,
             Some("shard") => Role::Shard,
-            Some(other) => return Err(format!("FUWA_ROLE must be all, gateway, directory or shard, got {other:?}")),
+            Some("media") => Role::Media,
+            Some(other) => {
+                return Err(format!("FUWA_ROLE must be all, gateway, directory, shard or media, got {other:?}"));
+            }
         };
         if role == Role::All {
             return Ok(Self::single());

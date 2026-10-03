@@ -409,6 +409,8 @@ const slug = (name: string) => name.toLowerCase().replace(/\s+/g, "-").replace(/
 
 function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceKey: string; serverId: string; channel: Channel; channels: Channel[] }) {
   const category = channel.type === ChannelType.CATEGORY;
+  /** Categories and voice channels keep their names as typed. */
+  const free = category || channel.type === ChannelType.VOICE;
   const texty = channel.type === ChannelType.TEXT || channel.type === ChannelType.ANNOUNCEMENT;
   const [draft, setDraft] = useState(() => draftOf(channel));
   const base = useMemo(() => draftOf(channel), [channel]);
@@ -437,7 +439,7 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
   };
 
   async function submit() {
-    const name = category ? draft.name.trim() : slug(draft.name);
+    const name = free ? draft.name.trim() : slug(draft.name);
     if (!name) return save.setError("a channel needs a name");
     const done = await save.go(instanceKey, serverId, channel.id, {
       ...(draft.name !== base.name && { name }),
@@ -459,7 +461,7 @@ function ChannelEditor({ instanceKey, serverId, channel, channels }: { instanceK
           <Input
             id="channel-edit-name"
             maxLength={100}
-            value={category ? draft.name : slug(draft.name)}
+            value={free ? draft.name : slug(draft.name)}
             onChange={(e) => set({ name: e.target.value })}
             className={cn("h-11 rounded-xl", !category && "pl-9")}
           />

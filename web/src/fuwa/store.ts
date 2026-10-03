@@ -12,8 +12,10 @@ import type {
   Role,
   Server,
   User,
+  VoiceState,
 } from "@/gen/fuwa/v1/types_pb";
 import { ApplicationStatus, ChannelType } from "@/gen/fuwa/v1/types_pb";
+import type { DmCall } from "@/gen/fuwa/v1/call_pb";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Item } from "@/e2ee/vault";
 import { loadApplied, type Applied } from "@/lib/applied";
@@ -68,6 +70,8 @@ export type DmState = {
   blocked: Record<string, string>;
   /** Conversations this device is still joining. */
   joining: Record<string, boolean>;
+  /** Calls going on in conversations, by conversation id. */
+  calls: Record<string, DmCall>;
 };
 
 export const emptyDms = (): DmState => ({
@@ -83,6 +87,7 @@ export const emptyDms = (): DmState => ({
   verified: {},
   blocked: {},
   joining: {},
+  calls: {},
 });
 
 export type InstanceState = {
@@ -120,6 +125,8 @@ export type InstanceState = {
   applications: Record<string, Application[]>;
   /** Servers you applied to and aren't in yet, by server id. Kept in this browser. */
   applied: Record<string, Applied>;
+  /** Per server: who's in its voice channels, in the order they joined. */
+  voice: Record<string, VoiceState[]>;
   dms: DmState;
 };
 
@@ -179,6 +186,7 @@ export function emptyInstance(key: string, url: string): InstanceState {
     profiles: {},
     applications: {},
     applied: loadApplied(key),
+    voice: {},
     dms: emptyDms(),
   };
 }
@@ -273,6 +281,7 @@ export function removeServer(i: InstanceState, serverId: string): InstanceState 
     emojis: without(i.emojis, serverId),
     synced: without(i.synced, serverId),
     applications: without(i.applications, serverId),
+    voice: without(i.voice, serverId),
     messages: keep(i.messages),
     pending: keep(i.pending),
     unread: keep(i.unread),
@@ -348,6 +357,9 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
         channels: { ...i.channels, [sid]: (i.channels[sid] ?? []).filter((c) => c.id !== id) },
         messages: without(i.messages, id),
         unread: without(i.unread, id),
+        voice: i.voice[sid]?.some((v) => v.channelId === id)
+          ? { ...i.voice, [sid]: i.voice[sid]!.filter((v) => v.channelId !== id) }
+          : i.voice,
       };
     }
     case "messageCreated":
@@ -443,12 +455,26 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
           : others;
       return { ...i, applications: { ...i.applications, [sid]: next }, users: withUsers(i.users, [application.user]) };
     }
+    case "voiceStateUpdated": {
+      const state = p.value.state;
+      return state ? withVoiceState(i, sid, state) : i;
+    }
+    case "voiceStateRemoved": {
+      const list = i.voice[sid] ?? [];
+      const { userId, channelId } = p.value;
+      const next = list.filter((v) => !(v.userId === userId && (!channelId || v.channelId === channelId)));
+      return next.length === list.length ? i : { ...i, voice: { ...i.voice, [sid]: next } };
+    }
     case "memberLeft": {
       if (p.value.userId === i.me?.id) return removeServer(i, sid);
       const list = i.members[sid] ?? [];
-      if (!list.some((m) => m.user?.id === p.value.userId)) return i;
+      const voice = i.voice[sid]?.some((v) => v.userId === p.value.userId)
+        ? { ...i.voice, [sid]: i.voice[sid]!.filter((v) => v.userId !== p.value.userId) }
+        : i.voice;
+      if (!list.some((m) => m.user?.id === p.value.userId)) return voice === i.voice ? i : { ...i, voice };
       return {
         ...i,
+        voice,
         members: { ...i.members, [sid]: list.filter((m) => m.user?.id !== p.value.userId) },
         servers: i.servers.map((s) => (s.id === sid ? { ...s, memberCount: s.memberCount - 1n } : s)),
       };
@@ -456,6 +482,14 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
     default:
       return i;
   }
+}
+
+/** Someone joined, moved or changed how they sound: one place per person per server. */
+export function withVoiceState(i: InstanceState, serverId: string, state: VoiceState): InstanceState {
+  const list = i.voice[serverId] ?? [];
+  const at = list.findIndex((v) => v.userId === state.userId);
+  const next = at === -1 ? [...list, state] : list.map((v, n) => (n === at ? state : v));
+  return { ...i, voice: { ...i.voice, [serverId]: next } };
 }
 
 export const isCategory = (c: Channel) => c.type === ChannelType.CATEGORY;

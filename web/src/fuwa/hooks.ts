@@ -52,6 +52,34 @@ export function useInstances(): InstanceState[] {
   });
 }
 
+/** What the server rail shows of an instance. */
+export type RailInstance = Pick<InstanceState, "key" | "url" | "node" | "connection" | "me" | "servers" | "applied">;
+
+let lastRail: RailInstance[] = [];
+const railCache = new Map<string, RailInstance>();
+const sameRail = (a: RailInstance, b: InstanceState) =>
+  a.url === b.url && a.node === b.node && a.connection === b.connection && a.me === b.me && a.servers === b.servers && a.applied === b.applied;
+
+/**
+ * The instances as the rail shows them: the same objects until something the
+ * rail draws changes, so a message arriving doesn't redraw the rail.
+ */
+export function useRailInstances(): RailInstance[] {
+  return useFuwa((s) => {
+    const next = s.order.flatMap((k) => {
+      const i = s.instances[k];
+      if (!i) return [];
+      const cached = railCache.get(k);
+      if (cached && sameRail(cached, i)) return [cached];
+      const fresh: RailInstance = { key: i.key, url: i.url, node: i.node, connection: i.connection, me: i.me, servers: i.servers, applied: i.applied };
+      railCache.set(k, fresh);
+      return [fresh];
+    });
+    if (next.length !== lastRail.length || next.some((i, n) => i !== lastRail[n])) lastRail = next;
+    return lastRail;
+  });
+}
+
 export const getInstance = (key: string) => store.get().instances[key];
 
 const NO_ROLES: Role[] = [];

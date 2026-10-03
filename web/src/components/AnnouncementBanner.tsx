@@ -2,7 +2,7 @@ import { MegaphoneIcon, SirenIcon, TriangleAlertIcon, XIcon } from "lucide-react
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { AnnouncementTone, type Announcement } from "@/gen/fuwa/v1/types_pb";
-import { useInstance } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
 import { InlineMarkdown } from "@/components/Markdown";
 import { formatStamp, formatTime, sameDay, toDate } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
@@ -40,10 +40,10 @@ export const toneOf = (a: Pick<Announcement, "tone">) =>
   a.tone === AnnouncementTone.WARNING || a.tone === AnnouncementTone.CRITICAL ? a.tone : AnnouncementTone.INFO;
 
 export function AnnouncementBanner({ instanceKey }: { instanceKey: string | undefined }) {
-  const inst = useInstance(instanceKey);
+  const announcement = useFuwa((s) => (instanceKey ? s.instances[instanceKey]?.node?.announcement : undefined));
   const now = useNow(15_000);
   const [closed, setClosed] = useState<Record<string, string | null>>({});
-  const a = inst?.node?.announcement;
+  const a = announcement;
   const key = instanceKey ?? "";
   const closedHere = key in closed ? closed[key] : closedId(key);
   const show = !!instanceKey && isLive(a, now) && (toneOf(a) === AnnouncementTone.CRITICAL || closedHere !== a.id);

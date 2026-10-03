@@ -3,7 +3,9 @@ import { ChevronLeftIcon, HashIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { ChannelType, Permission } from "@/gen/fuwa/v1/types_pb";
 import { useAccess, useInstance } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
 import { ChannelView } from "@/components/chat/ChannelView";
+import { VoiceStage } from "@/components/calls/VoiceStage";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
@@ -48,16 +50,20 @@ export function ServerIndex({ instanceKey, serverId }: { instanceKey: string; se
 }
 
 export function ChannelPage({ instanceKey, serverId, channelId }: { instanceKey: string; serverId: string; channelId: string }) {
-  const inst = useInstance(instanceKey);
-  const channel = inst?.channels[serverId]?.find((c) => c.id === channelId);
-  if (!inst || inst.connection === "signed-out") return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
+  // Only what decides the page, so the channel doesn't re-render for every event on the instance.
+  const known = useFuwa((s) => !!s.instances[instanceKey]);
+  const connection = useFuwa((s) => s.instances[instanceKey]?.connection);
+  const channel = useFuwa((s) => s.instances[instanceKey]?.channels[serverId]?.find((c) => c.id === channelId));
+  const synced = useFuwa((s) => !!s.instances[instanceKey]?.synced[serverId]);
+  const joined = useFuwa((s) => !!s.instances[instanceKey]?.servers.some((x) => x.id === serverId));
+  if (!known || connection === "signed-out") return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
   if (!channel) {
     // Deleted while open, or not loaded yet.
-    if (inst.synced[serverId]) return <Navigate to="/$instance/$server" params={{ instance: instanceKey, server: serverId }} replace />;
+    if (synced) return <Navigate to="/$instance/$server" params={{ instance: instanceKey, server: serverId }} replace />;
     // You left, were kicked or banned, or the server was deleted.
-    if (inst.connection === "live" && !inst.servers.some((s) => s.id === serverId))
-      return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
+    if (connection === "live" && !joined) return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
     return <div className="shimmer m-4 h-10 rounded-xl opacity-40" />;
   }
+  if (channel.type === ChannelType.VOICE) return <VoiceStage instanceKey={instanceKey} serverId={serverId} channel={channel} />;
   return <ChannelView instanceKey={instanceKey} serverId={serverId} channel={channel} />;
 }

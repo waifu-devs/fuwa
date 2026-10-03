@@ -146,6 +146,13 @@ browser starts from when it signs in.
 - `web/src/e2ee/`, `web/src/fuwa/dms.ts`, `web/src/components/dm/`: the web
   app's device, vault and screens.
 
+## Calls
+
+Calls in direct messages are end-to-end encrypted with the same groups: each
+device exports a secret from the conversation's group at its current epoch
+(`Device::export_secret`, label `fuwa call v1`) and seals every frame of
+sound with a key derived from it. See [calls.md](calls.md#direct-messages-are-end-to-end-encrypted).
+
 ## Not done yet
 
 - **Account keys.** Devices are trusted as the account's because the instance

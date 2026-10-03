@@ -11,7 +11,7 @@ import { getPrefs, type Prefs } from "@/lib/prefs";
  * positions (event.code), so Alt+K stays Alt+K on a Mac.
  */
 
-export type KeyGroup = "Navigation" | "Messages" | "Chat" | "App";
+export type KeyGroup = "Navigation" | "Messages" | "Chat" | "Voice" | "App";
 
 export type KeyAction = {
   id: string;
@@ -34,12 +34,15 @@ export const ACTIONS: KeyAction[] = [
   { id: "markServerRead", label: "Mark the server as read", group: "Messages", combo: "Shift+Escape", whileTyping: true },
   { id: "focusComposer", label: "Start typing a message", group: "Chat", combo: "Tab" },
   { id: "toggleMembers", label: "Show or hide members", group: "Chat", combo: "Mod+U", whileTyping: true },
+  { id: "toggleMute", label: "Mute or unmute yourself", group: "Voice", combo: "Mod+Shift+M", whileTyping: true },
+  { id: "toggleDeafen", label: "Deafen or undeafen yourself", group: "Voice", combo: "Mod+Shift+D", whileTyping: true },
+  { id: "pushToTalk", label: "Push to talk (hold)", group: "Voice", combo: null },
   { id: "openSettings", label: "Open settings", group: "App", combo: "Mod+Comma", whileTyping: true },
   { id: "shortcuts", label: "Show keyboard shortcuts", group: "App", combo: "Mod+Slash", whileTyping: true },
   { id: "toggleStreamer", label: "Turn streamer mode on or off", group: "App", combo: null, whileTyping: true },
 ];
 
-export const GROUPS: KeyGroup[] = ["Navigation", "Messages", "Chat", "App"];
+export const GROUPS: KeyGroup[] = ["Navigation", "Messages", "Chat", "Voice", "App"];
 
 export const actionById = (id: string) => ACTIONS.find((a) => a.id === id);
 
