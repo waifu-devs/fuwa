@@ -257,7 +257,20 @@ impl Api {
             .filter(|device| live.contains(&device.session_id))
             .map(|device| device.id.as_str())
             .collect();
-        let claimed = dms.claim_key_packages(&claimable).await?;
+        // Strangers' devices (people you share only a server with) give up a
+        // limited number of single-use key packages an hour.
+        let strangers: Vec<&str> = devices
+            .iter()
+            .filter(|device| {
+                device.account_id != account.id
+                    && !partners.contains(&device.account_id)
+                    && claimable.contains(&device.id.as_str())
+            })
+            .map(|device| device.id.as_str())
+            .collect();
+        let allowed = dms.take_stranger_claims(&account.id, strangers.len(), now_ms());
+        let last_resort_only: HashSet<&str> = strangers[allowed..].iter().copied().collect();
+        let claimed = dms.claim_key_packages(&claimable, &last_resort_only).await?;
         Ok(pb::ClaimKeyPackagesResponse {
             key_packages: claimed
                 .into_iter()

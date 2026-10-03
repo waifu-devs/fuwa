@@ -1,10 +1,23 @@
-import { BadgeCheckIcon, BotOffIcon, ChevronLeftIcon, ImageOffIcon, LockKeyholeIcon, SearchXIcon, ShieldCheckIcon, ShieldOffIcon, UserPlusIcon } from "lucide-react";
+import {
+  BadgeCheckIcon,
+  BotOffIcon,
+  ChevronLeftIcon,
+  ImageOffIcon,
+  LoaderIcon,
+  LockKeyholeIcon,
+  RotateCcwKeyIcon,
+  SearchXIcon,
+  ShieldCheckIcon,
+  ShieldOffIcon,
+  UserPlusIcon,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Permission, type Channel, type Member, type User } from "@/gen/fuwa/v1/types_pb";
+import { SECURE_BROKEN } from "@/e2ee/engine";
 import type { Item } from "@/e2ee/vault";
 import { focusChannel } from "@/fuwa/actions";
-import { markDmRead, prepareSecureChannel } from "@/fuwa/dms";
+import { dmProblem, markDmRead, prepareSecureChannel, resetSecureChannel } from "@/fuwa/dms";
 import { useAccess } from "@/fuwa/hooks";
 import { useFuwa, type DmMember, type DmState } from "@/fuwa/store";
 import { NotificationBell } from "@/components/chat/NotificationBell";
@@ -61,16 +74,19 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
   }, [channel.name, serverName]);
   useEffect(() => () => setTitle("fuwa"), []);
 
-  // Once encryption is running here: catch up, and bring in everyone who can see the channel.
+  const canSend = hasIn(access, id, Permission.SEND_MESSAGES);
+  const canReset = hasIn(access, id, Permission.MANAGE_CHANNELS);
+  const broken = useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] === SECURE_BROKEN);
+
+  // Once encryption is running here: catch up, and if you may write, bring in everyone who can see the channel.
   useEffect(() => {
-    if (status === "ready") void prepareSecureChannel(instanceKey, serverId, id).catch(() => {});
-  }, [status, instanceKey, serverId, id]);
+    if (status === "ready") void prepareSecureChannel(instanceKey, serverId, id, canSend).catch(() => {});
+  }, [status, instanceKey, serverId, id, canSend]);
 
   const byId = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
   const userOf = useCallback((userId: string) => byId.get(userId)?.user ?? users?.[userId], [byId, users]);
   const memberOf = useCallback((userId: string) => byId.get(userId), [byId]);
   const describe = useCallback((item: Item) => (me ? channelLine(item, (u) => nameIn(byId, users, u), me) : ""), [byId, users, me]);
-  const canSend = hasIn(access, id, Permission.SEND_MESSAGES);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -154,9 +170,19 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
             id={id}
             placeholder={`Message #${channel.name}`}
             promise="Only people in this channel can read this"
-            locked={canSend ? "" : "You don't have permission to send messages in this channel."}
+            locked={canSend || broken ? "" : "You don't have permission to send messages in this channel."}
+            action={broken ? canReset ? <ResetButton instanceKey={instanceKey} serverId={serverId} channelId={id} write={canSend} /> : null : undefined}
           />
-          <SecureChannelDialog open={info} onOpenChange={setInfo} instanceKey={instanceKey} channel={channel} byId={byId} />
+          <SecureChannelDialog
+            open={info}
+            onOpenChange={setInfo}
+            instanceKey={instanceKey}
+            serverId={serverId}
+            channel={channel}
+            byId={byId}
+            canReset={canReset}
+            canSend={canSend}
+          />
         </>
       ) : status === "unsupported" || status === "failed" ? (
         <Unavailable text={problem ?? "Encrypted messages aren't available here."} />
@@ -179,6 +205,9 @@ export function channelLine(item: Item, nameOf: (userId: string) => string, me: 
   const capital = (text: string) => `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
   if (item.kind === "joined") return "This device joined the channel. Messages from before it can't be read here.";
   if (item.kind === "unreadable") return `A message from ${name(item.senderId)} couldn't be opened on this device.`;
+  if (item.kind === "reset") {
+    return `${capital(name(item.senderId))} started this channel's encryption over. What came before stays on the devices that already read it.`;
+  }
   const devices = (list: Item["added"]) =>
     [...new Set(list.map((d) => d.userId))].map((userId) => {
       const n = list.filter((d) => d.userId === userId).length;
@@ -244,14 +273,20 @@ function SecureChannelDialog({
   open,
   onOpenChange,
   instanceKey,
+  serverId,
   channel,
   byId,
+  canReset,
+  canSend,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   instanceKey: string;
+  serverId: string;
   channel: Channel;
   byId: Map<string, Member>;
+  canReset: boolean;
+  canSend: boolean;
 }) {
   const me = useFuwa((s) => s.instances[instanceKey]?.me);
   const users = useFuwa((s) => s.instances[instanceKey]?.users);
@@ -321,7 +356,72 @@ function SecureChannelDialog({
         <p className={cn("mt-4 text-xs text-muted-foreground")}>
           Who's in it follows the channel's permissions. Compare safety numbers in a direct message to verify someone's devices.
         </p>
+        {canReset && (
+          <div className="mt-4 flex items-center gap-3 rounded-2xl border border-dashed px-3 py-2.5">
+            <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+              If the channel's encryption stops working for everyone, start it over. Messages already read stay on the devices that read them.
+            </p>
+            <ResetButton instanceKey={instanceKey} serverId={serverId} channelId={channel.id} write={canSend} onDone={() => onOpenChange(false)} />
+          </div>
+        )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Starts the channel's encryption over (Manage Channels), after asking once. */
+function ResetButton({
+  instanceKey,
+  serverId,
+  channelId,
+  write,
+  onDone,
+}: {
+  instanceKey: string;
+  serverId: string;
+  channelId: string;
+  write: boolean;
+  onDone?: () => void;
+}) {
+  const [stage, setStage] = useState<"idle" | "ask" | "busy">("idle");
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (stage !== "ask") return;
+    const timer = setTimeout(() => setStage("idle"), 4000);
+    return () => clearTimeout(timer);
+  }, [stage]);
+  const go = () => {
+    if (stage === "idle") return setStage("ask");
+    if (stage !== "ask") return;
+    setStage("busy");
+    setError(null);
+    resetSecureChannel(instanceKey, serverId, channelId, write)
+      .then(() => onDone?.())
+      .catch((err: unknown) => setError(dmProblem(err)))
+      .finally(() => setStage("idle"));
+  };
+  return (
+    <span className="flex shrink-0 flex-col items-end gap-1">
+      <motion.button
+        type="button"
+        onClick={go}
+        disabled={stage === "busy"}
+        whileTap={{ scale: 0.94 }}
+        layout
+        transition={SPRING}
+        className={cn(
+          "group flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors",
+          stage === "ask" ? "bg-destructive/12 text-destructive hover:bg-destructive/20" : "text-primary hover:bg-primary/10",
+        )}
+      >
+        {stage === "busy" ? (
+          <LoaderIcon className="size-3.5 animate-spin" />
+        ) : (
+          <RotateCcwKeyIcon className="size-3.5 transition-transform duration-500 group-hover:-rotate-45" />
+        )}
+        <SwapText>{stage === "ask" ? "Start over for everyone?" : "Start encryption over"}</SwapText>
+      </motion.button>
+      {error && <span className="max-w-56 text-right text-[0.7rem] text-destructive">{error}</span>}
+    </span>
   );
 }

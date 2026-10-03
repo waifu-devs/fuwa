@@ -52,9 +52,9 @@ export type Item = {
   /**
    * text: a message. devices: devices joined or left. joined: this device
    * came in here (what came before, it can't read). unreadable: a record it
-   * couldn't open.
+   * couldn't open. reset: someone started a secure channel's encryption over.
    */
-  kind: "text" | "devices" | "joined" | "unreadable";
+  kind: "text" | "devices" | "joined" | "unreadable" | "reset";
   content: string;
   replyTo: number;
   /** Unix ms of the last edit, or 0. */

@@ -996,7 +996,9 @@ export const DirectMessageService: GenService<{
    * Each is handed out once; once a device has none left, its last-resort
    * key package is handed out instead. Only for devices of people you have
    * a conversation with or share a server with (secure channels add them
-   * too), and your own.
+   * too), and your own. From people you have no conversation with, an
+   * account gets a limited number of single-use key packages an hour, and
+   * their last-resort ones past that.
    *
    * @generated from rpc fuwa.v1.DirectMessageService.ClaimKeyPackages
    */

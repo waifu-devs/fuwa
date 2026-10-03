@@ -394,6 +394,107 @@ async fn a_secure_channel_follows_its_permissions() {
         .unwrap_err();
     assert_eq!(commit_delete.code(), Code::InvalidArgument);
 
+    // Someone who may read but not write can't commit for the group: a
+    // commit the server can't read could break it for everyone.
+    channels
+        .set_channel_permissions(authed(
+            &juan.token,
+            pb::SetChannelPermissionsRequest {
+                server_id: sid.clone(),
+                channel_id: cid.clone(),
+                overwrites: vec![
+                    pb::PermissionOverwrite {
+                        target_id: rin.id.clone(),
+                        target: pb::OverwriteTarget::Member as i32,
+                        allow: vec![],
+                        deny: vec![pb::Permission::ViewChannels as i32],
+                    },
+                    pb::PermissionOverwrite {
+                        target_id: mika.id.clone(),
+                        target: pb::OverwriteTarget::Member as i32,
+                        allow: vec![],
+                        deny: vec![pb::Permission::SendMessages as i32],
+                    },
+                ],
+            },
+        ))
+        .await
+        .unwrap();
+    let reader = mika.device.commit(&cid, &[], &[juan.device.device_id()], &permitted).unwrap();
+    let refused = secure
+        .post_secure_commit(authed(
+            &mika.token,
+            pb::PostSecureCommitRequest {
+                server_id: sid.clone(),
+                channel_id: cid.clone(),
+                commit: reader.commit,
+                group_info: reader.group_info,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    mika.device.discard_pending(&cid).unwrap();
+
+    // When the group can't be followed any more, someone with Manage Channels
+    // starts it over: back to epoch 0, no group info, no welcomes waiting.
+    let reset = pb::ResetSecureChannelRequest { server_id: sid.clone(), channel_id: cid.clone() };
+    let refused = secure.reset_secure_channel(authed(&mika.token, reset.clone())).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    let marker = secure.reset_secure_channel(authed(&juan.token, reset)).await.unwrap().into_inner().record.unwrap();
+    assert_eq!(marker.kind, pb::SecureRecordKind::Reset as i32);
+    assert!(marker.data.is_empty() && marker.sender_id == juan.id);
+    let state = secure
+        .get_secure_channel(authed(
+            &mika.token,
+            pb::GetSecureChannelRequest { server_id: sid.clone(), channel_id: cid.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!((state.epoch, state.last_sequence), (0, marker.sequence));
+    let info = secure
+        .get_secure_group_info(authed(
+            &mika.token,
+            pb::GetSecureGroupInfoRequest { server_id: sid.clone(), channel_id: cid.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(info.group_info.is_empty());
+    // Juan's device starts a new group and brings Mika's in.
+    juan.device.forget(&cid).unwrap();
+    mika.device.forget(&cid).unwrap();
+    juan.device.create_group(&cid).unwrap();
+    let mika_device = vec![mika.device.device_id()];
+    let claimed = dms
+        .claim_key_packages(authed(&juan.token, pb::ClaimKeyPackagesRequest { device_ids: mika_device.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .key_packages;
+    let adds: Vec<(String, Vec<u8>)> = claimed.into_iter().map(|k| (k.device_id, k.key_package)).collect();
+    let fresh = juan.device.commit(&cid, &adds, &[], &permitted).unwrap();
+    let started = secure
+        .post_secure_commit(authed(
+            &juan.token,
+            pb::PostSecureCommitRequest {
+                server_id: sid.clone(),
+                channel_id: cid.clone(),
+                commit: fresh.commit,
+                group_info: fresh.group_info,
+                welcome: fresh.welcome.unwrap(),
+                welcome_device_ids: mika_device,
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .record
+        .unwrap();
+    assert_eq!((started.sequence, started.epoch), (marker.sequence + 1, 0));
+
     // Deleting the channel takes everything it kept.
     channels
         .delete_channel(authed(

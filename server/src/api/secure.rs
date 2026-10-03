@@ -259,7 +259,10 @@ impl Api {
         }
         let (current, _, _) = group(&conn, &channel.id).await?;
         match (header.wire_format, header.sender) {
-            (WireFormat::PrivateMessage, _) => {}
+            // A member's commit changes who's in the group for everyone, and the
+            // server can't read it to check it's sound: only people who may write
+            // here make them. Someone who only reads joins by themselves.
+            (WireFormat::PrivateMessage, _) => seat.access.require_in(&channel.id, Permission::SendMessages)?,
             // Joining by yourself needs the group info a first commit leaves.
             (WireFormat::PublicMessage, Some(Sender::NewMemberCommit)) if current > 0 => {}
             _ => return Err(Error::invalid("a commit must be encrypted, unless it's a device joining by itself")),
@@ -385,6 +388,70 @@ impl Api {
             })
             .await?;
         Ok(pb::PostSecureMessageResponse { record: Some(record) })
+    }
+}
+
+impl Api {
+    async fn reset_secure_channel(
+        &self,
+        metadata: &tonic::metadata::MetadataMap,
+        req: pb::ResetSecureChannelRequest,
+    ) -> Result<pb::ResetSecureChannelResponse> {
+        let account = self.account(metadata).await?;
+        let seat = self.membership(&account, &req.server_id).await?;
+        let channel = secure_channel(&seat.sdb.read()?, &seat, &req.channel_id).await?;
+        seat.access.require_in(&channel.id, Permission::ManageChannels)?;
+        let record = seat
+            .sdb
+            .write(&account.id, async |conn, events| {
+                let now = now_ms();
+                conn.execute(
+                    "INSERT OR IGNORE INTO secure_groups (channel_id, updated_at) VALUES (?1, ?2)",
+                    (channel.id.as_str(), now),
+                )
+                .await?;
+                let (epoch, _, _) = group(conn, &channel.id).await?;
+                // Back to epoch 0 with no group info: the next writer starts a new group.
+                conn.execute(
+                    "UPDATE secure_groups SET epoch = 0, group_info = NULL, last_seq = last_seq + 1, updated_at = ?2
+                     WHERE channel_id = ?1",
+                    (channel.id.as_str(), now),
+                )
+                .await?;
+                let (_, sequence, _) = group(conn, &channel.id).await?;
+                conn.execute("DELETE FROM secure_welcomes WHERE channel_id = ?1", [channel.id.as_str()]).await?;
+                let record = pb::SecureRecord {
+                    channel_id: channel.id.clone(),
+                    sequence,
+                    kind: pb::SecureRecordKind::Reset as i32,
+                    epoch,
+                    sender_id: account.id.clone(),
+                    sender_device_id: String::new(),
+                    data: Vec::new(),
+                    created_at: Some(timestamp(now)),
+                    deleted_at: None,
+                    deleted_by: String::new(),
+                };
+                conn.execute(
+                    &format!(
+                        "INSERT INTO secure_records ({RECORD_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, '', NULL, ?6, NULL, NULL)"
+                    ),
+                    (channel.id.as_str(), sequence, record.kind, epoch, account.id.as_str(), now),
+                )
+                .await?;
+                store::audit(
+                    conn,
+                    &account.id,
+                    Audit::new(pb::AuditAction::ChannelUpdate, &channel.id)
+                        .channel(&channel.name)
+                        .change("encryption", format!("group at epoch {epoch}"), "started over"),
+                )
+                .await?;
+                events.push(Payload::SecureRecordAdded(pb::SecureRecordAdded { record: Some(record.clone()) }));
+                Ok(record)
+            })
+            .await?;
+        Ok(pb::ResetSecureChannelResponse { record: Some(record) })
     }
 }
 
@@ -516,6 +583,14 @@ impl SecureChannelService for Api {
     ) -> Result<Response<pb::PostSecureMessageResponse>, Status> {
         let (metadata, _, req) = request.into_parts();
         respond(Api::post_secure_message(self, &metadata, req).await)
+    }
+
+    async fn reset_secure_channel(
+        &self,
+        request: Request<pb::ResetSecureChannelRequest>,
+    ) -> Result<Response<pb::ResetSecureChannelResponse>, Status> {
+        let (metadata, _, req) = request.into_parts();
+        respond(Api::reset_secure_channel(self, &metadata, req).await)
     }
 
     async fn delete_secure_record(

@@ -31,7 +31,9 @@ service SecureChannelService {
   rpc ListSecureWelcomes(ListSecureWelcomesRequest) returns (ListSecureWelcomesResponse);
   // Adds a commit (devices coming in or going). It must be for the group's
   // current epoch, which it then moves on; a commit for an older one fails
-  // with FAILED_PRECONDITION: catch up and try again. VIEW_CHANNELS.
+  // with FAILED_PRECONDITION: catch up and try again. A commit from a member
+  // of the group needs SEND_MESSAGES; a device joining by itself needs only
+  // VIEW_CHANNELS.
   rpc PostSecureCommit(PostSecureCommitRequest) returns (PostSecureCommitResponse);
   // Adds an encrypted message, for the current epoch like a commit.
   // SEND_MESSAGES; slow mode applies.
@@ -39,6 +41,11 @@ service SecureChannelService {
   // Deletes a message: its ciphertext goes, a gap stays. Your own, or anyone's
   // with MANAGE_MESSAGES.
   rpc DeleteSecureRecord(DeleteSecureRecordRequest) returns (DeleteSecureRecordResponse);
+  // Starts the channel's encryption over, for when its group can't be
+  // followed any more (a commit no device can read). Adds a RESET record:
+  // every device forgets the group, and the next one to write starts a new
+  // one at epoch 0. What devices already read stays on them. MANAGE_CHANNELS.
+  rpc ResetSecureChannel(ResetSecureChannelRequest) returns (ResetSecureChannelResponse);
 }
 
 enum SecureRecordKind {
@@ -47,6 +54,9 @@ enum SecureRecordKind {
   SECURE_RECORD_KIND_COMMIT = 1;
   // An encrypted message.
   SECURE_RECORD_KIND_MESSAGE = 2;
+  // Someone with MANAGE_CHANNELS started the encryption over: the group
+  // before it is gone, and the next record starts a new one. No data.
+  SECURE_RECORD_KIND_RESET = 3;
 }
 
 // One entry in a secure channel's log. Devices read them in order. The same
@@ -161,6 +171,15 @@ message DeleteSecureRecordRequest {
 }
 
 message DeleteSecureRecordResponse {}
+
+message ResetSecureChannelRequest {
+  string server_id = 1;
+  string channel_id = 2;
+}
+
+message ResetSecureChannelResponse {
+  SecureRecord record = 1;
+}
 
 // A record was added to a secure channel. Only people who can see the
 // channel get it.

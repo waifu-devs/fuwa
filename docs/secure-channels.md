@@ -43,9 +43,14 @@ group. So the apps keep the two in step:
   removes everyone else's, and commits that. Then it sends. A message is never
   encrypted to someone the server says can't see the channel.
 - **When permissions change** (a channel's overwrites, a role, someone's
-  roles, someone leaving), every online device in the channel brings the group
-  back in step after a short random wait. The first commit wins; the others
-  catch up, find nothing left to do, and commit nothing.
+  roles, someone leaving), every online device in the channel whose person
+  may write there brings the group back in step after a short random wait.
+  The first commit wins; the others catch up, find nothing left to do, and
+  commit nothing.
+- **Only people who may write commit.** A commit from a member of the group
+  needs Send Messages: the server can't read a commit to check it's sound,
+  and one no device can follow would break the channel for everyone. Someone
+  who can only read joins by themselves and never changes the group.
 - **The server stops showing the channel at once** to someone who loses
   access: they stop getting its records, live or listed, before any commit
   lands. Their devices are taken out by the next commit, after which what's
@@ -57,15 +62,33 @@ group. So the apps keep the two in step:
 The first device to write in a new channel starts its group, even if nobody
 else is signed in anywhere yet; the others come in as their devices appear.
 
+### Starting over
+
+If the group still can't be followed (a commit or group info that no device
+can read, which the server can't tell from a good one), anyone with Manage
+Channels starts the channel's encryption over from its encryption panel, or
+from the notice the channel shows when that happens (`ResetSecureChannel`).
+The server puts the channel back at epoch 0 with no group info and no
+welcomes waiting, and adds a reset record: every device forgets the group,
+the channel shows a line saying who started it over, and the first device
+that may write starts a new group and brings everyone back in. What devices
+already read stays on them. Resets are in the audit log.
+
 ### What the server checks
 
 Everything the server checks it can read without decrypting anything: the
-caller can see the channel (and send there, for a message; slow mode and
-time-outs apply as in any channel), a record's MLS header names this channel
+caller can see the channel (and send there, for a message or a member's
+commit; slow mode and time-outs apply as in any channel), a record's MLS header names this channel
 and the current epoch, a commit carries the group info it leaves behind, and a
 welcome goes only to signed-in devices of people who can see the channel.
 Devices live where direct messages keep them (the directory), so a shard asks
 the directory for them (`SecureDevices` in the cluster protocol).
+
+Adding someone takes one of their key packages. Anyone who shares a server
+with them can claim them, but an account gets at most 2,000 single-use key
+packages an hour from people it has no conversation with; past that it gets
+their last-resort key package, so nobody can use up someone's single-use
+ones on purpose.
 
 ### Who's who
 

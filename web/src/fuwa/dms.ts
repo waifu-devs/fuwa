@@ -77,9 +77,22 @@ export const markDmRead = (key: string, id: string) => dmEngine(key)?.markRead(i
 /** Marks the conversation's safety number as checked with the other person, or not ("" ). */
 export const verifyDm = (key: string, id: string, safety: string) => ready(key).verify(id, safety);
 
-/** Starts following a secure channel and gets it ready to write in: catches up, and brings everyone who can see it in. */
-export async function prepareSecureChannel(key: string, serverId: string, channelId: string) {
+/**
+ * Starts following a secure channel: catches up on it. Someone who may write
+ * there also gets it ready to write in, bringing in everyone who can see it;
+ * someone who only reads joins by themselves and changes nothing.
+ */
+export async function prepareSecureChannel(key: string, serverId: string, channelId: string, write: boolean) {
   const dms = ready(key);
-  void dms.followChannel(serverId, channelId);
-  await prepareConversation(key, channelId);
+  const following = dms.followChannel(serverId, channelId);
+  if (write) await prepareConversation(key, channelId);
+  else await following;
+}
+
+/** Starts a secure channel's encryption over (Manage Channels), then gets it going again if you may write there. */
+export async function resetSecureChannel(key: string, serverId: string, channelId: string, write: boolean) {
+  reportUsage("secure.reset");
+  await engine(key).api.secure.resetSecureChannel({ serverId, channelId });
+  await ready(key).followChannel(serverId, channelId);
+  if (write) await prepareConversation(key, channelId);
 }

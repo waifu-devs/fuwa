@@ -5,6 +5,7 @@ import {
   ChevronLeftIcon,
   CopyIcon,
   KeyRoundIcon,
+  RotateCcwKeyIcon,
   LockKeyholeIcon,
   PencilIcon,
   RotateCwIcon,
@@ -626,7 +627,7 @@ function deviceLine(item: Item, users: Map<string, User>, me: User): string {
 }
 
 function SystemLine({ item, text, animate }: { item: Item; text: string; animate: boolean }) {
-  const Icon = item.kind === "unreadable" ? ShieldAlertIcon : KeyRoundIcon;
+  const Icon = item.kind === "unreadable" ? ShieldAlertIcon : item.kind === "reset" ? RotateCcwKeyIcon : KeyRoundIcon;
   return (
     <motion.div
       {...(animate ? enter : {})}
@@ -637,7 +638,7 @@ function SystemLine({ item, text, animate }: { item: Item; text: string; animate
         <Icon
           className={cn(
             "size-4 transition-transform duration-500 group-hover:rotate-[-20deg]",
-            item.kind === "unreadable" ? "text-amber-500" : "text-emerald-500",
+            item.kind === "unreadable" || item.kind === "reset" ? "text-amber-500" : "text-emerald-500",
           )}
         />
       </span>
@@ -702,12 +703,15 @@ export function EncryptedComposer({
   placeholder,
   promise,
   locked = "",
+  action,
 }: {
   instanceKey: string;
   id: string;
   placeholder: string;
   promise: string;
   locked?: string;
+  /** Shown where "Try again" is when you can't write; null for nothing. */
+  action?: ReactNode;
 }) {
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
   const stuck = useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] ?? "");
@@ -786,15 +790,17 @@ export function EncryptedComposer({
               <p className="text-sm font-bold">{locked ? "You can read this, but not write here" : "You can't write here yet"}</p>
               <p className="text-xs text-muted-foreground">{blocked}</p>
             </div>
-            {!locked && (
-            <button
-              type="button"
-              onClick={() => void prepareConversation(instanceKey, id).catch(() => {})}
-              className="shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/10"
-            >
-              Try again
-            </button>
-            )}
+            {action !== undefined
+              ? action
+              : !locked && (
+                  <button
+                    type="button"
+                    onClick={() => void prepareConversation(instanceKey, id).catch(() => {})}
+                    className="shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/10"
+                  >
+                    Try again
+                  </button>
+                )}
           </motion.div>
         ) : (
           <motion.div

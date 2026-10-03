@@ -17,8 +17,10 @@ import {
 } from "@/gen/fuwa/v1/dm_pb";
 import type { DmCall } from "@/gen/fuwa/v1/call_pb";
 import type { Device as DeviceInfo } from "@/gen/fuwa/v1/dm_pb";
-import type { Event, User } from "@/gen/fuwa/v1/types_pb";
+import { SecureRecordKind } from "@/gen/fuwa/v1/secure_pb";
+import { Permission, type Event, type User } from "@/gen/fuwa/v1/types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { accessOf, hasIn } from "@/lib/permissions";
 import { reportError } from "@/lib/reports";
 import * as vault from "./vault";
 import { loadE2ee, type Commit, type Device, type E2ee, type Processed, type WasmMember } from "./wasm";
@@ -59,6 +61,14 @@ const CALL_LABEL = "fuwa call v1";
 const LOOKUPS = 100;
 /** How long a device waits, at most, before taking people who lost access out of a secure channel. */
 const ACCESS_SETTLE_MS = 2500;
+
+/**
+ * Why a secure channel can't be read or written: its group can't be followed
+ * any more (a change to it no device could read), until someone with Manage
+ * Channels starts its encryption over.
+ */
+export const SECURE_BROKEN =
+  "This channel's encryption can't be followed any more: a change to its keys couldn't be read. Someone who can manage the channel can start it over.";
 
 /** One entry in a group's log: a direct message's ConversationRecord, or a secure channel's SecureRecord. */
 type Rec = {
@@ -375,12 +385,23 @@ export class DmEngine {
           await this.fresh();
           await this.catchUp(conversation);
         });
+        this.setBroken(conversation, false);
       } catch (err) {
-        console.warn("fuwa: couldn't catch up on a conversation", err);
+        if (err instanceof DmError && err.message === SECURE_BROKEN) this.setBroken(conversation, true);
+        else console.warn("fuwa: couldn't catch up on a conversation", err);
       }
       await this.refresh(conversation).catch(() => {});
     });
     return this.work;
+  }
+
+  /** Shows (or clears) that a secure channel's encryption can't be followed. */
+  private setBroken(id: string, broken: boolean) {
+    updateDms(this.key, (d) => {
+      const now = d.blocked[id] ?? "";
+      if (broken ? now === SECURE_BROKEN : now !== SECURE_BROKEN) return d;
+      return { ...d, blocked: { ...d.blocked, [id]: broken ? SECURE_BROKEN : "" } };
+    });
   }
 
   // ───────────────────────── Under the lock ─────────────────────────
@@ -529,7 +550,8 @@ export class DmEngine {
       for (const record of records) {
         const outcome = await this.open(c, record, known, changed, forgetSent);
         note = { ...note, cursor: Number(record.sequence) };
-        if (outcome === "rejoin") {
+        if (outcome === "reset" && c.channel) this.restart(c.channel.serverId, id);
+        if (outcome === "rejoin" || outcome === "reset") {
           rejoin = true;
           break;
         }
@@ -547,20 +569,29 @@ export class DmEngine {
     }
   }
 
-  /** Opens one record and notes what it said. "rejoin" if this device has to join the group again. */
+  /**
+   * Opens one record and notes what it said. "rejoin" if this device has to
+   * join the group again; "reset" if the channel's encryption started over.
+   */
   private async open(
     c: Room,
     record: Rec,
     known: Map<number, vault.Item>,
     changed: Map<number, vault.Item>,
     forgetSent: string[],
-  ): Promise<"rejoin" | void> {
+  ): Promise<"rejoin" | "reset" | void> {
     const seq = Number(record.sequence);
     const at = ms(record);
     const put = (i: vault.Item) => {
       known.set(i.seq, i);
       changed.set(i.seq, i);
     };
+    if (c.channel && record.kind === SecureRecordKind.RESET) {
+      // The group before it is gone; the next commit starts a new one.
+      this.device.forget(c.id);
+      put(item(this.vaultKey, c.id, { seq, at, kind: "reset", senderId: record.senderId }));
+      return "reset";
+    }
     if (record.data.length === 0) {
       // Deleted before this device read it.
       const before = known.get(seq);
@@ -688,7 +719,15 @@ export class DmEngine {
     for (let attempt = 0; attempt < 3; attempt++) {
       const info = await c.groupInfo();
       if (info.epoch === 0n || info.groupInfo.length === 0) return null;
-      const commit = this.device.joinByItself(c.id, info.groupInfo, allowed) as Commit;
+      let commit: Commit;
+      try {
+        commit = this.device.joinByItself(c.id, info.groupInfo, allowed) as Commit;
+      } catch (err) {
+        if (!c.channel) throw err;
+        // Nothing to join from: the group the server holds can't be read.
+        reportError("e2ee.secure_broken", "secure_channel");
+        throw new DmError(SECURE_BROKEN);
+      }
       await vault.write(this.vaultKey, { device: this.saved() });
       try {
         const record = await c.commit(commit, false);
@@ -950,7 +989,8 @@ export class DmEngine {
       () => {
         this.settling.delete(serverId);
         for (const id of ids) {
-          if (!this.secure.has(id)) continue;
+          // Only people who may write commit for the group; the server refuses the others'.
+          if (!this.secure.has(id) || !this.canWrite(serverId, id)) continue;
           void exclusive(this.lock, async () => {
             await this.fresh();
             await this.catchUp(id);
@@ -966,6 +1006,40 @@ export class DmEngine {
       400 + Math.random() * ACCESS_SETTLE_MS,
     );
     this.settling.set(serverId, timer);
+  }
+
+  /**
+   * After a channel's encryption started over: someone who may write starts
+   * its new group. Every such device that's online would, so each waits a
+   * moment; the first commit wins and the rest join from its welcome.
+   */
+  private restart(serverId: string, id: string) {
+    if (!this.canWrite(serverId, id)) return;
+    setTimeout(
+      () => {
+        if (this.secure.has(id) && !this.stopped) void this.prepare(id).catch(() => {});
+      },
+      400 + Math.random() * ACCESS_SETTLE_MS,
+    );
+  }
+
+  /** Whether you may write in a server's channel, worked out as the server does, from what this app knows. */
+  private canWrite(serverId: string, channelId: string): boolean {
+    const i = store.get().instances[this.key];
+    const server = i?.servers.find((x) => x.id === serverId);
+    if (!i || !server) return false;
+    const member = i.members[serverId]?.find((m) => m.user?.id === this.me.id);
+    const access = accessOf(
+      serverId,
+      server.ownerId,
+      i.roles[serverId] ?? [],
+      i.channels[serverId] ?? [],
+      this.me.id,
+      member?.roleIds ?? [],
+      !!member?.pending && server.hasRules,
+      !!member?.timedOutUntil && timestampMs(member.timedOutUntil) > Date.now(),
+    );
+    return hasIn(access, channelId, Permission.SEND_MESSAGES);
   }
 
   /** A secure channel you can't see any more (or that was deleted): this device lets go of it and what it kept. */
