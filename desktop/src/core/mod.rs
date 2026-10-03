@@ -13,6 +13,7 @@ pub mod backgrounds;
 pub mod calls;
 pub mod config;
 pub mod dms;
+pub mod keybinds;
 pub mod linked;
 pub mod moderation;
 pub mod notifications;

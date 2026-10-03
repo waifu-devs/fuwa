@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::keybinds;
 use crate::core::secrets::Secrets;
 use crate::core::themes::{self, Backdrop, Theme};
 use crate::core::vault::write_json;
@@ -149,6 +150,10 @@ pub struct Prefs {
     pub notify_for: NotifyFor,
     /// Servers whose welcome screen you've seen, as `instance/server`.
     pub welcomed: std::collections::BTreeSet<String>,
+    /// Shortcuts changed from their defaults, by action; None takes one away.
+    pub keybinds: std::collections::BTreeMap<String, Option<String>>,
+    /// Extra shortcuts for any action, on top of their own.
+    pub custom_keybinds: Vec<keybinds::CustomKeybind>,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -176,6 +181,8 @@ impl Default for Prefs {
             notifications: true,
             notify_for: NotifyFor::Mentions,
             welcomed: Default::default(),
+            keybinds: Default::default(),
+            custom_keybinds: Vec::new(),
         }
     }
 }
@@ -197,6 +204,8 @@ impl Prefs {
             _ => {}
         }
         self.custom_themes = themes::sanitize_custom(std::mem::take(&mut self.custom_themes));
+        self.keybinds.retain(|_, combo| combo.as_deref().is_none_or(keybinds::valid));
+        self.custom_keybinds = keybinds::tidy_custom(std::mem::take(&mut self.custom_keybinds));
         let known =
             |id: &str| themes::builtins().iter().any(|t| t.id == id) || self.custom_themes.iter().any(|t| t.id == id);
         if !known(&self.theme) {
