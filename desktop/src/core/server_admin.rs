@@ -114,3 +114,144 @@ impl Core {
         Ok((res.entries, people(res.users), res.has_more))
     }
 }
+
+/// What changes about a role; `None` keeps it. `color: Some(None)` clears it.
+#[derive(Debug, Clone, Default)]
+pub struct RolePatch {
+    pub name: Option<String>,
+    pub color: Option<Option<u32>>,
+    pub hoist: Option<bool>,
+    pub mentionable: Option<bool>,
+    pub permissions: Option<Vec<i32>>,
+}
+
+impl Core {
+    fn put_role(&self, key: &str, role: &pb::Role) {
+        self.shared.instance(key, |i| {
+            let list = i.roles.entry(role.server_id.clone()).or_default();
+            list.retain(|r| r.id != role.id);
+            list.push(role.clone());
+            crate::core::store::sort_roles(list);
+        });
+    }
+
+    fn put_member(&self, key: &str, server_id: &str, member: pb::Member) {
+        let Some(user_id) = member.user.as_ref().map(|u| u.id.clone()) else { return };
+        self.shared.instance(key, |i| {
+            if let Some(list) = i.members.get_mut(server_id)
+                && let Some(m) = list.iter_mut().find(|m| m.user.as_ref().is_some_and(|u| u.id == user_id))
+            {
+                *m = member;
+            }
+        });
+    }
+
+    /// A new role at the bottom of the list, just above @everyone.
+    pub async fn create_role(&self, key: &str, server_id: &str, name: &str) -> Result<pb::Role, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.roles(),
+            create_role(pb::CreateRoleRequest { server_id: server_id.into(), name: name.into(), ..Default::default() })
+        )
+        .await?;
+        let role = res.role.unwrap_or_default();
+        self.put_role(key, &role);
+        Ok(role)
+    }
+
+    pub async fn update_role(
+        &self,
+        key: &str,
+        server_id: &str,
+        role_id: &str,
+        patch: RolePatch,
+    ) -> Result<pb::Role, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.roles(),
+            update_role(pb::UpdateRoleRequest {
+                server_id: server_id.into(),
+                role_id: role_id.into(),
+                name: patch.name,
+                clear_color: patch.color == Some(None),
+                color: patch.color.flatten().map(|c| c as i32),
+                permissions: patch.permissions.map(|permissions| pb::PermissionSet { permissions }),
+                hoist: patch.hoist,
+                mentionable: patch.mentionable,
+            })
+        )
+        .await?;
+        let role = res.role.unwrap_or_default();
+        self.put_role(key, &role);
+        Ok(role)
+    }
+
+    pub async fn delete_role(&self, key: &str, server_id: &str, role_id: &str) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        rpc!(api.roles(), delete_role(pb::DeleteRoleRequest { server_id: server_id.into(), role_id: role_id.into() }))
+            .await?;
+        self.shared.instance(key, |i| {
+            if let Some(list) = i.roles.get_mut(server_id) {
+                list.retain(|r| r.id != role_id);
+            }
+            if let Some(list) = i.members.get_mut(server_id) {
+                for m in list {
+                    m.role_ids.retain(|r| r != role_id);
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// Every role but @everyone, highest first.
+    pub async fn reorder_roles(&self, key: &str, server_id: &str, role_ids: Vec<String>) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res =
+            rpc!(api.roles(), reorder_roles(pb::ReorderRolesRequest { server_id: server_id.into(), role_ids })).await?;
+        let mut roles = res.roles;
+        crate::core::store::sort_roles(&mut roles);
+        self.shared.instance(key, |i| {
+            i.roles.insert(server_id.to_owned(), roles);
+        });
+        Ok(())
+    }
+
+    /// Gives someone a role, or takes it away.
+    pub async fn set_member_role(
+        &self,
+        key: &str,
+        server_id: &str,
+        user_id: &str,
+        role_id: &str,
+        give: bool,
+    ) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let member = if give {
+            rpc!(
+                api.roles(),
+                add_member_role(pb::AddMemberRoleRequest {
+                    server_id: server_id.into(),
+                    user_id: user_id.into(),
+                    role_id: role_id.into(),
+                })
+            )
+            .await?
+            .member
+        } else {
+            rpc!(
+                api.roles(),
+                remove_member_role(pb::RemoveMemberRoleRequest {
+                    server_id: server_id.into(),
+                    user_id: user_id.into(),
+                    role_id: role_id.into(),
+                })
+            )
+            .await?
+            .member
+        };
+        if let Some(member) = member {
+            self.put_member(key, server_id, member);
+        }
+        Ok(())
+    }
+}
