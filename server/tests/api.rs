@@ -2674,7 +2674,12 @@ async fn create_upload(
     c.media
         .create_upload(authed(
             token,
-            pb::CreateUploadRequest { purpose: purpose as i32, content_type: content_type.into(), size: size as i64 },
+            pb::CreateUploadRequest {
+                purpose: purpose as i32,
+                content_type: content_type.into(),
+                size: size as i64,
+                server_id: String::new(),
+            },
         ))
         .await
         .map(|r| r.into_inner())
@@ -2781,7 +2786,12 @@ async fn pictures_upload_serve_and_clean_up() {
     assert!(too_big.message().contains("4 KB"), "{}", too_big.message());
     let anonymous = c
         .media
-        .create_upload(pb::CreateUploadRequest { purpose: avatar as i32, content_type: "image/png".into(), size: 10 })
+        .create_upload(pb::CreateUploadRequest {
+            purpose: avatar as i32,
+            content_type: "image/png".into(),
+            size: 10,
+            server_id: String::new(),
+        })
         .await;
     assert_eq!(anonymous.unwrap_err().code(), Code::Unauthenticated);
 
@@ -5338,8 +5348,12 @@ async fn picture_uploads_take_the_caps_admins_set() {
         let mut media = c.media.clone();
         let juan = juan.clone();
         tokio::spawn(async move {
-            let request =
-                pb::CreateUploadRequest { purpose: avatar as i32, content_type: "image/png".into(), size: 500 };
+            let request = pb::CreateUploadRequest {
+                purpose: avatar as i32,
+                content_type: "image/png".into(),
+                size: 500,
+                server_id: String::new(),
+            };
             media.create_upload(authed(&juan, request)).await.map_err(|err| err.code())
         })
     });

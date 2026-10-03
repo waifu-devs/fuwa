@@ -318,6 +318,7 @@ async fn a_split_instance_comes_back_from_its_replica() {
         purpose: pb::MediaPurpose::Avatar as i32,
         content_type: "image/png".into(),
         size: picture.len() as i64,
+        server_id: String::new(),
     };
     let reserved = c.media.create_upload(authed(&juan, request)).await.unwrap().into_inner();
     let upload = reqwest::Client::new().put(on(&cluster.gateway, &reserved.upload_url)).body(picture.clone());

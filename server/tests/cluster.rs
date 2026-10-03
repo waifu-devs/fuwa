@@ -478,6 +478,7 @@ async fn a_split_instance_works_like_one() {
                 purpose: pb::MediaPurpose::ServerIcon as i32,
                 content_type: "image/png".into(),
                 size: png.len() as i64,
+                server_id: String::new(),
             },
         ))
         .await
@@ -1225,8 +1226,12 @@ async fn servers_live_in_their_region_and_move() {
         async move {
             let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
             png.resize(300, fill);
-            let request =
-                pb::CreateUploadRequest { purpose: purpose as i32, content_type: "image/png".into(), size: 300 };
+            let request = pb::CreateUploadRequest {
+                purpose: purpose as i32,
+                content_type: "image/png".into(),
+                size: 300,
+                server_id: String::new(),
+            };
             let reserved = media.create_upload(authed(&juan, request)).await.unwrap().into_inner();
             assert_eq!(http.put(&reserved.upload_url).body(png.clone()).send().await.unwrap().status(), 204);
             (reserved.media.unwrap(), png)
@@ -1343,6 +1348,62 @@ async fn servers_live_in_their_region_and_move() {
     c.servers.update_server(authed(&juan, request)).await.unwrap();
     assert!(!picture_at(&shard_b, &icon.id).exists() && !picture_at(&bucket_eu, &icon.id).exists());
     assert_eq!(http.get(&icon.url).send().await.unwrap().status(), 404);
+
+    // A picture uploaded for a server goes straight to its region: it's
+    // never kept at the directory, even for a moment.
+    let reserve = |purpose: pb::MediaPurpose, server_id: &str, token: &str| {
+        let (mut media, server_id, token) = (media.clone(), server_id.to_string(), token.to_string());
+        async move {
+            let request = pb::CreateUploadRequest {
+                purpose: purpose as i32,
+                content_type: "image/png".into(),
+                size: 300,
+                server_id,
+            };
+            media.create_upload(authed(&token, request)).await.map(|r| r.into_inner())
+        }
+    };
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.resize(300, 4);
+    let reserved = reserve(pb::MediaPurpose::ServerIcon, &server.id, &juan).await.unwrap();
+    let direct = reserved.media.clone().unwrap();
+    assert!(reserved.upload_url.contains(&format!("/media/servers/{}/upload/", server.id)));
+    assert_eq!(http.put(&reserved.upload_url).body(png.clone()).send().await.unwrap().status(), 204);
+    assert_eq!(std::fs::read(picture_at(&shard_b, &direct.id)).unwrap(), png);
+    assert!(picture_at(&bucket_eu, &direct.id).exists());
+    assert!(!directory_media.join(&direct.id).exists() && !picture_at(&shard_a, &direct.id).exists());
+    assert_eq!(http.get(&direct.url).send().await.unwrap().bytes().await.unwrap().to_vec(), png);
+    // A link works once.
+    assert_eq!(http.put(&reserved.upload_url).body(png.clone()).send().await.unwrap().status(), 404);
+    // Only for that server, and only by its members.
+    let request = pb::UpdateServerRequest {
+        server_id: in_eu.id.clone(),
+        icon_url: Some(direct.url.clone()),
+        ..Default::default()
+    };
+    assert_eq!(c.servers.update_server(authed(&juan, request)).await.unwrap_err().code(), Code::PermissionDenied);
+    assert_eq!(reserve(pb::MediaPurpose::Emoji, &server.id, &mika).await.unwrap_err().code(), Code::NotFound);
+    assert_eq!(reserve(pb::MediaPurpose::Banner, &server.id, &juan).await.unwrap_err().code(), Code::InvalidArgument);
+    let request = pb::UpdateServerRequest {
+        server_id: server.id.clone(),
+        icon_url: Some(direct.url.clone()),
+        ..Default::default()
+    };
+    c.servers.update_server(authed(&juan, request)).await.unwrap();
+    // A wrong-sized upload is turned away and nothing is kept.
+    let short = reserve(pb::MediaPurpose::Emoji, &server.id, &juan).await.unwrap();
+    assert_eq!(http.put(&short.upload_url).body(png[..200].to_vec()).send().await.unwrap().status(), 400);
+    let short = short.media.unwrap();
+    assert!(!picture_at(&shard_b, &short.id).exists());
+    assert!(cluster.directory.app().node().unwrap().media(&short.id).await.unwrap().is_none());
+    // Uploads the server never used are swept from its shard and bucket.
+    let unused = reserve(pb::MediaPurpose::Emoji, &server.id, &juan).await.unwrap();
+    assert_eq!(http.put(&unused.upload_url).body(png.clone()).send().await.unwrap().status(), 204);
+    let unused = unused.media.unwrap();
+    let later = fuwa_server::id::now_ms() + 3 * 24 * 60 * 60 * 1000;
+    fuwa_server::cluster::pictures::sweep(cluster.shards[1].app(), later).await.unwrap();
+    assert!(!picture_at(&shard_b, &unused.id).exists() && !picture_at(&bucket_eu, &unused.id).exists());
+    assert!(picture_at(&shard_b, &direct.id).exists(), "the icon it uses stays");
     assert!(cluster.directory.app().node().unwrap().moves().await.unwrap().is_empty(), "the move is over");
 
     cluster.stop().await;

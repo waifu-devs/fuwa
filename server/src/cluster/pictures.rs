@@ -22,9 +22,9 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::Path as UrlPath;
+use axum::extract::{DefaultBodyLimit, Path as UrlPath};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, put};
 use futures::Stream;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use tokio::sync::mpsc;
@@ -201,15 +201,158 @@ pub fn pictures(data: &Path, server_id: &str) -> Result<Vec<(String, PathBuf)>> 
 }
 
 /// `GET /media/servers/<server>/<id>`, where a picture's link leads once its
-/// server's shard has it.
+/// server's shard has it, and `PUT /media/servers/<server>/upload/<token>`,
+/// where a picture uploaded for the server arrives.
 pub fn routes(app: Arc<App>) -> Router {
-    Router::new().route(
-        "/media/servers/{server_id}/{id}",
-        get(move |UrlPath((server_id, id)): UrlPath<(String, String)>, headers: HeaderMap| {
-            let app = app.clone();
-            async move { serve(&app, &server_id, &id, &headers).await }
-        }),
-    )
+    let uploads = app.clone();
+    Router::new()
+        .route(
+            "/media/servers/{server_id}/{id}",
+            get(move |UrlPath((server_id, id)): UrlPath<(String, String)>, headers: HeaderMap| {
+                let app = app.clone();
+                async move { serve(&app, &server_id, &id, &headers).await }
+            }),
+        )
+        .route(
+            "/media/servers/{server_id}/upload/{token}",
+            put(move |UrlPath((server_id, token)): UrlPath<(String, String)>, body: Body| {
+                let app = uploads.clone();
+                async move { upload(&app, &server_id, &token, body).await }
+            })
+            .layer(DefaultBodyLimit::disable()),
+        )
+}
+
+/// Receives a picture uploaded for a server here: its bytes are kept with
+/// the server and its replica, never at the directory.
+async fn upload(app: &App, server_id: &str, token: &str, body: Body) -> Response {
+    let Ok(server_id) = parse_id("server_id", server_id) else { return plain(StatusCode::NOT_FOUND, "not found") };
+    let Link::Shard(link) = &app.link else { return plain(StatusCode::NOT_FOUND, "not found") };
+    if !app.servers.holds(&server_id) {
+        return misrouted();
+    }
+    let request =
+        cpb::StartServerUploadRequest { upload_hash: crate::auth::hash_token(token), server_id: server_id.clone() };
+    let started = match link.directory().start_server_upload(request).await {
+        Ok(started) => started.into_inner(),
+        Err(status) if status.code() == tonic::Code::NotFound => {
+            return plain(StatusCode::NOT_FOUND, "this upload link has been used or ran out; start the upload again");
+        }
+        Err(status) => {
+            tracing::warn!(error = %status.message(), "couldn't start a server picture's upload");
+            return plain(StatusCode::BAD_GATEWAY, "part of this instance is unreachable right now; try again soon");
+        }
+    };
+    let id = match canonical(&started.media_id) {
+        Ok(id) => id,
+        Err(_) => return plain(StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server"),
+    };
+    let dir = server_dir(&app.config.data_path, &server_id);
+    let temp = dir.join(format!(".incoming-{id}"));
+    let dest = dir.join(&id);
+    let kept = async {
+        std::fs::create_dir_all(&dir).map_err(|err| failed_io(&id, err))?;
+        let wait = std::time::Duration::from_millis(crate::media::RECEIVE_TTL_MS as u64);
+        let (kind, size) = tokio::time::timeout(wait, crate::media::receive_file(&id, started.size, &temp, body))
+            .await
+            .map_err(|_| (StatusCode::REQUEST_TIMEOUT, "the upload took too long".to_string()))??;
+        std::fs::rename(&temp, &dest).map_err(|err| failed_io(&id, err))?;
+        if let Some(replica) = app.servers.replica() {
+            replica.store().put_file(&name(&server_id, &id), &dest).await.map_err(|err| {
+                tracing::error!(media = %id, error = %err, "couldn't back up an uploaded picture");
+                (StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string())
+            })?;
+        }
+        // A move that started meanwhile has already sent the server's
+        // pictures, so this one wouldn't go with it.
+        if !app.servers.holds(&server_id) || app.servers.frozen().contains(&server_id) {
+            return Err((StatusCode::SERVICE_UNAVAILABLE, "that server is moving; upload it again in a moment".into()));
+        }
+        Ok::<_, (StatusCode, String)>((kind, size))
+    }
+    .await;
+    let (status, message, finish) = match kept {
+        Ok((kind, size)) => (StatusCode::NO_CONTENT, String::new(), Some((kind, size))),
+        Err((status, message)) => (status, message, None),
+    };
+    let request = cpb::FinishServerUploadRequest {
+        media_id: id.clone(),
+        server_id: server_id.clone(),
+        content_type: finish.map(|(kind, _)| kind.to_string()).unwrap_or_default(),
+        size: finish.map_or(0, |(_, size)| size),
+    };
+    let finished = link.ask(request, |mut d, r| async move { d.finish_server_upload(r).await }).await;
+    if finish.is_some() && finished.is_ok() {
+        return status.into_response();
+    }
+    let _ = std::fs::remove_file(&temp);
+    drop(app, &server_id, &id).await;
+    if let Err(err) = finished {
+        tracing::warn!(media = %id, error = %err, "couldn't record a server picture's upload");
+        if finish.is_some() {
+            return plain(StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server");
+        }
+    }
+    plain(status, &message)
+}
+
+fn failed_io(id: &str, err: std::io::Error) -> (StatusCode, String) {
+    tracing::error!(media = %id, error = %err, "couldn't store an uploaded picture");
+    (StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string())
+}
+
+fn misrouted() -> Response {
+    let mut response = plain(StatusCode::SERVICE_UNAVAILABLE, "that server is on another shard");
+    response.headers_mut().insert(MISROUTED, HeaderValue::from_static("1"));
+    response
+}
+
+/// How long a picture uploaded here waits to be used before it's deleted:
+/// after the directory has swept its row.
+const UNUSED_FOR_MS: i64 = 2 * crate::media::UNUSED_TTL_MS;
+
+/// Hourly: deletes pictures uploaded for this shard's servers that nothing
+/// uses.
+pub fn spawn_sweep(app: Arc<App>) {
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
+        loop {
+            tokio::select! {
+                _ = app.shutdown.cancelled() => return,
+                _ = every.tick() => match sweep(&app, crate::id::now_ms()).await {
+                    Ok(0) => {}
+                    Ok(swept) => tracing::info!(swept, "deleted server pictures nothing used"),
+                    Err(err) => tracing::warn!(error = %err, "couldn't sweep server pictures"),
+                },
+            }
+        }
+    });
+}
+
+/// Deletes pictures of servers here, as of `now`, that the server doesn't
+/// use and that arrived long enough ago that they never will be.
+pub async fn sweep(app: &App, now: i64) -> Result<usize> {
+    let entries = match std::fs::read_dir(app.config.data_path.join(DIR)) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(err) => return Err(err.into()),
+    };
+    let mut swept = 0;
+    for entry in entries {
+        let Ok(server_id) = entry?.file_name().into_string() else { continue };
+        if !app.servers.holds(&server_id) || app.servers.frozen().contains(&server_id) {
+            continue;
+        }
+        for (id, path) in pictures(&app.config.data_path, &server_id)? {
+            let arrived = std::fs::metadata(&path)?.modified()?;
+            let arrived = arrived.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+            if now - arrived >= UNUSED_FOR_MS && !uses(app, &server_id, &id).await {
+                drop(app, &server_id, &id).await;
+                swept += 1;
+            }
+        }
+    }
+    Ok(swept)
 }
 
 async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Response {
@@ -217,9 +360,7 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
         return plain(StatusCode::NOT_FOUND, "not found");
     };
     if !app.servers.holds(&server_id) {
-        let mut response = plain(StatusCode::SERVICE_UNAVAILABLE, "that server is on another shard");
-        response.headers_mut().insert(MISROUTED, HeaderValue::from_static("1"));
-        return response;
+        return misrouted();
     }
     let key = name(&server_id, &id);
     let path = app.config.data_path.join(&key);
@@ -303,6 +444,46 @@ async fn takeable(app: &App, server_id: &str, media_id: &str) -> Result<crate::m
         return Err(Error::FailedPrecondition("that picture isn't the server's".into()));
     }
     Ok(row)
+}
+
+/// Uses up the link for a picture uploaded for `server_id`, whose bytes its
+/// shard is receiving. A link for another server's picture is used up for
+/// nothing.
+pub async fn start_upload(app: &App, upload_hash: &str, server_id: &str) -> Result<cpb::StartServerUploadResponse> {
+    let node = app.node()?;
+    let now = crate::id::now_ms();
+    let row = node
+        .start_upload(upload_hash, now, now + crate::media::RECEIVE_TTL_MS)
+        .await?
+        .ok_or(Error::NotFound("upload link"))?;
+    if row.server_id.as_deref() != Some(server_id) {
+        app.delete_media(std::slice::from_ref(&row.id)).await?;
+        return Err(Error::NotFound("upload link"));
+    }
+    Ok(cpb::StartServerUploadResponse { media_id: row.id, size: row.size })
+}
+
+/// Records a server picture's upload its shard received, or drops it
+/// (`content_type` is `None`) when it didn't arrive whole.
+pub async fn finish_upload(
+    app: &App,
+    media_id: &str,
+    server_id: &str,
+    content_type: Option<&str>,
+    size: i64,
+) -> Result<()> {
+    let node = app.node()?;
+    let row = node.media(media_id).await?.ok_or(Error::NotFound("upload"))?;
+    if row.server_id.as_deref() != Some(server_id) || row.stored {
+        return Err(Error::FailedPrecondition("that isn't an upload for that server in progress".into()));
+    }
+    match content_type {
+        Some(kind) if crate::media::PICTURE_TYPES.contains(&kind) && size == row.size => {
+            node.finish_upload(&row.id, kind, crate::id::now_ms()).await
+        }
+        Some(_) => Err(Error::invalid("that isn't the picture that was reserved")),
+        None => app.delete_media(std::slice::from_ref(&row.id)).await,
+    }
 }
 
 /// Sends a server's picture to its shard.

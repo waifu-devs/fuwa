@@ -39,6 +39,24 @@ impl MediaService for Api {
                 if req.size <= 0 {
                     return Err(Error::invalid("that file is empty"));
                 }
+                let server_id = match req.server_id.trim() {
+                    "" => None,
+                    id => {
+                        if !matches!(
+                            purpose,
+                            pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji | pb::MediaPurpose::Avatar
+                        ) {
+                            return Err(Error::invalid(
+                                "only icons, emoji and webhook pictures are uploaded for a server",
+                            ));
+                        }
+                        let id = crate::id::parse_id("server_id", id)?;
+                        if !self.app.index.is_member(&account.id, &id) {
+                            return Err(Error::NotFound("server"));
+                        }
+                        Some(id)
+                    }
+                };
                 let settings = self.app.settings();
                 if let Some(cap) = settings.limits.picture_upload_bytes
                     && req.size > cap
@@ -56,7 +74,7 @@ impl MediaService for Api {
                     size: req.size,
                     stored: false,
                     used: false,
-                    server_id: None,
+                    server_id: server_id.clone(),
                 };
                 let token = auth::new_token();
                 let expires_at = now_ms() + media::UPLOAD_TTL_MS;
@@ -70,8 +88,14 @@ impl MediaService for Api {
                     )
                     .await?;
                 let base = &settings.public_url;
+                // A server's picture on a split instance goes straight to the
+                // shard holding the server (docs/regions.md).
+                let upload_url = match (&server_id, &self.app.link) {
+                    (Some(server_id), Link::Directory(_)) => format!("{base}/media/servers/{server_id}/upload/{token}"),
+                    _ => format!("{base}/media/upload/{token}"),
+                };
                 Ok(pb::CreateUploadResponse {
-                    upload_url: format!("{base}/media/upload/{token}"),
+                    upload_url,
                     expires_at: Some(timestamp(expires_at)),
                     media: Some(pb::Media {
                         url: format!("{base}/media/{}", row.id),
@@ -93,7 +117,7 @@ impl MediaService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let url = request.into_inner().url;
-                let Some(upload) = self.check_upload(&account, pb::MediaPurpose::Background, &url).await? else {
+                let Some(upload) = self.check_upload(&account, pb::MediaPurpose::Background, &url, None).await? else {
                     return Err(Error::invalid("upload the background to this instance first"));
                 };
                 let node = self.app.node()?;
@@ -168,8 +192,9 @@ impl Api {
         account: &Account,
         purpose: pb::MediaPurpose,
         url: &str,
+        server_id: Option<&str>,
     ) -> Result<Option<String>> {
-        self.app.check_picture(&account.id, purpose, url).await
+        self.app.check_picture(&account.id, purpose, url, server_id).await
     }
 
     /// Like `check_picture`, with the upload's size and type.
@@ -178,8 +203,9 @@ impl Api {
         account: &Account,
         purpose: pb::MediaPurpose,
         url: &str,
+        server_id: Option<&str>,
     ) -> Result<Option<pb::Media>> {
-        self.app.check_upload(&account.id, purpose, url).await
+        self.app.check_upload(&account.id, purpose, url, server_id).await
     }
 
     /// Marks a checked upload as used. On a split instance a server's

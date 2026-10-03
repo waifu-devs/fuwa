@@ -521,6 +521,9 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         None => None,
     };
     let reports = crate::reports::spawn(app.clone(), &app.config, install_id, app.shutdown.clone());
+    if let Link::Shard(_) = &app.link {
+        crate::cluster::pictures::spawn_sweep(app.clone());
+    }
     if app.node.is_some() {
         crate::telemetry::spawn(app.clone());
         spawn_housekeeping(app.clone());

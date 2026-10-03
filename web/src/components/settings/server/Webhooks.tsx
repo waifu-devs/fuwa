@@ -340,6 +340,7 @@ function WebhookCard({
                   instanceKey={instanceKey}
                   kind="avatar"
                   compact
+                  serverId={w.serverId}
                   value={w.avatarUrl}
                   onChange={(avatarUrl) => void save({ avatarUrl })}
                   fallback={<UserAvatar user={asUser({ ...w, avatarUrl: "" })} className="size-full text-2xl" />}
