@@ -554,21 +554,23 @@ pub async fn download(
     Ok(rx)
 }
 
-/// Deletes a finished recording: its row, its files, and the replica's copies.
+/// Deletes a finished recording: the replica's copies first, then its files
+/// and its row. A copy that won't go keeps the row, so deleting it again
+/// (or the next sweep) tries once more rather than leaving it behind.
 pub async fn delete(app: &App, sdb: &ServerDb, row: &RecordingRow) -> Result<()> {
-    sdb.delete_recording(&row.id).await?;
-    let dir = server_dir(app, &sdb.id).join(&row.id);
-    let _ = std::fs::remove_dir_all(&dir);
     if let Some(replica) = &app.replica {
         let tracks: Vec<Stored> = serde_json::from_str(&row.tracks).unwrap_or_default();
         for track in tracks {
             let key = replica_key(&sdb.id, &row.id, &file_name(&track.user_id, row.sealed));
-            if let Err(err) = replica.store().delete(&key).await {
+            replica.store().delete(&key).await.map_err(|err| {
                 tracing::warn!(recording = %row.id, error = %err, "couldn't delete a recording from the replica");
-            }
+                Error::Unavailable("couldn't delete the recording's copy; try again".into())
+            })?;
         }
     }
-    Ok(())
+    let dir = server_dir(app, &sdb.id).join(&row.id);
+    let _ = std::fs::remove_dir_all(&dir);
+    sdb.delete_recording(&row.id).await
 }
 
 // ───────────────────────────── Tracks ─────────────────────────────
