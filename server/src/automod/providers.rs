@@ -693,18 +693,30 @@ pub trait Provider: Send + Sync {
 /// A provider for `setup`, when it has what it needs.
 pub fn build(setup: &Setup) -> std::result::Result<Box<dyn Provider>, Failure> {
     setup.ready().map_err(Failure::NotSetUp)?;
-    let url = match setup.kind().map(|kind| (kind.id, kind.host)) {
-        Some(("typesafe-jev", host)) => format!("https://{host}/v1/systemone"),
-        Some((_, host)) => format!("https://{host}/client/v4/accounts/{}/ai/run/{}", setup.account_id, setup.model()),
-        None => setup.url.clone(),
+    Ok(Box::new(system_one(setup)))
+}
+
+/// Where `setup`'s requests go and the model they name.
+fn system_one(setup: &Setup) -> SystemOne {
+    let (url, model) = match setup.kind().map(|kind| (kind.id, kind.host)) {
+        Some(("typesafe-jev", host)) => (format!("https://{host}/v1/systemone"), setup.model()),
+        // Cloudflare runs the model the address names (`@cf/cloudflare/clef`),
+        // and its body wants the bare name ("clef"): anything else is a 400.
+        // The account id in the address is what lets account-owned tokens in,
+        // the same as user tokens.
+        Some((_, host)) => (
+            format!("https://{host}/client/v4/accounts/{}/ai/run/{}", setup.account_id, setup.model()),
+            setup.model().rsplit('/').next().unwrap_or_default(),
+        ),
+        None => (setup.url.clone(), setup.model()),
     };
-    Ok(Box::new(SystemOne {
+    SystemOne {
         id: setup.report_id(),
         url,
         key: setup.api_key.clone(),
         header: setup.header.clone(),
-        model: setup.model().to_string(),
-    }))
+        model: model.to_string(),
+    }
 }
 
 /// Asks `setup`'s provider about `text` and `pictures` (left out unless it
@@ -955,6 +967,33 @@ mod tests {
         assert_eq!(outgoing("@everyone mail me at a@b.com. @mika."), "@everyone mail me at a@b.com. @someone.");
         assert_eq!(outgoing("1 < 2 > 0 <not a tag>"), "1 < 2 > 0 <not a tag>");
         assert_eq!(outgoing(&"é".repeat(5000)).chars().count(), MAX_TEXT);
+    }
+
+    #[test]
+    fn clef_gets_its_model_in_the_address_and_bare_in_the_body() {
+        let account = "0123456789abcdef0123456789abcdef";
+        for (chosen, path, bare) in [
+            ("", "@cf/cloudflare/clef", "clef"),
+            ("@cf/cloudflare/clef", "@cf/cloudflare/clef", "clef"),
+            ("@cf/cloudflare/clef-flash", "@cf/cloudflare/clef-flash", "clef-flash"),
+        ] {
+            let setup = Setup {
+                id: "cloudflare-clef".into(),
+                enabled: true,
+                api_key: "k".repeat(40),
+                account_id: account.into(),
+                model: chosen.into(),
+                ..Default::default()
+            };
+            let provider = system_one(&setup);
+            assert_eq!(provider.url, format!("https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{path}"));
+            assert_eq!(provider.header, "", "the token goes as Authorization: Bearer");
+            let body = provider.body(&Message { text: "hi", pictures: &[] });
+            assert_eq!(body["model"], bare);
+        }
+        let jev = system_one(&Setup { id: "typesafe-jev".into(), api_key: "k".repeat(20), ..Default::default() });
+        assert_eq!(jev.url, "https://api.typesafe.ai/v1/systemone");
+        assert_eq!(jev.model, "jev-latest");
     }
 
     #[test]

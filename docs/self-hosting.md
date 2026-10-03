@@ -302,8 +302,10 @@ violence, self-harm, scams and spam.
 
 - **TypeSafe Jev**: an API key from your TypeSafe account. Messages go to
   `api.typesafe.ai` (US).
-- **Cloudflare Clef**: an API token with the Workers AI permission and your
-  account id. Messages go to `api.cloudflare.com`.
+- **Cloudflare Clef**: an API token with the Workers AI Read permission and
+  your account id. Account-owned tokens (Manage Account, Account API Tokens)
+  and user tokens (My Profile, API Tokens) both work. Messages go to
+  `api.cloudflare.com`.
 - **Your own**: press **Add your own** and give it a name, an https address
   and, if it needs one, a key and the header it goes in. It gets the same
   requests Jev and Clef do; [automod.md](automod.md) has what fuwa sends and

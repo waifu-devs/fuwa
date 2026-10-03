@@ -39,7 +39,7 @@ const KNOWN: Record<string, { name: string; host: string; blurb: string; models:
       { id: "@cf/cloudflare/clef", label: "Clef", hint: "Most accurate" },
       { id: "@cf/cloudflare/clef-flash", label: "Clef flash", hint: "Fastest, cheapest" },
     ],
-    keyHelp: "An API token with Workers AI permission (Cloudflare dashboard, My Profile, API Tokens), and your account id from the dashboard's sidebar. Billed by Cloudflare.",
+    keyHelp: "An API token with Workers AI Read, either an account token (Manage Account, Account API Tokens) or a user token (My Profile, API Tokens), and your account id from the dashboard's sidebar. Billed by Cloudflare.",
     tint: "from-orange-500/25 to-amber-500/10 text-orange-600 dark:text-orange-300",
   },
 };
