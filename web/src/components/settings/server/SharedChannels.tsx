@@ -569,6 +569,20 @@ export function ConnectionRow({
         <StateChip connection={c} />
         <ConnectionActions instanceKey={instanceKey} serverId={serverId} connection={c} onAsk={setConfirm} approved={`#${homeName} is now shared with ${otherName}`} />
       </div>
+      {c.checkedBy.length > 0 && (
+        <motion.p
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 420, damping: 32 }}
+          className="flex items-start gap-2 text-sm text-muted-foreground"
+        >
+          <EyeIcon className="mt-0.5 size-4 shrink-0 text-primary" />
+          <span>
+            {c.home ? "Your" : "Their"} AutoMod sends what's written there to <b className="text-foreground">{c.checkedBy.join(", ")}</b>
+            {c.home ? ", their people's messages included." : ", your people's messages included."}
+          </span>
+        </motion.p>
+      )}
       {!waiting(c) && <Allowed instanceKey={instanceKey} serverId={serverId} connection={c} />}
       <ConfirmDialog
         open={confirm !== null}

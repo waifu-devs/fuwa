@@ -64,7 +64,12 @@ the news lets go the next time it hears "gone" from the other.
   (docs/automod.md) count too: each side asks its own provider before its
   write, as for its own channels. The preview names the home's (`Name
   (host)` in `checked_by`) before the guest's admins ask, and a guest the
-  home kept out is turned away before anything goes to its provider.
+  home kept out is turned away before anything goes to its provider, as is
+  anything the home doesn't let guests send (pictures without Attach Files
+  or Embed Links). Both sides' Shared channels pages list the home's
+  providers on each connection (`SharedConnection.checked_by`); a guest's
+  page asks the home each time it loads, so a rule added after approval
+  shows up there.
 - **Each side moderates its own people.** A guest's moderators (Manage
   Messages in their channel) can delete their own server's people's messages
   there; the home's moderators can delete anyone's. The home can keep a guest
