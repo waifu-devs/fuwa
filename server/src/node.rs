@@ -21,6 +21,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0005_media.sql"),
     include_str!("../migrations/node/0006_cluster.sql"),
     include_str!("../migrations/node/0007_linked_sign_ins.sql"),
+    include_str!("../migrations/node/0008_agents.sql"),
 ];
 
 /// How long a session lasts after sign-in.
@@ -148,6 +149,17 @@ pub struct Session {
     pub last_active_at: i64,
     pub expires_at: i64,
     pub current: bool,
+}
+
+/// What node.db keeps about an agent besides its account.
+#[derive(Debug, Clone)]
+pub struct AgentRow {
+    pub account: Account,
+    pub owner_id: String,
+    pub public: bool,
+    pub bio: String,
+    /// When its token was last used; `None` if never.
+    pub last_active_at: Option<i64>,
 }
 
 /// Two-step sign-in, as stored.
@@ -1307,7 +1319,9 @@ impl NodeDb {
         let conn = self.read()?;
         query_all(
             &conn,
-            "SELECT id FROM media WHERE account_id = ?1 AND NOT (purpose IN (?2, ?3) AND used_at IS NOT NULL)",
+            // Pictures in use by a server (its icon, emoji and webhooks) stay with it.
+            "SELECT id FROM media WHERE account_id = ?1
+             AND NOT ((purpose IN (?2, ?3) OR server_id IS NOT NULL) AND used_at IS NOT NULL)",
             (account_id, pb::MediaPurpose::ServerIcon as i64, pb::MediaPurpose::Emoji as i64),
             |r| r.get::<String>(0),
         )
@@ -1344,6 +1358,117 @@ impl NodeDb {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
             }
             conn.execute("DELETE FROM accounts WHERE id = ?1", [account_id]).await?;
+            Ok(())
+        })
+        .await
+    }
+
+    // ───────────────────────── Agents ─────────────────────────
+
+    /// Makes an agent and its token's session, which never runs out.
+    pub async fn create_agent(
+        &self,
+        owner_id: &str,
+        username: &str,
+        display_name: &str,
+        token_hash: &str,
+    ) -> Result<Account> {
+        let result = db::write(&self.db, async |conn| {
+            let now = now_ms();
+            let id = new_id();
+            conn.execute(
+                "INSERT INTO accounts (id, kind, username, display_name, owner_id, admin, created_at, updated_at, last_seen_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?6, ?6)",
+                (id.as_str(), pb::AccountKind::Agent as i64, username, display_name, owner_id, now),
+            )
+            .await?;
+            insert_agent_session(conn, &id, token_hash, now).await?;
+            Ok(Account {
+                id,
+                kind: pb::AccountKind::Agent,
+                username: username.to_string(),
+                display_name: display_name.to_string(),
+                avatar_url: String::new(),
+                admin: false,
+                created_at: now,
+                last_seen_at: now,
+                status: String::new(),
+                status_expires_at: None,
+                two_factor: false,
+                disabled: false,
+            })
+        })
+        .await;
+        result.map_err(|err| {
+            if db::is_unique_violation(&err) { Error::AlreadyExists("that username is taken".into()) } else { err }
+        })
+    }
+
+    /// The agents someone made, oldest first.
+    pub async fn agents(&self, owner_id: &str) -> Result<Vec<AgentRow>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            &format!("{AGENT_SELECT} WHERE accounts.kind = ?1 AND accounts.owner_id = ?2 ORDER BY accounts.created_at, accounts.id"),
+            (pb::AccountKind::Agent as i64, owner_id),
+            agent_row,
+        )
+        .await
+    }
+
+    /// An agent, by id or by username.
+    pub async fn agent(&self, id: Option<&str>, username: Option<&str>) -> Result<Option<AgentRow>> {
+        let conn = self.read()?;
+        let (column, value) = match (id, username) {
+            (Some(id), _) => ("id", id),
+            (None, Some(username)) => ("username", username),
+            (None, None) => return Ok(None),
+        };
+        query_one(
+            &conn,
+            &format!("{AGENT_SELECT} WHERE accounts.kind = ?1 AND accounts.{column} = ?2"),
+            (pb::AccountKind::Agent as i64, value),
+            agent_row,
+        )
+        .await
+    }
+
+    /// How many agents someone has made.
+    pub async fn agent_count(&self, owner_id: &str) -> Result<i64> {
+        let conn = self.read()?;
+        Ok(query_one(
+            &conn,
+            "SELECT count(*) FROM accounts WHERE kind = ?1 AND owner_id = ?2",
+            (pb::AccountKind::Agent as i64, owner_id),
+            |r| r.get::<i64>(0),
+        )
+        .await?
+        .unwrap_or(0))
+    }
+
+    pub async fn set_agent_public(&self, id: &str, public: bool) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("UPDATE accounts SET public = ?2, updated_at = ?3 WHERE id = ?1", (id, public, now_ms()))
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Swaps an agent's token: its old sessions end and the new one starts.
+    pub async fn reset_agent_token(&self, id: &str, token_hash: &str) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("DELETE FROM sessions WHERE account_id = ?1", [id]).await?;
+            insert_agent_session(conn, id, token_hash, now_ms()).await
+        })
+        .await
+    }
+
+    /// Hands an upload to another account, such as an agent's picture its
+    /// owner uploaded, so it goes with that account.
+    pub async fn give_media(&self, id: &str, account_id: &str) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("UPDATE media SET account_id = ?2 WHERE id = ?1", (id, account_id)).await?;
             Ok(())
         })
         .await
@@ -1391,6 +1516,36 @@ impl NodeDb {
         .await?
         .unwrap_or_default())
     }
+}
+
+const AGENT_SELECT: &str =
+    "SELECT accounts.id, accounts.kind, accounts.username, accounts.display_name, accounts.avatar_url,
+    accounts.admin, accounts.created_at, accounts.last_seen_at, accounts.status, accounts.status_expires_at,
+    accounts.totp_secret IS NOT NULL, accounts.disabled_at IS NOT NULL,
+    coalesce(accounts.owner_id, ''), accounts.public, accounts.bio, sessions.last_active_at
+    FROM accounts LEFT JOIN sessions ON sessions.account_id = accounts.id";
+
+fn agent_row(row: &Row) -> turso::Result<AgentRow> {
+    Ok(AgentRow {
+        account: account(row)?,
+        owner_id: row.get(ACCOUNT_COLUMN_COUNT)?,
+        public: row.get(ACCOUNT_COLUMN_COUNT + 1)?,
+        bio: row.get(ACCOUNT_COLUMN_COUNT + 2)?,
+        last_active_at: row.get::<Option<i64>>(ACCOUNT_COLUMN_COUNT + 3)?.filter(|at| *at > 0),
+    })
+}
+
+/// An agent's token as a session (an agent has one at most, so joining
+/// sessions gives one row per agent): it never runs out, and its last use starts
+/// at zero so the first one is recorded at once.
+async fn insert_agent_session(conn: &Connection, account_id: &str, token_hash: &str, now: i64) -> Result<()> {
+    conn.execute(
+        "INSERT INTO sessions (token_hash, id, account_id, user_agent, created_at, last_active_at, expires_at)
+         VALUES (?1, ?2, ?3, 'Agent token', ?4, 0, ?5)",
+        (token_hash, new_id(), account_id, now, i64::MAX),
+    )
+    .await?;
+    Ok(())
 }
 
 async fn media_by_id(conn: &Connection, id: &str) -> Result<Option<MediaRow>> {

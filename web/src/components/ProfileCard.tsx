@@ -6,7 +6,8 @@ import { hue, UserAvatar } from "@/components/Icons";
 import { Markdown } from "@/components/Markdown";
 import { SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
-import { colorCss, displayName, shownStatus, toDate } from "@/lib/format";
+import { AppBadge } from "@/components/AppBadge";
+import { colorCss, displayName, isAgent, shownStatus, toDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const stagger = (n: number) => ({ ...SPRING, delay: 0.06 + n * 0.04 });
@@ -103,6 +104,7 @@ export function ProfileCard({
           <p className="flex min-w-0 items-center gap-1.5 text-xl font-extrabold">
             <Text className="truncate">{name}</Text>
             {owner && <CrownIcon aria-label="Owner" className="size-4 shrink-0 text-amber-400" />}
+            {isAgent(user) && <AppBadge agent />}
           </p>
           <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
             <span className="truncate">@{me ? <Private text={user.username} kind="name" /> : user.username}</span>

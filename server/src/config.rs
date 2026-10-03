@@ -37,6 +37,9 @@ pub struct Config {
     pub linked_issuer: String,
     /// FUWA_SERVER_CREATION: everyone (default) | admins | off.
     pub server_creation: pb::ServerCreation,
+    /// FUWA_AGENT_CREATION: who may make agents (bot accounts): everyone
+    /// (default) | admins | off.
+    pub agent_creation: pb::AgentCreation,
     /// FUWA_ADMIN_TOKEN: a bearer token with instance-admin rights, for a control
     /// plane or scripts. Unset means only admin accounts are admins.
     pub admin_token: Option<String>,
@@ -205,6 +208,15 @@ impl Config {
             }
         };
 
+        let agent_creation = match get("FUWA_AGENT_CREATION").as_deref().map(str::trim) {
+            None | Some("everyone") => pb::AgentCreation::Everyone,
+            Some("admins") => pb::AgentCreation::Admins,
+            Some("off") => pb::AgentCreation::Disabled,
+            Some(other) => {
+                return Err(format!("FUWA_AGENT_CREATION must be everyone, admins or off, got {other:?}"));
+            }
+        };
+
         let admin_token = get("FUWA_ADMIN_TOKEN").map(|token| token.trim().to_string());
         if let Some(token) = &admin_token
             && token.len() < 32
@@ -282,6 +294,7 @@ impl Config {
             linked_accounts,
             linked_issuer,
             server_creation,
+            agent_creation,
             admin_token,
             limits,
             telemetry: Telemetry {
@@ -410,6 +423,7 @@ mod tests {
         assert_eq!(config.linked_accounts, Accounts::Open);
         assert_eq!(config.linked_issuer, "https://api.waifu.dev");
         assert_eq!(config.server_creation, pb::ServerCreation::Everyone);
+        assert_eq!(config.agent_creation, pb::AgentCreation::Everyone);
         assert!(!config.limits.any());
         assert!(config.telemetry.enabled);
         assert!(config.encryption_key.is_none());

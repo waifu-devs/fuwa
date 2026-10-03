@@ -46,6 +46,8 @@ service DirectoryService {
   rpc DropPicture(DropPictureRequest) returns (DropPictureResponse);
   // How many servers an account owns, for the cap on that.
   rpc CountOwnedServers(CountOwnedServersRequest) returns (CountOwnedServersResponse);
+  // An agent by username, for adding it to a server.
+  rpc FindAgent(FindAgentRequest) returns (FindAgentResponse);
   // The server files the directory's data folder still holds from when the
   // instance ran as one process, sent to a starting shard: the first shard
   // to ask gets them all, and nothing goes to any other. Empty when there are
@@ -232,6 +234,17 @@ message CountOwnedServersRequest {
 
 message CountOwnedServersResponse {
   int64 count = 1;
+}
+
+message FindAgentRequest {
+  string username = 1;
+}
+
+message FindAgentResponse {
+  // Unset when there's no agent by that name, or it's turned off.
+  Account agent = 1;
+  string owner_id = 2;
+  bool public = 3;
 }
 
 message TakeServersRequest {

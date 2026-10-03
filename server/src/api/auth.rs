@@ -188,7 +188,11 @@ impl Api {
         Ok(pb::FinishLinkedSignInResponse { token, user: Some(account.user()), admin: account.admin, created })
     }
 
-    async fn apply_profile(&self, account: &Account, req: pb::UpdateProfileRequest) -> Result<(pb::User, pb::Profile)> {
+    pub(super) async fn apply_profile(
+        &self,
+        account: &Account,
+        req: pb::UpdateProfileRequest,
+    ) -> Result<(pb::User, pb::Profile)> {
         let status = match req.status.as_deref() {
             Some(status) => {
                 let status = text("status", status, 0, 128)?;

@@ -283,6 +283,8 @@ enum AuditAction {
   AUDIT_ACTION_WEBHOOK_CREATE = 32;
   AUDIT_ACTION_WEBHOOK_UPDATE = 33;
   AUDIT_ACTION_WEBHOOK_DELETE = 34;
+  // Someone added an agent: it's the target.
+  AUDIT_ACTION_AGENT_ADD = 35;
 }
 
 // One thing someone did with a moderator's or manager's permission.

@@ -94,6 +94,7 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.WEBHOOK_CREATE]: { label: "New webhooks", icon: WebhookIcon, tint: "bg-emerald-500/15 text-emerald-500" },
   [AuditAction.WEBHOOK_UPDATE]: { label: "Webhook changes", icon: WebhookIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.WEBHOOK_DELETE]: { label: "Deleted webhooks", icon: UnplugIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.AGENT_ADD]: { label: "Agents added", icon: BotIcon, tint: "bg-violet-500/15 text-violet-500" },
 };
 
 const FIELD: Record<string, string> = {
@@ -610,6 +611,8 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
     }
     case AuditAction.WEBHOOK_DELETE:
       return <>{actor} deleted the webhook <b>{change("name")?.before}</b></>;
+    case AuditAction.AGENT_ADD:
+      return <>{actor} added the agent {target}</>;
     default:
       return <>{actor} did something</>;
   }

@@ -67,6 +67,11 @@ async fn remove_member(
 /// it in Browse or an invite, a waifu.dev account if it asks for one, and an
 /// account old enough.
 pub(super) fn at_the_door(account: &Account, server: &pb::Server, code: &str, now: i64) -> Result<()> {
+    if account.kind == pb::AccountKind::Agent {
+        return Err(Error::FailedPrecondition(
+            "agents don't join by themselves; someone who manages the server adds them".into(),
+        ));
+    }
     if code.is_empty() && !server.discoverable {
         return Err(Error::NotFound("server"));
     }
@@ -133,6 +138,9 @@ impl ServerService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
+                if account.kind == pb::AccountKind::Agent {
+                    return Err(Error::denied("agents can't own servers"));
+                }
                 match self.app.settings().server_creation {
                     pb::ServerCreation::Disabled | pb::ServerCreation::Unspecified => {
                         return Err(Error::FailedPrecondition("this instance doesn't allow creating servers".into()));

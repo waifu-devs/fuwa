@@ -49,7 +49,8 @@ import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { Embeds } from "@/components/chat/Embeds";
-import { displayName, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
+import { AppBadge } from "@/components/AppBadge";
+import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
 import { comboLabel } from "@/lib/keybinds";
 import { pingsMe, useNotificationSettings } from "@/lib/notifications";
 import { hasIn } from "@/lib/permissions";
@@ -374,23 +375,8 @@ export function AuthorName({ user, member, app = false }: { user: User | undefin
     <span className="inline-flex min-w-0 items-center gap-1">
       <RoleName id={user?.id ?? ""} name={member?.nickname || displayName(user)} color={color} />
       {!!ownerId && user?.id === ownerId && <CrownIcon aria-label="Owner" className="size-3.5 shrink-0 text-amber-400" />}
-      {app && <AppBadge />}
+      {(app || isAgent(user)) && <AppBadge agent={!app} />}
     </span>
-  );
-}
-
-/** Marks what an app posted through a webhook, not a person. */
-export function AppBadge() {
-  return (
-    <motion.span
-      initial={{ scale: 0.6, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ type: "spring", stiffness: 600, damping: 18 }}
-      title="Posted by an app through a webhook"
-      className="shrink-0 rounded bg-primary/15 px-1 py-px text-[0.6rem] leading-none font-extrabold tracking-wide text-primary"
-    >
-      APP
-    </motion.span>
   );
 }
 

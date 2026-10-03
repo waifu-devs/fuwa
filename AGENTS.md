@@ -25,6 +25,16 @@
     can't sign in until it's turned back on. What belongs to a person but not to
     one server lives here; a server file keeps only a copy of what its members
     see (name, avatar, status) in its `users` table.
+  - Agents (`api/agents.rs`, `AgentService`) are accounts of kind
+    `ACCOUNT_KIND_AGENT` that a person makes (`accounts.owner_id`, `public`).
+    Their token is a session in `sessions` that never expires
+    (`expires_at = i64::MAX`, `last_active_at` 0 until first use); a new
+    token deletes the old sessions. An agent can't own servers, join or apply
+    by itself, use DMs or be an instance admin: someone with Manage Server
+    adds it (`AddAgent`, on the shard, which finds the agent through
+    `App::find_agent`, the cluster call `FindAgent`), and it skips rules
+    (never `pending`). Deleting a person deletes their agents
+    (`erase_account`). Who may make agents is the `agent_creation` setting.
   - `dms.rs`: direct messages (`dms.db`, on the directory): each device's
     public signature key and key packages (one-use, plus a last-resort one),
     each conversation's records in one order (MLS commits and messages, all

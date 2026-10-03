@@ -71,6 +71,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.DirectMessageService" => Target::Directory,
         "fuwa.v1.AdminService" if matches!(method, "SetServerLimits" | "ExportServer") => Target::Shard,
         "fuwa.v1.AdminService" => Target::Directory,
+        "fuwa.v1.AgentService" if method == "AddAgent" => Target::Shard,
+        "fuwa.v1.AgentService" => Target::Directory,
         "fuwa.v1.ServerService" if matches!(method, "CreateServer" | "ListServers" | "DiscoverServers") => {
             Target::Directory
         }

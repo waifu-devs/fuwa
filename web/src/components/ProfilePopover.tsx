@@ -10,7 +10,7 @@ import { useFuwa } from "@/fuwa/store";
 import { MemberRoles } from "@/components/MemberRoles";
 import { ModerateDialog, useModeration, type ModAction } from "@/components/ModerateDialog";
 import { ProfileCard } from "@/components/ProfileCard";
-import { timedOutUntil } from "@/lib/format";
+import { isAgent, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { toast } from "@/lib/ui";
 import { useMediaQuery } from "@/lib/use-media-query";
@@ -50,10 +50,10 @@ export function ProfilePopover({
   const owner = useFuwa((s) => !!member && s.instances[instanceKey]?.servers.find((x) => x.id === member.serverId)?.ownerId === user?.id);
   const [moderating, setModerating] = useState<ModAction | null>(null);
   const now = useNow();
-  // Anyone signed in can write to someone else privately, where the instance and this browser can.
+  // Anyone signed in can write to someone else privately, where the instance and this browser can. Agents have no DMs.
   const canMessage = useFuwa((s) => {
     const status = s.instances[instanceKey]?.dms.status;
-    return !me && (status === "ready" || status === "starting");
+    return !me && !isAgent(user) && (status === "ready" || status === "starting");
   });
   const [opening, setOpening] = useState(false);
   const navigate = useNavigate();

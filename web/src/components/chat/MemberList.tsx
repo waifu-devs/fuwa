@@ -11,7 +11,8 @@ import { Count } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { InlineMarkdown } from "@/components/Markdown";
 import { ProfilePopover } from "@/components/ProfilePopover";
-import { displayName, formatStamp, memberName, shownStatus, timedOutUntil } from "@/lib/format";
+import { AppBadge } from "@/components/AppBadge";
+import { displayName, formatStamp, isAgent, memberName, shownStatus, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { colorOf, hoistedRole } from "@/lib/permissions";
 
@@ -79,6 +80,7 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
                         <span className="flex items-center gap-1">
                           <RoleName id={m.user?.id ?? ""} name={memberName(m)} color={colorOf(roles, m)} className="text-sm" />
                           {m.user?.id === ownerId && <CrownIcon aria-label="Owner" className="size-3 shrink-0 text-amber-400" />}
+                          {isAgent(m.user) && <AppBadge agent />}
                           <TimedOutMark member={m} now={now} />
                         </span>
                         <MemberSubtitle member={m} me={m.user?.id === inst?.me?.id} now={now} />

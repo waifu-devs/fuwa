@@ -180,6 +180,7 @@ struct Clients {
     media: pb::media_service_client::MediaServiceClient<Channel>,
     invites: pb::invite_service_client::InviteServiceClient<Channel>,
     webhooks: pb::webhook_service_client::WebhookServiceClient<Channel>,
+    agents: pb::agent_service_client::AgentServiceClient<Channel>,
 }
 
 async fn clients(part: &Part) -> Clients {
@@ -195,7 +196,8 @@ async fn clients(part: &Part) -> Clients {
         node: pb::node_service_client::NodeServiceClient::new(channel.clone()),
         media: pb::media_service_client::MediaServiceClient::new(channel.clone()),
         invites: pb::invite_service_client::InviteServiceClient::new(channel.clone()),
-        webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel),
+        webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel.clone()),
+        agents: pb::agent_service_client::AgentServiceClient::new(channel),
     }
 }
 
@@ -542,6 +544,42 @@ async fn a_split_instance_works_like_one() {
     assert_eq!(posted["content"], "green");
     let wrong = format!("{}/webhooks/{}/{}/{}", cluster.gateway.url(), on_b.id, hook.id, "x".repeat(64));
     assert_eq!(http.post(&wrong).body("{}").send().await.unwrap().status(), 404);
+
+    // Agents are made on the directory and added on the shard holding the
+    // server, which asks the directory for them.
+    let request = pb::CreateAgentRequest { username: "relay".into(), display_name: "Relay".into() };
+    let made = c.agents.create_agent(authed(&juan, request)).await.unwrap().into_inner();
+    let reset = pb::UpdateSettingsRequest {
+        settings: None,
+        update_mask: None,
+        reset_mask: Some(prost_types::FieldMask { paths: vec!["default_limits.members".into()] }),
+    };
+    c.admin.update_settings(authed(&juan, reset)).await.unwrap();
+    let add = pb::AddAgentRequest { server_id: on_b.id.clone(), username: "relay".into() };
+    // The shard hears about the reset shortly.
+    let mut member = None;
+    for _ in 0..50 {
+        match c.agents.add_agent(authed(&juan, add.clone())).await {
+            Ok(added) => {
+                member = added.into_inner().member;
+                break;
+            }
+            Err(status) if status.code() == Code::ResourceExhausted => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(status) => panic!("{status:?}"),
+        }
+    }
+    assert_eq!(member.unwrap().user.unwrap().kind, pb::AccountKind::Agent as i32);
+    let said = pb::SendMessageRequest {
+        server_id: on_b.id.clone(),
+        channel_id: channel.id.clone(),
+        content: "relayed".into(),
+        ..Default::default()
+    };
+    c.messages.send_message(authed(&made.token, said)).await.unwrap();
+    let mine = c.agents.list_agents(authed(&juan, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents;
+    assert_eq!(mine[0].servers, 1);
 
     // Deleting a server: the stream says so, and the directory forgets it.
     c.servers.delete_server(authed(&juan, pb::DeleteServerRequest { server_id: on_a.id.clone() })).await.unwrap();

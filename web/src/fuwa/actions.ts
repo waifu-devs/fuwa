@@ -1096,6 +1096,32 @@ export const setWelcomeScreen = (key: string, serverId: string, welcomeScreen: W
     return saved;
   });
 
+// ───────────────────────── Agents ─────────────────────────
+
+export const listAgents = (key: string) => call((signal) => api(key).agents.listAgents({}, { signal })).pipe(Effect.map((r) => r.agents));
+
+/** Makes an agent: its token comes back this once. */
+export const createAgent = (key: string, username: string, displayName: string) =>
+  call((signal) => api(key).agents.createAgent({ username, displayName }, { signal })).pipe(Effect.map((r) => ({ agent: r.agent!, token: r.token })));
+
+export const updateAgent = (
+  key: string,
+  agentId: string,
+  change: { displayName?: string; avatarUrl?: string; bio?: string; public?: boolean },
+) => call((signal) => api(key).agents.updateAgent({ agentId, ...change }, { signal })).pipe(Effect.map((r) => r.agent!));
+
+export const resetAgentToken = (key: string, agentId: string) =>
+  call((signal) => api(key).agents.resetAgentToken({ agentId }, { signal })).pipe(Effect.map((r) => r.token));
+
+export const deleteAgent = (key: string, agentId: string) =>
+  call((signal) => api(key).agents.deleteAgent({ agentId }, { signal })).pipe(Effect.as(true));
+
+/** Adds an agent, by username, to a server the caller manages. */
+export const addAgent = (key: string, serverId: string, username: string) =>
+  call((signal) => api(key).agents.addAgent({ serverId, username: username.trim().replace(/^@/, "") }, { signal })).pipe(
+    Effect.map((r) => r.member!),
+  );
+
 // ───────────────────────── Webhooks ─────────────────────────
 
 export const listWebhooks = (key: string, serverId: string) => call((signal) => api(key).webhooks.listWebhooks({ serverId }, { signal }));
