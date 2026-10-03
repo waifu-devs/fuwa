@@ -360,7 +360,7 @@ Railway has no public UDP. There the media part goes behind a TCP proxy
 on the proxy's random port. A TURN server can't help there: it relays to
 the media part over UDP. For UDP and port 443, which strict networks still
 allow, the media part runs on a host of its own and the shards reach it
-over HTTPS with the cluster key ([self-hosting.md](self-hosting.md#the-media-part-on-a-host-of-its-own),
+over HTTPS with a media-only key ([self-hosting.md](self-hosting.md#the-media-part-on-a-host-of-its-own),
 `deploy/media-host`). With a
 volume-less media service, deploys overlap, so the restart above is the only
 interruption.

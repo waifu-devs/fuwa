@@ -391,7 +391,7 @@ async fn media_link(config: &Config, shutdown: &CancellationToken) -> crate::voi
         if config.media_urls.is_empty() {
             return MediaLink::Off("no media part is set up (FUWA_MEDIA_URL)".into());
         }
-        return match config.cluster.key_value().and_then(|key| MediaLink::remote(&config.media_urls, key)) {
+        return match config.cluster.media_key_value().and_then(|key| MediaLink::remote(&config.media_urls, key)) {
             Ok(link) => link,
             Err(err) => MediaLink::Off(err.to_string()),
         };

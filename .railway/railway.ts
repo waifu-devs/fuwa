@@ -207,7 +207,10 @@ export default defineRailway((ctx) => {
         }),
       ];
   // Where the directory (calls in direct messages) and shards (voice channels) open calls.
-  const mediaUrl = { FUWA_MEDIA_URL: MEDIA_HOST_URL || internalUrl("fuwa-media") };
+  // A media host gets its own key (shared variable FUWA_MEDIA_KEY), never the cluster key.
+  const mediaUrl = MEDIA_HOST_URL
+    ? { FUWA_MEDIA_URL: MEDIA_HOST_URL, FUWA_MEDIA_KEY: ctx.shared.FUWA_MEDIA_KEY }
+    : { FUWA_MEDIA_URL: internalUrl("fuwa-media") };
 
   const directory = service("fuwa-directory", {
     source: fuwaImage(),

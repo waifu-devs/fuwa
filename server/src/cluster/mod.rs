@@ -77,6 +77,11 @@ pub struct ClusterConfig {
     /// FUWA_CLUSTER_KEY: the shared secret on every internal call. Required
     /// unless the role is all.
     pub key: Option<String>,
+    /// FUWA_MEDIA_KEY: a separate secret for calls to the media parts only, so
+    /// a media part on a host of its own never holds the cluster key. On the
+    /// directory and shards it's what they send to media parts; on a media
+    /// part it's the only key it accepts (in place of FUWA_CLUSTER_KEY).
+    pub media_key: Option<String>,
     /// FUWA_DIRECTORY_URL: where gateways and shards reach the directory.
     pub directory_url: Option<String>,
     /// FUWA_SHARD_ID: a shard's name. Defaults to one made up on first start
@@ -100,6 +105,7 @@ impl std::fmt::Debug for ClusterConfig {
         f.debug_struct("ClusterConfig")
             .field("role", &self.role)
             .field("key", &crate::config::Secret(&self.key))
+            .field("media_key", &crate::config::Secret(&self.media_key))
             .field("directory_url", &self.directory_url)
             .field("shard_id", &self.shard_id)
             .field("internal_url", &self.internal_url)
@@ -115,6 +121,7 @@ impl ClusterConfig {
         Self {
             role: Role::All,
             key: None,
+            media_key: None,
             directory_url: None,
             shard_id: None,
             internal_url: None,
@@ -146,16 +153,25 @@ impl ClusterConfig {
         if role == Role::All {
             return Ok(Self { region, region_name, ..Self::single() });
         }
-        let key = get("FUWA_CLUSTER_KEY").map(|key| key.trim().to_string());
-        if key.as_ref().is_none_or(|key| key.len() < 32) {
-            return Err(format!(
-                "FUWA_CLUSTER_KEY must be set to at least 32 characters (the same on every part, e.g. from \
-                 `openssl rand -hex 32`) when FUWA_ROLE is {}",
-                role.as_str()
-            ));
+        let media_key = get("FUWA_MEDIA_KEY").map(|key| key.trim().to_string()).filter(|key| !key.is_empty());
+        if let Some(key) = &media_key {
+            check_key("FUWA_MEDIA_KEY", key)?;
         }
-        if key.as_ref().is_some_and(|key| AsciiMetadataValue::try_from(key.as_str()).is_err()) {
-            return Err("FUWA_CLUSTER_KEY must be plain ASCII letters, digits and punctuation".into());
+        // A media part with its own key holds nothing else: it never needs the
+        // cluster key, and accepts only the media key.
+        let key = match (role, &media_key) {
+            (Role::Media, Some(media_key)) => Some(media_key.clone()),
+            _ => get("FUWA_CLUSTER_KEY").map(|key| key.trim().to_string()),
+        };
+        match &key {
+            Some(key) => check_key("FUWA_CLUSTER_KEY", key)?,
+            None => {
+                return Err(format!(
+                    "FUWA_CLUSTER_KEY must be set to at least 32 characters (the same on every part, e.g. from \
+                     `openssl rand -hex 32`) when FUWA_ROLE is {}",
+                    role.as_str()
+                ));
+            }
         }
         let url = |name: &str| -> std::result::Result<Option<String>, String> {
             match get(name).map(|url| url.trim().trim_end_matches('/').to_string()) {
@@ -182,7 +198,17 @@ impl ClusterConfig {
         if let Some(id) = &shard_id {
             check_shard_id(id).map_err(|err| format!("FUWA_SHARD_ID {err}"))?;
         }
-        Ok(Self { role, key, directory_url, shard_id, internal_url, ride_out: RIDE_OUT, region, region_name })
+        Ok(Self {
+            role,
+            key,
+            media_key,
+            directory_url,
+            shard_id,
+            internal_url,
+            ride_out: RIDE_OUT,
+            region,
+            region_name,
+        })
     }
 
     /// This process is one part of several.
@@ -195,6 +221,25 @@ impl ClusterConfig {
         let key = self.key.as_deref().ok_or_else(|| Error::internal("no cluster key"))?;
         AsciiMetadataValue::try_from(key).map_err(|_| Error::internal("the cluster key isn't a valid header"))
     }
+
+    /// The key for calls to media parts: FUWA_MEDIA_KEY, or the cluster key.
+    pub fn media_key_value(&self) -> Result<AsciiMetadataValue> {
+        match &self.media_key {
+            Some(key) => AsciiMetadataValue::try_from(key.as_str())
+                .map_err(|_| Error::internal("the media key isn't a valid header")),
+            None => self.key_value(),
+        }
+    }
+}
+
+fn check_key(name: &str, key: &str) -> std::result::Result<(), String> {
+    if key.len() < 32 {
+        return Err(format!("{name} must be at least 32 characters (e.g. from `openssl rand -hex 32`)"));
+    }
+    if AsciiMetadataValue::try_from(key).is_err() {
+        return Err(format!("{name} must be plain ASCII letters, digits and punctuation"));
+    }
+    Ok(())
 }
 
 fn check_shard_id(id: &str) -> std::result::Result<(), String> {
@@ -526,6 +571,26 @@ mod tests {
         assert_eq!(parsed.directory_url.as_deref(), Some("http://directory:8080"));
         assert!(config(&[shard.as_slice(), &[("FUWA_SHARD_ID", "Shard One")]].concat()).is_err());
         assert!(config(&[("FUWA_ROLE", "everything")]).unwrap_err().contains("FUWA_ROLE"));
+    }
+
+    #[test]
+    fn a_media_part_can_hold_only_the_media_key() {
+        const MEDIA: &str = "media-key-0123456789abcdef0123456789abcdef";
+        // On its own host it needs no cluster key, and accepts only its own.
+        let media = config(&[("FUWA_ROLE", "media"), ("FUWA_MEDIA_KEY", MEDIA)]).unwrap();
+        assert_eq!(media.key.as_deref(), Some(MEDIA));
+        let both = config(&[("FUWA_ROLE", "media"), ("FUWA_MEDIA_KEY", MEDIA), ("FUWA_CLUSTER_KEY", KEY)]).unwrap();
+        assert_eq!(both.key.as_deref(), Some(MEDIA));
+        assert!(config(&[("FUWA_ROLE", "media")]).unwrap_err().contains("FUWA_CLUSTER_KEY"));
+        assert!(config(&[("FUWA_ROLE", "media"), ("FUWA_MEDIA_KEY", "short")]).unwrap_err().contains("FUWA_MEDIA_KEY"));
+        // The directory and shards send it to media parts, and the cluster key everywhere else.
+        let directory = config(&[("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", KEY), ("FUWA_MEDIA_KEY", MEDIA)]);
+        let directory = directory.unwrap();
+        assert_eq!(directory.media_key_value().unwrap().to_str().unwrap(), MEDIA);
+        assert_eq!(directory.key_value().unwrap().to_str().unwrap(), KEY);
+        let plain = config(&[("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", KEY)]).unwrap();
+        assert_eq!(plain.media_key_value().unwrap().to_str().unwrap(), KEY);
+        assert!(!format!("{directory:?}").contains(MEDIA));
     }
 
     #[test]
