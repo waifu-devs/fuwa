@@ -154,6 +154,9 @@ pub struct Prefs {
     pub keybinds: std::collections::BTreeMap<String, Option<String>>,
     /// Extra shortcuts for any action, on top of their own.
     pub custom_keybinds: Vec<keybinds::CustomKeybind>,
+    /// Sends anonymous counts of errors, slow paths and feature use to your
+    /// own instance, while its telemetry is on (see `reports.rs`).
+    pub share_reports: bool,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -183,6 +186,7 @@ impl Default for Prefs {
             welcomed: Default::default(),
             keybinds: Default::default(),
             custom_keybinds: Vec::new(),
+            share_reports: true,
         }
     }
 }
@@ -294,6 +298,10 @@ mod tests {
         std::fs::write(home.path().join("config/settings.json"), r#"{"theme":"dark","shiny":true}"#).unwrap();
         let old = load_prefs(&paths);
         assert_eq!((old.theme.as_str(), old.follow_system), ("yoru", false));
+        // A file from before reports shares them, as a new one does; turning them off sticks.
+        assert!(old.share_reports);
+        store_prefs(&paths, &Prefs { share_reports: false, ..Prefs::default() });
+        assert!(!load_prefs(&paths).share_reports);
         // A made theme that's gone falls back to a built-in one.
         std::fs::write(home.path().join("config/settings.json"), r#"{"theme":"custom-gone1","follow_system":false}"#)
             .unwrap();

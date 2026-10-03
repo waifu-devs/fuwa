@@ -234,6 +234,7 @@ impl Core {
         let token = res.upload_url.rsplit('/').next().unwrap_or_default();
         let target = format!("{}/media/upload/{token}", api.url.trim_end_matches('/'));
         put(&target, content_type, bytes).await?;
+        crate::core::reports::used("upload");
         Ok(res.media.map(|m| m.url).unwrap_or_default())
     }
 

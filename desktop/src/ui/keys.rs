@@ -324,6 +324,7 @@ impl FuwaApp {
     // ───────────────────────── The quick switcher ─────────────────────────
 
     pub(crate) fn open_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::core::reports::used("quick_switcher.open");
         self.sheet_open = false;
         let query = cx.new(|cx| InputState::new(window, cx).placeholder("Where to?"));
         let subscription = cx.subscribe_in(&query, window, |this: &mut Self, _, event: &InputEvent, _, cx| {

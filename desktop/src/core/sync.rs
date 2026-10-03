@@ -14,6 +14,7 @@ use tonic::Code;
 use crate::core::api::{Api, Problem};
 use crate::core::dms::{self, DmEngine, DmStatus};
 use crate::core::notifications;
+use crate::core::reports;
 use crate::core::store::{self, Connection, Outcome};
 use crate::core::{Core, Notice};
 use crate::pb;
@@ -266,6 +267,8 @@ async fn stream_once(
     state: &Arc<Mutex<Follow>>,
     backoff: &mut Backoff,
 ) -> Result<(), Problem> {
+    // Catching up: from asking to follow until the stream says it's ready.
+    let mut catching_up = Some(std::time::Instant::now());
     let mut stream = api.events().subscribe(request).await.map_err(Problem::from)?.into_inner();
     loop {
         let next = tokio::time::timeout(SILENCE, stream.message())
@@ -275,6 +278,9 @@ async fn stream_once(
         let Some(res) = next else { return Ok(()) };
         if let Some(ready) = res.ready {
             *backoff = Backoff::new();
+            if let Some(began) = catching_up.take() {
+                reports::timing("catch_up", began.elapsed());
+            }
             for head in ready.servers {
                 let known = {
                     let mut s = state.lock();

@@ -1,6 +1,7 @@
 //! The app's settings, full screen with a side menu, as on the web. These
 //! are this computer's, for every instance: how fuwa looks and moves,
-//! notifications, streamer mode, and the accounts signed in here.
+//! notifications, streamer mode, the accounts signed in here, and whether
+//! anonymous reports help fix bugs.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -39,6 +40,7 @@ pub(crate) enum Page {
     Streamer,
     Accounts,
     Keyboard,
+    Privacy,
     About,
 }
 
@@ -46,7 +48,7 @@ pub(crate) enum Page {
 const ACCOUNT_PAGES: [(Page, &str, &str); 2] =
     [(Page::Profile, "user-round-pen", "Profile"), (Page::Security, "key-round", "Password and devices")];
 
-const PAGES: [(Page, &str, &str); 8] = [
+const PAGES: [(Page, &str, &str); 9] = [
     (Page::Appearance, "palette", "Appearance"),
     (Page::Background, "image", "Background"),
     (Page::Motion, "sparkles", "Motion"),
@@ -54,6 +56,7 @@ const PAGES: [(Page, &str, &str); 8] = [
     (Page::Streamer, "eye-off", "Streamer mode"),
     (Page::Accounts, "user", "Accounts"),
     (Page::Keyboard, "keyboard", "Keyboard"),
+    (Page::Privacy, "shield-check", "Privacy"),
     (Page::About, "info", "About"),
 ];
 
@@ -63,6 +66,8 @@ pub struct SettingsView {
     pub(crate) keys: crate::ui::settings_keys::Keys,
     pub(crate) account: AccountForm,
     pub(crate) look: Look,
+    /// The reports' counts last shown on the Privacy page.
+    pub(crate) pending: crate::core::reports::Pending,
 }
 
 impl EventEmitter<SettingsEvent> for SettingsView {}
@@ -70,7 +75,29 @@ impl EventEmitter<SettingsEvent> for SettingsView {}
 impl SettingsView {
     pub fn new(core: Arc<Core>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let look = Look::new(&core.prefs(), window, cx);
-        Self { core, page: Page::Appearance, keys: Default::default(), account: AccountForm::new(window, cx), look }
+        // The Privacy page's counts change without the store changing: look again now and then.
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_millis(600)).await;
+                let looked = this.update(cx, |this, cx| {
+                    if this.page == Page::Privacy && crate::core::reports::pending() != this.pending {
+                        cx.notify();
+                    }
+                });
+                if looked.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+        Self {
+            core,
+            page: Page::Appearance,
+            keys: Default::default(),
+            account: AccountForm::new(window, cx),
+            look,
+            pending: Default::default(),
+        }
     }
 
     pub(crate) fn set(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Prefs)) {
@@ -320,6 +347,11 @@ impl SettingsView {
                 "Keyboard".into(),
                 "Shortcuts that work everywhere in the app. Click one to change it.".into(),
                 self.keyboard_page(prefs, p, cx),
+            ),
+            Page::Privacy => (
+                "Privacy".into(),
+                "What this app tells anyone, and only if you let it.".into(),
+                self.privacy_page(prefs, p, window, cx),
             ),
             Page::About => {
                 let body = div()

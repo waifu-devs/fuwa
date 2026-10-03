@@ -273,7 +273,13 @@
     (a server's settings, invites, bans and audit log), `calls.rs` (who's in
     voice and which conversations have a call, and the direct-message call
     frame encryption, byte for byte the web app's; the call itself comes
-    with the app's sound). It runs on its own
+    with the app's sound), `reports.rs` (the anonymous reports: panics, also
+    written to `crashes.txt` in the config folder so a crash is sent next
+    time, failed and timed `rpc!` calls, startup, catching up, slow frames
+    and a few feature counts, sent every 10 minutes through
+    `NodeService.SendReport` to one signed-in instance whose telemetry is
+    on, kept for next time when that fails; off with the "Help fix bugs"
+    setting, which counts nothing). It runs on its own
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
@@ -290,6 +296,8 @@
     notifications (clicks come back through a channel), `settings_account.rs`
     the profile and security pages, `settings_look.rs` the Appearance
     (themes, light and dark picks, theme files) and Background pages,
+    `settings_privacy.rs` the Privacy page ("Help fix bugs", what a report
+    holds, and what's waiting to go out),
     `backdrop.rs` what's drawn behind the app (picture, blurred once off the
     main thread when asked, dimming, a texture made here as a PNG or SVG
     tile and repeated), `effects.rs` the moving effects (the web's shaders

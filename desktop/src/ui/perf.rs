@@ -3,12 +3,19 @@
 //! many frames it drew, how long building them took (render, layout and
 //! paint, on the CPU) and how much memory it holds. Off, it costs a check
 //! of a flag per frame. At debug level it logs every frame's time too.
+//!
+//! The anonymous reports (`core::reports`) take two things from here,
+//! whatever the variable says: how long the first frame took to come after
+//! start (`startup`) and frames that took over 50 ms to build (`frame.long`).
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use gpui_kit::{AnyElement, IntoElement as _, ParentElement as _, Styled as _, canvas, div};
 use parking_lot::Mutex;
+
+use crate::core::reports;
 
 const EVERY: Duration = Duration::from_secs(5);
 
@@ -31,8 +38,14 @@ fn state() -> Option<&'static Mutex<State>> {
         .as_ref()
 }
 
+/// When the app started, for the reports' `startup`.
+static STARTED: OnceLock<Instant> = OnceLock::new();
+/// Whether the first frame has been drawn yet.
+static FIRST_FRAME: AtomicBool = AtomicBool::new(true);
+
 /// Called as the app starts, so startup counts from here.
 pub fn start() {
+    STARTED.get_or_init(Instant::now);
     let _ = state();
 }
 
@@ -60,9 +73,15 @@ impl Drop for Timed {
     }
 }
 
-/// Called at the top of the window's render.
+/// Called at the top of the window's render: when it began, if anything
+/// measures frames.
 pub fn frame() -> Option<Instant> {
-    state().map(|_| Instant::now())
+    if state().is_none() && !reports::enabled() {
+        // Startup is only counted from the first frame itself.
+        FIRST_FRAME.store(false, Ordering::Relaxed);
+        return None;
+    }
+    Some(Instant::now())
 }
 
 /// Wraps the window's whole tree: an empty canvas painted after everything
@@ -77,8 +96,17 @@ pub fn measured(root: AnyElement, began: Option<Instant>) -> AnyElement {
 }
 
 fn done(began: Instant) {
+    let took = began.elapsed();
+    if took > reports::LONG_FRAME {
+        reports::timing("frame.long", took);
+    }
+    if FIRST_FRAME.swap(false, Ordering::Relaxed)
+        && let Some(started) = STARTED.get()
+    {
+        reports::timing("startup", started.elapsed());
+    }
     let Some(state) = state() else { return };
-    let ms = began.elapsed().as_secs_f64() * 1000.0;
+    let ms = took.as_secs_f64() * 1000.0;
     let mut s = state.lock();
     if s.first {
         s.first = false;
