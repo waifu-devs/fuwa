@@ -47,6 +47,8 @@ pub struct ConnectView {
     sign_up: bool,
     busy: bool,
     error: Option<String>,
+    /// Who the browser is signing you in with, while it is.
+    browser: String,
     task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -83,6 +85,7 @@ impl ConnectView {
             sign_up: false,
             busy: false,
             error: None,
+            browser: String::new(),
             task: None,
             _subscriptions: subs,
         }
@@ -199,17 +202,16 @@ impl ConnectView {
         );
     }
 
-    fn linked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Signs in through the browser: with waifu.dev (`sso` false) or the
+    /// instance's identity provider, named `who` while it waits.
+    fn in_browser(&mut self, sso: bool, who: String, window: &mut Window, cx: &mut Context<Self>) {
         let (core, url) = (self.core.clone(), self.url.clone());
         self.step = Step::Browser;
+        self.browser = who;
+        let open_page = crate::ui::open_in_browser;
         self.start(
             async move {
-                core.linked_sign_in(&url, |page| {
-                    if let Err(err) = open::that_detached(page) {
-                        tracing::warn!("couldn't open the browser: {err}");
-                    }
-                })
-                .await
+                if sso { core.sso_sign_in(&url, open_page).await } else { core.linked_sign_in(&url, open_page).await }
             },
             window,
             cx,
@@ -284,26 +286,44 @@ impl Render for ConnectView {
                             )),
                     );
                 }
+                let sso = auth.sso_sign_in || auth.sso_sign_up;
+                if sso {
+                    let name =
+                        if auth.sso_name.is_empty() { "your organization".to_owned() } else { auth.sso_name.clone() };
+                    let who = name.clone();
+                    body = body.child(
+                        primary_button("sso", format!("Continue with {name}"), &p)
+                            .w_full()
+                            .child(icon("building").size(px(16.0)))
+                            .on_click(
+                                cx.listener(move |this, _, window, cx| this.in_browser(true, who.clone(), window, cx)),
+                            ),
+                    );
+                }
                 if auth.linked_sign_in {
+                    let who = issuer.clone();
                     body = body.child(
                         primary_button("linked", format!("Continue with {issuer}"), &p)
                             .w_full()
+                            .when(sso, |el| el.bg(p.secondary).text_color(p.foreground).shadow(Vec::new()))
                             .child(icon("external-link").size(px(16.0)))
-                            .on_click(cx.listener(|this, _, window, cx| this.linked(window, cx))),
+                            .on_click(
+                                cx.listener(move |this, _, window, cx| this.in_browser(false, who.clone(), window, cx)),
+                            ),
                     );
-                    if local {
-                        body = body.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .text_xs()
-                                .text_color(p.muted_foreground)
-                                .child(div().flex_1().h(px(1.0)).bg(p.border))
-                                .child("OR A LOCAL ACCOUNT")
-                                .child(div().flex_1().h(px(1.0)).bg(p.border)),
-                        );
-                    }
+                }
+                if (auth.linked_sign_in || sso) && local {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .text_xs()
+                            .text_color(p.muted_foreground)
+                            .child(div().flex_1().h(px(1.0)).bg(p.border))
+                            .child("OR A LOCAL ACCOUNT")
+                            .child(div().flex_1().h(px(1.0)).bg(p.border)),
+                    );
                 }
                 if local {
                     if self.sign_up {
@@ -323,7 +343,7 @@ impl Render for ConnectView {
                                 &p,
                             )
                             .w_full()
-                            .when(auth.linked_sign_in, |el| {
+                            .when(auth.linked_sign_in || sso, |el| {
                                 el.bg(p.secondary).text_color(p.foreground).shadow(Vec::new())
                             })
                             .when(busy, |el| el.opacity(0.7))
@@ -352,7 +372,7 @@ impl Render for ConnectView {
                         );
                     }
                 }
-                if !local && !auth.linked_sign_in {
+                if !local && !auth.linked_sign_in && !sso {
                     body = body.child(
                         div()
                             .text_color(p.muted_foreground)
@@ -385,7 +405,7 @@ impl Render for ConnectView {
             Step::Browser => (
                 "browser",
                 "Finish in your browser".into(),
-                format!("We opened {issuer} in your browser. Come back here when it says you're done."),
+                format!("We opened {} in your browser. Come back here when it says you're done.", self.browser),
                 div()
                     .flex()
                     .flex_col()

@@ -100,3 +100,11 @@ pub fn run() -> anyhow::Result<()> {
     drop(lock);
     Ok(())
 }
+
+/// Opens a sign-in page in the system browser, where people's passwords,
+/// passkeys and password managers already are.
+pub(crate) fn open_in_browser(page: &str) {
+    if let Err(err) = open::that_detached(page) {
+        tracing::warn!("couldn't open the browser: {err}");
+    }
+}

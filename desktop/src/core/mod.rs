@@ -17,6 +17,7 @@ pub mod notifications;
 pub mod permissions;
 pub mod secrets;
 pub mod server_admin;
+pub mod sso;
 pub mod store;
 mod sync;
 pub mod vault;
@@ -620,14 +621,29 @@ impl Core {
 
     /// Joins a server by an invite code or link (`https://…/invite/CODE`, or the code alone).
     pub async fn join_by_invite(&self, key: &str, invite: &str) -> Result<pb::Server, Problem> {
+        let (code, server) = self.open_invite(key, invite).await?;
+        self.join_with_invite(key, &server.id, &code).await
+    }
+
+    /// The server an invite (a code or a link) leads to, and its code.
+    pub async fn open_invite(&self, key: &str, invite: &str) -> Result<(String, pb::Server), Problem> {
         let api = self.api(key).ok_or_else(|| Problem::new(tonic::Code::NotFound, "That instance isn't here."))?;
         let code = invite.trim().trim_end_matches('/').rsplit('/').next().unwrap_or_default().to_owned();
         if code.is_empty() {
             return Err(Problem::new(tonic::Code::InvalidArgument, "Paste an invite link or code."));
         }
         let found = rpc!(api.invites(), get_invite(pb::GetInviteRequest { code: code.clone() })).await?;
-        let server_id = found.server.map(|s| s.id).unwrap_or_default();
-        let joined = rpc!(api.servers(), join_server(pb::JoinServerRequest { server_id, invite_code: code })).await?;
+        Ok((code, found.server.unwrap_or_default()))
+    }
+
+    /// Joins a server with an invite's code (after its single sign-on, if it has one).
+    pub async fn join_with_invite(&self, key: &str, server_id: &str, code: &str) -> Result<pb::Server, Problem> {
+        let api = self.api(key).ok_or_else(|| Problem::new(tonic::Code::NotFound, "That instance isn't here."))?;
+        let joined = rpc!(
+            api.servers(),
+            join_server(pb::JoinServerRequest { server_id: server_id.into(), invite_code: code.into() })
+        )
+        .await?;
         let server = joined.server.unwrap_or_default();
         self.shared.instance(key, |i| store::add_server(i, server.clone()));
         self.follow(key, &server.id, true);

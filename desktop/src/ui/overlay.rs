@@ -16,6 +16,44 @@ use crate::ui::text::safety_rows;
 use crate::ui::theme::{Palette, alpha};
 use crate::ui::widgets::{card, error_line, icon, icon_button, labeled, pal, primary_button, soft_button};
 
+/// What a server or instance calls its identity provider, for "Continue with …".
+pub fn provider_name(name: &str) -> &str {
+    if name.trim().is_empty() { "your organization" } else { name }
+}
+
+/// Names the site a sign-in sends people to before they go: it sees their
+/// IP address, which fuwa itself never hands out.
+pub fn host_notice(host: &str, p: &Palette) -> AnyElement {
+    if host.is_empty() {
+        return div().into_any_element();
+    }
+    div()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .px(px(12.0))
+        .py(px(10.0))
+        .rounded(px(12.0))
+        .bg(alpha(p.primary, 0.08))
+        .text_sm()
+        .text_color(p.muted_foreground)
+        .child(icon("globe").size(px(16.0)).flex_none().text_color(p.primary))
+        .child(div().flex_1().min_w_0().child(host_sentence(host, p)))
+        .into_any_element()
+}
+
+/// "Signs you in at <host>, which sees your IP address.", the host in bold.
+pub fn host_sentence(host: &str, p: &Palette) -> gpui_kit::StyledText {
+    let lead = "Signs you in at ";
+    let text = format!("{lead}{host}, which sees your IP address.");
+    let bold = gpui_kit::HighlightStyle {
+        font_weight: Some(FontWeight::BOLD),
+        color: Some(p.foreground.into()),
+        ..Default::default()
+    };
+    gpui_kit::StyledText::new(text).with_highlights([(lead.len()..lead.len() + host.len(), bold)])
+}
+
 /// A dim layer over the window, fading in, that swallows clicks.
 pub fn scrim(id: impl Into<ElementId>, p: &Palette) -> Stateful<Div> {
     let id = id.into();
@@ -42,6 +80,11 @@ impl FuwaApp {
         }
         let busy = self.dialog_busy;
         let field = || Input::new(&self.dialog_input).large();
+        let sso_label = match &dialog {
+            Dialog::SsoJoin { .. } if busy => "Waiting for your browser…".to_owned(),
+            Dialog::SsoJoin { provider, .. } => format!("Continue with {}", provider_name(provider)),
+            _ => String::new(),
+        };
         let (glyph, title, body, content, action): (&str, String, String, AnyElement, Option<&str>) = match &dialog {
             Dialog::CreateServer { .. } => (
                 "sparkles",
@@ -56,6 +99,16 @@ impl FuwaApp {
                 "Paste the invite link someone sent you, or just its code.".into(),
                 labeled("Invite", field(), &p).into_any_element(),
                 Some(if busy { "Joining…" } else { "Join" }),
+            ),
+            Dialog::SsoJoin { name, provider, host, .. } => (
+                "lock-keyhole",
+                format!("Sign in to join {name}"),
+                format!(
+                    "{name} asks its members to sign in through {}. Your browser opens to do it.",
+                    provider_name(provider)
+                ),
+                host_notice(host, &p),
+                Some(sso_label.as_str()),
             ),
             Dialog::LeaveServer { key, server } => {
                 let name = self
@@ -344,6 +397,7 @@ impl FuwaApp {
             Dialog::Profile { .. } => "profile",
             Dialog::Welcome { .. } => "welcome",
             Dialog::Moderate { .. } => "moderate",
+            Dialog::SsoJoin { .. } => "sso",
         };
         Some(
             motion::fade_in(

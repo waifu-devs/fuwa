@@ -235,7 +235,11 @@
     device per install and account, through `fuwa-e2ee`'s `client` feature,
     kept in 0600 files under the app's data folder; signing out wipes it),
     `linked.rs` (waifu.dev sign-in through the browser and a loopback page;
-    the sign-in page must be https, or http on this computer),
+    the sign-in page must be https, or http on this computer), `sso.rs`
+    (single sign-on the same way: an instance's provider on the sign-in
+    screen, a server's to join it or to see its channels again; `locked` is
+    the web's `ssoLocked`, and the UI names the provider's host, which sees
+    the person's IP address, before opening it),
     `config.rs` (saved instances and the app's settings; no tokens),
     `secrets.rs` (session tokens and the vault key in the system keychain,
     named per data folder, with a 0600 file only where there's no keychain;
@@ -253,7 +257,8 @@
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
-    `overlay.rs` draw the parts; `members.rs` is the member list, a view of
+    `overlay.rs` draw the parts (a server you're locked out of shows a
+    padlock and "Continue with <provider>" where its channels were); `members.rs` is the member list, a view of
     its own (cached, so the window's animations don't redraw it) that builds
     only the rows in sight; `compose.rs` is the @ list and editing in
     place (and the keys they take first), `mentions.rs` finds mentions and
