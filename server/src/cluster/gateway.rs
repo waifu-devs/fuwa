@@ -171,6 +171,8 @@ pub struct Gateway {
     /// Whether it has heard from the directory yet: until then it isn't
     /// healthy, so a deploy keeps the gateways before it running meanwhile.
     followed: AtomicBool,
+    /// The directory's last answer to /healthz/parts.
+    parts: super::status::Cached,
     shutdown: CancellationToken,
 }
 
@@ -219,6 +221,7 @@ impl Gateway {
             placements: RwLock::new(HashMap::new()),
             shards: RwLock::new(HashMap::new()),
             followed: AtomicBool::new(false),
+            parts: Default::default(),
             shutdown: CancellationToken::new(),
         });
         tokio::spawn(follow_settings(gateway.clone()));
@@ -254,6 +257,7 @@ impl Gateway {
         let server_pictures = self.clone();
         let sso_instance = self.clone();
         let health = self.clone();
+        let parts = self.clone();
         let http = Router::new()
             .route(
                 "/healthz",
@@ -264,6 +268,17 @@ impl Gateway {
                             true => (StatusCode::OK, "ok"),
                             false => (StatusCode::SERVICE_UNAVAILABLE, "waiting for the directory"),
                         }
+                    }
+                }),
+            )
+            .route(
+                // Which parts behind the gateways are up, as the directory sees them (status pages).
+                "/healthz/parts",
+                get(move || {
+                    let gateway = parts.clone();
+                    async move {
+                        let key = gateway.key.to_str().unwrap_or_default();
+                        super::status::from_directory(&gateway.parts, &gateway.directory_url, key).await
                     }
                 }),
             )
