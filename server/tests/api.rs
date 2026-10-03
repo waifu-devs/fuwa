@@ -5170,3 +5170,35 @@ async fn timed_out_members_only_read() {
 
     instance.stop().await;
 }
+
+#[tokio::test]
+async fn servers_are_never_handed_to_agents() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let server = create_server(&mut c, &owner, "Mine", false).await;
+    let made = c
+        .agents
+        .create_agent(authed(
+            &owner,
+            pb::CreateAgentRequest { username: "helper".into(), display_name: "Helper".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let agent_id = made.agent.unwrap().user.unwrap().id;
+    c.agents
+        .add_agent(authed(&owner, pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() }))
+        .await
+        .unwrap();
+    let handed = c
+        .servers
+        .transfer_ownership(authed(
+            &owner,
+            pb::TransferOwnershipRequest { server_id: server.id.clone(), user_id: agent_id },
+        ))
+        .await;
+    assert_eq!(handed.unwrap_err().code(), Code::FailedPrecondition);
+    instance.stop().await;
+}
