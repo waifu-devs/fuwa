@@ -107,7 +107,7 @@ impl Api {
                 "signing in with waifu.dev needs this instance's public URL to be https; an admin can change it".into(),
             )
         })?;
-        let return_origin = linked::return_origin(&req.return_origin)?;
+        let return_origin = linked::return_origin(&req.return_origin, &settings.public_url, &settings.allowed_origins)?;
         let secret_hash = req.secret_hash.trim().to_ascii_lowercase();
         if secret_hash.len() != 64 || !secret_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(Error::invalid("secret_hash must be a SHA-256 in hex"));

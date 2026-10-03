@@ -55,7 +55,10 @@
     and password changes don't apply to them. The web app's side is
     `web/src/lib/linked.ts`, the "Continue with waifu.dev" button in
     `Connect.tsx` and the callback page (`pages/LinkedCallback.tsx`), which also
-    hands sign-ins started by a fuwa app on another address back to it.
+    hands sign-ins started by a fuwa app on another address back to it. Only
+    apps the instance trusts get sign-ins back (`linked::return_origin`): its
+    own address, loopback (desktop apps), and origins listed by name in
+    `allowed_origins`.
   - `servers.rs`: community servers, one Turso file each under `servers/`: the
     ones this process keeps (all of them, or a shard's share). Every change goes through
     `ServerDb::write`, which appends events to the server's log in the same

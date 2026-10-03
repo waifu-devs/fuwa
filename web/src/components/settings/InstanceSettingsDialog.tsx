@@ -650,7 +650,7 @@ function Origins({
     <Setting
       id="origins"
       title="Sites that can connect"
-      hint="Web pages on other sites, such as the fuwa app on another instance, that may use this one from a browser."
+      hint="Web pages on other sites, such as the fuwa app on another instance, that may use this one from a browser. Signing in with waifu.dev from another site only works for sites listed here by name."
       defaultLabel={defaultLabel === "*" ? "any site" : defaultLabel}
       delay={0.12}
       {...reset}

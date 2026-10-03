@@ -3666,8 +3666,23 @@ async fn linked_accounts_sign_in_with_waifu_dev() {
     };
     assert_eq!(c.auth.start_linked_sign_in(bad_origin).await.unwrap_err().code(), Code::InvalidArgument);
     let bad_hash =
-        pb::StartLinkedSignInRequest { return_origin: "https://app.example".into(), secret_hash: "x".into() };
+        pb::StartLinkedSignInRequest { return_origin: "http://localhost:5173".into(), secret_hash: "x".into() };
     assert_eq!(c.auth.start_linked_sign_in(bad_hash).await.unwrap_err().code(), Code::InvalidArgument);
+
+    // Sign-ins only go back to apps the instance trusts: its own, ones on this
+    // device, and ones its admins list by name (any origin, "*", isn't enough).
+    let elsewhere = || pb::StartLinkedSignInRequest {
+        return_origin: "https://app.example".into(),
+        secret_hash: fuwa_server::linked::secret_hash("s"),
+    };
+    assert_eq!(c.auth.start_linked_sign_in(elsewhere()).await.unwrap_err().code(), Code::PermissionDenied);
+    let settings = c.admin.get_settings(authed(ADMIN_TOKEN, pb::GetSettingsRequest {})).await.unwrap().into_inner();
+    let mut listed = settings.config.unwrap().settings.unwrap();
+    listed.allowed_origins = vec!["https://app.example".into(), "http://localhost:5173".into()];
+    c.admin.update_settings(authed(ADMIN_TOKEN, settings_update(listed, &["allowed_origins"], &[]))).await.unwrap();
+    assert!(c.auth.start_linked_sign_in(elsewhere()).await.is_ok());
+    let reset = pb::InstanceSettings::default();
+    c.admin.update_settings(authed(ADMIN_TOKEN, settings_update(reset, &[], &["allowed_origins"]))).await.unwrap();
 
     // A sign-in goes to the issuer, as this instance, and comes back here.
     let started = start_linked(&mut c, "the app's secret").await.unwrap();
