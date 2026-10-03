@@ -84,7 +84,8 @@ import { SettingsScreen } from "@/components/settings/SettingsScreen";
 const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boolean> = {
   overview: (a) => has(a, Permission.MANAGE_SERVER),
   access: (a) => has(a, Permission.MANAGE_SERVER),
-  sso: (a) => has(a, Permission.MANAGE_SERVER),
+  // Who signs members in decides who gets in, so only the owner picks it.
+  sso: (a) => a.owner,
   "join-form": (a) => has(a, Permission.MANAGE_SERVER),
   welcome: (a) => has(a, Permission.MANAGE_SERVER),
   invites: (a) =>

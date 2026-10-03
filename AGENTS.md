@@ -72,7 +72,10 @@
     fetches). The instance's flow is `AuthService`'s
     Start/Get/FinishSsoSignIn (SSO accounts, kind `SSO`, keyed by the
     provider and subject); a server's is `api/sso.rs` (`SsoService`),
-    whose sign-ins live in the server file's `sso_identities`. A required
+    whose sign-ins live in the server file's `sso_identities`. Only the
+    server's owner may set it up, at https; `Provider::trust_key` (key,
+    client ID, sign-in URL, certificate fingerprints) decides when it's a
+    new provider, while `key` alone names instance SSO accounts. A required
     provider gates `let_in` and, through `permissions::Access::lock_out`,
     hides every channel from members whose sign-in is missing or older than
     `sso_recheck_days` (`app::spawn_sso_rechecks` tells their streams when one

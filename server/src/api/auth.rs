@@ -235,12 +235,12 @@ impl Api {
             return Ok(pb::FinishSsoSignInResponse { identity: Some(identity.to_pb(now)), ..Default::default() });
         }
         let settings = self.app.settings();
-        if !settings.sso_sign_in() || settings.sso_provider.key() != sign_in.provider_key {
+        if !settings.sso_sign_in() || settings.sso_provider.trust_key() != sign_in.provider_key {
             return Err(Error::FailedPrecondition(
                 "single sign-on changed while you were signing in; start again".into(),
             ));
         }
-        let issuer = sign_in.provider_key.as_str();
+        let issuer = &settings.sso_provider.key();
         let (account, created) = match node.linked_account(issuer, &identity.subject).await? {
             Some(account) => (account, false),
             None => {
@@ -263,7 +263,12 @@ impl Api {
                     .chars()
                     .take(64)
                     .collect();
-                let avatar_url = identity.picture.as_deref().and_then(|picture| url("avatar_url", picture).ok());
+                // Through the instance, so nobody's client fetches from the provider.
+                let avatar_url = identity
+                    .picture
+                    .as_deref()
+                    .and_then(|picture| url("avatar_url", picture).ok())
+                    .map(|picture| self.app.picture_link(&picture));
                 node.create_linked_account(&NewLinkedAccount {
                     kind: pb::AccountKind::Sso,
                     issuer,

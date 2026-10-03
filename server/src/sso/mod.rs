@@ -41,8 +41,9 @@ pub enum Protocol {
     Saml,
 }
 
-/// An identity provider, as stored: the client secret included.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+/// An identity provider, as stored: the client secret included (but never in
+/// its `Debug`).
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Provider {
     pub protocol: Protocol,
@@ -55,6 +56,23 @@ pub struct Provider {
     pub saml_sso_url: String,
     pub saml_certificates: String,
     pub email_domains: Vec<String>,
+}
+
+impl std::fmt::Debug for Provider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Provider")
+            .field("protocol", &self.protocol)
+            .field("name", &self.name)
+            .field("oidc_issuer", &self.oidc_issuer)
+            .field("oidc_client_id", &self.oidc_client_id)
+            .field("oidc_client_secret", &if self.oidc_client_secret.is_empty() { "" } else { "<redacted>" })
+            .field("oidc_extra_scopes", &self.oidc_extra_scopes)
+            .field("saml_entity_id", &self.saml_entity_id)
+            .field("saml_sso_url", &self.saml_sso_url)
+            .field("saml_certificates", &self.fingerprints())
+            .field("email_domains", &self.email_domains)
+            .finish()
+    }
 }
 
 /// An https URL, or http on this machine while testing.
@@ -80,6 +98,45 @@ impl Provider {
             Protocol::Oidc => format!("oidc {}", self.oidc_issuer),
             Protocol::Saml => format!("saml {}", self.saml_entity_id),
         }
+    }
+
+    /// Everything that decides who the provider vouches for: the key, plus
+    /// the client ID, the SAML sign-in URL and the signing certificates. A
+    /// change to any of them is a new provider: earlier sign-ins through it
+    /// don't count, and sign-ins already under way stop.
+    pub fn trust_key(&self) -> String {
+        match self.protocol {
+            Protocol::None => String::new(),
+            Protocol::Oidc => format!("{} client {}", self.key(), self.oidc_client_id),
+            Protocol::Saml => {
+                format!("{} at {} certs {}", self.key(), self.saml_sso_url, self.fingerprints().join(","))
+            }
+        }
+    }
+
+    /// The SHA-256 fingerprints of the SAML signing certificates, sorted.
+    pub fn fingerprints(&self) -> Vec<String> {
+        let mut found: Vec<String> = saml::certificates(&self.saml_certificates)
+            .unwrap_or_default()
+            .iter()
+            .map(|der| {
+                use sha2::Digest;
+                sha2::Sha256::digest(der).iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":")
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// The host people's browsers are sent to when they sign in: the SAML
+    /// sign-in URL's, or the OIDC issuer's.
+    pub fn host(&self) -> String {
+        let url = match self.protocol {
+            Protocol::None => return String::new(),
+            Protocol::Oidc => &self.oidc_issuer,
+            Protocol::Saml => &self.saml_sso_url,
+        };
+        reqwest::Url::parse(url).ok().and_then(|url| url.host_str().map(str::to_string)).unwrap_or_default()
     }
 
     /// A provider from a request, checked. An empty client secret keeps
@@ -354,7 +411,7 @@ pub async fn start(
         return_origin,
         account_id: account_id.to_string(),
         test,
-        provider_key: provider.key(),
+        provider_key: provider.trust_key(),
         expires_at: now_ms() + TTL_MS,
         ..Default::default()
     };
@@ -397,7 +454,7 @@ pub async fn identify(
     sign_in: &SignIn,
     answer: Answer,
 ) -> Result<Identity> {
-    if provider.key() != sign_in.provider_key {
+    if provider.trust_key() != sign_in.provider_key {
         return Err(Error::FailedPrecondition("single sign-on changed while you were signing in; start again".into()));
     }
     provider.ready()?;
@@ -554,6 +611,18 @@ mod tests {
         assert!(Provider::from_pb(&oidc("https://login.acme.com?x", "x"), &first).is_err());
         assert_eq!(Provider::parse(&first.stored()), first);
         assert!(!Provider::parse("").is_set());
+    }
+
+    #[test]
+    fn a_new_client_or_certificate_is_a_new_provider_and_never_debugs_its_secret() {
+        let first = Provider::from_pb(&oidc("https://login.acme.com", "s3cret"), &Provider::default()).unwrap();
+        let mut other_client = first.clone();
+        other_client.oidc_client_id = "another".into();
+        assert_eq!(first.key(), other_client.key(), "the same accounts");
+        assert_ne!(first.trust_key(), other_client.trust_key(), "but not the same trust");
+        assert_eq!(first.host(), "login.acme.com");
+        let shown = format!("{first:?}");
+        assert!(!shown.contains("s3cret") && shown.contains("<redacted>"), "{shown}");
     }
 
     #[test]

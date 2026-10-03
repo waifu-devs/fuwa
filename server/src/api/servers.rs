@@ -423,7 +423,7 @@ impl ServerService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let sdb = self.membership(&account, &request.get_ref().server_id).await?.sdb;
+                let Seat { sdb, access, .. } = self.membership(&account, &request.get_ref().server_id).await?;
                 let conn = sdb.read()?;
                 let mut members = query_all(
                     &conn,
@@ -441,6 +441,10 @@ impl ServerService for Api {
                     let id = m.user.as_ref().map(|u| u.id.as_str()).unwrap_or_default();
                     std::cmp::Reverse(rules.access(id, &m.role_ids).rank)
                 });
+                let manager = access.has(Permission::ManageServer);
+                for member in &mut members {
+                    store::scrub_sso(member, &account.id, manager);
+                }
                 Ok(pb::ListMembersResponse { members })
             }
             .await,

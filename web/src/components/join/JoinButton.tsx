@@ -116,7 +116,18 @@ export function JoinButton({
         testId="sso-join"
       />
     );
-    note = `${server.name} lets in people who sign in with ${name}.`;
+    note = (
+      <>
+        {server.name} lets in people who sign in with {name}
+        {server.ssoHost ? (
+          <>
+            {" "}
+            at <b className="text-foreground">{server.ssoHost}</b>
+          </>
+        ) : null}
+        . That sign-in page sees your IP address, like any site you visit.
+      </>
+    );
   } else if (kind === "waiting") {
     button = (
       <span className={cn("flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500/15 px-4 text-sm font-bold text-amber-600 dark:text-amber-400", tall)}>

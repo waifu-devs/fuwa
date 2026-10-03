@@ -66,6 +66,7 @@ struct Clients {
     servers: pb::server_service_client::ServerServiceClient<Channel>,
     channels: pb::channel_service_client::ChannelServiceClient<Channel>,
     sso: pb::sso_service_client::SsoServiceClient<Channel>,
+    roles: pb::role_service_client::RoleServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -76,7 +77,8 @@ async fn clients(instance: &Instance) -> Clients {
         node: pb::node_service_client::NodeServiceClient::new(channel.clone()),
         servers: pb::server_service_client::ServerServiceClient::new(channel.clone()),
         channels: pb::channel_service_client::ChannelServiceClient::new(channel.clone()),
-        sso: pb::sso_service_client::SsoServiceClient::new(channel),
+        sso: pb::sso_service_client::SsoServiceClient::new(channel.clone()),
+        roles: pb::role_service_client::RoleServiceClient::new(channel),
     }
 }
 
@@ -516,7 +518,7 @@ async fn servers_require_their_own_saml_sign_in_to_join_and_stay() {
     join(&mut c, &bea, &id).await.unwrap();
     assert!(visible_channels(&mut c, &bea, &id).await > 0);
 
-    // Only managers see or change it.
+    // Only the owner sees or changes it, not even an Admin.
     let get = |id: &str| pb::GetServerSsoRequest { server_id: id.into() };
     assert_eq!(c.sso.get_server_sso(authed(&bea, get(&id))).await.unwrap_err().code(), Code::PermissionDenied);
     let update = |provider: Option<pb::IdentityProvider>, required: Option<bool>| pb::UpdateServerSsoRequest {
@@ -526,6 +528,15 @@ async fn servers_require_their_own_saml_sign_in_to_join_and_stay() {
         required,
         recheck_days: None,
     };
+    let roles = c.roles.list_roles(authed(&owner, pb::ListRolesRequest { server_id: id.clone() })).await.unwrap();
+    let admin_role = roles.into_inner().roles.into_iter().find(|r| r.name == "Admin").unwrap();
+    let bea_id = c.auth.get_me(authed(&bea, pb::GetMeRequest {})).await.unwrap().into_inner().user.unwrap().id;
+    let give = pb::AddMemberRoleRequest { server_id: id.clone(), user_id: bea_id.clone(), role_id: admin_role.id };
+    c.roles.add_member_role(authed(&owner, give)).await.unwrap();
+    let by_admin = c.sso.update_server_sso(authed(&bea, update(Some(saml_provider()), None))).await.unwrap_err();
+    assert_eq!(by_admin.code(), Code::PermissionDenied);
+    assert!(by_admin.message().contains("owner"), "{by_admin:?}");
+    assert_eq!(c.sso.get_server_sso(authed(&bea, get(&id))).await.unwrap_err().code(), Code::PermissionDenied);
     let sso = c
         .sso
         .update_server_sso(authed(&owner, update(Some(saml_provider()), None)))
@@ -563,6 +574,7 @@ async fn servers_require_their_own_saml_sign_in_to_join_and_stay() {
     };
     assert!(server.sso_required);
     assert_eq!(server.sso_name, "Acme SAML");
+    assert_eq!(server.sso_host, "idp.acme.com", "apps name the site that sees your address");
     assert!(visible_channels(&mut c, &owner, &id).await > 0, "the owner is never shut out");
     assert_eq!(visible_channels(&mut c, &bea, &id).await, 0, "members who haven't signed in see nothing");
 
@@ -617,9 +629,37 @@ async fn servers_require_their_own_saml_sign_in_to_join_and_stay() {
     let back = landed(&post_saml(&instance, &format!("{base}/saml"), &wrong, &relay).await);
     assert!(back["error"].contains("refused"), "{back:?}");
 
+    // When someone signed in is theirs and the managers' business alone.
+    let members_seen_by = |token: &str| authed(token, pb::ListMembersRequest { server_id: id.clone() });
+    let seen = c.servers.list_members(members_seen_by(&ana)).await.unwrap().into_inner().members;
+    let signed_in = |members: &[pb::Member], who: &str| {
+        members.iter().find(|m| m.user.as_ref().unwrap().username == who).unwrap().sso_signed_in_at.is_some()
+    };
+    assert!(signed_in(&seen, "ana"), "your own");
+    assert!(!signed_in(&seen, "bea"), "not someone else's");
+    let seen = c.servers.list_members(members_seen_by(&owner)).await.unwrap().into_inner().members;
+    assert!(signed_in(&seen, "bea"), "managers see it");
+
     // Managers see how many members have signed in.
     let got = c.sso.get_server_sso(authed(&owner, get(&id))).await.unwrap().into_inner();
     assert_eq!(got.sso.unwrap().signed_in_members, 2);
+
+    // A new signing certificate is a new provider too, and the log says which.
+    // (Requiring it again first, to see that it stops.)
+    c.sso.update_server_sso(authed(&owner, update(None, Some(true)))).await.unwrap();
+    let mut rotated = saml_provider();
+    rotated.saml.as_mut().unwrap().sso_url = "https://idp.acme.com/sso2".into();
+    let sso =
+        c.sso.update_server_sso(authed(&owner, update(Some(rotated), None))).await.unwrap().into_inner().sso.unwrap();
+    assert!(!sso.required);
+    assert_eq!(sso.signed_in_members, 0);
+    c.sso.update_server_sso(authed(&owner, update(Some(saml_provider()), None))).await.unwrap();
+
+    // Only https for a server's provider.
+    let mut plain = saml_provider();
+    plain.saml.as_mut().unwrap().sso_url = "http://localhost:9/sso".into();
+    let plain = c.sso.update_server_sso(authed(&owner, update(Some(plain), None))).await.unwrap_err();
+    assert_eq!(plain.code(), Code::InvalidArgument);
 
     // Switching providers forgets every sign-in and stops requiring it.
     let mut other = saml_provider();

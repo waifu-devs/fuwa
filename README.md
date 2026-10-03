@@ -186,14 +186,18 @@ until someone sets it up, with the same settings form for both:
   the default). People get a "Continue with <name>" button, and an account
   here the first time. **Test sign-in** checks the saved provider without
   signing anyone in.
-- **One community server**: its managers (Manage Server) set up a provider
-  under the server's settings, Single sign-on. Once it's required, people sign
+- **One community server**: its owner (only the owner, since the provider
+  decides who gets in) sets up a provider, at an https address, under the
+  server's settings, Single sign-on. Once it's required, people sign
   in through it to join (or apply), and again every 7, 30 or 90 days (or never)
   to keep seeing the server. Members whose sign-in is missing or ran out stay
   members but see no channels until they sign in; the owner and agents never
-  need to. A manager signs in through it themselves before requiring it, so
-  nobody locks themselves out, and changing which provider it is forgets every
-  sign-in and stops requiring it.
+  need to. Changing which provider it is (its issuer or entity ID, client ID,
+  sign-in URL or signing certificates) forgets every sign-in and stops
+  requiring it, and the audit log records each of those, certificates by
+  SHA-256 fingerprint. Join buttons and the locked screen name the provider's
+  host, since its sign-in page sees the address of whoever signs in. Who has
+  signed in, and when, is shown only to that member and to managers.
 
 Both can list email domains: only people whose verified email is on one of
 them get in. The settings page shows what to tell the provider (the OIDC

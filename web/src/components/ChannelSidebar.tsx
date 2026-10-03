@@ -19,6 +19,7 @@ import {
   SettingsIcon,
   UserPlusIcon,
   Volume2Icon,
+  LockKeyholeIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState, type Ref } from "react";
@@ -33,6 +34,7 @@ import { ServerSettingsDialog, useServerSettingsTabs } from "@/components/dialog
 import { RulesDialog } from "@/components/join/Rules";
 import { WelcomeGate } from "@/components/join/Welcome";
 import { useLayout } from "@/components/Shell";
+import { useSsoLocked } from "@/components/join/SsoGate";
 import { Count, SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { UserPanel } from "@/components/UserPanel";
@@ -138,6 +140,9 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   const [welcoming, setWelcoming] = useState(false);
   // People waiting to be let in, for whoever can let them in.
   const reviews = !!server?.applications && has(access, Permission.KICK_MEMBERS);
+  // Locked out until they sign in through the server's provider: the way back in, where channels would be.
+  const ssoLocked = useSsoLocked(instanceKey, serverId);
+  const { compact, setNavOpen } = useLayout();
   const waiting = inst?.applications[serverId]?.length ?? 0;
   useEffect(() => {
     if (reviews) run(listApplications(instanceKey, serverId)).catch(() => {});
@@ -256,6 +261,29 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
               <span className="min-w-0 flex-1 truncate">
                 <Count value={waiting} /> {waiting === 1 ? "person wants" : "people want"} to join
               </span>
+              <ChevronRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
+            </motion.button>
+          )}
+        </AnimatePresence>
+        <AnimatePresence initial={false}>
+          {server && ssoLocked && (
+            <motion.button
+              type="button"
+              data-testid="sso-sidebar-locked"
+              onClick={() => {
+                navigate({ to: "/$instance/$server", params: { instance: instanceKey, server: serverId } });
+                if (compact) setNavOpen(false);
+              }}
+              initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+              animate={{ opacity: 1, height: "auto", marginBottom: 12 }}
+              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+              transition={SPRING}
+              className="group flex w-full items-center gap-2 overflow-hidden rounded-xl bg-primary/10 px-2.5 py-2 text-left text-sm font-bold text-primary transition-colors hover:bg-primary/15"
+            >
+              <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
+                <LockKeyholeIcon className="size-4 transition-transform group-hover:-rotate-12" />
+              </span>
+              <span className="min-w-0 flex-1 truncate">Sign in with {server.ssoName || "your organization"}</span>
               <ChevronRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
             </motion.button>
           )}

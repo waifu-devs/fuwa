@@ -207,6 +207,11 @@ pub fn identify(posted: &str, expect: &Expect) -> Result<Identity> {
         return Err(refused("it isn't confirmed for this sign-in, this address and now"));
     }
 
+    // A transient NameID is new on every sign-in, so it can't say who
+    // someone is from one time to the next.
+    if name_id.attribute("Format") == Some("urn:oasis:names:tc:SAML:2.0:nameid-format:transient") {
+        return Err(refused("its NameID is transient; set the provider to send a persistent one or an email"));
+    }
     let subject_id = text_of(name_id);
     if subject_id.is_empty() || subject_id.len() > 255 {
         return Err(refused("its NameID is empty or too long"));

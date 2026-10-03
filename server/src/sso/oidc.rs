@@ -26,6 +26,53 @@ const SKEW_SECS: i64 = 3 * 60;
 /// What was fetched, by address, and when.
 type Cache<T> = Mutex<HashMap<String, (i64, T)>>;
 
+/// The most read from a provider for one answer: discovery documents, key
+/// sets and token responses are a few kilobytes.
+const MAX_BODY: usize = 1024 * 1024;
+/// How long a fetch that failed is remembered, so asking again and again
+/// doesn't make the instance fetch again and again.
+const FAILURE_TTL_MS: i64 = 60 * 1000;
+
+/// Reads a response body, refusing one bigger than [`MAX_BODY`].
+async fn read_capped(mut response: reqwest::Response) -> Result<Vec<u8>> {
+    let too_big = || Error::FailedPrecondition("the identity provider sent far more than an answer needs".into());
+    if response.content_length().is_some_and(|n| n > MAX_BODY as u64) {
+        return Err(too_big());
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(unreachable)? {
+        if body.len() + chunk.len() > MAX_BODY {
+            return Err(too_big());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+/// Fetches that failed lately, by address, with what to tell people.
+fn failures() -> &'static Cache<String> {
+    static FAILED: OnceLock<Cache<String>> = OnceLock::new();
+    FAILED.get_or_init(Default::default)
+}
+
+fn failed_lately(url: &str, now: i64) -> Option<Error> {
+    let failed = failures().lock().unwrap_or_else(|p| p.into_inner());
+    failed
+        .get(url)
+        .filter(|(at, _)| now - at < FAILURE_TTL_MS)
+        .map(|(_, message)| Error::FailedPrecondition(message.clone()))
+}
+
+fn remember_failure(url: &str, now: i64, err: &Error) {
+    let message = match err {
+        Error::FailedPrecondition(m) | Error::Unavailable(m) | Error::PermissionDenied(m) => m.clone(),
+        _ => "the identity provider can't be reached right now; try again soon".into(),
+    };
+    let mut failed = failures().lock().unwrap_or_else(|p| p.into_inner());
+    failed.retain(|_, (at, _)| now - *at < FAILURE_TTL_MS);
+    failed.insert(url.to_string(), (now, message));
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct Discovery {
     issuer: String,
@@ -45,7 +92,10 @@ pub(super) fn client(public_only: bool) -> &'static reqwest::Client {
         let mut builder = reqwest::Client::builder()
             .user_agent(format!("fuwa/{}", crate::VERSION))
             .timeout(Duration::from_secs(15))
-            .redirect(reqwest::redirect::Policy::none());
+            .redirect(reqwest::redirect::Policy::none())
+            // A proxy from the environment would look names up itself,
+            // around the PublicOnly resolver.
+            .no_proxy();
         if public_only {
             builder = builder.dns_resolver(Arc::new(PublicOnly));
         }
@@ -98,6 +148,15 @@ async fn discover(issuer: &str, public_only: bool) -> Result<Discovery> {
     {
         return Ok(found.clone());
     }
+    if let Some(err) = failed_lately(issuer, now) {
+        return Err(err);
+    }
+    let found = fetch_discovery(issuer, public_only).await.inspect_err(|err| remember_failure(issuer, now, err))?;
+    cache.lock().unwrap_or_else(|p| p.into_inner()).insert(issuer.to_string(), (now, found.clone()));
+    Ok(found)
+}
+
+async fn fetch_discovery(issuer: &str, public_only: bool) -> Result<Discovery> {
     let url = fetchable(&format!("{issuer}/.well-known/openid-configuration"), public_only)?;
     let response = client(public_only).get(url).send().await.map_err(unreachable)?;
     if !response.status().is_success() {
@@ -106,7 +165,8 @@ async fn discover(issuer: &str, public_only: bool) -> Result<Discovery> {
             response.status()
         )));
     }
-    let found: Discovery = response.json().await.map_err(|_| {
+    let body = read_capped(response).await?;
+    let found: Discovery = serde_json::from_slice(&body).map_err(|_| {
         Error::FailedPrecondition(format!("{issuer}'s OpenID configuration couldn't be read; check the issuer"))
     })?;
     if found.issuer.trim_end_matches('/') != issuer {
@@ -118,7 +178,6 @@ async fn discover(issuer: &str, public_only: bool) -> Result<Discovery> {
     for endpoint in [&found.authorization_endpoint, &found.token_endpoint, &found.jwks_uri] {
         fetchable(endpoint, public_only)?;
     }
-    cache.lock().unwrap_or_else(|p| p.into_inner()).insert(issuer.to_string(), (now, found.clone()));
     Ok(found)
 }
 
@@ -157,14 +216,18 @@ async fn keys(jwks_uri: &str, public_only: bool, fresh: bool) -> Result<Vec<Jwk>
     {
         return Ok(found.clone());
     }
-    let url = fetchable(jwks_uri, public_only)?;
-    let response = client(public_only).get(url).send().await.map_err(unreachable)?;
-    let found: Jwks = response
-        .error_for_status()
-        .map_err(unreachable)?
-        .json()
-        .await
-        .map_err(|_| Error::FailedPrecondition("the provider's signing keys couldn't be read".into()))?;
+    if let Some(err) = failed_lately(jwks_uri, now) {
+        return Err(err);
+    }
+    let fetched: Result<Jwks> = async {
+        let url = fetchable(jwks_uri, public_only)?;
+        let response = client(public_only).get(url).send().await.map_err(unreachable)?;
+        let body = read_capped(response.error_for_status().map_err(unreachable)?).await?;
+        serde_json::from_slice(&body)
+            .map_err(|_| Error::FailedPrecondition("the provider's signing keys couldn't be read".into()))
+    }
+    .await;
+    let found = fetched.inspect_err(|err| remember_failure(jwks_uri, now, err))?;
     cache.lock().unwrap_or_else(|p| p.into_inner()).insert(jwks_uri.to_string(), (now, found.keys.clone()));
     Ok(found.keys)
 }
@@ -351,13 +414,15 @@ pub async fn identify(
     }
     let response = request.form(&form).send().await.map_err(unreachable)?;
     if !response.status().is_success() {
-        let answer = response.text().await.unwrap_or_default();
+        let answer = read_capped(response).await.unwrap_or_default();
+        let answer = String::from_utf8_lossy(&answer);
         tracing::info!(answer = %answer.chars().take(300).collect::<String>(), "an identity provider refused a code");
         return Err(Error::FailedPrecondition(
             "the identity provider didn't take this sign-in; check the client ID and secret, then start again".into(),
         ));
     }
-    let tokens: Tokens = response.json().await.map_err(|_| refused("it sent no ID token"))?;
+    let body = read_capped(response).await?;
+    let tokens: Tokens = serde_json::from_slice(&body).map_err(|_| refused("it sent no ID token"))?;
     let payload = verified_claims(&tokens.id_token, &found.jwks_uri, public_only).await?;
     let claims: Claims = serde_json::from_slice(&payload).map_err(|_| refused("its ID token is missing claims"))?;
 
@@ -386,8 +451,8 @@ pub async fn identify(
     let email_verified = match claims.email_verified {
         Some(serde_json::Value::Bool(verified)) => verified,
         Some(serde_json::Value::String(text)) => text == "true",
-        // Providers that don't say only hand out addresses they manage.
-        _ => true,
+        // Not said is not verified: email domains admit only verified addresses.
+        _ => false,
     };
     Ok(Identity {
         subject: claims.sub,

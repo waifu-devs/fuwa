@@ -367,6 +367,18 @@ impl ServerDb {
             conn.execute(&format!("VACUUM INTO '{path}'"), ()).await?;
         }
         db::to_sqlite(dest, None).await?;
+        {
+            // Secrets stay on the instance: the provider's client secret and
+            // sign-ins under way.
+            let (_db, conn) = db::open_plain(dest).await?;
+            let mut sso = load_sso(&conn).await?.provider;
+            if !sso.oidc_client_secret.is_empty() {
+                sso.oidc_client_secret.clear();
+                conn.execute("UPDATE server SET sso = ?1", [sso.stored()]).await?;
+            }
+            conn.execute("DELETE FROM sso_sign_ins", ()).await?;
+            db::pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").await?;
+        }
         for suffix in ["-wal", "-log"] {
             let mut side = dest.as_os_str().to_owned();
             side.push(suffix);
@@ -520,6 +532,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 has_welcome_screen: from_json::<StoredWelcome>(&r.get::<String>(15)?, "welcome screen").enabled,
                 sso_required: r.get(17)?,
                 sso_name: if r.get::<bool>(17)? { crate::sso::Provider::parse(&r.get::<String>(16)?).name } else { String::new() },
+                sso_host: if r.get::<bool>(17)? { crate::sso::Provider::parse(&r.get::<String>(16)?).host() } else { String::new() },
                 sso_recheck_days: r.get(18)?,
             })
         },
@@ -559,6 +572,15 @@ pub async fn load_sso(conn: &Connection) -> Result<ServerSso> {
 }
 
 /// When someone last signed in through the server's single sign-on.
+/// Leaves out when a member last signed in through the server's provider,
+/// unless `viewer` is that member or a manager: it's nobody else's business
+/// when they're online with their organization.
+pub fn scrub_sso(member: &mut pb::Member, viewer: &str, manager: bool) {
+    if !manager && member.user.as_ref().is_none_or(|u| u.id != viewer) {
+        member.sso_signed_in_at = None;
+    }
+}
+
 pub async fn sso_signed_in_at(conn: &Connection, user_id: &str) -> Result<Option<i64>> {
     query_one(conn, "SELECT signed_in_at FROM sso_identities WHERE user_id = ?1", [user_id], |r| r.get::<i64>(0)).await
 }

@@ -136,6 +136,14 @@ pub async fn to_sqlite(path: &Path, key: Option<&EncryptionKey>) -> Result<()> {
     Ok(())
 }
 
+/// Opens a plain (unencrypted, WAL) file, for touching up a copy before it
+/// leaves the instance.
+pub async fn open_plain(path: &Path) -> Result<(Database, Connection)> {
+    let db = build(path, None).await?;
+    let conn = connect(&db)?;
+    Ok((db, conn))
+}
+
 async fn build(path: &Path, key: Option<&EncryptionKey>) -> Result<Database> {
     let path = path.to_str().ok_or_else(|| Error::internal(format!("{} is not valid UTF-8", path.display())))?;
     let mut builder = Builder::new_local(path);

@@ -14,7 +14,7 @@ use crate::id::now_ms;
 use crate::node::Account;
 use crate::pb::{self, Permission, sso_service_server::SsoService};
 use crate::servers::{self as store, Audit, Payload, ServerDb, ServerSso};
-use crate::sso::{self, Endpoints, Provider, Scope};
+use crate::sso::{self, Endpoints, Protocol, Provider, Scope};
 
 /// The longest a sign-in can last before members sign in again: a year.
 const MAX_RECHECK_DAYS: i32 = 365;
@@ -73,16 +73,32 @@ impl Api {
     }
 }
 
+/// Who signs members in decides who gets into the server, so only its owner
+/// picks the provider, not everyone who can manage it.
+fn only_the_owner(owner: bool) -> Result<()> {
+    if owner { Ok(()) } else { Err(Error::denied("only the server's owner can set up single sign-on")) }
+}
+
 /// The audit entry for a change to single sign-on: never the secret.
 fn audit(before: &ServerSso, after: &ServerSso) -> Audit {
-    let describe = |p: &Provider| if p.is_set() { format!("{} ({})", p.name, p.key()) } else { String::new() };
+    let describe = |p: &Provider| match p.protocol {
+        Protocol::None => String::new(),
+        Protocol::Oidc => format!("{} (OIDC {}, client {})", p.name, p.oidc_issuer, p.oidc_client_id),
+        Protocol::Saml => format!(
+            "{} (SAML {}, signs in at {}, certificates SHA-256 {})",
+            p.name,
+            p.saml_entity_id,
+            p.saml_sso_url,
+            p.fingerprints().join(" ")
+        ),
+    };
     let entry = Audit::new(pb::AuditAction::ServerUpdate, "")
         .change("sso_provider", describe(&before.provider), describe(&after.provider))
         .change("sso_required", before.required, after.required)
         .change("sso_recheck_days", before.recheck_days, after.recheck_days);
     let domains = |p: &Provider| p.email_domains.join(", ");
     let secret_changed = before.provider.oidc_client_secret != after.provider.oidc_client_secret
-        && before.provider.key() == after.provider.key()
+        && before.provider.trust_key() == after.provider.trust_key()
         && after.provider.is_set();
     let entry = entry.change("sso_email_domains", domains(&before.provider), domains(&after.provider));
     if secret_changed { entry.change("sso_client_secret", "", "changed") } else { entry }
@@ -97,8 +113,9 @@ impl SsoService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let Seat { sdb, .. } =
+                let Seat { sdb, access, .. } =
                     self.with(&account, &request.get_ref().server_id, Permission::ManageServer).await?;
+                only_the_owner(access.owner)?;
                 let conn = sdb.read()?;
                 let mine = query_one(
                     &conn,
@@ -129,6 +146,7 @@ impl SsoService for Api {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
                 let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageServer).await?;
+                only_the_owner(access.owner)?;
                 if req.recheck_days.is_some_and(|days| !(0..=MAX_RECHECK_DAYS).contains(&days)) {
                     return Err(Error::invalid("members sign in again every 0 (never) to 365 days"));
                 }
@@ -141,6 +159,15 @@ impl SsoService for Api {
                             match &req.provider {
                                 Some(provider) => {
                                     let provider = Provider::from_pb(provider, &before.provider)?;
+                                    // Only the instance's own provider may be on this machine.
+                                    let url = match provider.protocol {
+                                        Protocol::Oidc => provider.oidc_issuer.as_str(),
+                                        Protocol::Saml => provider.saml_sso_url.as_str(),
+                                        Protocol::None => "https://",
+                                    };
+                                    if !url.starts_with("https://") {
+                                        return Err(Error::invalid("a server's provider must be at an https URL"));
+                                    }
                                     if provider.is_set() {
                                         provider.ready()?;
                                     }
@@ -149,7 +176,7 @@ impl SsoService for Api {
                                 None => before.provider.clone(),
                             }
                         };
-                        let moved = provider.key() != before.provider.key();
+                        let moved = provider.trust_key() != before.provider.trust_key();
                         if moved {
                             // Sign-ins through another provider don't count for this one.
                             conn.execute("DELETE FROM sso_identities", ()).await?;
@@ -262,7 +289,7 @@ impl SsoService for Api {
                         if !sso::take(conn, &sign_in.state).await? {
                             return Err(ran_out());
                         }
-                        if store::load_sso(conn).await?.provider.key() != sign_in.provider_key {
+                        if store::load_sso(conn).await?.provider.trust_key() != sign_in.provider_key {
                             return Err(Error::FailedPrecondition(
                                 "single sign-on changed while you were signing in; start again".into(),
                             ));

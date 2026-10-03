@@ -1,4 +1,4 @@
-import { BuildingIcon, ChevronLeftIcon, LockKeyholeIcon } from "lucide-react";
+import { BuildingIcon, ChevronLeftIcon, LockKeyholeIcon, GlobeIcon } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { AccountKind, type Server } from "@/gen/fuwa/v1/types_pb";
 import { startServerSso } from "@/fuwa/actions";
@@ -66,6 +66,18 @@ export function SsoGate({ instanceKey, server }: { instanceKey: string; server: 
             <b className="text-foreground">{server.name}</b> asks members to sign in through {name}
             {days > 0 ? ` every ${days === 1 ? "day" : `${days} days`}` : ""}. You're still a member; the channels come back once you do.
           </p>
+          {server.ssoHost && (
+            <motion.p
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 26, delay: 0.15 }}
+              className="mt-1 text-xs text-balance text-muted-foreground"
+              data-testid="sso-gate-host"
+            >
+              <GlobeIcon className="mr-1 inline size-3.5 -translate-y-px align-middle" />
+              Signs you in at <b className="text-foreground">{server.ssoHost}</b>, which sees your IP address.
+            </motion.p>
+          )}
         </div>
         <div className="w-full">
           <ProviderButton
