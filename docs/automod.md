@@ -26,7 +26,10 @@ that turns fuwa's questions into another provider's.
   channels or addresses. Mentions become `@someone`, `@role` and `#channel`,
   custom emoji become `:emoji:`, and only the first 4,000 characters go.
   Messages in DMs and secure channels are end-to-end encrypted and never go.
-- It has 3 seconds. A provider that's slow, down or answers something fuwa
+- Pictures go only to providers that read them (Cloudflare Clef), and only
+  when the server's Smart filter has **Check pictures too** on. See
+  [Pictures](#pictures).
+- It has 3 seconds (6 with pictures). A provider that's slow, down or answers something fuwa
   can't read lets the message through that rule; the server's other rules
   still apply. The failure is counted in the anonymous report as its kind and
   `typesafe-jev`, `cloudflare-clef` or `custom`, never your provider's name or
@@ -105,20 +108,52 @@ Anything else is a failure, and the admins' **Test connection** shows it:
 | `429` | Too many requests |
 | Anything else | It failed; `{"error": {"message": "..."}}` or `{"errors": [{"message": "..."}]}` is shown, cut to 160 characters |
 
+## Pictures
+
+With **Check pictures too** on, Clef also gets up to 4 of a message's
+pictures: attached ones (by their type or name), then embeds' images and
+thumbnails. The instance fetches them itself, the way it fetches every
+picture from elsewhere for readers: public addresses only, at most 8 MB, 2
+seconds in all. Uploads on the instance are read from its own files. It keeps
+PNG, JPEG and WebP of at most 4 MiB and 16 megapixels each, 8 MiB in all,
+and leaves out the rest (a GIF, a huge photo, one that didn't arrive in
+time). They go in the request as data URIs, the way Clef takes them:
+
+```json
+{
+  "state": { "chat_message": "look at this" },
+  "images": ["data:image/png;base64,iVBORw0KGgo..."],
+  "questions": { "...": "..." }
+}
+```
+
+and each question then also says to count the pictures as part of the
+message. A message that's only pictures is asked about too. Edits are asked
+about by their text alone, since their pictures can't change. The admins' own
+providers get text only.
+
 ## In Rust
 
 To build one into fuwa itself, implement `Provider` in
 `server/src/automod/providers.rs`:
 
 ```rust
+pub struct Message<'a> {
+    /// The text, already cleaned as above.
+    pub text: &'a str,
+    /// Its pictures, when the rule shows them and the provider reads them.
+    pub pictures: &'a [Picture],
+}
+
 pub trait Provider: Send + Sync {
     /// Its id in the anonymous report.
     fn id(&self) -> &'static str;
-    /// How likely `text` (already cleaned as above) is to be each label, 0 to 1.
-    fn classify<'a>(&'a self, text: &'a str) -> BoxFuture<'a, Result<Scores, Failure>>;
+    /// How likely the message is to be each label, 0 to 1.
+    fn classify<'a>(&'a self, message: &'a Message<'a>) -> BoxFuture<'a, Result<Scores, Failure>>;
 }
 ```
 
-then add its `Kind` to `KINDS` (id, name, host, models) and a branch for it
-in `build`. `check` wraps every provider with the 3-second limit, the text
-cleaning and the anonymous counts, so a provider only talks to its service.
+then add its `Kind` to `KINDS` (id, name, host, models, and `pictures: true`
+if it reads them) and a branch for it in `build`. `check` wraps every
+provider with the time limit, the text cleaning and the anonymous counts, so
+a provider only talks to its service.
