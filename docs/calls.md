@@ -52,6 +52,15 @@ sound on. Losing CONNECT, a time-out, a kick, a ban or the channel going
 away hangs them up the moment it happens (`spawn_voice_guard` watches the
 server's events), and each keep checks again.
 
+## Ping
+
+The voice bar shows your ping to the media part, and clicking it opens the
+last minute of it with packet loss, jitter and the route (UDP, TCP or a TURN
+relay). It's read from the browser's own WebRTC stats every two seconds
+(`web/src/calls/quality.ts`): the selected candidate pair's round trip,
+which the browser measures with its consent checks to the media part. Only
+your own; nothing about it is sent anywhere.
+
 ## Restarts
 
 Calls ride out deploys:

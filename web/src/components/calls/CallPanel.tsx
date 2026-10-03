@@ -2,12 +2,14 @@ import { Link } from "@tanstack/react-router";
 import { LockKeyholeIcon, TriangleAlertIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { hangUp } from "@/calls/engine";
+import { useQualityLevel } from "@/calls/quality";
 import { useCalls, type ActiveCall } from "@/calls/state";
 import { useFuwa } from "@/fuwa/store";
 import { SPRING, SwapText } from "@/components/motion";
 import { displayName } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
+import { ConnectionDetails, PingText, Signal } from "./Connection";
 import { HangUpButton } from "./parts";
 
 /** How long a call has gone on: 4:07, or 1:02:33. */
@@ -23,25 +25,6 @@ const STATUS: Record<ActiveCall["status"], string> = {
   connected: "Voice connected",
   reconnecting: "Reconnecting…",
 };
-
-/** Three bars that fill as the call connects, green once it's through. */
-function Signal({ status }: { status: ActiveCall["status"] }) {
-  const ok = status === "connected";
-  return (
-    <span aria-hidden className={cn("flex h-3.5 items-end gap-[2px]", !ok && "signal-connecting")}>
-      {[5, 9, 13].map((h, n) => (
-        <motion.span
-          key={n}
-          initial={{ scaleY: 0 }}
-          animate={{ scaleY: 1 }}
-          transition={{ ...SPRING, delay: n * 0.06 }}
-          className={cn("w-[3px] origin-bottom rounded-full transition-colors duration-500", ok ? "bg-[#3ba55d]" : status === "reconnecting" ? "bg-amber-500" : "bg-muted-foreground")}
-          style={{ height: h }}
-        />
-      ))}
-    </span>
-  );
-}
 
 /** Where you are in a call, above your user panel, with a way out. Shows wherever you go in the app. */
 export function CallPanel() {
@@ -67,6 +50,7 @@ export function CallPanel() {
 function CallPanelBody({ call }: { call: ActiveCall }) {
   const t = call.target;
   const now = useNow(1_000);
+  const level = useQualityLevel();
   const where = useFuwa((s) => {
     const inst = s.instances[t.instance];
     if (t.kind === "voice") {
@@ -87,16 +71,20 @@ function CallPanelBody({ call }: { call: ActiveCall }) {
     <div className="flex flex-col gap-1 p-2 pb-1.5">
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1 px-1.5">
-          <p
-            className={cn(
-              "flex items-center gap-1.5 text-sm font-extrabold",
-              call.status === "connected" ? "text-[#3ba55d]" : call.status === "reconnecting" ? "text-amber-500" : "text-muted-foreground",
-            )}
-          >
-            <Signal status={call.status} />
-            <SwapText className="truncate">{STATUS[call.status]}</SwapText>
-            {call.status === "connected" && <span className="ml-auto text-xs font-bold text-muted-foreground tabular-nums">{clock(seconds)}</span>}
-          </p>
+          <ConnectionDetails status={call.status}>
+            <button
+              type="button"
+              title="Connection details"
+              className={cn(
+                "-mx-1 flex w-[calc(100%+0.5rem)] items-center gap-1.5 rounded-md px-1 text-left text-sm font-extrabold transition hover:bg-muted/60 active:scale-[0.98]",
+                call.status === "connected" ? "text-[#3ba55d]" : call.status === "reconnecting" ? "text-amber-500" : "text-muted-foreground",
+              )}
+            >
+              <Signal status={call.status} level={level} />
+              <SwapText className="truncate">{STATUS[call.status]}</SwapText>
+              {call.status === "connected" && <PingText colored className="ml-auto shrink-0 text-xs font-bold text-muted-foreground" />}
+            </button>
+          </ConnectionDetails>
           <Link {...link} className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground hover:underline">
             {t.kind === "dm" && (
               <span title="End-to-end encrypted: only the people in this call can hear it" className="shrink-0">
@@ -104,6 +92,7 @@ function CallPanelBody({ call }: { call: ActiveCall }) {
               </span>
             )}
             <span className="truncate">{where}</span>
+            {call.status === "connected" && <span className="ml-auto shrink-0 pl-2 tabular-nums">{clock(seconds)}</span>}
           </Link>
         </div>
         <HangUpButton onClick={() => void hangUp(null)} />
