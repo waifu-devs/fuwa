@@ -995,7 +995,8 @@ export const DirectMessageService: GenService<{
    * Takes one key package per device, to add the devices to a conversation.
    * Each is handed out once; once a device has none left, its last-resort
    * key package is handed out instead. Only for devices of people you have
-   * a conversation with, and your own.
+   * a conversation with or share a server with (secure channels add them
+   * too), and your own.
    *
    * @generated from rpc fuwa.v1.DirectMessageService.ClaimKeyPackages
    */
