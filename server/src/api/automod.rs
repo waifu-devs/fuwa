@@ -198,6 +198,9 @@ async fn checked_rule(
                 ) {
                     return Err(Error::invalid("alerts go in a text channel"));
                 }
+                if channel.shared.as_ref().is_some_and(|s| !s.home) {
+                    return Err(Error::invalid("alerts can't go in a channel shared from another server"));
+                }
                 pb::AutoModAction { kind: action.kind, channel_id: channel.id, ..Default::default() }
             }
             Kind::TimeOut => {
@@ -337,6 +340,33 @@ pub(super) fn checks_today(server_id: &str) -> i64 {
         return 0;
     }
     checks.1.get(server_id).copied().unwrap_or_default()
+}
+
+/// Who a server's enabled provider rule sends a channel's messages to, as
+/// "Name (host)", for people about to write there who aren't its members
+/// (the shared channel preview). Empty when no provider reads that channel.
+pub(super) async fn readers(
+    app: &crate::app::App,
+    conn: &turso::Connection,
+    channel: &pb::Channel,
+) -> Result<Vec<String>> {
+    let mut names: Vec<String> = Vec::new();
+    for rule in store::load_automod(conn).await? {
+        if !rule.enabled
+            || rule.trigger != Trigger::Provider as i32
+            || rule.labels.iter().all(|l| l.level < Level::Flag as i32)
+            || rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id)
+        {
+            continue;
+        }
+        if let Some(setup) = app.settings().automod_provider(&rule.provider) {
+            let name = format!("{} ({})", setup.name(), setup.host());
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    Ok(names)
 }
 
 /// How long a message waits for its pictures to be read before its provider

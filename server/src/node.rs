@@ -24,7 +24,18 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0008_agents.sql"),
     include_str!("../migrations/node/0009_upload_days.sql"),
     include_str!("../migrations/node/0010_sso.sql"),
+    include_str!("../migrations/node/0011_regions.sql"),
 ];
+
+/// A server being moved from one shard to another (docs/regions.md).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Move {
+    pub server_id: String,
+    pub from: String,
+    pub to: String,
+    /// The server is open on `to` and placed there: only `from` letting go is left.
+    pub committed: bool,
+}
 
 /// A day, for counting uploads.
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
@@ -1007,10 +1018,13 @@ impl NodeDb {
 
     // ───────────────────────── Split instances ─────────────────────────
 
-    /// Every shard that has registered, and where it was.
-    pub async fn shards(&self) -> Result<Vec<(String, String)>> {
+    /// Every shard that has registered: (id, where it was, its region).
+    pub async fn shards(&self) -> Result<Vec<(String, String, String)>> {
         let conn = self.read()?;
-        query_all(&conn, "SELECT id, url FROM shards ORDER BY id", (), |r| Ok((r.get(0)?, r.get(1)?))).await
+        query_all(&conn, "SELECT id, url, region FROM shards ORDER BY id", (), |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
+        .await
     }
 
     /// Which shard holds each server.
@@ -1021,12 +1035,13 @@ impl NodeDb {
 
     /// Records a shard's registration: where it is and every server it holds,
     /// which is all it holds.
-    pub async fn register_shard(&self, shard_id: &str, url: &str, server_ids: &[String]) -> Result<()> {
+    pub async fn register_shard(&self, shard_id: &str, url: &str, region: &str, server_ids: &[String]) -> Result<()> {
         db::write(&self.db, async |conn| {
             conn.execute(
-                "INSERT INTO shards (id, url, registered_at) VALUES (?1, ?2, ?3)
-                 ON CONFLICT (id) DO UPDATE SET url = excluded.url, registered_at = excluded.registered_at",
-                (shard_id, url, now_ms()),
+                "INSERT INTO shards (id, url, region, registered_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (id) DO UPDATE SET url = excluded.url, region = excluded.region,
+                   registered_at = excluded.registered_at",
+                (shard_id, url, region, now_ms()),
             )
             .await?;
             conn.execute("DELETE FROM placements WHERE shard_id = ?1", [shard_id]).await?;
@@ -1057,6 +1072,48 @@ impl NodeDb {
                 }
                 None => conn.execute("DELETE FROM placements WHERE server_id = ?1", [server_id]).await?,
             };
+            Ok(())
+        })
+        .await
+    }
+
+    /// Servers being moved between shards.
+    pub async fn moves(&self) -> Result<Vec<Move>> {
+        let conn = self.read()?;
+        query_all(&conn, "SELECT server_id, from_shard, to_shard, committed FROM moves", (), |r| {
+            Ok(Move { server_id: r.get(0)?, from: r.get(1)?, to: r.get(2)?, committed: r.get(3)? })
+        })
+        .await
+    }
+
+    /// Records a move starting, or (`committed`) the server open on its new
+    /// shard and placed there, in one transaction with the placement.
+    pub async fn save_move(&self, moved: &Move) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "INSERT INTO moves (server_id, from_shard, to_shard, committed, started_at) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT (server_id) DO UPDATE SET from_shard = excluded.from_shard,
+                   to_shard = excluded.to_shard, committed = excluded.committed",
+                (moved.server_id.as_str(), moved.from.as_str(), moved.to.as_str(), moved.committed, now_ms()),
+            )
+            .await?;
+            if moved.committed {
+                conn.execute(
+                    "INSERT INTO placements (server_id, shard_id) VALUES (?1, ?2)
+                     ON CONFLICT (server_id) DO UPDATE SET shard_id = excluded.shard_id",
+                    (moved.server_id.as_str(), moved.to.as_str()),
+                )
+                .await?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// A move is over, one way or the other.
+    pub async fn end_move(&self, server_id: &str) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("DELETE FROM moves WHERE server_id = ?1", [server_id]).await?;
             Ok(())
         })
         .await
@@ -1368,17 +1425,38 @@ impl NodeDb {
         media_by_id(&self.read()?, id).await
     }
 
-    /// Marks a picture as in use, so it isn't swept; server icons also note
-    /// their server.
+    /// Marks a picture as in use, so it isn't swept; a server's pictures
+    /// also note their server. Whatever used it first owns it: an account's
+    /// avatar set as a webhook's picture stays the account's, and an emoji
+    /// added to a second server stays the first's (and where it's kept).
     pub async fn use_media(&self, id: &str, server_id: Option<&str>) -> Result<()> {
         db::write(&self.db, async |conn| {
             conn.execute(
-                "UPDATE media SET used_at = coalesce(used_at, ?2), server_id = coalesce(?3, server_id) WHERE id = ?1",
+                "UPDATE media SET server_id = CASE WHEN used_at IS NULL THEN ?3 ELSE server_id END,
+                                  used_at = coalesce(used_at, ?2) WHERE id = ?1",
                 (id, now_ms(), server_id),
             )
             .await?;
             Ok(())
         })
+        .await
+    }
+
+    /// A server's pictures in use: its icon, emoji and webhooks' pictures.
+    pub async fn server_media(&self, server_id: &str) -> Result<Vec<String>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            "SELECT id FROM media WHERE server_id = ?1 AND stored_at IS NOT NULL AND used_at IS NOT NULL
+             AND purpose IN (?2, ?3, ?4) ORDER BY id",
+            (
+                server_id,
+                pb::MediaPurpose::ServerIcon as i64,
+                pb::MediaPurpose::Emoji as i64,
+                pb::MediaPurpose::Avatar as i64,
+            ),
+            |r| r.get::<String>(0),
+        )
         .await
     }
 

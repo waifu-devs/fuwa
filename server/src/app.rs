@@ -141,7 +141,10 @@ impl App {
                     }
                 }
                 let (servers, link) = if role == Role::All {
-                    (Servers::open(&config.data_path, key, hub.clone(), false, None).await?, Link::Alone)
+                    (
+                        Servers::open(&config.data_path, key, hub.clone(), false, None, &config.cluster.region).await?,
+                        Link::Alone,
+                    )
                 } else {
                     let shards = crate::cluster::directory::Shards::load(&config, &node).await?;
                     (Servers::none(hub.clone()), Link::Directory(Box::new(shards)))
@@ -149,7 +152,9 @@ impl App {
                 (Some(node), Some(dms), Some(media), servers, link)
             }
             Role::Shard => {
-                let servers = Servers::open(&config.data_path, key, hub.clone(), true, replica.clone()).await?;
+                let servers =
+                    Servers::open(&config.data_path, key, hub.clone(), true, replica.clone(), &config.cluster.region)
+                        .await?;
                 (None, None, None, servers, Link::Shard(Box::new(crate::cluster::shard::Link::new(&config)?)))
             }
         };
@@ -206,6 +211,10 @@ impl App {
             app.sweep_media(crate::id::now_ms()).await?;
         }
         crate::cluster::shard::connect(&app).await;
+        // Shared channels' messages reach the servers showing them from the start.
+        if matches!(app.link, Link::Alone | Link::Shard(_)) {
+            crate::api::spawn_shared_fanout(app.clone());
+        }
         Ok(app)
     }
 
@@ -295,7 +304,7 @@ impl App {
     }
 
     pub fn node_info(&self) -> pb::Node {
-        node_info(&self.settings(), self.announcement())
+        pb::Node { regions: self.regions(), ..node_info(&self.settings(), self.announcement()) }
     }
 
     /// Every route: the gRPC services (also reachable as gRPC-Web from
@@ -329,6 +338,7 @@ impl App {
             .add_service(DirectMessageServiceServer::new(api.clone()))
             .add_service(crate::pb::call_service_server::CallServiceServer::new(api.clone()))
             .add_service(crate::pb::secure_channel_service_server::SecureChannelServiceServer::new(api.clone()))
+            .add_service(crate::pb::shared_channel_service_server::SharedChannelServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
             .add_service(reflection);
@@ -351,6 +361,9 @@ impl App {
         }
         if self.node.is_some() {
             router = router.merge(crate::sso::http::instance_routes(self.clone()));
+        }
+        if let Link::Shard(_) = &self.link {
+            router = router.merge(crate::cluster::pictures::routes(self.clone()));
         }
         if matches!(self.link, Link::Alone | Link::Shard(_)) {
             router = router.merge(crate::webhooks::routes(self.clone()));
@@ -416,12 +429,14 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         server_creation: settings.server_creation as i32,
         agent_creation: settings.agent_creation as i32,
         telemetry: settings.telemetry,
+        shared_channels: settings.shared_channels,
         announcement,
         build: Some(pb::Build {
             version: crate::VERSION.into(),
             commit: crate::COMMIT.into(),
             source: crate::SOURCE.into(),
         }),
+        regions: vec![],
     }
 }
 

@@ -627,9 +627,9 @@ impl FuwaApp {
         cx: &mut Context<Self>,
     ) -> (AnyElement, AnyElement) {
         let p = pal(cx);
-        let (name, connection, servers) = self.core.shared.read(|s| match s.instance(key) {
-            Some(i) => (i.name(), Some(i.connection), i.servers.clone()),
-            None => (String::new(), None, Vec::new()),
+        let (name, connection, servers, admin) = self.core.shared.read(|s| match s.instance(key) {
+            Some(i) => (i.name(), Some(i.connection), i.servers.clone(), i.admin),
+            None => (String::new(), None, Vec::new(), false),
         });
         let header = div()
             .flex()
@@ -646,6 +646,16 @@ impl FuwaApp {
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .child(name),
             )
+            .when(admin, |el| {
+                // Instance settings, for its admins; the gear turns as you point at it.
+                let k = key.to_owned();
+                el.child(
+                    icon_button("instance-settings", "settings", &p)
+                        .size(px(28.0))
+                        .group("instance-gear")
+                        .on_click(cx.listener(move |this, _, window, cx| this.open_instance_settings(&k, window, cx))),
+                )
+            })
             .into_any_element();
         let mut list = div().pt(px(8.0)).child(section_label("Your servers here", &p));
         for (n, server) in servers.iter().enumerate() {

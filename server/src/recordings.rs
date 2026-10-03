@@ -148,6 +148,21 @@ impl Recordings {
         let _ = tokio::time::timeout(FINISH_WAIT, futures::future::join_all(tasks)).await;
     }
 
+    /// Stops a server's recordings and waits (a while) for their files to
+    /// finish, before it moves to another shard.
+    pub async fn finish_server(&self, server_id: &str) {
+        let tasks: Vec<_> = self
+            .lock()
+            .values_mut()
+            .filter(|rec| rec.server_id == server_id)
+            .filter_map(|rec| {
+                rec.stop.cancel();
+                rec.task.take()
+            })
+            .collect();
+        let _ = tokio::time::timeout(FINISH_WAIT, futures::future::join_all(tasks)).await;
+    }
+
     /// Starts and stops recordings as people turn them on and off, for as
     /// long as the part runs.
     pub fn spawn(app: Arc<App>) {

@@ -117,6 +117,15 @@
     (`MEDIA_PURPOSE_EMOJI`) counted in the server's attachments, and every
     change sends the whole list (`EmojisUpdated`). Messages write them
     `<:name:id>` (`<a:name:id>` when they move).
+    Shared channels (`api/shared.rs`, docs/shared-channels.md): a channel's
+    home keeps it and every message (`channel_guests`, `share_codes`,
+    `channel_blocks`); a guest server shows it as a channel of its own
+    (`channel_links`) and keeps none of it. The guest's shard checks its own
+    roles and AutoMod and passes reads and writes to the home as
+    `cluster.v1.SharedCall`s (`App::shared`); the home's
+    `spawn_shared_fanout` passes message events back, published at the guest
+    as sequence 0. Message calls on a channel check `shared::link_of` first;
+    new channel kinds or message paths must too.
   - `webhooks.rs`: posting through a webhook over plain HTTP
     (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
     body), with each webhook's 30-a-minute limit (counted only for posts
@@ -250,6 +259,20 @@
     away with `fuwa-not-ready` until every known shard has registered again
     (`Shards::caught_up`). A gateway's `/healthz` fails until it has reached
     the directory.
+    Regions (`docs/regions.md` is the design): every part may carry
+    `FUWA_REGION`; the directory's is the home region and keeps each shard's
+    (`shards.region`). A server's region is its shard's, stamped on its file
+    when opened (`server.region`); `create_server` picks the emptiest shard
+    of the region asked for (`Shards::emptiest_in`), never one elsewhere.
+    `moves.rs` moves a server between regions for an admin
+    (`AdminService.MoveServer`): the directory records it in `moves`, the new
+    shard pulls the files from the old one (`SendServer`, which freezes it:
+    writes answer `Error::Moving`, which gateways ride out), the directory
+    switches the placement, then the old shard lets go (`ReleaseServer`,
+    deleting its files, recordings and replica copies, and ending live
+    streams with `Misrouted` so gateways follow) and the new one starts
+    replicating. `sort_registration` keeps a restart mid-move from putting a
+    server in two places.
   - `web.rs`: serves the embedded web app (feature `web`, from `web/dist`), with
     `index.html` for any path the API doesn't answer so deep links work.
   - `tests/api.rs`: end-to-end tests against a running instance; `tests/web.rs`
@@ -329,7 +352,7 @@
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
     in both), `settings_keys.rs` the Keyboard page where they're changed,
     `server_settings.rs` a server's settings
-    (overview, welcome screen, invites, roles, emoji, integrations, members,
+    (overview, welcome screen, invites, roles, channels, emoji, integrations, members,
     bans, AutoMod, audit log; the server's name opens it; a cached view, so
     it redraws only when the server changes, and its flourishes play once
     rather than loop; `save_bar` is the floating unsaved-changes bar pages
@@ -346,7 +369,19 @@
     (added by username, removed by kicking), `server_settings/welcome.rs`
     the Welcome screen editor beside a preview drawn like the welcome
     dialog, `server_settings/automod.rs` the AutoMod rules (each tried with
-    `TestAutoModRule` as it's edited, before it's saved),
+    `TestAutoModRule` as it's edited, before it's saved; the Smart filter
+    picks one of the instance's providers, a level and "how sure" per label,
+    and pictures where the provider reads them),
+    `server_settings/channels.rs` the Channels page (moved a place at a
+    time with `core/arrange.rs`'s `step`, each one's name, topic, category
+    and slow mode, and who can see and do what in it, saved as one
+    `SetChannelPermissions`; the New button opens the app's new-channel
+    dialog and stays in settings),
+    `instance_settings.rs` an instance's settings for its admins (the gear
+    by the instance's name; Privacy and Moderation so far, where the
+    providers servers' smart filters ask are set up and tried, over
+    `core/instance_admin.rs`; a cached view like server settings, sharing
+    its `save_bar`, `switch` and chips),
     `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),
@@ -511,7 +546,7 @@
   one event payload and keeps the usage totals in step: members and channels in
   the `usage` row, message totals through `servers::add_usage`. Invites are the
   exception: their codes are secrets, so making or revoking one writes only an
-  audit entry, never an event. AutoMod rules are the same: members mustn't
+  audit entry, never an event (shared channels' share codes too). AutoMod rules are the same: members mustn't
   see the words a rule looks for.
 - Writes can run more than once (after a clash), so the closure given to
   `ServerDb::write` or `db::write` does nothing outside its transaction. Reads

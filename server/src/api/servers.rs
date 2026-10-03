@@ -167,7 +167,7 @@ impl ServerService for Api {
                     discoverable: req.discoverable,
                 };
                 let icon = self.check_picture(&account, pb::MediaPurpose::ServerIcon, &new.icon_url).await?;
-                let server = self.app.create_server(&account.user(), new).await?;
+                let server = self.app.create_server(&account.user(), new, req.region.trim()).await?;
                 self.keep_picture(icon.as_deref(), Some(&server.id)).await;
                 tracing::info!(server = %server.id, owner = %account.id, "server created");
                 Ok(pb::CreateServerResponse { server: Some(server) })
@@ -265,6 +265,9 @@ impl ServerService for Api {
                             ) {
                                 return Err(Error::invalid("system messages can only go in a text channel"));
                             }
+                            if channel.shared.as_ref().is_some_and(|s| !s.home) {
+                                return Err(Error::invalid("system messages can't go in a channel shared from another server"));
+                            }
                         }
                         conn.execute(
                             "UPDATE server SET name = coalesce(?1, name), description = coalesce(?2, description),
@@ -334,8 +337,11 @@ impl ServerService for Api {
                 if !viewer.is_instance_admin() && owner != actor {
                     return Err(Error::denied("only the server's owner can delete it"));
                 }
+                // Servers its channels are shown in, and that show its own, let go too.
+                let ended = super::shared::take_server(&sdb.read()?).await?;
                 self.app.servers.delete(&sdb.id, &actor).await?;
                 self.app.server_gone(&sdb.id).await;
+                super::shared::tell_ended(&self.app, &sdb.id, &actor, ended).await;
                 tracing::info!(server = %sdb.id, by = %actor, "server deleted");
                 Ok(pb::DeleteServerResponse {})
             }

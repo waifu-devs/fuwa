@@ -34,8 +34,10 @@ use crate::ui::widgets::{
 
 mod agents;
 mod automod;
+mod channels;
 mod emoji;
 mod roles;
+pub(crate) use roles::switch;
 mod webhooks;
 mod welcome;
 
@@ -46,6 +48,10 @@ pub enum ServerSettingsEvent {
         user_id: String,
         action: Action,
     },
+    /// Open the new-channel dialog over the settings, in a category or none.
+    CreateChannel {
+        parent: String,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -54,6 +60,7 @@ enum Page {
     Welcome,
     Invites,
     Roles,
+    Channels,
     Emoji,
     Integrations,
     Members,
@@ -69,6 +76,7 @@ impl Page {
             Page::Welcome => "Welcome screen",
             Page::Invites => "Invites",
             Page::Roles => "Roles",
+            Page::Channels => "Channels",
             Page::Emoji => "Emoji",
             Page::Integrations => "Integrations",
             Page::Members => "Members",
@@ -84,6 +92,7 @@ impl Page {
             Page::Welcome => "party-popper",
             Page::Invites => "link",
             Page::Roles => "shield",
+            Page::Channels => "hash",
             Page::Emoji => "face-slightly-smiling-plus",
             Page::Integrations => "webhook",
             Page::Members => "users",
@@ -98,6 +107,7 @@ impl Page {
             Page::Overview => "Its name, picture and a few words, and how it notifies people by default.",
             Page::Invites => "The links that let people in. Revoke one and it stops working at once.",
             Page::Roles => "Who can do what. Members take the color of their highest role.",
+            Page::Channels => "Order, categories, topics, slow mode, and who can see and use each.",
             Page::Emoji => "The server's own emoji. Everyone here can use them as :name:.",
             Page::Welcome => "What new members see first: a few words and channels to start in.",
             Page::Integrations => {
@@ -105,15 +115,17 @@ impl Page {
             }
             Page::Members => "Everyone here. Time out, kick or ban the people you rank above.",
             Page::Bans => "Who's kept out, and why.",
-            Page::AutoMod => "Rules that catch messages as they're sent: blocked words, mention spam and links.",
+            Page::AutoMod => {
+                "Rules that catch messages as they're sent: blocked words, mention spam, links and a smart filter."
+            }
             Page::AuditLog => "Every change people made here with their permissions.",
         }
     }
 }
 
 /// The settings group, then the moderation group, as on the web.
-const SETTINGS: [Page; 6] =
-    [Page::Overview, Page::Welcome, Page::Invites, Page::Roles, Page::Emoji, Page::Integrations];
+const SETTINGS: [Page; 7] =
+    [Page::Overview, Page::Welcome, Page::Invites, Page::Roles, Page::Channels, Page::Emoji, Page::Integrations];
 const MODERATION: [Page; 4] = [Page::Members, Page::Bans, Page::AutoMod, Page::AuditLog];
 
 /// The pages someone with this access may open.
@@ -134,6 +146,9 @@ fn pages(access: &crate::core::permissions::Access) -> Vec<Page> {
     }
     if access.has(P::ManageRoles) {
         out.push(Page::Roles);
+    }
+    if access.channels.keys().any(|c| access.has_in(c, P::ManageChannels) || access.has_in(c, P::ManageRoles)) {
+        out.push(Page::Channels);
     }
     if access.has(P::ManageEmoji) {
         out.push(Page::Emoji);
@@ -201,6 +216,7 @@ pub struct ServerSettingsView {
     hooks: webhooks::Hooks,
     agents: agents::Agents,
     automod: automod::AutoMod,
+    channels: channels::Channels,
     welcome: welcome::Welcome,
     /// A floating bar of changes not saved yet, drawn over the page's foot.
     bar: Option<AnyElement>,
@@ -231,6 +247,7 @@ impl ServerSettingsView {
         let (agents, agent_subscriptions) = agents::Agents::new(window, cx);
         let (automod, automod_subscriptions) = automod::AutoMod::new(window, cx);
         let (welcome, welcome_subscriptions) = welcome::Welcome::new(window, cx);
+        let (channels, channel_subscriptions) = channels::Channels::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe(&name, |_: &mut Self, _, e: &InputEvent, cx| {
                 if let InputEvent::Change = e {
@@ -254,6 +271,7 @@ impl ServerSettingsView {
         subscriptions.extend(agent_subscriptions);
         subscriptions.extend(automod_subscriptions);
         subscriptions.extend(welcome_subscriptions);
+        subscriptions.extend(channel_subscriptions);
         Self {
             core,
             key,
@@ -282,6 +300,7 @@ impl ServerSettingsView {
             agents,
             automod,
             welcome,
+            channels,
             bar: None,
             _subscriptions: subscriptions,
         }
@@ -1282,6 +1301,7 @@ impl Render for ServerSettingsView {
             Page::Invites => self.invites_page(&p, cx),
             Page::Welcome => self.welcome_page(&server, &p, window, cx),
             Page::Roles => self.roles_page(&p, window, cx),
+            Page::Channels => self.channels_page(&p, window, cx),
             Page::Emoji => self.emoji_page(&p, window, cx),
             Page::Integrations => {
                 let mut both = div().flex().flex_col().gap(px(36.0));
@@ -1299,7 +1319,7 @@ impl Render for ServerSettingsView {
             Page::AuditLog => self.audit_page(&p, cx),
         };
         let content = div()
-            .w(px(if matches!(page, Page::Roles | Page::Welcome) { 860.0 } else { 680.0 }))
+            .w(px(if matches!(page, Page::Roles | Page::Welcome | Page::Channels) { 860.0 } else { 680.0 }))
             .flex()
             .flex_col()
             .gap(px(6.0))
@@ -1392,7 +1412,7 @@ impl Render for ServerSettingsView {
 /// A member, what you may do to them, their roles (name and color), and whether they own the server.
 type MemberRow = (pb::Member, Vec<P>, Vec<(String, Option<u32>)>, bool);
 
-fn amber(p: &Palette) -> Hsla {
+pub(crate) fn amber(p: &Palette) -> Hsla {
     hsla(0.11, 0.9, if p.dark { 0.62 } else { 0.42 }, 1.0)
 }
 
@@ -1409,7 +1429,7 @@ fn row(p: &Palette) -> gpui_kit::Div {
         .border_color(p.border)
 }
 
-fn pill(text: &str, color: Hsla) -> gpui_kit::Div {
+pub(crate) fn pill(text: &str, color: Hsla) -> gpui_kit::Div {
     div()
         .flex_none()
         .px(px(7.0))
@@ -1429,14 +1449,14 @@ fn chip_text(text: String, fg: Hsla, bg: Hsla) -> gpui_kit::Div {
 }
 
 /// The floating "n changes not saved" bar, with Discard and Save.
-fn save_bar(
+pub(crate) fn save_bar<V: 'static>(
     id: &str,
     n: usize,
     saving: bool,
     p: &Palette,
-    cx: &mut Context<ServerSettingsView>,
-    discard: impl Fn(&mut ServerSettingsView, &mut Window, &mut Context<ServerSettingsView>) + 'static,
-    save: impl Fn(&mut ServerSettingsView, &mut Context<ServerSettingsView>) + 'static,
+    cx: &mut Context<V>,
+    discard: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
+    save: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
 ) -> AnyElement {
     motion::rise(
         div()
@@ -1475,9 +1495,9 @@ fn save_bar(
                     p,
                 )
                 .when(saving, |el| el.opacity(0.6))
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_click(cx.listener(move |this, _, window, cx| {
                     if !saving {
-                        save(this, cx)
+                        save(this, window, cx)
                     }
                 })),
             ),
@@ -1489,14 +1509,14 @@ fn save_bar(
 }
 
 /// A circle that turns while something's on its way.
-fn spinner(id: impl Into<SharedString>, size: f32, window: &Window) -> AnyElement {
+pub(crate) fn spinner(id: impl Into<SharedString>, size: f32, window: &Window) -> AnyElement {
     motion::ambient(icon("loader-circle").size(px(size)), id.into(), Duration::from_millis(900), window, |el, t| {
         el.rotate(gpui_kit::radians(t * std::f32::consts::TAU))
     })
 }
 
 /// Grey bars that pulse while a list loads.
-fn shimmer_rows(n: usize, p: &Palette) -> impl IntoElement {
+pub(crate) fn shimmer_rows(n: usize, p: &Palette) -> impl IntoElement {
     use gpui_kit::{Animation, AnimationExt as _};
     let base = alpha(p.muted_foreground, 0.1);
     div().flex().flex_col().gap(px(8.0)).children((0..n).map(move |k| {
@@ -1578,7 +1598,7 @@ fn text_chips(
         .into_any_element()
 }
 
-fn chip(id: SharedString, label: &str, on: bool, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
+pub(crate) fn chip(id: SharedString, label: &str, on: bool, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
     let hover = mix(p.secondary, p.primary, 0.16);
     div()
         .id(id)
@@ -1645,6 +1665,13 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::WebhookUpdate => ("webhook", sky),
         A::WebhookDelete => ("unplug", red),
         A::AgentAdd => ("bot", violet),
+        A::ShareCodeCreate | A::SharedChannelRequest => ("link", green),
+        A::ShareCodeDelete => ("link-2-off", red),
+        A::SharedChannelApprove => ("check", green),
+        A::SharedChannelUpdate => ("settings", sky),
+        A::SharedChannelDisconnect => ("unplug", red),
+        A::SharedChannelBlock => ("user-x", red),
+        A::SharedChannelUnblock => ("undo", green),
         A::Unspecified => ("scroll-text", p.muted_foreground.into()),
     }
 }
@@ -1788,6 +1815,7 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
     let actor = who(&entry.actor_id);
     let target = who(&entry.target_id);
     let change = |field: &str| entry.changes.iter().find(|c| c.field == field);
+    let shared_server = || change("server").map(|c| c.after.clone()).unwrap_or_else(|| "another server".into());
     let at = entry.created_at.as_ref().map(|t| t.seconds * 1000).unwrap_or_default();
     let named_channel = |name: &str| format!("**#{}**", plain(name));
     let channel = match channels.iter().find(|c| c.id == entry.target_id) {
@@ -1908,6 +1936,22 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         A::WebhookUpdate => format!("{actor} changed the webhook **{}**", name_of(true)),
         A::WebhookDelete => format!("{actor} deleted the webhook **{}**", name_of(false)),
         A::AgentAdd => format!("{actor} added the agent {target}"),
+        A::ShareCodeCreate => format!("{actor} made a share code for {}", named_channel(&entry.channel_name)),
+        A::ShareCodeDelete => format!("{actor} deleted a share code for {}", named_channel(&entry.channel_name)),
+        A::SharedChannelRequest => {
+            format!("{actor} asked to show {} from **{}**", named_channel(&entry.channel_name), plain(&shared_server()))
+        }
+        A::SharedChannelApprove => {
+            format!("{actor} shared {} with **{}**", named_channel(&entry.channel_name), plain(&shared_server()))
+        }
+        A::SharedChannelUpdate => {
+            format!("{actor} changed what the other server may do in {}", named_channel(&entry.channel_name))
+        }
+        A::SharedChannelDisconnect => {
+            format!("{actor} ended sharing {} with **{}**", named_channel(&entry.channel_name), plain(&shared_server()))
+        }
+        A::SharedChannelBlock => format!("{actor} kept {target} out of {}", named_channel(&entry.channel_name)),
+        A::SharedChannelUnblock => format!("{actor} let {target} back into {}", named_channel(&entry.channel_name)),
         A::Unspecified => format!("{actor} did something"),
     }
 }
@@ -1950,7 +1994,8 @@ mod tests {
         use crate::core::permissions::Access;
         let nobody = Access::default();
         assert!(pages(&nobody).is_empty());
-        let owner = Access { owner: true, server: u32::MAX, ..Access::default() };
+        let channels = std::iter::once(("general".to_owned(), u32::MAX)).collect();
+        let owner = Access { owner: true, server: u32::MAX, channels, ..Access::default() };
         assert_eq!(words("ManageServer"), "Manage server");
         assert_eq!(
             pages(&owner),
@@ -1959,6 +2004,7 @@ mod tests {
                 Page::Welcome,
                 Page::Invites,
                 Page::Roles,
+                Page::Channels,
                 Page::Emoji,
                 Page::Integrations,
                 Page::Members,
@@ -1969,5 +2015,9 @@ mod tests {
         );
         let hooks = Access { server: crate::core::permissions::bit(P::ManageWebhooks), ..Access::default() };
         assert_eq!(pages(&hooks), vec![Page::Integrations]);
+        // Managing one channel opens the Channels page.
+        let one = std::iter::once(("general".to_owned(), crate::core::permissions::bit(P::ManageRoles))).collect();
+        let keeper = Access { channels: one, ..Access::default() };
+        assert_eq!(pages(&keeper), vec![Page::Channels]);
     }
 }

@@ -108,6 +108,37 @@ pub fn moved(layout: &Layout, drop: &Drop) -> Layout {
     }
 }
 
+/// The layout with one channel or category moved a place up (`by` -1) or
+/// down (1), as the arrow keys do: a channel at the end of its group steps
+/// into the next one. `None` when it can't go further.
+pub fn step(layout: &Layout, id: &str, by: i32) -> Option<Layout> {
+    if let Some(at) = layout.categories.iter().position(|(c, _)| c == id) {
+        let to = at as i32 + by;
+        if to < 0 || to as usize >= layout.categories.len() {
+            return None;
+        }
+        let before = if by < 0 {
+            Some(layout.categories[to as usize].0.clone())
+        } else {
+            layout.categories.get(to as usize + 1).map(|(c, _)| c.clone())
+        };
+        return Some(moved(layout, &Drop::Category { id: id.into(), before }));
+    }
+    let groups: Vec<(&str, &[String])> = std::iter::once(("", layout.loose.as_slice()))
+        .chain(layout.categories.iter().map(|(c, children)| (c.as_str(), children.as_slice())))
+        .collect();
+    let g = groups.iter().position(|(_, children)| children.iter().any(|c| c == id))?;
+    let (parent, list) = groups[g];
+    let at = list.iter().position(|c| c == id)? as i32;
+    if at + by >= 0 && ((at + by) as usize) < list.len() {
+        let before = if by < 0 { Some(list[(at - 1) as usize].clone()) } else { list.get(at as usize + 2).cloned() };
+        return Some(moved(layout, &Drop::Channel { id: id.into(), parent: parent.into(), before }));
+    }
+    let (next, children) = *groups.get(usize::try_from(g as i32 + by).ok()?)?;
+    let before = if by < 0 { None } else { children.first().cloned() };
+    Some(moved(layout, &Drop::Channel { id: id.into(), parent: next.into(), before }))
+}
+
 /// The channels as they'll be once the server takes a new order, for showing
 /// it straight away. They keep the positions they had between them, handed
 /// out in the new order, so the server's answer (and its events) usually
@@ -221,5 +252,28 @@ mod tests {
             [("general", 0), ("art", 1), ("doodles", 2), ("games", 3), ("minecraft", 4), ("chess", 5)]
         );
         assert_eq!(shown[2].parent_id, "art");
+    }
+
+    #[test]
+    fn arrows_step_one_place_and_across_categories() {
+        let layout = layout_of(&sample());
+        let down = step(&layout, "minecraft", 1).unwrap();
+        assert_eq!(down.categories[0].1, ["chess", "minecraft"]);
+        // At the end of its category it steps into the next one, first.
+        let across = step(&down, "minecraft", 1).unwrap();
+        assert_eq!(across.categories[0].1, ["chess"]);
+        assert_eq!(across.categories[1].1, ["minecraft", "doodles"]);
+        // And back up, to the end of the one before.
+        let back = step(&across, "minecraft", -1).unwrap();
+        assert_eq!(back.categories[0].1, ["chess", "minecraft"]);
+        // Out of the first category, up among the loose channels.
+        let out = step(&layout, "minecraft", -1).unwrap();
+        assert_eq!(out.loose, ["general", "minecraft"]);
+        assert!(step(&layout, "general", -1).is_none());
+        assert!(step(&layout, "doodles", 1).is_none());
+        // Categories swap with their neighbours.
+        let cats = step(&layout, "games", 1).unwrap();
+        assert_eq!(cats.categories.iter().map(|(c, _)| c.as_str()).collect::<Vec<_>>(), ["art", "games"]);
+        assert!(step(&layout, "games", -1).is_none());
     }
 }

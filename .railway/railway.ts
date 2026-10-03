@@ -65,6 +65,30 @@ const DRAIN = 45;
  */
 const SPLIT: { gateways: number; shards: number } | null = { gateways: 2, shards: 2 };
 
+/**
+ * The home region's label (docs/regions.md): where the directory, the gateways and the
+ * parts above run, and so where accounts, settings and direct messages are kept.
+ */
+const HOME = { id: "us-east", name: "US East" };
+
+/**
+ * Regions beyond the home one, for communities whose servers must be kept elsewhere
+ * (docs/regions.md). Each gets `fuwa-<id>-shard-1` to `-<shards>` on volumes of their
+ * own, a `fuwa-<id>-media` with its own TCP proxy for calls in that region, and a
+ * `fuwa-<id>-replica` bucket, all in `railway` / `bucket`. Their servers' messages,
+ * recordings and calls stay there; requests reach them through the home gateways.
+ *
+ * Empty, fuwa.chat is one region and runs exactly as before. Adding one deploys new
+ * services, so it waits for Juan to say so. Railway can't move a service to another
+ * region: a region is added, never moved, and removing one deletes its volumes and
+ * every server on them (move them home first, in Settings > Instance > Servers).
+ *
+ * For example: `{ id: "eu", name: "Europe", railway: "europe-west4-drams3a", bucket: "ams", shards: 1 }`.
+ * Railway regions: us-west2, us-east4-eqdc4a, europe-west4-drams3a, asia-southeast1-eqsg3a.
+ * Bucket regions: sjc, iad, ams, sin.
+ */
+const REGIONS: { id: string; name: string; railway: string; bucket: string; shards: number }[] = [];
+
 export default defineRailway((ctx) => {
   // The image every merge to master publishes; the publish workflow redeploys every
   // part onto it right away. Auto updates are the fallback: Railway takes a new image
@@ -130,6 +154,19 @@ export default defineRailway((ctx) => {
   if (!Number.isInteger(shards) || shards < 1 || shards > MAX_VOLUMES - 1) {
     throw new Error(`SPLIT.shards must be a whole number from 1 to ${MAX_VOLUMES - 1}`);
   }
+  for (const r of REGIONS) {
+    if (!/^[a-z0-9-]{1,32}$/.test(r.id) || r.id === HOME.id || REGIONS.filter((o) => o.id === r.id).length > 1) {
+      throw new Error(`region ${JSON.stringify(r.id)} needs a label of its own: 1 to 32 of a-z, 0-9 and -`);
+    }
+    if (!Number.isInteger(r.shards) || r.shards < 1) throw new Error(`region ${r.id} needs at least one shard`);
+  }
+  if (1 + shards + REGIONS.reduce((n, r) => n + r.shards, 0) > MAX_VOLUMES) {
+    throw new Error(`the directory and every region's shards need at most ${MAX_VOLUMES} volumes`);
+  }
+  // Labels go on the parts only once there's more than one region, so a single-region
+  // fuwa.chat keeps the settings it has always had.
+  const label = (region: { id: string; name: string }) =>
+    REGIONS.length ? { FUWA_REGION: region.id, FUWA_REGION_NAME: region.name } : {};
 
   // Every part listens on PORT on both IPv4 and IPv6, and the parts reach each other over
   // Railway's private network, sending the cluster key with every call.
@@ -140,6 +177,12 @@ export default defineRailway((ctx) => {
     FUWA_CLUSTER_KEY: ctx.shared.FUWA_CLUSTER_KEY,
   });
   const internalUrl = (name: string) => `http://\${{${name}.RAILWAY_PRIVATE_DOMAIN}}:${PORT}`;
+  const mediaEnv = (region: { id: string; name: string }) => ({
+    ...part("media"),
+    ...label(region),
+    FUWA_MEDIA_PORT: String(MEDIA_PORT),
+    FUWA_MEDIA_ADDRESSES: "tcp/${{RAILWAY_TCP_PROXY_DOMAIN}}:${{RAILWAY_TCP_PROXY_PORT}}",
+  });
 
   // Calls' sound. Railway has no public UDP, so apps reach it over TCP (ICE-TCP)
   // through a TCP proxy, whose address it hands them. It keeps nothing: on a deploy or
@@ -151,11 +194,7 @@ export default defineRailway((ctx) => {
     regions: { [REGION]: 1 },
     tcp: [MEDIA_PORT],
     deploy: { drainingSeconds: 5 },
-    env: {
-      ...part("media"),
-      FUWA_MEDIA_PORT: String(MEDIA_PORT),
-      FUWA_MEDIA_ADDRESSES: "tcp/${{RAILWAY_TCP_PROXY_DOMAIN}}:${{RAILWAY_TCP_PROXY_PORT}}",
-    },
+    env: mediaEnv(HOME),
   });
   // Where the directory (calls in direct messages) and shards (voice channels) open calls.
   const mediaUrl = { FUWA_MEDIA_URL: internalUrl(media.name) };
@@ -170,6 +209,7 @@ export default defineRailway((ctx) => {
     deploy: { drainingSeconds: DRAIN },
     env: {
       ...part("directory"),
+      ...label(HOME),
       // The instance's own settings live with the directory, which hands them to every
       // other part, and it sends the usage signal.
       ...instance,
@@ -191,6 +231,7 @@ export default defineRailway((ctx) => {
       deploy: { drainingSeconds: DRAIN },
       env: {
         ...part("shard"),
+        ...label(HOME),
         // Never renamed: the directory knows which servers are on which shard by it.
         FUWA_SHARD_ID: `shard-${i + 1}`,
         FUWA_DIRECTORY_URL: internalUrl(directory.name),
@@ -221,5 +262,50 @@ export default defineRailway((ctx) => {
     },
   });
 
-  return project("fuwa", { resources: [data, replica, directory, ...shardParts.flat(), gateway, media] });
+  // Each other region: its own shards, media part and bucket, joined to the home
+  // directory over the private network (it spans regions within a project).
+  const regionParts = REGIONS.flatMap((region) => {
+    const regionReplica = bucket(`fuwa-${region.id}-replica`, { region: region.bucket });
+    const regionMedia = service(`fuwa-${region.id}-media`, {
+      source: fuwaImage(),
+      healthcheck: "/healthz",
+      regions: { [region.railway]: 1 },
+      tcp: [MEDIA_PORT],
+      deploy: { drainingSeconds: 5 },
+      env: mediaEnv(region),
+    });
+    const regionShards = Array.from({ length: region.shards }, (_, i) => {
+      const name = `fuwa-${region.id}-shard-${i + 1}`;
+      const shardData = volume(`${name}-data`, { region: region.railway, sizeMB: VOLUME_MB });
+      const shard = service(name, {
+        source: fuwaImage(),
+        healthcheck: "/healthz",
+        regions: { [region.railway]: 1 },
+        volumeMounts: { "/data": shardData },
+        deploy: { drainingSeconds: DRAIN },
+        env: {
+          ...part("shard"),
+          ...label(region),
+          FUWA_SHARD_ID: `${region.id}-shard-${i + 1}`,
+          FUWA_DIRECTORY_URL: internalUrl(directory.name),
+          FUWA_INTERNAL_URL: internalUrl(name),
+          FUWA_ENCRYPTION_KEY: ctx.shared.FUWA_ENCRYPTION_KEY,
+          // Its own region's bucket, so its servers' copies stay there too.
+          FUWA_S3_ENDPOINT: ref(regionReplica, "ENDPOINT"),
+          FUWA_S3_REGION: ref(regionReplica, "REGION"),
+          FUWA_S3_BUCKET: ref(regionReplica, "BUCKET"),
+          FUWA_S3_ACCESS_KEY_ID: ref(regionReplica, "ACCESS_KEY_ID"),
+          FUWA_S3_SECRET_ACCESS_KEY: ref(regionReplica, "SECRET_ACCESS_KEY"),
+          FUWA_RESTORE: "if-empty",
+          FUWA_MEDIA_URL: internalUrl(regionMedia.name),
+        },
+      });
+      return [shardData, shard];
+    });
+    return [regionReplica, regionMedia, ...regionShards.flat()];
+  });
+
+  return project("fuwa", {
+    resources: [data, replica, directory, ...shardParts.flat(), gateway, media, ...regionParts],
+  });
 });

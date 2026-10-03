@@ -108,11 +108,11 @@ fn color_of(c: u32) -> Hsla {
     rgb(c).into()
 }
 
-fn role_color(r: &pb::Role) -> Option<u32> {
+pub(super) fn role_color(r: &pb::Role) -> Option<u32> {
     r.color.map(|c| c as u32)
 }
 
-fn member_name(m: &pb::Member) -> String {
+pub(super) fn member_name(m: &pb::Member) -> String {
     match &m.user {
         Some(u) if m.nickname.is_empty() => user_name(u),
         Some(_) => m.nickname.clone(),
@@ -121,7 +121,7 @@ fn member_name(m: &pb::Member) -> String {
 }
 
 /// A small dot in a role's color, or an outline for one without.
-fn dot(color: Option<u32>, size: f32, p: &Palette) -> gpui_kit::Div {
+pub(super) fn dot(color: Option<u32>, size: f32, p: &Palette) -> gpui_kit::Div {
     let d = div().flex_none().size(px(size)).rounded_full();
     match color {
         Some(c) => d.bg(color_of(c)),
@@ -130,12 +130,12 @@ fn dot(color: Option<u32>, size: f32, p: &Palette) -> gpui_kit::Div {
 }
 
 /// A switch that calls back into the page.
-pub(super) fn switch(
+pub(crate) fn switch<V: 'static>(
     id: SharedString,
     on: bool,
     disabled: bool,
-    cx: &mut Context<ServerSettingsView>,
-    set: impl Fn(&mut ServerSettingsView, bool, &mut Context<ServerSettingsView>) + 'static,
+    cx: &mut Context<V>,
+    set: impl Fn(&mut V, bool, &mut Context<V>) + 'static,
 ) -> impl IntoElement {
     let entity = cx.entity().downgrade();
     let set = Rc::new(set);
@@ -681,7 +681,7 @@ impl ServerSettingsView {
                 p,
                 cx,
                 move |this, window, cx| this.discard_role(&r1, window, cx),
-                move |this, cx| {
+                move |this, _, cx| {
                     if !this.roles.saving {
                         this.save_role(&r2, everyone, cx)
                     }

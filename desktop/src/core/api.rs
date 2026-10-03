@@ -114,6 +114,7 @@ clients! {
     join => "JoinService" pb::join_service_client::JoinServiceClient<Transport>,
     calls => "CallService" pb::call_service_client::CallServiceClient<Transport>,
     sso => "SsoService" pb::sso_service_client::SsoServiceClient<Transport>,
+    admin => "AdminService" pb::admin_service_client::AdminServiceClient<Transport>,
 }
 
 impl Api {

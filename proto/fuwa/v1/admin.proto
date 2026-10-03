@@ -40,6 +40,11 @@ service AdminService {
   // open, sent in pieces. It is never encrypted, even when the instance
   // encrypts its files.
   rpc ExportServer(ExportServerRequest) returns (stream ExportServerResponse);
+  // Moves a server's data to another region (one of Node.regions): its
+  // file and recordings are copied to a shard there, then deleted where they
+  // were. Changes to it wait a moment meanwhile, and people in its calls
+  // reconnect. Only on an instance with more than one region.
+  rpc MoveServer(MoveServerRequest) returns (MoveServerResponse);
 
   // Puts a banner on every client of this instance, or takes it down.
   rpc SetAnnouncement(SetAnnouncementRequest) returns (SetAnnouncementResponse);
@@ -114,6 +119,10 @@ message InstanceSettings {
   // Moderation providers servers' AutoMod can use, one entry for each kind
   // fuwa knows. Their API keys are never sent back.
   repeated AutoModProviderSettings automod_providers = 25;
+  // Servers may share channels with each other (SharedChannelService).
+  // Turning it off stops new codes and requests; channels already shared
+  // stay shared until either side ends them. FUWA_SHARED_CHANNELS.
+  bool shared_channels = 30;
   // How many times a day (UTC) one server's Smart filter may ask its
   // provider; unset for no cap. Past it, that day's messages go through the
   // Smart filter unchecked (the server's other rules still apply).
@@ -373,6 +382,16 @@ message ListInstanceServersRequest {}
 
 message ListInstanceServersResponse {
   repeated InstanceServer servers = 1;
+}
+
+message MoveServerRequest {
+  string server_id = 1;
+  // The region's id; empty for the home region.
+  string region = 2;
+}
+
+message MoveServerResponse {
+  Server server = 1;
 }
 
 message ExportServerRequest {

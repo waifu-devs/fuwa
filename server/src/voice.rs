@@ -52,12 +52,12 @@ impl Place {
     /// Whether the media part should pass their camera on: only while they
     /// say it's on, so nobody films while everyone sees their camera off.
     pub fn may_video(&self) -> bool {
-        self.state.self_video && !self.state.video_suppress
+        self.state.self_video && !self.state.video_suppress && !self.state.server_video_off
     }
 
     /// Whether the media part should pass their shared screen on.
     pub fn may_screen(&self) -> bool {
-        self.state.self_stream && !self.state.video_suppress
+        self.state.self_stream && !self.state.video_suppress && !self.state.server_video_off
     }
 
     pub fn may(&self) -> May {

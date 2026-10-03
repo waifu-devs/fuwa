@@ -866,7 +866,7 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path()).await;
     let mut c = clients(&instance).await;
-    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (juan, juan_id) = sign_up(&mut c, "juan").await;
     let (mika, mika_id) = sign_up(&mut c, "mika").await;
     let request = pb::CreateServerRequest { name: "Cameras".into(), discoverable: true, ..Default::default() };
     let sid = c.servers.create_server(authed(&juan, request)).await.unwrap().into_inner().server.unwrap().id;
@@ -896,7 +896,8 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     let (mut watching, offer) = Peer::new().await;
     let request =
         pb::JoinVoiceRequest { server_id: sid.clone(), channel_id: voice.id.clone(), offer, ..Default::default() };
-    watching.answer(&c.calls.join_voice(authed(&juan, request)).await.unwrap().into_inner().answer);
+    let watcher = c.calls.join_voice(authed(&juan, request)).await.unwrap().into_inner();
+    watching.answer(&watcher.answer);
 
     // Until asked, a viewer gets the smallest size, starting on a keyframe.
     // A bigger one may come first, when its first frames reach the media
@@ -975,6 +976,46 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     assert_eq!(watching.screen_sounds_heard(heard), 0, "no screen's sound once the share stops");
     assert!(watching.heard.len() > heard + 10, "the voice goes on");
     c.calls.keep_voice(authed(&mika, keep(true, true))).await.unwrap();
+
+    // A moderator turns Mika's camera and screen off: they stay off even
+    // while Mika's app says they're on, the voice goes on, and it outlasts
+    // the call like server mute.
+    let video_off = |user_id: &str, off| pb::ModerateVoiceRequest {
+        server_id: sid.clone(),
+        user_id: user_id.into(),
+        server_video_off: Some(off),
+        ..Default::default()
+    };
+    let denied = c.calls.moderate_voice(authed(&mika, video_off(&juan_id, true))).await.unwrap_err();
+    assert_eq!(denied.code(), tonic::Code::PermissionDenied, "needs MUTE_MEMBERS");
+    c.calls.moderate_voice(authed(&juan, video_off(&mika_id, true))).await.unwrap();
+    let state = c.calls.keep_voice(authed(&mika, keep(true, true))).await.unwrap().into_inner().state.unwrap();
+    assert!(state.server_video_off && !state.self_video && !state.self_stream, "{state:?}");
+    let sdb = instance.app.servers.get(&sid).await.unwrap();
+    assert!(sdb.voice_moderation(&mika_id).await.unwrap().video_off, "kept for their next call");
+    watching.say(serde_json::json!({ "type": "layers", "layers": { &mid: "h" } }));
+    talk(&mut filming, &mut watching, Duration::from_millis(500)).await;
+    let (seen, heard) = (watching.seen.len(), watching.heard.len());
+    talk(&mut filming, &mut watching, Duration::from_secs(1)).await;
+    assert_eq!(watching.seen.len(), seen, "no camera or screen once a moderator turns them off");
+    assert_eq!(watching.screen_sounds_heard(heard), 0, "nor the screen's sound");
+    assert!(watching.heard.len() > heard + 10, "the voice goes on");
+    // Juan keeps watching: an unkept place is let go after 15 seconds.
+    let request = pb::KeepVoiceRequest {
+        server_id: sid.clone(),
+        session_id: watcher.session_id.clone(),
+        channel_id: voice.id.clone(),
+        ..Default::default()
+    };
+    c.calls.keep_voice(authed(&juan, request)).await.unwrap();
+    // Lifted: Mika turns them on again.
+    c.calls.moderate_voice(authed(&juan, video_off(&mika_id, false))).await.unwrap();
+    assert!(!sdb.voice_moderation(&mika_id).await.unwrap().video_off);
+    let state = c.calls.keep_voice(authed(&mika, keep(true, true))).await.unwrap().into_inner().state.unwrap();
+    assert!(!state.server_video_off && state.self_video && state.self_stream);
+    let from = watching.seen.len();
+    talk(&mut filming, &mut watching, Duration::from_secs(2)).await;
+    assert!(watching.seen.len() > from + 5, "the camera's back");
 
     // A channel that takes VIDEO away stops the camera there, and says so.
     let everyone = pb::PermissionOverwrite {

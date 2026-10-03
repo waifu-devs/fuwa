@@ -2,17 +2,19 @@
 // @generated from file fuwa/v1/channel.proto (package fuwa.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Channel, ChannelType, PermissionOverwrite } from "./types_pb";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Channel, ChannelType, Permission, PermissionOverwrite, SharedServer, User } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file fuwa/v1/channel.proto.
  */
 export const file_fuwa_v1_channel: GenFile = /*@__PURE__*/
-  fileDesc("ChVmdXdhL3YxL2NoYW5uZWwucHJvdG8SB2Z1d2EudjEifQoUQ3JlYXRlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSIgoEdHlwZRgDIAEoDjIULmZ1d2EudjEuQ2hhbm5lbFR5cGUSEQoJcGFyZW50X2lkGAQgASgJEg0KBXRvcGljGAUgASgJIjoKFUNyZWF0ZUNoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIjoKEUdldENoYW5uZWxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJIjcKEkdldENoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIigKE0xpc3RDaGFubmVsc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjoKFExpc3RDaGFubmVsc1Jlc3BvbnNlEiIKCGNoYW5uZWxzGAEgAygLMhAuZnV3YS52MS5DaGFubmVsIvUBChRVcGRhdGVDaGFubmVsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIRCgRuYW1lGAMgASgJSACIAQESEgoFdG9waWMYBCABKAlIAYgBARIVCghwb3NpdGlvbhgFIAEoBUgCiAEBEhYKCXBhcmVudF9pZBgGIAEoCUgDiAEBEh0KEHNsb3dtb2RlX3NlY29uZHMYByABKAVIBIgBAUIHCgVfbmFtZUIICgZfdG9waWNCCwoJX3Bvc2l0aW9uQgwKCl9wYXJlbnRfaWRCEwoRX3Nsb3dtb2RlX3NlY29uZHMiOgoVVXBkYXRlQ2hhbm5lbFJlc3BvbnNlEiEKB2NoYW5uZWwYASABKAsyEC5mdXdhLnYxLkNoYW5uZWwiPQoURGVsZXRlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkiFwoVRGVsZXRlQ2hhbm5lbFJlc3BvbnNlIlgKFlJlb3JkZXJDaGFubmVsc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEisKCGNoYW5uZWxzGAIgAygLMhkuZnV3YS52MS5DaGFubmVsUGxhY2VtZW50IjkKEENoYW5uZWxQbGFjZW1lbnQSEgoKY2hhbm5lbF9pZBgBIAEoCRIRCglwYXJlbnRfaWQYAiABKAkiPQoXUmVvcmRlckNoYW5uZWxzUmVzcG9uc2USIgoIY2hhbm5lbHMYASADKAsyEC5mdXdhLnYxLkNoYW5uZWwidwocU2V0Q2hhbm5lbFBlcm1pc3Npb25zUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIwCgpvdmVyd3JpdGVzGAMgAygLMhwuZnV3YS52MS5QZXJtaXNzaW9uT3ZlcndyaXRlIkIKHVNldENoYW5uZWxQZXJtaXNzaW9uc1Jlc3BvbnNlEiEKB2NoYW5uZWwYASABKAsyEC5mdXdhLnYxLkNoYW5uZWwy0gQKDkNoYW5uZWxTZXJ2aWNlEk4KDUNyZWF0ZUNoYW5uZWwSHS5mdXdhLnYxLkNyZWF0ZUNoYW5uZWxSZXF1ZXN0Gh4uZnV3YS52MS5DcmVhdGVDaGFubmVsUmVzcG9uc2USRQoKR2V0Q2hhbm5lbBIaLmZ1d2EudjEuR2V0Q2hhbm5lbFJlcXVlc3QaGy5mdXdhLnYxLkdldENoYW5uZWxSZXNwb25zZRJLCgxMaXN0Q2hhbm5lbHMSHC5mdXdhLnYxLkxpc3RDaGFubmVsc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RDaGFubmVsc1Jlc3BvbnNlEk4KDVVwZGF0ZUNoYW5uZWwSHS5mdXdhLnYxLlVwZGF0ZUNoYW5uZWxSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVDaGFubmVsUmVzcG9uc2USTgoNRGVsZXRlQ2hhbm5lbBIdLmZ1d2EudjEuRGVsZXRlQ2hhbm5lbFJlcXVlc3QaHi5mdXdhLnYxLkRlbGV0ZUNoYW5uZWxSZXNwb25zZRJUCg9SZW9yZGVyQ2hhbm5lbHMSHy5mdXdhLnYxLlJlb3JkZXJDaGFubmVsc1JlcXVlc3QaIC5mdXdhLnYxLlJlb3JkZXJDaGFubmVsc1Jlc3BvbnNlEmYKFVNldENoYW5uZWxQZXJtaXNzaW9ucxIlLmZ1d2EudjEuU2V0Q2hhbm5lbFBlcm1pc3Npb25zUmVxdWVzdBomLmZ1d2EudjEuU2V0Q2hhbm5lbFBlcm1pc3Npb25zUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
+  fileDesc("ChVmdXdhL3YxL2NoYW5uZWwucHJvdG8SB2Z1d2EudjEifQoUQ3JlYXRlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSIgoEdHlwZRgDIAEoDjIULmZ1d2EudjEuQ2hhbm5lbFR5cGUSEQoJcGFyZW50X2lkGAQgASgJEg0KBXRvcGljGAUgASgJIjoKFUNyZWF0ZUNoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIjoKEUdldENoYW5uZWxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJIjcKEkdldENoYW5uZWxSZXNwb25zZRIhCgdjaGFubmVsGAEgASgLMhAuZnV3YS52MS5DaGFubmVsIigKE0xpc3RDaGFubmVsc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIjoKFExpc3RDaGFubmVsc1Jlc3BvbnNlEiIKCGNoYW5uZWxzGAEgAygLMhAuZnV3YS52MS5DaGFubmVsIvUBChRVcGRhdGVDaGFubmVsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIRCgRuYW1lGAMgASgJSACIAQESEgoFdG9waWMYBCABKAlIAYgBARIVCghwb3NpdGlvbhgFIAEoBUgCiAEBEhYKCXBhcmVudF9pZBgGIAEoCUgDiAEBEh0KEHNsb3dtb2RlX3NlY29uZHMYByABKAVIBIgBAUIHCgVfbmFtZUIICgZfdG9waWNCCwoJX3Bvc2l0aW9uQgwKCl9wYXJlbnRfaWRCEwoRX3Nsb3dtb2RlX3NlY29uZHMiOgoVVXBkYXRlQ2hhbm5lbFJlc3BvbnNlEiEKB2NoYW5uZWwYASABKAsyEC5mdXdhLnYxLkNoYW5uZWwiPQoURGVsZXRlQ2hhbm5lbFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkiFwoVRGVsZXRlQ2hhbm5lbFJlc3BvbnNlIlgKFlJlb3JkZXJDaGFubmVsc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEisKCGNoYW5uZWxzGAIgAygLMhkuZnV3YS52MS5DaGFubmVsUGxhY2VtZW50IjkKEENoYW5uZWxQbGFjZW1lbnQSEgoKY2hhbm5lbF9pZBgBIAEoCRIRCglwYXJlbnRfaWQYAiABKAkiPQoXUmVvcmRlckNoYW5uZWxzUmVzcG9uc2USIgoIY2hhbm5lbHMYASADKAsyEC5mdXdhLnYxLkNoYW5uZWwidwocU2V0Q2hhbm5lbFBlcm1pc3Npb25zUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIwCgpvdmVyd3JpdGVzGAMgAygLMhwuZnV3YS52MS5QZXJtaXNzaW9uT3ZlcndyaXRlIkIKHVNldENoYW5uZWxQZXJtaXNzaW9uc1Jlc3BvbnNlEiEKB2NoYW5uZWwYASABKAsyEC5mdXdhLnYxLkNoYW5uZWwimwIKEFNoYXJlZENvbm5lY3Rpb24SCgoCaWQYASABKAkSDAoEaG9tZRgCIAEoCBISCgpjaGFubmVsX2lkGAMgASgJEhkKEWhvbWVfY2hhbm5lbF9uYW1lGAQgASgJEiUKBnNlcnZlchgFIAEoCzIVLmZ1d2EudjEuU2hhcmVkU2VydmVyEi0KBXN0YXRlGAYgASgOMh4uZnV3YS52MS5TaGFyZWRDb25uZWN0aW9uU3RhdGUSJAoHYWxsb3dlZBgHIAMoDjITLmZ1d2EudjEuUGVybWlzc2lvbhIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpjaGVja2VkX2J5GAkgAygJIrcBCglTaGFyZUNvZGUSDAoEY29kZRgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhQKDGNoYW5uZWxfbmFtZRgDIAEoCRISCgpjcmVhdG9yX2lkGAQgASgJEi4KCmNyZWF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCmV4cGlyZXNfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIpYBCgxDaGFubmVsQmxvY2sSEgoKY2hhbm5lbF9pZBgBIAEoCRIbCgR1c2VyGAIgASgLMg0uZnV3YS52MS5Vc2VyEiUKBnNlcnZlchgDIAEoCzIVLmZ1d2EudjEuU2hhcmVkU2VydmVyEi4KCmNyZWF0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIj8KFkNyZWF0ZVNoYXJlQ29kZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkiOwoXQ3JlYXRlU2hhcmVDb2RlUmVzcG9uc2USIAoEY29kZRgBIAEoCzISLmZ1d2EudjEuU2hhcmVDb2RlIjkKFkRlbGV0ZVNoYXJlQ29kZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBGNvZGUYAiABKAkiGQoXRGVsZXRlU2hhcmVDb2RlUmVzcG9uc2UiNgoTUHJldmlld1NoYXJlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDAoEY29kZRgCIAEoCSL+AQoUUHJldmlld1NoYXJlUmVzcG9uc2USKgoLaG9tZV9zZXJ2ZXIYASABKAsyFS5mdXdhLnYxLlNoYXJlZFNlcnZlchIUCgxjaGFubmVsX25hbWUYAiABKAkSFQoNY2hhbm5lbF90b3BpYxgDIAEoCRIOCgZyZWdpb24YBCABKAkSEgoKY2hlY2tlZF9ieRgFIAMoCRIkCgdhbGxvd2VkGAYgAygOMhMuZnV3YS52MS5QZXJtaXNzaW9uEi4KCmV4cGlyZXNfYXQYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhMKC2d1ZXN0X2NvdW50GAggASgFIlYKEkFjY2VwdFNoYXJlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDAoEY29kZRgCIAEoCRIMCgRuYW1lGAMgASgJEhEKCXBhcmVudF9pZBgEIAEoCSJEChNBY2NlcHRTaGFyZVJlc3BvbnNlEi0KCmNvbm5lY3Rpb24YASABKAsyGS5mdXdhLnYxLlNoYXJlZENvbm5lY3Rpb24iTwoSUmV2aWV3U2hhcmVSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJEg8KB2FwcHJvdmUYAyABKAgiRAoTUmV2aWV3U2hhcmVSZXNwb25zZRItCgpjb25uZWN0aW9uGAEgASgLMhkuZnV3YS52MS5TaGFyZWRDb25uZWN0aW9uIisKFkxpc3RDb25uZWN0aW9uc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIpMBChdMaXN0Q29ubmVjdGlvbnNSZXNwb25zZRIuCgtjb25uZWN0aW9ucxgBIAMoCzIZLmZ1d2EudjEuU2hhcmVkQ29ubmVjdGlvbhIhCgVjb2RlcxgCIAMoCzISLmZ1d2EudjEuU2hhcmVDb2RlEiUKBmJsb2NrcxgDIAMoCzIVLmZ1d2EudjEuQ2hhbm5lbEJsb2NrImkKF1VwZGF0ZUNvbm5lY3Rpb25SZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJEiQKB2FsbG93ZWQYAyADKA4yEy5mdXdhLnYxLlBlcm1pc3Npb24iSQoYVXBkYXRlQ29ubmVjdGlvblJlc3BvbnNlEi0KCmNvbm5lY3Rpb24YASABKAsyGS5mdXdhLnYxLlNoYXJlZENvbm5lY3Rpb24iPQoRRGlzY29ubmVjdFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkiFAoSRGlzY29ubmVjdFJlc3BvbnNlImIKF0Jsb2NrRnJvbUNoYW5uZWxSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSDwoHYmxvY2tlZBgEIAEoCCIaChhCbG9ja0Zyb21DaGFubmVsUmVzcG9uc2UqiQEKFVNoYXJlZENvbm5lY3Rpb25TdGF0ZRInCiNTSEFSRURfQ09OTkVDVElPTl9TVEFURV9VTlNQRUNJRklFRBAAEiMKH1NIQVJFRF9DT05ORUNUSU9OX1NUQVRFX1dBSVRJTkcQARIiCh5TSEFSRURfQ09OTkVDVElPTl9TVEFURV9BQ1RJVkUQAjLSBAoOQ2hhbm5lbFNlcnZpY2USTgoNQ3JlYXRlQ2hhbm5lbBIdLmZ1d2EudjEuQ3JlYXRlQ2hhbm5lbFJlcXVlc3QaHi5mdXdhLnYxLkNyZWF0ZUNoYW5uZWxSZXNwb25zZRJFCgpHZXRDaGFubmVsEhouZnV3YS52MS5HZXRDaGFubmVsUmVxdWVzdBobLmZ1d2EudjEuR2V0Q2hhbm5lbFJlc3BvbnNlEksKDExpc3RDaGFubmVscxIcLmZ1d2EudjEuTGlzdENoYW5uZWxzUmVxdWVzdBodLmZ1d2EudjEuTGlzdENoYW5uZWxzUmVzcG9uc2USTgoNVXBkYXRlQ2hhbm5lbBIdLmZ1d2EudjEuVXBkYXRlQ2hhbm5lbFJlcXVlc3QaHi5mdXdhLnYxLlVwZGF0ZUNoYW5uZWxSZXNwb25zZRJOCg1EZWxldGVDaGFubmVsEh0uZnV3YS52MS5EZWxldGVDaGFubmVsUmVxdWVzdBoeLmZ1d2EudjEuRGVsZXRlQ2hhbm5lbFJlc3BvbnNlElQKD1Jlb3JkZXJDaGFubmVscxIfLmZ1d2EudjEuUmVvcmRlckNoYW5uZWxzUmVxdWVzdBogLmZ1d2EudjEuUmVvcmRlckNoYW5uZWxzUmVzcG9uc2USZgoVU2V0Q2hhbm5lbFBlcm1pc3Npb25zEiUuZnV3YS52MS5TZXRDaGFubmVsUGVybWlzc2lvbnNSZXF1ZXN0GiYuZnV3YS52MS5TZXRDaGFubmVsUGVybWlzc2lvbnNSZXNwb25zZTLyBQoUU2hhcmVkQ2hhbm5lbFNlcnZpY2USVAoPQ3JlYXRlU2hhcmVDb2RlEh8uZnV3YS52MS5DcmVhdGVTaGFyZUNvZGVSZXF1ZXN0GiAuZnV3YS52MS5DcmVhdGVTaGFyZUNvZGVSZXNwb25zZRJUCg9EZWxldGVTaGFyZUNvZGUSHy5mdXdhLnYxLkRlbGV0ZVNoYXJlQ29kZVJlcXVlc3QaIC5mdXdhLnYxLkRlbGV0ZVNoYXJlQ29kZVJlc3BvbnNlEksKDFByZXZpZXdTaGFyZRIcLmZ1d2EudjEuUHJldmlld1NoYXJlUmVxdWVzdBodLmZ1d2EudjEuUHJldmlld1NoYXJlUmVzcG9uc2USSAoLQWNjZXB0U2hhcmUSGy5mdXdhLnYxLkFjY2VwdFNoYXJlUmVxdWVzdBocLmZ1d2EudjEuQWNjZXB0U2hhcmVSZXNwb25zZRJICgtSZXZpZXdTaGFyZRIbLmZ1d2EudjEuUmV2aWV3U2hhcmVSZXF1ZXN0GhwuZnV3YS52MS5SZXZpZXdTaGFyZVJlc3BvbnNlElQKD0xpc3RDb25uZWN0aW9ucxIfLmZ1d2EudjEuTGlzdENvbm5lY3Rpb25zUmVxdWVzdBogLmZ1d2EudjEuTGlzdENvbm5lY3Rpb25zUmVzcG9uc2USVwoQVXBkYXRlQ29ubmVjdGlvbhIgLmZ1d2EudjEuVXBkYXRlQ29ubmVjdGlvblJlcXVlc3QaIS5mdXdhLnYxLlVwZGF0ZUNvbm5lY3Rpb25SZXNwb25zZRJFCgpEaXNjb25uZWN0EhouZnV3YS52MS5EaXNjb25uZWN0UmVxdWVzdBobLmZ1d2EudjEuRGlzY29ubmVjdFJlc3BvbnNlElcKEEJsb2NrRnJvbUNoYW5uZWwSIC5mdXdhLnYxLkJsb2NrRnJvbUNoYW5uZWxSZXF1ZXN0GiEuZnV3YS52MS5CbG9ja0Zyb21DaGFubmVsUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.CreateChannelRequest
@@ -361,6 +363,629 @@ export const SetChannelPermissionsResponseSchema: GenMessage<SetChannelPermissio
   messageDesc(file_fuwa_v1_channel, 14);
 
 /**
+ * A connection between a channel and a server it's shown in, from one
+ * side's point of view.
+ *
+ * @generated from message fuwa.v1.SharedConnection
+ */
+export type SharedConnection = Message<"fuwa.v1.SharedConnection"> & {
+  /**
+   * The same on both sides.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * This server is the channel's home.
+   *
+   * @generated from field: bool home = 2;
+   */
+  home: boolean;
+
+  /**
+   * The channel here: the home's channel, or the guest's own (empty until
+   * the home approves).
+   *
+   * @generated from field: string channel_id = 3;
+   */
+  channelId: string;
+
+  /**
+   * The channel's name at its home.
+   *
+   * @generated from field: string home_channel_name = 4;
+   */
+  homeChannelName: string;
+
+  /**
+   * The server on the other end.
+   *
+   * @generated from field: fuwa.v1.SharedServer server = 5;
+   */
+  server?: SharedServer | undefined;
+
+  /**
+   * @generated from field: fuwa.v1.SharedConnectionState state = 6;
+   */
+  state: SharedConnectionState;
+
+  /**
+   * What the guest server's people may do in the channel, at most: some of
+   * SEND_MESSAGES, EMBED_LINKS and ATTACH_FILES. VIEW_CHANNELS always.
+   *
+   * @generated from field: repeated fuwa.v1.Permission allowed = 7;
+   */
+  allowed: Permission[];
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 8;
+   */
+  createdAt?: Timestamp | undefined;
+
+  /**
+   * Outside AutoMod providers the home's rules send the channel's messages
+   * to, as "Name (host)", the guest's people's included. Asked of the home
+   * each time the list is read; empty when none, or when it couldn't be.
+   *
+   * @generated from field: repeated string checked_by = 9;
+   */
+  checkedBy: string[];
+};
+
+/**
+ * Describes the message fuwa.v1.SharedConnection.
+ * Use `create(SharedConnectionSchema)` to create a new message.
+ */
+export const SharedConnectionSchema: GenMessage<SharedConnection> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 15);
+
+/**
+ * A code to share a channel. It names the home server, so any server on the
+ * instance can look it up.
+ *
+ * @generated from message fuwa.v1.ShareCode
+ */
+export type ShareCode = Message<"fuwa.v1.ShareCode"> & {
+  /**
+   * @generated from field: string code = 1;
+   */
+  code: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * @generated from field: string channel_name = 3;
+   */
+  channelName: string;
+
+  /**
+   * @generated from field: string creator_id = 4;
+   */
+  creatorId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 5;
+   */
+  createdAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp expires_at = 6;
+   */
+  expiresAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.ShareCode.
+ * Use `create(ShareCodeSchema)` to create a new message.
+ */
+export const ShareCodeSchema: GenMessage<ShareCode> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 16);
+
+/**
+ * Someone from another server kept out of one of this server's shared channels.
+ *
+ * @generated from message fuwa.v1.ChannelBlock
+ */
+export type ChannelBlock = Message<"fuwa.v1.ChannelBlock"> & {
+  /**
+   * @generated from field: string channel_id = 1;
+   */
+  channelId: string;
+
+  /**
+   * @generated from field: fuwa.v1.User user = 2;
+   */
+  user?: User | undefined;
+
+  /**
+   * The server they're from.
+   *
+   * @generated from field: fuwa.v1.SharedServer server = 3;
+   */
+  server?: SharedServer | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 4;
+   */
+  createdAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.ChannelBlock.
+ * Use `create(ChannelBlockSchema)` to create a new message.
+ */
+export const ChannelBlockSchema: GenMessage<ChannelBlock> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 17);
+
+/**
+ * @generated from message fuwa.v1.CreateShareCodeRequest
+ */
+export type CreateShareCodeRequest = Message<"fuwa.v1.CreateShareCodeRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.CreateShareCodeRequest.
+ * Use `create(CreateShareCodeRequestSchema)` to create a new message.
+ */
+export const CreateShareCodeRequestSchema: GenMessage<CreateShareCodeRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 18);
+
+/**
+ * @generated from message fuwa.v1.CreateShareCodeResponse
+ */
+export type CreateShareCodeResponse = Message<"fuwa.v1.CreateShareCodeResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.ShareCode code = 1;
+   */
+  code?: ShareCode | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.CreateShareCodeResponse.
+ * Use `create(CreateShareCodeResponseSchema)` to create a new message.
+ */
+export const CreateShareCodeResponseSchema: GenMessage<CreateShareCodeResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 19);
+
+/**
+ * @generated from message fuwa.v1.DeleteShareCodeRequest
+ */
+export type DeleteShareCodeRequest = Message<"fuwa.v1.DeleteShareCodeRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string code = 2;
+   */
+  code: string;
+};
+
+/**
+ * Describes the message fuwa.v1.DeleteShareCodeRequest.
+ * Use `create(DeleteShareCodeRequestSchema)` to create a new message.
+ */
+export const DeleteShareCodeRequestSchema: GenMessage<DeleteShareCodeRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 20);
+
+/**
+ * @generated from message fuwa.v1.DeleteShareCodeResponse
+ */
+export type DeleteShareCodeResponse = Message<"fuwa.v1.DeleteShareCodeResponse"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.DeleteShareCodeResponse.
+ * Use `create(DeleteShareCodeResponseSchema)` to create a new message.
+ */
+export const DeleteShareCodeResponseSchema: GenMessage<DeleteShareCodeResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 21);
+
+/**
+ * @generated from message fuwa.v1.PreviewShareRequest
+ */
+export type PreviewShareRequest = Message<"fuwa.v1.PreviewShareRequest"> & {
+  /**
+   * The server that would show the channel.
+   *
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string code = 2;
+   */
+  code: string;
+};
+
+/**
+ * Describes the message fuwa.v1.PreviewShareRequest.
+ * Use `create(PreviewShareRequestSchema)` to create a new message.
+ */
+export const PreviewShareRequestSchema: GenMessage<PreviewShareRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 22);
+
+/**
+ * What admins see before accepting a code: whose channel it is, where what
+ * their people write there is kept, and what the home server sees.
+ *
+ * @generated from message fuwa.v1.PreviewShareResponse
+ */
+export type PreviewShareResponse = Message<"fuwa.v1.PreviewShareResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.SharedServer home_server = 1;
+   */
+  homeServer?: SharedServer | undefined;
+
+  /**
+   * @generated from field: string channel_name = 2;
+   */
+  channelName: string;
+
+  /**
+   * @generated from field: string channel_topic = 3;
+   */
+  channelTopic: string;
+
+  /**
+   * Where the channel's messages are kept: the home server's region, when
+   * the instance has more than one. Empty otherwise.
+   *
+   * @generated from field: string region = 4;
+   */
+  region: string;
+
+  /**
+   * Hosts outside the instance that see the text of messages there (the home
+   * server's AutoMod providers), so admins know before accepting.
+   *
+   * @generated from field: repeated string checked_by = 5;
+   */
+  checkedBy: string[];
+
+  /**
+   * What their people may do there, at most.
+   *
+   * @generated from field: repeated fuwa.v1.Permission allowed = 6;
+   */
+  allowed: Permission[];
+
+  /**
+   * @generated from field: google.protobuf.Timestamp expires_at = 7;
+   */
+  expiresAt?: Timestamp | undefined;
+
+  /**
+   * How many servers it's shown in already, besides its home.
+   *
+   * @generated from field: int32 guest_count = 8;
+   */
+  guestCount: number;
+};
+
+/**
+ * Describes the message fuwa.v1.PreviewShareResponse.
+ * Use `create(PreviewShareResponseSchema)` to create a new message.
+ */
+export const PreviewShareResponseSchema: GenMessage<PreviewShareResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 23);
+
+/**
+ * @generated from message fuwa.v1.AcceptShareRequest
+ */
+export type AcceptShareRequest = Message<"fuwa.v1.AcceptShareRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string code = 2;
+   */
+  code: string;
+
+  /**
+   * The channel's name here, once approved. Empty for the home's name.
+   *
+   * @generated from field: string name = 3;
+   */
+  name: string;
+
+  /**
+   * The category it goes in here. Empty for none.
+   *
+   * @generated from field: string parent_id = 4;
+   */
+  parentId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.AcceptShareRequest.
+ * Use `create(AcceptShareRequestSchema)` to create a new message.
+ */
+export const AcceptShareRequestSchema: GenMessage<AcceptShareRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 24);
+
+/**
+ * @generated from message fuwa.v1.AcceptShareResponse
+ */
+export type AcceptShareResponse = Message<"fuwa.v1.AcceptShareResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.SharedConnection connection = 1;
+   */
+  connection?: SharedConnection | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.AcceptShareResponse.
+ * Use `create(AcceptShareResponseSchema)` to create a new message.
+ */
+export const AcceptShareResponseSchema: GenMessage<AcceptShareResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 25);
+
+/**
+ * @generated from message fuwa.v1.ReviewShareRequest
+ */
+export type ReviewShareRequest = Message<"fuwa.v1.ReviewShareRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string connection_id = 2;
+   */
+  connectionId: string;
+
+  /**
+   * @generated from field: bool approve = 3;
+   */
+  approve: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.ReviewShareRequest.
+ * Use `create(ReviewShareRequestSchema)` to create a new message.
+ */
+export const ReviewShareRequestSchema: GenMessage<ReviewShareRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 26);
+
+/**
+ * @generated from message fuwa.v1.ReviewShareResponse
+ */
+export type ReviewShareResponse = Message<"fuwa.v1.ReviewShareResponse"> & {
+  /**
+   * Unset when turned down.
+   *
+   * @generated from field: fuwa.v1.SharedConnection connection = 1;
+   */
+  connection?: SharedConnection | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.ReviewShareResponse.
+ * Use `create(ReviewShareResponseSchema)` to create a new message.
+ */
+export const ReviewShareResponseSchema: GenMessage<ReviewShareResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 27);
+
+/**
+ * @generated from message fuwa.v1.ListConnectionsRequest
+ */
+export type ListConnectionsRequest = Message<"fuwa.v1.ListConnectionsRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ListConnectionsRequest.
+ * Use `create(ListConnectionsRequestSchema)` to create a new message.
+ */
+export const ListConnectionsRequestSchema: GenMessage<ListConnectionsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 28);
+
+/**
+ * @generated from message fuwa.v1.ListConnectionsResponse
+ */
+export type ListConnectionsResponse = Message<"fuwa.v1.ListConnectionsResponse"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.SharedConnection connections = 1;
+   */
+  connections: SharedConnection[];
+
+  /**
+   * Codes that still work, newest first.
+   *
+   * @generated from field: repeated fuwa.v1.ShareCode codes = 2;
+   */
+  codes: ShareCode[];
+
+  /**
+   * @generated from field: repeated fuwa.v1.ChannelBlock blocks = 3;
+   */
+  blocks: ChannelBlock[];
+};
+
+/**
+ * Describes the message fuwa.v1.ListConnectionsResponse.
+ * Use `create(ListConnectionsResponseSchema)` to create a new message.
+ */
+export const ListConnectionsResponseSchema: GenMessage<ListConnectionsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 29);
+
+/**
+ * @generated from message fuwa.v1.UpdateConnectionRequest
+ */
+export type UpdateConnectionRequest = Message<"fuwa.v1.UpdateConnectionRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string connection_id = 2;
+   */
+  connectionId: string;
+
+  /**
+   * @generated from field: repeated fuwa.v1.Permission allowed = 3;
+   */
+  allowed: Permission[];
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateConnectionRequest.
+ * Use `create(UpdateConnectionRequestSchema)` to create a new message.
+ */
+export const UpdateConnectionRequestSchema: GenMessage<UpdateConnectionRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 30);
+
+/**
+ * @generated from message fuwa.v1.UpdateConnectionResponse
+ */
+export type UpdateConnectionResponse = Message<"fuwa.v1.UpdateConnectionResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.SharedConnection connection = 1;
+   */
+  connection?: SharedConnection | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateConnectionResponse.
+ * Use `create(UpdateConnectionResponseSchema)` to create a new message.
+ */
+export const UpdateConnectionResponseSchema: GenMessage<UpdateConnectionResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 31);
+
+/**
+ * @generated from message fuwa.v1.DisconnectRequest
+ */
+export type DisconnectRequest = Message<"fuwa.v1.DisconnectRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string connection_id = 2;
+   */
+  connectionId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.DisconnectRequest.
+ * Use `create(DisconnectRequestSchema)` to create a new message.
+ */
+export const DisconnectRequestSchema: GenMessage<DisconnectRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 32);
+
+/**
+ * @generated from message fuwa.v1.DisconnectResponse
+ */
+export type DisconnectResponse = Message<"fuwa.v1.DisconnectResponse"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.DisconnectResponse.
+ * Use `create(DisconnectResponseSchema)` to create a new message.
+ */
+export const DisconnectResponseSchema: GenMessage<DisconnectResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 33);
+
+/**
+ * @generated from message fuwa.v1.BlockFromChannelRequest
+ */
+export type BlockFromChannelRequest = Message<"fuwa.v1.BlockFromChannelRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * @generated from field: string user_id = 3;
+   */
+  userId: string;
+
+  /**
+   * False lets them back.
+   *
+   * @generated from field: bool blocked = 4;
+   */
+  blocked: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.BlockFromChannelRequest.
+ * Use `create(BlockFromChannelRequestSchema)` to create a new message.
+ */
+export const BlockFromChannelRequestSchema: GenMessage<BlockFromChannelRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 34);
+
+/**
+ * @generated from message fuwa.v1.BlockFromChannelResponse
+ */
+export type BlockFromChannelResponse = Message<"fuwa.v1.BlockFromChannelResponse"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.BlockFromChannelResponse.
+ * Use `create(BlockFromChannelResponseSchema)` to create a new message.
+ */
+export const BlockFromChannelResponseSchema: GenMessage<BlockFromChannelResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_channel, 35);
+
+/**
+ * @generated from enum fuwa.v1.SharedConnectionState
+ */
+export enum SharedConnectionState {
+  /**
+   * @generated from enum value: SHARED_CONNECTION_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The guest's admins accepted a code; the home's haven't approved yet.
+   *
+   * @generated from enum value: SHARED_CONNECTION_STATE_WAITING = 1;
+   */
+  WAITING = 1,
+
+  /**
+   * Shown in both servers.
+   *
+   * @generated from enum value: SHARED_CONNECTION_STATE_ACTIVE = 2;
+   */
+  ACTIVE = 2,
+}
+
+/**
+ * Describes the enum fuwa.v1.SharedConnectionState.
+ */
+export const SharedConnectionStateSchema: GenEnum<SharedConnectionState> = /*@__PURE__*/
+  enumDesc(file_fuwa_v1_channel, 0);
+
+/**
  * Channels in a community server. Members see the ones VIEW_CHANNELS lets
  * them; MANAGE_CHANNELS changes them, MANAGE_ROLES their permissions.
  *
@@ -430,4 +1055,115 @@ export const ChannelService: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_channel, 0);
+
+/**
+ * Channels shared between community servers on this instance, like Slack
+ * Connect. One server, the channel's home, keeps the channel and everything
+ * said in it; each guest server shows it as a channel of its own and keeps
+ * none of it. Sharing takes both sides' admins: the home makes a code, a
+ * guest's admins accept it, and the home's admins approve. docs/shared-channels.md
+ * has the design.
+ *
+ * @generated from service fuwa.v1.SharedChannelService
+ */
+export const SharedChannelService: GenService<{
+  /**
+   * Home: a code another server's admins use to show one of this server's
+   * channels there. MANAGE_SERVER, and MANAGE_CHANNELS in the channel.
+   *
+   * @generated from rpc fuwa.v1.SharedChannelService.CreateShareCode
+   */
+  createShareCode: {
+    methodKind: "unary";
+    input: typeof CreateShareCodeRequestSchema;
+    output: typeof CreateShareCodeResponseSchema;
+  },
+  /**
+   * Home: stops a code working. MANAGE_SERVER.
+   *
+   * @generated from rpc fuwa.v1.SharedChannelService.DeleteShareCode
+   */
+  deleteShareCode: {
+    methodKind: "unary";
+    input: typeof DeleteShareCodeRequestSchema;
+    output: typeof DeleteShareCodeResponseSchema;
+  },
+  /**
+   * Guest: where a code leads, shown before accepting. MANAGE_SERVER.
+   *
+   * @generated from rpc fuwa.v1.SharedChannelService.PreviewShare
+   */
+  previewShare: {
+    methodKind: "unary";
+    input: typeof PreviewShareRequestSchema;
+    output: typeof PreviewShareResponseSchema;
+  },
+  /**
+   * Guest: asks to show the channel in this server. The home's admins
+   * approve it before it appears. MANAGE_SERVER.
+   *
+   * @generated from rpc fuwa.v1.SharedChannelService.AcceptShare
+   */
+  acceptShare: {
+    methodKind: "unary";
+    input: typeof AcceptShareRequestSchema;
+    output: typeof AcceptShareResponseSchema;
+  },
+  /**
+   * Home: approves or turns down a server's request. MANAGE_SERVER, and
+   * MANAGE_CHANNELS in the channel.
+   *
+   * @generated from rpc fuwa.v1.SharedChannelService.ReviewShare
+   */
+  reviewShare: {
+    methodKind: "unary";
+    input: typeof ReviewShareRequestSchema;
+    output: typeof ReviewShareResponseSchema;
+  },
+  /**
+   * The server's shared channels, both ways, with requests waiting, codes
+   * and people kept out. MANAGE_SERVER.
+   *
+   * @generated from rpc fuwa.v1.SharedChannelService.ListConnections
+   */
+  listConnections: {
+    methodKind: "unary";
+    input: typeof ListConnectionsRequestSchema;
+    output: typeof ListConnectionsResponseSchema;
+  },
+  /**
+   * Home: what a guest server's people may do in the channel. MANAGE_SERVER,
+   * and MANAGE_CHANNELS in the channel.
+   *
+   * @generated from rpc fuwa.v1.SharedChannelService.UpdateConnection
+   */
+  updateConnection: {
+    methodKind: "unary";
+    input: typeof UpdateConnectionRequestSchema;
+    output: typeof UpdateConnectionResponseSchema;
+  },
+  /**
+   * Either side ends a connection, or withdraws or turns down a request. The
+   * guest's channel goes away; the messages stay with the home. MANAGE_SERVER.
+   *
+   * @generated from rpc fuwa.v1.SharedChannelService.Disconnect
+   */
+  disconnect: {
+    methodKind: "unary";
+    input: typeof DisconnectRequestSchema;
+    output: typeof DisconnectResponseSchema;
+  },
+  /**
+   * Home: keeps one person from another server out of the channel, or lets
+   * them back. KICK_MEMBERS.
+   *
+   * @generated from rpc fuwa.v1.SharedChannelService.BlockFromChannel
+   */
+  blockFromChannel: {
+    methodKind: "unary";
+    input: typeof BlockFromChannelRequestSchema;
+    output: typeof BlockFromChannelResponseSchema;
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_fuwa_v1_channel, 1);
 

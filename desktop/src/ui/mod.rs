@@ -13,6 +13,7 @@ mod embeds;
 mod emoji;
 mod emoji_picker;
 mod http;
+mod instance_settings;
 mod keys;
 mod members;
 mod mentions;

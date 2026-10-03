@@ -20,6 +20,8 @@ pub mod directory;
 pub mod gateway;
 pub mod index;
 pub mod media;
+pub mod moves;
+pub mod pictures;
 pub mod shard;
 
 use std::path::Path;
@@ -85,6 +87,12 @@ pub struct ClusterConfig {
     /// How long a call waits for another part that's restarting: [`RIDE_OUT`]
     /// (tests make it shorter).
     pub ride_out: Duration,
+    /// FUWA_REGION: the part of the world this part runs in, such as "eu"
+    /// (docs/regions.md). Empty is the instance's home region.
+    pub region: String,
+    /// FUWA_REGION_NAME: what people see for this region; built in for
+    /// common labels.
+    pub region_name: Option<String>,
 }
 
 impl std::fmt::Debug for ClusterConfig {
@@ -96,13 +104,24 @@ impl std::fmt::Debug for ClusterConfig {
             .field("shard_id", &self.shard_id)
             .field("internal_url", &self.internal_url)
             .field("ride_out", &self.ride_out)
+            .field("region", &self.region)
+            .field("region_name", &self.region_name)
             .finish()
     }
 }
 
 impl ClusterConfig {
     pub fn single() -> Self {
-        Self { role: Role::All, key: None, directory_url: None, shard_id: None, internal_url: None, ride_out: RIDE_OUT }
+        Self {
+            role: Role::All,
+            key: None,
+            directory_url: None,
+            shard_id: None,
+            internal_url: None,
+            ride_out: RIDE_OUT,
+            region: String::new(),
+            region_name: None,
+        }
     }
 
     pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> std::result::Result<Self, String> {
@@ -116,8 +135,16 @@ impl ClusterConfig {
                 return Err(format!("FUWA_ROLE must be all, gateway, directory, shard or media, got {other:?}"));
             }
         };
+        let region = get("FUWA_REGION").map(|region| region.trim().to_string()).unwrap_or_default();
+        if !region.is_empty() {
+            check_region(&region).map_err(|err| format!("FUWA_REGION {err}"))?;
+        }
+        let region_name = get("FUWA_REGION_NAME").map(|name| name.trim().to_string()).filter(|name| !name.is_empty());
+        if region_name.as_ref().is_some_and(|name| name.chars().count() > 64) {
+            return Err("FUWA_REGION_NAME must be at most 64 characters".into());
+        }
         if role == Role::All {
-            return Ok(Self::single());
+            return Ok(Self { region, region_name, ..Self::single() });
         }
         let key = get("FUWA_CLUSTER_KEY").map(|key| key.trim().to_string());
         if key.as_ref().is_none_or(|key| key.len() < 32) {
@@ -155,7 +182,7 @@ impl ClusterConfig {
         if let Some(id) = &shard_id {
             check_shard_id(id).map_err(|err| format!("FUWA_SHARD_ID {err}"))?;
         }
-        Ok(Self { role, key, directory_url, shard_id, internal_url, ride_out: RIDE_OUT })
+        Ok(Self { role, key, directory_url, shard_id, internal_url, ride_out: RIDE_OUT, region, region_name })
     }
 
     /// This process is one part of several.
@@ -174,6 +201,42 @@ fn check_shard_id(id: &str) -> std::result::Result<(), String> {
     let valid = (1..=64).contains(&id.len())
         && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
     if valid { Ok(()) } else { Err(format!("must be 1 to 64 of a-z, 0-9, - and _, got {id:?}")) }
+}
+
+/// Whether a region label is one: 1 to 32 of a-z, 0-9 and `-`.
+pub fn check_region(region: &str) -> std::result::Result<(), String> {
+    let valid = (1..=32).contains(&region.len())
+        && region.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if valid { Ok(()) } else { Err(format!("must be 1 to 32 of a-z, 0-9 and -, got {region:?}")) }
+}
+
+/// What people see for a region: FUWA_REGION_NAME where it's set, a name
+/// for common labels, else the label itself.
+pub fn region_name(region: &str, named: Option<&str>) -> String {
+    if let Some(name) = named.filter(|name| !name.is_empty()) {
+        return name.to_string();
+    }
+    let known = match region {
+        "" | "home" => "Home",
+        "us" => "United States",
+        "us-east" => "US East",
+        "us-west" => "US West",
+        "us-central" => "US Central",
+        "ca" | "canada" => "Canada",
+        "eu" | "europe" => "Europe",
+        "eu-west" => "Europe (West)",
+        "eu-central" => "Europe (Central)",
+        "uk" => "United Kingdom",
+        "asia" => "Asia",
+        "asia-southeast" | "sg" => "Southeast Asia",
+        "asia-east" => "East Asia",
+        "jp" | "japan" => "Japan",
+        "au" | "oceania" => "Oceania",
+        "sa" | "south-america" | "br" => "South America",
+        "in" | "india" => "India",
+        _ => return region.to_string(),
+    };
+    known.to_string()
 }
 
 /// Whether a name is one of the files a server's database is made of, as
@@ -456,6 +519,21 @@ mod tests {
         assert_eq!(parsed.directory_url.as_deref(), Some("http://directory:8080"));
         assert!(config(&[shard.as_slice(), &[("FUWA_SHARD_ID", "Shard One")]].concat()).is_err());
         assert!(config(&[("FUWA_ROLE", "everything")]).unwrap_err().contains("FUWA_ROLE"));
+    }
+
+    #[test]
+    fn regions_are_short_labels() {
+        assert_eq!(config(&[]).unwrap().region, "");
+        let one = config(&[("FUWA_REGION", "eu")]).unwrap();
+        assert_eq!((one.role, one.region.as_str()), (Role::All, "eu"));
+        let shard = config(&[("FUWA_ROLE", "directory"), ("FUWA_CLUSTER_KEY", KEY), ("FUWA_REGION", "us-west")]);
+        assert_eq!(shard.unwrap().region, "us-west");
+        for bad in ["EU", "eu west", "eu_west", &"a".repeat(33)] {
+            assert!(config(&[("FUWA_REGION", bad)]).unwrap_err().contains("FUWA_REGION"), "{bad}");
+        }
+        assert_eq!(region_name("eu", None), "Europe");
+        assert_eq!(region_name("mars-1", None), "mars-1");
+        assert_eq!(region_name("eu", Some("Frankfurt")), "Frankfurt");
     }
 
     #[test]
