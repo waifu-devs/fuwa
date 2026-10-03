@@ -15,6 +15,7 @@ import {
   type DirectMessageContent,
   type DirectMessageEvent,
 } from "@/gen/fuwa/v1/dm_pb";
+import type { DmCall } from "@/gen/fuwa/v1/call_pb";
 import type { User } from "@/gen/fuwa/v1/types_pb";
 import * as vault from "./vault";
 import { loadE2ee, type Commit, type Device, type E2ee, type Processed, type WasmMember } from "./wasm";
@@ -47,6 +48,9 @@ const SILENCE_MS = 70_000;
 const CALL = { timeoutMs: 20_000 };
 /** The longest message, in characters, as the composer allows. */
 export const MAX_DM = 4000;
+
+/** What a conversation's group exports its call secret under. */
+const CALL_LABEL = "fuwa call v1";
 
 /** Something a person can be told about why sending didn't work. */
 export class DmError extends Error {
@@ -225,6 +229,11 @@ export class DmEngine {
   async resync() {
     const { conversations } = await this.api.dms.listConversations({}, CALL);
     this.setConversations(conversations);
+    // Calls aren't replayed, so they're listed again too. An instance from before calls has none.
+    this.api.calls
+      .listDmCalls({}, CALL)
+      .then(({ calls }) => updateDms(this.key, (d) => ({ ...d, calls: Object.fromEntries(calls.map((c) => [c.conversationId, c])) })))
+      .catch(() => {});
     const notes = new Map((await vault.loadNotes(this.vaultKey)).map((n) => [n.conversation, n]));
     for (const c of conversations) {
       const note = notes.get(c.id);
@@ -239,6 +248,35 @@ export class DmEngine {
       (a, b) => Number((b.updatedAt?.seconds ?? 0n) - (a.updatedAt?.seconds ?? 0n)) || (a.id < b.id ? 1 : -1),
     );
     updateDms(this.key, (d) => ({ ...d, conversations: sorted }));
+  }
+
+  /** A call starting, changing or ending (when nobody's left in it). */
+  setCall(call: DmCall) {
+    updateDms(this.key, (d) => {
+      const { [call.conversationId]: _, ...rest } = d.calls;
+      return { ...d, calls: call.participants.length ? { ...rest, [call.conversationId]: call } : rest };
+    });
+  }
+
+  /**
+   * The secret a call in this conversation encrypts its sound with: exported
+   * from the conversation's group, so only its devices can work it out, and
+   * new with every epoch (a device joining or leaving). `epoch` is one a
+   * frame said it was sent in; when it's newer than this device's, the
+   * device catches up on the conversation first.
+   */
+  async callSecret(id: string, epoch?: number): Promise<{ epoch: number; secret: Uint8Array }> {
+    const read = () =>
+      exclusive(this.lock, async () => {
+        await this.fresh();
+        return this.device.exportSecret(id, CALL_LABEL, 32) as { epoch: number; secret: Uint8Array };
+      });
+    let current = await read();
+    if (epoch !== undefined && epoch > current.epoch) {
+      await this.queue(id);
+      current = await read();
+    }
+    return current;
   }
 
   /** A conversation someone just opened, as the instance answered. */
@@ -263,6 +301,9 @@ export class DmEngine {
       }
       case "recordDeleted":
         void this.forgetDeleted(p.value.conversationId, Number(p.value.sequence)).catch(() => {});
+        break;
+      case "callUpdated":
+        this.setCall(p.value);
         break;
     }
   }

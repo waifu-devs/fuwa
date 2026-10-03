@@ -9,6 +9,7 @@ import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { SPRING, SwapText } from "@/components/motion";
 import { UserPanel } from "@/components/UserPanel";
+import { CallPanel } from "@/components/calls/CallPanel";
 import { DmList } from "@/components/dm/DmList";
 import { HostedBadge } from "@/components/HostedBadge";
 import { InstanceSettingsDialog } from "@/components/settings/InstanceSettingsDialog";
@@ -74,6 +75,7 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
           ))}
         </AnimatePresence>
       </div>
+      <CallPanel />
       <UserPanel instanceKey={instanceKey} />
     </>
   );

@@ -571,7 +571,8 @@ export const DmCallSchema: GenMessage<DmCall> = /*@__PURE__*/
  * and answers for people coming and going, as JSON ({"type": "offer" or
  * "answer", "sdp": ...}), and a few notices ({"type": "replaced"} when the
  * same account joined from somewhere else, {"type": "restarting"} when the
- * media part is about to restart and the app should join again at once).
+ * media part is about to restart and the app should join again at once,
+ * {"type": "closed"} when the instance hung it up).
  *
  * Who's in a call is kept in memory, not stored, and each app keeps its
  * place with KeepVoice every 5 seconds; a place nobody kept for 15 seconds

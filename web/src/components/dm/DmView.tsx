@@ -27,6 +27,7 @@ import { useFuwa, type PendingMessage } from "@/fuwa/store";
 import { sendsMessage } from "@/components/chat/Composer";
 import { DayDivider, EditBox, MessageBody, MessageLine, ToolButton } from "@/components/chat/MessageList";
 import { EncryptionDialog } from "@/components/dm/EncryptionDialog";
+import { CallButton, DmCallStrip } from "@/components/calls/DmCall";
 import { UserAvatar } from "@/components/Icons";
 import { SPRING, SwapText } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
@@ -101,10 +102,12 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
           </motion.span>
         </AnimatePresence>
         <span className="flex-1" />
+        {conversation && status === "ready" && <CallButton instanceKey={instanceKey} conversationId={conversationId} />}
         {conversation && <TrustPill instanceKey={instanceKey} conversationId={conversationId} onOpen={() => setSheet(true)} />}
       </header>
       {conversation && me ? (
         <>
+          <DmCallStrip instanceKey={instanceKey} conversation={conversation} me={me} />
           <DmMessages instanceKey={instanceKey} conversation={conversation} me={me} partner={partner} />
           <DmComposer instanceKey={instanceKey} conversation={conversation} partner={partner} />
           <EncryptionDialog open={sheet} onOpenChange={setSheet} instanceKey={instanceKey} conversation={conversation} />

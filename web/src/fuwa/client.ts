@@ -4,6 +4,7 @@ import { AccountService } from "@/gen/fuwa/v1/account_pb";
 import { AdminService } from "@/gen/fuwa/v1/admin_pb";
 import { AuthService } from "@/gen/fuwa/v1/auth_pb";
 import { AutoModService } from "@/gen/fuwa/v1/automod_pb";
+import { CallService } from "@/gen/fuwa/v1/call_pb";
 import { ChannelService } from "@/gen/fuwa/v1/channel_pb";
 import { DirectMessageService } from "@/gen/fuwa/v1/dm_pb";
 import { EmojiService } from "@/gen/fuwa/v1/emoji_pb";
@@ -33,6 +34,7 @@ export type Api = {
   dms: Client<typeof DirectMessageService>;
   automod: Client<typeof AutoModService>;
   emojis: Client<typeof EmojiService>;
+  calls: Client<typeof CallService>;
 };
 
 /**
@@ -63,5 +65,6 @@ export function makeApi(url: string, token: () => string | null): Api {
     dms: createClient(DirectMessageService, transport),
     automod: createClient(AutoModService, transport),
     emojis: createClient(EmojiService, transport),
+    calls: createClient(CallService, transport),
   };
 }

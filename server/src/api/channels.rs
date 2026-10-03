@@ -16,10 +16,10 @@ const MAX_SLOWMODE: i32 = 6 * 60 * 60;
 const MAX_OVERWRITES: usize = 100;
 
 /// Channel names read like `#general`: lowercase, words joined by dashes.
-/// Categories keep their name as typed.
+/// Categories and voice channels keep their name as typed ("Lounge").
 fn channel_name(name: &str, kind: pb::ChannelType) -> Result<String> {
     let name = text("name", name, 1, 100)?;
-    if kind == pb::ChannelType::Category {
+    if matches!(kind, pb::ChannelType::Category | pb::ChannelType::Voice) {
         return Ok(name);
     }
     let slug = name
