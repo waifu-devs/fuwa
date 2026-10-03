@@ -1184,6 +1184,10 @@ impl Engine {
         events: mpsc::Sender<Bridged>,
         now: Instant,
     ) -> Result<()> {
+        // Voice channels only: direct-message calls are end-to-end encrypted.
+        if !room.starts_with("s/") {
+            return Err(Error::invalid("programs can only be in voice channels"));
+        }
         if self.in_room(&room, &participant) >= MAX_ROOM {
             return Err(Error::ResourceExhausted(format!("a call holds at most {MAX_ROOM} people")));
         }
@@ -1318,8 +1322,10 @@ impl Engine {
                 for client in self.clients.iter_mut().filter(|c| c.id != origin && c.room == room) {
                     client.forward(origin, &data);
                 }
+                // Programs get sound only, never a camera's frames.
+                let audio = data.params.spec().codec.is_audio();
                 let ticks = data.time.numer().saturating_mul(48_000) / u64::from(data.time.denom().max(1));
-                for bridge in self.bridges.iter().filter(|b| b.room == room && b.participant != participant) {
+                for bridge in self.bridges.iter().filter(|b| audio && b.room == room && b.participant != participant) {
                     bridge.hear(&participant, &data.data, ticks as u32);
                 }
             }
@@ -1371,6 +1377,14 @@ mod tests {
         assert!(!offer_allowed(&sdp(&[("text", "sendonly")])));
         assert!(!offer_allowed(&sdp(&vec![("audio", "recvonly"); MAX_ROOM + 3])), "too many");
         assert!(!offer_allowed(&"a".repeat(MAX_SDP + 1)));
+    }
+
+    #[tokio::test]
+    async fn programs_stay_out_of_direct_message_calls() {
+        let config = MediaConfig { port: 0, addresses: vec![Advertised::parse("127.0.0.1").unwrap()] };
+        let sfu = Sfu::start(config, CancellationToken::new()).await.unwrap();
+        assert!(sfu.bridge("d/conversation", "bot", "s1", true, true).await.is_err());
+        assert!(sfu.bridge("s/server/channel", "bot", "s1", true, true).await.is_ok());
     }
 
     #[test]
