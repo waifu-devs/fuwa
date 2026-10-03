@@ -356,10 +356,20 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
                         channel_id: channel_id.clone(),
                         title: format!(
                             "{} in #{}",
-                            i.display_name(Some(&sid), &m.author_id),
+                            match &m.webhook {
+                                Some(w) => w.name.clone(),
+                                None => i.display_name(Some(&sid), &m.author_id),
+                            },
                             i.channel(&sid, channel_id).map(|c| c.name.as_str()).unwrap_or("a channel")
                         ),
-                        body: m.content.chars().take(160).collect(),
+                        // An app may post only a card.
+                        body: [&m.content]
+                            .into_iter()
+                            .chain(m.embeds.first().map(|e| &e.title))
+                            .chain(m.embeds.first().map(|e| &e.description))
+                            .find(|t| !t.is_empty())
+                            .map(|t| t.chars().take(160).collect())
+                            .unwrap_or_default(),
                         mention,
                     })
                 })
@@ -394,22 +404,27 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
             rpc!(api.servers(), list_members(pb::ListMembersRequest { server_id: id.clone() })),
             rpc!(api.roles(), list_roles(pb::ListRolesRequest { server_id: id.clone() })),
         )?;
+        // An instance from before custom emoji has none to list.
+        let emojis = rpc!(api.emojis(), list_emojis(pb::ListEmojisRequest { server_id: id.clone() }))
+            .await
+            .map(|r| r.emojis)
+            .unwrap_or_default();
         // Instances from before calls don't know who's in voice; that's nobody.
         let voice = rpc!(api.calls(), list_voice_states(pb::ListVoiceStatesRequest { server_id: id.clone() }))
             .await
             .map(|r| r.states)
             .unwrap_or_default();
-        Ok::<_, Problem>((server, channels, members, roles, voice))
+        Ok::<_, Problem>((server, channels, members, roles, emojis, voice))
     };
     match retrying(&core, &key, load).await {
-        Ok((server, channels, members, roles, voice)) => {
+        Ok((server, channels, members, roles, emojis, voice)) => {
             let held = state.lock().held.remove(&server_id).unwrap_or_default();
             core.shared.update(|s| {
                 let focus = s.focus_channel(&key).map(str::to_owned);
                 let Some(i) = s.instances.get_mut(&key) else { return };
                 let Some(server) = server.server else { return };
                 let sid = server.id.clone();
-                store::apply_snapshot(i, server, channels.channels, members.members, roles.roles);
+                store::apply_snapshot(i, server, channels.channels, members.members, roles.roles, emojis);
                 i.voice.insert(sid, voice);
                 for event in &held {
                     store::apply_event(i, event, focus.as_deref());

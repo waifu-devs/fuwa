@@ -156,6 +156,31 @@ impl FuwaApp {
 
         let mut rows = div().relative().pt(px(8.0));
         let mut y = 8.0;
+        if server.has_welcome_screen {
+            let (key, sid) = (key.to_owned(), server.id.clone());
+            let hover = alpha(p.primary, 0.08);
+            rows = rows.child(
+                div()
+                    .id("welcome-open")
+                    .h(px(ROW))
+                    .mx(px(8.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .rounded(px(10.0))
+                    .text_color(p.primary)
+                    .font_weight(FontWeight::BOLD)
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_dialog(Dialog::Welcome { key: key.clone(), server: sid.clone() }, window, cx)
+                    }))
+                    .child(icon("party-popper").size(px(16.0)))
+                    .child("Welcome screen"),
+            );
+            y += ROW;
+        }
         let mut highlight = None;
         let mut n = 0;
         for (cat, list) in groups {

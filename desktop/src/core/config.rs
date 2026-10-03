@@ -112,6 +112,8 @@ pub struct Prefs {
     pub notifications: bool,
     /// Which messages notify you in servers whose settings don't say.
     pub notify_for: NotifyFor,
+    /// Servers whose welcome screen you've seen, as `instance/server`.
+    pub welcomed: std::collections::BTreeSet<String>,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -133,6 +135,7 @@ impl Default for Prefs {
             text_scale: 1.0,
             notifications: true,
             notify_for: NotifyFor::Mentions,
+            welcomed: Default::default(),
         }
     }
 }

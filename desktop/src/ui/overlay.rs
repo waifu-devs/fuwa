@@ -37,6 +37,9 @@ impl FuwaApp {
         if let Dialog::Profile { key, user_id, server } = &dialog {
             return Some(self.render_profile(key, user_id, server.as_deref(), cx));
         }
+        if let Dialog::Welcome { key, server } = &dialog {
+            return Some(self.render_welcome(key, server, cx));
+        }
         let busy = self.dialog_busy;
         let field = || Input::new(&self.dialog_input).large();
         let (glyph, title, body, content, action): (&str, String, String, AnyElement, Option<&str>) = match &dialog {
@@ -262,9 +265,17 @@ impl FuwaApp {
                     self.rules.as_ref().map(|_| if busy { "Agreeing…" } else { "I agree" }),
                 )
             }
-            Dialog::Profile { .. } => unreachable!("drawn on its own"),
+            Dialog::Moderate { key, server, user_id, action } => self.moderate_parts(key, server, user_id, *action, cx),
+            Dialog::Profile { .. } | Dialog::Welcome { .. } => unreachable!("drawn on its own"),
         };
-        let danger = matches!(dialog, Dialog::LeaveServer { .. });
+        let danger = matches!(
+            dialog,
+            Dialog::LeaveServer { .. }
+                | Dialog::Moderate {
+                    action: crate::core::moderation::Action::Kick | crate::core::moderation::Action::Ban(_),
+                    ..
+                }
+        );
         let panel = card(&p)
             .w(px(460.0))
             .p(px(24.0))
@@ -331,6 +342,8 @@ impl FuwaApp {
             Dialog::CreateChannel { .. } => "channel",
             Dialog::Rules { .. } => "rules",
             Dialog::Profile { .. } => "profile",
+            Dialog::Welcome { .. } => "welcome",
+            Dialog::Moderate { .. } => "moderate",
         };
         Some(
             motion::fade_in(
@@ -391,20 +404,33 @@ impl FuwaApp {
         let streamer = self.prefs.streamer_mode;
         let status = user.as_ref().map(|u| u.status.clone()).unwrap_or_default();
         let mut info = div().px(px(20.0)).pb(px(20.0)).flex().flex_col().gap(px(10.0)).child(
-            div().flex().flex_col().child(div().text_xl().font_weight(FontWeight::EXTRA_BOLD).child(name)).child(
-                div()
-                    .flex()
-                    .gap(px(6.0))
-                    .text_sm()
-                    .text_color(p.muted_foreground)
-                    .when(!streamer || !me, |el| {
-                        el.child(format!("@{}", user.as_ref().map(|u| u.username.as_str()).unwrap_or("")))
-                    })
-                    .when_some(
-                        profile.as_ref().map(|pr| pr.pronouns.clone()).filter(|x| !x.is_empty()),
-                        |el, pronouns| el.child("·").child(pronouns),
-                    ),
-            ),
+            div()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(div().text_xl().font_weight(FontWeight::EXTRA_BOLD).child(name))
+                        .when(crate::ui::widgets::is_agent(user.as_ref()), |el| {
+                            el.child(crate::ui::widgets::app_badge("profile-badge", "AGENT", &p))
+                        }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(6.0))
+                        .text_sm()
+                        .text_color(p.muted_foreground)
+                        .when(!streamer || !me, |el| {
+                            el.child(format!("@{}", user.as_ref().map(|u| u.username.as_str()).unwrap_or("")))
+                        })
+                        .when_some(
+                            profile.as_ref().map(|pr| pr.pronouns.clone()).filter(|x| !x.is_empty()),
+                            |el, pronouns| el.child("·").child(pronouns),
+                        ),
+                ),
         );
         if !status.is_empty() {
             info = info.child(
@@ -455,7 +481,11 @@ impl FuwaApp {
                 })),
             ));
         }
-        if !me {
+        if let Some(buttons) = server.and_then(|sid| self.moderation_buttons(key, sid, user_id, &p, cx)) {
+            info = info.child(buttons);
+        }
+        // Agents have no private messages.
+        if !me && !crate::ui::widgets::is_agent(user.as_ref()) {
             info = info.child(
                 primary_button("profile-message", "Message", &p)
                     .w_full()
@@ -489,6 +519,164 @@ impl FuwaApp {
                 ),
             ),
             "dialog-fade-profile",
+            Duration::from_millis(160),
+        )
+        .into_any_element()
+    }
+
+    /// A server's welcome screen: its icon and name, a few words, and the
+    /// channels it suggests, each a card that rises after the one before.
+    fn render_welcome(&mut self, key: &str, server_id: &str, cx: &mut Context<Self>) -> AnyElement {
+        let p = pal(cx);
+        let (server, channels, look) = self.core.shared.read(|s| {
+            let i = s.instance(key);
+            (
+                i.and_then(|i| i.server(server_id)).cloned(),
+                i.and_then(|i| i.channels.get(server_id)).cloned().unwrap_or_default(),
+                i.map(|i| crate::ui::mentions::Look::of(i, server_id)).unwrap_or_default(),
+            )
+        });
+        let Some(server) = server else { return div().into_any_element() };
+        let mut body = div().flex().flex_col().items_center().gap(px(12.0)).child(motion::rise(
+            div()
+                .relative()
+                .child(crate::ui::widgets::server_icon(&server, 64.0, 20.0, &p))
+                .child(div().absolute().top(px(-10.0)).right(px(-14.0)).text_size(px(22.0)).child("👋")),
+            "welcome-icon",
+            Duration::ZERO,
+            14.0,
+        ));
+        body = body.child(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .child(section_title("WELCOME TO", &p))
+                .child(div().text_xl().font_weight(FontWeight::EXTRA_BOLD).child(server.name.clone())),
+        );
+        match &self.welcome {
+            None => {
+                body = body.child(
+                    div()
+                        .text_sm()
+                        .text_color(p.muted_foreground)
+                        .child(self.dialog_error.clone().unwrap_or_else(|| "Getting the welcome screen…".into())),
+                )
+            }
+            Some(screen) => {
+                if !screen.description.trim().is_empty() {
+                    let shown = crate::ui::mentions::mention_links(
+                        &crate::ui::text::images_as_links(&screen.description),
+                        &look,
+                    );
+                    body = body.child(motion::rise(
+                        div().w_full().min_w_0().text_sm().text_color(p.muted_foreground).child(
+                            gpui_kit::component::text::TextView::markdown("welcome-description", shown)
+                                .markdown_extensions(crate::ui::emoji::markdown_extensions()),
+                        ),
+                        "welcome-description",
+                        Duration::from_millis(80),
+                        8.0,
+                    ));
+                }
+                let suggested: Vec<_> = screen
+                    .channels
+                    .iter()
+                    .filter_map(|w| channels.iter().find(|c| c.id == w.channel_id).map(|c| (w.clone(), c.clone())))
+                    .collect();
+                if !suggested.is_empty() {
+                    let mut list = div().w_full().flex().flex_col().gap(px(8.0)).child(section_title("START HERE", &p));
+                    for (n, (w, channel)) in suggested.into_iter().enumerate() {
+                        let hover = alpha(p.primary, 0.08);
+                        let border = p.primary;
+                        let (k, sid, cid) = (key.to_owned(), server_id.to_owned(), channel.id.clone());
+                        let lead = welcome_emoji(&w.emoji, &look, &p);
+                        list = list.child(motion::rise(
+                            div()
+                                .id(SharedString::from(format!("welcome-{}", channel.id)))
+                                .flex()
+                                .items_center()
+                                .gap(px(12.0))
+                                .p(px(12.0))
+                                .rounded(px(14.0))
+                                .border_1()
+                                .border_color(p.border)
+                                .bg(p.secondary)
+                                .cursor_pointer()
+                                .hover(move |s| s.bg(hover).border_color(border))
+                                .active(|s| s.top(px(1.0)))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.dialog = None;
+                                    this.open_channel(&k, &sid, &cid, window, cx);
+                                }))
+                                .child(lead)
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .flex()
+                                        .flex_col()
+                                        .child(
+                                            div()
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_sm()
+                                                .child(format!("#{}", channel.name)),
+                                        )
+                                        .when(!w.description.is_empty(), |el| {
+                                            el.child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(p.muted_foreground)
+                                                    .child(w.description.clone()),
+                                            )
+                                        }),
+                                )
+                                .child(icon("arrow-right").size(px(16.0)).text_color(p.muted_foreground)),
+                            SharedString::from(format!("welcome-in-{n}")),
+                            Duration::from_millis(160 + 70 * n as u64),
+                            14.0,
+                        ));
+                    }
+                    body = body.child(list);
+                }
+            }
+        }
+        body = body.child(
+            div()
+                .id("welcome-skip")
+                .mt(px(4.0))
+                .text_sm()
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.muted_foreground)
+                .cursor_pointer()
+                .hover({
+                    let fg = p.foreground;
+                    move |s| s.text_color(fg)
+                })
+                .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
+                .child("I'll look around myself"),
+        );
+        let glow = alpha(p.primary, 0.18);
+        let panel = card(&p)
+            .w(px(440.0))
+            .overflow_hidden()
+            .relative()
+            .child(div().absolute().top_0().left_0().right_0().h(px(120.0)).bg(gpui_kit::linear_gradient(
+                180.0,
+                gpui_kit::linear_color_stop(glow, 0.0),
+                gpui_kit::linear_color_stop(alpha(p.primary, 0.0), 1.0),
+            )))
+            .child(div().relative().p(px(24.0)).child(body));
+        motion::fade_in(
+            scrim("dialog-scrim", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
+                motion::rise(
+                    div().id("dialog-panel").on_click(|_, _, cx| cx.stop_propagation()).child(panel),
+                    "dialog-welcome",
+                    Duration::ZERO,
+                    24.0,
+                ),
+            ),
+            "dialog-fade-welcome",
             Duration::from_millis(160),
         )
         .into_any_element()
@@ -577,5 +765,36 @@ impl LeaveExt for Div {
             |el, t| el.opacity(1.0 - t).relative().left(px(80.0 * t)),
         )
         .into_any_element()
+    }
+}
+
+/// A suggested channel's emoji: a Unicode one, one of the server's own, or a #.
+fn welcome_emoji(emoji: &str, look: &crate::ui::mentions::Look, p: &Palette) -> AnyElement {
+    let base = div()
+        .size(px(36.0))
+        .flex_none()
+        .rounded(px(12.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(alpha(p.primary, 0.12))
+        .text_color(p.primary);
+    let own = emoji
+        .strip_prefix('<')
+        .and_then(|e| e.strip_suffix('>'))
+        .and_then(|e| e.rsplit_once(':'))
+        .and_then(|(_, id)| look.emojis.get(&id.to_uppercase()));
+    match own {
+        Some(url) => {
+            use gpui_kit::StyledImage as _;
+            base.child(
+                gpui_kit::img(SharedString::from(url.clone())).size(px(24.0)).object_fit(gpui_kit::ObjectFit::Contain),
+            )
+            .into_any_element()
+        }
+        None if !emoji.is_empty() && !emoji.starts_with('<') => {
+            base.text_size(px(20.0)).child(emoji.to_owned()).into_any_element()
+        }
+        None => base.child(icon("hash").size(px(18.0))).into_any_element(),
     }
 }

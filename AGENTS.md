@@ -193,10 +193,12 @@
     (what you may do in a server, a port of `web/src/lib/permissions.ts`),
     `notifications.rs` (per channel and server levels and mutes, kept on the
     instance, and whether a message should notify), `account.rs` (profile,
-    pictures, password, signed-in devices, rules, creating channels),
-    `calls.rs` (who's in voice and which conversations have a call, and the
-    direct-message call frame encryption, byte for byte the web app's; the
-    call itself comes with the app's sound). It runs on its own
+    pictures, password, signed-in devices, rules, the welcome screen, creating
+    channels), `moderation.rs` (time outs, kicks and bans, and who may do
+    them to whom: the permission plus outranking them), `calls.rs` (who's in
+    voice and which conversations have a call, and the direct-message call
+    frame encryption, byte for byte the web app's; the call itself comes
+    with the app's sound). It runs on its own
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
@@ -204,13 +206,18 @@
     place (and the keys they take first), `mentions.rs` finds mentions and
     makes them links, `menus.rs` the bell menus, `notify.rs` the system
     notifications (clicks come back through a channel), `settings_account.rs`
-    the profile and security pages; `motion.rs` is how things move (springs,
+    the profile and security pages, `moderate.rs` the time out, kick and ban
+    buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
+    the `:name:` list, and a Markdown plugin that draws emoji inline),
+    `emoji_picker.rs` the picker by the composer, `embeds.rs` the cards apps
+    post through webhooks; `http.rs` fetches pictures for `img` on the core's
+    runtime (GPUI's own client loads nothing); `motion.rs` is how things move (springs,
     rises, glides, all settling at once with reduced motion); `theme.rs` is
     the web app's palettes and the bundled font (M PLUS Rounded 1c, whose
     files name the family "Rounded Mplus 1c").
   - `tests/core.rs`: two app cores against an in-process instance: servers,
     live messages, mentions that notify, edits, mutes kept on the instance,
-    unread counts, encrypted DMs both ways, and that no plaintext reaches the
+    unread counts, time-outs and kicks reaching the person live, encrypted DMs both ways, and that no plaintext reaches the
     instance's files.
   - `packaging/`: the icon (`icon.svg`, and the PNGs and `.ico` made from it)
     for the installers. `[package.metadata.packager]` in `Cargo.toml` tells
