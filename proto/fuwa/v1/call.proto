@@ -1,0 +1,191 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// Voice: talking in a server's voice channels, and calls in direct messages.
+//
+// Sound goes over WebRTC to the instance's media part (an SFU: it passes each
+// person's sound on to everyone else in the call, and never mixes or keeps
+// it). Calls here only arrange that: the app sends a WebRTC offer and gets
+// the media part's answer back. After that, the media part and the app talk
+// over the connection itself: a data channel named "fuwa" carries the offers
+// and answers for people coming and going, as JSON ({"type": "offer" or
+// "answer", "sdp": ...}), and a few notices ({"type": "replaced"} when the
+// same account joined from somewhere else, {"type": "restarting"} when the
+// media part is about to restart and the app should join again at once,
+// {"type": "closed"} when the instance hung it up).
+//
+// Who's in a call is kept in memory, not stored, and each app keeps its
+// place with KeepVoice every 5 seconds; a place nobody kept for 15 seconds
+// is let go. A part restarting forgets nothing anyone notices: the apps
+// keep their place again with their next KeepVoice, and join the media part
+// again when their connection drops, with the session they had. See
+// docs/calls.md.
+service CallService {
+  // What an app needs before it makes an offer: whether this instance has
+  // calls on, and the STUN and TURN servers to reach the media part through
+  // (TURN credentials are made for the caller and expire). Signed in.
+  rpc GetCallSettings(GetCallSettingsRequest) returns (GetCallSettingsResponse);
+
+  // Joins a voice channel (CONNECT there), or moves to another one in the
+  // same server. One place per account per server: joining from another
+  // device takes the place over, and the first device hears "replaced". With
+  // `session_id` it rejoins the session the caller already has, after its
+  // connection dropped; that fails with FAILED_PRECONDITION when the place
+  // was taken over meanwhile.
+  rpc JoinVoice(JoinVoiceRequest) returns (JoinVoiceResponse);
+  // Leaves the server's voice channel the caller is in, if any.
+  rpc LeaveVoice(LeaveVoiceRequest) returns (LeaveVoiceResponse);
+  // Keeps the caller's place, and changes their own mute and deafen. Fails
+  // with FAILED_PRECONDITION when `session_id` isn't the caller's place any
+  // more (it was taken over, a moderator disconnected them, or they lost
+  // CONNECT); the app hangs up then.
+  rpc KeepVoice(KeepVoiceRequest) returns (KeepVoiceResponse);
+  // Who's in the server's voice channels now, leaving out the channels the
+  // caller can't see.
+  rpc ListVoiceStates(ListVoiceStatesRequest) returns (ListVoiceStatesResponse);
+  // Server mutes or deafens someone in a voice channel (MUTE_MEMBERS), or
+  // disconnects them (MOVE_MEMBERS). Only people ranked below the caller.
+  rpc ModerateVoice(ModerateVoiceRequest) returns (ModerateVoiceResponse);
+
+  // Joins the call in a direct-message conversation, starting it if nobody
+  // is in it. The other person's apps hear it ring (CallUpdated on
+  // DirectMessageService.Watch). The sound is end-to-end encrypted by the
+  // apps on top of WebRTC's own encryption, with a key from the
+  // conversation's MLS group, so the media part passes on what it can't hear.
+  rpc JoinDmCall(JoinDmCallRequest) returns (JoinDmCallResponse);
+  rpc LeaveDmCall(LeaveDmCallRequest) returns (LeaveDmCallResponse);
+  rpc KeepDmCall(KeepDmCallRequest) returns (KeepDmCallResponse);
+  // The calls going on in the caller's conversations.
+  rpc ListDmCalls(ListDmCallsRequest) returns (ListDmCallsResponse);
+}
+
+message IceServer {
+  repeated string urls = 1;
+  string username = 2;
+  string credential = 3;
+}
+
+message GetCallSettingsRequest {}
+
+message GetCallSettingsResponse {
+  // Off: the instance's admins turned calls off, or it couldn't start its
+  // media part. Voice channels show, but nobody can join them.
+  bool enabled = 1;
+  repeated IceServer ice_servers = 2;
+}
+
+message JoinVoiceRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // The app's WebRTC offer, SDP. It sends its microphone (one audio track,
+  // send only) and opens the "fuwa" data channel.
+  string offer = 3;
+  bool self_mute = 4;
+  bool self_deaf = 5;
+  // Rejoin this session instead of starting a new one.
+  string session_id = 6;
+}
+
+message JoinVoiceResponse {
+  // The media part's WebRTC answer, SDP.
+  string answer = 1;
+  // The caller's place: KeepVoice and rejoining name it.
+  string session_id = 2;
+  VoiceState state = 3;
+}
+
+message LeaveVoiceRequest {
+  string server_id = 1;
+  // Leave only if this is still the caller's session; empty for whichever.
+  string session_id = 2;
+}
+
+message LeaveVoiceResponse {}
+
+message KeepVoiceRequest {
+  string server_id = 1;
+  string session_id = 2;
+  // Where the caller is: the place comes back here after the server's part
+  // restarted and forgot it.
+  string channel_id = 3;
+  bool self_mute = 4;
+  bool self_deaf = 5;
+}
+
+message KeepVoiceResponse {
+  VoiceState state = 1;
+}
+
+message ListVoiceStatesRequest {
+  string server_id = 1;
+}
+
+message ListVoiceStatesResponse {
+  repeated VoiceState states = 1;
+}
+
+message ModerateVoiceRequest {
+  string server_id = 1;
+  string user_id = 2;
+  // Unset leaves it as it is.
+  optional bool server_mute = 3;
+  optional bool server_deaf = 4;
+  // Takes them out of the voice channel.
+  bool disconnect = 5;
+}
+
+message ModerateVoiceResponse {}
+
+message JoinDmCallRequest {
+  string conversation_id = 1;
+  string offer = 2;
+  bool self_mute = 3;
+  bool self_deaf = 4;
+  string session_id = 5;
+}
+
+message JoinDmCallResponse {
+  string answer = 1;
+  string session_id = 2;
+  VoiceState state = 3;
+}
+
+message LeaveDmCallRequest {
+  string conversation_id = 1;
+  string session_id = 2;
+}
+
+message LeaveDmCallResponse {}
+
+message KeepDmCallRequest {
+  string conversation_id = 1;
+  string session_id = 2;
+  bool self_mute = 3;
+  bool self_deaf = 4;
+}
+
+message KeepDmCallResponse {
+  VoiceState state = 1;
+}
+
+message ListDmCallsRequest {}
+
+message ListDmCallsResponse {
+  repeated DmCall calls = 1;
+}
+
+// The call going on in a direct-message conversation.
+message DmCall {
+  string conversation_id = 1;
+  // Everyone in it; none when it ended.
+  repeated VoiceState participants = 2;
+  // When it started: apps ring for a call that started a moment ago and
+  // that you're not in.
+  google.protobuf.Timestamp started_at = 3;
+  // Who started it.
+  string started_by = 4;
+}

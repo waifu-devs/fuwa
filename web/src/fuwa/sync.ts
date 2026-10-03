@@ -243,10 +243,12 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           ],
           { concurrency: "unbounded" },
         ).pipe(Effect.retry(retryPolicy));
+        const voice = yield* listVoice(serverId);
         store.update((s) => {
           const current = s.instances[key];
           if (!current || !server.server) return s;
           let next = applySnapshot(current, server.server, channels.channels, members.members, roles.roles, emojis.emojis);
+          next = { ...next, voice: { ...next.voice, [serverId]: voice } };
           const focus = s.focus?.instance === key ? s.focus.channel : null;
           for (const event of held.get(serverId) ?? []) next = applyEvent(next, event, focus);
           return { ...s, instances: { ...s.instances, [key]: next } };
@@ -261,6 +263,20 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
             updateInstance(key, (i) => removeServer(i, serverId));
           }).pipe(Effect.zipRight(unfollow(key, serverId))),
         ),
+      );
+
+    // Who's in voice channels isn't in the log (it lives only as long as the
+    // calls do), so it's listed whenever the stream starts again.
+    const listVoice = (serverId: string) =>
+      call((signal) => api.calls.listVoiceStates({ serverId }, { signal })).pipe(
+        Effect.map((r) => r.states),
+        // Instances from before calls, or a server that's mid-move: nobody, for now.
+        Effect.orElseSucceed(() => []),
+      );
+    const relistVoice = (serverId: string) =>
+      listVoice(serverId).pipe(
+        Effect.tap((states) => Effect.sync(() => updateInstance(key, (i) => (i.synced[serverId] ? { ...i, voice: { ...i.voice, [serverId]: states } } : i)))),
+        Effect.asVoid,
       );
 
     // A replay goes by what you can see now, so channels you gained or lost
@@ -289,6 +305,7 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
         if (res.ready) {
           for (const head of res.ready.servers) {
             if (cursors.has(head.serverId)) {
+              yield* FiberSet.run(snapshots, relistVoice(head.serverId));
               const from = resumedFrom.get(head.serverId);
               if (from !== undefined && head.sequence > from) yield* FiberSet.run(snapshots, relist(head.serverId));
               continue;

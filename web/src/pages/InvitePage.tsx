@@ -1,7 +1,7 @@
 import { Code } from "@connectrpc/connect";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { Effect } from "effect";
-import { ChevronLeftIcon, HashIcon, Link2OffIcon, LoaderCircleIcon, UsersIcon } from "lucide-react";
+import { ChevronLeftIcon, GlobeIcon, HashIcon, Link2OffIcon, LoaderCircleIcon, UsersIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { lookUpInvite, run } from "@/fuwa/actions";
@@ -18,6 +18,9 @@ import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { displayName } from "@/lib/format";
 import { expiresAt, timeLeft } from "@/lib/invites";
+import { allowPicturesFrom } from "@/lib/shown";
+import { loadSaved, normalizeUrl } from "@/fuwa/saved";
+import { store } from "@/fuwa/store";
 import { HostedBadge } from "@/components/HostedBadge";
 
 type Found = Effect.Effect.Success<ReturnType<typeof lookUpInvite>>;
@@ -42,8 +45,13 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
   const inst = useInstance(key);
   // From the key alone, so signing in partway (which adds the instance) doesn't look the invite up again.
   const address = instanceKey.replaceAll("~", "/");
+  // Looking an invite up talks to its instance, which learns your IP address.
+  // One you never added asks first, so a link alone can't make you visit it.
+  const [confirmed, setConfirmed] = useState(() => knownInstance(address));
 
   useEffect(() => {
+    if (!confirmed) return;
+    allowPicturesFrom(address);
     let cancelled = false;
     setFound(null);
     setProblem(null);
@@ -54,7 +62,7 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
     return () => {
       cancelled = true;
     };
-  }, [address, code]);
+  }, [address, code, confirmed]);
 
   const signedOut = !inst || inst.connection === "signed-out" || (!inst.me && !!inst.node && inst.connection !== "connecting");
 
@@ -81,7 +89,9 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
       )}
       <div className="grid min-h-[calc(100%-3.5rem)] place-items-center p-4 sm:min-h-full">
         <AnimatePresence mode="wait">
-          {problem ? (
+          {!confirmed ? (
+            <Elsewhere key="elsewhere" address={address} onContinue={() => setConfirmed(true)} />
+          ) : problem ? (
             <Broken key="broken" problem={problem} />
           ) : !found ? (
             <motion.div key="loading" exit={{ opacity: 0, scale: 0.97 }} className="w-full max-w-md rounded-3xl border bg-card p-8 shadow-xl">
@@ -194,6 +204,69 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
 }
 
 /** An invite that doesn't lead anywhere anymore, or a server that can't be reached. */
+/** Whether `address` is this instance or one this browser already added. */
+function knownInstance(address: string): boolean {
+  let origin: string;
+  try {
+    origin = new URL(normalizeUrl(address)).origin;
+  } catch {
+    return false;
+  }
+  const origins = [location.origin, ...loadSaved().map((i) => i.url), ...Object.values(store.get().instances).map((i) => i.url)];
+  return origins.some((url) => {
+    try {
+      return new URL(url).origin === origin;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Asks before opening an invite on an instance this browser has never talked to. */
+function Elsewhere({ address, onContinue }: { address: string; onContinue: () => void }) {
+  let host = address;
+  try {
+    host = new URL(normalizeUrl(address)).host;
+  } catch {
+    // Shown as typed.
+  }
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={{ duration: 0.45, ease: EASE_OUT }}
+      className="flex w-full max-w-md flex-col items-center gap-3 rounded-3xl border bg-card p-8 text-center shadow-xl"
+    >
+      <motion.span
+        initial={{ scale: 0.5, rotate: -20 }}
+        animate={{ scale: 1, rotate: 0 }}
+        transition={{ type: "spring", stiffness: 380, damping: 12, delay: 0.1 }}
+        className="grid size-16 place-items-center rounded-full bg-primary/15 text-primary"
+      >
+        <motion.span animate={{ rotate: 360 }} transition={{ duration: 18, repeat: Infinity, ease: "linear" }}>
+          <GlobeIcon className="size-7" />
+        </motion.span>
+      </motion.span>
+      <h1 className="text-xl font-extrabold">Open this invite on another fuwa?</h1>
+      <p className="text-sm text-muted-foreground">
+        This invite is for a server on <b className="text-foreground [overflow-wrap:anywhere]">{host}</b>, which you haven't added yet. Opening it
+        connects to that instance, so it will see your IP address. Only continue if you trust whoever sent the link.
+      </p>
+      <div className="mt-1 flex w-full flex-col gap-2 sm:flex-row-reverse">
+        <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="flex-1">
+          <Button onClick={onContinue} className="btn w-full rounded-xl font-bold">
+            Continue to {host}
+          </Button>
+        </motion.div>
+        <Button asChild variant="ghost" className="flex-1 rounded-xl font-bold">
+          <Link to="/">Go back</Link>
+        </Button>
+      </div>
+    </motion.div>
+  );
+}
+
 function Broken({ problem }: { problem: FuwaError }) {
   const gone = problem.code === Code.NotFound;
   return (

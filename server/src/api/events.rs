@@ -37,6 +37,8 @@ fn channel_of(payload: &Payload) -> Option<&str> {
         Payload::ChannelCreated(pb::ChannelCreated { channel: Some(c) })
         | Payload::ChannelUpdated(pb::ChannelUpdated { channel: Some(c) }) => Some(&c.id),
         Payload::ChannelDeleted(d) => Some(&d.channel_id),
+        Payload::VoiceStateUpdated(pb::VoiceStateUpdated { state: Some(s) }) => Some(&s.channel_id),
+        Payload::VoiceStateRemoved(r) => Some(&r.channel_id),
         _ => None,
     }
 }

@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { LockKeyholeIcon, ShieldAlertIcon } from "lucide-react";
+import { LockKeyholeIcon, PhoneCallIcon, ShieldAlertIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { Ref } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
@@ -102,6 +102,7 @@ function DmLink({
   const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id);
   const items = useFuwa((s) => s.instances[instanceKey]?.dms.items[conversation.id]);
   const unread = useFuwa((s) => s.instances[instanceKey]?.dms.unread[conversation.id] ?? 0);
+  const calling = useFuwa((s) => !!s.instances[instanceKey]?.dms.calls[conversation.id]?.participants.length);
   const other = conversation.users.find((u) => u.id !== meId) ?? conversation.users[0];
   const line = preview(items, meId);
   return (
@@ -142,6 +143,21 @@ function DmLink({
             </motion.span>
           </AnimatePresence>
         </span>
+        <AnimatePresence>
+          {calling && (
+            <motion.span
+              key="call"
+              initial={{ scale: 0, rotate: -40 }}
+              animate={{ scale: 1, rotate: 0 }}
+              exit={{ scale: 0, rotate: 40 }}
+              transition={{ type: "spring", stiffness: 600, damping: 16 }}
+              title="A call is going on"
+              className="grid size-6 shrink-0 place-items-center rounded-full bg-[#3ba55d] text-white"
+            >
+              <PhoneCallIcon className="ringing size-3.5" />
+            </motion.span>
+          )}
+        </AnimatePresence>
         <AnimatePresence>
           {unread > 0 && (
             <motion.span

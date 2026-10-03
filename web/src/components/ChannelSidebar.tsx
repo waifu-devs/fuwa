@@ -37,6 +37,9 @@ import { useLayout } from "@/components/Shell";
 import { Count, SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { UserPanel } from "@/components/UserPanel";
+import { CallPanel } from "@/components/calls/CallPanel";
+import { VoiceUsers } from "@/components/calls/VoiceUsers";
+import { joinCall } from "@/calls/engine";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -319,6 +322,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                             instanceKey={instanceKey}
                             channel={c}
                             active={params.channel === c.id}
+                            canConnect={hasIn(access, c.id, Permission.CONNECT)}
                             onEdit={
                               hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)
                                 ? () => setSettings({ tab: "channels", target: c.id })
@@ -338,6 +342,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
           })
         )}
       </div>
+      <CallPanel />
       <UserPanel instanceKey={instanceKey} />
 
       <InviteDialog
@@ -378,8 +383,11 @@ function ChannelRow({
   ref,
   onEdit,
   onInvite,
+  canConnect,
 }: {
   instanceKey: string;
+  /** A voice channel you may join. */
+  canConnect?: boolean;
   channel: Channel;
   active: boolean;
   index: number;
@@ -395,6 +403,7 @@ function ChannelRow({
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
   const dot = unread > 0 && !active;
   const locked = isPrivate(channel, channel.serverId);
+  const voice = channel.type === ChannelType.VOICE;
   return (
     <motion.li
       ref={ref}
@@ -415,7 +424,11 @@ function ChannelRow({
       <Link
         to="/$instance/$server/$channel"
         params={{ instance: instanceKey, server: channel.serverId, channel: channel.id }}
-        onClick={() => compact && setNavOpen(false)}
+        onClick={() => {
+          if (compact) setNavOpen(false);
+          // A voice channel joins as it opens, as Discord's do, when you may connect there.
+          if (voice && canConnect) void joinCall({ kind: "voice", instance: instanceKey, serverId: channel.serverId, channelId: channel.id });
+        }}
         className={cn(
           "row-y group relative flex items-center gap-1.5 rounded-lg px-2 text-[0.94rem] transition-colors",
           active ? "font-bold text-primary" : unread ? "font-bold text-foreground" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
@@ -520,6 +533,7 @@ function ChannelRow({
           )}
         </AnimatePresence>
       </Link>
+      {voice && <VoiceUsers instanceKey={instanceKey} serverId={channel.serverId} channelId={channel.id} />}
     </motion.li>
   );
 }

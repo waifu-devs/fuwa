@@ -17,6 +17,7 @@ import {
   ShieldCheckIcon,
   TvMinimalPlayIcon,
   UserRoundIcon,
+  AudioLinesIcon,
 } from "lucide-react";
 import { useEffect } from "react";
 import { useFuwa } from "@/fuwa/store";
@@ -27,6 +28,7 @@ import { Chat } from "@/components/settings/app/Chat";
 import { KEYBIND_SETTINGS, Keybinds } from "@/components/settings/app/Keybinds";
 import { Notifications } from "@/components/settings/app/Notifications";
 import { Streamer } from "@/components/settings/app/Streamer";
+import { Voice, VOICE_SETTINGS } from "@/components/settings/app/Voice";
 import { hasPassword, LinkedSignIn, Password, Session } from "@/components/settings/Account";
 import { Agents } from "@/components/settings/account/Agents";
 import { Devices } from "@/components/settings/account/Devices";
@@ -90,6 +92,14 @@ const APP: SettingsSection[] = [
       { id: "unread-badge", label: "Unread count on the tab", keywords: "badge title favicon" },
       { id: "sounds", label: "Sounds", keywords: "volume audio" },
     ],
+  },
+  {
+    id: "voice",
+    label: "Voice & audio",
+    icon: AudioLinesIcon,
+    description: "Your microphone and speakers in calls, on this device.",
+    keywords: "call microphone mic speakers headset audio",
+    settings: VOICE_SETTINGS,
   },
   {
     id: "keybinds",
@@ -253,6 +263,7 @@ export function UserSettings() {
       {section === "accessibility" && <Accessibility />}
       {section === "chat" && <Chat />}
       {section === "notifications" && <Notifications />}
+      {section === "voice" && <Voice />}
       {section === "keybinds" && <Keybinds />}
       {section === "streamer" && <Streamer instanceKey={key} />}
       {section === "advanced" && <Advanced />}

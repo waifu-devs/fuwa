@@ -1,0 +1,188 @@
+import { ChevronLeftIcon, HeadphonesIcon, MicOffIcon, Volume2Icon } from "lucide-react";
+import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import { useEffect } from "react";
+import { Permission, type Channel, type VoiceState } from "@/gen/fuwa/v1/types_pb";
+import { hangUp, joinCall } from "@/calls/engine";
+import { useCalls, useInVoice } from "@/calls/state";
+import { useAccess, useInstance } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
+import { CopyId } from "@/components/CopyId";
+import { hue } from "@/components/Icons";
+import { SPRING, SwapText } from "@/components/motion";
+import { useLayout } from "@/components/Shell";
+import { Button } from "@/components/ui/button";
+import { displayName, memberName } from "@/lib/format";
+import { hasIn } from "@/lib/permissions";
+import { setTitle } from "@/lib/notify";
+import { cn } from "@/lib/utils";
+import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceAvatar, VoiceFlags } from "./parts";
+import { useVoiceIn } from "./VoiceUsers";
+
+/**
+ * A voice channel, open: everyone in it as a tile that glows while they
+ * talk, and the controls for your own place there. Each tile is one
+ * person's own stream, the way video will arrive too, so a tile can later
+ * pop out into its own window.
+ */
+export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: string; serverId: string; channel: Channel }) {
+  const inst = useInstance(instanceKey);
+  const access = useAccess(instanceKey, serverId);
+  const states = useVoiceIn(instanceKey, serverId, channel.id);
+  const joined = useInVoice(instanceKey, channel.id);
+  const status = useCalls((s) => (joined ? s.call?.status : null));
+  const { compact, setNavOpen } = useLayout();
+  const canConnect = hasIn(access, channel.id, Permission.CONNECT);
+  const canSpeak = hasIn(access, channel.id, Permission.SPEAK);
+  const serverName = inst?.servers.find((s) => s.id === serverId)?.name;
+
+  useEffect(() => {
+    setTitle(`🔊 ${channel.name} · ${serverName ?? "fuwa"}`);
+    return () => setTitle("fuwa");
+  }, [channel.name, serverName]);
+
+  const join = () => void joinCall({ kind: "voice", instance: instanceKey, serverId, channelId: channel.id });
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-[radial-gradient(ellipse_at_top,color-mix(in_srgb,var(--primary)_10%,transparent),transparent_65%)]">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4">
+        {compact && (
+          <button
+            type="button"
+            aria-label="Channels"
+            onClick={() => setNavOpen(true)}
+            className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted"
+          >
+            <ChevronLeftIcon className="size-5" />
+          </button>
+        )}
+        <Volume2Icon className="size-5 shrink-0 text-muted-foreground" />
+        <h1 className="truncate font-extrabold">
+          <SwapText className="truncate align-bottom">{channel.name}</SwapText>
+        </h1>
+        <CopyId id={channel.id} what="channel ID" />
+        <span className="flex-1" />
+        <AnimatePresence>
+          {states.length > 0 && (
+            <motion.span
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={SPRING}
+              className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground tabular-nums"
+            >
+              {states.length} in voice
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </header>
+
+      <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
+        {states.length === 0 ? (
+          <Empty name={channel.name} />
+        ) : (
+          <LayoutGroup>
+            <motion.ul layout className={cn("m-auto grid w-full max-w-5xl gap-3 sm:gap-4", gridFor(states.length))}>
+              <AnimatePresence initial={false} mode="popLayout">
+                {states.map((state, n) => (
+                  <Tile key={state.userId} instanceKey={instanceKey} serverId={serverId} channelId={channel.id} state={state} index={n} />
+                ))}
+              </AnimatePresence>
+            </motion.ul>
+          </LayoutGroup>
+        )}
+      </div>
+
+      <footer className="flex shrink-0 flex-col items-center gap-2 border-t bg-card/60 px-4 py-3 backdrop-blur">
+        <AnimatePresence mode="wait" initial={false}>
+          {joined ? (
+            <motion.div key="in" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }} transition={SPRING} className="flex items-center gap-2">
+              <MuteButtons size="lg" />
+              <HangUpButton size="lg" onClick={() => void hangUp(null)} />
+            </motion.div>
+          ) : (
+            <motion.div key="out" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }} transition={SPRING} className="flex flex-col items-center gap-1.5">
+              <Button onClick={join} disabled={!canConnect} className="btn group h-12 rounded-2xl px-6 font-extrabold">
+                <HeadphonesIcon className="transition-transform group-hover:-rotate-12 group-hover:scale-110" /> Join voice
+              </Button>
+              {!canConnect ? (
+                <p className="text-xs text-muted-foreground">You can't join this channel.</p>
+              ) : (
+                !canSpeak && (
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <MicOffIcon className="size-3" /> You can listen here, but not speak.
+                  </p>
+                )
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {joined && status !== "connected" && (
+            <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="text-xs font-bold text-muted-foreground">
+              {status === "reconnecting" ? "Reconnecting…" : "Connecting…"}
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </footer>
+    </div>
+  );
+}
+
+/** Columns for this many people: one big tile, a pair, then a grid. */
+function gridFor(n: number) {
+  if (n === 1) return "max-w-xl grid-cols-1";
+  if (n === 2) return "max-w-3xl grid-cols-1 sm:grid-cols-2";
+  if (n <= 4) return "grid-cols-2";
+  if (n <= 9) return "grid-cols-2 md:grid-cols-3";
+  return "grid-cols-2 md:grid-cols-3 lg:grid-cols-4";
+}
+
+function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey: string; serverId: string; channelId: string; state: VoiceState; index: number }) {
+  const user = useFuwa((s) => s.instances[instanceKey]?.users[state.userId]);
+  const member = useFuwa((s) => s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === state.userId));
+  const speaking = useSpeaking(state.userId);
+  const name = member ? memberName(member) : displayName(user);
+  return (
+    <motion.li
+      layout
+      initial={{ opacity: 0, scale: 0.8, y: 16 }}
+      animate={{ opacity: 1, scale: 1, y: 0, transition: { ...SPRING, delay: Math.min(index, 8) * 0.04 } }}
+      exit={{ opacity: 0, scale: 0.85, transition: { duration: 0.18 } }}
+      transition={SPRING}
+    >
+      <ParticipantMenu instanceKey={instanceKey} serverId={serverId} channelId={channelId} user={user} state={state}>
+        <button
+          type="button"
+          className={cn(
+            "group relative flex aspect-video w-full flex-col items-center justify-center gap-3 overflow-hidden rounded-3xl border bg-card text-left shadow-sm transition-[box-shadow,border-color] duration-300",
+            speaking ? "border-[#3ba55d] shadow-[0_0_0_2px_#3ba55d,0_10px_40px_-10px_rgb(59_165_93/0.6)]" : "hover:border-primary/40",
+          )}
+        >
+          {/* Their color, softly, behind them. */}
+          <span aria-hidden className="server-gradient absolute inset-0 opacity-25 transition-opacity duration-500 group-hover:opacity-35" style={hue(state.userId)} />
+          <motion.span animate={{ scale: speaking ? 1.06 : 1 }} transition={{ type: "spring", stiffness: 400, damping: 15 }} className="relative">
+            <VoiceAvatar user={user} speaking={speaking} ring={4} className="size-16 text-xl sm:size-20 sm:text-2xl" />
+          </motion.span>
+          <span className="absolute inset-x-2 bottom-2 flex items-center gap-1.5 rounded-xl bg-background/75 px-2.5 py-1 backdrop-blur">
+            <span className="min-w-0 flex-1 truncate text-sm font-bold">{name}</span>
+            <VoiceFlags state={state} />
+          </span>
+        </button>
+      </ParticipantMenu>
+    </motion.li>
+  );
+}
+
+function Empty({ name }: { name: string }) {
+  return (
+    <div className="m-auto flex flex-col items-center gap-3 text-center">
+      <span className="float relative grid size-20 place-items-center rounded-full bg-primary/12 text-primary">
+        <span aria-hidden className="call-wave absolute inset-0 rounded-full border-2 border-primary/40" />
+        <span aria-hidden className="call-wave absolute inset-0 rounded-full border-2 border-primary/30 [animation-delay:1s]" />
+        <Volume2Icon className="size-9" />
+      </span>
+      <p className="text-lg font-extrabold">Nobody's in {name} yet</p>
+      <p className="max-w-xs text-sm text-muted-foreground">Join, and whoever comes by can talk with you.</p>
+    </div>
+  );
+}

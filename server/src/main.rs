@@ -29,8 +29,11 @@ see https://github.com/waifu-devs/fuwa#configuration. The most common:
   FUWA_PUBLIC_URL       the URL clients reach this instance on
   FUWA_LOCAL_ACCOUNTS   open | closed | off (default open)
   FUWA_TELEMETRY        on | off: the anonymous daily usage signal (default on)
-  FUWA_ROLE             all | gateway | directory | shard: run one part of a
-                        split instance (default all, everything in one process)
+  FUWA_ROLE             all | gateway | directory | shard | media: run one part
+                        of a split instance (default all, everything in one process)
+  FUWA_MEDIA_PORT       the port calls' sound uses, UDP and TCP (default 50000;
+                        off for no calls in this process)
+  FUWA_MEDIA_ADDRESSES  where apps reach it (default this machine's address)
   FUWA_S3_BUCKET        on a split instance's directory and shards: a bucket
                         to copy their databases and pictures to as they change
                         (with FUWA_S3_ENDPOINT, FUWA_S3_ACCESS_KEY_ID and

@@ -19,12 +19,15 @@ pub mod id;
 pub mod linked;
 pub mod media;
 pub mod node;
+pub mod outside;
 pub mod permissions;
 pub mod replica;
+pub mod rtc;
 pub mod servers;
 pub mod settings;
 pub mod telemetry;
 pub mod twofactor;
+pub mod voice;
 pub mod web;
 pub mod webhooks;
 

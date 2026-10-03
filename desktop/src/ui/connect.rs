@@ -266,6 +266,24 @@ impl Render for ConnectView {
             Step::Account => {
                 let local = auth.local_sign_in || auth.local_sign_up;
                 let mut body = div().flex().flex_col().gap(px(14.0));
+                if plain_http(&self.url) {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap(px(10.0))
+                            .p(px(12.0))
+                            .rounded(px(12.0))
+                            .bg(alpha(p.destructive, 0.1))
+                            .text_color(p.destructive)
+                            .text_sm()
+                            .child(icon("triangle-alert").size(px(16.0)).mt(px(2.0)))
+                            .child(div().flex_1().child(
+                                "This instance doesn't use https. Your password, your messages and your address \
+                                 travel unprotected: anyone on the network between you can read them.",
+                            )),
+                    );
+                }
                 if auth.linked_sign_in {
                     body = body.child(
                         primary_button("linked", format!("Continue with {issuer}"), &p)
@@ -485,6 +503,15 @@ fn dots(p: &crate::ui::theme::Palette) -> impl IntoElement {
             },
         )
     }))
+}
+
+/// Whether an address is plain http somewhere other than this computer.
+fn plain_http(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else { return false };
+    parsed.scheme() == "http"
+        && !matches!(parsed.host(), Some(url::Host::Domain("localhost")))
+        && !matches!(parsed.host(), Some(url::Host::Ipv4(ip)) if ip.is_loopback())
+        && !matches!(parsed.host(), Some(url::Host::Ipv6(ip)) if ip.is_loopback())
 }
 
 fn short_host(url: &str) -> String {

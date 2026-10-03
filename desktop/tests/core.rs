@@ -61,6 +61,9 @@ fn until(core: &Core, what: &str, check: impl Fn(&Store) -> bool) {
 
 #[test]
 fn two_people_talk_in_a_server_and_in_private() {
+    // Secrets stay in the test's own folders, out of this computer's keychain.
+    // SAFETY: set before anything reads it.
+    unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
     let data = tempfile::tempdir().unwrap();
     let instance = start_instance(data.path());
     let (home_a, home_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());

@@ -92,16 +92,49 @@ impl FuwaApp {
             .items_center()
             .gap(px(2.0))
             .w_full()
-            .child(
+            .child({
+                // The name opens the server's settings, for people who can change any of it.
+                let settings = crate::ui::server_settings::can_open(&access);
+                let hover = alpha(p.primary, 0.1);
+                let (k, sid) = (key.to_owned(), server.id.clone());
                 div()
+                    .id("server-name")
                     .flex_1()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .whitespace_nowrap()
-                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .min_w_0()
+                    .h(px(30.0))
+                    .px(px(6.0))
+                    .ml(px(-6.0))
                     .mr(px(4.0))
-                    .child(server.name.clone()),
-            )
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .rounded(px(8.0))
+                    .group("server-name")
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .whitespace_nowrap()
+                            .font_weight(FontWeight::EXTRA_BOLD)
+                            .child(server.name.clone()),
+                    )
+                    .when(settings, |el| {
+                        el.cursor_pointer()
+                            .hover(move |s| s.bg(hover))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .text_color(p.muted_foreground)
+                                    .opacity(0.6)
+                                    .group_hover("server-name", |s| s.opacity(1.0))
+                                    .child(icon("chevron-down").size(px(14.0))),
+                            )
+                            .on_click(
+                                cx.listener(move |this, _, window, cx| this.open_server_settings(&k, &sid, window, cx)),
+                            )
+                    })
+            })
             .child({
                 let menu = Menu::Server { key: key.to_owned(), server: server.id.clone() };
                 let open = self.menu.as_ref() == Some(&menu);
@@ -275,6 +308,15 @@ impl FuwaApp {
         };
         let strong = active || unread > 0;
         let hover = alpha(p.primary, 0.08);
+        // Who's in a voice channel. Joining from the desktop app comes with
+        // its sound (src/core/calls.rs); until then the web app does it.
+        let in_voice = if kind == pb::ChannelType::Voice {
+            self.core.shared.read(|s| {
+                s.instance(key).map(|i| crate::core::calls::in_channel(&i.voice, server, &c.id).len()).unwrap_or(0)
+            })
+        } else {
+            0
+        };
         div()
             .id(SharedString::from(format!("row|{}", c.id)))
             .relative()
@@ -303,6 +345,19 @@ impl FuwaApp {
                     .child(c.name.clone()),
             )
             .when(unread > 0 && !active, |el| el.child(badge(unread, p).border_color(p.sidebar)))
+            .when(in_voice > 0, |el| {
+                el.opacity(1.0).child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(3.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.primary)
+                        .child(icon("users").size(px(13.0)))
+                        .child(in_voice.to_string()),
+                )
+            })
     }
 
     fn dm_sidebar(

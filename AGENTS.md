@@ -118,6 +118,19 @@
     (Signature V4), `store.rs` a bucket or a folder behind one interface. A
     single process (`FUWA_ROLE=all`) refuses the settings: it keeps plain
     local files.
+  - Calls (`docs/calls.md` is the design): `rtc.rs` is the SFU, str0m
+    driven by one task (UDP and ICE-TCP on one port, ICE-lite), with
+    `offer_allowed` and per-person budgets limiting what an app may send.
+    `voice.rs` keeps who's in which call in memory (`Voice`, leases) and
+    `MediaLink` reaches the media part (in process, or the media parts on
+    `FUWA_MEDIA_URL` by rendezvous hashing). `api/calls.rs` is
+    `CallService`: places, keeps, moderation (`voice_moderation` in the
+    server file keeps server mute and deafen), TURN credentials, and
+    `spawn_voice_guard`, which hangs people up as soon as an event takes
+    their access away (through `Hub::tap`). `cluster/media.rs` is a media
+    part (`FUWA_ROLE=media`). Calls in direct messages are end-to-end
+    encrypted by the apps; the server never holds their keys and only
+    forwards sealed frames. Never put a participant's address in a log or an event.
   - `config.rs`: `FUWA_*` environment variables: how the process starts, and
     the defaults for settings.
   - `settings.rs`: settings admins change from a client (`AdminService`), stored
@@ -130,6 +143,15 @@
     reserved with `MediaService.CreateUpload` (`api/media.rs`) and checks its
     bytes really are the picture type it claims; `GET /media/<id>` serves it.
     Pictures nothing uses are swept hourly and at startup.
+  - `outside.rs`: pictures from other sites. No client ever loads a picture
+    from anywhere but a fuwa instance, since that site would learn the
+    reader's IP address: any picture link that isn't an upload (embed images,
+    webhook post avatars, the waifu.dev picture) is rewritten when stored, with
+    `App::picture_link`, to `/media/outside/<hmac>?url=...`, which the instance
+    fetches itself (public addresses only, pictures only, 8 MB, cached). The
+    key is from FUWA_CLUSTER_KEY when split, else node.db's `meta`. New
+    fields that hold a picture link go through `picture_link` too; the web
+    app's `lib/shown.ts` hides any that don't.
   - `migrations/node`, `migrations/server`: SQL applied in order, tracked in
     `PRAGMA user_version`. Never edit a migration that has shipped; add a new file
     and list it in `MIGRATIONS`.
@@ -175,14 +197,22 @@
     subscribe, snapshot, apply, reconnect), `dms.rs` and `vault.rs` (one MLS
     device per install and account, through `fuwa-e2ee`'s `client` feature,
     kept in 0600 files under the app's data folder; signing out wipes it),
-    `linked.rs` (waifu.dev sign-in through the browser and a loopback page),
-    `config.rs` (saved instances and the app's settings), `permissions.rs`
+    `linked.rs` (waifu.dev sign-in through the browser and a loopback page;
+    the sign-in page must be https, or http on this computer),
+    `config.rs` (saved instances and the app's settings; no tokens),
+    `secrets.rs` (session tokens and the vault key in the system keychain,
+    named per data folder, with a 0600 file only where there's no keychain;
+    vault files are sealed with XChaCha20-Poly1305 under that key), `permissions.rs`
     (what you may do in a server, a port of `web/src/lib/permissions.ts`),
     `notifications.rs` (per channel and server levels and mutes, kept on the
     instance, and whether a message should notify), `account.rs` (profile,
     pictures, password, signed-in devices, rules, the welcome screen, creating
     channels), `moderation.rs` (time outs, kicks and bans, and who may do
-    them to whom: the permission plus outranking them). It runs on its own
+    them to whom: the permission plus outranking them), `server_admin.rs`
+    (a server's settings, invites, bans and audit log), `calls.rs` (who's in
+    voice and which conversations have a call, and the direct-message call
+    frame encryption, byte for byte the web app's; the call itself comes
+    with the app's sound). It runs on its own
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
@@ -190,12 +220,17 @@
     place (and the keys they take first), `mentions.rs` finds mentions and
     makes them links, `menus.rs` the bell menus, `notify.rs` the system
     notifications (clicks come back through a channel), `settings_account.rs`
-    the profile and security pages, `moderate.rs` the time out, kick and ban
+    the profile and security pages, `server_settings.rs` a server's settings
+    (overview, invites, members, bans, audit log; the server's name opens
+    it), `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),
     `emoji_picker.rs` the picker by the composer, `embeds.rs` the cards apps
     post through webhooks; `http.rs` fetches pictures for `img` on the core's
-    runtime (GPUI's own client loads nothing); `motion.rs` is how things move (springs,
+    runtime (GPUI's own client loads nothing): from your instances, from
+    anywhere; from anyone else, only https to public addresses, checked
+    after DNS and on every redirect. Markdown goes through `text::markdown`,
+    whose links open only for http(s) and mailto. `motion.rs` is how things move (springs,
     rises, glides, all settling at once with reduced motion); `theme.rs` is
     the web app's palettes and the bundled font (M PLUS Rounded 1c, whose
     files name the family "Rounded Mplus 1c").
@@ -222,6 +257,16 @@
   - `src/components/`, `src/pages/`: the UI. Routes are
     `/<instance>/<server>/<channel>`, where `<instance>` is the host (or, in
     streamer mode, a local alias like `/~waifu-devs`, see `lib/streamer.ts`).
+  - `src/calls/`: calls, kept apart from `fuwa/store.ts` in their own
+    store (`state.ts`). `engine.ts` is one call at a time (`Session`: join,
+    keep, answer the media part's offers over the `fuwa` data channel,
+    rejoin with the same session on a restart), `audio.ts` the microphone
+    (gain, voice activity or push to talk, mute) and speakers (per-person
+    volume, output device, who's speaking), `frames.ts` and
+    `frames.worker.ts` the end-to-end encryption of direct-message calls,
+    `keys.ts` push to talk. The screens are in `components/calls/`; the
+    Voice & audio settings are `settings/app/Voice.tsx` and the instance's
+    Calls page `settings/instance/Calls.tsx`.
   - `src/e2ee/`: encrypted direct messages in the browser. `engine.ts` is one
     device per signed-in account and instance (`DmEngine`): it registers the
     device, keeps key packages topped up, reads each conversation's records
@@ -289,7 +334,8 @@
   Railway project ("fuwa"): the published image, a volume at `/data`, the
   domain. Its `SPLIT` setting turns it into a directory (on that volume),
   shards (a volume each) and gateway replicas; shards can be added, never
-  removed. Every merge to master redeploys each service it declares onto the
+  removed. `fuwa-media` carries calls' sound, reached by apps through a TCP
+  proxy (Railway has no public UDP), one replica. Every merge to master redeploys each service it declares onto the
   new image (the `Deploy fuwa.chat` job in `publish.yml`); with a volume
   attached, Railway stops the old deployment before starting the new one, so
   while it's one process each deploy briefly drops connections. Split, only

@@ -167,7 +167,9 @@ fn start_dms(
     });
     let (core, key, api, token, slot) = (core.clone(), key.to_owned(), api.clone(), token.to_owned(), slot.clone());
     tokio::spawn(async move {
-        match DmEngine::start(&key, api, user, &token, core.paths.vaults.clone(), core.shared.clone()).await {
+        match DmEngine::start(&key, api, user, &token, core.paths.vaults.clone(), core.vault_key, core.shared.clone())
+            .await
+        {
             Ok(engine) => {
                 core.shared.instance(&key, |i| {
                     i.dms.status = DmStatus::Ready;
@@ -409,16 +411,23 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
             .await
             .map(|r| r.emojis)
             .unwrap_or_default();
-        Ok::<_, Problem>((server, channels, members, roles, emojis))
+        // Instances from before calls don't know who's in voice; that's nobody.
+        let voice = rpc!(api.calls(), list_voice_states(pb::ListVoiceStatesRequest { server_id: id.clone() }))
+            .await
+            .map(|r| r.states)
+            .unwrap_or_default();
+        Ok::<_, Problem>((server, channels, members, roles, emojis, voice))
     };
     match retrying(&core, &key, load).await {
-        Ok((server, channels, members, roles, emojis)) => {
+        Ok((server, channels, members, roles, emojis, voice)) => {
             let held = state.lock().held.remove(&server_id).unwrap_or_default();
             core.shared.update(|s| {
                 let focus = s.focus_channel(&key).map(str::to_owned);
                 let Some(i) = s.instances.get_mut(&key) else { return };
                 let Some(server) = server.server else { return };
+                let sid = server.id.clone();
                 store::apply_snapshot(i, server, channels.channels, members.members, roles.roles, emojis);
+                i.voice.insert(sid, voice);
                 for event in &held {
                     store::apply_event(i, event, focus.as_deref());
                 }

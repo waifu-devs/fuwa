@@ -5,6 +5,7 @@ import { ChannelType, Permission } from "@/gen/fuwa/v1/types_pb";
 import { useAccess, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { ChannelView } from "@/components/chat/ChannelView";
+import { VoiceStage } from "@/components/calls/VoiceStage";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
@@ -63,5 +64,6 @@ export function ChannelPage({ instanceKey, serverId, channelId }: { instanceKey:
     if (connection === "live" && !joined) return <Navigate to="/$instance" params={{ instance: instanceKey }} replace />;
     return <div className="shimmer m-4 h-10 rounded-xl opacity-40" />;
   }
+  if (channel.type === ChannelType.VOICE) return <VoiceStage instanceKey={instanceKey} serverId={serverId} channel={channel} />;
   return <ChannelView instanceKey={instanceKey} serverId={serverId} channel={channel} />;
 }

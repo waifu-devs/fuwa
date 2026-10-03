@@ -22,7 +22,7 @@ fn safe(url: &str) -> Option<&str> {
 }
 
 fn markdown(id: String, text: &str) -> TextView {
-    TextView::markdown(SharedString::from(id), crate::ui::text::images_as_links(text))
+    crate::ui::text::markdown(SharedString::from(id), crate::ui::text::images_as_links(text))
         .markdown_extensions(crate::ui::emoji::markdown_extensions())
         .selectable(true)
 }

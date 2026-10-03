@@ -48,9 +48,61 @@ impl DeviceRow {
             id: self.id.clone(),
             user_id: self.account_id.clone(),
             signature_key: self.signature_key.clone(),
-            label: self.label.clone(),
+            label: device_label(&self.label),
             created_at: Some(timestamp(self.created_at)),
         }
+    }
+}
+
+/// What others are told about a device: its browser or app, its system and
+/// whether it's a phone, as words both apps read ("Firefox/ (Windows)"),
+/// never the whole User-Agent, whose versions and details tell people apart
+/// across sites. Labels kept before this are cut down as they're shown.
+pub fn device_label(user_agent: &str) -> String {
+    let has = |words: &[&str]| words.iter().any(|word| user_agent.contains(word));
+    let app = if user_agent.starts_with("fuwa-desktop") {
+        "fuwa-desktop"
+    } else if has(&["Edg/", "EdgA/", "EdgiOS/"]) {
+        "Edg/"
+    } else if has(&["OPR/", "Opera"]) {
+        "OPR/"
+    } else if has(&["SamsungBrowser"]) {
+        "SamsungBrowser/"
+    } else if has(&["Vivaldi"]) {
+        "Vivaldi/"
+    } else if has(&["Firefox/", "FxiOS"]) {
+        "Firefox/"
+    } else if has(&["CriOS", "Chrome/", "Chromium"]) {
+        "Chrome/"
+    } else if has(&["Safari/"]) {
+        "Safari/"
+    } else if user_agent.is_empty() {
+        ""
+    } else {
+        "grpc"
+    };
+    let lower = user_agent.to_ascii_lowercase();
+    let system = if has(&["iPhone"]) {
+        "iPhone"
+    } else if has(&["iPad"]) {
+        "iPad"
+    } else if has(&["Android"]) {
+        "Android"
+    } else if has(&["CrOS"]) {
+        "CrOS"
+    } else if lower.contains("windows") {
+        "Windows"
+    } else if has(&["Mac OS X", "Macintosh"]) || lower.contains("macos") {
+        "Macintosh"
+    } else if lower.contains("linux") {
+        "Linux"
+    } else {
+        ""
+    };
+    let phone = has(&["Mobi"]) && !has(&["iPad"]);
+    match (app, system, phone) {
+        ("", "", _) => String::new(),
+        (app, system, phone) => format!("{app} ({system}{})", if phone { "; Mobile" } else { "" }),
     }
 }
 
@@ -731,6 +783,21 @@ fn values(items: &[&str]) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn devices_are_labelled_without_their_details() {
+        let firefox = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0";
+        assert_eq!(device_label(firefox), "Firefox/ (Windows)");
+        let phone = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/129.0 Mobile Safari/537.36";
+        assert_eq!(device_label(phone), "Chrome/ (Android; Mobile)");
+        let iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1";
+        assert_eq!(device_label(iphone), "Safari/ (iPhone; Mobile)");
+        assert_eq!(device_label("fuwa-desktop/0.1.0 (macos; aarch64)"), "fuwa-desktop (Macintosh)");
+        assert_eq!(device_label("grpc-rust/0.14"), "grpc ()");
+        assert_eq!(device_label(""), "");
+        // Already cut down, it stays the same.
+        assert_eq!(device_label(&device_label(phone)), device_label(phone));
+    }
 
     async fn open() -> (tempfile::TempDir, DmDb) {
         let dir = tempfile::tempdir().unwrap();

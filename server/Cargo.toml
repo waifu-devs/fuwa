@@ -33,6 +33,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"
 sha2 = "0.10"
+# WebRTC for calls (the media part), with pure-Rust crypto so builds stay reproducible.
+str0m = { version = "0.24", default-features = false, features = ["rust-crypto"] }
 # Embedded files get a fixed timestamp, so builds of one commit come out identical.
 rust-embed = { version = "8", optional = true, features = ["deterministic-timestamps"] }
 thiserror = "2"
@@ -49,6 +51,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 turso = "0.7.2"
 ulid = "1"
+url = "2"
 
 [features]
 # Embed the web client (web/dist, built with `pnpm build` in web/) and serve it on /.
