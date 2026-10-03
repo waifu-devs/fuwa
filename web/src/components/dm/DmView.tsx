@@ -16,7 +16,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { User } from "@/gen/fuwa/v1/types_pb";
 import type { Item } from "@/e2ee/vault";
@@ -27,6 +27,7 @@ import { useFuwa, type PendingMessage } from "@/fuwa/store";
 import { sendsMessage } from "@/components/chat/Composer";
 import { DayDivider, EditBox, MessageBody, MessageLine, ToolButton } from "@/components/chat/MessageList";
 import { EncryptionDialog } from "@/components/dm/EncryptionDialog";
+import { CallButton, DmCallStrip } from "@/components/calls/DmCall";
 import { UserAvatar } from "@/components/Icons";
 import { SPRING, SwapText } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
@@ -101,10 +102,12 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
           </motion.span>
         </AnimatePresence>
         <span className="flex-1" />
+        {conversation && status === "ready" && <CallButton instanceKey={instanceKey} conversationId={conversationId} />}
         {conversation && <TrustPill instanceKey={instanceKey} conversationId={conversationId} onOpen={() => setSheet(true)} />}
       </header>
       {conversation && me ? (
         <>
+          <DmCallStrip instanceKey={instanceKey} conversation={conversation} me={me} />
           <DmMessages instanceKey={instanceKey} conversation={conversation} me={me} partner={partner} />
           <DmComposer instanceKey={instanceKey} conversation={conversation} partner={partner} />
           <EncryptionDialog open={sheet} onOpenChange={setSheet} instanceKey={instanceKey} conversation={conversation} />
@@ -224,7 +227,7 @@ function DmMessages({
     for (const item of list) {
       // The first device to join a conversation doesn't need telling it joined.
       if (item.kind === "joined" && item.seq <= 1) continue;
-      const date = new Date(item.at);
+      const date = dateOf(item);
       if (!prev || !sameDay(prev.at, date)) {
         out.push({ kind: "day", key: `day-${date.toDateString()}`, date });
         prev = null;
@@ -250,23 +253,50 @@ function DmMessages({
   const initial = useRef<Set<number> | null>(null);
   if (initial.current === null && items) initial.current = new Set(items.map((i) => i.seq));
 
+  // A long conversation opens with its latest rows drawn; scrolling up reveals the rest.
+  const [hidden, setHidden] = useState<number | null>(null);
+  const skipped = hidden ?? (items ? Math.max(0, rows.length - FIRST_ROWS) : 0);
+  if (hidden === null && items) setHidden(skipped);
+  const shown = skipped ? rows.slice(skipped) : rows;
+
+  const actions = useMemo<DmActions>(
+    () => ({
+      edit: setEditing,
+      cancelEdit: () => setEditing(null),
+      save: async (seq, text) => {
+        await editDm(instanceKey, id, seq, text);
+        setEditing(null);
+      },
+      remove: (seq) => deleteDm(instanceKey, id, seq),
+    }),
+    [instanceKey, id],
+  );
+
   const scroller = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
+  const fromBottom = useRef(0);
   const [missed, setMissed] = useState(0);
   const count = useRef(0);
+  const shownBefore = useRef(skipped);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
+    const revealed = skipped < shownBefore.current;
     if (atBottom.current) el.scrollTop = el.scrollHeight;
+    // Rows revealed above: keep what you were reading where it was.
+    else if (revealed) el.scrollTop = el.scrollHeight - fromBottom.current;
     else if (rows.length > count.current) setMissed((n) => n + rows.length - count.current);
     count.current = rows.length;
-  }, [rows]);
+    shownBefore.current = skipped;
+  }, [rows, skipped]);
   const onScroll = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
+    fromBottom.current = el.scrollHeight - el.scrollTop;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
     if (atBottom.current) setMissed(0);
-  }, []);
+    if (el.scrollTop < 300 && skipped > 0) setHidden(Math.max(0, skipped - MORE_ROWS));
+  }, [skipped]);
 
   return (
     <div className="relative min-h-0 flex-1">
@@ -277,10 +307,11 @@ function DmMessages({
           transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
           className="flex min-h-full flex-col justify-end pb-3"
         >
-          <Beginning partner={partner} />
+          {skipped === 0 && <Beginning partner={partner} />}
           {(!items || joining) && <Joining />}
-          <AnimatePresence initial={false}>
-            {rows.map((row) => {
+          {/* Rows don't animate their layout, so a new arrival needn't re-render every row (the default does). */}
+          <AnimatePresence initial={false} presenceAffectsLayout={false}>
+            {shown.map((row) => {
               if (row.kind === "day") return <DayDivider key={row.key} date={row.date} />;
               if (row.kind === "pending")
                 return (
@@ -308,13 +339,7 @@ function DmMessages({
                   instanceKey={instanceKey}
                   animate={animate}
                   editing={editing === item.seq}
-                  onEdit={() => setEditing(item.seq)}
-                  onCancelEdit={() => setEditing(null)}
-                  onSave={async (text) => {
-                    await editDm(instanceKey, id, item.seq, text);
-                    setEditing(null);
-                  }}
-                  onDelete={() => deleteDm(instanceKey, id, item.seq)}
+                  actions={actions}
                 />
               );
             })}
@@ -391,7 +416,27 @@ function Joining() {
 
 const enter = { initial: { opacity: 0, y: 12, scale: 0.98 }, animate: { opacity: 1, y: 0, scale: 1 } };
 
-function DmRow({
+/** Rows drawn when a conversation opens; older ones come in as you scroll up. */
+const FIRST_ROWS = 80;
+const MORE_ROWS = 80;
+
+/** One date per (immutable) item, so memoized rows keep the same props. */
+const dates = new WeakMap<Item, Date>();
+const dateOf = (item: Item) => {
+  let d = dates.get(item);
+  if (!d) dates.set(item, (d = new Date(item.at)));
+  return d;
+};
+
+/** What a row can do to its message, the same object for the whole conversation. */
+type DmActions = {
+  edit: (seq: number) => void;
+  cancelEdit: () => void;
+  save: (seq: number, text: string) => Promise<void>;
+  remove: (seq: number) => Promise<void>;
+};
+
+const DmRow = memo(function DmRow({
   item,
   first,
   date,
@@ -401,10 +446,7 @@ function DmRow({
   instanceKey,
   animate,
   editing,
-  onEdit,
-  onCancelEdit,
-  onSave,
-  onDelete,
+  actions,
 }: {
   item: Item;
   first: boolean;
@@ -415,16 +457,12 @@ function DmRow({
   instanceKey: string;
   animate: boolean;
   editing: boolean;
-  onEdit: () => void;
-  onCancelEdit: () => void;
-  onSave: (text: string) => Promise<void>;
-  onDelete: () => Promise<void>;
+  actions: DmActions;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState(false);
   return (
     <motion.div
-      layout="position"
       {...(animate ? enter : {})}
       exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
@@ -434,7 +472,7 @@ function DmRow({
         {item.deleted ? (
           <p className="text-sm text-muted-foreground italic">Message deleted</p>
         ) : editing ? (
-          <EditBox initial={item.content} onCancel={onCancelEdit} onSave={onSave} />
+          <EditBox initial={item.content} onCancel={actions.cancelEdit} onSave={(text) => actions.save(item.seq, text)} />
         ) : (
           <>
             <MessageBody content={item.content} display={display} />
@@ -457,7 +495,7 @@ function DmRow({
               className="flex items-center gap-0.5"
             >
               <span className="px-2 text-xs font-bold text-destructive">Delete for both of you?</span>
-              <ToolButton label="Delete" danger onClick={() => onDelete().catch(() => setConfirming(false))}>
+              <ToolButton label="Delete" danger onClick={() => actions.remove(item.seq).catch(() => setConfirming(false))}>
                 <CheckIcon />
               </ToolButton>
               <ToolButton label="Keep" onClick={() => setConfirming(false)}>
@@ -488,7 +526,7 @@ function DmRow({
                 </AnimatePresence>
               </ToolButton>
               {mine && (
-                <ToolButton label="Edit" onClick={onEdit}>
+                <ToolButton label="Edit" onClick={() => actions.edit(item.seq)}>
                   <PencilIcon />
                 </ToolButton>
               )}
@@ -503,7 +541,7 @@ function DmRow({
       )}
     </motion.div>
   );
-}
+});
 
 /** What changed about the conversation's devices, in words. */
 function deviceLine(item: Item, users: Map<string, User>, me: User): string {
@@ -531,7 +569,6 @@ function SystemLine({ item, users, me, animate }: { item: Item; users: Map<strin
   const Icon = item.kind === "unreadable" ? ShieldAlertIcon : KeyRoundIcon;
   return (
     <motion.div
-      layout="position"
       {...(animate ? enter : {})}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className="message-row group flex items-center gap-3 px-4 py-1.5"
@@ -570,7 +607,6 @@ function PendingDm({
   const display = usePrefs((p) => p.messageDisplay);
   return (
     <motion.div
-      layout="position"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: pending.failed ? 1 : 0.55, y: 0 }}
       exit={{ opacity: 0 }}

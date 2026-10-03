@@ -17,9 +17,10 @@ import {
   ShieldCheckIcon,
   TvMinimalPlayIcon,
   UserRoundIcon,
+  AudioLinesIcon,
 } from "lucide-react";
 import { useEffect } from "react";
-import { useInstance } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
 import { Accessibility } from "@/components/settings/app/Accessibility";
 import { Advanced } from "@/components/settings/app/Advanced";
 import { Appearance } from "@/components/settings/app/Appearance";
@@ -27,6 +28,7 @@ import { Chat } from "@/components/settings/app/Chat";
 import { KEYBIND_SETTINGS, Keybinds } from "@/components/settings/app/Keybinds";
 import { Notifications } from "@/components/settings/app/Notifications";
 import { Streamer } from "@/components/settings/app/Streamer";
+import { Voice, VOICE_SETTINGS } from "@/components/settings/app/Voice";
 import { hasPassword, LinkedSignIn, Password, Session } from "@/components/settings/Account";
 import { Agents } from "@/components/settings/account/Agents";
 import { Devices } from "@/components/settings/account/Devices";
@@ -92,6 +94,14 @@ const APP: SettingsSection[] = [
     ],
   },
   {
+    id: "voice",
+    label: "Voice & audio",
+    icon: AudioLinesIcon,
+    description: "Your microphone and speakers in calls, on this device.",
+    keywords: "call microphone mic speakers headset audio",
+    settings: VOICE_SETTINGS,
+  },
+  {
     id: "keybinds",
     label: "Keybinds",
     icon: KeyboardIcon,
@@ -130,9 +140,10 @@ const ACCOUNT = new Set(["profile", "server-profiles", "devices", "security", "p
 export function UserSettings() {
   const open = useUi((u) => u.settings);
   const { instance: key } = useParams({ strict: false }) as { instance?: string };
-  const inst = useInstance(key);
-  const me = inst?.me;
-  const where = inst?.node?.name ?? "this instance";
+  // Always mounted (settings open from anywhere), so it reads only what it shows.
+  const me = useFuwa((s) => (key ? s.instances[key]?.me : undefined));
+  const node = useFuwa((s) => (key ? s.instances[key]?.node : undefined));
+  const where = node?.name ?? "this instance";
 
   // Signing out leaves nothing on the account pages to show.
   useEffect(() => {
@@ -201,7 +212,7 @@ export function UserSettings() {
                 id: "linked",
                 label: "Sign-in",
                 icon: Flower2Icon,
-                description: `You sign in to ${where} with ${issuerName(inst?.node?.auth?.linkedIssuer)}.`,
+                description: `You sign in to ${where} with ${issuerName(node?.auth?.linkedIssuer)}.`,
                 keywords: "waifu.dev linked password 2fa security",
               },
             ]),
@@ -252,6 +263,7 @@ export function UserSettings() {
       {section === "accessibility" && <Accessibility />}
       {section === "chat" && <Chat />}
       {section === "notifications" && <Notifications />}
+      {section === "voice" && <Voice />}
       {section === "keybinds" && <Keybinds />}
       {section === "streamer" && <Streamer instanceKey={key} />}
       {section === "advanced" && <Advanced />}

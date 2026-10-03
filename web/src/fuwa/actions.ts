@@ -31,6 +31,7 @@ import { saveApplied, type Applied } from "@/lib/applied";
 import { canReturnTo, newSecret, savePending, sha256Hex, type PendingSignIn } from "@/lib/linked";
 import { rememberServerSignIn, savePendingSso, type PendingSso } from "@/lib/sso";
 import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
+import { arranged } from "@/lib/arrange";
 import { accessOf, canSee, sortRoles } from "@/lib/permissions";
 import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
@@ -1000,10 +1001,18 @@ export const updateChannel = (
     return channel!;
   });
 
-/** Every channel of a server in its new order, each in its category (or none). */
+/**
+ * Every channel of a server in its new order, each in its category (or none).
+ * The new order shows at once and goes back if the server turns it down.
+ */
 export const reorderChannels = (key: string, serverId: string, channels: Pick<ChannelPlacement, "channelId" | "parentId">[]) =>
   Effect.gen(function* () {
-    const res = yield* call((signal) => api(key).channels.reorderChannels({ serverId, channels }, { signal }));
+    const before = store.get().instances[key]?.channels[serverId];
+    const setChannels = (list: Channel[]) => updateInstance(key, (i) => ({ ...i, channels: { ...i.channels, [serverId]: list } }));
+    if (before) setChannels(arranged(before, channels));
+    const res = yield* call((signal) => api(key).channels.reorderChannels({ serverId, channels }, { signal })).pipe(
+      Effect.tapError(() => Effect.sync(() => before && setChannels(before))),
+    );
     storeChannels(key, serverId, res.channels);
     return res.channels;
   });

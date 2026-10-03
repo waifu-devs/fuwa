@@ -34,7 +34,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0007_join.sql"),
     include_str!("../migrations/server/0008_automod_emoji_welcome.sql"),
     include_str!("../migrations/server/0009_webhooks.sql"),
-    include_str!("../migrations/server/0010_sso.sql"),
+    include_str!("../migrations/server/0010_voice.sql"),
+    include_str!("../migrations/server/0011_sso.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -437,6 +438,34 @@ impl ServerDb {
         )
         .await?
         .ok_or_else(|| Error::internal("limits row missing"))
+    }
+
+    /// Whether someone is server muted and deafened, which outlasts their calls.
+    pub async fn voice_moderation(&self, user_id: &str) -> Result<(bool, bool)> {
+        let conn = self.read()?;
+        let row = query_one(&conn, "SELECT mute, deaf FROM voice_moderation WHERE user_id = ?1", [user_id], |r| {
+            Ok((r.get::<i64>(0)? != 0, r.get::<i64>(1)? != 0))
+        })
+        .await?;
+        Ok(row.unwrap_or((false, false)))
+    }
+
+    pub async fn set_voice_moderation(&self, user_id: &str, mute: bool, deaf: bool) -> Result<()> {
+        let user_id = user_id.to_owned();
+        db::write(&self.db, async |conn| {
+            if mute || deaf {
+                conn.execute(
+                    "INSERT INTO voice_moderation (user_id, mute, deaf) VALUES (?1, ?2, ?3) \
+                     ON CONFLICT (user_id) DO UPDATE SET mute = excluded.mute, deaf = excluded.deaf",
+                    (user_id.as_str(), mute as i64, deaf as i64),
+                )
+                .await?;
+            } else {
+                conn.execute("DELETE FROM voice_moderation WHERE user_id = ?1", [user_id.as_str()]).await?;
+            }
+            Ok(())
+        })
+        .await
     }
 
     /// The caps in force: this server's own, else the instance defaults.

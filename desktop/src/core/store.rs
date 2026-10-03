@@ -5,6 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::calls;
 use crate::core::dms::DmState;
 use crate::pb::{self, event::Payload};
 
@@ -68,6 +69,8 @@ pub struct InstanceState {
     pub dms: DmState,
     /// Your notification settings, by `notifications::key`. Only servers and channels that have some.
     pub notifications: HashMap<String, pb::NotificationSettings>,
+    /// Per server: who's in its voice channels, in the order they joined.
+    pub voice: HashMap<String, Vec<pb::VoiceState>>,
 }
 
 impl InstanceState {
@@ -92,6 +95,7 @@ impl InstanceState {
             synced: HashSet::new(),
             dms: DmState::default(),
             notifications: HashMap::new(),
+            voice: HashMap::new(),
         }
     }
 
@@ -243,6 +247,7 @@ pub fn remove_server(i: &mut InstanceState, server_id: &str) {
     i.channels.remove(server_id);
     i.members.remove(server_id);
     i.roles.remove(server_id);
+    i.voice.remove(server_id);
     i.emojis.remove(server_id);
     i.synced.remove(server_id);
     for id in channels {
@@ -329,6 +334,9 @@ pub fn apply_event(i: &mut InstanceState, event: &pb::Event, focus: Option<&str>
             }
             i.messages.remove(&p.channel_id);
             i.unread.remove(&p.channel_id);
+            if let Some(list) = i.voice.get_mut(sid) {
+                list.retain(|v| v.channel_id != p.channel_id);
+            }
         }
         Payload::MessageCreated(pb::MessageCreated { message: Some(message) })
         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(message) }) => {
@@ -371,6 +379,9 @@ pub fn apply_event(i: &mut InstanceState, event: &pb::Event, focus: Option<&str>
                 remove_server(i, sid);
                 return Outcome::Gone;
             }
+            if let Some(list) = i.voice.get_mut(sid) {
+                list.retain(|v| v.user_id != p.user_id);
+            }
             if let Some(list) = i.members.get_mut(sid) {
                 let before = list.len();
                 list.retain(|m| !m.user.as_ref().is_some_and(|u| u.id == p.user_id));
@@ -405,6 +416,14 @@ pub fn apply_event(i: &mut InstanceState, event: &pb::Event, focus: Option<&str>
                 for c in list {
                     c.permission_overwrites.retain(|o| o.target_id != p.role_id);
                 }
+            }
+        }
+        Payload::VoiceStateUpdated(pb::VoiceStateUpdated { state: Some(state) }) => {
+            calls::put(i.voice.entry(sid.to_owned()).or_default(), state.clone());
+        }
+        Payload::VoiceStateRemoved(p) => {
+            if let Some(list) = i.voice.get_mut(sid) {
+                list.retain(|v| v.user_id != p.user_id);
             }
         }
         _ => {}

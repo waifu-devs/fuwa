@@ -36,6 +36,9 @@ export default defineConfig({
   },
   build: {
     target: "es2022",
+    // Fonts stay files: inlined into the stylesheet, every subset's bytes would block the first paint
+    // even though the browser only fetches the subsets a page uses.
+    assetsInlineLimit: (file) => (/\.woff2?$/.test(file) ? false : undefined),
     chunkSizeWarningLimit: 1500,
     // Libraries in their own file: the app's code changes far more often, and each stays under the limit.
     rolldownOptions: {

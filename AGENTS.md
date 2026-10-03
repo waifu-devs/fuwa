@@ -144,6 +144,19 @@
     (Signature V4), `store.rs` a bucket or a folder behind one interface. A
     single process (`FUWA_ROLE=all`) refuses the settings: it keeps plain
     local files.
+  - Calls (`docs/calls.md` is the design): `rtc.rs` is the SFU, str0m
+    driven by one task (UDP and ICE-TCP on one port, ICE-lite), with
+    `offer_allowed` and per-person budgets limiting what an app may send.
+    `voice.rs` keeps who's in which call in memory (`Voice`, leases) and
+    `MediaLink` reaches the media part (in process, or the media parts on
+    `FUWA_MEDIA_URL` by rendezvous hashing). `api/calls.rs` is
+    `CallService`: places, keeps, moderation (`voice_moderation` in the
+    server file keeps server mute and deafen), TURN credentials, and
+    `spawn_voice_guard`, which hangs people up as soon as an event takes
+    their access away (through `Hub::tap`). `cluster/media.rs` is a media
+    part (`FUWA_ROLE=media`). Calls in direct messages are end-to-end
+    encrypted by the apps; the server never holds their keys and only
+    forwards sealed frames. Never put a participant's address in a log or an event.
   - `config.rs`: `FUWA_*` environment variables: how the process starts, and
     the defaults for settings.
   - `settings.rs`: settings admins change from a client (`AdminService`), stored
@@ -222,7 +235,10 @@
     pictures, password, signed-in devices, rules, the welcome screen, creating
     channels), `moderation.rs` (time outs, kicks and bans, and who may do
     them to whom: the permission plus outranking them), `server_admin.rs`
-    (a server's settings, invites, bans and audit log). It runs on its own
+    (a server's settings, invites, bans and audit log), `calls.rs` (who's in
+    voice and which conversations have a call, and the direct-message call
+    frame encryption, byte for byte the web app's; the call itself comes
+    with the app's sound). It runs on its own
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
@@ -267,6 +283,16 @@
   - `src/components/`, `src/pages/`: the UI. Routes are
     `/<instance>/<server>/<channel>`, where `<instance>` is the host (or, in
     streamer mode, a local alias like `/~waifu-devs`, see `lib/streamer.ts`).
+  - `src/calls/`: calls, kept apart from `fuwa/store.ts` in their own
+    store (`state.ts`). `engine.ts` is one call at a time (`Session`: join,
+    keep, answer the media part's offers over the `fuwa` data channel,
+    rejoin with the same session on a restart), `audio.ts` the microphone
+    (gain, voice activity or push to talk, mute) and speakers (per-person
+    volume, output device, who's speaking), `frames.ts` and
+    `frames.worker.ts` the end-to-end encryption of direct-message calls,
+    `keys.ts` push to talk. The screens are in `components/calls/`; the
+    Voice & audio settings are `settings/app/Voice.tsx` and the instance's
+    Calls page `settings/instance/Calls.tsx`.
   - `src/e2ee/`: encrypted direct messages in the browser. `engine.ts` is one
     device per signed-in account and instance (`DmEngine`): it registers the
     device, keeps key packages topped up, reads each conversation's records
@@ -291,6 +317,16 @@
     and Access (rules and questions, welcome screen, roles, channels and their permissions,
     emoji, invites, AutoMod, applications, members, bans, audit log, ownership), shown by `dialogs/ServerSettingsDialog.tsx`,
     which also says which pages your permissions open (`useServerSettingsTabs`).
+  - Arranging channels: with Manage Channels, rows in the sidebar
+    (`ChannelSidebar.tsx`) and in the Channels settings page drag into order,
+    into and out of categories, through `hooks/use-arrange.ts`. It works on
+    the DOM (rows marked `data-arrange`, `data-id`, `data-parent`) and moves
+    a copy, the drop line and the category ring by `transform`, so the list
+    renders only once, on the drop. `lib/arrange.ts` is the layout (loose
+    channels, then each category and its channels), what a drop or an arrow
+    key does to it, and the order `ChannelService.ReorderChannels` takes;
+    `reorderChannels` shows the new order at once and puts it back if the
+    server says no.
   - Invites: `dialogs/InviteDialog.tsx` makes and copies a link (from the
     server menu or a channel), `pages/InvitePage.tsx` is where a link lands
     (`/invite/<code>` on the instance, which goes to `/<instance>/invite/<code>`),
@@ -334,7 +370,8 @@
   Railway project ("fuwa"): the published image, a volume at `/data`, the
   domain. Its `SPLIT` setting turns it into a directory (on that volume),
   shards (a volume each) and gateway replicas; shards can be added, never
-  removed. Every merge to master redeploys each service it declares onto the
+  removed. `fuwa-media` carries calls' sound, reached by apps through a TCP
+  proxy (Railway has no public UDP), one replica. Every merge to master redeploys each service it declares onto the
   new image (the `Deploy fuwa.chat` job in `publish.yml`); with a volume
   attached, Railway stops the old deployment before starting the new one, so
   while it's one process each deploy briefly drops connections. Split, only

@@ -869,3 +869,108 @@ async fn one_process_splits_in_place() {
     b.stop().await;
     directory.stop().await;
 }
+
+mod common;
+
+/// A media part on `addr` (its API) carrying calls on a port of its own.
+async fn start_media(dir: &Path, listener: TcpListener, addr: SocketAddr) -> (Part, CancellationToken) {
+    let vars = [
+        ("FUWA_ROLE", "media".to_string()),
+        ("FUWA_MEDIA_PORT", "0".to_string()),
+        ("FUWA_MEDIA_ADDRESSES", "127.0.0.1".to_string()),
+    ];
+    let calls = CancellationToken::new();
+    let (router, _) = fuwa_server::cluster::media::start(&config(dir, &vars), calls.clone()).await.unwrap();
+    let shutdown = CancellationToken::new();
+    let serving = serve(listener, router, shutdown.clone());
+    (Part { app: None, addr, shutdown, serving }, calls)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn calls_ride_out_a_media_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let (media_listener, media_addr) = listen().await;
+    let (media, calls) = start_media(&root.path().join("media"), media_listener, media_addr).await;
+    let media_url = [("FUWA_MEDIA_URL", media.url())];
+    let (gateway_listener, gateway_addr) = listen().await;
+    let (listener, addr) = listen().await;
+    let directory = start_directory(root.path(), &media_url, listener, addr, gateway_addr).await;
+    let shard = start_shard_with(&root.path().join("shard-a"), "a", &directory, &media_url).await;
+    let (gateway, _gateway) = start_gateway(&root.path().join("gateway"), &directory, gateway_listener, gateway_addr);
+
+    let channel = Channel::from_shared(gateway.url()).unwrap().connect().await.unwrap();
+    let mut c = clients(&gateway).await;
+    let mut voice = pb::call_service_client::CallServiceClient::new(channel);
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (mika, _) = sign_up(&mut c, "mika").await;
+    let settings = voice.get_call_settings(authed(&juan, pb::GetCallSettingsRequest {})).await.unwrap().into_inner();
+    assert!(settings.enabled, "the directory knows where the media part is");
+    let server = create_server(&mut c, &juan, "Calls").await;
+    join(&mut c, &mika, &server.id).await.unwrap();
+    let lounge = c
+        .channels
+        .create_channel(authed(
+            &juan,
+            pb::CreateChannelRequest {
+                server_id: server.id.clone(),
+                name: "Lounge".into(),
+                r#type: pb::ChannelType::Voice as i32,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .channel
+        .unwrap();
+
+    let join_voice = |token: String, offer: String, session_id: String| {
+        let mut voice = voice.clone();
+        let request = pb::JoinVoiceRequest {
+            server_id: server.id.clone(),
+            channel_id: lounge.id.clone(),
+            offer,
+            session_id,
+            ..Default::default()
+        };
+        async move { voice.join_voice(authed(&token, request)).await.unwrap().into_inner() }
+    };
+    let (mut a, offer) = common::Peer::new().await;
+    let a_joined = join_voice(juan.clone(), offer, String::new()).await;
+    a.answer(&a_joined.answer);
+    let (mut b, offer) = common::Peer::new().await;
+    let b_joined = join_voice(mika.clone(), offer, String::new()).await;
+    b.answer(&b_joined.answer);
+    common::talk(&mut a, &mut b, Duration::from_secs(3)).await;
+    assert!(b.heard.len() > 20, "sound goes through the split instance's media part");
+
+    // A deploy: the media part tells everyone, and a new one takes its place.
+    calls.cancel();
+    common::talk(&mut a, &mut b, Duration::from_millis(500)).await;
+    assert!(a.signals.iter().any(|s| s == "restarting") && b.signals.iter().any(|s| s == "restarting"));
+    media.stop().await;
+    let (media_listener, _) = (TcpListener::bind(media_addr).await.unwrap(), ());
+    let (media, _calls) = start_media(&root.path().join("media"), media_listener, media_addr).await;
+
+    // Both join again with the sessions they had: nobody left the call.
+    let (mut a, offer) = common::Peer::new().await;
+    let again = join_voice(juan.clone(), offer, a_joined.session_id.clone()).await;
+    assert_eq!(again.session_id, a_joined.session_id);
+    a.answer(&again.answer);
+    let (mut b, offer) = common::Peer::new().await;
+    b.answer(&join_voice(mika.clone(), offer, b_joined.session_id.clone()).await.answer);
+    common::talk(&mut a, &mut b, Duration::from_secs(3)).await;
+    assert!(b.heard.len() > 20, "sound is back after the restart");
+    let states = voice
+        .list_voice_states(authed(&juan, pb::ListVoiceStatesRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .states;
+    assert_eq!(states.len(), 2);
+
+    media.stop().await;
+    gateway.stop().await;
+    shard.stop().await;
+    directory.stop().await;
+}

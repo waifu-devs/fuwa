@@ -39,6 +39,8 @@ sha1 = "0.10"
 sha2 = "0.10"
 # Single sign-on: checking OpenID Connect ID token signatures (RS, PS, ES, EdDSA).
 ring = "0.17"
+# WebRTC for calls (the media part), with pure-Rust crypto so builds stay reproducible.
+str0m = { version = "0.24", default-features = false, features = ["rust-crypto"] }
 # Embedded files get a fixed timestamp, so builds of one commit come out identical.
 rust-embed = { version = "8", optional = true, features = ["deterministic-timestamps"] }
 # Single sign-on: checking SAML signatures against the provider's certificates,

@@ -54,6 +54,22 @@ pub struct Config {
     pub web: bool,
     /// FUWA_ROLE and the rest of how a split instance fits together.
     pub cluster: ClusterConfig,
+    /// FUWA_CALLS: on (default) | off. Voice channels and direct-message calls.
+    pub calls: bool,
+    /// FUWA_ICE_URLS: STUN and TURN servers apps reach the media part
+    /// through (comma-separated stun:, turn: and turns: URLs). None by default.
+    pub ice_urls: Vec<String>,
+    /// FUWA_TURN_SECRET: the TURN servers' shared secret (coturn's
+    /// static-auth-secret), to make each caller a credential.
+    pub turn_secret: String,
+    /// Where this process carries calls itself (one process, or a media
+    /// part): FUWA_MEDIA_PORT (default 50000, UDP and TCP; `off` for no
+    /// calls here) and FUWA_MEDIA_ADDRESSES. None when it's off, or this
+    /// part doesn't carry calls.
+    pub media: Option<crate::rtc::MediaConfig>,
+    /// FUWA_MEDIA_URL: on a split instance's directory and shards, where the
+    /// media parts are (comma-separated internal URLs).
+    pub media_urls: Vec<String>,
     /// Where the databases and pictures are continuously copied to:
     /// FUWA_S3_* (a bucket) or FUWA_REPLICA_PATH (a directory). None is off.
     pub replica: Option<ReplicaConfig>,
@@ -276,6 +292,49 @@ impl Config {
         };
 
         let cluster = ClusterConfig::from_lookup(&get)?;
+
+        let calls = match get("FUWA_CALLS").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_CALLS must be on or off, got {other:?}")),
+        };
+        let list = |key: &str| -> Vec<String> {
+            get(key).unwrap_or_default().split(',').map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).collect()
+        };
+        let ice_urls = list("FUWA_ICE_URLS");
+        crate::settings::check_ice_urls(&ice_urls).map_err(|err| format!("FUWA_ICE_URLS: {err}"))?;
+        let media = match (cluster.role, get("FUWA_MEDIA_PORT").as_deref().map(str::trim)) {
+            (Role::All | Role::Media, Some("off")) => {
+                if cluster.role == Role::Media {
+                    return Err("FUWA_MEDIA_PORT can't be off on a media part".into());
+                }
+                None
+            }
+            (Role::All | Role::Media, port) => {
+                let port = match port {
+                    None => crate::rtc::DEFAULT_PORT,
+                    Some(port) => port
+                        .parse::<u16>()
+                        .ok()
+                        .ok_or_else(|| format!("FUWA_MEDIA_PORT must be a port number or off, got {port:?}"))?,
+                };
+                let addresses = list("FUWA_MEDIA_ADDRESSES")
+                    .iter()
+                    .map(|a| crate::rtc::Advertised::parse(a))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|err| format!("FUWA_MEDIA_ADDRESSES: {err}"))?;
+                Some(crate::rtc::MediaConfig { port, addresses })
+            }
+            _ => None,
+        };
+        let media_urls = list("FUWA_MEDIA_URL");
+        for url in &media_urls {
+            if !(url.starts_with("http://") || url.starts_with("https://")) {
+                return Err(format!("FUWA_MEDIA_URL must be http(s) URLs, got {url:?}"));
+            }
+        }
+        let media_urls = media_urls.into_iter().map(|u| u.trim_end_matches('/').to_string()).collect();
+
         let replica = match (replica(&get)?, cluster.role) {
             // Only the parts that keep files replicate them: a split
             // instance's directory and shards. One process keeps plain local files.
@@ -284,8 +343,8 @@ impl Config {
                             (FUWA_ROLE=directory or shard); an instance run as one process keeps its files on its own disk"
                     .into());
             }
-            // Gateways keep nothing (and may share the others' variables).
-            (Some(_), Role::Gateway) => None,
+            // Gateways and media parts keep nothing (and may share the others' variables).
+            (Some(_), Role::Gateway | Role::Media) => None,
             (replica, _) => replica,
         };
 
@@ -312,6 +371,11 @@ impl Config {
             },
             web,
             cluster,
+            calls,
+            ice_urls,
+            turn_secret: get("FUWA_TURN_SECRET").map(|s| s.trim().to_string()).unwrap_or_default(),
+            media,
+            media_urls,
             replica,
         })
     }

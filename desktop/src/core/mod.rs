@@ -8,6 +8,7 @@
 
 pub mod account;
 pub mod api;
+pub mod calls;
 pub mod config;
 pub mod dms;
 pub mod linked;

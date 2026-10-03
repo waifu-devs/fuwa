@@ -44,6 +44,7 @@ import { providerReady } from "@/lib/sso";
 import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { Accounts } from "./instance/Accounts";
 import { Announcement } from "./instance/Announcement";
+import { CALL_FIELDS, CALL_SECTION, CallSettings } from "./instance/Calls";
 import { Servers } from "./instance/Servers";
 import { SettingsScreen } from "./SettingsScreen";
 
@@ -68,6 +69,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "picture_upload_bytes", get: (s) => s.pictureUploadBytes },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
+  ...CALL_FIELDS,
 ];
 
 const changedPaths = (draft: InstanceSettings, saved: InstanceSettings) =>
@@ -226,6 +228,7 @@ export function InstanceSettingsDialog({
               description: "What this instance tells Waifu Devs.",
               settings: [{ id: "telemetry", label: "Anonymous usage signal", keywords: "telemetry analytics" }],
             },
+            CALL_SECTION,
           ],
         },
         {
@@ -564,6 +567,7 @@ export function InstanceSettingsDialog({
               </Setting>
             </>
           )}
+          {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
           {tab === "privacy" && (
             <>
               <Setting id="telemetry" title="Anonymous usage signal" defaultLabel={defaults.telemetry ? "on" : "off"} {...resetter("telemetry")}>
@@ -652,6 +656,7 @@ const CREATION_LABEL: Record<number, string> = {
 /** Copies the named settings from one draft into another. */
 function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: string[]) {
   for (const path of paths) {
+    CALL_FIELDS.find((f) => f.path === path)?.copy(into, from);
     switch (path) {
       case "name":
         into.name = from.name;

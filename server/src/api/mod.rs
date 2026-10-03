@@ -5,6 +5,7 @@ mod admin;
 mod agents;
 mod auth;
 mod automod;
+mod calls;
 mod channels;
 mod dms;
 mod emoji;
@@ -20,6 +21,7 @@ mod sso;
 mod webhooks;
 
 pub(crate) use account::export_server;
+pub use calls::{spawn_voice_guard, spawn_voice_sweeper};
 pub use media::PictureOwner;
 pub use sso::note_lapses;
 pub use webhooks::{WebhookPost, execute_webhook, verify_webhook};

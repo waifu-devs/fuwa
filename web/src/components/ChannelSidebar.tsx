@@ -22,15 +22,16 @@ import {
   LockKeyholeIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useState, type Ref } from "react";
+import { useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
-import { leaveServer, listApplications, run, updateNotifications } from "@/fuwa/actions";
+import { leaveServer, listApplications, reorderChannels, run, updateNotifications } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
-import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
+import { useAccess, useAction } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { CreateChannelDialog } from "@/components/dialogs/CreateChannelDialog";
 import { InviteDialog } from "@/components/dialogs/InviteDialog";
-import { ServerSettingsDialog, useServerSettingsTabs } from "@/components/dialogs/ServerSettingsDialog";
+import { useServerSettingsTabs } from "@/components/dialogs/serverSettingsTabs";
+import { lazyComponent } from "@/components/lazy";
 import { RulesDialog } from "@/components/join/Rules";
 import { WelcomeGate } from "@/components/join/Welcome";
 import { useLayout } from "@/components/Shell";
@@ -38,6 +39,9 @@ import { useSsoLocked } from "@/components/join/SsoGate";
 import { Count, SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { UserPanel } from "@/components/UserPanel";
+import { CallPanel } from "@/components/calls/CallPanel";
+import { VoiceUsers } from "@/components/calls/VoiceUsers";
+import { joinCall } from "@/calls/engine";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,11 +52,18 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useArrange } from "@/hooks/use-arrange";
+import { layoutOf, placements } from "@/lib/arrange";
 import { isMuted, MUTE_FOR, mutedLabel, useMuted, useNotificationSettings, useNow } from "@/lib/notifications";
 import { has, hasIn, isPrivate } from "@/lib/permissions";
 import { usePrefs } from "@/lib/prefs";
 import { copy, openSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
+
+const ServerSettingsDialog = lazyComponent(
+  () => import("@/components/dialogs/ServerSettingsDialog").then((m) => m.ServerSettingsDialog),
+  (p) => p.open,
+);
 
 export const CHANNEL_ICON: Partial<Record<ChannelType, typeof HashIcon>> = {
   [ChannelType.ANNOUNCEMENT]: MegaphoneIcon,
@@ -115,18 +126,29 @@ function ServerNotificationItems({ instanceKey, serverId }: { instanceKey: strin
 }
 
 export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
-  const inst = useInstance(instanceKey);
+  // Only what the sidebar shows, so messages and member changes elsewhere don't re-render it.
+  const known = useFuwa((s) => !!s.instances[instanceKey]);
+  const nodeName = useFuwa((s) => s.instances[instanceKey]?.node?.name);
   const params = useParams({ strict: false }) as { channel?: string };
   const navigate = useNavigate();
-  const server = inst?.servers.find((s) => s.id === serverId);
-  const channels = inst?.channels[serverId];
-  const synced = inst?.synced[serverId];
+  const server = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId));
+  const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId]);
+  const synced = useFuwa((s) => s.instances[instanceKey]?.synced[serverId]);
   const access = useAccess(instanceKey, serverId);
   const owner = access.owner;
   const settingsTabs = useServerSettingsTabs(instanceKey, serverId);
   const canCreate = has(access, Permission.MANAGE_CHANNELS);
   const usage = settingsTabs.includes("usage");
   const groups = useMemo(() => groupChannels(channels ?? []), [channels]);
+  const layout = useMemo(() => layoutOf(channels ?? []), [channels]);
+  const list = useRef<HTMLDivElement>(null);
+  // Whoever can manage the server's channels drags them into order, Discord-style.
+  useArrange({
+    container: list,
+    enabled: canCreate && !!synced,
+    layout,
+    onArrange: (next) => void run(reorderChannels(instanceKey, serverId, placements(next))).catch((err: FuwaError) => toast(err.message)),
+  });
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [creating, setCreating] = useState<{ parentId: string } | null>(null);
   const [settings, setSettings] = useState<{ tab: string; target?: string } | null>(null);
@@ -143,12 +165,12 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   // Locked out until they sign in through the server's provider: the way back in, where channels would be.
   const ssoLocked = useSsoLocked(instanceKey, serverId);
   const { compact, setNavOpen } = useLayout();
-  const waiting = inst?.applications[serverId]?.length ?? 0;
+  const waiting = useFuwa((s) => s.instances[instanceKey]?.applications[serverId]?.length ?? 0);
   useEffect(() => {
     if (reviews) run(listApplications(instanceKey, serverId)).catch(() => {});
   }, [reviews, instanceKey, serverId]);
 
-  if (!inst) return null;
+  if (!known) return null;
   return (
     <>
       <DropdownMenu>
@@ -167,7 +189,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                     <Count value={Number(server.memberCount)} /> {server.memberCount === 1n ? "member" : "members"} ·{" "}
                   </>
                 )}
-                {inst.node?.name ?? <Private text={instanceKey} />}
+                {nodeName ?? <Private text={instanceKey} />}
               </span>
             </span>
             <ChevronDownIcon className="size-4 transition-transform duration-300 group-data-[state=open]:rotate-180" />
@@ -242,7 +264,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <div className="scroll-thin flex-1 overflow-y-auto px-2 pt-3 pb-4">
+      <div ref={list} className="scroll-thin relative flex-1 overflow-y-auto px-2 pt-3 pb-4">
         <AnimatePresence initial={false}>
           {reviews && waiting > 0 && (
             <motion.button
@@ -295,69 +317,48 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
             ))}
           </div>
         ) : (
-          groups.map((group) => {
-            const id = group.category?.id ?? "";
-            const closed = !!collapsed[id];
-            return (
-              <div key={id || "loose"} className={cn(group.category && "mt-4")}>
-                {group.category && (
-                  <div className="group flex items-center pr-1">
-                    <button
-                      type="button"
-                      onClick={() => setCollapsed((c) => ({ ...c, [id]: !closed }))}
-                      className="flex flex-1 items-center gap-1 px-1 py-1 text-xs font-bold tracking-wide text-muted-foreground uppercase transition hover:text-foreground"
-                    >
-                      <ChevronDownIcon className={cn("size-3 transition-transform duration-200", closed && "-rotate-90")} />
-                      <span className="truncate">{group.category.name}</span>
-                    </button>
-                    {hasIn(access, id, Permission.MANAGE_CHANNELS) && (
-                      <button
-                        type="button"
-                        aria-label={`Create a channel in ${group.category.name}`}
-                        onClick={() => setCreating({ parentId: id })}
-                        className="grid size-5 place-items-center rounded text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-foreground"
-                      >
-                        <PlusIcon className="size-3.5" />
-                      </button>
-                    )}
-                  </div>
-                )}
-                <AnimatePresence initial={false}>
-                  {!closed && (
-                    <motion.ul
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                      className="flex flex-col gap-0.5 overflow-hidden"
-                    >
-                      <AnimatePresence mode="popLayout">
-                        {group.channels.map((c, n) => (
-                          <ChannelRow
-                            key={c.id}
-                            index={n}
-                            instanceKey={instanceKey}
-                            channel={c}
-                            active={params.channel === c.id}
-                            onEdit={
-                              hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)
-                                ? () => setSettings({ tab: "channels", target: c.id })
-                                : undefined
-                            }
-                            onInvite={
-                              c.type !== ChannelType.VOICE && hasIn(access, c.id, Permission.CREATE_INVITE) ? () => setInviting(c.id) : undefined
-                            }
-                          />
-                        ))}
-                      </AnimatePresence>
-                    </motion.ul>
-                  )}
-                </AnimatePresence>
-              </div>
-            );
-          })
+          <ul className="flex flex-col gap-0.5">
+            <AnimatePresence mode="popLayout" initial={false}>
+              {groups.flatMap((group) => {
+                const id = group.category?.id ?? "";
+                const closed = !!collapsed[id];
+                const rows = closed
+                  ? []
+                  : group.channels.map((c, n) => (
+                      <ChannelRow
+                        key={c.id}
+                        index={n}
+                        parent={id}
+                        instanceKey={instanceKey}
+                        channel={c}
+                        active={params.channel === c.id}
+                        canConnect={hasIn(access, c.id, Permission.CONNECT)}
+                        onEdit={
+                          hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)
+                            ? () => setSettings({ tab: "channels", target: c.id })
+                            : undefined
+                        }
+                        onInvite={c.type !== ChannelType.VOICE && hasIn(access, c.id, Permission.CREATE_INVITE) ? () => setInviting(c.id) : undefined}
+                      />
+                    ));
+                if (!group.category) return rows;
+                return [
+                  <CategoryRow
+                    key={id}
+                    category={group.category}
+                    closed={closed}
+                    count={group.channels.length}
+                    onToggle={() => setCollapsed((c) => ({ ...c, [id]: !closed }))}
+                    onAdd={hasIn(access, id, Permission.MANAGE_CHANNELS) ? () => setCreating({ parentId: id }) : undefined}
+                  />,
+                  ...rows,
+                ];
+              })}
+            </AnimatePresence>
+          </ul>
         )}
       </div>
+      <CallPanel />
       <UserPanel instanceKey={instanceKey} />
 
       <InviteDialog
@@ -390,19 +391,91 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   );
 }
 
+/** A category's header: folds its channels away, and (with Manage Channels) adds one or drags the whole category. */
+function CategoryRow({
+  category,
+  closed,
+  count,
+  onToggle,
+  onAdd,
+  ref,
+}: {
+  category: Channel;
+  closed: boolean;
+  count: number;
+  onToggle: () => void;
+  onAdd?: () => void;
+  ref?: Ref<HTMLLIElement>;
+}) {
+  return (
+    <motion.li
+      ref={ref}
+      data-arrange="category"
+      data-id={category.id}
+      data-collapsed={closed || undefined}
+      layout="position"
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, transition: { duration: 0.15 } }}
+      transition={SPRING}
+      className="group relative mt-4 flex items-center rounded-lg pr-1 transition-colors"
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!closed}
+        className="flex min-w-0 flex-1 items-center gap-1 px-1 py-1 text-xs font-bold tracking-wide text-muted-foreground uppercase transition group-data-[drop-into]:text-primary hover:text-foreground"
+      >
+        <ChevronDownIcon className={cn("size-3 shrink-0 transition-transform duration-200", closed && "-rotate-90")} />
+        <span className="truncate">{category.name}</span>
+        <AnimatePresence initial={false}>
+          {closed && count > 0 && (
+            <motion.span
+              initial={{ opacity: 0, scale: 0.6 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.6 }}
+              transition={SPRING}
+              className="ml-0.5 rounded-full bg-muted px-1.5 text-[0.62rem] tabular-nums"
+            >
+              {count}
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </button>
+      {onAdd && (
+        <button
+          type="button"
+          data-arrange-skip
+          aria-label={`Create a channel in ${category.name}`}
+          onClick={onAdd}
+          className="grid size-5 place-items-center rounded text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:rotate-90 hover:text-foreground"
+        >
+          <PlusIcon className="size-3.5" />
+        </button>
+      )}
+    </motion.li>
+  );
+}
+
 function ChannelRow({
   instanceKey,
   channel,
   active,
   index,
+  parent,
   ref,
   onEdit,
   onInvite,
+  canConnect,
 }: {
   instanceKey: string;
+  /** A voice channel you may join. */
+  canConnect?: boolean;
   channel: Channel;
   active: boolean;
   index: number;
+  /** The category it shows under, or "" for none. */
+  parent: string;
   ref?: Ref<HTMLLIElement>;
   /** With Manage Channels or Manage Roles there: opens the channel's settings. */
   onEdit?: () => void;
@@ -415,9 +488,13 @@ function ChannelRow({
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
   const dot = unread > 0 && !active;
   const locked = isPrivate(channel, channel.serverId);
+  const voice = channel.type === ChannelType.VOICE;
   return (
     <motion.li
       ref={ref}
+      data-arrange="channel"
+      data-id={channel.id}
+      data-parent={parent}
       layout="position"
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0, transition: { ...SPRING, delay: Math.min(index, 12) * 0.025 } }}
@@ -435,7 +512,11 @@ function ChannelRow({
       <Link
         to="/$instance/$server/$channel"
         params={{ instance: instanceKey, server: channel.serverId, channel: channel.id }}
-        onClick={() => compact && setNavOpen(false)}
+        onClick={() => {
+          if (compact) setNavOpen(false);
+          // A voice channel joins as it opens, as Discord's do, when you may connect there.
+          if (voice && canConnect) void joinCall({ kind: "voice", instance: instanceKey, serverId: channel.serverId, channelId: channel.id });
+        }}
         className={cn(
           "row-y group relative flex items-center gap-1.5 rounded-lg px-2 text-[0.94rem] transition-colors",
           active ? "font-bold text-primary" : unread ? "font-bold text-foreground" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
@@ -540,6 +621,7 @@ function ChannelRow({
           )}
         </AnimatePresence>
       </Link>
+      {voice && <VoiceUsers instanceKey={instanceKey} serverId={channel.serverId} channelId={channel.id} />}
     </motion.li>
   );
 }

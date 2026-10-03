@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package fuwa.v1;
 
+import "fuwa/v1/call.proto";
 import "fuwa/v1/types.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -265,6 +266,9 @@ message DirectMessageEvent {
     ConversationRecord record_added = 2;
     // Without its data.
     ConversationRecord record_deleted = 3;
+    // Someone joined or left the conversation's call, or muted. An empty
+    // call means it ended.
+    DmCall call_updated = 4;
   }
 }
 

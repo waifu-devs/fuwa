@@ -7,7 +7,7 @@ import { ChannelSidebar } from "@/components/ChannelSidebar";
 import { InstanceSidebar } from "@/components/InstanceSidebar";
 import { EASE_OUT } from "@/components/motion";
 import { Rail } from "@/components/Rail";
-import { useInstance } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
 import { onCommand } from "@/lib/ui";
 import { useMediaQuery } from "@/lib/use-media-query";
 
@@ -60,10 +60,10 @@ export function Shell() {
 
   // Opening a channel or a conversation on a phone shows the chat; leaving one shows the list. Signed out (the session
   // ended, or an admin turned the account off), it shows the page asking to sign in; an invite shows itself.
-  const inst = useInstance(params.instance);
-  const signedOut = inst?.connection === "signed-out";
+  // Only what the frame needs: the shell (and everything around the page) doesn't re-render for each event.
+  const signedOut = useFuwa((s) => (params.instance ? s.instances[params.instance]?.connection === "signed-out" : false));
   // An instance this browser doesn't know yet has nothing to list, only the page asking to connect.
-  const known = !!inst;
+  const known = useFuwa((s) => !!params.instance && !!s.instances[params.instance]);
   const page = !!params.channel || !!params.code || !!params.conversation || !known;
   useEffect(() => {
     setNavOpen(!page && !signedOut);

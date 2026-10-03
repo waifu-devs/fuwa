@@ -61,7 +61,7 @@ export function AppliedWatcher() {
  * it's being looked at, or a cross once it's turned down. Its menu takes the
  * application back, applies again, or lets it go.
  */
-export function AppliedButton({ inst, applied }: { inst: InstanceState; applied: Applied }) {
+export function AppliedButton({ inst, applied }: { inst: Pick<InstanceState, "key">; applied: Applied }) {
   const { server } = applied;
   const waiting = applied.status === ApplicationStatus.PENDING;
   const [applying, setApplying] = useState(false);

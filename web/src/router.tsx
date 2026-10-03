@@ -6,11 +6,11 @@ import {
   Outlet,
   useParams,
 } from "@tanstack/react-router";
+import { useState } from "react";
 import { useInstanceOrder } from "@/fuwa/hooks";
 import { aliasToKey, keyToAlias } from "@/lib/streamer";
 import { rememberedPath, Shell } from "@/components/Shell";
 import { AppOverlays, StreamerBanner } from "@/components/Shortcuts";
-import { UserSettings } from "@/components/settings/UserSettings";
 import { instanceKey } from "@/fuwa/saved";
 import { DmView } from "@/components/dm/DmView";
 import { InstanceHome } from "@/pages/InstanceHome";
@@ -19,6 +19,18 @@ import { LinkedCallback } from "@/pages/LinkedCallback";
 import { SsoDone } from "@/pages/SsoDone";
 import { ChannelPage, ServerIndex } from "@/pages/ServerPages";
 import { Welcome } from "@/pages/Welcome";
+import { lazyComponent } from "@/components/lazy";
+import { useUi } from "@/lib/ui";
+
+const SettingsScreens = lazyComponent(() => import("@/components/settings/UserSettings").then((m) => m.UserSettings));
+
+/** Settings load from their own file the first time they open (or once the app is idle). */
+function UserSettings() {
+  const open = useUi((u) => u.settings !== null);
+  const [opened, setOpened] = useState(open);
+  if (open && !opened) setOpened(true);
+  return opened ? <SettingsScreens /> : null;
+}
 
 /**
  * Addresses name the instance by its host, so links read like
