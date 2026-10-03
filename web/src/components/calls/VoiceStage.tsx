@@ -16,7 +16,7 @@ import { hasIn } from "@/lib/permissions";
 import { setTitle } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceFlags } from "./parts";
-import { CameraButton, LiveBadge, PopOutButton, ScreenButton, TileMedia } from "./Video";
+import { CameraButton, LiveBadge, PopOutButton, RecordButton, ScreenButton, TileMedia } from "./Video";
 import { useVoiceIn } from "./VoiceUsers";
 
 /**
@@ -66,6 +66,7 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
         </h1>
         <CopyId id={channel.id} what="channel ID" />
         <span className="flex-1" />
+        <RecordingPill instanceKey={instanceKey} serverId={serverId} states={states} />
         <AnimatePresence>
           {states.length > 0 && (
             <motion.span
@@ -123,6 +124,7 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
               <MuteButtons size="lg" />
               <CameraButton size="lg" />
               <ScreenButton size="lg" />
+              <RecordButton size="lg" />
               <HangUpButton size="lg" onClick={() => void hangUp(null)} />
             </motion.div>
           ) : (
@@ -200,6 +202,39 @@ function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey:
       </ParticipantMenu>
       {joined && <PopOutButton popped={{ instance: instanceKey, userId: state.userId, serverId }} name={name} className="absolute top-2 right-2" />}
     </motion.li>
+  );
+}
+
+/** Who's recording the channel, for everyone to see, while anyone is. */
+function RecordingPill({ instanceKey, serverId, states }: { instanceKey: string; serverId: string; states: VoiceState[] }) {
+  const names = useFuwa((s) =>
+    states
+      .filter((v) => v.selfRecord)
+      .map((v) => {
+        const member = s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === v.userId);
+        return member ? memberName(member) : displayName(s.instances[instanceKey]?.users[v.userId]);
+      })
+      .join(", "),
+  );
+  return (
+    <AnimatePresence>
+      {names && (
+        <motion.span
+          initial={{ opacity: 0, scale: 0.8, x: 8 }}
+          animate={{ opacity: 1, scale: 1, x: 0 }}
+          exit={{ opacity: 0, scale: 0.8 }}
+          transition={SPRING}
+          title={`${names} ${names.includes(",") ? "are" : "is"} recording this channel`}
+          className="flex max-w-[45%] items-center gap-1.5 rounded-full bg-[#ed4245]/12 px-2.5 py-1 text-xs font-bold text-[#ed4245]"
+        >
+          <span aria-hidden className="relative grid size-2 place-items-center">
+            <span className="absolute inset-0 animate-ping rounded-full bg-[#ed4245]/60" />
+            <span className="size-2 rounded-full bg-[#ed4245]" />
+          </span>
+          <span className="truncate">Recording · {names}</span>
+        </motion.span>
+      )}
+    </AnimatePresence>
   );
 }
 

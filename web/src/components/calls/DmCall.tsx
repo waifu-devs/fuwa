@@ -12,7 +12,7 @@ import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { clock } from "./CallPanel";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceAvatar } from "./parts";
-import { CameraButton, LiveBadge, PopOutButton, ScreenButton, TileMedia } from "./Video";
+import { CameraButton, LiveBadge, PopOutButton, RecordButton, ScreenButton, TileMedia } from "./Video";
 
 /** The call going on in a conversation, if there is one. */
 export const useDmCall = (instanceKey: string, conversationId: string) => useFuwa((s) => s.instances[instanceKey]?.dms.calls[conversationId]);
@@ -70,6 +70,9 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
   else if (status !== "connected") line = status === "reconnecting" ? "Reconnecting…" : "Connecting…";
   else if (!partnerIn) line = `Calling ${displayName(partner)}…`;
   else line = since ? clock(Math.max(0, Math.floor((now - since) / 1000))) : "In call";
+  const myRecord = useCalls((s) => s.selfRecord);
+  const recorders = conversation.users.filter((u) => (u.id === me.id ? inCall && myRecord : call?.participants.some((p) => p.userId === u.id && p.selfRecord)));
+  if (recorders.length) line += ` · Recording: ${recorders.map((u) => (u.id === me.id ? "you" : displayName(u))).join(", ")}`;
 
   return (
     <AnimatePresence initial={false}>
@@ -119,6 +122,7 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
                 <MuteButtons size="lg" />
                 <CameraButton size="lg" />
                 <ScreenButton size="lg" />
+                <RecordButton size="lg" />
                 <HangUpButton size="lg" label="Hang up" onClick={() => void hangUp(null)} />
               </div>
             ) : (

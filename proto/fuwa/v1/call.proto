@@ -121,6 +121,8 @@ message JoinVoiceRequest {
   bool self_video = 7;
   // Sharing their screen (VIDEO there).
   bool self_stream = 8;
+  // Recording the call (RECORD there).
+  bool self_record = 9;
 }
 
 message JoinVoiceResponse {
@@ -149,6 +151,7 @@ message KeepVoiceRequest {
   bool self_deaf = 5;
   bool self_video = 6;
   bool self_stream = 7;
+  bool self_record = 8;
 }
 
 message KeepVoiceResponse {
@@ -230,6 +233,7 @@ message JoinDmCallRequest {
   string session_id = 5;
   bool self_video = 6;
   bool self_stream = 7;
+  bool self_record = 8;
 }
 
 message JoinDmCallResponse {
@@ -252,6 +256,7 @@ message KeepDmCallRequest {
   bool self_deaf = 4;
   bool self_video = 5;
   bool self_stream = 6;
+  bool self_record = 7;
 }
 
 message KeepDmCallResponse {

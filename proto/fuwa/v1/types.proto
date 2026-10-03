@@ -229,8 +229,11 @@ enum Permission {
   PERMISSION_MUTE_MEMBERS = 22;
   // Disconnect others from voice channels.
   PERMISSION_MOVE_MEMBERS = 23;
-  // Turn their camera on in voice channels.
+  // Turn their camera on and share their screen in voice channels.
   PERMISSION_VIDEO = 24;
+  // Record voice channels on their own device. Everyone in the channel
+  // sees while someone records.
+  PERMISSION_RECORD = 25;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -759,6 +762,12 @@ message VoiceState {
   bool video_suppress = 11;
   // They're sharing their screen.
   bool self_stream = 12;
+  // They're recording the call on their device. A courtesy their app shows,
+  // not a lock: anyone can record what their own speakers play.
+  bool self_record = 13;
+  // They can't record here: they don't have RECORD in this channel. Never
+  // set in direct-message calls.
+  bool record_suppress = 14;
 }
 
 message ServerUpdated {

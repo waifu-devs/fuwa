@@ -83,6 +83,9 @@ class Session {
   private video: RTCRtpTransceiver | null = null;
   private screen: MediaStreamTrack | null = null;
   private screenVideo: RTCRtpTransceiver | null = null;
+  private recorder: MediaRecorder | null = null;
+  /** The channel doesn't allow recording (no RECORD there). */
+  recordSuppressed = false;
   private layersTimer: ReturnType<typeof setTimeout> | null = null;
   private unwant: (() => void) | null = null;
   private unprefs: (() => void) | null = null;
@@ -268,10 +271,10 @@ class Session {
     await pc.setLocalDescription(offer);
     await gathered(pc);
     if (attempt !== this.attempt || this.stopped) return;
-    const { selfMute, selfDeaf, selfVideo, selfStream } = getCalls();
+    const { selfMute, selfDeaf, selfVideo, selfStream, selfRecord } = getCalls();
     const sdp = pc.localDescription?.sdp ?? offer.sdp ?? "";
     const t = this.target;
-    const selves = { selfMute, selfDeaf, selfVideo, selfStream, sessionId: this.sessionId };
+    const selves = { selfMute, selfDeaf, selfVideo, selfStream, selfRecord, sessionId: this.sessionId };
     const joined =
       t.kind === "voice"
         ? await this.api.calls.joinVoice({ serverId: t.serverId, channelId: t.channelId, offer: sdp, ...selves })
@@ -279,6 +282,7 @@ class Session {
     if (attempt !== this.attempt || this.stopped) return;
     this.sessionId = joined.sessionId;
     this.videoSuppressed = !!joined.state?.videoSuppress;
+    this.recordSuppressed = !!joined.state?.recordSuppress;
     await pc.setRemoteDescription({ type: "answer", sdp: joined.answer });
   }
 
@@ -341,6 +345,32 @@ class Session {
     }
     setLocalVideo(this.camera);
     await this.video?.sender.replaceTrack(this.camera).catch(() => {});
+  }
+
+  /**
+   * Records the call's sound, everyone's and yours, to a file saved when
+   * it stops (or when you hang up). Nothing goes anywhere but this device.
+   */
+  setRecording(on: boolean) {
+    if (on && !this.recorder) {
+      const stream = this.speakers.record(this.mic?.track ?? null);
+      const type = RECORDING_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
+      const recorder = new MediaRecorder(stream, { ...(type ? { mimeType: type } : {}), audioBitsPerSecond: 128_000 });
+      const chunks: Blob[] = [];
+      const started = new Date();
+      recorder.ondataavailable = (e) => {
+        if (e.data.size) chunks.push(e.data);
+      };
+      recorder.onstop = () => saveRecording(new Blob(chunks, { type: recorder.mimeType }), started);
+      // A piece every few seconds, so a long call never waits on one huge buffer.
+      recorder.start(5_000);
+      this.recorder = recorder;
+    } else if (!on && this.recorder) {
+      if (this.recorder.state !== "inactive") this.recorder.stop();
+      this.recorder = null;
+      this.speakers.stopRecording();
+      toast("Recording saved to your downloads.");
+    }
   }
 
   /** Shares a screen or stops, the same way as the camera. */
@@ -423,8 +453,8 @@ class Session {
   /** Keeps the place in the call, and tells the instance how you sound. */
   async keep() {
     if (this.stopped || !this.sessionId) return;
-    const { selfMute, selfDeaf, selfVideo, selfStream } = getCalls();
-    const selves = { sessionId: this.sessionId, selfMute, selfDeaf, selfVideo, selfStream };
+    const { selfMute, selfDeaf, selfVideo, selfStream, selfRecord } = getCalls();
+    const selves = { sessionId: this.sessionId, selfMute, selfDeaf, selfVideo, selfStream, selfRecord };
     const t = this.target;
     try {
       if (t.kind === "voice") {
@@ -438,6 +468,11 @@ class Session {
         if (this.videoSuppressed && getCalls().selfStream) {
           toast("You can't share your screen in this channel any more.");
           void setScreen(false);
+        }
+        this.recordSuppressed = !!kept.state?.recordSuppress;
+        if (this.recordSuppressed && getCalls().selfRecord) {
+          toast("You can't record in this channel any more.");
+          setRecording(false);
         }
       } else {
         await this.api.calls.keepDmCall({ conversationId: t.conversationId, ...selves });
@@ -473,6 +508,8 @@ class Session {
     if (this.layersTimer) clearTimeout(this.layersTimer);
     if (this.broken) clearTimeout(this.broken);
     this.teardown();
+    // Hanging up ends a recording and saves it.
+    this.setRecording(false);
     this.mic?.close();
     this.camera?.stop();
     this.camera = null;
@@ -564,7 +601,7 @@ export async function joinCall(target: CallTarget) {
   if (session) await hangUp(null);
   const s = new Session(target);
   session = s;
-  setCalls(() => ({ call: { target, status: "connecting", since: null, problem: null }, speaking: {}, ended: null, selfVideo: false, selfStream: false }));
+  setCalls(() => ({ call: { target, status: "connecting", since: null, problem: null }, speaking: {}, ended: null, selfVideo: false, selfStream: false, selfRecord: false }));
   try {
     await s.start();
   } catch (err) {
@@ -580,7 +617,7 @@ export async function hangUp(why: string | null, tell = true) {
   const s = session;
   if (!s) return;
   session = null;
-  setCalls(() => ({ call: null, speaking: {}, ended: why, selfVideo: false, selfStream: false }));
+  setCalls(() => ({ call: null, speaking: {}, ended: why, selfVideo: false, selfStream: false, selfRecord: false }));
   cue("disconnect");
   if (why) toast(why);
   await s.stop(tell);
@@ -641,6 +678,37 @@ export async function setScreen(on: boolean) {
 }
 
 export const toggleScreen = () => setScreen(!getCalls().selfStream);
+
+/** Starts or stops recording the call you're in, on this device. Everyone in it sees that you are. */
+export function setRecording(on: boolean) {
+  const s = session;
+  if (!s || getCalls().selfRecord === on) return;
+  if (on && s.recordSuppressed) return void toast("You can't record in this channel.");
+  if (on && typeof MediaRecorder === "undefined") return void toast("This browser can't record.");
+  setCalls(() => ({ selfRecord: on }));
+  s.setRecording(on);
+  cue(on ? "recording" : "mute");
+  void s.keep();
+}
+
+export const toggleRecording = () => setRecording(!getCalls().selfRecord);
+
+/** What recordings are saved as, best first: Opus wherever the browser can. */
+const RECORDING_TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"];
+
+/** Hands a finished recording to the browser to save, named for when it started. */
+function saveRecording(blob: Blob, started: Date) {
+  if (!blob.size) return;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const when = `${started.getFullYear()}-${pad(started.getMonth() + 1)}-${pad(started.getDate())} ${pad(started.getHours())}.${pad(started.getMinutes())}`;
+  const ext = blob.type.includes("ogg") ? "ogg" : blob.type.includes("mp4") ? "m4a" : "webm";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `fuwa call ${when}.${ext}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
 
 /** Push to talk's key went down or up. */
 export function setPushing(down: boolean) {

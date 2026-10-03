@@ -213,6 +213,8 @@ struct Quiet {
     suppress: bool,
     /// No VIDEO: their camera stays off.
     video_suppress: bool,
+    /// No RECORD: they can't say they're recording.
+    record_suppress: bool,
 }
 
 impl Quiet {
@@ -220,16 +222,19 @@ impl Quiet {
         Self {
             suppress: !access.has_in(channel_id, pb::Permission::Speak),
             video_suppress: !access.has_in(channel_id, pb::Permission::Video),
+            record_suppress: !access.has_in(channel_id, pb::Permission::Record),
         }
     }
 
     fn of(state: &pb::VoiceState) -> Self {
-        Self { suppress: state.suppress, video_suppress: state.video_suppress }
+        Self { suppress: state.suppress, video_suppress: state.video_suppress, record_suppress: state.record_suppress }
     }
 
     fn apply(self, state: &mut pb::VoiceState) {
         state.suppress = self.suppress;
         state.video_suppress = self.video_suppress;
+        state.record_suppress = self.record_suppress;
+        state.self_record &= !self.record_suppress;
     }
 }
 
@@ -365,7 +370,7 @@ impl Api {
         account: &Account,
         server_id: &str,
         channel_id: &str,
-        (self_mute, self_deaf, self_video, self_stream): (bool, bool, bool, bool),
+        (self_mute, self_deaf, self_video, self_stream, self_record): (bool, bool, bool, bool, bool),
         session_id: &str,
     ) -> Result<(String, Place)> {
         self.calls_on()?;
@@ -395,6 +400,7 @@ impl Api {
             },
             self_video,
             self_stream,
+            self_record,
             ..Default::default()
         };
         Quiet::new(&seat.access, &channel.id).apply(&mut state);
@@ -417,7 +423,7 @@ impl Api {
 
     async fn join_voice(&self, metadata: &MetadataMap, req: pb::JoinVoiceRequest) -> Result<pb::JoinVoiceResponse> {
         let account = self.account(metadata).await?;
-        let selves = (req.self_mute, req.self_deaf, req.self_video, req.self_stream);
+        let selves = (req.self_mute, req.self_deaf, req.self_video, req.self_stream, req.self_record);
         let (server_id, place) =
             self.voice_place(&account, &req.server_id, &req.channel_id, selves, &req.session_id).await?;
         let answer = self.app.media_link.open(&place, &req.offer).await?;
@@ -428,7 +434,7 @@ impl Api {
     async fn listen_voice(&self, metadata: &MetadataMap, req: pb::ListenVoiceRequest) -> Result<ListenStream> {
         let account = self.account(metadata).await?;
         // Programs have no camera.
-        let selves = (req.self_mute, req.self_deaf, false, false);
+        let selves = (req.self_mute, req.self_deaf, false, false, false);
         let (server_id, place) =
             self.voice_place(&account, &req.server_id, &req.channel_id, selves, &req.session_id).await?;
         let events = self.app.media_link.bridge(&place).await?;
@@ -514,11 +520,13 @@ impl Api {
                     || place.state.self_mute != req.self_mute
                     || place.state.self_deaf != req.self_deaf
                     || place.state.self_video != req.self_video
-                    || place.state.self_stream != req.self_stream;
+                    || place.state.self_stream != req.self_stream
+                    || place.state.self_record != req.self_record;
                 place.state.self_mute = req.self_mute;
                 place.state.self_deaf = req.self_deaf;
                 place.state.self_video = req.self_video;
                 place.state.self_stream = req.self_stream;
+                place.state.self_record = req.self_record;
                 quiet.apply(&mut place.state);
                 let may_changed = place.may() != may_before;
                 place.expires = lease();
@@ -546,6 +554,7 @@ impl Api {
                     self_deaf: req.self_deaf,
                     self_video: req.self_video,
                     self_stream: req.self_stream,
+                    self_record: req.self_record,
                     server_mute: moderation.0,
                     server_deaf: moderation.1,
                     joined_at: Some(timestamp(now_ms())),
@@ -661,6 +670,7 @@ impl Api {
             self_deaf: req.self_deaf,
             self_video: req.self_video,
             self_stream: req.self_stream,
+            self_record: req.self_record,
             joined_at: before.as_ref().and_then(|p| p.state.joined_at).or(Some(timestamp(now_ms()))),
             ..Default::default()
         };
@@ -710,6 +720,7 @@ impl Api {
                 || p.state.self_deaf != req.self_deaf
                 || p.state.self_video != req.self_video
                 || p.state.self_stream != req.self_stream
+                || p.state.self_record != req.self_record
         });
         let forgotten = before.is_none();
         let may_before = before.as_ref().map(Place::may);
@@ -728,6 +739,7 @@ impl Api {
         place.state.self_deaf = req.self_deaf;
         place.state.self_video = req.self_video;
         place.state.self_stream = req.self_stream;
+        place.state.self_record = req.self_record;
         place.expires = lease();
         // Forgotten in a restart: only back if still connected to the media part.
         if forgotten && !self.app.media_link.update(&place).await {

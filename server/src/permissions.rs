@@ -21,7 +21,7 @@ pub const fn bit(p: P) -> Bits {
     1 << p as u64
 }
 
-const KNOWN: [P; 24] = [
+const KNOWN: [P; 25] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -46,6 +46,7 @@ const KNOWN: [P; 24] = [
     P::MuteMembers,
     P::MoveMembers,
     P::Video,
+    P::Record,
 ];
 
 /// Every permission there is.
@@ -72,6 +73,7 @@ pub const CHANNEL: Bits = bit(P::ManageChannels)
     | bit(P::Connect)
     | bit(P::Speak)
     | bit(P::Video)
+    | bit(P::Record)
     | bit(P::MuteMembers)
     | bit(P::MoveMembers);
 
@@ -100,7 +102,8 @@ pub const ADMIN: Bits = bit(P::ManageServer)
     | bit(P::TimeOutMembers)
     | bit(P::ManageNicknames)
     | bit(P::MuteMembers)
-    | bit(P::MoveMembers);
+    | bit(P::MoveMembers)
+    | bit(P::Record);
 
 /// What a member who hasn't agreed to the server's rules yet can't do: talk
 /// (in text or voice), bring people in, or rename themselves.
@@ -154,6 +157,7 @@ pub fn label(p: P) -> &'static str {
         P::MuteMembers => "Mute members",
         P::MoveMembers => "Move members",
         P::Video => "Video",
+        P::Record => "Record",
         P::ManageWebhooks => "Manage webhooks",
     }
 }

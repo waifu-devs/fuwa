@@ -1,17 +1,18 @@
-import { CropIcon, ExpandIcon, MonitorUpIcon, MonitorXIcon, PictureInPicture2Icon, SparklesIcon, TagIcon, VideoIcon, VideoOffIcon, XIcon } from "lucide-react";
+import { CircleDotIcon, CropIcon, ExpandIcon, MonitorUpIcon, MonitorXIcon, PictureInPicture2Icon, SparklesIcon, TagIcon, VideoIcon, VideoOffIcon, XIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Permission, type User, type VoiceState } from "@/gen/fuwa/v1/types_pb";
-import { toggleCamera, toggleScreen } from "@/calls/engine";
+import { toggleCamera, toggleRecording, toggleScreen } from "@/calls/engine";
 import { getCalls, subscribeCalls, useCalls, type CallTarget } from "@/calls/state";
 import { canShareScreen, feedOf, useLayerFor, useVideoTrack } from "@/calls/video";
 import { useAccess } from "@/fuwa/hooks";
-import { useFuwa } from "@/fuwa/store";
+import { store, useFuwa } from "@/fuwa/store";
 import { hue } from "@/components/Icons";
 import { displayName, memberName } from "@/lib/format";
 import { hasIn } from "@/lib/permissions";
 import { setPrefs, usePrefs } from "@/lib/prefs";
+import { cue } from "@/lib/sounds";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 import { useSpeaking, VoiceAvatar } from "./parts";
@@ -177,6 +178,74 @@ export function ScreenButton({ size = "sm", className }: { size?: "sm" | "lg"; c
       </motion.span>
     </button>
   );
+}
+
+/** Whether you may record the call you're in: RECORD in a voice channel, always in a conversation. */
+export function useMayRecord(target: CallTarget | null | undefined): boolean {
+  const serverId = target?.kind === "voice" ? target.serverId : "";
+  const access = useAccess(target?.instance ?? "", serverId);
+  if (!target) return false;
+  if (target.kind === "dm") return true;
+  return hasIn(access, target.channelId, Permission.RECORD);
+}
+
+/** Records the call's sound to a file on this device, or stops and saves it. Hidden where you can't record. */
+export function RecordButton({ size = "sm", className }: { size?: "sm" | "lg"; className?: string }) {
+  const on = useCalls((s) => s.selfRecord);
+  const target = useCalls((s) => s.call?.target);
+  const may = useMayRecord(target);
+  if (!may && !on) return null;
+  const label = on ? "Stop recording and save it" : "Record the call's sound (everyone sees you are)";
+  return (
+    <button
+      type="button"
+      onClick={toggleRecording}
+      aria-pressed={on}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "group relative grid shrink-0 place-items-center transition active:scale-90",
+        size === "sm" ? "size-8 rounded-lg" : "size-12 rounded-2xl",
+        on ? "bg-[#ed4245] text-white hover:brightness-110" : size === "sm" ? "text-muted-foreground hover:bg-muted hover:text-foreground" : "bg-muted text-foreground hover:bg-muted/70",
+        className,
+      )}
+    >
+      {on && <span aria-hidden className="absolute inset-0 animate-ping rounded-[inherit] bg-[#ed4245]/40 [animation-duration:2s]" />}
+      <motion.span key={String(on)} initial={{ scale: 0.4 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 600, damping: 14 }} className="relative grid place-items-center">
+        <CircleDotIcon className={cn(size === "sm" ? "size-[18px]" : "size-5", "transition-transform group-hover:scale-110")} />
+      </motion.span>
+    </button>
+  );
+}
+
+/**
+ * Says so, with a sound, when someone else in your call starts recording
+ * it. Mounted once; reads only who's recording, so it wakes for nothing else.
+ */
+export function RecordingWatch() {
+  const target = useCalls((s) => s.call?.target);
+  const recording = useFuwa((s) => {
+    const inst = target && s.instances[target.instance];
+    if (!inst || !target) return "";
+    const states = target.kind === "voice" ? inst.voice[target.serverId]?.filter((v) => v.channelId === target.channelId) : inst.dms.calls[target.conversationId]?.participants;
+    return (states ?? [])
+      .filter((v) => v.selfRecord && v.userId !== inst.me?.id)
+      .map((v) => v.userId)
+      .sort()
+      .join(" ");
+  });
+  const seen = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const now = new Set(recording ? recording.split(" ") : []);
+    const fresh = [...now].filter((id) => !seen.current.has(id));
+    seen.current = now;
+    if (!fresh.length || !target) return;
+    const inst = store.get().instances[target.instance];
+    const names = fresh.map((id) => displayName(inst?.users[id])).join(", ");
+    cue("recording");
+    toast(`${names} started recording this call.`);
+  }, [recording, target]);
+  return null;
 }
 
 /** The little "LIVE" mark on a shared screen, breathing while it's live. */

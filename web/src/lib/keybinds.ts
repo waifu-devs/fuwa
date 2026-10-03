@@ -39,6 +39,7 @@ export const ACTIONS: KeyAction[] = [
   { id: "pushToTalk", label: "Push to talk (hold)", group: "Voice", combo: null },
   { id: "toggleCamera", label: "Turn your camera on or off", group: "Voice", combo: null, whileTyping: true },
   { id: "toggleScreen", label: "Share your screen, or stop", group: "Voice", combo: null, whileTyping: true },
+  { id: "toggleRecording", label: "Record the call, or stop and save it", group: "Voice", combo: null, whileTyping: true },
   { id: "openSettings", label: "Open settings", group: "App", combo: "Mod+Comma", whileTyping: true },
   { id: "shortcuts", label: "Show keyboard shortcuts", group: "App", combo: "Mod+Slash", whileTyping: true },
   { id: "toggleStreamer", label: "Turn streamer mode on or off", group: "App", combo: null, whileTyping: true },

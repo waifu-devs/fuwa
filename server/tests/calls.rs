@@ -987,6 +987,25 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     assert_eq!(watching.seen.len(), seen, "no camera without VIDEO");
     assert!(watching.heard.len() > heard + 10, "sound still goes");
 
+    // Recording needs RECORD, which nobody has by default.
+    let record = pb::KeepVoiceRequest { self_record: true, ..keep(false, false) };
+    let state = c.calls.keep_voice(authed(&mika, record.clone())).await.unwrap().into_inner().state.unwrap();
+    assert!(state.record_suppress && !state.self_record, "no RECORD: not recording");
+    let everyone = pb::PermissionOverwrite {
+        target_id: sid.clone(),
+        target: pb::OverwriteTarget::Role as i32,
+        allow: vec![pb::Permission::Record as i32],
+        deny: vec![pb::Permission::Video as i32],
+    };
+    let request = pb::SetChannelPermissionsRequest {
+        server_id: sid.clone(),
+        channel_id: voice.id.clone(),
+        overwrites: vec![everyone],
+    };
+    c.channels.set_channel_permissions(authed(&juan, request)).await.unwrap();
+    let state = c.calls.keep_voice(authed(&mika, record)).await.unwrap().into_inner().state.unwrap();
+    assert!(state.self_record && !state.record_suppress, "everyone sees Mika recording");
+
     instance.app.shutdown.cancel();
     instance.serving.await.unwrap();
 }
