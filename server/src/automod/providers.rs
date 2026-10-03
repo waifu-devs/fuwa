@@ -14,8 +14,9 @@
 //! one adapter, [`SystemOne`], and differ only in address, key and model.
 //!
 //! What goes out: the message's text with mentions, channel links and custom
-//! emoji ids taken out ([`outgoing`]), and nothing else: never who wrote it,
-//! where, or which server. Only the instance calls providers, never an app.
+//! emoji ids taken out ([`outgoing`]), its pictures when the server's rule
+//! asks for them and the provider reads pictures ([`Kind::pictures`]), and
+//! nothing else: never who wrote it, where, or which server. Only the instance calls providers, never an app.
 //! A provider that fails or is slow never stops a message: the caller lets it
 //! through its rule, and the failure is counted in the anonymous report by
 //! kind and provider id only ("custom" for the admins' own, never its name or
@@ -36,6 +37,15 @@ use crate::reports;
 
 /// How long a message waits for its provider before going through unchecked.
 pub const TIMEOUT: Duration = Duration::from_secs(3);
+/// The same with pictures, which take longer to send and read.
+pub const PICTURES_TIMEOUT: Duration = Duration::from_secs(6);
+/// The most pictures one request carries, each at most [`MAX_PICTURE_BYTES`]
+/// and [`MAX_PICTURE_PIXELS`], all of them at most [`MAX_PICTURES_BYTES`]
+/// (Clef's limits).
+pub const MAX_PICTURES: usize = 4;
+pub const MAX_PICTURE_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_PICTURE_PIXELS: u64 = 16_000_000;
+pub const MAX_PICTURES_BYTES: usize = 8 * 1024 * 1024;
 /// The most characters of a message a provider reads.
 const MAX_TEXT: usize = 4000;
 const MAX_KEY: usize = 512;
@@ -58,6 +68,8 @@ pub struct Kind {
     pub models: &'static [&'static str],
     /// Cloudflare's addresses name the account.
     pub needs_account: bool,
+    /// It reads pictures as well as text.
+    pub pictures: bool,
 }
 
 pub const KINDS: &[Kind] = &[
@@ -67,6 +79,7 @@ pub const KINDS: &[Kind] = &[
         host: "api.typesafe.ai",
         models: &["jev-latest", "jev-preview"],
         needs_account: false,
+        pictures: false,
     },
     Kind {
         id: "cloudflare-clef",
@@ -74,6 +87,7 @@ pub const KINDS: &[Kind] = &[
         host: "api.cloudflare.com",
         models: &["@cf/cloudflare/clef", "@cf/cloudflare/clef-flash"],
         needs_account: true,
+        pictures: true,
     },
 ];
 
@@ -204,6 +218,11 @@ impl fmt::Debug for Setup {
 }
 
 impl Setup {
+    /// Whether its provider reads pictures (the admins' own read only text).
+    pub fn reads_pictures(&self) -> bool {
+        self.kind().is_some_and(|kind| kind.pictures)
+    }
+
     pub fn kind(&self) -> Option<&'static Kind> {
         kind(&self.id)
     }
@@ -395,6 +414,7 @@ impl Setup {
             id: self.id.clone(),
             name: self.name().into(),
             host: self.host(),
+            pictures: self.reads_pictures(),
             labels: LABELS
                 .iter()
                 .map(|l| pb::AutoModLabel {
@@ -574,11 +594,100 @@ impl Failure {
     }
 }
 
-/// A moderation provider: reads a message's text (already cleaned by
-/// [`outgoing`]) and says how likely it is to be each of [`LABELS`].
+/// A picture in a message, as the server read it: PNG, JPEG or WebP within
+/// Clef's limits (see [`Picture::read`]).
+#[derive(Clone)]
+pub struct Picture {
+    pub content_type: &'static str,
+    pub bytes: bytes::Bytes,
+}
+
+impl Picture {
+    /// The picture in `bytes`, when it's a PNG, JPEG or WebP of at most
+    /// [`MAX_PICTURE_BYTES`] and [`MAX_PICTURE_PIXELS`]; anything else is
+    /// left out (a GIF, a huge photo).
+    pub fn read(bytes: bytes::Bytes) -> Option<Self> {
+        if bytes.len() > MAX_PICTURE_BYTES {
+            return None;
+        }
+        let content_type = crate::media::sniff(&bytes[..bytes.len().min(16)])?;
+        if !matches!(content_type, "image/png" | "image/jpeg" | "image/webp") {
+            return None;
+        }
+        let (width, height) = dimensions(&bytes)?;
+        if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_PICTURE_PIXELS {
+            return None;
+        }
+        Some(Self { content_type, bytes })
+    }
+
+    fn data_uri(&self) -> String {
+        use base64::Engine;
+        format!("data:{};base64,{}", self.content_type, base64::engine::general_purpose::STANDARD.encode(&self.bytes))
+    }
+}
+
+/// A PNG's, JPEG's or WebP's width and height, from its headers.
+fn dimensions(b: &[u8]) -> Option<(u32, u32)> {
+    let be16 = |i: usize| Some(u16::from_be_bytes([*b.get(i)?, *b.get(i + 1)?]) as u32);
+    let le16 = |i: usize| Some(u16::from_le_bytes([*b.get(i)?, *b.get(i + 1)?]) as u32);
+    let le24 = |i: usize| Some(u32::from_le_bytes([*b.get(i)?, *b.get(i + 1)?, *b.get(i + 2)?, 0]));
+    let be32 = |i: usize| Some(u32::from_be_bytes(b.get(i..i + 4)?.try_into().ok()?));
+    if b.starts_with(b"\x89PNG") {
+        // IHDR is always first.
+        return Some((be32(16)?, be32(20)?));
+    }
+    if b.starts_with(b"\xff\xd8") {
+        // Walk the segments to the frame header.
+        let mut i = 2;
+        while i + 4 <= b.len() {
+            if b[i] != 0xff {
+                return None;
+            }
+            let marker = b[i + 1];
+            if marker == 0xff {
+                i += 1;
+                continue;
+            }
+            if matches!(marker, 0xd8 | 0x01 | 0xd0..=0xd7) {
+                i += 2;
+                continue;
+            }
+            let len = be16(i + 2)? as usize;
+            if matches!(marker, 0xc0..=0xcf) && !matches!(marker, 0xc4 | 0xc8 | 0xcc) {
+                return Some((be16(i + 7)?, be16(i + 5)?));
+            }
+            i += 2 + len;
+        }
+        return None;
+    }
+    if b.get(..4) == Some(b"RIFF") && b.get(8..12) == Some(b"WEBP") {
+        return match b.get(12..16)? {
+            b"VP8 " => Some((le16(26)? & 0x3fff, le16(28)? & 0x3fff)),
+            b"VP8L" => {
+                let bits = u32::from_le_bytes(b.get(21..25)?.try_into().ok()?);
+                Some(((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1))
+            }
+            b"VP8X" => Some((le24(24)? + 1, le24(27)? + 1)),
+            _ => None,
+        };
+    }
+    None
+}
+
+/// What a provider reads about a message: its text, already cleaned by
+/// [`outgoing`], and its pictures when the rule shows them (only to
+/// providers that read pictures).
+pub struct Message<'a> {
+    pub text: &'a str,
+    pub pictures: &'a [Picture],
+}
+
+/// A moderation provider: reads a message and says how likely it is to be
+/// each of [`LABELS`].
 pub trait Provider: Send + Sync {
     fn id(&self) -> &'static str;
-    fn classify<'a>(&'a self, text: &'a str) -> BoxFuture<'a, std::result::Result<Scores, Failure>>;
+    fn classify<'a>(&'a self, message: &'a Message<'a>) -> BoxFuture<'a, std::result::Result<Scores, Failure>>;
 }
 
 /// A provider for `setup`, when it has what it needs.
@@ -598,14 +707,24 @@ pub fn build(setup: &Setup) -> std::result::Result<Box<dyn Provider>, Failure> {
     }))
 }
 
-/// Asks `setup`'s provider about `text`, giving up after [`TIMEOUT`]. Counts
-/// how long it took, and any failure (by kind and provider id only), in the
-/// anonymous report.
-pub async fn check(setup: &Setup, text: &str) -> (std::result::Result<Scores, Failure>, Duration) {
+/// Asks `setup`'s provider about `text` and `pictures` (left out unless it
+/// reads pictures), giving up after [`TIMEOUT`] ([`PICTURES_TIMEOUT`] with
+/// pictures). Counts how long it took, and any failure (by kind and provider
+/// id only), in the anonymous report.
+pub async fn check(
+    setup: &Setup,
+    text: &str,
+    pictures: &[Picture],
+) -> (std::result::Result<Scores, Failure>, Duration) {
     let started = Instant::now();
     let text = outgoing(text);
+    let pictures = if setup.reads_pictures() { &pictures[..pictures.len().min(MAX_PICTURES)] } else { &[] };
+    let message = Message { text: &text, pictures };
+    let timeout = if pictures.is_empty() { TIMEOUT } else { PICTURES_TIMEOUT };
     let answer = match build(setup) {
-        Ok(provider) => tokio::time::timeout(TIMEOUT, provider.classify(&text)).await.unwrap_or(Err(Failure::TimedOut)),
+        Ok(provider) => {
+            tokio::time::timeout(timeout, provider.classify(&message)).await.unwrap_or(Err(Failure::TimedOut))
+        }
         Err(failure) => Err(failure),
     };
     let took = started.elapsed();
@@ -627,7 +746,7 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .no_proxy()
         .https_only(true)
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(TIMEOUT)
+        .timeout(PICTURES_TIMEOUT)
         .user_agent(concat!("fuwa/", env!("CARGO_PKG_VERSION")))
         .build()
         .expect("the HTTP client builds")
@@ -647,22 +766,30 @@ struct SystemOne {
 }
 
 impl SystemOne {
-    fn body(&self, text: &str) -> Value {
+    fn body(&self, message: &Message) -> Value {
         let questions: Map<String, Value> = LABELS
             .iter()
             .map(|l| {
+                let instructions = if message.pictures.is_empty() {
+                    l.question.to_string()
+                } else {
+                    format!("{} Count the pictures sent with it as part of the message.", l.question)
+                };
                 let question = json!({
                     "type": "noul",
-                    "instructions": l.question,
+                    "instructions": instructions,
                     "criteria": { "true": l.yes, "false": l.no },
                 });
                 (l.id.to_string(), question)
             })
             .collect();
         let mut body = json!({
-            "state": { "chat_message": text },
+            "state": { "chat_message": message.text },
             "questions": questions,
         });
+        if !message.pictures.is_empty() {
+            body["images"] = message.pictures.iter().map(Picture::data_uri).collect();
+        }
         if !self.model.is_empty() {
             body["model"] = Value::from(self.model.as_str());
         }
@@ -675,9 +802,9 @@ impl Provider for SystemOne {
         self.id
     }
 
-    fn classify<'a>(&'a self, text: &'a str) -> BoxFuture<'a, std::result::Result<Scores, Failure>> {
+    fn classify<'a>(&'a self, message: &'a Message<'a>) -> BoxFuture<'a, std::result::Result<Scores, Failure>> {
         Box::pin(async move {
-            let request = CLIENT.post(&self.url).json(&self.body(text));
+            let request = CLIENT.post(&self.url).json(&self.body(message));
             let request = match (self.key.is_empty(), self.header.is_empty()) {
                 (true, _) => request,
                 (false, true) => request.bearer_auth(&self.key),
@@ -702,7 +829,6 @@ impl Provider for SystemOne {
     }
 }
 
-/// An error without the address it was for.
 /// The most of an answer fuwa reads.
 const MAX_ANSWER: usize = 64 * 1024;
 
@@ -718,6 +844,7 @@ async fn read_body(mut response: reqwest::Response) -> Value {
     serde_json::from_slice(&bytes).unwrap_or(Value::Null)
 }
 
+/// An error without the address it was for.
 fn short(err: reqwest::Error) -> String {
     let err = err.without_url();
     let mut source: Option<&dyn std::error::Error> = Some(&err);
@@ -861,13 +988,13 @@ mod tests {
             header: String::new(),
             model: setup.model().into(),
         };
-        let body = provider.body("hi");
+        let body = provider.body(&Message { text: "hi", pictures: &[] });
         assert_eq!(body["model"], "jev-latest");
         assert_eq!(body["state"], json!({ "chat_message": "hi" }));
         assert_eq!(body["questions"].as_object().unwrap().len(), LABELS.len());
         assert_eq!(body["questions"]["scam"]["type"], "noul");
         let unnamed = SystemOne { model: String::new(), ..provider };
-        assert!(unnamed.body("hi").get("model").is_none());
+        assert!(unnamed.body(&Message { text: "hi", pictures: &[] }).get("model").is_none());
     }
 
     #[test]
@@ -923,6 +1050,61 @@ mod tests {
         let ids: Vec<String> = complete(std::slice::from_ref(&made)).into_iter().map(|s| s.id).collect();
         assert_eq!(ids, ["typesafe-jev", "cloudflare-clef", made.id.as_str()]);
         assert!(!is_custom_id("custom-") && !is_custom_id("custom-../x") && !is_custom_id("typesafe-jev"));
+    }
+
+    /// A PNG's first bytes for a `width` by `height` picture.
+    fn png(width: u32, height: u32) -> bytes::Bytes {
+        let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        b.extend_from_slice(&width.to_be_bytes());
+        b.extend_from_slice(&height.to_be_bytes());
+        b.extend_from_slice(&[8, 6, 0, 0, 0]);
+        b.into()
+    }
+
+    #[test]
+    fn pictures_are_read_within_clef_s_limits() {
+        assert_eq!(Picture::read(png(1024, 768)).unwrap().content_type, "image/png");
+        // 16 megapixels at most, and nothing empty.
+        assert!(Picture::read(png(4000, 4000)).is_some());
+        assert!(Picture::read(png(6000, 4000)).is_none());
+        assert!(Picture::read(png(0, 10)).is_none());
+        // JPEG: an APP0 segment, then the frame header.
+        let mut jpeg = vec![0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0, 0xff, 0xc0, 0, 17, 8];
+        jpeg.extend_from_slice(&480u16.to_be_bytes());
+        jpeg.extend_from_slice(&640u16.to_be_bytes());
+        assert_eq!(dimensions(&jpeg), Some((640, 480)));
+        assert_eq!(Picture::read(jpeg.into()).unwrap().content_type, "image/jpeg");
+        // WebP, extended: sizes minus one, 24 bits each.
+        let mut webp = b"RIFF\0\0\0\0WEBPVP8X\x0a\0\0\0\0\0\0\0".to_vec();
+        webp.extend_from_slice(&[0xff, 0x07, 0, 0x37, 0x04, 0]);
+        assert_eq!(dimensions(&webp), Some((2048, 1080)));
+        // Clef doesn't read GIFs, and nothing goes over 4 MiB.
+        assert!(Picture::read(bytes::Bytes::from_static(b"GIF89a\x10\0\x10\0")).is_none());
+        let mut big = png(100, 100).to_vec();
+        big.resize(MAX_PICTURE_BYTES + 1, 0);
+        assert!(Picture::read(big.into()).is_none());
+        assert!(Picture::read(bytes::Bytes::from_static(b"\x89PNG\r\n")).is_none());
+    }
+
+    #[test]
+    fn pictures_go_as_data_uris_with_the_text() {
+        let provider = SystemOne {
+            id: "cloudflare-clef",
+            url: String::new(),
+            key: String::new(),
+            header: String::new(),
+            model: String::new(),
+        };
+        let pictures = [Picture::read(png(2, 2)).unwrap()];
+        let body = provider.body(&Message { text: "look", pictures: &pictures });
+        let images = body["images"].as_array().unwrap();
+        assert_eq!(images.len(), 1);
+        assert!(images[0].as_str().unwrap().starts_with("data:image/png;base64,iVBORw0KGgo"));
+        assert!(body["questions"]["scam"]["instructions"].as_str().unwrap().contains("pictures"));
+        let text_only = provider.body(&Message { text: "look", pictures: &[] });
+        assert!(text_only.get("images").is_none());
+        assert!(!text_only["questions"]["scam"]["instructions"].as_str().unwrap().contains("pictures"));
+        assert!(kind("cloudflare-clef").unwrap().pictures && !kind("typesafe-jev").unwrap().pictures);
     }
 
     #[test]

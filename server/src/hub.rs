@@ -11,6 +11,18 @@ use crate::pb;
 /// resubscribe from its last sequence.
 const BUFFER: usize = 1024;
 
+/// Not an event of the server's: the server moved to another shard, so
+/// streams following it here end, as misrouted, and the gateway follows it
+/// where it is now. Never stored, and never sent to a client.
+pub fn moved_event(server_id: &str) -> pb::Event {
+    pb::Event { id: String::new(), server_id: server_id.to_string(), sequence: -1, payload: None, ..Default::default() }
+}
+
+/// Whether an event is a [`moved_event`].
+pub fn is_moved(event: &pb::Event) -> bool {
+    event.sequence == -1 && event.payload.is_none()
+}
+
 #[derive(Default)]
 pub struct Hub {
     channels: Mutex<HashMap<String, broadcast::Sender<Arc<pb::Event>>>>,

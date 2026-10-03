@@ -179,6 +179,18 @@ pub fn spawn_voice_guard(app: Arc<App>) {
     });
 }
 
+/// Hangs up everyone in a server's voice channels here, for a server that's
+/// leaving this shard: their apps join again where it's going.
+pub async fn hang_up_server(app: &App, server_id: &str) {
+    for place in app.voice.list(server_id) {
+        let user_id = place.state.user_id.clone();
+        if let Some(place) = app.voice.remove(server_id, &user_id, Some(&place.session_id)) {
+            app.media_link.close(&place.room, Some(&user_id), Some(&place.session_id)).await;
+            gone(app, server_id, &place).await;
+        }
+    }
+}
+
 /// Who may still be where they are in a server's voice channels.
 async fn recheck_voice(app: &App, server_id: &str) {
     let sdb = app.servers.get(server_id).await.ok();
@@ -391,6 +403,8 @@ impl Api {
         self.calls_on()?;
         check_session(session_id)?;
         let (seat, channel) = self.voice_channel(account, server_id, channel_id).await?;
+        // A server on its way to another shard is joined there, once it's arrived.
+        seat.sdb.writable()?;
         seat.access.require_in(&channel.id, pb::Permission::Connect)?;
         super::messages::check_not_timed_out(&seat.member)?;
         let server_id = seat.sdb.id.clone();

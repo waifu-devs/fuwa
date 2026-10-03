@@ -481,11 +481,12 @@ async fn review_here(
     access: &Access,
     channel_id: &str,
     content: &str,
+    pictures: &[String],
 ) -> Result<()> {
     if access.has(Permission::ManageServer) || store::load_automod(&sdb.read()?).await?.is_empty() {
         return Ok(());
     }
-    let asked = automod::ask(app, sdb, member, access, channel_id, content).await;
+    let asked = automod::ask(app, sdb, member, access, channel_id, content, pictures).await;
     let author_id = member.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
     let blocked = sdb
         .write(&author_id, async |conn, events| {
@@ -548,7 +549,8 @@ pub(super) async fn guest_send(
 ) -> Result<pb::Message> {
     let channel_id = link.channel_id.clone().unwrap_or_default();
     let guest = guest_of(&sdb.read()?, &sdb.id, account, access, link).await?;
-    review_here(app, sdb, member, access, &channel_id, &req.content).await?;
+    let pictures = automod::picture_links(&req.attachments, &req.embeds);
+    review_here(app, sdb, member, access, &channel_id, &req.content, &pictures).await?;
     let call = Call::Send(cpb::GuestSend {
         guest: Some(guest),
         content: req.content,
@@ -601,7 +603,7 @@ pub(super) async fn guest_edit(
     req: &pb::UpdateMessageRequest,
 ) -> Result<pb::Message> {
     let channel_id = link.channel_id.clone().unwrap_or_default();
-    review_here(app, sdb, member, access, &channel_id, &req.content).await?;
+    review_here(app, sdb, member, access, &channel_id, &req.content, &[]).await?;
     let call = Call::Edit(cpb::GuestEdit {
         guest: Some(guest),
         message_id: req.message_id.clone(),
@@ -749,7 +751,8 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
     {
         return Err(Error::ResourceExhausted("this channel's home server is out of storage".into()));
     }
-    let asked = ask_home(app, sdb, &guest, &send.content).await;
+    let pictures = automod::picture_links(&send.attachments, &send.embeds);
+    let asked = ask_home(app, sdb, &guest, &send.content, &pictures).await;
     let message = sdb
         .write(&author_id, async |conn, events| {
             let (row, user, server) = connection(conn, &guest).await?;
@@ -839,7 +842,13 @@ async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply
 /// write, as `messages` does for the home's own people. `None` when the
 /// guest's connection is gone or they're kept out; the write then turns
 /// them away.
-async fn ask_home(app: &App, sdb: &ServerDb, guest: &cpb::Guest, content: &str) -> Option<automod::Asked> {
+async fn ask_home(
+    app: &App,
+    sdb: &ServerDb,
+    guest: &cpb::Guest,
+    content: &str,
+    pictures: &[String],
+) -> Option<automod::Asked> {
     let conn = sdb.read().ok()?;
     let (row, user, _) = connection(&conn, guest).await.ok()?;
     // Someone the home kept out is turned away by the write; their text
@@ -851,7 +860,7 @@ async fn ask_home(app: &App, sdb: &ServerDb, guest: &cpb::Guest, content: &str) 
     let channel_id = row.channel_id.clone();
     let access = Access::guest(&channel_id, row.allowed);
     let member = pb::Member { user: Some(user), ..Default::default() };
-    automod::ask(app, sdb, &member, &access, &channel_id, content).await
+    automod::ask(app, sdb, &member, &access, &channel_id, content, pictures).await
 }
 
 async fn home_edit(app: &App, sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cpb::SharedReply> {
@@ -861,7 +870,7 @@ async fn home_edit(app: &App, sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cp
     let before = load_message(&sdb.read()?, &sdb.id, &edit.message_id).await?;
     let asked = match before {
         Some(m) if m.author_id == author_id && m.content != edit.content => {
-            ask_home(app, sdb, &guest, &edit.content).await
+            ask_home(app, sdb, &guest, &edit.content, &[]).await
         }
         _ => None,
     };

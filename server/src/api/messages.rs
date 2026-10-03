@@ -524,7 +524,9 @@ impl MessageService for Api {
                 {
                     return Err(Error::ResourceExhausted("this server is out of storage".into()));
                 }
-                let asked = automod::ask(&self.app, &sdb, &member, &access, &req.channel_id, &req.content).await;
+                let pictures = automod::picture_links(&req.attachments, &req.embeds);
+                let asked =
+                    automod::ask(&self.app, &sdb, &member, &access, &req.channel_id, &req.content, &pictures).await;
                 let message = sdb
                     .write(&account.id, async |conn, events| {
                         let channel =
@@ -676,7 +678,7 @@ impl MessageService for Api {
                 let before = load_message(&sdb.read()?, &sdb.id, &req.message_id).await?;
                 let asked = match before {
                     Some(m) if m.author_id == account.id && m.content != req.content => {
-                        automod::ask(&self.app, &sdb, &member, &access, &m.channel_id, &req.content).await
+                        automod::ask(&self.app, &sdb, &member, &access, &m.channel_id, &req.content, &[]).await
                     }
                     _ => None,
                 };

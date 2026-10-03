@@ -40,6 +40,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0013_recordings.sql"),
     include_str!("../migrations/server/0014_recording_limits.sql"),
     include_str!("../migrations/server/0015_secure_channels.sql"),
+    include_str!("../migrations/server/0016_region.sql"),
     include_str!("../migrations/server/0017_shared_channels.sql"),
 ];
 
@@ -61,6 +62,9 @@ pub struct ServerDb {
     unfolded: AtomicU32,
     folding: AtomicBool,
     hub: Arc<Hub>,
+    /// Being moved to another shard: it takes no changes until the move is
+    /// over (see [`Servers::freeze`]).
+    frozen: AtomicBool,
 }
 
 /// Usage changes are folded into the totals after this many writes.
@@ -224,7 +228,9 @@ impl ServerDb {
         actor_id: &str,
         f: impl AsyncFnOnce(&Connection, &mut Vec<Payload>) -> Result<T> + Clone,
     ) -> Result<T> {
+        self.writable()?;
         let shared = self.db.shared().await;
+        self.writable()?;
         let value = self.run(actor_id, f).await;
         drop(shared);
         if value.is_ok() {
@@ -241,8 +247,21 @@ impl ServerDb {
         actor_id: &str,
         f: impl AsyncFnOnce(&Connection, &mut Vec<Payload>) -> Result<T> + Clone,
     ) -> Result<T> {
+        self.writable()?;
         let _alone = self.db.alone().await;
+        self.writable()?;
         self.run(actor_id, f).await
+    }
+
+    /// Refuses changes while the server is being moved to another shard: the
+    /// gateway holds them and tries again, on the new shard once it's there.
+    pub fn writable(&self) -> Result<()> {
+        if self.frozen.load(Ordering::Acquire) { Err(Error::Moving) } else { Ok(()) }
+    }
+
+    /// The database, for copying its files.
+    pub fn db(&self) -> &Arc<Db> {
+        &self.db
     }
 
     async fn run<T>(
@@ -487,6 +506,7 @@ impl ServerDb {
     }
 
     pub async fn set_voice_moderation(&self, user_id: &str, mute: bool, deaf: bool) -> Result<()> {
+        self.writable()?;
         let user_id = user_id.to_owned();
         db::write(&self.db, async |conn| {
             if mute || deaf {
@@ -506,6 +526,7 @@ impl ServerDb {
 
     /// Starts a recording of a voice channel ([`crate::recordings`]).
     pub async fn add_recording(&self, row: &RecordingRow) -> Result<()> {
+        self.writable()?;
         let row = row.clone();
         db::write(&self.db, async |conn| {
             conn.execute(
@@ -590,6 +611,7 @@ impl ServerDb {
     }
 
     pub async fn set_limits(&self, limits: &pb::ServerLimits) -> Result<()> {
+        self.writable()?;
         db::write(&self.db, async |conn| {
             conn.execute(
                 "UPDATE limits SET members = ?1, channels = ?2, storage_bytes = ?3, attachment_bytes = ?4, emojis = ?5, \
@@ -663,7 +685,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
         conn,
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
                 default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome,
-                sso, sso_required, sso_recheck_days
+                sso, sso_required, sso_recheck_days, region
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -688,6 +710,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 sso_name: if r.get::<bool>(17)? { crate::sso::Provider::parse(&r.get::<String>(16)?).name } else { String::new() },
                 sso_host: if r.get::<bool>(17)? { crate::sso::Provider::parse(&r.get::<String>(16)?).host() } else { String::new() },
                 sso_recheck_days: r.get(18)?,
+                region: r.get(19)?,
             })
         },
     )
@@ -751,6 +774,12 @@ pub struct Servers {
     split: bool,
     /// Where every server file here is continuously copied, if anywhere.
     replica: Option<Arc<Replica>>,
+    /// The region this process is in (FUWA_REGION), which every server here
+    /// is in too.
+    region: String,
+    /// Servers moved here that aren't replicated yet: they will be once the
+    /// shard they came from has let go of its copies (see cluster/moves.rs).
+    unreplicated: RwLock<std::collections::HashSet<String>>,
 }
 
 /// What a new server starts with.
@@ -772,6 +801,8 @@ impl Servers {
             open: RwLock::new(HashMap::new()),
             split: true,
             replica: None,
+            region: String::new(),
+            unreplicated: RwLock::default(),
         }
     }
 
@@ -783,11 +814,23 @@ impl Servers {
         hub: Arc<Hub>,
         split: bool,
         replica: Option<Arc<Replica>>,
+        region: &str,
     ) -> Result<Self> {
         let dir = data_path.join("servers");
         let trash = data_path.join("deleted");
         std::fs::create_dir_all(&dir)?;
-        let servers = Self { dir, trash, key, hub, open: RwLock::new(HashMap::new()), split, replica };
+        let region = region.to_string();
+        let servers = Self {
+            dir,
+            trash,
+            key,
+            hub,
+            open: RwLock::new(HashMap::new()),
+            split,
+            replica,
+            region,
+            unreplicated: RwLock::default(),
+        };
 
         let mut entries: Vec<PathBuf> = std::fs::read_dir(&servers.dir)?
             .filter_map(|entry| entry.ok().map(|e| e.path()))
@@ -799,16 +842,20 @@ impl Servers {
                 tracing::warn!(path = %path.display(), "skipping a file in servers/ that isn't named after a server id");
                 continue;
             };
-            if let Err(err) = servers.load(&id, &path).await {
+            if let Err(err) = servers.load(&id, &path, true).await {
                 tracing::error!(server = %id, error = %err, "couldn't open server database; skipping it");
             }
         }
         Ok(servers)
     }
 
-    async fn load(&self, id: &str, path: &Path) -> Result<()> {
+    async fn load(&self, id: &str, path: &Path, replicate: bool) -> Result<()> {
         let sdb = Arc::new(self.open_file(id, path).await?);
-        self.replicate(&sdb).await?;
+        if replicate {
+            self.replicate(&sdb).await?;
+        } else {
+            self.unreplicated.write().unwrap_or_else(|p| p.into_inner()).insert(id.to_string());
+        }
         sdb.fold_usage().await?;
         let server = sdb.server().await?;
         if server.id != id {
@@ -816,8 +863,108 @@ impl Servers {
         }
         // Servers from before roles get theirs the first time they open.
         db::write(&sdb.db, async |conn| permissions::seed(conn, id, now_ms()).await.map(drop)).await?;
+        // A file brought here from another region (moved, or copied by hand)
+        // is in this one now.
+        if server.region != self.region {
+            let region = self.region.clone();
+            db::write(&sdb.db, async |conn| {
+                conn.execute("UPDATE server SET region = ?1", [region.as_str()]).await?;
+                Ok(())
+            })
+            .await?;
+        }
         self.write().insert(id.to_string(), sdb);
         Ok(())
+    }
+
+    /// Opens a server whose files were just put in servers/ (moved here from
+    /// another shard), as at start but not replicated yet: see
+    /// [`replicate_adopted`](Self::replicate_adopted).
+    pub async fn adopt(&self, id: &str) -> Result<Arc<ServerDb>> {
+        if self.holds(id) {
+            return Err(Error::AlreadyExists(format!("server {id} is already here")));
+        }
+        if let Err(err) = self.load(id, &self.path(id), false).await {
+            self.unreplicated.write().unwrap_or_else(|p| p.into_inner()).remove(id);
+            return Err(err);
+        }
+        self.get(id).await
+    }
+
+    /// Servers moved here not replicated yet.
+    pub fn unreplicated(&self) -> Vec<String> {
+        self.unreplicated.read().unwrap_or_else(|p| p.into_inner()).iter().cloned().collect()
+    }
+
+    /// Starts replicating a server moved here, now that the shard it came
+    /// from has let go of its replica. True if it wasn't yet.
+    pub async fn replicate_adopted(&self, id: &str) -> Result<bool> {
+        if !self.unreplicated.write().unwrap_or_else(|p| p.into_inner()).remove(id) {
+            return Ok(false);
+        }
+        let Some(sdb) = self.read().get(id).cloned() else { return Ok(false) };
+        if let Some(replica) = &self.replica {
+            self.replicate(&sdb).await?;
+            replica.sync_now(&replica_name(id)).await?;
+        }
+        Ok(true)
+    }
+
+    /// Every server here and who's in it, for one server.
+    pub async fn entry(&self, id: &str) -> Result<cpb::ServerEntry> {
+        let sdb = self.get(id).await?;
+        let conn = sdb.read()?;
+        let server = load_server(&conn).await?;
+        let member_ids = query_all(&conn, "SELECT user_id FROM members", (), |r| r.get::<String>(0)).await?;
+        let invite_codes = query_all(&conn, "SELECT code FROM invites", (), |r| r.get::<String>(0)).await?;
+        Ok(cpb::ServerEntry { server: Some(server), member_ids, invite_codes })
+    }
+
+    pub fn replica(&self) -> Option<&Arc<Replica>> {
+        self.replica.as_ref()
+    }
+
+    /// Lets go of a server that moved to another shard: it's no longer
+    /// served here and its files are deleted, along with this process's
+    /// replica of it (see [`Replica::release`]). Unlike [`delete`](Self::delete)
+    /// nothing is kept here and nobody is told it's gone: it lives on elsewhere.
+    pub async fn release(&self, id: &str) -> Result<()> {
+        let Some(sdb) = self.write().remove(id) else { return Ok(()) };
+        let replicated = !self.unreplicated.write().unwrap_or_else(|p| p.into_inner()).remove(id);
+        if let Some(replica) = self.replica.as_ref().filter(|_| replicated) {
+            replica.release(&replica_name(id)).await;
+        }
+        let _alone = sdb.db.alone().await;
+        for suffix in SIDECARS {
+            match std::fs::remove_file(sidecar(&sdb.path, suffix)) {
+                Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err.into()),
+                _ => {}
+            }
+        }
+        // Live streams following it here end, and follow it on its new shard.
+        self.hub.publish([crate::hub::moved_event(id)]);
+        Ok(())
+    }
+
+    /// Stops a server taking changes, for moving it (or lets it take them
+    /// again). Returns whether it was frozen before.
+    pub fn freeze(&self, id: &str, frozen: bool) -> bool {
+        match self.read().get(id) {
+            Some(sdb) => sdb.frozen.swap(frozen, Ordering::AcqRel),
+            None => false,
+        }
+    }
+
+    /// The servers here that are frozen for a move.
+    pub fn frozen(&self) -> Vec<String> {
+        self.read().values().filter(|sdb| sdb.frozen.load(Ordering::Acquire)).map(|sdb| sdb.id.clone()).collect()
+    }
+
+    /// Where a server's file is, and the files kept beside it, as they are
+    /// now (with the log folded in, for a server that's taking no changes).
+    pub fn files(&self, id: &str) -> Vec<PathBuf> {
+        let path = self.path(id);
+        SIDECARS.iter().map(|suffix| sidecar(&path, suffix)).filter(|p| p.exists()).collect()
     }
 
     async fn open_file(&self, id: &str, path: &Path) -> Result<ServerDb> {
@@ -830,6 +977,7 @@ impl Servers {
             unfolded: AtomicU32::new(0),
             folding: AtomicBool::new(false),
             hub: self.hub.clone(),
+            frozen: AtomicBool::new(false),
         })
     }
 
@@ -902,14 +1050,15 @@ impl Servers {
         let path = self.path(&id);
         let sdb = Arc::new(self.open_file(&id, &path).await?);
         self.replicate(&sdb).await?;
+        let region = self.region.clone();
         let created = sdb
             .write(&owner.id, async |conn, events| {
                 let now = now_ms();
                 let general = new_id();
                 conn.execute(
-                    "INSERT INTO server (id, name, description, icon_url, owner_id, discoverable, system_channel_id, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
-                    (id.as_str(), new.name.as_str(), new.description.as_str(), new.icon_url.as_str(), owner.id.as_str(), new.discoverable, general.as_str(), now),
+                    "INSERT INTO server (id, name, description, icon_url, owner_id, discoverable, system_channel_id, created_at, updated_at, region)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)",
+                    (id.as_str(), new.name.as_str(), new.description.as_str(), new.icon_url.as_str(), owner.id.as_str(), new.discoverable, general.as_str(), now, region.as_str()),
                 )
                 .await?;
                 for role in permissions::seed(conn, &id, now).await? {
@@ -1658,6 +1807,7 @@ mod tests {
             unfolded: AtomicU32::new(0),
             folding: AtomicBool::new(false),
             hub: Arc::new(Hub::default()),
+            frozen: AtomicBool::new(false),
         };
         sdb.write("u", async |_, events| {
             events.push(Payload::ChannelDeleted(pb::ChannelDeleted { channel_id: "c1".into() }));

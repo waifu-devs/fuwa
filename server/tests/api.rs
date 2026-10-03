@@ -4512,6 +4512,8 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
     assert_eq!(offered.len(), 1);
     assert_eq!((offered[0].name.as_str(), offered[0].host.as_str()), ("Cloudflare Clef", "api.cloudflare.com"));
     assert!(offered[0].labels.iter().any(|l| l.id == "hate" && l.default_level == Level::Block as i32));
+    // Clef reads pictures too.
+    assert!(offered[0].pictures);
 
     // One switch: a rule with no labels gets the defaults. Flags need a channel.
     let rule = save_rule(&mut c, &owner, &server.id, smart.clone()).await.unwrap();
@@ -4526,6 +4528,35 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
     // The key is made up, so the provider turns it down (or can't be reached):
     // messages still go through, and the test says why.
     send(&mut c, &member, &server.id, &general.id, "hello there").await.unwrap();
+
+    // Showing it pictures too: a message that's only a picture is read and
+    // asked about, and still goes through when the provider doesn't answer.
+    let rule = save_rule(&mut c, &owner, &server.id, pb::AutoModRule { pictures: true, ..rule.clone() }).await.unwrap();
+    assert!(rule.pictures);
+    // A 16 by 16 PNG's headers, which is all the server looks at before sending it.
+    let mut cat = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\x10\0\0\0\x10\x08\x06\0\0\0".to_vec();
+    cat.resize(300, 0);
+    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, cat).await;
+    let sent = c
+        .messages
+        .send_message(authed(
+            &member,
+            pb::SendMessageRequest {
+                server_id: server.id.clone(),
+                channel_id: general.id.clone(),
+                attachments: vec![pb::Attachment {
+                    filename: "cat.png".into(),
+                    content_type: "image/png".into(),
+                    url: picture.clone(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(sent.message.unwrap().attachments.len(), 1);
     let tried = c
         .automod
         .test_auto_mod_rule(authed(
@@ -4597,6 +4628,8 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
         .await
         .unwrap();
     assert_eq!(switched.provider, mine.id);
+    // The admins' own providers read text only, so the rule stops asking for pictures.
+    assert!(!switched.pictures && !theirs.pictures);
     send(&mut c, &member, &server.id, &general.id, "hello again").await.unwrap();
     let tried = c
         .automod

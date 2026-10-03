@@ -156,6 +156,9 @@ async fn checked_rule(
         }
         _ => (String::new(), vec![]),
     };
+    // Only providers that read pictures are shown them.
+    let pictures =
+        trigger == Trigger::Provider && rule.pictures && (providers::kind(&provider).is_some_and(|kind| kind.pictures));
     let mut rule = rule;
     if trigger == Trigger::Provider {
         let highest = labels.iter().map(|l| l.level).max().unwrap_or_default();
@@ -246,6 +249,7 @@ async fn checked_rule(
         updated_at: None,
         provider,
         labels,
+        pictures,
     })
 }
 
@@ -260,8 +264,12 @@ pub(super) struct Asked {
 
 /// Asks the provider of the server's provider rule about a message, when the
 /// rule is on, its provider is set up and the message isn't left alone.
-/// `None` when nothing was asked or the provider didn't answer (counted in
-/// the anonymous report): the message then goes through that rule unchecked.
+/// `pictures` are the links to the message's pictures (attached ones and
+/// embeds'), read and shown only when the rule says so and the provider
+/// reads pictures. `None` when nothing was asked or the provider didn't
+/// answer (counted in the anonymous report): the message then goes through
+/// that rule unchecked.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn ask(
     app: &crate::app::App,
     sdb: &store::ServerDb,
@@ -269,8 +277,9 @@ pub(super) async fn ask(
     access: &Access,
     channel_id: &str,
     content: &str,
+    pictures: &[String],
 ) -> Option<Asked> {
-    if access.has(Permission::ManageServer) || content.trim().is_empty() {
+    if access.has(Permission::ManageServer) || (content.trim().is_empty() && pictures.is_empty()) {
         return None;
     }
     let conn = sdb.read().ok()?;
@@ -288,7 +297,11 @@ pub(super) async fn ask(
     drop(conn);
     let setup = app.settings().automod_provider(&rule.provider)?.clone();
     let provider = setup.name().to_string();
-    let (answer, _) = providers::check(&setup, content).await;
+    let pictures = if rule.pictures && setup.reads_pictures() { read_pictures(app, pictures).await } else { vec![] };
+    if content.trim().is_empty() && pictures.is_empty() {
+        return None;
+    }
+    let (answer, _) = providers::check(&setup, content, &pictures).await;
     Some(Asked { rule_id: rule.id, provider, scores: answer.ok()? })
 }
 
@@ -317,6 +330,68 @@ pub(super) async fn readers(
         }
     }
     Ok(names)
+}
+
+/// How long a message waits for its pictures to be read before its provider
+/// is asked without the ones still missing.
+const PICTURES_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The pictures at `links` a provider can read, in order, at most
+/// [`providers::MAX_PICTURES`] and [`providers::MAX_PICTURES_BYTES`] in all.
+/// Ones that can't be fetched in [`PICTURES_WAIT`], or aren't a PNG, JPEG or
+/// WebP within the provider's limits, are left out; one that couldn't be
+/// fetched is counted in the anonymous report.
+async fn read_pictures(app: &crate::app::App, links: &[String]) -> Vec<providers::Picture> {
+    let mut wanted: Vec<&str> = Vec::new();
+    for link in links {
+        if !link.is_empty() && !wanted.contains(&link.as_str()) {
+            wanted.push(link);
+        }
+    }
+    wanted.truncate(providers::MAX_PICTURES);
+    if wanted.is_empty() {
+        return vec![];
+    }
+    let started = std::time::Instant::now();
+    let fetched = futures::future::join_all(
+        wanted.iter().map(|link| tokio::time::timeout(PICTURES_WAIT, crate::outside::picture(app, link))),
+    )
+    .await;
+    crate::reports::server_timing("automod:pictures", started.elapsed());
+    let mut read = Vec::new();
+    let mut total = 0;
+    for found in fetched {
+        let Ok(Some((_, bytes))) = found else {
+            crate::reports::server_error("automod_picture_unavailable", None);
+            continue;
+        };
+        if let Some(picture) = providers::Picture::read(bytes)
+            && total + picture.bytes.len() <= providers::MAX_PICTURES_BYTES
+        {
+            total += picture.bytes.len();
+            read.push(picture);
+        }
+    }
+    read
+}
+
+/// The links to a message's pictures a provider may be shown: attachments
+/// that say they're PNG, JPEG or WebP (by type or name), then embeds' images
+/// and thumbnails.
+pub(super) fn picture_links(attachments: &[pb::Attachment], embeds: &[pb::Embed]) -> Vec<String> {
+    let readable = |a: &pb::Attachment| {
+        let kind = a.content_type.to_ascii_lowercase();
+        let name = a.filename.to_ascii_lowercase();
+        matches!(kind.as_str(), "image/png" | "image/jpeg" | "image/jpg" | "image/webp")
+            || [".png", ".jpg", ".jpeg", ".webp"].iter().any(|end| name.ends_with(end))
+    };
+    attachments
+        .iter()
+        .filter(|a| readable(a))
+        .map(|a| a.url.clone())
+        .chain(embeds.iter().flat_map(|e| [e.image_url.clone(), e.thumbnail_url.clone()]))
+        .filter(|link| !link.is_empty())
+        .collect()
 }
 
 /// What a caught rule does: its own actions, or for a provider rule the ones
@@ -585,7 +660,7 @@ impl AutoModService for Api {
                         Error::FailedPrecondition("that provider isn't turned on for this instance".into())
                     })?;
                     let rule = pb::AutoModRule { labels: checked_labels(&rule.labels)?, ..rule };
-                    let (answer, took) = providers::check(setup, &req.content).await;
+                    let (answer, took) = providers::check(setup, &req.content, &[]).await;
                     let elapsed_ms = took.as_millis().min(i32::MAX as u128) as i32;
                     return Ok(match answer {
                         Ok(scores) => {
