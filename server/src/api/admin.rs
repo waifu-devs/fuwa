@@ -80,6 +80,17 @@ impl Api {
                 telemetry_url: config.telemetry.url.clone(),
                 hosted: config.telemetry.hosted,
                 version: crate::VERSION.into(),
+                media_port: match &self.app.media_link {
+                    crate::voice::MediaLink::Local(sfu) => sfu.config().port.into(),
+                    _ => 0,
+                },
+                media_addresses: match &self.app.media_link {
+                    crate::voice::MediaLink::Local(sfu) => sfu.describe(),
+                    crate::voice::MediaLink::Remote(parts) => {
+                        parts.iter().map(|(url, _)| format!("media part at {url}")).collect()
+                    }
+                    crate::voice::MediaLink::Off(why) => vec![format!("off: {why}")],
+                },
             }),
         })
     }

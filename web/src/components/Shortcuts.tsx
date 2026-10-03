@@ -5,6 +5,9 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Channel, Server } from "@/gen/fuwa/v1/types_pb";
 import { markServerRead } from "@/fuwa/actions";
+import { toggleDeafen, toggleMute } from "@/calls/engine";
+import { watchPushToTalk } from "@/calls/keys";
+import { IncomingCalls } from "@/components/calls/IncomingCalls";
 import { store, useFuwa, type FuwaState } from "@/fuwa/store";
 import { CHANNEL_ICON, openableChannels } from "@/components/ChannelSidebar";
 import { ServerIcon } from "@/components/Icons";
@@ -153,6 +156,10 @@ export function AppOverlays() {
       },
       focusComposer: () => document.querySelector<HTMLTextAreaElement>("[data-composer]")?.focus(),
       toggleMembers: () => runCommand("toggleMembers"),
+      toggleMute,
+      toggleDeafen,
+      // Held down, not pressed: the call listens for it going down and up itself.
+      pushToTalk: () => {},
       openSettings: () => (getUi().settings === null ? openSettings() : closeSettings()),
       shortcuts: () => setShortcuts(!getUi().shortcuts),
       toggleStreamer: () => {
@@ -179,6 +186,8 @@ export function AppOverlays() {
       if (document.querySelector('[role="dialog"], [role="menu"]')) {
         const allowed =
           action.id === "toggleStreamer" ||
+          action.id === "toggleMute" ||
+          action.id === "toggleDeafen" ||
           (action.id === "openSettings" && ui.settings !== null) ||
           (action.id === "shortcuts" && ui.shortcuts) ||
           (action.id === "quickSwitcher" && ui.switcher);
@@ -191,10 +200,13 @@ export function AppOverlays() {
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate]);
 
+  useEffect(watchPushToTalk, []);
+
   return (
     <>
       <ShortcutSheet />
       <QuickSwitcher here={here} />
+      <IncomingCalls />
       <Toaster />
     </>
   );

@@ -309,7 +309,7 @@ export function ChannelPermissions({ instanceKey, serverId, channel, channels }:
                 transition={SPRING}
                 className="min-w-0 rounded-2xl border bg-background/40 p-3"
               >
-                {CHANNEL_GROUPS.map((group) => (
+                {CHANNEL_GROUPS.filter((g) => category || (g.title === "Voice") === (channel.type === ChannelType.VOICE) || g.title === "General").map((group) => (
                   <div key={group.title} className="mb-2 last:mb-0">
                     <p className="mb-1 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{group.title}</p>
                     <ul>

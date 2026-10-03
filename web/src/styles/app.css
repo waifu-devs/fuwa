@@ -635,3 +635,26 @@ body[data-settings-open] #root { scale: 0.94; filter: blur(3px); opacity: 0.4; }
 .announcement-critical .announcement-icon { background: rgb(255 255 255 / 0.22); }
 .announcement-critical .announcement-glyph { animation: siren 1.1s ease-in-out infinite; }
 @keyframes siren { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
+
+/* Calls (components/calls). Someone talking: a green ring that breathes with them. */
+.speaking-ring {
+  border-style: solid;
+  border-color: #3ba55d;
+  box-shadow: 0 0 0 0 rgb(59 165 93 / 0.5), 0 0 14px rgb(59 165 93 / 0.45);
+  animation: speaking 1.1s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes speaking { 50% { box-shadow: 0 0 0 4px rgb(59 165 93 / 0.18), 0 0 22px rgb(59 165 93 / 0.55); } }
+
+/* A call ringing: the phone shakes, then rests, like a real one. */
+@keyframes ringing { 0%, 50%, 100% { transform: rotate(0); } 5%, 15%, 25%, 35% { transform: rotate(-16deg); } 10%, 20%, 30%, 40% { transform: rotate(16deg); } }
+.ringing { animation: ringing 1.6s ease-in-out infinite; transform-origin: 50% 60%; }
+/* Waves going out from whoever's calling. */
+@keyframes call-wave { from { transform: scale(1); opacity: 0.55; } to { transform: scale(1.9); opacity: 0; } }
+.call-wave { animation: call-wave 2s cubic-bezier(0.2, 0.7, 0.3, 1) infinite; }
+
+/* The signal bars on "Voice connected" fill one by one while connecting. */
+@keyframes bars { 0%, 100% { opacity: 0.25; } 30%, 60% { opacity: 1; } }
+.signal-connecting > span { animation: bars 1.2s ease-in-out infinite; }
+.signal-connecting > span:nth-child(2) { animation-delay: 0.15s; }
+.signal-connecting > span:nth-child(3) { animation-delay: 0.3s; }

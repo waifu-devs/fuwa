@@ -39,6 +39,10 @@ export const KNOWN: P[] = [
   P.CREATE_INVITE,
   P.MANAGE_EMOJI,
   P.MANAGE_WEBHOOKS,
+  P.CONNECT,
+  P.SPEAK,
+  P.MUTE_MEMBERS,
+  P.MOVE_MEMBERS,
 ];
 
 export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), 0);
@@ -54,10 +58,23 @@ export const CHANNEL: Bits = [
   P.MENTION_EVERYONE,
   P.MANAGE_MESSAGES,
   P.CREATE_INVITE,
+  P.CONNECT,
+  P.SPEAK,
+  P.MUTE_MEMBERS,
+  P.MOVE_MEMBERS,
 ].reduce((bits, p) => bits | bit(p), 0);
 
 /** What a member who hasn't agreed to the server's rules yet can't do, as on the server. */
-export const TALK: Bits = [P.SEND_MESSAGES, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.CREATE_INVITE, P.CHANGE_NICKNAME].reduce(
+export const TALK: Bits = [
+  P.SEND_MESSAGES,
+  P.EMBED_LINKS,
+  P.ATTACH_FILES,
+  P.MENTION_EVERYONE,
+  P.CREATE_INVITE,
+  P.CHANGE_NICKNAME,
+  P.CONNECT,
+  P.SPEAK,
+].reduce(
   (bits, p) => bits | bit(p),
   0,
 );
@@ -112,6 +129,22 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     channel: "Make invite links that open this channel.",
   },
   [P.MANAGE_EMOJI]: { label: "Manage emoji", about: "Add, rename and delete the server's own emoji." },
+  [P.CONNECT]: { label: "Connect", about: "Join voice channels.", channel: "Join this voice channel." },
+  [P.SPEAK]: {
+    label: "Speak",
+    about: "Talk in voice channels. Without it they can join and listen.",
+    channel: "Talk in this voice channel. Without it they can join and listen.",
+  },
+  [P.MUTE_MEMBERS]: {
+    label: "Mute members",
+    about: "Mute or deafen people ranked below them in voice channels, for everyone.",
+    channel: "Mute or deafen people ranked below them in this voice channel.",
+  },
+  [P.MOVE_MEMBERS]: {
+    label: "Move members",
+    about: "Disconnect people ranked below them from voice channels.",
+    channel: "Disconnect people ranked below them from this voice channel.",
+  },
   [P.MANAGE_WEBHOOKS]: {
     label: "Manage webhooks",
     about: "Make, change and delete webhooks, and see their addresses, which let other apps post in any channel.",
@@ -135,6 +168,7 @@ export const PERMISSION_GROUPS: { title: string; permissions: P[] }[] = [
     title: "Text channels",
     permissions: [P.SEND_MESSAGES, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
+  { title: "Voice channels", permissions: [P.CONNECT, P.SPEAK, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
   { title: "Advanced", permissions: [P.ADMINISTRATOR] },
 ];
 
@@ -145,6 +179,7 @@ export const CHANNEL_GROUPS: { title: string; permissions: P[] }[] = [
     title: "Text",
     permissions: [P.SEND_MESSAGES, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
+  { title: "Voice", permissions: [P.CONNECT, P.SPEAK, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
 ];
 
 /** What one member can do in one server. */

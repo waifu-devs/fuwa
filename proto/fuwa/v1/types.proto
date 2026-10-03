@@ -201,6 +201,17 @@ enum Permission {
   PERMISSION_MANAGE_EMOJI = 18;
   // Create, change and delete the server's webhooks, and see their addresses.
   PERMISSION_MANAGE_WEBHOOKS = 19;
+
+  // Server-wide, and per channel through overwrites.
+
+  // Join voice channels.
+  PERMISSION_CONNECT = 20;
+  // Be heard in voice channels. Without it, people join muted.
+  PERMISSION_SPEAK = 21;
+  // Mute and deafen others in voice channels.
+  PERMISSION_MUTE_MEMBERS = 22;
+  // Disconnect others from voice channels.
+  PERMISSION_MOVE_MEMBERS = 23;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -674,7 +685,43 @@ message Event {
     RoleDeleted role_deleted = 24;
     ApplicationUpdated application_updated = 25;
     EmojisUpdated emojis_updated = 26;
+    // Not stored: who's in a voice channel lives in memory, so these always
+    // have sequence 0. After a reconnect, apps list them again
+    // (CallService.ListVoiceStates).
+    VoiceStateUpdated voice_state_updated = 40;
+    VoiceStateRemoved voice_state_removed = 41;
   }
+}
+
+// Someone joined a voice channel, moved to another, or muted or deafened.
+message VoiceStateUpdated {
+  VoiceState state = 1;
+}
+
+// Someone left the voice channel they were in.
+message VoiceStateRemoved {
+  string user_id = 1;
+  string channel_id = 2;
+}
+
+// Someone in a call: in a server's voice channel, or in a direct-message
+// conversation's call.
+message VoiceState {
+  string user_id = 1;
+  // The voice channel; empty for a direct-message call.
+  string channel_id = 2;
+  // The conversation; empty for a voice channel.
+  string conversation_id = 3;
+  // Muted or deafened by themselves.
+  bool self_mute = 4;
+  bool self_deaf = 5;
+  // Muted or deafened by a moderator: they can't take it off themselves.
+  bool server_mute = 6;
+  bool server_deaf = 7;
+  // When they joined the channel or call they're in.
+  google.protobuf.Timestamp joined_at = 8;
+  // They can't be heard here: they don't have SPEAK in this channel.
+  bool suppress = 9;
 }
 
 message ServerUpdated {

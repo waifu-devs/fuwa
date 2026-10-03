@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::pb;
 
@@ -14,6 +14,9 @@ const BUFFER: usize = 1024;
 #[derive(Default)]
 pub struct Hub {
     channels: Mutex<HashMap<String, broadcast::Sender<Arc<pb::Event>>>>,
+    /// Sees every event of every server, followed or not (calls use it to
+    /// hang up whoever just lost their place).
+    tap: Mutex<Option<mpsc::UnboundedSender<Arc<pb::Event>>>>,
 }
 
 impl Hub {
@@ -22,16 +25,28 @@ impl Hub {
         channels.entry(server_id.to_string()).or_insert_with(|| broadcast::channel(BUFFER).0).subscribe()
     }
 
+    /// Every event published from now on. One tap at a time: a new one replaces the last.
+    pub fn tap(&self) -> mpsc::UnboundedReceiver<Arc<pb::Event>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *self.tap.lock().unwrap_or_else(|p| p.into_inner()) = Some(tx);
+        rx
+    }
+
     /// Sends events to everyone following their server. Callers publish in commit
     /// order, so subscribers see each server's events in sequence.
     pub fn publish(&self, events: impl IntoIterator<Item = pb::Event>) {
         let mut channels = self.channels.lock().unwrap_or_else(|p| p.into_inner());
+        let mut tap = self.tap.lock().unwrap_or_else(|p| p.into_inner());
         for event in events {
             let server_id = event.server_id.clone();
+            let event = Arc::new(event);
+            if tap.as_ref().is_some_and(|t| t.send(event.clone()).is_err()) {
+                *tap = None;
+            }
             let idle = match channels.get(&server_id) {
                 None => continue,
                 Some(sender) if sender.receiver_count() == 0 => true,
-                Some(sender) => sender.send(Arc::new(event)).is_err(),
+                Some(sender) => sender.send(event).is_err(),
             };
             if idle {
                 channels.remove(&server_id);

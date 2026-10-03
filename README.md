@@ -130,6 +130,11 @@ the log filter are read only from the environment.
 | `FUWA_TELEMETRY_URL` | `https://analytics.waifu.dev/v1/fuwa/signals` | Where the signal goes |
 | `FUWA_HOSTING` | `self_hosted` | `hosted` only on Waifu Devs' own instance; reported in the signal |
 | `FUWA_LOG` | `info,turso_core=warn` | Log filter ([syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)) |
+| `FUWA_CALLS` | `on` | Voice channels and calls in direct messages; `off` turns them off |
+| `FUWA_MEDIA_PORT` | `50000` | The port calls' sound uses, UDP and TCP, open to the internet; `off` for no calls in this process |
+| `FUWA_MEDIA_ADDRESSES` | this machine's address | Where apps reach that port: `HOST`, `HOST:PORT`, or `udp/…` or `tcp/…` for one protocol (a TCP proxy), comma-separated |
+| `FUWA_ICE_URLS` | unset | STUN and TURN servers for people on strict networks, comma-separated `stun:`, `turn:` and `turns:` URLs |
+| `FUWA_TURN_SECRET` | unset | The TURN servers' shared secret (coturn's `static-auth-secret`); each call gets a password from it |
 | `FUWA_S3_BUCKET` and the other `FUWA_S3_*` | unset | Split instances only: a bucket the directory and shards copy their files to as they change; see [Replicating to a bucket](#replicating-to-a-bucket) |
 | `FUWA_REPLICA_PATH` | unset | Split instances only: a folder to replicate to instead of a bucket |
 | `FUWA_RESTORE` | `off` | `if-empty`: restore a part from the replica when its data folder is empty |
@@ -284,6 +289,10 @@ with `FUWA_ROLE`:
   community server.
 - **Shards** (one or more): each keeps some of the community servers' files and
   sends their live events. New servers go to the shard holding the fewest.
+- **Media** (one or more, optional): carries calls' sound. Apps reach its
+  `FUWA_MEDIA_PORT` directly; the directory and shards reach it on
+  `FUWA_MEDIA_URL`. It keeps nothing. Without one, a split instance has no
+  calls. See [docs/calls.md](docs/calls.md).
 - **Gateways** (one or more): what clients connect to. They keep nothing, serve
   the web app, and pass each call to the directory or to the shard holding its
   server. A client's one live stream can follow servers on several shards; the
@@ -295,10 +304,11 @@ the cluster key, apart from `/healthz`.
 
 | Variable | For | What it does |
 | --- | --- | --- |
-| `FUWA_ROLE` | every part | `all` (the default: everything in one process), `gateway`, `directory` or `shard` |
+| `FUWA_ROLE` | every part | `all` (the default: everything in one process), `gateway`, `directory`, `shard` or `media` |
 | `FUWA_CLUSTER_KEY` | every part | A shared secret of 32+ characters (`openssl rand -hex 32`), the same on every part |
 | `FUWA_DIRECTORY_URL` | gateways, shards | Where the directory is, like `http://directory:8080` |
 | `FUWA_INTERNAL_URL` | shards | Where gateways and the directory reach this shard, like `http://shard-1:8080` |
+| `FUWA_MEDIA_URL` | directory, shards | Where the media parts are, like `http://media:8080`, comma-separated; calls are spread over them |
 | `FUWA_SHARD_ID` | shards | The shard's name (a-z, 0-9, `-`, `_`). Defaults to one made up on first start and kept in its data folder as `shard-id` |
 
 The other variables work as above, read by the part that uses them: set
@@ -347,6 +357,10 @@ Restarting a part, say to deploy a new version, interrupts nobody:
   Once back, it answers clients only after every shard has registered again
   (or 30 seconds have passed), so nobody gets a server list with servers
   missing. Live streams don't need it.
+- **A media part** tells every app in a call it's restarting; they join
+  again on its replacement with the same place, so nobody sees anyone leave
+  and the sound is back within a second or two (see
+  [docs/calls.md](docs/calls.md#restarts)). The same happens with one process.
 - **A gateway** keeps nothing, so run two or more and start new ones before
   stopping old ones. When it stops, it tells each open live stream to follow
   again; clients do, on another gateway, from where they got to. Its health

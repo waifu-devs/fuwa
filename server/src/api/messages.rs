@@ -196,7 +196,7 @@ fn check_extras(attachments: &mut [pb::Attachment], embeds: &[pb::Embed]) -> Res
 }
 
 /// Refuses members who are timed out.
-fn check_not_timed_out(member: &pb::Member) -> Result<()> {
+pub(super) fn check_not_timed_out(member: &pb::Member) -> Result<()> {
     if let Some(until) = &member.timed_out_until {
         let until = crate::id::millis(until);
         if until > now_ms() {
