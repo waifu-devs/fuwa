@@ -197,7 +197,10 @@ impl FuwaApp {
                 .font_weight(FontWeight::BOLD)
                 .cursor_pointer()
                 .hover(move |s| s.bg(hover))
-                .on_click(cx.listener(move |this, _, _, cx| this.sign_in_server(k.clone(), sid.clone(), cx)))
+                // To the gate, which names the provider's host before anything opens.
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.navigate(Nav::Server { key: k.clone(), server: sid.clone() }, window, cx)
+                }))
                 .child(icon("lock-keyhole").size(px(16.0)).flex_none())
                 .child(div().flex_1().min_w_0().child(format!("Sign in with {provider} to see the channels")));
             let row = motion::rise(row, SharedString::from(format!("sso-row|{key}|{server_id}")), Duration::ZERO, 6.0);
