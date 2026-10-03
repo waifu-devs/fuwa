@@ -36,6 +36,7 @@ pub const FIELDS: &[&str] = &[
     "call_recordings_keep_days",
     "ice_urls",
     "turn_secret",
+    "automod_providers",
 ];
 
 /// The settings in force.
@@ -61,6 +62,9 @@ pub struct Settings {
     pub call_recordings_keep_days: Option<i64>,
     pub ice_urls: Vec<String>,
     pub turn_secret: String,
+    /// Moderation providers servers' AutoMod can use, keys and all; only
+    /// the ones admins have set up.
+    pub automod_providers: Vec<crate::automod::providers::Setup>,
 }
 
 impl Settings {
@@ -85,6 +89,7 @@ impl Settings {
             call_recordings_keep_days: config.call_recordings_keep_days,
             ice_urls: config.ice_urls.clone(),
             turn_secret: config.turn_secret.clone(),
+            automod_providers: config.automod_providers.clone(),
         }
     }
 
@@ -108,6 +113,10 @@ impl Settings {
     pub fn from_pb(config: &Config, from: &pb::InstanceSettings) -> Self {
         let mut settings = Self::defaults(config);
         for field in FIELDS {
+            // Sent apart, keys and all (`WatchResponse.automod_providers`).
+            if *field == "automod_providers" {
+                continue;
+            }
             if let Err(err) = settings.set_from_pb(field, from) {
                 tracing::warn!(setting = %field, error = %err, "ignoring a setting the directory sent");
             }
@@ -184,7 +193,16 @@ impl Settings {
             call_recordings_keep_days: self.call_recordings_keep_days,
             ice_urls: self.ice_urls.clone(),
             turn_secret: self.turn_secret.clone(),
+            automod_providers: crate::automod::providers::complete(&self.automod_providers)
+                .iter()
+                .map(|setup| setup.to_pb(false))
+                .collect(),
         }
+    }
+
+    /// A moderation provider servers can use now, by id.
+    pub fn automod_provider(&self, id: &str) -> Option<&crate::automod::providers::Setup> {
+        self.automod_providers.iter().find(|setup| setup.id == id && setup.usable())
     }
 
     /// Sets one field from a request, checking it.
@@ -257,6 +275,27 @@ impl Settings {
             "call_recordings_keep_days" => Value::from(from.call_recordings_keep_days),
             "ice_urls" => Value::from(from.ice_urls.clone()),
             "turn_secret" => Value::from(from.turn_secret.clone()),
+            // Keys are never sent out, so an empty one keeps the saved key.
+            "automod_providers" => {
+                let mut setups: Vec<crate::automod::providers::Setup> = Vec::new();
+                for provider in &from.automod_providers {
+                    let previous = self.automod_providers.iter().find(|s| s.id == provider.id.trim());
+                    let setup = crate::automod::providers::Setup::from_pb(provider, previous)?;
+                    if setups.iter().any(|s| s.id == setup.id) {
+                        return Err(Error::invalid("each moderation provider is set up once"));
+                    }
+                    setups.push(setup);
+                }
+                if setups.iter().filter(|s| s.is_custom()).count() > crate::automod::providers::MAX_CUSTOM {
+                    return Err(Error::invalid(format!(
+                        "at most {} moderation providers of your own",
+                        crate::automod::providers::MAX_CUSTOM
+                    )));
+                }
+                // Leave out the ones with nothing set up.
+                setups.retain(|s| *s != crate::automod::providers::Setup { id: s.id.clone(), ..Default::default() });
+                serde_json::to_value(setups).map_err(|err| Error::internal(err.to_string()))?
+            }
             other => return Err(unknown(other)),
         };
         self.set_json(field, &value)
@@ -302,6 +341,9 @@ impl Settings {
             "call_recordings_keep_days" => Value::from(self.call_recordings_keep_days),
             "ice_urls" => Value::from(self.ice_urls.clone()),
             "turn_secret" => Value::from(self.turn_secret.clone()),
+            "automod_providers" => {
+                serde_json::to_value(&self.automod_providers).map_err(|err| Error::internal(err.to_string()))?
+            }
             other => return Err(unknown(other)),
         })
     }
@@ -384,6 +426,14 @@ impl Settings {
                     return Err(Error::invalid("turn_secret can be at most 256 characters"));
                 }
                 self.turn_secret = secret.to_string();
+            }
+            "automod_providers" => {
+                let setups: Vec<crate::automod::providers::Setup> = serde_json::from_value(value.clone())
+                    .map_err(|err| Error::invalid(format!("automod_providers doesn't read: {err}")))?;
+                if let Some(setup) = setups.iter().find(|s| s.kind().is_none() && !s.is_custom()) {
+                    return Err(Error::invalid(format!("fuwa doesn't know a moderation provider called {}", setup.id)));
+                }
+                self.automod_providers = setups;
             }
             other => return Err(unknown(other)),
         }

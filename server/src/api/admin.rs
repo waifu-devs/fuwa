@@ -8,6 +8,7 @@ use tonic::{Request, Response, Status};
 
 use super::{Api, respond, text};
 use crate::auth::{self, Viewer};
+use crate::automod::providers;
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::node::{AccountFilter, AccountSummary};
@@ -449,6 +450,51 @@ impl AdminService for Api {
                 self.app.replace_announcement(Some(announcement.clone()));
                 tracing::info!(id = %announcement.id, "announcement put up");
                 Ok(pb::SetAnnouncementResponse { announcement: Some(announcement) })
+            }
+            .await,
+        )
+    }
+
+    async fn test_auto_mod_provider(
+        &self,
+        request: Request<pb::TestAutoModProviderRequest>,
+    ) -> Result<Response<pb::TestAutoModProviderResponse>, Status> {
+        respond(
+            async {
+                self.require_instance_admin(request.metadata()).await?;
+                let req = request.into_inner();
+                let content = req.content.trim();
+                if content.is_empty() || content.chars().count() > 2000 {
+                    return Err(Error::invalid("test with 1 to 2000 characters"));
+                }
+                let given = req.provider.unwrap_or_default();
+                let settings = self.app.settings();
+                let previous = settings.automod_providers.iter().find(|s| s.id == given.id.trim());
+                // Whether it's on doesn't matter for a test.
+                let given = pb::AutoModProviderSettings { enabled: false, ..given };
+                let setup = providers::Setup::from_pb(&given, previous)?;
+                let (answer, took) = providers::check(&setup, content).await;
+                let elapsed_ms = took.as_millis().min(i32::MAX as u128) as i32;
+                Ok(match answer {
+                    Ok(mut scores) => {
+                        scores.sort_by(|a, b| b.1.total_cmp(&a.1));
+                        pb::TestAutoModProviderResponse {
+                            ok: true,
+                            error: String::new(),
+                            elapsed_ms,
+                            scores: scores
+                                .into_iter()
+                                .map(|(label, probability)| pb::AutoModScore { label: label.into(), probability })
+                                .collect(),
+                        }
+                    }
+                    Err(failure) => pb::TestAutoModProviderResponse {
+                        ok: false,
+                        error: failure.to_string(),
+                        elapsed_ms,
+                        scores: vec![],
+                    },
+                })
             }
             .await,
         )
