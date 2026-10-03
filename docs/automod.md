@@ -47,8 +47,11 @@ that turns fuwa's questions into another provider's.
   that server's messages go through the Smart filter unchecked until
   midnight UTC, like when the provider is down, and its other rules still
   apply: a limit that blocked messages would stop a busy server talking. Each
-  server's Usage page shows the day's count. It's counted where the server
-  lives, in memory, so a restart starts the day's count again.
+  server's Usage page shows the day's count. The first time a server runs
+  out on a day, AutoMod posts one alert in its Smart filter rule's alert
+  channel (when the rule alerts) saying so; it names no message or member.
+  It's counted where the server lives, in memory, so a restart starts the
+  day's count again (and may post that day's alert again).
 
 ## The request
 

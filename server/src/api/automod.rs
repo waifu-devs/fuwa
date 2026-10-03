@@ -301,45 +301,105 @@ pub(super) async fn ask(
     if content.trim().is_empty() && pictures.is_empty() {
         return None;
     }
-    if !take_check(&sdb.id, app.settings().limits.automod_checks_per_day) {
+    if let Check::Capped { per_day, first } = take_check(&sdb.id, app.settings().limits.automod_checks_per_day) {
         crate::reports::server_error("automod_provider_capped", Some(setup.report_id()));
+        if first {
+            alert_capped(sdb, per_day).await;
+        }
         return None;
     }
     let (answer, _) = providers::check(&setup, content, &pictures).await;
     Some(Asked { rule_id: rule.id, provider, scores: answer.ok()? })
 }
 
-/// Smart filter checks each server asked its provider on `.0` (days since
-/// 1970, UTC). Counted where the server lives, which is the one place its
-/// messages are sent from; kept in memory, so a restart starts the day again.
-static CHECKS: std::sync::LazyLock<std::sync::Mutex<(i64, std::collections::HashMap<String, i64>)>> =
-    std::sync::LazyLock::new(Default::default);
+/// Today's Smart filter checks: how many each server asked its provider,
+/// and which servers were told they're used up. Counted where the server
+/// lives, which is the one place its messages are sent from; kept in memory,
+/// so a restart starts the day again.
+#[derive(Default)]
+struct Checks {
+    /// Days since 1970, UTC.
+    day: i64,
+    used: std::collections::HashMap<String, i64>,
+    alerted: std::collections::HashSet<String>,
+}
+
+static CHECKS: std::sync::LazyLock<std::sync::Mutex<Checks>> = std::sync::LazyLock::new(Default::default);
 
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
+/// Whether a server's Smart filter may ask its provider.
+#[derive(Debug, PartialEq)]
+enum Check {
+    /// Yes, and it was counted.
+    Taken,
+    /// No: today's `per_day` checks are used up. `first` the first time
+    /// that day, when its moderators get told.
+    Capped { per_day: i64, first: bool },
+}
+
 /// Counts one of the server's checks for today, unless it already used
-/// `per_day` of them (`None` for no cap): then `false`, and nothing's asked.
-fn take_check(server_id: &str, per_day: Option<i64>) -> bool {
+/// `per_day` of them (`None` for no cap): then nothing's asked.
+fn take_check(server_id: &str, per_day: Option<i64>) -> Check {
     let today = now_ms().div_euclid(DAY_MS);
     let mut checks = CHECKS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    if checks.0 != today {
-        *checks = (today, Default::default());
+    if checks.day != today {
+        *checks = Checks { day: today, ..Default::default() };
     }
-    let used = checks.1.entry(server_id.to_string()).or_default();
-    if per_day.is_some_and(|cap| *used >= cap) {
-        return false;
+    let used = checks.used.entry(server_id.to_string()).or_default();
+    if let Some(cap) = per_day.filter(|cap| *used >= *cap) {
+        let first = checks.alerted.insert(server_id.to_string());
+        return Check::Capped { per_day: cap, first };
     }
     *used += 1;
-    true
+    Check::Taken
+}
+
+/// Tells the server's moderators that its Smart filter used up today's
+/// checks: one alert in its Smart filter rule's alert channel, when the rule
+/// alerts. It names no message and no one; a failed write only skips it.
+async fn alert_capped(sdb: &store::ServerDb, per_day: i64) {
+    let posted = sdb
+        .write("", async |conn, events| {
+            let rules = store::load_automod(conn).await?;
+            let Some(rule) = rules.into_iter().find(|r| r.enabled && r.trigger == Trigger::Provider as i32) else {
+                return Ok(());
+            };
+            let Some(alert) = rule.actions.iter().find(|a| a.kind == Kind::Alert as i32) else { return Ok(()) };
+            let Some(channel) = load_channel(conn, &sdb.id, &alert.channel_id).await? else { return Ok(()) };
+            let message = pb::Message {
+                id: new_id(),
+                server_id: sdb.id.clone(),
+                channel_id: channel.id.clone(),
+                created_at: Some(timestamp(now_ms())),
+                kind: pb::MessageKind::AutoModAlert as i32,
+                auto_mod: Some(pb::AutoModAlert {
+                    rule_id: rule.id.clone(),
+                    rule_name: rule.name.clone(),
+                    trigger: rule.trigger,
+                    capped_per_day: per_day,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            super::messages::insert_system(conn, &message).await?;
+            store::add_usage(conn, UsageChange { messages: 1, messages_sent: 1, ..Default::default() }).await?;
+            events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message) }));
+            Ok(())
+        })
+        .await;
+    if posted.is_err() {
+        crate::reports::server_error("automod_cap_alert_failed", None);
+    }
 }
 
 /// How many checks the server's Smart filter asked its provider today.
 pub(super) fn checks_today(server_id: &str) -> i64 {
     let checks = CHECKS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    if checks.0 != now_ms().div_euclid(DAY_MS) {
+    if checks.day != now_ms().div_euclid(DAY_MS) {
         return 0;
     }
-    checks.1.get(server_id).copied().unwrap_or_default()
+    checks.used.get(server_id).copied().unwrap_or_default()
 }
 
 /// Who a server's enabled provider rule sends a channel's messages to, as
@@ -548,6 +608,7 @@ pub(super) async fn review(
                 blocked: blocked.is_some(),
                 timed_out_seconds: action(rule, Kind::TimeOut).map_or(0, |a| a.duration_seconds),
                 provider: asked.filter(|a| a.rule_id == rule.id).map(|a| a.provider.clone()).unwrap_or_default(),
+                capped_per_day: 0,
             }),
             ..Default::default()
         };
@@ -686,7 +747,7 @@ impl AutoModService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let server_id = self.with(&account, &req.server_id, Permission::ManageServer).await?.sdb.id.clone();
+                let sdb = self.with(&account, &req.server_id, Permission::ManageServer).await?.sdb;
                 if req.content.chars().count() > super::messages::MAX_MESSAGE_LENGTH {
                     return Err(Error::invalid("that's longer than a message can be"));
                 }
@@ -697,11 +758,13 @@ impl AutoModService for Api {
                         Error::FailedPrecondition("that provider isn't turned on for this instance".into())
                     })?;
                     let rule = pb::AutoModRule { labels: checked_labels(&rule.labels)?, ..rule };
-                    let cap = settings.limits.automod_checks_per_day;
-                    if !take_check(&server_id, cap)
-                        && let Some(per_day) = cap
+                    if let Check::Capped { per_day, first } =
+                        take_check(&sdb.id, settings.limits.automod_checks_per_day)
                     {
                         crate::reports::server_error("automod_provider_capped", Some(setup.report_id()));
+                        if first {
+                            alert_capped(&sdb, per_day).await;
+                        }
                         return Ok(pb::TestAutoModRuleResponse {
                             error: format!(
                                 "today's {per_day} Smart filter checks are used up, so it wasn't asked (they come back at midnight UTC)"

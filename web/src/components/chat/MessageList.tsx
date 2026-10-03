@@ -808,6 +808,22 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
             {formatStamp(date)}
           </time>
         </p>
+        {alert.cappedPerDay > 0 ? (
+          <div className="mt-1 overflow-hidden rounded-2xl border border-l-4 border-l-amber-500 bg-card/70 p-3">
+            <p className="text-sm">
+              The Smart filter used up today's <b>{alert.cappedPerDay.toLocaleString()}</b> checks, so messages go
+              through it unchecked until midnight UTC. Your other rules still apply.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-bold">
+                <ShieldIcon className="size-3" /> {alert.ruleName}
+              </span>
+              <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-bold text-amber-600 dark:text-amber-400">
+                <TimerIcon className="size-3" /> Back at midnight UTC
+              </span>
+            </div>
+          </div>
+        ) : (
         <div className="mt-1 overflow-hidden rounded-2xl border border-l-4 border-l-amber-500 bg-card/70 p-3">
           <p className="text-sm">
             {alert.blocked ? "Blocked a message from " : "Flagged a message from "}
@@ -843,6 +859,7 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
             )}
           </div>
         </div>
+        )}
       </div>
       {canDelete && (
         <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">

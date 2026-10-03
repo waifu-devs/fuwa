@@ -1683,10 +1683,15 @@ fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::Au
     let what = if alert.blocked { "Blocked" } else { "Flagged" };
     let place = i.channel(server, &alert.channel_id).map(|c| format!(" in **#{}**", c.name)).unwrap_or_default();
     let quote: String = alert.content.lines().map(|l| format!("> {l}\n")).collect();
-    let mut text = format!(
-        "{what} a message from **{}**{place} for {why}.\n\n{quote}",
-        i.display_name(Some(server), &m.author_id)
-    );
+    let mut text = if alert.capped_per_day > 0 {
+        format!(
+            "The Smart filter used up today's **{}** checks, so messages go through it unchecked until midnight UTC. \
+             Your other rules still apply.\n\nRule: {}",
+            alert.capped_per_day, alert.rule_name
+        )
+    } else {
+        format!("{what} a message from **{}**{place} for {why}.\n\n{quote}", i.display_name(Some(server), &m.author_id))
+    };
     if !alert.matched.is_empty() {
         text.push_str(&format!(
             "\nMatched: {}",

@@ -4760,6 +4760,7 @@ async fn smart_filter_checks_stop_at_the_daily_limit() {
         ..Default::default()
     };
     let rule = save_rule(&mut c, &owner, &server.id, smart).await.unwrap();
+    let rule_id = rule.id.clone();
 
     // The limit is the instance's, shown with each server's usage.
     let shown = c
@@ -4790,6 +4791,23 @@ async fn smart_filter_checks_stop_at_the_daily_limit() {
         .into_inner();
     assert!(tried.error.contains("today's 2 Smart filter checks are used up"), "{tried:?}");
     assert_eq!(usage(&mut c, &owner, &server.id).await.automod_checks_today, 2);
+
+    // The moderators hear about it once that day, in the rule's alert
+    // channel, with no message or member named.
+    let log = c
+        .messages
+        .list_messages(authed(
+            &owner,
+            pb::ListMessagesRequest { server_id: server.id.clone(), channel_id: mods.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .messages;
+    assert_eq!(log.len(), 1, "{log:?}");
+    let alert = log[0].auto_mod.clone().unwrap();
+    assert_eq!((alert.capped_per_day, alert.rule_id.as_str()), (2, rule_id.as_str()));
+    assert!(log[0].author_id.is_empty() && alert.content.is_empty() && alert.channel_id.is_empty());
 
     // Admins raise it from the app.
     let raised = settings_update(
