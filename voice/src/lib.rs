@@ -69,7 +69,12 @@ pub struct Client {
 impl Client {
     /// Connects to an instance at its address (`https://fuwa.chat`), with
     /// the token the account signs in with (an agent's, from Settings, Agents).
+    /// Plain `http://` is only for this machine (localhost, 127.0.0.1, ::1):
+    /// anywhere else, the token would cross the network readable.
     pub async fn connect(url: &str, token: &str) -> Result<Self, Error> {
+        if !secure_enough(url) {
+            return Err(Status::invalid_argument("use https:// (plain http:// is only for this machine)"));
+        }
         let bearer = MetadataValue::try_from(format!("Bearer {token}"))
             .map_err(|_| Status::invalid_argument("that token has characters a header can't carry"))?;
         let mut endpoint =
@@ -99,6 +104,16 @@ impl Client {
             Speaker { calls: self.calls.clone(), server_id: server_id.to_string(), session: heard.session.clone() };
         Ok((heard, speaker))
     }
+}
+
+fn secure_enough(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("http://") else { return url.starts_with("https://") };
+    let host = rest.split('/').next().unwrap_or_default();
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or_default(),
+        None => host.split(':').next().unwrap_or_default(),
+    };
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
 /// One frame of someone's sound.
@@ -224,5 +239,18 @@ impl Speaker {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tokens_cross_the_network_only_encrypted() {
+        for ok in ["https://fuwa.chat", "http://localhost:8080", "http://127.0.0.1:1/x", "http://[::1]:9"] {
+            assert!(super::secure_enough(ok), "{ok}");
+        }
+        for no in ["http://fuwa.chat", "http://localhost.evil.com", "http://10.0.0.1", "ftp://x", "http://[::2]"] {
+            assert!(!super::secure_enough(no), "{no}");
+        }
     }
 }
