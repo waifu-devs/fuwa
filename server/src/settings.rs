@@ -26,12 +26,14 @@ pub const FIELDS: &[&str] = &[
     "default_limits.storage_bytes",
     "default_limits.attachment_bytes",
     "default_limits.emojis",
+    "default_limits.recording_bytes",
     "picture_upload_bytes",
     "picture_upload_bytes_per_day",
     "telemetry",
     "web",
     "calls",
     "call_recordings",
+    "call_recordings_keep_days",
     "ice_urls",
     "turn_secret",
     "automod_providers",
@@ -57,6 +59,7 @@ pub struct Settings {
     pub web: bool,
     pub calls: bool,
     pub call_recordings: bool,
+    pub call_recordings_keep_days: Option<i64>,
     pub ice_urls: Vec<String>,
     pub turn_secret: String,
     /// Moderation providers servers' AutoMod can use, keys and all; only
@@ -83,6 +86,7 @@ impl Settings {
             web: config.web,
             calls: config.calls,
             call_recordings: config.call_recordings,
+            call_recordings_keep_days: config.call_recordings_keep_days,
             ice_urls: config.ice_urls.clone(),
             turn_secret: config.turn_secret.clone(),
             automod_providers: config.automod_providers.clone(),
@@ -178,6 +182,7 @@ impl Settings {
                 storage_bytes: limits.storage_bytes,
                 attachment_bytes: limits.attachment_bytes,
                 emojis: limits.emojis,
+                recording_bytes: limits.recording_bytes,
             }),
             telemetry: self.telemetry,
             web: self.web,
@@ -185,6 +190,7 @@ impl Settings {
             picture_upload_bytes_per_day: limits.picture_upload_bytes_per_day,
             calls: self.calls,
             call_recordings: self.call_recordings,
+            call_recordings_keep_days: self.call_recordings_keep_days,
             ice_urls: self.ice_urls.clone(),
             turn_secret: self.turn_secret.clone(),
             automod_providers: crate::automod::providers::complete(&self.automod_providers)
@@ -259,12 +265,14 @@ impl Settings {
             "default_limits.storage_bytes" => Value::from(limits.storage_bytes),
             "default_limits.attachment_bytes" => Value::from(limits.attachment_bytes),
             "default_limits.emojis" => Value::from(limits.emojis),
+            "default_limits.recording_bytes" => Value::from(limits.recording_bytes),
             "picture_upload_bytes" => Value::from(from.picture_upload_bytes),
             "picture_upload_bytes_per_day" => Value::from(from.picture_upload_bytes_per_day),
             "telemetry" => Value::from(from.telemetry),
             "web" => Value::from(from.web),
             "calls" => Value::from(from.calls),
             "call_recordings" => Value::from(from.call_recordings),
+            "call_recordings_keep_days" => Value::from(from.call_recordings_keep_days),
             "ice_urls" => Value::from(from.ice_urls.clone()),
             "turn_secret" => Value::from(from.turn_secret.clone()),
             // Keys are never sent out, so an empty one keeps the saved key.
@@ -323,12 +331,14 @@ impl Settings {
             "default_limits.storage_bytes" => Value::from(limits.storage_bytes),
             "default_limits.attachment_bytes" => Value::from(limits.attachment_bytes),
             "default_limits.emojis" => Value::from(limits.emojis),
+            "default_limits.recording_bytes" => Value::from(limits.recording_bytes),
             "picture_upload_bytes" => Value::from(limits.picture_upload_bytes),
             "picture_upload_bytes_per_day" => Value::from(limits.picture_upload_bytes_per_day),
             "telemetry" => Value::from(self.telemetry),
             "web" => Value::from(self.web),
             "calls" => Value::from(self.calls),
             "call_recordings" => Value::from(self.call_recordings),
+            "call_recordings_keep_days" => Value::from(self.call_recordings_keep_days),
             "ice_urls" => Value::from(self.ice_urls.clone()),
             "turn_secret" => Value::from(self.turn_secret.clone()),
             "automod_providers" => {
@@ -382,12 +392,23 @@ impl Settings {
             "default_limits.storage_bytes" => self.limits.storage_bytes = cap(field, value)?,
             "default_limits.attachment_bytes" => self.limits.attachment_bytes = cap(field, value)?,
             "default_limits.emojis" => self.limits.emojis = cap(field, value)?,
+            "default_limits.recording_bytes" => self.limits.recording_bytes = cap(field, value)?,
             "picture_upload_bytes" => self.limits.picture_upload_bytes = cap(field, value)?,
             "picture_upload_bytes_per_day" => self.limits.picture_upload_bytes_per_day = cap(field, value)?,
             "telemetry" => self.telemetry = flag(field, value)?,
             "web" => self.web = flag(field, value)?,
             "calls" => self.calls = flag(field, value)?,
             "call_recordings" => self.call_recordings = flag(field, value)?,
+            "call_recordings_keep_days" => {
+                self.call_recordings_keep_days = match cap(field, value)? {
+                    Some(0) => {
+                        return Err(Error::invalid(
+                            "call_recordings_keep_days must be 1 or more, or unset to keep them",
+                        ));
+                    }
+                    days => days,
+                }
+            }
             "ice_urls" => {
                 let invalid = || Error::invalid("ice_urls must be a list of stun:, turn: or turns: URLs");
                 let list = value.as_array().ok_or_else(invalid)?;
@@ -421,7 +442,7 @@ impl Settings {
 }
 
 /// Turns request field paths into setting names: known ones pass, and
-/// "default_limits" stands for all four limits.
+/// "default_limits" stands for all the server limits.
 pub fn expand(paths: &[String]) -> Result<Vec<String>> {
     let mut fields = Vec::new();
     for path in paths {
@@ -611,7 +632,10 @@ mod tests {
         assert!(s.set_json("ice_urls", &serde_json::json!(["https://turn.example.com"])).is_err());
         assert!(s.set_json("ice_urls", &serde_json::json!(["turn:turn.example.com:3478?transport=tcp"])).is_ok());
         assert!(expand(&["nope".into()]).is_err());
-        assert_eq!(expand(&["default_limits".into()]).unwrap().len(), 5);
+        assert_eq!(expand(&["default_limits".into()]).unwrap().len(), 6);
+        assert!(s.set_json("call_recordings_keep_days", &Value::from(0)).is_err());
+        assert!(s.set_json("call_recordings_keep_days", &Value::from(30)).is_ok());
+        assert!(s.set_json("call_recordings_keep_days", &Value::Null).is_ok());
     }
 
     #[test]

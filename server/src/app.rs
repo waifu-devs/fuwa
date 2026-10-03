@@ -328,6 +328,7 @@ impl App {
             .add_service(MediaServiceServer::new(api.clone()))
             .add_service(DirectMessageServiceServer::new(api.clone()))
             .add_service(crate::pb::call_service_server::CallServiceServer::new(api.clone()))
+            .add_service(crate::pb::secure_channel_service_server::SecureChannelServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
             .add_service(reflection);

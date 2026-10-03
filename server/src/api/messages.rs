@@ -221,7 +221,12 @@ fn wait(ms: i64) -> String {
 /// Holds a member to a channel's slow mode, inside the write that sends their
 /// message: they wait the channel's time between messages. One row per member
 /// and channel, so two sent at once clash and the second is turned away.
-async fn check_slowmode(conn: &turso::Connection, channel: &pb::Channel, user_id: &str, now: i64) -> Result<()> {
+pub(super) async fn check_slowmode(
+    conn: &turso::Connection,
+    channel: &pb::Channel,
+    user_id: &str,
+    now: i64,
+) -> Result<()> {
     if channel.slowmode_seconds <= 0 {
         return Ok(());
     }

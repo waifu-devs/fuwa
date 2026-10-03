@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package fuwa.v1;
 
+import "fuwa/v1/secure.proto";
 import "google/protobuf/timestamp.proto";
 
 // ============================================================================
@@ -568,6 +569,11 @@ enum ChannelType {
   CHANNEL_TYPE_ANNOUNCEMENT = 3;
   CHANNEL_TYPE_THREAD = 4;
   CHANNEL_TYPE_CATEGORY = 5;
+  // A text channel whose messages are end-to-end encrypted: only the devices
+  // of people who can see it can read them (SecureChannelService). Its
+  // messages never go through MessageService. A channel can't become secure,
+  // or stop being secure, once made.
+  CHANNEL_TYPE_SECURE = 6;
 }
 
 message Channel {
@@ -716,6 +722,10 @@ message ServerLimits {
   optional int64 storage_bytes = 3;
   optional int64 attachment_bytes = 4;
   optional int64 emojis = 5;
+  // Voice channel recordings kept on the server, all together, in bytes.
+  // Once reached, recordings stop and no new one starts until some are
+  // deleted.
+  optional int64 recording_bytes = 6;
 }
 
 // ============================================================================
@@ -753,6 +763,8 @@ message Event {
     RoleDeleted role_deleted = 24;
     ApplicationUpdated application_updated = 25;
     EmojisUpdated emojis_updated = 26;
+    SecureRecordAdded secure_record_added = 27;
+    SecureRecordDeleted secure_record_deleted = 28;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).

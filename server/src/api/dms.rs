@@ -239,8 +239,14 @@ impl Api {
         ids.sort_unstable();
         ids.dedup();
         let devices = dms.devices(&ids).await?;
-        if devices.iter().any(|device| device.account_id != account.id && !partners.contains(&device.account_id)) {
-            return Err(Error::denied("you can only add the devices of people you have a conversation with"));
+        // Secure channels add the devices of people who share a server with
+        // you, the same people you could open a conversation with.
+        if devices.iter().any(|device| {
+            device.account_id != account.id
+                && !partners.contains(&device.account_id)
+                && !self.app.index.share_a_server(&account.id, &device.account_id)
+        }) {
+            return Err(Error::denied("you can only add the devices of people you share a server with"));
         }
         let mut owners: Vec<&str> = devices.iter().map(|device| device.account_id.as_str()).collect();
         owners.sort_unstable();
@@ -251,7 +257,20 @@ impl Api {
             .filter(|device| live.contains(&device.session_id))
             .map(|device| device.id.as_str())
             .collect();
-        let claimed = dms.claim_key_packages(&claimable).await?;
+        // Strangers' devices (people you share only a server with) give up a
+        // limited number of single-use key packages an hour.
+        let strangers: Vec<&str> = devices
+            .iter()
+            .filter(|device| {
+                device.account_id != account.id
+                    && !partners.contains(&device.account_id)
+                    && claimable.contains(&device.id.as_str())
+            })
+            .map(|device| device.id.as_str())
+            .collect();
+        let allowed = dms.take_stranger_claims(&account.id, &strangers, now_ms());
+        let last_resort_only: HashSet<&str> = strangers.into_iter().filter(|id| !allowed.contains(id)).collect();
+        let claimed = dms.claim_key_packages(&claimable, &last_resort_only).await?;
         Ok(pb::ClaimKeyPackagesResponse {
             key_packages: claimed
                 .into_iter()
