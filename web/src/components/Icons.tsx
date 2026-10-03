@@ -3,6 +3,7 @@ import { useState, type CSSProperties, type ReactNode } from "react";
 import type { Server, User } from "@/gen/fuwa/v1/types_pb";
 import type { Connection } from "@/fuwa/store";
 import { displayName, hueOf, initials } from "@/lib/format";
+import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
 /** Sets `--h` to the hue that belongs to an id, for `.server-gradient`. */
@@ -10,10 +11,12 @@ export const hue = (id: string) => ({ "--h": hueOf(id) }) as CSSProperties;
 
 /**
  * A picture that gives way to `fallback` when it can't load: a link that
- * broke, or an upload replaced since and deleted.
+ * broke, an upload replaced since and deleted, or a picture that isn't on a
+ * fuwa instance (see `shownPicture`).
  */
-function Picture({ src, fallback }: { src: string; fallback: ReactNode }) {
+function Picture({ src: given, fallback }: { src: string; fallback: ReactNode }) {
   const [broken, setBroken] = useState<string | null>(null);
+  const src = shownPicture(given);
   if (!src || broken === src) return fallback;
   return <img src={src} alt="" onError={() => setBroken(src)} className="size-full object-cover" draggable={false} />;
 }
