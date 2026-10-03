@@ -337,8 +337,11 @@ impl App {
             }
         };
         // Only the gRPC routes: gRPC-Web answers anything else over HTTP/1.1 with a 400.
-        let mut router =
-            grpc.into_axum_router().layer(tonic_web::GrpcWebLayer::new()).route("/healthz", get(|| async { "ok" }));
+        let mut router = grpc
+            .into_axum_router()
+            .layer(axum::middleware::from_fn(crate::reports::time_calls))
+            .layer(tonic_web::GrpcWebLayer::new())
+            .route("/healthz", get(|| async { "ok" }));
         if self.node.is_some() {
             router = router.merge(crate::media::routes(self.clone())).merge(crate::outside::routes(self.clone()));
         }
@@ -466,6 +469,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         _ => {}
     }
     let data_path = config.data_path.clone();
+    let opening = std::time::Instant::now();
     let listener =
         tokio::net::TcpListener::bind(address).await.map_err(|err| format!("couldn't listen on {address}: {err}"))?;
     let app = App::open(config)
@@ -491,6 +495,13 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         "fuwa is up"
     );
 
+    crate::reports::server_timing("startup", opening.elapsed());
+
+    let install_id = match &app.node {
+        Some(node) => node.install_id().await.ok(),
+        None => None,
+    };
+    let reports = crate::reports::spawn(app.clone(), &app.config, install_id, app.shutdown.clone());
     if app.node.is_some() {
         crate::telemetry::spawn(app.clone());
         spawn_housekeeping(app.clone());
@@ -514,6 +525,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     if let Some(replica) = &app.replica {
         replica.close().await;
     }
+    crate::reports::finish(reports).await;
     served
 }
 

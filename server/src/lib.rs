@@ -22,6 +22,7 @@ pub mod node;
 pub mod outside;
 pub mod permissions;
 pub mod replica;
+pub mod reports;
 pub mod rtc;
 pub mod servers;
 pub mod settings;

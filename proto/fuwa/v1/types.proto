@@ -17,7 +17,8 @@ message Node {
   string public_url = 3;
   AuthMethods auth = 4;
   ServerCreation server_creation = 5;
-  // Whether this instance sends the anonymous usage signal.
+  // Whether this instance sends the anonymous usage signal and its hourly
+  // report of errors and slow paths. While it's off, apps send no reports.
   bool telemetry = 6;
   // A banner the instance's admins put up for everyone, while it runs.
   Announcement announcement = 7;
