@@ -540,6 +540,9 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     if let Link::Shard(_) = &app.link {
         crate::cluster::pictures::spawn_sweep(app.clone());
     }
+    if app.node.is_some() || matches!(app.link, Link::Shard(_)) {
+        crate::media::backfill::spawn(app.clone());
+    }
     if app.node.is_some() {
         crate::telemetry::spawn(app.clone());
         spawn_housekeeping(app.clone());

@@ -274,14 +274,18 @@ What's checked:
 Avatars, banners and server icons can be uploaded to the instance itself. The
 app crops them in the browser and saves them as small WebP files (GIFs go up as
 they are, so they keep moving). The file is checked to really be a PNG, JPEG,
-GIF, WebP or AVIF picture, and a JPEG, PNG or WebP loses what it says about
-where and how it was taken (EXIF with a photo's GPS position, XMP, text and
-comments; colour profiles stay), then it's served at `<FUWA_PUBLIC_URL>/media/<id>` to
+GIF, WebP or AVIF picture, and it loses what it says about where and how it
+was taken (EXIF with a photo's GPS position, XMP, text and comments; colour
+profiles and animation stay; an AVIF's are zeroed where they are), then it's
+served at `<FUWA_PUBLIC_URL>/media/<id>` to
 anyone with the link, so set `FUWA_PUBLIC_URL` to the address people use before
 anyone uploads. Pictures aren't encrypted by `FUWA_ENCRYPTION_KEY`, since
 they're public at their links. A picture that gets replaced, or that nothing
 uses a day after it was uploaded, is deleted, and so are an account's pictures
 when the account is deleted.
+Pictures kept before an update that takes out more are gone over once, in the
+background after start-up (a `.pictures-cleaned-1` file in the data folder says
+it's done), and sent to the replica again.
 
 To upload one yourself, call `MediaService.CreateUpload` with the picture's type
 and size, then `PUT` the file to the `upload_url` it returns (within ten

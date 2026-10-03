@@ -7,8 +7,14 @@
 //! APP1 (EXIF, XMP), APP3 to APP13, APP15, comments, APP2 other than its
 //! colour profile, and anything after the end of the picture (where phones
 //! append extra images with their own EXIF); PNG drops eXIf, tEXt, iTXt, zTXt
-//! and tIME, and anything after IEND; WebP drops its EXIF and XMP chunks.
-//! Colour profiles, Adobe's colour transform and animation stay.
+//! and tIME, and anything after IEND; WebP drops its EXIF and XMP chunks;
+//! GIF drops comments, application extensions other than looping and the
+//! colour profile (XMP among them), and anything after its end. Colour
+//! profiles, Adobe's colour transform and animation stay.
+//!
+//! AVIF keeps its layout, since its boxes point at each other by offset:
+//! the bytes of its Exif and XMP items (and of an XMP `uuid` box) are
+//! overwritten with zeros where they are, so the file stays the same size.
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
@@ -31,6 +37,8 @@ pub fn strip(kind: &str, r: &mut impl Read, w: &mut (impl Write + Seek)) -> io::
         "image/jpeg" => jpeg(r, w),
         "image/png" => png(r, w),
         "image/webp" => webp(r, w),
+        "image/gif" => gif(r, w),
+        "image/avif" => avif(r, w),
         _ => Err(bad("not a type metadata is taken out of")),
     }
 }
@@ -213,6 +221,302 @@ fn webp(r: &mut impl Read, w: &mut (impl Write + Seek)) -> io::Result<()> {
     Ok(())
 }
 
+/// GIF's application extensions that stay: looping (Netscape's and the
+/// older AnimExts) and the colour profile.
+const GIF_KEPT_APPS: [&[u8; 11]; 3] = [b"NETSCAPE2.0", b"ANIMEXTS1.0", b"ICCRGBG1012"];
+
+/// Copies (or, with `w` `None`, skips) GIF data sub-blocks up to and
+/// including their empty terminator.
+fn gif_blocks(r: &mut impl Read, mut w: Option<&mut dyn Write>) -> io::Result<()> {
+    loop {
+        let len = byte(r)?.ok_or_else(|| bad("cut off before its end"))?;
+        let mut block = [0u8; 255];
+        r.read_exact(&mut block[..usize::from(len)])?;
+        if let Some(w) = w.as_deref_mut() {
+            w.write_all(&[len])?;
+            w.write_all(&block[..usize::from(len)])?;
+        }
+        if len == 0 {
+            return Ok(());
+        }
+    }
+}
+
+/// Bytes of a GIF colour table the `flags` byte says follows, if any.
+fn gif_table(flags: u8) -> usize {
+    if flags & 0x80 == 0 { 0 } else { 3 << ((flags & 0x07) + 1) }
+}
+
+fn gif(r: &mut impl Read, w: &mut impl Write) -> io::Result<()> {
+    // The header and the logical screen descriptor.
+    let mut head = [0u8; 13];
+    r.read_exact(&mut head)?;
+    if &head[..6] != b"GIF87a" && &head[..6] != b"GIF89a" {
+        return Err(bad("not a GIF"));
+    }
+    w.write_all(&head)?;
+    io::copy(&mut r.by_ref().take(gif_table(head[10]) as u64), w)?;
+    loop {
+        match byte(r)?.ok_or_else(|| bad("cut off before its end"))? {
+            // An image: its descriptor, colour table, LZW code size and data.
+            0x2c => {
+                let mut descriptor = [0u8; 10];
+                descriptor[0] = 0x2c;
+                r.read_exact(&mut descriptor[1..])?;
+                w.write_all(&descriptor)?;
+                let table = gif_table(descriptor[9]) as u64;
+                if io::copy(&mut r.by_ref().take(table + 1), w)? != table + 1 {
+                    return Err(bad("cut off before its end"));
+                }
+                gif_blocks(r, Some(w))?;
+            }
+            0x21 => {
+                let label = byte(r)?.ok_or_else(|| bad("cut off before its end"))?;
+                match label {
+                    // Comments go.
+                    0xfe => gif_blocks(r, None)?,
+                    // Application extensions: their first block names them.
+                    0xff => {
+                        let len = byte(r)?.ok_or_else(|| bad("cut off before its end"))?;
+                        let mut name = vec![0u8; usize::from(len)];
+                        r.read_exact(&mut name)?;
+                        if GIF_KEPT_APPS.iter().any(|kept| name == kept.as_slice()) {
+                            w.write_all(&[0x21, 0xff, len])?;
+                            w.write_all(&name)?;
+                            gif_blocks(r, Some(w))?;
+                        } else if len != 0 {
+                            gif_blocks(r, None)?;
+                        }
+                    }
+                    // Frame timing and plain text are part of the picture.
+                    _ => {
+                        w.write_all(&[0x21, label])?;
+                        gif_blocks(r, Some(w))?;
+                    }
+                }
+            }
+            // The end: anything after it is left out.
+            0x3b => {
+                w.write_all(&[0x3b])?;
+                return Ok(());
+            }
+            _ => return Err(bad("a GIF block of no kind")),
+        }
+    }
+}
+
+/// The most of an AVIF's `meta` box read to find its metadata.
+const MAX_META: u64 = 16 << 20;
+/// The `uuid` box XMP is sometimes kept in.
+const XMP_UUID: [u8; 16] = *b"\xbe\x7a\xcf\xcb\x97\xa9\x42\xe8\x9c\x71\x99\x94\x91\xe3\xaf\xac";
+
+/// Reads a big-endian number `size` bytes long (0, 4 or 8) from `data` at `*at`.
+fn be(data: &[u8], at: &mut usize, size: usize) -> io::Result<u64> {
+    let bytes = data.get(*at..*at + size).ok_or_else(|| bad("an AVIF box is cut off"))?;
+    *at += size;
+    Ok(bytes.iter().fold(0, |n, b| (n << 8) | u64::from(*b)))
+}
+
+/// An ISO box's header at `at` in `data`: its type, where its body starts
+/// and where it ends.
+fn iso_box(data: &[u8], at: usize) -> io::Result<([u8; 4], usize, usize)> {
+    let mut pos = at;
+    let size = be(data, &mut pos, 4)?;
+    let kind: [u8; 4] = data.get(pos..pos + 4).ok_or_else(|| bad("an AVIF box is cut off"))?.try_into().expect("four");
+    pos += 4;
+    let end = match size {
+        0 => data.len(),
+        1 => at + usize::try_from(be(data, &mut pos, 8)?).map_err(|_| bad("an AVIF box is too big"))?,
+        n => at + usize::try_from(n).map_err(|_| bad("an AVIF box is too big"))?,
+    };
+    if end < pos || end > data.len() {
+        return Err(bad("an AVIF box is cut off"));
+    }
+    Ok((kind, pos, end))
+}
+
+/// Where (from the start of the file) an AVIF's Exif and XMP items are,
+/// from its `meta` box (`meta` its body, after the box header, starting at
+/// `meta_at` in the file).
+fn avif_metadata(meta: &[u8], meta_at: u64) -> io::Result<Vec<(u64, u64)>> {
+    // A full box: its version and flags, then boxes.
+    let mut children = Vec::new();
+    let mut at = 4;
+    while at < meta.len() {
+        let (kind, body, end) = iso_box(meta, at)?;
+        children.push((kind, body, end));
+        at = end;
+    }
+    let find = |name: &[u8; 4]| children.iter().find(|(kind, _, _)| kind == name).map(|&(_, body, end)| (body, end));
+
+    // Which items are metadata: Exif, and XMP (a `mime` item of RDF).
+    let mut items = Vec::new();
+    if let Some((body, end)) = find(b"iinf") {
+        let iinf = &meta[body..end];
+        let mut at = 0;
+        let version = be(iinf, &mut at, 1)?;
+        at += 3;
+        let count = be(iinf, &mut at, if version == 0 { 2 } else { 4 })?;
+        for _ in 0..count {
+            let (kind, body, end) = iso_box(iinf, at)?;
+            at = end;
+            if &kind != b"infe" {
+                continue;
+            }
+            let infe = &iinf[body..end];
+            let mut pos = 0;
+            let version = be(infe, &mut pos, 1)?;
+            if version < 2 {
+                continue;
+            }
+            pos += 3;
+            let id = be(infe, &mut pos, if version == 2 { 2 } else { 4 })?;
+            pos += 2;
+            let item_type = infe.get(pos..pos + 4).ok_or_else(|| bad("an AVIF box is cut off"))?;
+            pos += 4;
+            let is_xmp = item_type == b"mime" && {
+                let rest = infe.get(pos..).unwrap_or_default();
+                let name = rest.split(|b| *b == 0).nth(1).unwrap_or_default();
+                name == b"application/rdf+xml"
+            };
+            if item_type == b"Exif" || is_xmp {
+                items.push(id);
+            }
+        }
+    }
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let idat = find(b"idat").map(|(body, _)| meta_at + body as u64);
+
+    // Where those items' bytes are.
+    let (body, end) = find(b"iloc").ok_or_else(|| bad("an AVIF's metadata has no location"))?;
+    let iloc = &meta[body..end];
+    let mut at = 0;
+    let version = be(iloc, &mut at, 1)?;
+    at += 3;
+    let sizes = be(iloc, &mut at, 2)?;
+    let (offset_size, length_size) = ((sizes >> 12) as usize, ((sizes >> 8) & 0xf) as usize);
+    let (base_size, index_size) = (((sizes >> 4) & 0xf) as usize, (sizes & 0xf) as usize);
+    let count = be(iloc, &mut at, if version < 2 { 2 } else { 4 })?;
+    let mut ranges = Vec::new();
+    for _ in 0..count {
+        let id = be(iloc, &mut at, if version < 2 { 2 } else { 4 })?;
+        let method = if version == 0 { 0 } else { be(iloc, &mut at, 2)? & 0xf };
+        let reference = be(iloc, &mut at, 2)?;
+        let base = be(iloc, &mut at, base_size)?;
+        let extents = be(iloc, &mut at, 2)?;
+        for _ in 0..extents {
+            if version > 0 {
+                be(iloc, &mut at, index_size)?;
+            }
+            let offset = be(iloc, &mut at, offset_size)?;
+            let length = be(iloc, &mut at, length_size)?;
+            if !items.contains(&id) {
+                continue;
+            }
+            if reference != 0 {
+                // Kept in another file, so not in this one.
+                continue;
+            }
+            let start = match method {
+                0 => base,
+                1 => idat.ok_or_else(|| bad("an AVIF item points into an idat it hasn't"))? + base,
+                _ => return Err(bad("an AVIF's metadata is made from other items")),
+            }
+            .checked_add(offset)
+            .ok_or_else(|| bad("an AVIF item is out of place"))?;
+            ranges.push((start, length));
+        }
+    }
+    Ok(ranges)
+}
+
+fn avif(r: &mut impl Read, w: &mut (impl Write + Seek)) -> io::Result<()> {
+    let start = w.stream_position()?;
+    let mut at: u64 = 0;
+    let mut ranges = Vec::new();
+    loop {
+        let mut head = [0u8; 8];
+        match r.read(&mut head[..1])? {
+            0 => break,
+            _ => r.read_exact(&mut head[1..])?,
+        }
+        w.write_all(&head)?;
+        let size = u64::from(u32::from_be_bytes(head[..4].try_into().expect("four bytes")));
+        let kind: [u8; 4] = head[4..].try_into().expect("four bytes");
+        let mut header = 8;
+        let size = match size {
+            // To the end of the file.
+            0 => None,
+            1 => {
+                let mut large = [0u8; 8];
+                r.read_exact(&mut large)?;
+                w.write_all(&large)?;
+                header = 16;
+                Some(u64::from_be_bytes(large))
+            }
+            n => Some(n),
+        };
+        if at == 0 && &kind != b"ftyp" {
+            return Err(bad("not an AVIF"));
+        }
+        let body = match size {
+            Some(size) => size.checked_sub(header).ok_or_else(|| bad("an AVIF box is too short"))?,
+            None => u64::MAX,
+        };
+        if &kind == b"meta" {
+            if body > MAX_META {
+                return Err(bad("an AVIF's meta box is too big"));
+            }
+            let mut meta = vec![0u8; body as usize];
+            r.read_exact(&mut meta)?;
+            w.write_all(&meta)?;
+            ranges.extend(avif_metadata(&meta, at + header)?);
+        } else if &kind == b"uuid" {
+            let mut uuid = [0u8; 16];
+            r.read_exact(&mut uuid)?;
+            w.write_all(&uuid)?;
+            let rest = io::copy(&mut r.by_ref().take(body.saturating_sub(16)), w)?;
+            if uuid == XMP_UUID {
+                ranges.push((at + header + 16, rest));
+            }
+            if size.is_some() && rest != body.saturating_sub(16) {
+                return Err(bad("cut off before its end"));
+            }
+        } else {
+            let copied = io::copy(&mut r.by_ref().take(body), w)?;
+            if size.is_some() && copied != body {
+                return Err(bad("cut off before its end"));
+            }
+        }
+        match size {
+            Some(size) => at += size,
+            None => break,
+        }
+    }
+    let end = w.stream_position()?;
+    let length = end - start;
+    let zeros = [0u8; 8192];
+    for (from, len) in ranges {
+        // An extent of length 0 runs to the end of the file.
+        let to =
+            if len == 0 { length } else { from.checked_add(len).ok_or_else(|| bad("an AVIF item is out of place"))? };
+        if to > length || from > to {
+            return Err(bad("an AVIF item is out of place"));
+        }
+        w.seek(SeekFrom::Start(start + from))?;
+        let mut left = to - from;
+        while left > 0 {
+            let n = left.min(zeros.len() as u64) as usize;
+            w.write_all(&zeros[..n])?;
+            left -= n as u64;
+        }
+    }
+    w.seek(SeekFrom::Start(end))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
@@ -370,7 +674,94 @@ mod tests {
     }
 
     #[test]
-    fn other_types_are_left_to_the_caller() {
+    fn gifs_lose_comments_and_xmp_and_keep_looping() {
+        let head = [&b"GIF89a"[..], &[1, 0, 1, 0, 0x80, 0, 0], &[0, 0, 0, 255, 255, 255]].concat();
+        let looping = [&[0x21, 0xff, 11][..], b"NETSCAPE2.0", &[3, 1, 0, 0, 0]].concat();
+        let timing = [0x21, 0xf9, 4, 0, 10, 0, 0, 0];
+        let image = [&[0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0][..], &[2, 2, 0x4c, 0x01, 0]].concat();
+        let comment = [&[0x21, 0xfe, 13][..], b"taken at home", &[0]].concat();
+        let xmp = [&[0x21, 0xff, 11][..], b"XMP DataXMP", &[9], b"GPS 35.6N", &[0]].concat();
+        let input = [&head[..], &looping, &comment, &timing, &xmp, &image, &[0x3b], b"after"].concat();
+        let out = run("image/gif", &input).unwrap();
+        assert_eq!(out, [&head[..], &looping, &timing, &image, &[0x3b]].concat());
+        assert!(!String::from_utf8_lossy(&out).contains("GPS"));
+        assert!(run("image/gif", &input[..input.len() - 20]).is_err(), "cut off");
         assert!(run("image/gif", b"GIF89a").is_err());
+    }
+
+    fn iso(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        [&((body.len() + 8) as u32).to_be_bytes()[..], kind, body].concat()
+    }
+
+    /// A small AVIF: item 1 the picture in `mdat`, item 2 Exif in `mdat`,
+    /// item 3 XMP in `idat`.
+    fn avif_file(exif: &[u8], xmp: &[u8]) -> Vec<u8> {
+        let ftyp = iso(b"ftyp", b"avif\0\0\0\0avifmif1");
+        let infe = |id: u16, kind: &[u8; 4], extra: &[u8]| {
+            iso(b"infe", &[&[2, 0, 0, 0][..], &id.to_be_bytes(), &[0, 0], kind, b"\0", extra].concat())
+        };
+        let iinf = iso(
+            b"iinf",
+            &[
+                &[0, 0, 0, 0, 0, 3][..],
+                &infe(1, b"av01", b""),
+                &infe(2, b"Exif", b""),
+                &infe(3, b"mime", b"application/rdf+xml\0"),
+            ]
+            .concat(),
+        );
+        let idat = iso(b"idat", xmp);
+        let picture = b"AV1 frame bytes";
+        // The meta box's size doesn't depend on the offsets, so lay it out
+        // once to learn where mdat starts.
+        let meta_with = |mdat_at: u32| {
+            let entry = |id: u16, method: u16, offset: u32, len: u32| {
+                [
+                    &id.to_be_bytes()[..],
+                    &method.to_be_bytes(),
+                    &[0, 0],
+                    &[0, 1],
+                    &offset.to_be_bytes(),
+                    &len.to_be_bytes(),
+                ]
+                .concat()
+            };
+            let iloc = iso(
+                b"iloc",
+                &[
+                    &[1, 0, 0, 0, 0x44, 0x00, 0, 3][..],
+                    &entry(1, 0, mdat_at + 8, picture.len() as u32),
+                    &entry(2, 0, mdat_at + 8 + picture.len() as u32, exif.len() as u32),
+                    &entry(3, 1, 0, xmp.len() as u32),
+                ]
+                .concat(),
+            );
+            iso(b"meta", &[&[0, 0, 0, 0][..], &iso(b"hdlr", &[0; 24]), &iinf, &iloc, &idat].concat())
+        };
+        let mdat_at = (ftyp.len() + meta_with(0).len()) as u32;
+        let mdat = iso(b"mdat", &[&picture[..], exif].concat());
+        [ftyp, meta_with(mdat_at), mdat].concat()
+    }
+
+    #[test]
+    fn avifs_keep_their_layout_with_exif_and_xmp_zeroed() {
+        let exif = b"\0\0\0\0MM\0*GPS 35.68N";
+        let xmp = b"<x:xmpmeta>GPS 35.68N</x:xmpmeta>";
+        let input = avif_file(exif, xmp);
+        let out = run("image/avif", &input).unwrap();
+        assert_eq!(out.len(), input.len());
+        assert_eq!(out, avif_file(&[0; 18], &[0; 33]));
+        assert!(!String::from_utf8_lossy(&out).contains("GPS"));
+        assert!(String::from_utf8_lossy(&out).contains("AV1 frame bytes"));
+
+        // XMP in a uuid box goes the same way.
+        let uuid = iso(b"uuid", &[&XMP_UUID[..], b"GPS here"].concat());
+        let with_uuid = [&input[..], &uuid].concat();
+        let out = run("image/avif", &with_uuid).unwrap();
+        assert_eq!(out.len(), with_uuid.len());
+        assert!(!String::from_utf8_lossy(&out).contains("GPS"));
+
+        assert!(run("image/avif", &input[..input.len() - 3]).is_err(), "cut off");
+        assert!(run("image/avif", &iso(b"mdat", b"x")).is_err(), "no ftyp");
     }
 }
