@@ -78,6 +78,16 @@ impl Key {
         Some(Self(bytes.try_into().ok()?))
     }
 
+    /// A MAC of `parts` under this key, for other things the instance signs
+    /// (each with its own label first, so one can't stand for another).
+    pub(crate) fn mac(&self, parts: &[&[u8]]) -> [u8; 32] {
+        let mut mac = Hmac::<Sha256>::new_from_slice(&self.0).expect("HMAC takes keys of any length");
+        for part in parts {
+            mac.update(part);
+        }
+        mac.finalize().into_bytes().into()
+    }
+
     fn sign(&self, url: &str) -> String {
         let mut mac = Hmac::<Sha256>::new_from_slice(&self.0).expect("HMAC takes keys of any length");
         mac.update(url.as_bytes());

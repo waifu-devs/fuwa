@@ -150,7 +150,7 @@ async fn come_back(app: &Arc<App>, scope: Scope, state: String, answer: Answer) 
     let result: Result<String> = async {
         let identity = super::identify(&provider, &endpoints, &sign_in, answer).await?;
         let code = crate::auth::new_token();
-        if !answered(app, &scope, &state, &crate::auth::hash_token(&code), &identity).await? {
+        if !answered(app, &scope, &sign_in, &crate::auth::hash_token(&code), &identity).await? {
             return Err(Error::FailedPrecondition("this sign-in was already used; start again".into()));
         }
         Ok(code)
@@ -181,8 +181,18 @@ async fn come_back(app: &Arc<App>, scope: Scope, state: String, answer: Answer) 
 async fn load(app: &Arc<App>, scope: &Scope, state: &str) -> Result<Option<(SignIn, Provider)>> {
     match scope {
         Scope::Instance => {
-            let Some(sign_in) = app.node()?.sso_sign_in(state).await? else { return Ok(None) };
-            Ok(Some((sign_in, app.settings().sso_provider.clone())))
+            // Nothing was kept when it started: the state itself says what it is.
+            let settings = app.settings();
+            let provider = settings.sso_provider.clone();
+            let sign_in = super::ticket::read(
+                app.picture_key(),
+                &provider,
+                state,
+                crate::id::now_ms(),
+                &settings.public_url,
+                &settings.allowed_origins,
+            )?;
+            Ok(Some((sign_in, provider)))
         }
         Scope::Server(id) => {
             let sdb = app.servers.get(id).await?;
@@ -197,12 +207,13 @@ async fn load(app: &Arc<App>, scope: &Scope, state: &str) -> Result<Option<(Sign
 async fn answered(
     app: &Arc<App>,
     scope: &Scope,
-    state: &str,
+    sign_in: &SignIn,
     code_hash: &str,
     identity: &super::Identity,
 ) -> Result<bool> {
+    let state = sign_in.state.as_str();
     match scope {
-        Scope::Instance => app.node()?.sso_answered(state, code_hash, identity).await,
+        Scope::Instance => app.node()?.sso_answered(sign_in, code_hash, identity).await,
         Scope::Server(id) => {
             let sdb = app.servers.get(id).await?;
             sdb.write("", async |conn, _| super::answered(conn, state, code_hash, identity).await).await

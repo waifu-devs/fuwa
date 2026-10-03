@@ -38,9 +38,9 @@ pub fn authorize_url(
     entity_id: &str,
     acs_url: &str,
     relay_state: &str,
+    id: &str,
     now: i64,
-) -> Result<(String, String)> {
-    let id = format!("_{}", crate::auth::new_token());
+) -> Result<String> {
     let request = format!(
         r#"<samlp:AuthnRequest xmlns:samlp="{PROTOCOL}" xmlns:saml="{ASSERTION}" ID="{id}" Version="2.0" IssueInstant="{instant}" Destination="{destination}" AssertionConsumerServiceURL="{acs}" ProtocolBinding="{POST_BINDING}"><saml:Issuer>{issuer}</saml:Issuer><samlp:NameIDPolicy AllowCreate="true"/></samlp:AuthnRequest>"#,
         instant = xml::format_time(now),
@@ -54,7 +54,7 @@ pub fn authorize_url(
     let mut url = reqwest::Url::parse(&provider.saml_sso_url)
         .map_err(|_| Error::FailedPrecondition("the SAML sign-in URL isn't a URL".into()))?;
     url.query_pairs_mut().append_pair("SAMLRequest", &STANDARD.encode(deflated)).append_pair("RelayState", relay_state);
-    Ok((url.into(), id))
+    Ok(url.into())
 }
 
 /// The certificates in `text`: PEM blocks, or bare base64 as metadata has them.
@@ -518,7 +518,8 @@ mod tests {
     #[test]
     fn requests_deflate_and_carry_the_relay_state() {
         let provider = provider(RSA);
-        let (url, id) = authorize_url(&provider, "https://sp/meta", "https://sp/acs", "st", 0).unwrap();
+        let id = "_req42";
+        let url = authorize_url(&provider, "https://sp/meta", "https://sp/acs", "st", id, 0).unwrap();
         let url = reqwest::Url::parse(&url).unwrap();
         let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
         assert_eq!(query["RelayState"], "st");

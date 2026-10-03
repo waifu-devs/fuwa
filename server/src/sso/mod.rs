@@ -16,6 +16,7 @@
 pub mod http;
 pub mod oidc;
 pub mod saml;
+pub mod ticket;
 pub mod xml;
 
 use serde::{Deserialize, Serialize};
@@ -390,12 +391,10 @@ pub struct SignIn {
     pub expires_at: i64,
 }
 
-/// How many sign-ins may start in [`TTL_MS`]: through the instance's provider
-/// in all (anyone may start one, and nothing says who they are, since no
-/// client address is ever looked at), through one server's in all, and by one
-/// account at one server. Each start keeps a row until it runs out, so this
-/// also bounds those.
-pub const MAX_STARTS_INSTANCE: usize = 2_000;
+/// How many sign-ins may start in [`TTL_MS`] through one server's provider in
+/// all, and by one account at one server. Each keeps a row until it runs out,
+/// so this also bounds those. The instance's own sign-ins keep nothing until
+/// the provider answers ([`ticket`]), so they need no such cap.
 pub const MAX_STARTS_SERVER: usize = 1_000;
 pub const MAX_STARTS_ACCOUNT: usize = 10;
 
@@ -437,57 +436,62 @@ pub fn starts() -> &'static StartLimiter {
     STARTS.get_or_init(StartLimiter::default)
 }
 
-/// Begins a sign-in: the provider's page, and the row to keep until it's back.
-/// `return_origin` is already checked (`linked::return_origin`): only apps the
-/// instance trusts get sign-ins back.
+/// Begins a server's sign-in: the provider's page, and the row to keep until
+/// it's back. `return_origin` is already checked (`linked::return_origin`):
+/// only apps the instance trusts get sign-ins back.
 pub async fn start(
     provider: &Provider,
     endpoints: &Endpoints,
     return_origin: &str,
     secret_hash: &str,
     account_id: &str,
-    test: bool,
 ) -> Result<(String, SignIn)> {
     provider.ready()?;
-    let return_origin = return_origin.to_string();
     let secret_hash = secret_hash.trim().to_ascii_lowercase();
     if secret_hash.len() != 64 || !secret_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(Error::invalid("secret_hash must be a SHA-256 in hex"));
     }
-    let mut sign_in = SignIn {
+    let sign_in = SignIn {
         state: crate::auth::new_token(),
         secret_hash,
-        return_origin,
+        return_origin: return_origin.to_string(),
         account_id: account_id.to_string(),
-        test,
         provider_key: provider.trust_key(),
+        verifier: crate::auth::new_token(),
+        nonce: crate::auth::new_token(),
+        request_id: format!("_{}", crate::auth::new_token()),
         expires_at: now_ms() + TTL_MS,
         ..Default::default()
     };
-    let url = match provider.protocol {
+    let url = authorize(provider, endpoints, &sign_in).await?;
+    Ok((url, sign_in))
+}
+
+/// The provider's sign-in page for `sign_in`.
+pub async fn authorize(provider: &Provider, endpoints: &Endpoints, sign_in: &SignIn) -> Result<String> {
+    provider.ready()?;
+    match provider.protocol {
         Protocol::Oidc => {
-            let (verifier, challenge) = crate::linked::pkce();
-            sign_in.verifier = verifier;
-            sign_in.nonce = crate::auth::new_token();
             oidc::authorize_url(
                 provider,
                 endpoints.public_only,
                 &endpoints.redirect_uri,
                 &sign_in.state,
                 &sign_in.nonce,
-                &challenge,
+                &ticket::challenge(&sign_in.verifier),
             )
-            .await?
+            .await
         }
-        Protocol::Saml => {
-            let (url, request_id) =
-                saml::authorize_url(provider, &endpoints.entity_id, &endpoints.acs_url, &sign_in.state, now_ms())?;
-            sign_in.request_id = request_id;
-            url
-        }
+        Protocol::Saml => saml::authorize_url(
+            provider,
+            &endpoints.entity_id,
+            &endpoints.acs_url,
+            &sign_in.state,
+            &sign_in.request_id,
+            now_ms(),
+        ),
         Protocol::None => unreachable!("ready() refuses it"),
-    };
-    Ok((url, sign_in))
+    }
 }
 
 /// What the provider sent back.
@@ -542,7 +546,12 @@ pub async fn identify(
 /// Checks a finish against its sign-in: the app's secret and the code the
 /// browser came back with. Returns who signed in.
 pub fn check_finish(sign_in: &SignIn, code: &str, secret: &str) -> Result<Identity> {
-    if !crate::auth::constant_time_eq(crate::linked::secret_hash(secret).as_bytes(), sign_in.secret_hash.as_bytes()) {
+    // An instance ticket keeps the first half of the hash; a server's row all of it.
+    let hash = crate::linked::secret_hash(secret);
+    let expected = &sign_in.secret_hash;
+    if !matches!(expected.len(), 32 | 64)
+        || !crate::auth::constant_time_eq(&hash.as_bytes()[..expected.len().min(hash.len())], expected.as_bytes())
+    {
         return Err(Error::denied("another app started this sign-in"));
     }
     let (Some(code_hash), Some(identity)) = (&sign_in.code_hash, &sign_in.identity) else {
@@ -583,7 +592,7 @@ pub async fn load(conn: &Connection, state: &str) -> Result<Option<SignIn>> {
     query_one(
         conn,
         "SELECT state, secret_hash, return_origin, account_id, test, provider_key, verifier, nonce, request_id, code_hash, identity, expires_at
-         FROM sso_sign_ins WHERE state = ?1 AND expires_at >= ?2",
+         FROM sso_sign_ins WHERE state = ?1 AND expires_at >= ?2 AND coalesce(code_hash, 'x') <> ''",
         (state, now_ms()),
         |r| {
             Ok(SignIn {
@@ -618,9 +627,51 @@ pub async fn answered(conn: &Connection, state: &str, code_hash: &str, identity:
         == 1)
 }
 
-/// Uses a sign-in up: false if something else already did.
+/// Uses a sign-in up: false if something else already did. The row stays,
+/// emptied, until it runs out, so the provider's answer can't be used again.
 pub async fn take(conn: &Connection, state: &str) -> Result<bool> {
-    Ok(conn.execute("DELETE FROM sso_sign_ins WHERE state = ?1", [state]).await? == 1)
+    Ok(conn
+        .execute(
+            "UPDATE sso_sign_ins SET code_hash = '', identity = NULL WHERE state = ?1 AND code_hash <> ''",
+            [state],
+        )
+        .await?
+        == 1)
+}
+
+/// Records the provider's answer to an instance ticket: its first row, so
+/// false if the state was used already.
+pub async fn answered_ticket(
+    conn: &Connection,
+    sign_in: &SignIn,
+    code_hash: &str,
+    identity: &Identity,
+) -> Result<bool> {
+    let json = serde_json::to_string(identity).map_err(|err| Error::internal(err.to_string()))?;
+    conn.execute("DELETE FROM sso_sign_ins WHERE expires_at < ?1", [now_ms()]).await?;
+    let inserted = conn
+        .execute(
+            "INSERT INTO sso_sign_ins (state, secret_hash, return_origin, test, provider_key, code_hash, identity, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (
+                sign_in.state.as_str(),
+                sign_in.secret_hash.as_str(),
+                sign_in.return_origin.as_str(),
+                sign_in.test,
+                sign_in.provider_key.as_str(),
+                code_hash,
+                json.as_str(),
+                sign_in.expires_at,
+            ),
+        )
+        .await;
+    match inserted {
+        Ok(_) => Ok(true),
+        Err(err) => {
+            let err = Error::from(err);
+            if crate::db::is_unique_violation(&err) { Ok(false) } else { Err(err) }
+        }
+    }
 }
 
 #[cfg(test)]
