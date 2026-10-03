@@ -69,6 +69,10 @@ pub struct Config {
     /// FUWA_TURN_SECRET: the TURN servers' shared secret (coturn's
     /// static-auth-secret), to make each caller a credential.
     pub turn_secret: String,
+    /// Moderation providers servers' AutoMod can use, on from the start:
+    /// FUWA_JEV_API_KEY turns TypeSafe Jev on; FUWA_CLEF_API_TOKEN and
+    /// FUWA_CLEF_ACCOUNT_ID turn Cloudflare Clef on. None by default.
+    pub automod_providers: Vec<crate::automod::providers::Setup>,
     /// Where this process carries calls itself (one process, or a media
     /// part): FUWA_MEDIA_PORT (default 50000, UDP and TCP; `off` for no
     /// calls here) and FUWA_MEDIA_ADDRESSES. None when it's off, or this
@@ -103,6 +107,7 @@ impl std::fmt::Debug for Config {
             .field("web", &self.web)
             .field("cluster", &self.cluster)
             .field("replica", &self.replica)
+            .field("automod_providers", &self.automod_providers)
             .finish()
     }
 }
@@ -451,6 +456,7 @@ impl Config {
             call_recordings_keep_days,
             ice_urls,
             turn_secret: get("FUWA_TURN_SECRET").map(|s| s.trim().to_string()).unwrap_or_default(),
+            automod_providers: automod_providers(&get)?,
             media,
             media_urls,
             replica,
@@ -552,6 +558,42 @@ pub fn parse_bytes(value: &str) -> Result<i64, String> {
     Ok((number * multiplier).round() as i64)
 }
 
+/// The moderation providers the environment turns on (FUWA_JEV_API_KEY,
+/// FUWA_CLEF_API_TOKEN with FUWA_CLEF_ACCOUNT_ID), checked like a change
+/// from the app.
+fn automod_providers(get: &impl Fn(&str) -> Option<String>) -> Result<Vec<crate::automod::providers::Setup>, String> {
+    use crate::automod::providers::Setup;
+    let mut setups = Vec::new();
+    let value = |name: &str| get(name).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    if let Some(key) = value("FUWA_JEV_API_KEY") {
+        let given = pb::AutoModProviderSettings {
+            id: "typesafe-jev".into(),
+            enabled: true,
+            api_key: key,
+            ..Default::default()
+        };
+        setups.push(Setup::from_pb(&given, None).map_err(|err| format!("FUWA_JEV_API_KEY: {err}"))?);
+    }
+    match (value("FUWA_CLEF_API_TOKEN"), value("FUWA_CLEF_ACCOUNT_ID")) {
+        (Some(key), Some(account_id)) => {
+            let given = pb::AutoModProviderSettings {
+                id: "cloudflare-clef".into(),
+                enabled: true,
+                api_key: key,
+                account_id,
+                ..Default::default()
+            };
+            setups.push(
+                Setup::from_pb(&given, None)
+                    .map_err(|err| format!("FUWA_CLEF_API_TOKEN or FUWA_CLEF_ACCOUNT_ID: {err}"))?,
+            );
+        }
+        (None, None) => {}
+        _ => return Err("FUWA_CLEF_API_TOKEN and FUWA_CLEF_ACCOUNT_ID go together".into()),
+    }
+    Ok(setups)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -561,6 +603,22 @@ mod tests {
     fn config(vars: &[(&str, &str)]) -> Result<Config, String> {
         let vars: HashMap<String, String> = vars.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         Config::from_lookup(|key| vars.get(key).cloned())
+    }
+
+    #[test]
+    fn moderation_providers_can_start_on() {
+        assert!(config(&[]).unwrap().automod_providers.is_empty());
+        let on = config(&[
+            ("FUWA_JEV_API_KEY", "ts-key"),
+            ("FUWA_CLEF_API_TOKEN", "cf-token"),
+            ("FUWA_CLEF_ACCOUNT_ID", "0123456789abcdef0123456789abcdef"),
+        ])
+        .unwrap();
+        let ids: Vec<&str> = on.automod_providers.iter().filter(|s| s.usable()).map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["typesafe-jev", "cloudflare-clef"]);
+        assert!(!format!("{on:?}").contains("cf-token"));
+        assert!(config(&[("FUWA_CLEF_API_TOKEN", "cf-token")]).is_err());
+        assert!(config(&[("FUWA_CLEF_API_TOKEN", "t"), ("FUWA_CLEF_ACCOUNT_ID", "nope")]).is_err());
     }
 
     #[test]

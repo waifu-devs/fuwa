@@ -127,12 +127,23 @@
     the message (`execute_webhook`): its `author_id` is the webhook's id and
     `Message.webhook` carries the name and picture it posted under. Webhook
     messages never ping @everyone, @here or roles, and nobody can edit them.
-  - `automod.rs`: what an AutoMod rule catches (words with `*` wildcards,
+  - `automod/`: what an AutoMod rule catches (words with `*` wildcards,
     pings, links to sites not allowed); `api/automod.rs` keeps the rules
     (`automod_rules`, one protobuf blob each) and `review` runs them inside
     the write that sends or edits a message: it blocks (an error starting
     "AutoMod: "), posts an alert message (`MESSAGE_KIND_AUTO_MOD_ALERT`) and
     times the author out. People with Manage Server are never caught.
+    `automod/providers.rs` is moderation services (`Provider`, registered in
+    `KINDS`: TypeSafe Jev and Cloudflare Clef, which both speak System One,
+    so one adapter): the instance's `automod_providers` setting holds their
+    keys (never sent to clients; shards get them in `WatchResponse`), and a
+    server's one PROVIDER rule ("Smart filter") picks one and a level per
+    label. `api/automod.rs`'s `ask` calls it before the message's write
+    (never inside it), with only the text (`providers::outgoing` strips
+    mentions and emoji ids), cut off at 3 seconds; a failure lets the
+    message through that rule and is counted in the anonymous report by
+    kind and provider id. The web pages are `settings/instance/Moderation.tsx`
+    and the Smart filter in `settings/server/AutoMod.tsx`.
   - `permissions.rs`: roles and permissions. `Rules::access` works out what a
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's

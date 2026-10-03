@@ -169,7 +169,13 @@ async fn stay_in_touch(app: Arc<App>) {
                         message = stream.message() => match message {
                             Ok(Some(message)) => {
                                 if let Some(settings) = message.settings {
-                                    app.replace_settings(Settings::from_pb(&app.config, &settings));
+                                    let mut settings = Settings::from_pb(&app.config, &settings);
+                                    settings.automod_providers = message
+                                        .automod_providers
+                                        .iter()
+                                        .map(crate::automod::providers::Setup::from_cluster)
+                                        .collect();
+                                    app.replace_settings(settings);
                                 }
                                 if first {
                                     first = false;
