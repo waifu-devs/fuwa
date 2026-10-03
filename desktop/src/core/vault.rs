@@ -6,7 +6,8 @@
 //! keeps ciphertext, and a message can be opened once), so this is the only
 //! copy of it. Each vault is a folder under the app's data folder, readable
 //! only by you, written by swapping in whole files so a crash never leaves
-//! half of one.
+//! half of one. Every file in it is encrypted (XChaCha20-Poly1305) with a key
+//! kept in the system keychain, so a copy of the folder alone reads as noise.
 
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -104,8 +105,37 @@ struct Head {
 /// One account's vault on one instance.
 pub struct Vault {
     dir: PathBuf,
+    key: [u8; 32],
     head: Head,
     items: HashMap<String, Vec<Item>>,
+}
+
+/// What an encrypted vault file starts with, then a 24-byte nonce, then the sealed JSON.
+const SEALED: &[u8] = b"fuwa-vault-v1\n";
+
+fn seal(key: &[u8; 32], plain: &[u8]) -> std::io::Result<Vec<u8>> {
+    use chacha20poly1305::aead::{Aead as _, KeyInit as _};
+    let cipher = chacha20poly1305::XChaCha20Poly1305::new(key.into());
+    let mut nonce = [0u8; 24];
+    getrandom::fill(&mut nonce).map_err(std::io::Error::other)?;
+    let sealed = cipher.encrypt(&nonce.into(), plain).map_err(|_| std::io::Error::other("couldn't encrypt"))?;
+    Ok([SEALED, &nonce, &sealed].concat())
+}
+
+/// Opens a sealed file. One from before vaults were encrypted reads as it is,
+/// and is sealed the next time it's written.
+fn unseal(key: &[u8; 32], bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+    use chacha20poly1305::aead::{Aead as _, KeyInit as _};
+    let Some(rest) = bytes.strip_prefix(SEALED) else { return Ok(bytes.to_vec()) };
+    if rest.len() < 24 {
+        return Err(std::io::Error::other("a vault file is cut short"));
+    }
+    let (nonce, sealed) = rest.split_at(24);
+    let cipher = chacha20poly1305::XChaCha20Poly1305::new(key.into());
+    let nonce: [u8; 24] = nonce.try_into().expect("24 bytes");
+    cipher
+        .decrypt(&nonce.into(), sealed)
+        .map_err(|_| std::io::Error::other("a vault file doesn't open with this computer's key"))
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -120,13 +150,26 @@ impl Vault {
 
     /// Opens the vault, empty if there's none yet. A vault kept for another
     /// session (an earlier sign-in) is wiped: its device is gone from the instance.
-    pub fn open(dir: PathBuf, session: &str) -> std::io::Result<Self> {
-        let head: Option<Head> = read_json(&dir.join("vault.json"))?;
+    /// One that doesn't open with `key` (the keychain lost it) is wiped too:
+    /// nothing in it can be read again.
+    pub fn open(dir: PathBuf, session: &str, key: [u8; 32]) -> std::io::Result<Self> {
+        let head: Option<Head> = match read_sealed(&key, &dir.join("vault.json")) {
+            Ok(head) => head,
+            Err(err) => {
+                tracing::warn!("starting a new vault: {err}");
+                None
+            }
+        };
         match head {
-            Some(head) if head.session == session => Ok(Self { dir, head, items: HashMap::new() }),
+            Some(head) if head.session == session => Ok(Self { dir, key, head, items: HashMap::new() }),
             _ => {
                 wipe(&dir)?;
-                Ok(Self { dir, head: Head { session: session.to_owned(), ..Head::default() }, items: HashMap::new() })
+                Ok(Self {
+                    dir,
+                    key,
+                    head: Head { session: session.to_owned(), ..Head::default() },
+                    items: HashMap::new(),
+                })
             }
         }
     }
@@ -147,7 +190,7 @@ impl Vault {
     /// A conversation's items, oldest first.
     pub fn items(&mut self, conversation: &str) -> std::io::Result<&mut Vec<Item>> {
         if !self.items.contains_key(conversation) {
-            let list: Vec<Item> = read_json(&self.items_path(conversation))?.unwrap_or_default();
+            let list: Vec<Item> = read_sealed(&self.key, &self.items_path(conversation))?.unwrap_or_default();
             self.items.insert(conversation.to_owned(), list);
         }
         Ok(self.items.get_mut(conversation).expect("just loaded"))
@@ -185,9 +228,14 @@ impl Vault {
         std::fs::create_dir_all(&self.dir)?;
         restrict(&self.dir, true)?;
         for conversation in conversations {
-            write_json(&self.items_path(&conversation), &self.items[&conversation])?;
+            self.write_sealed(&self.items_path(&conversation), &self.items[&conversation])?;
         }
-        write_json(&self.dir.join("vault.json"), &self.head)
+        self.write_sealed(&self.dir.join("vault.json"), &self.head)
+    }
+
+    fn write_sealed<T: Serialize + ?Sized>(&self, path: &Path, value: &T) -> std::io::Result<()> {
+        let plain = serde_json::to_vec(value).map_err(std::io::Error::other)?;
+        write_file(path, &seal(&self.key, &plain)?)
     }
 }
 
@@ -209,9 +257,9 @@ pub fn wipe(dir: &Path) -> std::io::Result<()> {
     }
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> std::io::Result<Option<T>> {
+fn read_sealed<T: for<'de> Deserialize<'de>>(key: &[u8; 32], path: &Path) -> std::io::Result<Option<T>> {
     match std::fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(std::io::Error::other),
+        Ok(bytes) => serde_json::from_slice(&unseal(key, &bytes)?).map(Some).map_err(std::io::Error::other),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err),
     }
@@ -237,6 +285,12 @@ pub fn write_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+/// Makes a folder (and its parents) that only you can open.
+pub fn private_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(path)?;
+    restrict(path, true)
+}
+
 /// Only you can read it (on Unix; Windows keeps a user's app data to them already).
 fn restrict(path: &Path, dir: bool) -> std::io::Result<()> {
     #[cfg(unix)]
@@ -252,11 +306,13 @@ fn restrict(path: &Path, dir: bool) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    const KEY: [u8; 32] = [7; 32];
+
     #[test]
     fn a_vault_keeps_what_it_was_given_and_forgets_other_sessions() {
         let root = tempfile::tempdir().unwrap();
         let dir = Vault::dir_for(root.path(), "fuwa.chat", "u1");
-        let mut vault = Vault::open(dir.clone(), "session-a").unwrap();
+        let mut vault = Vault::open(dir.clone(), "session-a", KEY).unwrap();
         assert!(vault.device().is_none());
         let mut item = Item::new(2, ItemKind::Text, 5, "u1", "d1");
         item.content = "hello".into();
@@ -270,7 +326,7 @@ mod tests {
             })
             .unwrap();
 
-        let mut again = Vault::open(dir.clone(), "session-a").unwrap();
+        let mut again = Vault::open(dir.clone(), "session-a", KEY).unwrap();
         assert_eq!(again.device().unwrap(), vec![1, 2, 3]);
         assert_eq!(again.note("c").cursor, 2);
         assert_eq!(again.sent("h").unwrap(), b"hi");
@@ -278,8 +334,36 @@ mod tests {
         assert_eq!(seqs, [1, 2]);
         assert_eq!(again.items("c").unwrap()[1], item);
 
-        let mut other = Vault::open(dir, "session-b").unwrap();
+        let mut other = Vault::open(dir.clone(), "session-b", KEY).unwrap();
         assert!(other.device().is_none());
         assert!(other.items("c").unwrap().is_empty());
+    }
+
+    #[test]
+    fn vault_files_are_sealed_and_need_their_key() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = Vault::dir_for(root.path(), "fuwa.chat", "u1");
+        let mut vault = Vault::open(dir.clone(), "s", KEY).unwrap();
+        let mut item = Item::new(1, ItemKind::Text, 5, "u1", "d1");
+        item.content = "a secret 🍵".into();
+        vault.write(Change { items: vec![("c".into(), item)], ..Change::default() }).unwrap();
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+            assert!(bytes.starts_with(SEALED));
+            assert!(!bytes.windows(8).any(|w| w == b"a secret"));
+        }
+        // Another key can't read it, and starts over.
+        let mut stranger = Vault::open(dir.clone(), "s", [9; 32]).unwrap();
+        assert!(stranger.items("c").unwrap().is_empty());
+    }
+
+    #[test]
+    fn plain_vaults_from_before_still_open() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("v");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("vault.json"), r#"{"session":"s","device":"AQID","notes":{},"sent":{}}"#).unwrap();
+        let vault = Vault::open(dir, "s", KEY).unwrap();
+        assert_eq!(vault.device().unwrap(), vec![1, 2, 3]);
     }
 }

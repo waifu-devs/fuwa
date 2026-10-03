@@ -244,6 +244,25 @@ impl NodeDb {
         db::connect(&self.db)
     }
 
+    /// The key links to pictures from other sites are signed with (see
+    /// [`crate::outside`]), made the first time it's asked for. Never shown.
+    pub async fn picture_key(&self) -> Result<crate::outside::Key> {
+        db::write(&self.db, async |conn| {
+            if let Some(key) =
+                query_one(conn, "SELECT value FROM meta WHERE key = 'picture_key'", (), |r| r.get::<String>(0)).await?
+                && let Some(key) = crate::outside::Key::from_hex(&key)
+            {
+                return Ok(key);
+            }
+            let mut bytes = [0u8; 32];
+            getrandom::fill(&mut bytes).expect("the OS random number generator failed");
+            let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('picture_key', ?1)", [hex.as_str()]).await?;
+            Ok(crate::outside::Key::from_hex(&hex).expect("hex just written"))
+        })
+        .await
+    }
+
     /// This instance's random, anonymous id, made the first time it's asked for.
     pub async fn install_id(&self) -> Result<String> {
         db::write(&self.db, async |conn| {

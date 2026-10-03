@@ -2,6 +2,7 @@ use prost::Message as _;
 use tonic::{Request, Response, Status};
 
 use super::{Api, Seat, automod, respond, url, users};
+use crate::app::App;
 use crate::db::{is_unique_violation, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
@@ -269,13 +270,19 @@ pub struct WebhookMessage {
 }
 
 /// Checks a webhook's post as a member's message is checked.
-pub(super) fn check_webhook_message(post: &mut WebhookMessage) -> Result<()> {
+pub(super) fn check_webhook_message(app: &App, post: &mut WebhookMessage) -> Result<()> {
     check_content(&post.content, !post.embeds.is_empty())?;
     check_extras(&mut [], &post.embeds)?;
-    for embed in &mut post.embeds {
+    check_embed_links(app, &mut post.embeds)
+}
+
+/// Embeds link only to http(s), and their pictures come through the
+/// instance, so nobody who reads the message is seen by the site they're on.
+fn check_embed_links(app: &App, embeds: &mut [pb::Embed]) -> Result<()> {
+    for embed in embeds {
         embed.url = url("embed url", &embed.url)?;
-        embed.thumbnail_url = url("embed thumbnail", &embed.thumbnail_url)?;
-        embed.image_url = url("embed image", &embed.image_url)?;
+        embed.thumbnail_url = app.picture_link(&url("embed thumbnail", &embed.thumbnail_url)?);
+        embed.image_url = app.picture_link(&url("embed image", &embed.image_url)?);
     }
     Ok(())
 }
@@ -395,6 +402,7 @@ impl MessageService for Api {
             }
             check_content(&req.content, !req.attachments.is_empty() || !req.embeds.is_empty())?;
             check_extras(&mut req.attachments, &req.embeds)?;
+            check_embed_links(&self.app, &mut req.embeds)?;
             let limits = sdb.limits(&self.app.settings().limits).await?;
             if let Some(limit) = limits.storage_bytes
                 && sdb.storage_bytes() >= limit

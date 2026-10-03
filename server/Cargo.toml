@@ -37,14 +37,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"
 sha2 = "0.10"
+# Single sign-on: checking OpenID Connect ID token signatures (RS, PS, ES, EdDSA).
+ring = "0.17"
 # Embedded files get a fixed timestamp, so builds of one commit come out identical.
+rust-embed = { version = "8", optional = true, features = ["deterministic-timestamps"] }
 # Single sign-on: checking SAML signatures against the provider's certificates,
 # with the same ring that TLS uses.
 rustls-pki-types = "1"
-# Single sign-on: checking OpenID Connect ID token signatures (RS, PS, ES, EdDSA).
-ring = "0.17"
 rustls-webpki = { version = "0.103", default-features = false, features = ["ring", "std"] }
-rust-embed = { version = "8", optional = true, features = ["deterministic-timestamps"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }

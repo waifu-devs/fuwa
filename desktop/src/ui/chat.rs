@@ -26,7 +26,8 @@ use crate::ui::motion;
 use crate::ui::text::{clock, images_as_links, ms_of, when};
 use crate::ui::theme::{Palette, alpha, mix};
 use crate::ui::widgets::{
-    avatar, card, conn_dot, error_line, fuwa_mark, icon, icon_button, icon_button_in, pal, primary_button, soft_button,
+    app_badge, avatar, card, conn_dot, error_line, fuwa_mark, icon, icon_button, icon_button_in, is_agent, pal,
+    primary_button, soft_button,
 };
 
 /// Why you can't write here, and what would let you.
@@ -83,6 +84,10 @@ pub struct Msg {
     pub failed: Option<String>,
     pub nonce: u64,
     pub unreadable: bool,
+    /// Not a person: "APP" for what a webhook posted, "BOT" for AutoMod.
+    pub badge: Option<&'static str>,
+    /// Cards an app posted with it.
+    pub embeds: Vec<pb::Embed>,
 }
 
 impl Row {
@@ -144,13 +149,24 @@ impl FuwaApp {
                         }
                         continue;
                     }
+                    let hook = m.webhook.as_ref();
                     rows.push(Row::Msg(Box::new(Msg {
                         id: m.id.clone(),
-                        user: i.users.get(&m.author_id).cloned(),
-                        name: i.display_name(Some(&server), &m.author_id),
-                        color: i.name_color(&server, &m.author_id).map(|c| rgb(c).into()),
+                        user: match hook {
+                            Some(w) => Some(webhook_author(w)),
+                            None => i.users.get(&m.author_id).cloned(),
+                        },
+                        name: match hook {
+                            Some(w) => w.name.clone(),
+                            None => i.display_name(Some(&server), &m.author_id),
+                        },
+                        color: if hook.is_some() {
+                            None
+                        } else {
+                            i.name_color(&server, &m.author_id).map(|c| rgb(c).into())
+                        },
                         content: m.content.clone(),
-                        shown: images_as_links(&mention_links(&m.content, &look)),
+                        shown: mention_links(&images_as_links(&m.content), &look),
                         mentions_me: i.pings_me(&server, m, suppress),
                         editing: self.editing.as_deref() == Some(m.id.as_str()),
                         can_delete: m.author_id == me || manage,
@@ -162,6 +178,11 @@ impl FuwaApp {
                         failed: None,
                         nonce: 0,
                         unreadable: false,
+                        badge: match hook {
+                            Some(_) => Some("APP"),
+                            None => is_agent(i.users.get(&m.author_id)).then_some("AGENT"),
+                        },
+                        embeds: m.embeds.clone(),
                     })));
                 }
                 for p in i.pending.get(&channel).into_iter().flatten() {
@@ -171,7 +192,7 @@ impl FuwaApp {
                         name: i.display_name(Some(&server), &me),
                         color: i.name_color(&server, &me).map(|c| rgb(c).into()),
                         content: p.content.clone(),
-                        shown: images_as_links(&mention_links(&p.content, &look)),
+                        shown: mention_links(&images_as_links(&p.content), &look),
                         mentions_me: false,
                         editing: false,
                         can_delete: false,
@@ -183,6 +204,8 @@ impl FuwaApp {
                         failed: p.failed.clone(),
                         nonce: p.nonce,
                         unreadable: false,
+                        badge: None,
+                        embeds: Vec::new(),
                     })));
                 }
                 group(&mut rows);
@@ -224,6 +247,8 @@ impl FuwaApp {
                             failed: None,
                             nonce: 0,
                             unreadable: false,
+                            badge: None,
+                            embeds: Vec::new(),
                         }))),
                         ItemKind::Text => {}
                         ItemKind::Unreadable => rows.push(Row::Msg(Box::new(Msg {
@@ -244,6 +269,8 @@ impl FuwaApp {
                             failed: None,
                             nonce: 0,
                             unreadable: true,
+                            badge: None,
+                            embeds: Vec::new(),
                         }))),
                         ItemKind::Joined => rows.push(Row::Note {
                             id: item.seq.to_string(),
@@ -290,6 +317,8 @@ impl FuwaApp {
                         failed: None,
                         nonce: 0,
                         unreadable: false,
+                        badge: None,
+                        embeds: Vec::new(),
                     })));
                 }
                 group(&mut rows);
@@ -555,6 +584,7 @@ impl FuwaApp {
             .px(px(20.0))
             .pb(px(20.0))
             .when_some(self.picker.clone(), |el, picker| el.child(self.picker_list(picker, &p, cx)))
+            .when(self.emoji_open, |el| el.child(self.emoji_panel(&p, cx)))
             .child(
                 div()
                     .flex()
@@ -575,6 +605,7 @@ impl FuwaApp {
                         inset: false,
                     }])
                     .child(div().flex_1().min_w_0().py(px(4.0)).child(Textarea::new(&self.composer).appearance(false)))
+                    .child(self.emoji_button(&p, cx))
                     .child(
                         div()
                             .id("send")
@@ -607,7 +638,7 @@ impl FuwaApp {
                 .text_size(px(11.0))
                 .font_weight(FontWeight::EXTRA_BOLD)
                 .text_color(p.muted_foreground)
-                .child("MENTION"),
+                .child(if matches!(picker.options.first(), Some(Pick::Emoji(_))) { "EMOJI" } else { "MENTION" }),
         );
         for (n, pick) in picker.options.iter().enumerate() {
             let active = n == picker.active;
@@ -642,6 +673,11 @@ impl FuwaApp {
                         .into_any_element(),
                     format!("@{which}"),
                     if *which == "everyone" { "Everyone in the channel".into() } else { "Everyone online".into() },
+                ),
+                Pick::Emoji(choice) => (
+                    emoji_glyph(choice, 22.0),
+                    format!(":{}:", choice.name),
+                    if choice.url.is_some() { "This server".into() } else { String::new() },
                 ),
             };
             let pick = pick.clone();
@@ -704,6 +740,8 @@ impl FuwaApp {
                 .text_color(p.muted_foreground)
                 .child(format!("MEMBERS — {}", members.iter().filter(|m| !m.pending).count())),
         );
+        let now = crate::core::dms::now_ms();
+        let amber = gpui_kit::hsla(0.11, 0.9, if p.dark { 0.62 } else { 0.42 }, 1.0);
         for (n, (m, color)) in members.iter().zip(colors).enumerate() {
             if m.pending {
                 continue;
@@ -738,12 +776,29 @@ impl FuwaApp {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(color.unwrap_or(p.foreground.into()))
-                            .child(name),
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(color.unwrap_or(p.foreground.into()))
+                                    .child(name),
+                            )
+                            .when(is_agent(Some(&user)), |el| {
+                                el.child(app_badge(
+                                    SharedString::from(format!("member-badge|{}", user.id)),
+                                    "AGENT",
+                                    &p,
+                                ))
+                            }),
                     )
+                    .when(crate::core::moderation::timed_out_until(m, now).is_some(), |el| {
+                        el.child(icon("hourglass").size(px(14.0)).text_color(amber))
+                    })
                     .when(!mine, |el| {
                         el.child(
                             div()
@@ -1143,6 +1198,7 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
     } else {
         let (this, key, server) = (ctx.this.clone(), ctx.key.clone(), ctx.server.clone());
         TextView::markdown(SharedString::from(format!("md|{}", m.id)), m.shown.clone())
+            .markdown_extensions(crate::ui::emoji::markdown_extensions())
             .selectable(true)
             .style(TextViewStyle { paragraph_gap: gpui_kit::rems(0.35), ..TextViewStyle::default() })
             .on_link_click(move |url, _, window, cx| match url.strip_prefix(SCHEME) {
@@ -1164,12 +1220,13 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
                         open_card(&this, &key, server.clone(), id, window, cx);
                     }
                 }
-                None => cx.open_url(url),
+                None => crate::ui::text::open_link(url, cx),
             })
             .w_full()
             .into_any_element()
     };
-    let author = m.user.as_ref().map(|u| u.id.clone());
+    // Apps and bots have no profile to open; agents do.
+    let author = m.user.as_ref().filter(|_| matches!(m.badge, None | Some("AGENT"))).map(|u| u.id.clone());
     let name = div()
         .id(SharedString::from(format!("name|{}", m.id)))
         .font_weight(FontWeight::EXTRA_BOLD)
@@ -1184,7 +1241,17 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
     let time = div().text_xs().text_color(p.muted_foreground).child(when(m.at));
     let mut body = div().flex_1().min_w_0().flex().flex_col();
     if m.head {
-        body = body.child(div().flex().items_baseline().gap(px(8.0)).child(name).child(time));
+        body = body.child(
+            div()
+                .flex()
+                .items_baseline()
+                .gap(px(8.0))
+                .child(name)
+                .when_some(m.badge, |el, badge| {
+                    el.child(app_badge(SharedString::from(format!("badge|{}", m.id)), badge, p))
+                })
+                .child(time),
+        );
     }
     body = body.child(
         div()
@@ -1196,6 +1263,9 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
                 el.child(div().text_xs().text_color(p.muted_foreground).child("(edited)"))
             }),
     );
+    if !m.embeds.is_empty() {
+        body = body.child(crate::ui::embeds::embeds(&m.id, &m.embeds, p));
+    }
     if let Some(reason) = &m.failed {
         let (retry, dismiss) = (ctx.this.clone(), ctx.this.clone());
         let nonce = m.nonce;
@@ -1298,7 +1368,7 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
             })
             .when(can_delete, |el| {
                 let this = ctx.this.clone();
-                el.child(icon_button_in(SharedString::from(format!("del|{id}")), "trash-2", p, p.destructive).on_click(
+                el.child(icon_button_in(SharedString::from(format!("del|{id}")), "trash", p, p.destructive).on_click(
                     move |_, _, cx| {
                         let _ = this.update(cx, |this, cx| this.delete(id.clone(), cx));
                     },
@@ -1494,6 +1564,8 @@ fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::Au
         failed: None,
         nonce: 0,
         unreadable: false,
+        badge: Some("BOT"),
+        embeds: Vec::new(),
     }
 }
 
@@ -1505,4 +1577,29 @@ fn span(seconds: i64) -> String {
         s => (s, "second"),
     };
     format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
+}
+
+/// An emoji to pick: a server's own picture, or the character.
+pub(crate) fn emoji_glyph(choice: &crate::ui::emoji::Choice, size: f32) -> AnyElement {
+    let base = div().size(px(size + 2.0)).flex_none().flex().items_center().justify_center();
+    match &choice.url {
+        Some(url) => base
+            .child({
+                use gpui_kit::StyledImage as _;
+                gpui_kit::img(SharedString::from(url.clone())).size(px(size)).object_fit(gpui_kit::ObjectFit::Contain)
+            })
+            .into_any_element(),
+        None => base.text_size(px(size * 0.85)).child(choice.insert.clone()).into_any_element(),
+    }
+}
+
+/// Who a webhook message says it's from, drawn like a person with no profile.
+fn webhook_author(w: &pb::MessageWebhook) -> pb::User {
+    pb::User {
+        id: w.webhook_id.clone(),
+        username: w.name.clone(),
+        display_name: w.name.clone(),
+        avatar_url: w.avatar_url.clone(),
+        ..Default::default()
+    }
 }

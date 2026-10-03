@@ -3,13 +3,15 @@
 //! app's own settings, which apply to every instance.
 //!
 //! Both are JSON files in the app's config folder (`FUWA_DESKTOP_HOME` moves
-//! everything, for tests and portable installs). Tokens never leave this
-//! computer except to their own instance, like the web app's localStorage.
+//! everything, for tests and portable installs). The tokens themselves live
+//! in the system keychain (see `secrets.rs`), never in these files, and
+//! never leave this computer except to their own instance.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::secrets::Secrets;
 use crate::core::vault::write_json;
 
 /// Where the app keeps its files.
@@ -49,19 +51,52 @@ impl Paths {
     }
 }
 
-/// An instance you added.
+/// An instance you added, with its session token when you're signed in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedInstance {
     pub url: String,
+    /// Only ever read from older files, which kept it here: it's moved to the keychain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
 }
 
-pub fn load_instances(paths: &Paths) -> Vec<SavedInstance> {
-    read(&paths.instances()).unwrap_or_default()
+fn token_name(url: &str) -> String {
+    format!("token:{url}")
 }
 
-pub fn store_instances(paths: &Paths, list: &[SavedInstance]) {
-    if let Err(err) = write_json(&paths.instances(), list) {
+pub fn load_instances(paths: &Paths, secrets: &Secrets) -> Vec<SavedInstance> {
+    let mut list: Vec<SavedInstance> = read(&paths.instances()).unwrap_or_default();
+    let mut moved = false;
+    for saved in &mut list {
+        match saved.token.take() {
+            // From before tokens moved to the keychain.
+            Some(token) => {
+                secrets.set(&token_name(&saved.url), &token);
+                saved.token = Some(token);
+                moved = true;
+            }
+            None => saved.token = secrets.get(&token_name(&saved.url)),
+        }
+    }
+    if moved {
+        store_instances(paths, secrets, &list);
+    }
+    list
+}
+
+pub fn store_instances(paths: &Paths, secrets: &Secrets, list: &[SavedInstance]) {
+    let before: Vec<SavedInstance> = read(&paths.instances()).unwrap_or_default();
+    for gone in before.iter().filter(|b| !list.iter().any(|s| s.url == b.url)) {
+        secrets.delete(&token_name(&gone.url));
+    }
+    for saved in list {
+        match &saved.token {
+            Some(token) => secrets.set(&token_name(&saved.url), token),
+            None => secrets.delete(&token_name(&saved.url)),
+        }
+    }
+    let plain: Vec<SavedInstance> = list.iter().map(|s| SavedInstance { url: s.url.clone(), token: None }).collect();
+    if let Err(err) = write_json(&paths.instances(), &plain) {
         tracing::warn!("couldn't save the instance list: {err}");
     }
 }
@@ -112,6 +147,8 @@ pub struct Prefs {
     pub notifications: bool,
     /// Which messages notify you in servers whose settings don't say.
     pub notify_for: NotifyFor,
+    /// Servers whose welcome screen you've seen, as `instance/server`.
+    pub welcomed: std::collections::BTreeSet<String>,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -133,6 +170,7 @@ impl Default for Prefs {
             text_scale: 1.0,
             notifications: true,
             notify_for: NotifyFor::Mentions,
+            welcomed: Default::default(),
         }
     }
 }
@@ -164,13 +202,25 @@ mod tests {
 
     #[test]
     fn instances_and_prefs_round_trip() {
+        // SAFETY: tests in this binary don't read this variable concurrently with a write.
+        unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
         let home = tempfile::tempdir().unwrap();
         let paths = Paths::under(home.path());
-        assert!(load_instances(&paths).is_empty());
+        let secrets = Secrets::open(&paths.config);
+        assert!(load_instances(&paths, &secrets).is_empty());
         assert_eq!(load_prefs(&paths), Prefs::default());
         let list = vec![SavedInstance { url: "https://fuwa.chat".into(), token: Some("t".into()) }];
-        store_instances(&paths, &list);
-        assert_eq!(load_instances(&paths), list);
+        store_instances(&paths, &secrets, &list);
+        assert_eq!(load_instances(&paths, &secrets), list);
+        // The token isn't in the instance list's file.
+        let file = std::fs::read_to_string(home.path().join("config/instances.json")).unwrap();
+        assert!(!file.contains("\"t\""), "{file}");
+        // A file from before the keychain hands its tokens over.
+        std::fs::write(home.path().join("config/instances.json"), r#"[{"url":"https://old.chat","token":"o"}]"#)
+            .unwrap();
+        let moved = load_instances(&paths, &secrets);
+        assert_eq!(moved[0].token.as_deref(), Some("o"));
+        assert!(!std::fs::read_to_string(home.path().join("config/instances.json")).unwrap().contains("\"o\""));
         let prefs = Prefs { theme: ThemeChoice::Dark, streamer_mode: true, ..Prefs::default() };
         store_prefs(&paths, &prefs);
         assert_eq!(load_prefs(&paths), prefs);

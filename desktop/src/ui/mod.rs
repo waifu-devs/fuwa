@@ -6,12 +6,18 @@ mod assets;
 mod chat;
 mod compose;
 mod connect;
+mod embeds;
+mod emoji;
+mod emoji_picker;
+mod http;
 mod mentions;
 mod menus;
+mod moderate;
 mod motion;
 mod notify;
 mod overlay;
 mod rail;
+mod server_settings;
 mod settings;
 mod settings_account;
 mod sidebar;
@@ -46,7 +52,12 @@ pub fn run() -> anyhow::Result<()> {
 
     let core = Core::start(paths)?;
 
-    gpui_kit::application().with_assets(assets::Assets).run(move |cx| {
+    let trusted: http::Trusted = {
+        let core = core.clone();
+        std::sync::Arc::new(move || core.instance_urls())
+    };
+    let pictures = std::sync::Arc::new(http::Client::new(core.handle(), trusted));
+    gpui_kit::application().with_assets(assets::Assets).with_http_client(pictures).run(move |cx| {
         gpui_kit::init(cx);
         theme::load_fonts(cx);
         app::bind_keys(cx);

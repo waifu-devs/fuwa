@@ -169,7 +169,11 @@ impl Api {
                     .chars()
                     .take(64)
                     .collect();
-                let avatar_url = identity.picture.as_deref().and_then(|picture| url("avatar_url", picture).ok());
+                let avatar_url = identity
+                    .picture
+                    .as_deref()
+                    .and_then(|picture| url("avatar_url", picture).ok())
+                    .map(|picture| self.app.picture_link(&picture));
                 node.create_linked_account(&NewLinkedAccount {
                     kind: pb::AccountKind::Linked,
                     issuer: &sign_in.issuer,
@@ -299,8 +303,20 @@ impl Api {
             }
             None => None,
         };
-        let avatar_url = req.avatar_url.as_deref().map(|value| url("avatar_url", value)).transpose()?;
-        let banner_url = req.banner_url.as_deref().map(|value| url("banner_url", value)).transpose()?;
+        // Pictures from other sites come through the instance, so nobody
+        // who looks at them is seen by that site.
+        let avatar_url = req
+            .avatar_url
+            .as_deref()
+            .map(|value| url("avatar_url", value))
+            .transpose()?
+            .map(|v| self.app.picture_link(&v));
+        let banner_url = req
+            .banner_url
+            .as_deref()
+            .map(|value| url("banner_url", value))
+            .transpose()?
+            .map(|v| self.app.picture_link(&v));
         let old_banner = match &banner_url {
             Some(_) => {
                 self.app.node()?.profile(&account.id).await?.map(|profile| profile.banner_url).unwrap_or_default()

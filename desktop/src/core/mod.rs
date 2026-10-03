@@ -11,8 +11,11 @@ pub mod api;
 pub mod config;
 pub mod dms;
 pub mod linked;
+pub mod moderation;
 pub mod notifications;
 pub mod permissions;
+pub mod secrets;
+pub mod server_admin;
 pub mod store;
 mod sync;
 pub mod vault;
@@ -123,6 +126,9 @@ impl Engine {
 pub struct Core {
     pub shared: Shared,
     pub paths: Paths,
+    secrets: secrets::Secrets,
+    /// Encrypts the vaults on disk; kept in the system keychain.
+    pub(crate) vault_key: [u8; 32],
     runtime: tokio::runtime::Runtime,
     engines: Mutex<HashMap<String, Engine>>,
     prefs: Mutex<Prefs>,
@@ -149,17 +155,24 @@ impl Core {
             version: Arc::new(version_tx),
             notices: notices_tx,
         };
+        // Only you can open the app's folders.
+        vault::private_dir(&paths.config)?;
+        vault::private_dir(&paths.vaults)?;
+        let secrets = secrets::Secrets::open(&paths.config);
+        let vault_key = secrets.vault_key();
         let prefs = config::load_prefs(&paths);
         let core = Arc::new(Self {
             shared,
             paths,
+            secrets,
+            vault_key,
             runtime,
             engines: Mutex::new(HashMap::new()),
             prefs: Mutex::new(prefs),
             version,
             notices: Mutex::new(Some(notices)),
         });
-        for saved in config::load_instances(&core.paths) {
+        for saved in config::load_instances(&core.paths, &core.secrets) {
             core.add_instance(&saved.url, saved.token);
         }
         Ok(core)
@@ -175,6 +188,11 @@ impl Core {
             let _ = tx.send(future.await);
         });
         rx
+    }
+
+    /// The core's runtime, for work the window hands it (fetching pictures).
+    pub fn handle(&self) -> tokio::runtime::Handle {
+        self.runtime.handle().clone()
     }
 
     /// Changes whenever the store does.
@@ -217,7 +235,12 @@ impl Core {
                     .collect()
             })
         };
-        config::store_instances(&self.paths, &list);
+        config::store_instances(&self.paths, &self.secrets, &list);
+    }
+
+    /// The addresses of the instances you added.
+    pub fn instance_urls(&self) -> Vec<String> {
+        self.engines.lock().values().map(|e| e.api.url.clone()).collect()
     }
 
     pub fn api(&self, key: &str) -> Option<Api> {
@@ -346,6 +369,13 @@ impl Core {
             })
         )
         .await?;
+        // The page comes from the instance: open it only if it's a real web page.
+        if !linked::safe_sign_in_page(&started.authorize_url) {
+            return Err(Problem::new(
+                tonic::Code::PermissionDenied,
+                "The instance gave a sign-in page that isn't https, so fuwa won't open it.",
+            ));
+        }
         open_page(&started.authorize_url);
         match callback.wait(&started.state).await {
             linked::Returned::Code { code, state } => {

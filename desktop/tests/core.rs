@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fuwa_desktop::core::config::Paths;
-use fuwa_desktop::core::dms::{Content, DmStatus};
+use fuwa_desktop::core::dms::{Content, DmStatus, now_ms};
+use fuwa_desktop::core::moderation::{Action, timed_out_until};
 use fuwa_desktop::core::store::{Connection, Focus, Store};
 use fuwa_desktop::core::vault::ItemKind;
 use fuwa_desktop::core::{Core, Notice};
@@ -60,6 +61,9 @@ fn until(core: &Core, what: &str, check: impl Fn(&Store) -> bool) {
 
 #[test]
 fn two_people_talk_in_a_server_and_in_private() {
+    // Secrets stay in the test's own folders, out of this computer's keychain.
+    // SAFETY: set before anything reads it.
+    unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
     let data = tempfile::tempdir().unwrap();
     let instance = start_instance(data.path());
     let (home_a, home_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -225,6 +229,29 @@ fn two_people_talk_in_a_server_and_in_private() {
         s.instance(&key).unwrap().dms.safety.get(&conversation).is_some_and(|n| n.len() == 60)
     });
     assert_eq!(safety(&alice), safety(&bob));
+
+    // Alice owns the server, so she may time Bob out, kick or ban him; he
+    // may do nothing to her. A time-out reaches Bob live, and so does a kick.
+    let alice_id = alice.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().id);
+    let sid = server.id.clone();
+    assert_eq!(alice.shared.read(|s| s.instance(&key).unwrap().can_moderate(&sid, &bob_id)).len(), 3);
+    assert!(bob.shared.read(|s| s.instance(&key).unwrap().can_moderate(&sid, &alice_id)).is_empty());
+    {
+        let (core, key, sid, bob_id) = (alice.clone(), key.clone(), sid.clone(), bob_id.clone());
+        wait(&alice, async move { core.moderate(&key, &sid, &bob_id, Action::TimeOut(600), "calm down").await })
+            .unwrap();
+    }
+    until(&bob, "his time-out", |s| {
+        s.instance(&key).unwrap().my_member(&sid).is_some_and(|m| timed_out_until(m, now_ms()).is_some())
+    });
+    {
+        let (core, key, sid, bob_id) = (alice.clone(), key.clone(), sid.clone(), bob_id.clone());
+        wait(&alice, async move { core.moderate(&key, &sid, &bob_id, Action::Kick, "").await }).unwrap();
+    }
+    until(&bob, "being kicked", |s| s.instance(&key).unwrap().server(&sid).is_none());
+    assert!(alice.shared.read(|s| {
+        s.instance(&key).unwrap().members[&sid].iter().all(|m| m.user.as_ref().is_none_or(|u| u.id != bob_id))
+    }));
 
     // What the instance keeps is ciphertext only: the words appear nowhere in its files.
     let mut found = false;

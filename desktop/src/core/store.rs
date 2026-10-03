@@ -54,6 +54,8 @@ pub struct InstanceState {
     pub members: HashMap<String, Vec<pb::Member>>,
     /// Per server, highest first.
     pub roles: HashMap<String, Vec<pb::Role>>,
+    /// Per server, its own emoji.
+    pub emojis: HashMap<String, Vec<pb::Emoji>>,
     /// Everyone this instance has shown us, by id, so authors resolve even after they leave.
     pub users: HashMap<String, pb::User>,
     /// Per channel, only for channels someone opened.
@@ -82,6 +84,7 @@ impl InstanceState {
             channels: HashMap::new(),
             members: HashMap::new(),
             roles: HashMap::new(),
+            emojis: HashMap::new(),
             users: HashMap::new(),
             messages: HashMap::new(),
             pending: HashMap::new(),
@@ -240,6 +243,7 @@ pub fn remove_server(i: &mut InstanceState, server_id: &str) {
     i.channels.remove(server_id);
     i.members.remove(server_id);
     i.roles.remove(server_id);
+    i.emojis.remove(server_id);
     i.synced.remove(server_id);
     for id in channels {
         i.messages.remove(&id);
@@ -268,6 +272,7 @@ pub fn apply_snapshot(
     channels: Vec<pb::Channel>,
     mut members: Vec<pb::Member>,
     mut roles: Vec<pb::Role>,
+    emojis: Vec<pb::Emoji>,
 ) {
     let id = server.id.clone();
     add_server(i, server);
@@ -279,6 +284,7 @@ pub fn apply_snapshot(
     sort_roles(&mut roles);
     i.members.insert(id.clone(), members);
     i.roles.insert(id.clone(), roles);
+    i.emojis.insert(id.clone(), emojis);
     i.synced.insert(id);
 }
 
@@ -382,6 +388,9 @@ pub fn apply_event(i: &mut InstanceState, event: &pb::Event, focus: Option<&str>
             list.push(role.clone());
             sort_roles(list);
         }
+        Payload::EmojisUpdated(p) => {
+            i.emojis.insert(sid.to_owned(), p.emojis.clone());
+        }
         Payload::RoleDeleted(p) => {
             // The server takes it from everyone and every channel without saying so for each.
             if let Some(list) = i.roles.get_mut(sid) {
@@ -437,7 +446,7 @@ mod tests {
         i.me = Some(pb::User { id: "me".into(), ..Default::default() });
         let server = pb::Server { id: "s".into(), member_count: 2, ..Default::default() };
         let channel = pb::Channel { id: "c".into(), server_id: "s".into(), ..Default::default() };
-        apply_snapshot(&mut i, server, vec![channel], vec![], vec![]);
+        apply_snapshot(&mut i, server, vec![channel], vec![], vec![], vec![]);
         i.messages.insert("c".into(), ChannelMessages::default());
         let left = event("s", Payload::MemberLeft(pb::MemberLeft { user_id: "me".into(), reason: 1 }));
         assert_eq!(apply_event(&mut i, &left, None), Outcome::Gone);

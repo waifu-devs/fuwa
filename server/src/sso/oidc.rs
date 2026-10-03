@@ -7,7 +7,7 @@
 //! refuses to reach loopback, private or link-local addresses.
 
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -17,6 +17,7 @@ use serde::Deserialize;
 
 use super::{Identity, Provider};
 use crate::error::{Error, Result};
+use crate::outside::{PublicOnly, is_public};
 
 /// How long what an issuer says about itself is remembered.
 const DISCOVERY_TTL_MS: i64 = 10 * 60 * 1000;
@@ -33,57 +34,6 @@ struct Discovery {
     jwks_uri: String,
     #[serde(default)]
     token_endpoint_auth_methods_supported: Vec<String>,
-}
-
-/// Whether an address is out on the internet: not this machine, a private
-/// network, link-local, shared, documentation or reserved space.
-pub fn is_public(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            let [a, b, ..] = v4.octets();
-            !(v4.is_private()
-                || v4.is_loopback()
-                || v4.is_link_local()
-                || v4.is_broadcast()
-                || v4.is_documentation()
-                || v4.is_unspecified()
-                || v4.is_multicast()
-                || a == 0
-                || a >= 240
-                || (a == 100 && (64..128).contains(&b))
-                || (a == 192 && b == 0 && v4.octets()[2] == 0)
-                || (a == 198 && (18..20).contains(&b)))
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_public(IpAddr::V4(v4));
-            }
-            let first = v6.segments()[0];
-            !(v6.is_loopback()
-                || v6.is_unspecified()
-                || v6.is_multicast()
-                || first & 0xfe00 == 0xfc00
-                || first & 0xffc0 == 0xfe80
-                || (first == 0x2001 && v6.segments()[1] == 0xdb8)
-                || first == 0x0064)
-        }
-    }
-}
-
-/// Resolves names only to public addresses.
-struct PublicOnly;
-
-impl reqwest::dns::Resolve for PublicOnly {
-    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
-        Box::pin(async move {
-            let found: Vec<SocketAddr> = tokio::net::lookup_host((name.as_str(), 0)).await?.collect();
-            let public: Vec<SocketAddr> = found.into_iter().filter(|addr| is_public(addr.ip())).collect();
-            if public.is_empty() {
-                return Err(format!("{} has no public address", name.as_str()).into());
-            }
-            Ok(Box::new(public.into_iter()) as reqwest::dns::Addrs)
-        })
-    }
 }
 
 /// The client for fetches to a provider; `public_only` for providers a
@@ -115,7 +65,11 @@ fn fetchable(url: &str, public_only: bool) -> Result<reqwest::Url> {
             return Err(refused());
         }
         match parsed.host() {
-            Some(url::Host::Domain(name)) if name.eq_ignore_ascii_case("localhost") || name.ends_with(".localhost") => {
+            Some(url::Host::Domain(name))
+                if name.eq_ignore_ascii_case("localhost")
+                    || name.ends_with(".localhost")
+                    || name.ends_with(".internal") =>
+            {
                 return Err(refused());
             }
             Some(url::Host::Ipv4(ip)) if !is_public(IpAddr::V4(ip)) => return Err(refused()),

@@ -68,9 +68,10 @@
     independent library are in `sso/testdata/`). `http.rs` takes providers'
     answers at `/sso/instance/...` and `/sso/servers/<id>/...` and sends the
     browser to `/auth/sso/done#...`. Server-scope providers are fetched only
-    from public addresses (`oidc::PublicOnly`). The instance's flow is
-    `AuthService`'s Start/Get/FinishSsoSignIn (SSO accounts, kind `SSO`, keyed
-    by the provider and subject); a server's is `api/sso.rs` (`SsoService`),
+    from public addresses (`outside::PublicOnly`, shared with picture
+    fetches). The instance's flow is `AuthService`'s
+    Start/Get/FinishSsoSignIn (SSO accounts, kind `SSO`, keyed by the
+    provider and subject); a server's is `api/sso.rs` (`SsoService`),
     whose sign-ins live in the server file's `sso_identities`. A required
     provider gates `let_in` and, through `permissions::Access::lock_out`,
     hides every channel from members whose sign-in is missing or older than
@@ -152,6 +153,15 @@
     reserved with `MediaService.CreateUpload` (`api/media.rs`) and checks its
     bytes really are the picture type it claims; `GET /media/<id>` serves it.
     Pictures nothing uses are swept hourly and at startup.
+  - `outside.rs`: pictures from other sites. No client ever loads a picture
+    from anywhere but a fuwa instance, since that site would learn the
+    reader's IP address: any picture link that isn't an upload (embed images,
+    webhook post avatars, the waifu.dev picture) is rewritten when stored, with
+    `App::picture_link`, to `/media/outside/<hmac>?url=...`, which the instance
+    fetches itself (public addresses only, pictures only, 8 MB, cached). The
+    key is from FUWA_CLUSTER_KEY when split, else node.db's `meta`. New
+    fields that hold a picture link go through `picture_link` too; the web
+    app's `lib/shown.ts` hides any that don't.
   - `migrations/node`, `migrations/server`: SQL applied in order, tracked in
     `PRAGMA user_version`. Never edit a migration that has shipped; add a new file
     and list it in `MIGRATIONS`.
@@ -197,12 +207,19 @@
     subscribe, snapshot, apply, reconnect), `dms.rs` and `vault.rs` (one MLS
     device per install and account, through `fuwa-e2ee`'s `client` feature,
     kept in 0600 files under the app's data folder; signing out wipes it),
-    `linked.rs` (waifu.dev sign-in through the browser and a loopback page),
-    `config.rs` (saved instances and the app's settings), `permissions.rs`
+    `linked.rs` (waifu.dev sign-in through the browser and a loopback page;
+    the sign-in page must be https, or http on this computer),
+    `config.rs` (saved instances and the app's settings; no tokens),
+    `secrets.rs` (session tokens and the vault key in the system keychain,
+    named per data folder, with a 0600 file only where there's no keychain;
+    vault files are sealed with XChaCha20-Poly1305 under that key), `permissions.rs`
     (what you may do in a server, a port of `web/src/lib/permissions.ts`),
     `notifications.rs` (per channel and server levels and mutes, kept on the
     instance, and whether a message should notify), `account.rs` (profile,
-    pictures, password, signed-in devices, rules, creating channels). It runs on its own
+    pictures, password, signed-in devices, rules, the welcome screen, creating
+    channels), `moderation.rs` (time outs, kicks and bans, and who may do
+    them to whom: the permission plus outranking them), `server_admin.rs`
+    (a server's settings, invites, bans and audit log). It runs on its own
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
@@ -210,13 +227,23 @@
     place (and the keys they take first), `mentions.rs` finds mentions and
     makes them links, `menus.rs` the bell menus, `notify.rs` the system
     notifications (clicks come back through a channel), `settings_account.rs`
-    the profile and security pages; `motion.rs` is how things move (springs,
+    the profile and security pages, `server_settings.rs` a server's settings
+    (overview, invites, members, bans, audit log; the server's name opens
+    it), `moderate.rs` the time out, kick and ban
+    buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
+    the `:name:` list, and a Markdown plugin that draws emoji inline),
+    `emoji_picker.rs` the picker by the composer, `embeds.rs` the cards apps
+    post through webhooks; `http.rs` fetches pictures for `img` on the core's
+    runtime (GPUI's own client loads nothing): from your instances, from
+    anywhere; from anyone else, only https to public addresses, checked
+    after DNS and on every redirect. Markdown goes through `text::markdown`,
+    whose links open only for http(s) and mailto. `motion.rs` is how things move (springs,
     rises, glides, all settling at once with reduced motion); `theme.rs` is
     the web app's palettes and the bundled font (M PLUS Rounded 1c, whose
     files name the family "Rounded Mplus 1c").
   - `tests/core.rs`: two app cores against an in-process instance: servers,
     live messages, mentions that notify, edits, mutes kept on the instance,
-    unread counts, encrypted DMs both ways, and that no plaintext reaches the
+    unread counts, time-outs and kicks reaching the person live, encrypted DMs both ways, and that no plaintext reaches the
     instance's files.
   - `packaging/`: the icon (`icon.svg`, and the PNGs and `.ico` made from it)
     for the installers. `[package.metadata.packager]` in `Cargo.toml` tells

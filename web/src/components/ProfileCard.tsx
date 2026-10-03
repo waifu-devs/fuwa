@@ -8,6 +8,7 @@ import { SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { AppBadge } from "@/components/AppBadge";
 import { colorCss, displayName, isAgent, shownStatus, toDate } from "@/lib/format";
+import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
 const stagger = (n: number) => ({ ...SPRING, delay: 0.06 + n * 0.04 });
@@ -69,7 +70,7 @@ export function ProfileCard({
             className={cn("absolute inset-0 transition-colors duration-500", accent === undefined && "server-gradient")}
           >
             {accent !== undefined && <span className="absolute inset-0 bg-gradient-to-br from-transparent via-transparent to-black/45" />}
-            {profile?.bannerUrl && <img src={profile.bannerUrl} alt="" className="relative size-full object-cover" draggable={false} />}
+            {shownPicture(profile?.bannerUrl) && <img src={shownPicture(profile?.bannerUrl)} alt="" className="relative size-full object-cover" draggable={false} />}
           </motion.div>
         </AnimatePresence>
       </div>

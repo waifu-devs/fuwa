@@ -194,11 +194,12 @@ impl DmEngine {
         me: pb::User,
         token: &str,
         vaults: PathBuf,
+        vault_key: [u8; 32],
         shared: Shared,
     ) -> Result<Arc<Self>> {
         let session = sha256_hex(token.as_bytes());
         let dir = Vault::dir_for(&vaults, key, &me.id);
-        let mut vault = tokio::task::spawn_blocking(move || Vault::open(dir, &session))
+        let mut vault = tokio::task::spawn_blocking(move || Vault::open(dir, &session, vault_key))
             .await
             .map_err(|e| DmError(e.to_string()))??;
         let stored = vault.device();

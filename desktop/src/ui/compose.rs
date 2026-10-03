@@ -7,13 +7,17 @@ use crate::core::dms::Content;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Picker, Target};
 use crate::ui::chat::Row;
-use crate::ui::mentions;
+use crate::ui::{emoji, mentions};
 
 impl FuwaApp {
     /// Takes the keys the @ list and editing use. True when it took the key.
     pub(crate) fn intercept(&mut self, key: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let m = &key.modifiers;
         let bare = !(m.shift || m.control || m.alt || m.platform || m.function);
+        if self.emoji_open && key.key == "escape" {
+            self.close_emoji(window, cx);
+            return true;
+        }
         if self.edit_box.read(cx).focus_handle(cx).is_focused(window) {
             if key.key == "escape" {
                 self.cancel_edit(window, cx);
@@ -50,9 +54,9 @@ impl FuwaApp {
         false
     }
 
-    /// Opens, moves or closes the @ list as the text changes.
+    /// Opens, moves or closes the @ list (or the : one) as the text changes.
     pub(crate) fn update_picker(&mut self, cx: &mut Context<Self>) {
-        let Some(Target::Channel { key, server, channel }) = self.target() else {
+        let Some(target) = self.target() else {
             self.picker = None;
             return;
         };
@@ -60,7 +64,14 @@ impl FuwaApp {
             let state = self.composer.read(cx);
             (state.value().to_string(), state.cursor())
         };
-        let Some((start, query)) = mentions::token(&text, caret) else {
+        let mention = match &target {
+            Target::Channel { .. } => mentions::token(&text, caret),
+            Target::Dm { .. } => None,
+        };
+        let Some((start, query, kind)) = mention
+            .map(|(start, query)| (start, query, '@'))
+            .or_else(|| emoji::typing(&text, caret).map(|(start, query)| (start, query, ':')))
+        else {
             self.picker = None;
             self.picker_dismissed = None;
             return;
@@ -69,13 +80,21 @@ impl FuwaApp {
             self.picker = None;
             return;
         }
-        let options = self.core.shared.read(|s| {
-            s.instance(&key)
-                .map(|i| {
-                    let everyone = i.access(&server).has_in(&channel, pb::Permission::MentionEveryone);
-                    mentions::options(i, &server, &query, everyone)
+        let options = self.core.shared.read(|s| match &target {
+            Target::Channel { key, server, channel } => s
+                .instance(key)
+                .map(|i| match kind {
+                    '@' => {
+                        let everyone = i.access(server).has_in(channel, pb::Permission::MentionEveryone);
+                        mentions::options(i, server, &query, everyone)
+                    }
+                    _ => {
+                        let own = i.emojis.get(server).map(Vec::as_slice).unwrap_or_default();
+                        emoji::search(&query, own, 8).into_iter().map(mentions::Pick::Emoji).collect()
+                    }
                 })
-                .unwrap_or_default()
+                .unwrap_or_default(),
+            Target::Dm { .. } => emoji::search(&query, &[], 8).into_iter().map(mentions::Pick::Emoji).collect(),
         });
         if options.is_empty() {
             self.picker = None;
@@ -105,11 +124,30 @@ impl FuwaApp {
         cx.notify();
     }
 
-    /// The text to send, with picked roles as their tokens.
+    /// The text to send, with picked roles and the server's emoji as their tokens.
     pub(crate) fn encode_mentions(&mut self, text: &str) -> String {
         let out = mentions::encode(text, &self.picked_roles);
         self.picked_roles.clear();
-        out
+        self.encode_emoji(&out)
+    }
+
+    /// `:name:` of the open server's emoji as their tokens.
+    pub(crate) fn encode_emoji(&self, text: &str) -> String {
+        let Some(Target::Channel { key, server, .. }) = self.target() else { return text.to_owned() };
+        self.core.shared.read(|s| {
+            let own = s.instance(&key).and_then(|i| i.emojis.get(&server)).map(Vec::as_slice).unwrap_or_default();
+            emoji::encode(text, own)
+        })
+    }
+
+    /// Puts text in the composer where the caret is, from the emoji picker.
+    pub(crate) fn insert_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let text = text.to_owned();
+        self.composer.update(cx, |state, cx| {
+            state.replace(text, window, cx);
+            state.focus(window, cx);
+        });
+        cx.notify();
     }
 
     // ───────────────────────── Editing ─────────────────────────
@@ -167,6 +205,7 @@ impl FuwaApp {
         let core = self.core.clone();
         match self.target() {
             Some(Target::Channel { key, server, .. }) => {
+                let text = self.encode_emoji(&text);
                 self.run(cx, async move { core.edit_message(&key, &server, &id, &text).await }, |this, result, cx| {
                     if let Err(err) = result {
                         this.toast("circle-alert", "Couldn't edit that".into(), err.message, None, None, cx);
