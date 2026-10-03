@@ -91,6 +91,45 @@ service MediaService {
   rpc Close(CloseRequest) returns (CloseResponse);
   // Changes whether someone is heard and hears others.
   rpc Update(UpdateRequest) returns (UpdateResponse);
+  // Puts a program in a room without WebRTC, for as long as the stream is
+  // open: it gets each person's frames of sound, and ends with why.
+  rpc Bridge(BridgeRequest) returns (stream BridgeResponse);
+  // Queues frames of sound for a bridge to say.
+  rpc Speak(SpeakRequest) returns (SpeakResponse);
+}
+
+message BridgeRequest {
+  string room = 1;
+  string participant = 2;
+  string session_id = 3;
+  bool may_speak = 4;
+  bool may_hear = 5;
+}
+
+message BridgeResponse {
+  oneof event {
+    HeardFrame frame = 1;
+    // "replaced", "restarting" or "closed". A stream that ends without it
+    // was cut off: open it again.
+    string ended = 2;
+  }
+}
+
+message HeardFrame {
+  string participant = 1;
+  bytes frame = 2;
+  uint32 timestamp = 3;
+}
+
+message SpeakRequest {
+  string room = 1;
+  string participant = 2;
+  string session_id = 3;
+  repeated bytes frames = 4;
+}
+
+message SpeakResponse {
+  uint32 queued = 1;
 }
 
 message OpenRequest {

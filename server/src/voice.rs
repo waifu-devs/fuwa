@@ -21,7 +21,10 @@ use crate::cpb;
 use crate::error::{Error, Result};
 use crate::id::{now_ms, timestamp};
 use crate::pb;
-use crate::rtc::Sfu;
+use crate::rtc::{Bridged, Ending, Heard, Sfu};
+
+/// What a bridge hears, wherever its media part is.
+pub type BridgeEvents = std::pin::Pin<Box<dyn futures::Stream<Item = Bridged> + Send>>;
 
 /// How long a place lasts without being kept. Apps keep theirs every 5 seconds.
 pub const LEASE: Duration = Duration::from_secs(15);
@@ -274,6 +277,67 @@ impl MediaLink {
         };
         if let Err(err) = result {
             tracing::info!(room, error = %err, "couldn't hang up a call on its media part");
+        }
+    }
+
+    /// Puts a program in a place's call without WebRTC (see [`Sfu::bridge`]).
+    /// The stream ends with [`Bridged::Ended`], or just ends when the media
+    /// part went away, which is worth opening again.
+    pub async fn bridge(&self, place: &Place) -> Result<BridgeEvents> {
+        use tokio_stream::StreamExt;
+        let user_id = &place.state.user_id;
+        match self {
+            Self::Off(_) => Err(self.off()),
+            Self::Local(sfu) => {
+                let heard =
+                    sfu.bridge(&place.room, user_id, &place.session_id, place.may_speak(), place.may_hear()).await?;
+                Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(heard)))
+            }
+            Self::Remote(_) => {
+                let client = self.part(&place.room)?;
+                let request = cpb::BridgeRequest {
+                    room: place.room.clone(),
+                    participant: user_id.clone(),
+                    session_id: place.session_id.clone(),
+                    may_speak: place.may_speak(),
+                    may_hear: place.may_hear(),
+                };
+                let stream = crate::cluster::ride_out(crate::cluster::RIDE_OUT, || {
+                    let (mut client, request) = (client.clone(), request.clone());
+                    async move { client.bridge(request).await }
+                })
+                .await?
+                .into_inner();
+                let events = stream.map_while(|event| match event.ok()?.event? {
+                    cpb::bridge_response::Event::Frame(f) => Some(Bridged::Frame(Heard {
+                        participant: f.participant,
+                        frame: f.frame,
+                        timestamp: f.timestamp,
+                    })),
+                    cpb::bridge_response::Event::Ended(why) => Some(Bridged::Ended(Ending::parse(&why))),
+                });
+                Ok(Box::pin(events))
+            }
+        }
+    }
+
+    /// Queues frames for a place's bridge to say; how many are waiting.
+    pub async fn speak(&self, place: &Place, frames: Vec<Vec<u8>>) -> Result<usize> {
+        let user_id = &place.state.user_id;
+        match self {
+            Self::Off(_) => Err(self.off()),
+            Self::Local(sfu) => sfu.speak(&place.room, user_id, &place.session_id, frames).await,
+            Self::Remote(_) => {
+                let mut client = self.part(&place.room)?;
+                let request = cpb::SpeakRequest {
+                    room: place.room.clone(),
+                    participant: user_id.clone(),
+                    session_id: place.session_id.clone(),
+                    frames,
+                };
+                let queued = client.speak(request).await.map_err(Error::retried)?.into_inner().queued;
+                Ok(queued as usize)
+            }
         }
     }
 

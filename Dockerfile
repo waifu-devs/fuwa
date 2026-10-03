@@ -16,11 +16,12 @@ RUN rustup target add wasm32-unknown-unknown \
 COPY Cargo.toml Cargo.lock rustfmt.toml ./
 COPY e2ee e2ee
 COPY e2ee-wasm e2ee-wasm
-# The server is in the workspace too; its manifest is enough here.
+# The server and the voice client are in the workspace too; their manifests are enough here.
 COPY server/Cargo.toml server/
-RUN mkdir -p server/src \
+COPY voice/Cargo.toml voice/
+RUN mkdir -p server/src voice/src \
     && echo 'fn main() {}' > server/src/main.rs \
-    && touch server/src/lib.rs \
+    && touch server/src/lib.rs voice/src/lib.rs \
     && cargo build --locked -p fuwa-e2ee-wasm --target wasm32-unknown-unknown --profile wasm \
     && wasm-bindgen --target web --out-dir /pkg target/wasm32-unknown-unknown/wasm/fuwa_e2ee_wasm.wasm
 
@@ -44,12 +45,14 @@ ENV SOURCE_DATE_EPOCH=0
 COPY Cargo.toml Cargo.lock rustfmt.toml ./
 COPY server/Cargo.toml server/build.rs server/
 COPY proto proto
-# The server reads direct messages' headers with e2ee; e2ee-wasm only needs to be there for the workspace.
+# The server reads direct messages' headers with e2ee; e2ee-wasm and the voice
+# client only need to be there for the workspace.
 COPY e2ee e2ee
 COPY e2ee-wasm/Cargo.toml e2ee-wasm/
-RUN mkdir -p server/src e2ee-wasm/src \
+COPY voice/Cargo.toml voice/
+RUN mkdir -p server/src e2ee-wasm/src voice/src \
     && echo 'fn main() {}' > server/src/main.rs \
-    && touch server/src/lib.rs e2ee-wasm/src/lib.rs \
+    && touch server/src/lib.rs e2ee-wasm/src/lib.rs voice/src/lib.rs \
     && cargo build --release --locked --features web --bin fuwa \
     && rm -rf server/src
 

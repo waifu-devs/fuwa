@@ -11,20 +11,49 @@
 //! leaves a call for it; the sound drops for about as long as that takes.
 
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::routing::get;
+use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 
 use crate::config::Config;
 use crate::cpb;
-use crate::rtc::Sfu;
+use crate::rtc::{Bridged, Sfu};
 
 struct Internal(Sfu);
 
+type BridgeStream = Pin<Box<dyn futures::Stream<Item = Result<cpb::BridgeResponse, Status>> + Send>>;
+
 #[tonic::async_trait]
 impl cpb::media_service_server::MediaService for Internal {
+    type BridgeStream = BridgeStream;
+
+    async fn bridge(&self, request: Request<cpb::BridgeRequest>) -> Result<Response<BridgeStream>, Status> {
+        let r = request.into_inner();
+        let heard = self.0.bridge(&r.room, &r.participant, &r.session_id, r.may_speak, r.may_hear).await?;
+        let events = tokio_stream::wrappers::ReceiverStream::new(heard).map(|bridged| {
+            let event = match bridged {
+                Bridged::Frame(h) => cpb::bridge_response::Event::Frame(cpb::HeardFrame {
+                    participant: h.participant,
+                    frame: h.frame,
+                    timestamp: h.timestamp,
+                }),
+                Bridged::Ended(ending) => cpb::bridge_response::Event::Ended(ending.as_str().into()),
+            };
+            Ok(cpb::BridgeResponse { event: Some(event) })
+        });
+        Ok(Response::new(Box::pin(events)))
+    }
+
+    async fn speak(&self, request: Request<cpb::SpeakRequest>) -> Result<Response<cpb::SpeakResponse>, Status> {
+        let r = request.into_inner();
+        let queued = self.0.speak(&r.room, &r.participant, &r.session_id, r.frames).await?;
+        Ok(Response::new(cpb::SpeakResponse { queued: queued as u32 }))
+    }
+
     async fn open(&self, request: Request<cpb::OpenRequest>) -> Result<Response<cpb::OpenResponse>, Status> {
         let r = request.into_inner();
         let answer = self.0.open(&r.room, &r.participant, &r.session_id, &r.offer, r.may_speak, r.may_hear).await?;

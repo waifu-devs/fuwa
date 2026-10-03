@@ -18,6 +18,12 @@
 //! offers and answers for people coming and going (and the notices
 //! "replaced" and "restarting") go over it as JSON, so nothing else needs to
 //! be arranged through the API once someone is in.
+//!
+//! Agents, bots and other programs can be in a room without WebRTC, through
+//! a bridge ([`Sfu::bridge`]): it hears each person's frames of Opus as they
+//! arrive, labelled with whose they are, and what the program says
+//! ([`Sfu::speak`]) goes out to everyone as its own track, paced one 20 ms
+//! frame at a time.
 
 use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -27,7 +33,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use str0m::change::{SdpAnswer, SdpOffer, SdpPendingOffer};
 use str0m::channel::{ChannelData, ChannelId};
-use str0m::media::{Direction, KeyframeRequest, KeyframeRequestKind, MediaData, MediaKind, Mid};
+use str0m::format::Codec;
+use str0m::media::{Direction, Frequency, KeyframeRequest, KeyframeRequestKind, MediaData, MediaKind, MediaTime, Mid};
 use str0m::net::{Protocol, Receive, TcpType};
 use str0m::rtp::Extension;
 use str0m::{Candidate, Event, IceConnectionState, Input, Output, Rtc};
@@ -136,7 +143,76 @@ enum Signal {
     Closed,
 }
 
+/// What a bridge hears, and how it ends.
+#[derive(Debug)]
+pub enum Bridged {
+    /// A frame of someone's sound, as they sent it (Opus; sealed, in
+    /// direct-message calls, but bridges are only for voice channels).
+    Frame(Heard),
+    /// The bridge is over, and why: the same account joined from somewhere
+    /// else, the media part is restarting (open it again), or it was hung up.
+    Ended(Ending),
+}
+
+#[derive(Debug, Clone)]
+pub struct Heard {
+    /// Whose sound: their account.
+    pub participant: String,
+    pub frame: Vec<u8>,
+    /// When it was spoken, in 48 kHz ticks of the speaker's own clock: the
+    /// gaps between frames, not the time of day.
+    pub timestamp: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ending {
+    Replaced,
+    Restarting,
+    Closed,
+}
+
+impl Ending {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Replaced => "replaced",
+            Self::Restarting => "restarting",
+            Self::Closed => "closed",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "replaced" => Self::Replaced,
+            "closed" => Self::Closed,
+            _ => Self::Restarting,
+        }
+    }
+}
+
+/// One Opus frame of what a bridge says goes out every this long.
+pub const FRAME_TIME: Duration = Duration::from_millis(20);
+/// Frames a bridge may have waiting: a second of sound.
+pub const MAX_QUEUED: usize = 50;
+/// Frames a bridge holds for its program before it drops what it hears.
+const BRIDGE_BUFFER: usize = 512;
+
 enum Command {
+    Bridge {
+        room: String,
+        participant: String,
+        session_id: String,
+        may_speak: bool,
+        may_hear: bool,
+        events: mpsc::Sender<Bridged>,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    Speak {
+        room: String,
+        participant: String,
+        session_id: String,
+        frames: Vec<Vec<u8>>,
+        reply: oneshot::Sender<Result<usize>>,
+    },
     Open {
         room: String,
         participant: String,
@@ -244,6 +320,41 @@ impl Sfu {
             session_id: session_id.filter(|s| !s.is_empty()).map(Into::into),
         };
         self.send(command).await
+    }
+
+    /// Puts a program in a room without WebRTC: what it hears comes out of
+    /// the receiver, until it's dropped (which leaves) or it ends.
+    pub async fn bridge(
+        &self,
+        room: &str,
+        participant: &str,
+        session_id: &str,
+        may_speak: bool,
+        may_hear: bool,
+    ) -> Result<mpsc::Receiver<Bridged>> {
+        let (events, heard) = mpsc::channel(BRIDGE_BUFFER);
+        let (reply, answer) = oneshot::channel();
+        self.send(Command::Bridge {
+            room: room.into(),
+            participant: participant.into(),
+            session_id: session_id.into(),
+            may_speak,
+            may_hear,
+            events,
+            reply,
+        })
+        .await?;
+        answer.await.map_err(|_| Error::Unavailable("calls are restarting; try again".into()))??;
+        Ok(heard)
+    }
+
+    /// Queues frames of Opus for a bridge to say, giving back how many are
+    /// waiting now. They go out one every 20 ms.
+    pub async fn speak(&self, room: &str, participant: &str, session_id: &str, frames: Vec<Vec<u8>>) -> Result<usize> {
+        let (reply, answer) = oneshot::channel();
+        let (room, participant, session_id) = (room.into(), participant.into(), session_id.into());
+        self.send(Command::Speak { room, participant, session_id, frames, reply }).await?;
+        answer.await.map_err(|_| Error::Unavailable("calls are restarting; try again".into()))?
     }
 
     /// Changes whether someone may speak and hear, saying whether they (in
@@ -446,7 +557,7 @@ const OFFER_WINDOW: Duration = Duration::from_secs(10);
 const MAX_BYTES_PER_SECOND: usize = 80 * 1024;
 /// The largest frame of sound passed on: Opus frames are 1275 bytes at most,
 /// plus the encryption trailer in direct-message calls.
-const MAX_FRAME: usize = 1500;
+pub const MAX_FRAME: usize = 1500;
 
 /// Whether an app's offer asks for what calls allow: sending one audio
 /// track at most (video comes later), receiving the others' tracks, and the
@@ -683,21 +794,101 @@ impl Client {
         }
     }
 
+    /// The track this connection hears `origin`'s `mid` on, once it's open.
+    fn track_from(&self, origin: ClientId, mid: Mid) -> Option<Mid> {
+        self.tracks_out.iter().find_map(|out| {
+            let from = out.from.upgrade()?;
+            (from.origin == origin && from.mid == mid).then(|| out.mid()).flatten()
+        })
+    }
+
     fn forward(&mut self, origin: ClientId, data: &MediaData) {
         if !self.may_hear || self.leaving.is_some() {
             return;
         }
-        let mid = self.tracks_out.iter().find_map(|out| {
-            let from = out.from.upgrade()?;
-            (from.origin == origin && from.mid == data.mid).then(|| out.mid()).flatten()
-        });
-        let Some(mid) = mid else { return };
+        let Some(mid) = self.track_from(origin, data.mid) else { return };
         let Some(writer) = self.rtc.writer(mid) else { return };
         let Some(pt) = writer.match_params(data.params) else { return };
         if let Err(err) = writer.write(pt, data.network_time, data.time, data.data.clone()) {
             tracing::debug!(client = self.id, error = %err, "couldn't pass sound on");
             self.rtc.disconnect();
         }
+    }
+
+    /// Passes on a frame of Opus a bridge said.
+    fn forward_said(&mut self, origin: ClientId, from: Mid, now: Instant, time: MediaTime, frame: &[u8]) {
+        if !self.may_hear || self.leaving.is_some() {
+            return;
+        }
+        let Some(mid) = self.track_from(origin, from) else { return };
+        let Some(writer) = self.rtc.writer(mid) else { return };
+        let Some(pt) = writer.payload_params().find(|p| p.spec().codec == Codec::Opus).map(|p| p.pt()) else { return };
+        if let Err(err) = writer.write(pt, now, time, frame.to_vec()) {
+            tracing::debug!(client = self.id, error = %err, "couldn't pass a bridge's sound on");
+        }
+    }
+}
+
+/// A program in a room without WebRTC: it hears through `events`, and says
+/// what's in `queue`, one frame every [`FRAME_TIME`].
+struct Bridge {
+    id: ClientId,
+    room: String,
+    participant: String,
+    session_id: String,
+    events: mpsc::Sender<Bridged>,
+    /// Its sound, as everyone else gets it.
+    track: Arc<TrackIn>,
+    may_speak: bool,
+    may_hear: bool,
+    queue: VecDeque<Vec<u8>>,
+    /// When it started: its RTP clock counts from here.
+    started: Instant,
+    /// When the next frame goes out.
+    next: Instant,
+    /// Sound it said this second: (since, bytes).
+    said: (Instant, usize),
+}
+
+impl Bridge {
+    fn end(&self, ending: Ending) {
+        let _ = self.events.try_send(Bridged::Ended(ending));
+    }
+
+    fn hear(&self, participant: &str, frame: &[u8], timestamp: u32) {
+        if !self.may_hear {
+            return;
+        }
+        let heard = Heard { participant: participant.to_string(), frame: frame.to_vec(), timestamp };
+        // A program that doesn't keep up misses sound rather than holding up the call.
+        let _ = self.events.try_send(Bridged::Frame(heard));
+    }
+
+    /// The next frame to say, if one is due, and its time on the bridge's clock.
+    fn due(&mut self, now: Instant) -> Option<(Vec<u8>, MediaTime)> {
+        if self.queue.is_empty() || now < self.next {
+            return None;
+        }
+        // After a pause the clock moves on with the time that passed, so
+        // listeners hear the gap; while talking, frames are 20 ms apart.
+        if now.duration_since(self.next) > FRAME_TIME * 5 {
+            self.next = now;
+        }
+        let at = self.next;
+        self.next += FRAME_TIME;
+        let frame = self.queue.pop_front()?;
+        let ticks = at.duration_since(self.started).as_micros() as u64 * 48 / 1000;
+        let ticks = ticks - ticks % 960;
+        Some((frame, MediaTime::new(ticks, Frequency::FORTY_EIGHT_KHZ)))
+    }
+
+    fn within_budget(&mut self, len: usize) -> bool {
+        let now = Instant::now();
+        if now.duration_since(self.said.0) >= Duration::from_secs(1) {
+            self.said = (now, 0);
+        }
+        self.said.1 += len;
+        self.said.1 <= MAX_BYTES_PER_SECOND
     }
 }
 
@@ -712,6 +903,7 @@ struct Engine {
     tcp: mpsc::Receiver<Tcp>,
     tcp_peers: HashMap<SocketAddr, mpsc::Sender<Vec<u8>>>,
     clients: Vec<Client>,
+    bridges: Vec<Bridge>,
     next_id: ClientId,
     /// Where packets "arrive" for str0m: the addresses last given to apps,
     /// one per protocol and IP family. The sockets listen on every address,
@@ -728,6 +920,7 @@ impl Engine {
             tcp,
             tcp_peers: HashMap::new(),
             clients: vec![],
+            bridges: vec![],
             next_id: 1,
             destinations: vec![],
             timeouts: vec![],
@@ -747,6 +940,7 @@ impl Engine {
                 .clients
                 .iter()
                 .filter_map(|c| c.leaving)
+                .chain(self.bridges.iter().filter(|b| !b.queue.is_empty()).map(|b| b.next))
                 .chain(self.timeouts.iter().copied())
                 .chain(closing)
                 .min()
@@ -757,6 +951,9 @@ impl Engine {
                     let now = Instant::now();
                     for client in &mut self.clients {
                         client.leave(Signal::Restarting, now);
+                    }
+                    for bridge in self.bridges.drain(..) {
+                        bridge.end(Ending::Restarting);
                     }
                     closing = Some(now + PARTING);
                     tracing::info!(people = self.clients.len(), "calls are moving to the next media part");
@@ -809,6 +1006,12 @@ impl Engine {
 
     fn on_command(&mut self, command: Command, now: Instant) {
         match command {
+            Command::Bridge { room, participant, session_id, may_speak, may_hear, events, reply } => {
+                let _ = reply.send(self.bridge(room, participant, session_id, may_speak, may_hear, events, now));
+            }
+            Command::Speak { room, participant, session_id, frames, reply } => {
+                let _ = reply.send(self.speak(&room, &participant, &session_id, frames));
+            }
             Command::Open { room, participant, session_id, offer, may_speak, may_hear, candidates, reply } => {
                 let answer = self.open(room, participant, session_id, &offer, may_speak, may_hear, candidates, now);
                 let _ = reply.send(answer);
@@ -822,6 +1025,15 @@ impl Engine {
                         client.leave(Signal::Closed, now);
                     }
                 }
+                self.bridges.retain(|bridge| {
+                    let named = participant.as_ref().is_none_or(|p| *p == bridge.participant);
+                    let same = session_id.as_ref().is_none_or(|s| *s == bridge.session_id);
+                    let closing = bridge.room == room && named && same;
+                    if closing {
+                        bridge.end(Ending::Closed);
+                    }
+                    !closing
+                });
             }
             Command::Update { room, participant, session_id, may_speak, may_hear, reply } => {
                 let mut connected = false;
@@ -831,6 +1043,13 @@ impl Engine {
                         client.may_hear = may_hear;
                         connected |=
                             client.leaving.is_none() && session_id.as_ref().is_none_or(|s| *s == client.session_id);
+                    }
+                }
+                for bridge in &mut self.bridges {
+                    if bridge.room == room && bridge.participant == participant {
+                        bridge.may_speak = may_speak;
+                        bridge.may_hear = may_hear;
+                        connected |= session_id.as_ref().is_none_or(|s| *s == bridge.session_id);
                     }
                 }
                 let _ = reply.send(connected);
@@ -850,8 +1069,7 @@ impl Engine {
         candidates: Vec<(Protocol, SocketAddr)>,
         now: Instant,
     ) -> Result<String> {
-        let others = self.clients.iter().filter(|c| c.room == room && c.leaving.is_none() && c.rtc.is_alive());
-        if others.filter(|c| c.participant != participant).count() >= MAX_ROOM {
+        if self.in_room(&room, &participant) >= MAX_ROOM {
             return Err(Error::ResourceExhausted(format!("a call holds at most {MAX_ROOM} people")));
         }
         if !offer_allowed(offer) {
@@ -892,17 +1110,7 @@ impl Engine {
             }
         }
 
-        // Someone already here under this name (another of their devices, or
-        // the same app before its connection dropped) makes way.
-        for client in &mut self.clients {
-            if client.room == room && client.participant == participant {
-                if client.session_id == session_id {
-                    client.rtc.disconnect();
-                } else {
-                    client.leave(Signal::Replaced, now);
-                }
-            }
-        }
+        self.make_way(&room, &participant, &session_id, now);
 
         let id = self.next_id;
         self.next_id += 1;
@@ -929,8 +1137,108 @@ impl Engine {
                 client.tracks_out.push(TrackOut { from: Arc::downgrade(track), state: TrackState::ToOpen });
             }
         }
+        for bridge in self.bridges.iter().filter(|b| b.room == client.room) {
+            client.tracks_out.push(TrackOut { from: Arc::downgrade(&bridge.track), state: TrackState::ToOpen });
+        }
         self.clients.push(client);
         Ok(answer.to_sdp_string())
+    }
+
+    /// Everyone in a room but `participant`.
+    fn in_room(&self, room: &str, participant: &str) -> usize {
+        let clients = self.clients.iter().filter(|c| c.room == room && c.leaving.is_none() && c.rtc.is_alive());
+        let bridges = self.bridges.iter().filter(|b| b.room == room);
+        clients.filter(|c| c.participant != participant).count()
+            + bridges.filter(|b| b.participant != participant).count()
+    }
+
+    /// Someone already here under this name (another of their devices, or
+    /// the same app or program before its connection dropped) makes way.
+    fn make_way(&mut self, room: &str, participant: &str, session_id: &str, now: Instant) {
+        for client in &mut self.clients {
+            if client.room == room && client.participant == participant {
+                if client.session_id == session_id {
+                    client.rtc.disconnect();
+                } else {
+                    client.leave(Signal::Replaced, now);
+                }
+            }
+        }
+        self.bridges.retain(|bridge| {
+            let here = bridge.room == room && bridge.participant == participant;
+            if here && bridge.session_id != session_id {
+                bridge.end(Ending::Replaced);
+            }
+            !here
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bridge(
+        &mut self,
+        room: String,
+        participant: String,
+        session_id: String,
+        may_speak: bool,
+        may_hear: bool,
+        events: mpsc::Sender<Bridged>,
+        now: Instant,
+    ) -> Result<()> {
+        if self.in_room(&room, &participant) >= MAX_ROOM {
+            return Err(Error::ResourceExhausted(format!("a call holds at most {MAX_ROOM} people")));
+        }
+        self.make_way(&room, &participant, &session_id, now);
+        let id = self.next_id;
+        self.next_id += 1;
+        let track = Arc::new(TrackIn {
+            origin: id,
+            participant: participant.clone(),
+            mid: Mid::from("bridge"),
+            kind: MediaKind::Audio,
+        });
+        for client in self.clients.iter_mut().filter(|c| c.room == room) {
+            client.tracks_out.push(TrackOut { from: Arc::downgrade(&track), state: TrackState::ToOpen });
+        }
+        self.bridges.push(Bridge {
+            id,
+            room,
+            participant,
+            session_id,
+            events,
+            track,
+            may_speak,
+            may_hear,
+            queue: VecDeque::new(),
+            started: now,
+            next: now,
+            said: (now, 0),
+        });
+        Ok(())
+    }
+
+    fn speak(&mut self, room: &str, participant: &str, session_id: &str, frames: Vec<Vec<u8>>) -> Result<usize> {
+        let bridge = self
+            .bridges
+            .iter_mut()
+            .find(|b| b.room == room && b.participant == participant && b.session_id == session_id)
+            .ok_or_else(|| Error::FailedPrecondition("you're not in that call any more".into()))?;
+        if frames.iter().any(|f| f.is_empty() || f.len() > MAX_FRAME) {
+            return Err(Error::invalid(format!("each frame is one Opus packet, 1 to {MAX_FRAME} bytes")));
+        }
+        if bridge.queue.len() + frames.len() > MAX_QUEUED {
+            return Err(Error::ResourceExhausted(
+                "more than a second of sound is waiting to go out; send it as it plays".into(),
+            ));
+        }
+        if !bridge.may_speak {
+            return Ok(bridge.queue.len());
+        }
+        for frame in frames {
+            if bridge.within_budget(frame.len()) {
+                bridge.queue.push_back(frame);
+            }
+        }
+        Ok(bridge.queue.len())
     }
 }
 
@@ -954,6 +1262,24 @@ impl Engine {
         self.clients.retain(|c| c.rtc.is_alive());
         if self.clients.len() != before {
             tracing::debug!(people = self.clients.len(), "someone hung up");
+        }
+
+        self.bridges.retain(|b| !b.events.is_closed());
+        let mut said = Vec::new();
+        for bridge in &mut self.bridges {
+            while let Some((frame, time)) = bridge.due(now) {
+                let who = (bridge.id, bridge.room.clone(), bridge.participant.clone(), bridge.track.mid);
+                said.push((who, time, frame));
+            }
+        }
+        for ((origin, room, participant, mid), time, frame) in said {
+            for client in self.clients.iter_mut().filter(|c| c.room == room) {
+                client.forward_said(origin, mid, now, time, &frame);
+            }
+            // Programs hear each other too.
+            for bridge in self.bridges.iter().filter(|b| b.room == room && b.id != origin) {
+                bridge.hear(&participant, &frame, time.numer() as u32);
+            }
         }
 
         self.timeouts.clear();
@@ -987,9 +1313,14 @@ impl Engine {
                 }
             }
             Propagated::Media(origin, data) => {
-                let Some(room) = origin_room(&self.clients, origin) else { return };
+                let Some(from) = self.clients.iter().find(|c| c.id == origin) else { return };
+                let (room, participant) = (from.room.clone(), from.participant.clone());
                 for client in self.clients.iter_mut().filter(|c| c.id != origin && c.room == room) {
                     client.forward(origin, &data);
+                }
+                let ticks = data.time.numer().saturating_mul(48_000) / u64::from(data.time.denom().max(1));
+                for bridge in self.bridges.iter().filter(|b| b.room == room && b.participant != participant) {
+                    bridge.hear(&participant, &data.data, ticks as u32);
                 }
             }
             Propagated::Keyframe(request, origin, mid) => {

@@ -11,7 +11,8 @@ import { hue } from "@/components/Icons";
 import { SPRING, SwapText } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
-import { displayName, memberName } from "@/lib/format";
+import { AppBadge } from "@/components/AppBadge";
+import { displayName, isAgent, memberName } from "@/lib/format";
 import { hasIn } from "@/lib/permissions";
 import { setTitle } from "@/lib/notify";
 import { cn } from "@/lib/utils";
@@ -165,6 +166,7 @@ function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey:
           </motion.span>
           <span className="absolute inset-x-2 bottom-2 flex items-center gap-1.5 rounded-xl bg-background/75 px-2.5 py-1 backdrop-blur">
             <span className="min-w-0 flex-1 truncate text-sm font-bold">{name}</span>
+            {isAgent(member?.user ?? user) && <AppBadge agent />}
             <VoiceFlags state={state} />
           </span>
         </button>

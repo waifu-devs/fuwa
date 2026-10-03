@@ -1478,6 +1478,7 @@ dependencies = [
  "flate2",
  "futures",
  "fuwa-e2ee",
+ "fuwa-voice",
  "getrandom 0.3.4",
  "hmac 0.12.1",
  "http",
@@ -1514,6 +1515,20 @@ dependencies = [
  "turso",
  "ulid",
  "url",
+]
+
+[[package]]
+name = "fuwa-voice"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "prost-types",
+ "protoc-bin-vendored",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
 ]
 
 [[package]]
@@ -3940,6 +3955,7 @@ version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -4843,11 +4859,13 @@ dependencies = [
  "socket2",
  "sync_wrapper",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tower",
  "tower-layer",
  "tower-service",
  "tracing",
+ "webpki-roots",
 ]
 
 [[package]]
