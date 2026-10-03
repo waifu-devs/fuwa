@@ -179,6 +179,7 @@ struct Clients {
     node: pb::node_service_client::NodeServiceClient<Channel>,
     media: pb::media_service_client::MediaServiceClient<Channel>,
     invites: pb::invite_service_client::InviteServiceClient<Channel>,
+    webhooks: pb::webhook_service_client::WebhookServiceClient<Channel>,
 }
 
 async fn clients(part: &Part) -> Clients {
@@ -193,7 +194,8 @@ async fn clients(part: &Part) -> Clients {
         admin: pb::admin_service_client::AdminServiceClient::new(channel.clone()),
         node: pb::node_service_client::NodeServiceClient::new(channel.clone()),
         media: pb::media_service_client::MediaServiceClient::new(channel.clone()),
-        invites: pb::invite_service_client::InviteServiceClient::new(channel),
+        invites: pb::invite_service_client::InviteServiceClient::new(channel.clone()),
+        webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel),
     }
 }
 
@@ -522,6 +524,24 @@ async fn a_split_instance_works_like_one() {
     let mut direct = clients(&cluster.directory).await;
     assert_eq!(direct.node.get_node(pb::GetNodeRequest {}).await.unwrap_err().code(), Code::PermissionDenied);
     assert_eq!(http.get(format!("{}/healthz", cluster.directory.url())).send().await.unwrap().status(), 200);
+
+    // Webhook posts reach the shard holding their server through a gateway.
+    let channel = general(&mut c, &juan, &on_b.id).await;
+    let request = pb::CreateWebhookRequest {
+        server_id: on_b.id.clone(),
+        channel_id: channel.id.clone(),
+        name: "CI".into(),
+        avatar_url: String::new(),
+    };
+    let hook = c.webhooks.create_webhook(authed(&juan, request)).await.unwrap().into_inner().webhook.unwrap();
+    let url = format!("{}/webhooks/{}/{}/{}?wait=true", cluster.gateway.url(), on_b.id, hook.id, hook.token);
+    let posted = http.post(&url).header("content-type", "application/json").body(r#"{"content":"green"}"#);
+    let posted = posted.send().await.unwrap();
+    assert_eq!(posted.status(), 200);
+    let posted: serde_json::Value = posted.json().await.unwrap();
+    assert_eq!(posted["content"], "green");
+    let wrong = format!("{}/webhooks/{}/{}/{}", cluster.gateway.url(), on_b.id, hook.id, "x".repeat(64));
+    assert_eq!(http.post(&wrong).body("{}").send().await.unwrap().status(), 404);
 
     // Deleting a server: the stream says so, and the directory forgets it.
     c.servers.delete_server(authed(&juan, pb::DeleteServerRequest { server_id: on_a.id.clone() })).await.unwrap();

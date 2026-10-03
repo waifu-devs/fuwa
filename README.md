@@ -189,6 +189,24 @@ To upload one yourself, call `MediaService.CreateUpload` with the picture's type
 and size, then `PUT` the file to the `upload_url` it returns (within ten
 minutes, once) and set the returned `media.url` as the avatar, banner or icon.
 
+### Webhooks
+
+A server's managers (anyone with Manage webhooks) make webhooks under Server
+settings, Integrations. Each one is an address that posts into one channel,
+with no account: CI results, feeds, alerts. Posts are a JSON `POST` shaped like
+Discord's, so tools made for Discord webhooks work unchanged:
+
+```sh
+curl -X POST "$WEBHOOK_URL" -H 'content-type: application/json' \
+  -d '{"content": "Build **passed**", "username": "CI", "embeds": [{"title": "main", "color": 5763719}]}'
+```
+
+The address is `<FUWA_PUBLIC_URL>/webhooks/<server id>/<webhook id>/<token>`,
+on the same port as everything else. It answers `204`, or `200` with the
+message with `?wait=true`. Each webhook may post 30 messages a minute (then
+`429` with `Retry-After`), and never pings @everyone, @here or roles. Anyone
+with the address can post, so a leaked one is replaced with New address.
+
 ### Looking after an instance
 
 Besides the settings above, instance admins get three pages in the app's

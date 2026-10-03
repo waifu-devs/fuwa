@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::{Body, Bytes};
-use axum::extract::Request;
+use axum::extract::{Path as UrlPath, Request};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 use futures::stream::{FuturesUnordered, SelectAll};
@@ -41,6 +41,8 @@ use crate::settings::Settings;
 /// The largest request passed on. Client messages are far smaller; this is
 /// only a backstop.
 const MAX_REQUEST: usize = 64 * 1024 * 1024;
+/// The biggest webhook post passed on; shards take no more.
+const MAX_WEBHOOK_BODY: usize = 256 * 1024;
 /// Most servers one stream can follow, as a single process allows.
 const MAX_SERVERS: usize = 200;
 /// How often merged streams send a heartbeat, whatever the shards send.
@@ -81,7 +83,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.InviteService"
         | "fuwa.v1.JoinService"
         | "fuwa.v1.AutoModService"
-        | "fuwa.v1.EmojiService" => Target::Shard,
+        | "fuwa.v1.EmojiService"
+        | "fuwa.v1.WebhookService" => Target::Shard,
         _ => Target::Unknown,
     }
 }
@@ -227,6 +230,7 @@ impl Gateway {
             .layer(tonic_web::GrpcWebLayer::new());
 
         let media = self.clone();
+        let webhooks = self.clone();
         let health = self.clone();
         let http = Router::new()
             .route(
@@ -239,6 +243,13 @@ impl Gateway {
                             false => (StatusCode::SERVICE_UNAVAILABLE, "waiting for the directory"),
                         }
                     }
+                }),
+            )
+            .route(
+                "/webhooks/{server_id}/{*rest}",
+                any(move |UrlPath((server_id, _)): UrlPath<(String, String)>, request: Request| {
+                    let gateway = webhooks.clone();
+                    async move { gateway.pass_to_shard(&server_id, request).await }
                 }),
             )
             .route(
@@ -362,6 +373,40 @@ impl Gateway {
                 return (StatusCode::BAD_GATEWAY, "part of this instance is unreachable right now; try again soon\n")
                     .into_response();
             }
+        }
+    }
+
+    /// Passes a plain HTTP request for a server (a webhook post) on to the
+    /// shard holding it, waiting out a restart or a move like calls do.
+    async fn pass_to_shard(&self, server_id: &str, request: Request) -> Response {
+        if parse_id("server_id", server_id).is_err() {
+            return (StatusCode::NOT_FOUND, "not found\n").into_response();
+        }
+        let (parts, body) = request.into_parts();
+        let Ok(body) = axum::body::to_bytes(body, MAX_WEBHOOK_BODY).await else {
+            return (StatusCode::PAYLOAD_TOO_LARGE, "that request is too big\n").into_response();
+        };
+        let mut patience = Patience::new(self.config.cluster.ride_out);
+        let mut refresh = false;
+        loop {
+            match self.shard_for(server_id, refresh).await {
+                Ok(channel) => match self.send(channel, &parts, body.clone()).await {
+                    Ok(response) if response.headers().contains_key(MISROUTED) => {}
+                    Ok(response) if response.headers().contains_key(NOT_READY) => {}
+                    Ok(response) => return response,
+                    Err(err) => tracing::debug!(error = %err, "couldn't reach a shard for a webhook post"),
+                },
+                Err(status) if status.code() == tonic::Code::Unavailable => {}
+                Err(status) if status.code() == tonic::Code::NotFound => {
+                    return (StatusCode::NOT_FOUND, "not found\n").into_response();
+                }
+                Err(status) => return (StatusCode::BAD_GATEWAY, format!("{}\n", status.message())).into_response(),
+            }
+            if !patience.wait().await {
+                return (StatusCode::BAD_GATEWAY, "part of this instance is unreachable right now; try again soon\n")
+                    .into_response();
+            }
+            refresh = true;
         }
     }
 

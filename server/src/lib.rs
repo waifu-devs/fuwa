@@ -26,6 +26,7 @@ pub mod settings;
 pub mod telemetry;
 pub mod twofactor;
 pub mod web;
+pub mod webhooks;
 
 pub mod proto {
     pub mod fuwa {

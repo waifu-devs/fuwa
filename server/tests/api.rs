@@ -77,6 +77,7 @@ struct Clients {
     join: pb::join_service_client::JoinServiceClient<Channel>,
     automod: pb::auto_mod_service_client::AutoModServiceClient<Channel>,
     emojis: pb::emoji_service_client::EmojiServiceClient<Channel>,
+    webhooks: pb::webhook_service_client::WebhookServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -95,7 +96,8 @@ async fn clients(instance: &Instance) -> Clients {
         invites: pb::invite_service_client::InviteServiceClient::new(channel.clone()),
         join: pb::join_service_client::JoinServiceClient::new(channel.clone()),
         automod: pb::auto_mod_service_client::AutoModServiceClient::new(channel.clone()),
-        emojis: pb::emoji_service_client::EmojiServiceClient::new(channel),
+        emojis: pb::emoji_service_client::EmojiServiceClient::new(channel.clone()),
+        webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel),
     }
 }
 
@@ -4369,5 +4371,231 @@ async fn custom_emoji_and_the_welcome_screen() {
         .server
         .unwrap();
     assert!(server_now.has_welcome_screen);
+    instance.stop().await;
+}
+
+/// Posts to a webhook's address the way other apps do.
+async fn post_webhook(instance: &Instance, webhook: &pb::Webhook, body: &str, wait: bool) -> reqwest::Response {
+    let url = format!(
+        "http://{}/webhooks/{}/{}/{}{}",
+        instance.addr,
+        webhook.server_id,
+        webhook.id,
+        webhook.token,
+        if wait { "?wait=true" } else { "" }
+    );
+    reqwest::Client::new()
+        .post(url)
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .send()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn webhooks_post_into_channels() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (member, _, _) = sign_up(&mut c, "member").await;
+    let server = create_server(&mut c, &owner, "Hooks", true).await;
+    join(&mut c, &member, &server.id).await;
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.name == "general")
+        .unwrap();
+    let news = new_channel(&mut c, &owner, &server.id, "news", pb::ChannelType::Text).await;
+
+    let create = |channel_id: &str, name: &str, avatar_url: &str| pb::CreateWebhookRequest {
+        server_id: server.id.clone(),
+        channel_id: channel_id.into(),
+        name: name.into(),
+        avatar_url: avatar_url.into(),
+    };
+    // Members without Manage webhooks can't make or see any.
+    assert_eq!(
+        c.webhooks.create_webhook(authed(&member, create(&general.id, "Nope", ""))).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    assert_eq!(
+        c.webhooks
+            .list_webhooks(authed(&member, pb::ListWebhooksRequest { server_id: server.id.clone() }))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::PermissionDenied
+    );
+    assert_eq!(
+        c.webhooks.create_webhook(authed(&owner, create(&general.id, "", ""))).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+    assert_eq!(
+        c.webhooks
+            .create_webhook(authed(&owner, create(&general.id, "Outside", "https://example.com/a.png")))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::InvalidArgument
+    );
+
+    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Avatar, png(300, 7)).await;
+    let hook = c
+        .webhooks
+        .create_webhook(authed(&owner, create(&general.id, "Build bot", &picture)))
+        .await
+        .unwrap()
+        .into_inner()
+        .webhook
+        .unwrap();
+    assert_eq!((hook.name.as_str(), hook.avatar_url.as_str()), ("Build bot", picture.as_str()));
+    assert_eq!(hook.token.len(), 64);
+
+    // A Discord-shaped post lands in its channel under the webhook's name.
+    let response = post_webhook(
+        &instance,
+        &hook,
+        r#"{"content":"build **passed** @everyone","embeds":[{"title":"main","color":65280,"fields":[{"name":"took","value":"3m"}]}],"tts":false}"#,
+        true,
+    )
+    .await;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let posted: serde_json::Value = response.json().await.unwrap();
+    let listed = messages(&mut c, &member, &server.id, &general.id).await;
+    let message = listed.iter().find(|m| m.id == posted["id"].as_str().unwrap()).unwrap();
+    assert_eq!(message.author_id, hook.id);
+    assert!(!message.mentions_everyone, "webhooks never ping everyone");
+    let author = message.webhook.as_ref().unwrap();
+    assert_eq!((author.name.as_str(), author.avatar_url.as_str()), ("Build bot", picture.as_str()));
+    assert_eq!(message.embeds[0].color, 0x00FF00);
+
+    // A post can go out under another name; no ?wait answers 204.
+    let response =
+        post_webhook(&instance, &hook, r#"{"content":"deploying","username":"Deploys","avatar_url":""}"#, false).await;
+    assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+    let last = messages(&mut c, &member, &server.id, &general.id).await.pop().unwrap();
+    assert_eq!(last.webhook.unwrap().name, "Deploys");
+
+    // Bad posts and wrong tokens.
+    assert_eq!(post_webhook(&instance, &hook, "not json", false).await.status(), reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(
+        post_webhook(&instance, &hook, r#"{"content":"  "}"#, false).await.status(),
+        reqwest::StatusCode::BAD_REQUEST
+    );
+    let wrong = pb::Webhook { token: "x".repeat(64), ..hook.clone() };
+    assert_eq!(
+        post_webhook(&instance, &wrong, r#"{"content":"hi"}"#, false).await.status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
+
+    // Members can't edit webhook messages; managers can delete them.
+    assert_eq!(
+        c.messages
+            .update_message(authed(
+                &owner,
+                pb::UpdateMessageRequest {
+                    server_id: server.id.clone(),
+                    message_id: message.id.clone(),
+                    content: "mine now".into()
+                }
+            ))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::PermissionDenied
+    );
+
+    // Moving it and resetting its address.
+    let moved = c
+        .webhooks
+        .update_webhook(authed(
+            &owner,
+            pb::UpdateWebhookRequest {
+                server_id: server.id.clone(),
+                webhook_id: hook.id.clone(),
+                name: "CI".into(),
+                avatar_url: picture.clone(),
+                channel_id: news.id.clone(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .webhook
+        .unwrap();
+    assert_eq!((moved.name.as_str(), moved.channel_id.as_str()), ("CI", news.id.as_str()));
+    assert_eq!(
+        post_webhook(&instance, &moved, r#"{"content":"over here"}"#, false).await.status(),
+        reqwest::StatusCode::NO_CONTENT
+    );
+    assert_eq!(messages(&mut c, &member, &server.id, &news.id).await.len(), 1);
+    let reset = c
+        .webhooks
+        .reset_webhook_token(authed(
+            &owner,
+            pb::ResetWebhookTokenRequest { server_id: server.id.clone(), webhook_id: hook.id.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .webhook
+        .unwrap();
+    assert_ne!(reset.token, hook.token);
+    assert_eq!(
+        post_webhook(&instance, &hook, r#"{"content":"old"}"#, false).await.status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
+
+    let listed = c
+        .webhooks
+        .list_webhooks(authed(&owner, pb::ListWebhooksRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(listed.webhooks.len(), 1);
+    assert_eq!(listed.webhooks[0].messages, 3);
+    assert!(listed.webhooks[0].last_used_at.is_some());
+    assert_eq!(listed.creators[0].username, "owner");
+
+    // Thirty posts a minute, then 429 with Retry-After.
+    let mut limited = None;
+    for _ in 0..30 {
+        let response = post_webhook(&instance, &reset, r#"{"content":"spam"}"#, false).await;
+        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            limited = Some(response);
+            break;
+        }
+    }
+    let limited = limited.expect("the 31st post a minute is turned away");
+    assert!(limited.headers().contains_key("retry-after"));
+
+    // The audit log has all of it, never the token.
+    let log =
+        audit_log(&mut c, &owner, pb::ListAuditLogRequest { server_id: server.id.clone(), ..Default::default() }).await;
+    let actions: Vec<_> = log.entries.iter().map(|e| e.action()).collect();
+    assert!(actions.contains(&pb::AuditAction::WebhookCreate));
+    assert!(actions.contains(&pb::AuditAction::WebhookUpdate));
+    assert!(log.entries.iter().all(|e| e.changes.iter().all(|ch| !ch.after.contains(&reset.token))));
+
+    // Deleting its channel takes the webhook and its picture with it.
+    c.channels
+        .delete_channel(authed(
+            &owner,
+            pb::DeleteChannelRequest { server_id: server.id.clone(), channel_id: news.id.clone() },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        post_webhook(&instance, &reset, r#"{"content":"gone"}"#, false).await.status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
+    assert_eq!(fetch(&instance, &picture).await.0, reqwest::StatusCode::NOT_FOUND);
     instance.stop().await;
 }

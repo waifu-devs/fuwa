@@ -59,7 +59,8 @@ export function onLiveEvent(key: string, event: Event) {
     const alert = shouldAlert(settings, mention, getPrefs());
     if (alert.sound && !looking) playSome(mention ? "mention" : "message", mention ? 600 : 1500);
     if (!alert.notify || (!document.hidden && document.hasFocus())) return;
-    notify(inst, event.serverId, message.channelId, message.authorId, message.content, mention);
+    const body = message.content || message.embeds[0]?.title || message.embeds[0]?.description || "";
+    notify(inst, event.serverId, message.channelId, message.authorId, body, mention, message.webhook?.name);
   } else if (p.case === "memberJoined") {
     const user = p.value.member?.user;
     const viewing = s.focus?.instance === key && (inst.channels[event.serverId] ?? []).some((c) => c.id === s.focus!.channel);
@@ -106,13 +107,13 @@ export function onRemoved(serverName: string, reason: LeaveReason) {
   else if (reason === LeaveReason.BANNED) toast(`You were banned from ${serverName}`);
 }
 
-function notify(inst: InstanceState, serverId: string, channelId: string, authorId: string, content: string, mention: boolean) {
+function notify(inst: InstanceState, serverId: string, channelId: string, authorId: string, content: string, mention: boolean, app?: string) {
   const p = getPrefs();
   if (!p.desktopNotifications || (p.streamer && p.streamerMuteNotifications)) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   const channel = inst.channels[serverId]?.find((c) => c.id === channelId);
   const member = inst.members[serverId]?.find((m) => m.user?.id === authorId);
-  const author = member ? memberName(member) : displayName(inst.users[authorId]);
+  const author = app ?? (member ? memberName(member) : displayName(inst.users[authorId]));
   const body = content.replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
   try {
     const n = new Notification(`${author}${channel ? ` in #${channel.name}` : ""}`, {
