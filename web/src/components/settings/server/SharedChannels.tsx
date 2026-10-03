@@ -38,7 +38,8 @@ import {
   updateConnection,
 } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
-import { useAccess, useAction } from "@/fuwa/hooks";
+import { useAccess, useAction, useInstance } from "@/fuwa/hooks";
+import { hasRegions, regionName } from "@/lib/regions";
 import { useFuwa } from "@/fuwa/store";
 import { ServerIcon, UserAvatar } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
@@ -320,7 +321,7 @@ function AddChannel({ instanceKey, serverId, channels }: { instanceKey: string; 
             transition={{ type: "spring", stiffness: 380, damping: 28 }}
             className="flex flex-col gap-4"
           >
-            <PreviewCard preview={preview} />
+            <PreviewCard preview={preview} instanceKey={instanceKey} />
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1.5">
                 <span className="text-sm font-extrabold">Name here</span>
@@ -375,8 +376,9 @@ function AddChannel({ instanceKey, serverId, channels }: { instanceKey: string; 
 const stagger = (n: number) => ({ initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0, transition: { ...SPRING, delay: 0.12 + n * 0.05 } } });
 
 /** Where a code leads: whose channel it is, where what's said is kept, and what your people may do there. */
-function PreviewCard({ preview }: { preview: PreviewShareResponse }) {
+function PreviewCard({ preview, instanceKey }: { preview: PreviewShareResponse; instanceKey: string }) {
   const home = preview.homeServer;
+  const regions = useInstance(instanceKey)?.node?.regions;
   const now = useNow(60_000);
   const left = toDate(preview.expiresAt).getTime() - now;
   return (
@@ -408,7 +410,12 @@ function PreviewCard({ preview }: { preview: PreviewShareResponse }) {
           <DatabaseIcon className="mt-0.5 size-4 shrink-0 text-primary" />
           <span>
             Messages are stored only on <b>{home?.name ?? "the other server"}</b>
-            {preview.region && <> ({preview.region})</>}. Your people's messages there are kept by them too, even if you disconnect later.
+            {hasRegions(regions) && (
+              <>
+                , in <b>{regionName(regions, preview.region)}</b>
+              </>
+            )}
+            . Your people's messages there are kept by them too, even if you disconnect later.
           </span>
         </motion.p>
         {preview.checkedBy.length > 0 && (
