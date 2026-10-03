@@ -605,12 +605,16 @@ impl Core {
         Ok(res.welcome_screen.unwrap_or_default())
     }
 
-    /// The server's AutoMod rules, oldest first.
-    pub async fn automod_rules(&self, key: &str, server_id: &str) -> Result<Vec<pb::AutoModRule>, Problem> {
+    /// The server's rules, and the moderation providers the instance turned on for smart filters.
+    pub async fn automod_rules(
+        &self,
+        key: &str,
+        server_id: &str,
+    ) -> Result<(Vec<pb::AutoModRule>, Vec<pb::AutoModProvider>), Problem> {
         let api = self.api(key).ok_or_else(missing)?;
-        Ok(rpc!(api.automod(), list_auto_mod_rules(pb::ListAutoModRulesRequest { server_id: server_id.into() }))
-            .await?
-            .rules)
+        let res = rpc!(api.automod(), list_auto_mod_rules(pb::ListAutoModRulesRequest { server_id: server_id.into() }))
+            .await?;
+        Ok((res.rules, res.providers))
     }
 
     /// Adds a rule (without an id) or replaces one.
@@ -646,9 +650,9 @@ impl Core {
         server_id: &str,
         rule: pb::AutoModRule,
         content: &str,
-    ) -> Result<(bool, Vec<String>), Problem> {
+    ) -> Result<pb::TestAutoModRuleResponse, Problem> {
         let api = self.api(key).ok_or_else(missing)?;
-        let res = rpc!(
+        rpc!(
             api.automod(),
             test_auto_mod_rule(pb::TestAutoModRuleRequest {
                 server_id: server_id.into(),
@@ -656,8 +660,7 @@ impl Core {
                 content: content.into(),
             })
         )
-        .await?;
-        Ok((res.matched, res.matches))
+        .await
     }
 }
 

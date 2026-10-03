@@ -130,12 +130,12 @@ pub(super) fn dot(color: Option<u32>, size: f32, p: &Palette) -> gpui_kit::Div {
 }
 
 /// A switch that calls back into the page.
-pub(super) fn switch(
+pub(crate) fn switch<V: 'static>(
     id: SharedString,
     on: bool,
     disabled: bool,
-    cx: &mut Context<ServerSettingsView>,
-    set: impl Fn(&mut ServerSettingsView, bool, &mut Context<ServerSettingsView>) + 'static,
+    cx: &mut Context<V>,
+    set: impl Fn(&mut V, bool, &mut Context<V>) + 'static,
 ) -> impl IntoElement {
     let entity = cx.entity().downgrade();
     let set = Rc::new(set);
@@ -681,7 +681,7 @@ impl ServerSettingsView {
                 p,
                 cx,
                 move |this, window, cx| this.discard_role(&r1, window, cx),
-                move |this, cx| {
+                move |this, _, cx| {
                     if !this.roles.saving {
                         this.save_role(&r2, everyone, cx)
                     }
