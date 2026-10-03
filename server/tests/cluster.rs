@@ -592,6 +592,17 @@ async fn a_split_instance_works_like_one() {
     assert_eq!(direct.node.get_node(pb::GetNodeRequest {}).await.unwrap_err().code(), Code::PermissionDenied);
     assert_eq!(http.get(format!("{}/healthz", cluster.directory.url())).send().await.unwrap().status(), 200);
 
+    // A status page sees which parts are up through a gateway, never from a part directly.
+    let parts: serde_json::Value =
+        http.get(format!("{}/healthz/parts", cluster.gateway.url())).send().await.unwrap().json().await.unwrap();
+    let parts = parts["parts"].as_array().unwrap();
+    assert!(parts.contains(&serde_json::json!({ "part": "directory", "up": true })));
+    assert_eq!(parts.iter().filter(|p| p["part"] == "shard" && p["up"] == true).count(), cluster.shards.len());
+    assert!(!parts.iter().any(|p| p.to_string().contains("http")), "no addresses: {parts:?}");
+    let direct = http.get(format!("{}/healthz/parts", cluster.directory.url())).send().await.unwrap();
+    // Refused like any call without the cluster key.
+    assert_eq!(direct.headers().get("grpc-status").map(|v| v.to_str().unwrap()), Some("7"));
+
     // Webhook posts reach the shard holding their server through a gateway.
     let channel = general(&mut c, &juan, &on_b.id).await;
     let request = pb::CreateWebhookRequest {

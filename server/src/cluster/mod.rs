@@ -23,6 +23,7 @@ pub mod media;
 pub mod moves;
 pub mod pictures;
 pub mod shard;
+pub mod status;
 
 use std::path::Path;
 use std::sync::Arc;

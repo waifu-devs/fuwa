@@ -356,6 +356,18 @@ impl App {
             .layer(axum::middleware::from_fn(crate::reports::time_calls))
             .layer(tonic_web::GrpcWebLayer::new())
             .route("/healthz", get(|| async { "ok" }));
+        if matches!(self.link, Link::Alone | Link::Directory(_)) {
+            // Which parts are up, for a status page. A directory's is behind the cluster key
+            // (only gateways ask it); a single process answers anyone.
+            let app = self.clone();
+            router = router.route(
+                "/healthz/parts",
+                get(move || {
+                    let app = app.clone();
+                    async move { crate::cluster::status::parts(&app).await }
+                }),
+            );
+        }
         if self.node.is_some() {
             router = router.merge(crate::media::routes(self.clone())).merge(crate::outside::routes(self.clone()));
         }
