@@ -825,7 +825,7 @@ impl LeaveExt for Div {
 }
 
 /// A suggested channel's emoji: a Unicode one, one of the server's own, or a #.
-fn welcome_emoji(emoji: &str, look: &crate::ui::mentions::Look, p: &Palette) -> AnyElement {
+pub(crate) fn welcome_emoji(emoji: &str, look: &crate::ui::mentions::Look, p: &Palette) -> AnyElement {
     let base = div()
         .size(px(36.0))
         .flex_none()
