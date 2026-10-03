@@ -275,10 +275,13 @@ pub(super) struct Checking {
 
 /// Checks being asked right now, by server, provider and what they ask, so
 /// the same message sent again and again (a raid, a spammer) is asked once.
-static ASKING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<u64, Answer>>> =
-    std::sync::LazyLock::new(Default::default);
+/// The key is the whole of what's asked, compared in full, so no message
+/// can pass for another.
+type Asking = std::collections::HashMap<(String, String, String, Vec<String>), Answer>;
 
-fn asking() -> std::sync::MutexGuard<'static, std::collections::HashMap<u64, Answer>> {
+static ASKING: std::sync::LazyLock<std::sync::Mutex<Asking>> = std::sync::LazyLock::new(Default::default);
+
+fn asking() -> std::sync::MutexGuard<'static, Asking> {
     ASKING.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
@@ -336,12 +339,7 @@ pub(super) async fn start(
     if content.trim().is_empty() && pictures.is_empty() {
         return None;
     }
-    let key = {
-        use std::hash::{Hash, Hasher};
-        let mut hash = std::collections::hash_map::DefaultHasher::new();
-        (&sdb.id, &setup.id, content, &pictures).hash(&mut hash);
-        hash.finish()
-    };
+    let key = (sdb.id.clone(), setup.id.clone(), content.to_string(), pictures.clone());
     let checking =
         |answer| Some(Checking { rule_id: rule.id.clone(), provider: provider.clone(), lane: lane.clone(), answer });
     if let Some(answer) = asking().get(&key).cloned() {
@@ -360,7 +358,7 @@ pub(super) async fn start(
     let answer: Answer = futures::FutureExt::shared(
         Box::pin(async move { rx.await.ok().flatten() }) as futures::future::BoxFuture<'static, _>
     );
-    asking().insert(key, answer.clone());
+    asking().insert(key.clone(), answer.clone());
     let (app, content) = (app.clone(), content.to_string());
     tokio::spawn(async move {
         let pictures = read_pictures(&app, &pictures).await;
@@ -669,8 +667,9 @@ pub(super) async fn review(
     asked: Option<&Asked>,
     events: &mut Vec<Payload>,
 ) -> Result<Verdict> {
-    // Managers and administrators are trusted, as on Discord.
-    if access.has(Permission::ManageServer) || content.trim().is_empty() {
+    // Managers and administrators are trusted, as on Discord. A message
+    // with no text (pictures only) is still up to its provider's answer.
+    if access.has(Permission::ManageServer) || (content.trim().is_empty() && asked.is_none()) {
         return Ok(Verdict::default());
     }
     let rules = store::load_automod(conn).await?;

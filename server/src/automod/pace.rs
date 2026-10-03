@@ -8,7 +8,6 @@
 //! how long a message waits for an answer before it's sent (see [`budget`]).
 
 use std::collections::HashMap;
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -79,14 +78,12 @@ pub struct Turn {
     done: bool,
 }
 
-/// Waits, at most `wait`, for a turn to ask `provider`. Run it to the end
-/// (in its own task when the caller may go away), or the lane's count of
-/// waiting checks drifts.
+/// Waits, at most `wait`, for a turn to ask `provider`.
 pub async fn turn(provider: &str, wait: Duration) -> Result<Turn, Refused> {
     let lane = lane(provider);
-    // Whether this check is in the lane's waiting count, to take it off
-    // again if it gives up.
-    let counted = std::sync::atomic::AtomicBool::new(false);
+    // Takes this check off the lane's waiting count however it stops
+    // waiting: its turn, its timeout, or its caller going away.
+    let mut waiting = Waiting { lane: &lane, counted: false };
     let waited = tokio::time::timeout(wait, async {
         loop {
             let freed = lane.freed.notified();
@@ -96,17 +93,17 @@ pub async fn turn(provider: &str, wait: Duration) -> Result<Turn, Refused> {
                 let mut state = lane.state();
                 if state.in_flight < state.limit as usize {
                     state.in_flight += 1;
-                    if counted.swap(false, Relaxed) {
+                    if std::mem::take(&mut waiting.counted) {
                         state.waiting -= 1;
                     }
                     return Ok(());
                 }
-                if !counted.load(Relaxed) {
+                if !waiting.counted {
                     if state.waiting >= MAX_WAITING {
                         return Err(Refused::Busy);
                     }
                     state.waiting += 1;
-                    counted.store(true, Relaxed);
+                    waiting.counted = true;
                 }
             }
             freed.await;
@@ -114,15 +111,25 @@ pub async fn turn(provider: &str, wait: Duration) -> Result<Turn, Refused> {
     })
     .await;
     match waited {
-        Ok(Ok(())) => Ok(Turn { lane, started: Instant::now(), done: false }),
+        Ok(Ok(())) => Ok(Turn { lane: lane.clone(), started: Instant::now(), done: false }),
         Ok(Err(refused)) => Err(refused),
-        Err(_) => {
-            if counted.load(Relaxed) {
-                lane.state().waiting -= 1;
-            }
+        Err(_) => Err(Refused::TimedOut),
+    }
+}
+
+/// A check waiting for its turn.
+struct Waiting<'a> {
+    lane: &'a Lane,
+    /// It's in the lane's waiting count.
+    counted: bool,
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        if self.counted {
+            self.lane.state().waiting -= 1;
             // It may have been the one woken for a freed place: pass it on.
-            lane.freed.notify_one();
-            Err(Refused::TimedOut)
+            self.lane.freed.notify_one();
         }
     }
 }
@@ -209,6 +216,24 @@ mod tests {
         let lane = lane(p);
         let state = lane.state();
         assert_eq!((state.in_flight, state.waiting), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_goes_away_frees_its_place_in_line() {
+        let p = "test-cancel";
+        let held: Vec<Turn> = futures::future::join_all((0..4).map(|_| turn(p, Duration::from_secs(1))))
+            .await
+            .into_iter()
+            .map(Result::unwrap)
+            .collect();
+        let gone = tokio::spawn(async move { turn(p, Duration::from_secs(30)).await.is_ok() });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(lane(p).state().waiting, 1);
+        gone.abort();
+        let _ = gone.await;
+        assert_eq!(lane(p).state().waiting, 0);
+        drop(held);
+        assert_eq!(lane(p).state().in_flight, 0);
     }
 
     #[test]
