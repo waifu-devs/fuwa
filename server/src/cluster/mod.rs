@@ -21,6 +21,7 @@ pub mod gateway;
 pub mod index;
 pub mod media;
 pub mod moves;
+pub mod pictures;
 pub mod shard;
 
 use std::path::Path;
