@@ -73,8 +73,6 @@ export type Item = {
   editSigned?: Signed;
   /** Who passed it on to this device, when it came as shared history rather than as it was sent. */
   sharedBy?: string;
-  /** Shared history whose signing device isn't one of its sender's any more, so it can't be checked against them. */
-  unchecked?: boolean;
 };
 
 /** What this device sent, by the SHA-256 of its ciphertext: it can't open its own messages. */

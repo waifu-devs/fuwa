@@ -141,24 +141,29 @@ log notes it), and time-outs, kicks and bans apply.
   panel. The change is a record in the channel's log, so every member sees a
   line saying who changed it, and it goes in the audit log. While it's on, the
   device whose commit added someone posts, right after that commit, one
-  history record: up to the last 500 messages it has (about 56 KB), encrypted
+  history record: up to the last 500 messages it has from since sharing was last turned on (about 56 KB), encrypted
   in the new epoch, so only the members after the commit, the new ones
   included, can open it. The server refuses a history record unless sharing is
   on, the last record in the log is a commit from that same device that added
   devices, and nothing came after it, so each addition gets at most one.
   A device that just joined itself waits a few seconds before passing anything
   on, so a member who has been in the channel longer goes first.
-- **Shared messages can't be changed or made up.** Each message (and edit) in
-  a secure channel is signed by the device that sent it, over the channel, the
-  sender, the time and the content. A device that receives shared history
-  keeps an entry only if its signature checks against that device's key, the
-  key's device belongs to the person named as sender, that person is in the
-  channel's member list, and the entry is older than when this device joined
-  and not already there. A sharer can still leave messages out. If the
-  signing device has since been removed from its owner's account, the entry
-  shows as "shared · can't check", since nobody can confirm that device was
-  theirs any more. Shared messages show a small "shared" chip and never chime
-  or notify. Messages sent before signing existed aren't shared.
+- **Shared messages can't be changed, made up or moved.** Each message (and
+  edit) in a secure channel is signed by the device that sent it, over the
+  channel, the sender, the time and the content. A device that receives
+  shared history keeps an entry only if its signature checks, the signing
+  device is registered to the person named as sender right now (anyone can
+  sign with a key of their own, so a key that isn't theirs proves nothing),
+  that person is in the channel, and the channel's log, read from record
+  headers without decrypting anything, has a message from that sender and
+  device at that place that wasn't deleted. Each place is taken once, and an
+  edit only of a message taken with it. Only messages from before this device
+  joined and after sharing was last turned on are taken, so what was said
+  while sharing was off stays with those who were there. A sharer can still
+  leave messages out, or swap two messages that the same device sent. A
+  message whose device has since been removed from its owner's account isn't
+  passed on. Shared messages show a small "shared" chip and never chime or
+  notify. Messages sent before signing existed aren't shared.
 - **A new device starts empty**, as with direct messages: MLS can't decrypt a
   message twice, so each device keeps what it read. A key backup only you can
   open would fix this for direct messages and channels together.

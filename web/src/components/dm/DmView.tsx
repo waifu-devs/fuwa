@@ -546,18 +546,11 @@ const DmRow = memo(function DmRow({
             )}
             {item.sharedBy && (
               <span
-                className={cn(
-                  "ml-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-full px-1.5 py-px align-middle text-[0.65rem] font-bold",
-                  item.unchecked ? "bg-amber-500/12 text-amber-700 dark:text-amber-300" : "bg-muted text-muted-foreground",
-                )}
-                title={
-                  item.unchecked
-                    ? "Passed on when this device joined. The device that signed it isn't theirs any more, so it can't be checked against them."
-                    : "Passed on when this device joined, and checked against the signature of the device that sent it."
-                }
+                className="ml-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-full bg-muted px-1.5 py-px align-middle text-[0.65rem] font-bold text-muted-foreground"
+                title="Passed on when this device joined, and checked against the signature of the sender's device."
               >
                 <HistoryIcon className="size-3" />
-                {item.unchecked ? "shared · can't check" : "shared"}
+                shared
               </span>
             )}
           </>

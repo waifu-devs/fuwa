@@ -27,6 +27,7 @@ import { Permission, type Event, type User } from "@/gen/fuwa/v1/types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { accessOf, hasIn } from "@/lib/permissions";
 import { reportError } from "@/lib/reports";
+import * as history from "./history";
 import * as vault from "./vault";
 import { loadE2ee, type Commit, type Device, type E2ee, type Processed, type WasmMember } from "./wasm";
 
@@ -67,6 +68,8 @@ const LOOKUPS = 100;
 /** The most shared history one device passes on at once: the newest messages that fit in one encrypted message. */
 const HISTORY_BYTES = 56_000;
 const HISTORY_ENTRIES = 500;
+/** Pages of the log a device reads to check shared history against: enough for what one share carries. */
+const LOG_PAGES = 10;
 /** How long a device waits, at most, before taking people who lost access out of a secure channel. */
 const ACCESS_SETTLE_MS = 2500;
 /** How much longer a device that joined a secure channel after it started waits, so one with more of its history goes first. */
@@ -776,10 +779,10 @@ export class DmEngine {
 
   /**
    * Earlier messages someone's device passed on when it added this one. Each
-   * is checked against the signature of the device that sent it; only
-   * messages from before this device joined, and not already here, are
-   * taken. A message whose signing device isn't its sender's any more is
-   * kept but marked as one that can't be checked.
+   * is checked against the signature of the device that sent it, which must
+   * be one of its sender's devices now, and against the channel's log (see
+   * history.ts); only messages from before this device joined, and not
+   * already here, are taken. The rest are left out.
    */
   private async takeHistory(c: Room, by: string, plaintext: Uint8Array, known: Map<number, vault.Item>, put: (i: vault.Item) => void) {
     let shared: SharedHistory;
@@ -793,30 +796,37 @@ export class DmEngine {
     if (!(await c.shares())) return;
     const joined = Math.max(0, ...[...known.values()].filter((i) => i.kind === "joined" && i.senderId === this.me.id).map((i) => i.seq));
     if (!joined) return;
-    const entries: { seq: number; opened: Opened; deviceId: string }[] = [];
+    const opened: { seq: number; opened: Opened; deviceId: string }[] = [];
     for (const entry of shared.entries.slice(0, HISTORY_ENTRIES)) {
       const seq = Number(entry.sequence);
       if (seq <= 0 || seq >= joined) continue;
       try {
-        const opened = this.openSigned(c.id, entry.payload, entry.signature, entry.signatureKey);
-        if (!opened || !c.allowed.includes(opened.payload.senderId)) continue;
-        entries.push({ seq, opened, deviceId: this.e2ee.deviceId(entry.signatureKey) });
+        const o = this.openSigned(c.id, entry.payload, entry.signature, entry.signatureKey);
+        const body = o?.payload.content?.body;
+        if (o && (body?.case === "text" || body?.case === "edit")) opened.push({ seq, opened: o, deviceId: this.e2ee.deviceId(entry.signatureKey) });
       } catch {
         // Not a signed payload: left out.
       }
     }
-    if (!entries.length) return;
-    const senders = unique(entries.map((e) => e.opened.payload.senderId));
-    const theirs = new Set<string>();
+    if (!opened.length) return;
+    const senders = unique(opened.map((e) => e.opened.payload.senderId)).filter((id) => c.allowed.includes(id));
+    const devices = new Set<string>();
     for (const userIds of chunks(senders, LOOKUPS)) {
-      for (const d of (await this.api.dms.listDevices({ userIds }, CALL)).devices) theirs.add(`${d.userId}/${d.id}`);
+      for (const d of (await this.api.dms.listDevices({ userIds }, CALL)).devices) devices.add(`${d.userId}/${d.id}`);
     }
-    for (const { seq, opened, deviceId } of entries) {
-      const { senderId, content } = opened.payload;
-      const at = Number(opened.payload.sentAtMs);
-      const unchecked = !theirs.has(`${senderId}/${deviceId}`);
-      const body = content?.body;
-      if (body?.case === "text") {
+    const log = await this.logBetween(c, Math.min(...opened.map((e) => e.seq)) - 1, joined);
+    const candidates: history.Candidate[] = opened.map(({ seq, opened: o, deviceId }) => {
+      const body = o.payload.content!.body;
+      return body.case === "edit"
+        ? { seq, senderId: o.payload.senderId, deviceId, kind: "edit", target: Number(body.value.sequence) }
+        : { seq, senderId: o.payload.senderId, deviceId, kind: "text" };
+    });
+    for (const i of history.accept(candidates, { joined, allowed: c.allowed, devices, log: log.headers })) {
+      const { seq, opened: o, deviceId } = opened[i];
+      const senderId = o.payload.senderId;
+      const at = log.at.get(seq) ?? Number(o.payload.sentAtMs);
+      const body = o.payload.content!.body;
+      if (body.case === "text") {
         if (known.has(seq)) continue;
         put(
           item(this.vaultKey, c.id, {
@@ -827,18 +837,37 @@ export class DmEngine {
             deviceId,
             content: body.value.content.slice(0, MAX_DM),
             replyTo: Number(body.value.replyToSequence),
-            signed: opened.signed,
+            signed: o.signed,
             sharedBy: by,
-            unchecked,
           }),
         );
-      } else if (body?.case === "edit") {
-        const target = known.get(Number(body.value.sequence));
+      } else if (body.case === "edit") {
+        const target = known.get(seq);
         if (target?.sharedBy && target.kind === "text" && target.senderId === senderId && !target.deleted) {
-          put({ ...target, content: body.value.content.slice(0, MAX_DM), editedAt: at, editSigned: opened.signed, unchecked: target.unchecked || unchecked });
+          put({ ...target, content: body.value.content.slice(0, MAX_DM), editedAt: Number(o.payload.sentAtMs), editSigned: o.signed });
         }
       }
     }
+  }
+
+  /** The headers of a channel's records after `after` and before `before`: who sent what kind, and whether it's gone. */
+  private async logBetween(c: Room, after: number, before: number) {
+    const headers = new Map<number, history.Logged>();
+    const at = new Map<number, number>();
+    for (let page = 0, cursor = after; page < LOG_PAGES && cursor < before - 1; page++) {
+      const { records, hasMore } = await c.records(cursor);
+      for (const r of records) {
+        const seq = Number(r.sequence);
+        if (seq >= before) return { headers, at };
+        const kind = r.kind === SecureRecordKind.MESSAGE ? "message" : r.kind === SecureRecordKind.SETTINGS ? "settings" : "other";
+        const on = (r as Rec & { shareHistory?: boolean }).shareHistory ?? false;
+        headers.set(seq, { kind, senderId: r.senderId, deviceId: r.senderDeviceId, deleted: r.data.length === 0, on });
+        at.set(seq, ms(r));
+        cursor = seq;
+      }
+      if (!hasMore || !records.length) break;
+    }
+    return { headers, at };
   }
 
   /**
@@ -848,8 +877,11 @@ export class DmEngine {
    */
   private async shareHistory(c: Room) {
     if (!c.channel || !(await c.shares())) return;
-    const items = (await vault.loadItems(this.vaultKey, c.id))
-      .filter((i) => i.kind === "text" && !i.deleted && i.signed)
+    const all = await vault.loadItems(this.vaultKey, c.id);
+    // What was said while sharing was off stays with those who were there.
+    const since = Math.max(0, ...all.filter((i) => i.kind === "setting").map((i) => i.seq));
+    const items = all
+      .filter((i) => i.kind === "text" && !i.deleted && i.signed && i.seq > since)
       .sort((a, b) => b.seq - a.seq);
     const entries: ReturnType<typeof create<typeof SharedEntrySchema>>[] = [];
     let size = 0;
