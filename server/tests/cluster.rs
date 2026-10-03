@@ -469,17 +469,18 @@ async fn a_split_instance_works_like_one() {
         .unwrap()
         .into_inner();
     let http = reqwest::Client::new();
-    // The gateway holds no more of a call than any part would take.
-    let huge = http
-        .post(format!("{}/fuwa.v1.NodeService/GetNode", cluster.gateway.url()))
+    // The gateway holds no more of a call than any part would take, and
+    // answers as soon as it has read too much. Over HTTP/2, as gRPC goes:
+    // over HTTP/1.1 the call is turned away (400, no grpc-status) before the
+    // gateway reads any of it.
+    let mut grpc = tonic::transport::Channel::from_shared(cluster.gateway.url()).unwrap().connect().await.unwrap();
+    let huge = http::Request::post(format!("{}/fuwa.v1.NodeService/GetNode", cluster.gateway.url()))
         .header("content-type", "application/grpc")
-        .body(vec![0u8; 9 * 1024 * 1024])
-        .send()
-        .await;
-    // It answers as soon as it has read too much, which may cut the upload short.
-    if let Ok(huge) = huge {
-        assert_eq!(huge.headers()["grpc-status"], (Code::ResourceExhausted as i32).to_string().as_str());
-    }
+        .body(tonic::body::Body::new("\0".repeat(9 * 1024 * 1024)))
+        .unwrap();
+    std::future::poll_fn(|cx| tonic::codegen::Service::poll_ready(&mut grpc, cx)).await.unwrap();
+    let huge = tonic::codegen::Service::call(&mut grpc, huge).await.unwrap();
+    assert_eq!(huge.headers()["grpc-status"], (Code::ResourceExhausted as i32).to_string().as_str());
     assert!(reserved.upload_url.starts_with(&cluster.gateway.url()));
     let put = http.put(&reserved.upload_url).body(png.clone()).send().await.unwrap();
     assert_eq!(put.status(), reqwest::StatusCode::NO_CONTENT);
