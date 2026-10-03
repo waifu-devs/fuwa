@@ -100,7 +100,9 @@
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's
     (@everyone, then the member's roles together, then the member). No View
-    Channels in a channel means no permissions there at all. `Access` also
+    Channels in a channel means no permissions there at all. A member who's
+    timed out keeps only View Channels until it ends (`Access::time_out`), so
+    they read and can only leave or agree to the rules. `Access` also
     knows rank (the member's highest role; the owner above everything) for
     `outranks`, `above` and `may_change`.
   - `db.rs`: Turso helpers: opening, `user_version` migrations, transactions.

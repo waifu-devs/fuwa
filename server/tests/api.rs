@@ -5075,3 +5075,98 @@ async fn webhooks_stay_out_of_channels_their_managers_cannot_see() {
 
     instance.stop().await;
 }
+
+#[tokio::test]
+async fn timed_out_members_only_read() {
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (moderator, mod_user, _) = sign_up(&mut c, "moderator").await;
+    let (aoi, aoi_user, _) = sign_up(&mut c, "aoi").await;
+    let server = create_server(&mut c, &owner, "Quiet", true).await;
+    let sid = server.id.clone();
+    join(&mut c, &moderator, &sid).await;
+    join(&mut c, &aoi, &sid).await;
+    let mods = create_role(&mut c, &owner, &sid, "Mods", &[P::KickMembers, P::ManageMessages, P::ManageChannels])
+        .await
+        .unwrap();
+    give_role(&mut c, &owner, &sid, &mod_user.id, &mods.id).await.unwrap();
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .remove(0);
+    let theirs = send(&mut c, &aoi, &sid, &general.id, "hi").await.unwrap();
+    let own = send(&mut c, &moderator, &sid, &general.id, "hello").await.unwrap();
+    let time_out = |seconds: i64| {
+        authed(
+            &owner,
+            pb::TimeOutMemberRequest {
+                server_id: sid.clone(),
+                user_id: mod_user.id.clone(),
+                seconds,
+                reason: "".into(),
+            },
+        )
+    };
+    c.servers.time_out_member(time_out(600)).await.unwrap();
+
+    // A time-out takes away moderating as well as talking.
+    let kick = c
+        .servers
+        .kick_member(authed(
+            &moderator,
+            pb::KickMemberRequest { server_id: sid.clone(), user_id: aoi_user.id.clone(), reason: "".into() },
+        ))
+        .await;
+    assert_eq!(kick.unwrap_err().code(), Code::PermissionDenied);
+    let delete = |token: &str, message_id: &str| {
+        authed(token, pb::DeleteMessageRequest { server_id: sid.clone(), message_id: message_id.into() })
+    };
+    assert_eq!(
+        c.messages.delete_message(delete(&moderator, &theirs.id)).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    assert_eq!(
+        c.messages.delete_message(delete(&moderator, &own.id)).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    let channel = c
+        .channels
+        .create_channel(authed(
+            &moderator,
+            pb::CreateChannelRequest { server_id: sid.clone(), name: "mine".into(), ..Default::default() },
+        ))
+        .await;
+    assert_eq!(channel.unwrap_err().code(), Code::PermissionDenied);
+    let nickname = c
+        .servers
+        .update_member(authed(
+            &moderator,
+            pb::UpdateMemberRequest {
+                server_id: sid.clone(),
+                user_id: mod_user.id.clone(),
+                nickname: Some("loud".into()),
+            },
+        ))
+        .await;
+    assert_eq!(nickname.unwrap_err().code(), Code::PermissionDenied);
+    // Reading still works.
+    assert!(messages(&mut c, &moderator, &sid, &general.id).await.iter().any(|m| m.id == theirs.id));
+
+    // Once it ends, everything comes back.
+    c.servers.time_out_member(time_out(0)).await.unwrap();
+    c.messages.delete_message(delete(&moderator, &theirs.id)).await.unwrap();
+    c.messages.delete_message(delete(&moderator, &own.id)).await.unwrap();
+
+    // Timed out again, they can still leave.
+    c.servers.time_out_member(time_out(600)).await.unwrap();
+    c.servers.leave_server(authed(&moderator, pb::LeaveServerRequest { server_id: sid.clone() })).await.unwrap();
+
+    instance.stop().await;
+}

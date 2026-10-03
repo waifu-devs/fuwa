@@ -135,6 +135,11 @@ pub fn label(p: P) -> &'static str {
     }
 }
 
+/// Refuses someone who's timed out.
+fn timed_out() -> Error {
+    Error::denied("you're timed out in this server; you can read, but not change anything until it ends")
+}
+
 /// Refuses for want of `p`.
 pub fn missing(p: P) -> Error {
     Error::denied(format!("you need the {} permission for that", label(p)))
@@ -180,6 +185,8 @@ pub struct Access {
     channels: HashMap<String, Bits>,
     /// Hasn't agreed to the server's rules yet, so can't talk.
     pub pending: bool,
+    /// Timed out, so can only read until it ends.
+    pub timed_out: bool,
 }
 
 impl Rules {
@@ -209,7 +216,7 @@ impl Rules {
         for parent in holders {
             channels.insert(parent, bit(P::ViewChannels));
         }
-        Access { owner, server, rank, channels, pending: false }
+        Access { owner, server, rank, channels, pending: false, timed_out: false }
     }
 
     /// Permissions in a channel: its category's overwrites, then its own. In
@@ -254,9 +261,33 @@ impl Access {
         }
     }
 
-    /// Why they can't do `p`: the rules they haven't agreed to, or a missing permission.
+    /// Takes away everything but seeing channels from a member who's timed
+    /// out, as Discord does: until it ends they read, and change nothing in
+    /// the server but leaving it or agreeing to its rules. The owner can't be
+    /// timed out.
+    pub fn time_out(&mut self) {
+        if self.owner {
+            return;
+        }
+        self.timed_out = true;
+        self.server &= bit(P::ViewChannels);
+        for bits in self.channels.values_mut() {
+            *bits &= bit(P::ViewChannels);
+        }
+    }
+
+    /// Refuses a member who's timed out, for changes that need no permission
+    /// (deleting their own message, say).
+    pub fn require_not_timed_out(&self) -> Result<()> {
+        if self.timed_out { Err(timed_out()) } else { Ok(()) }
+    }
+
+    /// Why they can't do `p`: a time-out, the rules they haven't agreed to, or
+    /// a missing permission.
     fn refuse(&self, p: P) -> Error {
-        if self.pending && TALK & bit(p) != 0 {
+        if self.timed_out && p != P::ViewChannels {
+            timed_out()
+        } else if self.pending && TALK & bit(p) != 0 {
             Error::FailedPrecondition("agree to this server's rules first".into())
         } else {
             missing(p)
