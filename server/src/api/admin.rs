@@ -356,6 +356,21 @@ impl AdminService for Api {
         )
     }
 
+    async fn move_server(
+        &self,
+        request: Request<pb::MoveServerRequest>,
+    ) -> Result<Response<pb::MoveServerResponse>, Status> {
+        respond(
+            async {
+                self.require_instance_admin(request.metadata()).await?;
+                let req = request.into_inner();
+                let server = crate::cluster::moves::move_server(&self.app, &req.server_id, req.region.trim()).await?;
+                Ok(pb::MoveServerResponse { server: Some(server) })
+            }
+            .await,
+        )
+    }
+
     async fn export_server(
         &self,
         request: Request<pb::ExportServerRequest>,
@@ -473,7 +488,7 @@ impl AdminService for Api {
                 // Whether it's on doesn't matter for a test.
                 let given = pb::AutoModProviderSettings { enabled: false, ..given };
                 let setup = providers::Setup::from_pb(&given, previous)?;
-                let (answer, took) = providers::check(&setup, content).await;
+                let (answer, took) = providers::check(&setup, content, &[]).await;
                 let elapsed_ms = took.as_millis().min(i32::MAX as u128) as i32;
                 Ok(match answer {
                     Ok(mut scores) => {

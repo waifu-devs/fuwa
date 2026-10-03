@@ -27,6 +27,23 @@ message Node {
   Build build = 8;
   // Who may make agents (bot accounts).
   AgentCreation agent_creation = 9;
+  // Where this instance keeps community servers, the home region first.
+  // Empty, or one region, when there's no choice to make (an instance run
+  // as one process, or one whose parts are all in one place).
+  repeated Region regions = 10;
+}
+
+// A part of the world a split instance keeps servers in (docs/regions.md).
+// A server's messages, recordings and calls stay in its region.
+message Region {
+  // A short label, such as "eu" or "us-west". Empty for the home region of
+  // an instance whose parts don't name theirs.
+  string id = 1;
+  // What people see, such as "Europe".
+  string name = 2;
+  // Where accounts, sessions and direct messages are kept, and new servers
+  // go unless their creator picks another.
+  bool home = 3;
 }
 
 // What a fuwa binary was built from. The instance reports this about itself,
@@ -321,6 +338,9 @@ message Server {
   // sees the address of whoever signs in, so apps name it before sending
   // anyone there.
   string sso_host = 20;
+  // The region its data is kept in (Node.regions): its messages, files,
+  // recordings and calls. Empty for the home region.
+  string region = 21;
 }
 
 // What new members see once they're in: a few words and the channels to
@@ -474,6 +494,10 @@ message AutoModRule {
   // where flags go and its TIME_OUT action for how long; both are optional
   // until a label needs them.
   repeated AutoModLabelRule labels = 16;
+  // PROVIDER: also show the provider the message's pictures (attached ones
+  // and embeds'), when it reads pictures (AutoModProvider.pictures). Up to 4
+  // PNG, JPEG or WebP pictures per message, fetched by the server.
+  bool pictures = 17;
 }
 
 // What an AutoMod alert tells moderators.

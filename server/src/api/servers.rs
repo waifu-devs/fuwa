@@ -167,7 +167,7 @@ impl ServerService for Api {
                     discoverable: req.discoverable,
                 };
                 let icon = self.check_picture(&account, pb::MediaPurpose::ServerIcon, &new.icon_url).await?;
-                let server = self.app.create_server(&account.user(), new).await?;
+                let server = self.app.create_server(&account.user(), new, req.region.trim()).await?;
                 self.keep_picture(icon.as_deref(), Some(&server.id)).await;
                 tracing::info!(server = %server.id, owner = %account.id, "server created");
                 Ok(pb::CreateServerResponse { server: Some(server) })

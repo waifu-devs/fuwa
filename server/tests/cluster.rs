@@ -1054,3 +1054,119 @@ async fn calls_ride_out_a_media_restart() {
     shard.stop().await;
     directory.stop().await;
 }
+
+/// Servers live in the region their creator picked, and an admin can move one
+/// to another region: changes pause for a moment, live streams carry on, and
+/// nothing of it is left where it was.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn servers_live_in_their_region_and_move() {
+    let root = tempfile::tempdir().unwrap();
+    let (gateway_listener, gateway_addr) = listen().await;
+    let (listener, addr) = listen().await;
+    let home = [("FUWA_REGION", "us-east".to_string())];
+    let directory = start_directory(root.path(), &home, listener, addr, gateway_addr).await;
+    // Shard a doesn't say where it is: the home region. Shard b is in Europe,
+    // replicating to a bucket of its own.
+    let bucket = |name: &str| ("FUWA_REPLICA_PATH", root.path().join(name).to_str().unwrap().to_string());
+    let a = start_shard_with(&root.path().join("shard-a"), "a", &directory, &[bucket("bucket-us")]).await;
+    let eu = [("FUWA_REGION", "eu".to_string()), bucket("bucket-eu")];
+    let b = start_shard_with(&root.path().join("shard-b"), "b", &directory, &eu).await;
+    for shard in [&a, &b] {
+        shard.app().replica.as_ref().unwrap().start();
+    }
+    let (gateway, _gateway) = start_gateway(&root.path().join("gateway"), &directory, gateway_listener, gateway_addr);
+    let cluster = Cluster { directory, shards: vec![a, b], gateway, _gateway };
+    let mut c = clients(&cluster.gateway).await;
+
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    let regions: Vec<(&str, &str, bool)> =
+        node.regions.iter().map(|r| (r.id.as_str(), r.name.as_str(), r.home)).collect();
+    assert_eq!(regions, [("us-east", "US East", true), ("eu", "Europe", false)]);
+
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let make = |region: &str| {
+        let request = pb::CreateServerRequest { name: "Somewhere".into(), region: region.into(), ..Default::default() };
+        let mut servers = c.servers.clone();
+        let request = authed(&juan, request);
+        async move { servers.create_server(request).await.map(|r| r.into_inner().server.unwrap()) }
+    };
+    // New servers go to their region's shards.
+    let in_eu = make("eu").await.unwrap();
+    assert_eq!((cluster.placement(&in_eu.id).as_deref(), in_eu.region.as_str()), (Some("b"), "eu"));
+    for region in ["", "us-east"] {
+        let at_home = make(region).await.unwrap();
+        assert_eq!((cluster.placement(&at_home.id).as_deref(), at_home.region.as_str()), (Some("a"), ""));
+    }
+    assert_eq!(make("mars").await.unwrap_err().code(), Code::InvalidArgument);
+    assert_eq!(make("Not A Region").await.unwrap_err().code(), Code::InvalidArgument);
+
+    // A server at home, with a message, a recording's files and a live stream.
+    let server = make("").await.unwrap();
+    let channel = general(&mut c, &juan, &server.id).await;
+    send(&mut c, &juan, &server.id, &channel.id, "before").await;
+    let recording = format!("recordings/{}/01J9Z3K8X2V5W7Q4R6T8Y0B2C5", server.id);
+    let track = "01J9Z3K8X2V5W7Q4R6T8Y0B2C6.opus";
+    let shard_a = root.path().join("shard-a");
+    std::fs::create_dir_all(shard_a.join(&recording)).unwrap();
+    std::fs::write(shard_a.join(&recording).join(track), b"OggS").unwrap();
+    let cursors = vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }];
+    let mut stream =
+        c.events.subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors })).await.unwrap().into_inner();
+    assert!(next(&mut stream).await.ready.is_some());
+    // The home shard's replica has it.
+    let replicated = |bucket: &str| root.path().join(bucket).join("servers").join(&server.id).exists();
+    for _ in 0..50 {
+        if replicated("bucket-us") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(replicated("bucket-us"));
+
+    // Only admins move servers (the first account is one).
+    let (mika, _) = sign_up(&mut c, "mika").await;
+    let request = pb::MoveServerRequest { server_id: server.id.clone(), region: "eu".into() };
+    assert_eq!(c.admin.move_server(authed(&mika, request.clone())).await.unwrap_err().code(), Code::PermissionDenied);
+    let moved = c.admin.move_server(authed(ADMIN_TOKEN, request.clone())).await.unwrap().into_inner();
+    assert_eq!(moved.server.unwrap().region, "eu");
+    assert_eq!(cluster.placement(&server.id).as_deref(), Some("b"));
+    assert!(cluster.shards[1].app().servers.holds(&server.id) && !cluster.shards[0].app().servers.holds(&server.id));
+    assert_eq!(
+        c.admin.move_server(authed(ADMIN_TOKEN, request)).await.unwrap_err().code(),
+        Code::FailedPrecondition,
+        "it's already there"
+    );
+
+    // Everything came along, and it carries on in its new region.
+    let request = pb::GetServerRequest { server_id: server.id.clone() };
+    let got = c.servers.get_server(authed(&juan, request)).await.unwrap().into_inner();
+    assert_eq!(got.server.unwrap().region, "eu");
+    let shard_b = root.path().join("shard-b");
+    assert!(shard_b.join(&recording).join(track).exists());
+    send(&mut c, &juan, &server.id, &channel.id, "after").await;
+    let request =
+        pb::ListMessagesRequest { server_id: server.id.clone(), channel_id: channel.id.clone(), ..Default::default() };
+    let listed = c.messages.list_messages(authed(&juan, request)).await.unwrap().into_inner().messages;
+    assert_eq!(listed.iter().map(|m| m.content.as_str()).collect::<HashSet<_>>(), HashSet::from(["before", "after"]));
+    // The live stream followed it to its new shard.
+    let event = until(&mut stream, |e| matches!(&e.payload, Some(Payload::MessageCreated(_)))).await;
+    let Some(Payload::MessageCreated(created)) = event.payload else { unreachable!() };
+    assert_eq!(created.message.unwrap().content, "after");
+
+    // Nothing is left in the old region: not on its shard, nor in its bucket.
+    assert!(!shard_a.join("servers").join(format!("{}.db", server.id)).exists());
+    assert!(!shard_a.join(&recording).exists());
+    for _ in 0..50 {
+        if replicated("bucket-eu") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(replicated("bucket-eu"), "the new region's bucket has it");
+    assert!(!replicated("bucket-us"), "the old region's bucket doesn't");
+    assert!(root.path().join("bucket-eu").join(&recording).join(track).exists());
+    assert!(!root.path().join("bucket-us").join(&recording).exists());
+    assert!(cluster.directory.app().node().unwrap().moves().await.unwrap().is_empty(), "the move is over");
+
+    cluster.stop().await;
+}
