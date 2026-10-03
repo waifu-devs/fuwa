@@ -417,6 +417,12 @@ impl Config {
             if !(url.starts_with("http://") || url.starts_with("https://")) {
                 return Err(format!("FUWA_MEDIA_URL must be http(s) URLs, got {url:?}"));
             }
+            if url.starts_with("http://") && !private_host(url) {
+                return Err(format!(
+                    "FUWA_MEDIA_URL {url:?} must be https://: plain http:// would send the key in the clear, so it's \
+                     only for private names (like http://media:8080 or *.railway.internal) and addresses"
+                ));
+            }
         }
         let media_urls = media_urls.into_iter().map(|u| u.trim_end_matches('/').to_string()).collect();
 
@@ -607,6 +613,25 @@ fn automod_providers(get: &impl Fn(&str) -> Option<String>) -> Result<Vec<crate:
     Ok(setups)
 }
 
+/// Whether an `http://` URL's host is on a private network: a name with no
+/// dots (Docker Compose), localhost, `*.internal` (Railway's private network)
+/// or a loopback, private or link-local address. Anything else is reached over
+/// the internet and must use https.
+fn private_host(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else { return false };
+    match parsed.host() {
+        Some(url::Host::Domain(name)) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            !name.contains('.') || name == "localhost" || name.ends_with(".localhost") || name.ends_with(".internal")
+        }
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
+        Some(url::Host::Ipv6(ip)) => {
+            ip.is_loopback() || (ip.segments()[0] & 0xfe00) == 0xfc00 || (ip.segments()[0] & 0xffc0) == 0xfe80
+        }
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -698,6 +723,31 @@ mod tests {
         assert!(config(&[("FUWA_ENCRYPTION_KEY", "short")]).unwrap_err().contains("64 hex"));
         assert!(config(&[("FUWA_LIMIT_STORAGE", "5 parsecs")]).unwrap_err().contains("unknown unit"));
         assert!(config(&[("FUWA_CALL_RECORDINGS_KEEP_DAYS", "0")]).unwrap_err().contains("1 or more"));
+    }
+
+    #[test]
+    fn media_parts_on_the_internet_need_https() {
+        let split = [("FUWA_ROLE", "shard"), ("FUWA_CLUSTER_KEY", "cluster-key-0123456789abcdef0123456789abcdef")];
+        let split =
+            [&split[..], &[("FUWA_DIRECTORY_URL", "http://directory:8080"), ("FUWA_INTERNAL_URL", "http://s:8080")]]
+                .concat();
+        let media = |url: &str| config(&[&split[..], &[("FUWA_MEDIA_URL", url)]].concat()).map(|c| c.media_urls);
+        for private in [
+            "http://media:8080",
+            "http://fuwa-media.railway.internal:8080",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://10.0.0.5:8080",
+            "http://192.168.1.2:8080",
+            "http://[::1]:8080",
+            "http://[fd00::5]:8080",
+            "https://media.example.com:8443",
+        ] {
+            assert!(media(private).is_ok(), "{private}");
+        }
+        for public in ["http://media.example.com:8443", "http://203.0.113.5:8080", "http://[2001:db8::1]:8080"] {
+            assert!(media(public).unwrap_err().contains("must be https://"), "{public}");
+        }
     }
 
     #[test]

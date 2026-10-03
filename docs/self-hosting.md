@@ -305,8 +305,9 @@ UDP). For both, run the media part on a host of its own.
 A split instance (`FUWA_ROLE`, see the README's [Scaling out](../README.md#scaling-out)) can carry its
 calls on any machine with a public IP, such as a small VPS, while
 everything else stays where it is. Apps get UDP and TCP on port 443 there;
-the instance's directory and shards open calls on it over HTTPS with the
-cluster key. It keeps nothing, so it needs no volume or backups.
+the instance's directory and shards open calls on it over HTTPS with a key
+of its own (`FUWA_MEDIA_KEY`), so the machine never holds the cluster key.
+It keeps nothing, so it needs no volume or backups.
 
 1. Point a name at the machine, such as `media.example.com` (with
    Cloudflare, "DNS only": its proxy carries no calls).
@@ -314,19 +315,23 @@ cluster key. It keeps nothing, so it needs no volume or backups.
    but SSH: `sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw
    allow 8443/tcp && sudo ufw allow 443 && sudo ufw enable`.
 3. Copy [`deploy/media-host`](../deploy/media-host) there, copy
-   `.env.example` to `.env`, fill it in (`chmod 600 .env`), and run
+   `.env.example` to `.env`, fill it in (`chmod 600 .env`; a new key from
+   `openssl rand -hex 32`, and the image tag the rest of the instance
+   runs), and run
    `docker compose up -d`. Caddy gets the certificate for port 8443 by
    itself, through port 80.
 4. Check it: `curl https://media.example.com:8443/healthz` says `ok`.
-5. Set `FUWA_MEDIA_URL=https://media.example.com:8443` on the directory
-   and every shard, in place of the old media part (several, comma-separated,
-   share calls between them). Calls in progress join the new one by
-   themselves.
+5. Set `FUWA_MEDIA_URL=https://media.example.com:8443` and the same
+   `FUWA_MEDIA_KEY` on the directory and every shard, in place of the old
+   media part (several, comma-separated, share calls between them; with
+   `FUWA_MEDIA_KEY` set they all take that key). Calls in progress join the
+   new one by themselves. A media URL on the internet must be `https://`:
+   fuwa refuses `http://` for anything but private names and addresses.
 
 Nothing on it logs addresses: fuwa never does, and the Caddyfile has no
-access log. Keep it on the same version as the rest of the instance:
-update it with them (`docker compose pull && docker compose up -d`), and
-calls ride the restart out as on any media part.
+access log. Keep it on the same version as the rest of the instance: when
+they update, change `FUWA_VERSION` and run `docker compose up -d`, and calls
+ride the restart out as on any media part.
 
 ## Moderation providers
 

@@ -406,7 +406,8 @@ the cluster key, apart from `/healthz`.
 | `FUWA_CLUSTER_KEY` | every part | A shared secret of 32+ characters (`openssl rand -hex 32`), the same on every part |
 | `FUWA_DIRECTORY_URL` | gateways, shards | Where the directory is, like `http://directory:8080` |
 | `FUWA_INTERNAL_URL` | shards | Where gateways and the directory reach this shard, like `http://shard-1:8080` |
-| `FUWA_MEDIA_URL` | directory, shards | Where the media parts are, like `http://media:8080`, comma-separated; calls are spread over them |
+| `FUWA_MEDIA_URL` | directory, shards | Where the media parts are, like `http://media:8080`, comma-separated; calls are spread over them  (`https://` for one on the internet) |
+| `FUWA_MEDIA_KEY` | directory, shards, media | Optional: a separate 32+ character key for calls to the media parts only, so a media part on a host of its own ([docs/self-hosting.md](docs/self-hosting.md#the-media-part-on-a-host-of-its-own)) needs no cluster key |
 | `FUWA_SHARD_ID` | shards | The shard's name (a-z, 0-9, `-`, `_`). Defaults to one made up on first start and kept in its data folder as `shard-id` |
 | `FUWA_REGION` | any part | The region it runs in, like `eu` or `us-west` (see [docs/regions.md](docs/regions.md)). The directory's is the home region; unset is the home region |
 | `FUWA_REGION_NAME` | any part | The region's name people see, like `Europe`. Common labels have one built in |
