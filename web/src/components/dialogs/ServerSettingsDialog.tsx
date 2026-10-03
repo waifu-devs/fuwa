@@ -248,8 +248,8 @@ export function ServerSettingsDialog({
       id: "automod",
       label: "AutoMod",
       icon: BotIcon,
-      description: "Rules that catch messages as they're sent: blocked words, mention spam and links.",
-      keywords: "automod auto moderation filter blocked words banned words swear profanity spam mentions pings raid links urls block alert time out",
+      description: "Rules that catch messages as they're sent: blocked words, mention spam, links and a smart filter.",
+      keywords: "automod auto moderation filter blocked words banned words swear profanity spam mentions pings raid links urls block alert time out ai smart jev clef typesafe cloudflare hate scam",
     },
     { id: "audit-log", label: "Audit log", icon: ScrollTextIcon, description: "Every change people made here.", keywords: "history log moderation" },
   ].filter((s) => can(s.id));

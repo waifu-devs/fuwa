@@ -456,11 +456,21 @@ impl DirectoryService for Internal {
         let app = self.app.clone();
         let mut settings = app.watch_settings();
         let (tx, rx) = mpsc::channel(4);
+        let is_shard = !shard.is_empty();
         tokio::spawn(async move {
-            let _following = (!shard.is_empty()).then(|| Following::new(app.clone(), shard));
+            let _following = is_shard.then(|| Following::new(app.clone(), shard));
             loop {
-                let current = settings.borrow_and_update().to_pb();
-                if tx.send(Ok(cpb::WatchResponse { settings: Some(current) })).await.is_err() {
+                let (current, automod_providers) = {
+                    let settings = settings.borrow_and_update();
+                    // Only shards check messages, so only they get the keys.
+                    let providers = match is_shard {
+                        false => Vec::new(),
+                        true => settings.automod_providers.iter().map(|setup| setup.to_pb(true)).collect(),
+                    };
+                    (settings.to_pb(), providers)
+                };
+                let response = cpb::WatchResponse { settings: Some(current), automod_providers };
+                if tx.send(Ok(response)).await.is_err() {
                     return;
                 }
                 tokio::select! {

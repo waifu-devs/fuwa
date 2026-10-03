@@ -107,6 +107,7 @@ clients! {
     emojis => "EmojiService" pb::emoji_service_client::EmojiServiceClient<Transport>,
     webhooks => "WebhookService" pb::webhook_service_client::WebhookServiceClient<Transport>,
     agents => "AgentService" pb::agent_service_client::AgentServiceClient<Transport>,
+    automod => "AutoModService" pb::auto_mod_service_client::AutoModServiceClient<Transport>,
     invites => "InviteService" pb::invite_service_client::InviteServiceClient<Transport>,
     dms => "DirectMessageService" pb::direct_message_service_client::DirectMessageServiceClient<Transport>,
     media => "MediaService" pb::media_service_client::MediaServiceClient<Transport>,
