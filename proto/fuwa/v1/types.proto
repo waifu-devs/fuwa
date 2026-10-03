@@ -519,6 +519,11 @@ message AutoModAlert {
   int32 timed_out_seconds = 8;
   // PROVIDER: the provider's name, such as "TypeSafe Jev".
   string provider = 9;
+  // Set instead of a message when the Smart filter used up today's checks
+  // (this many, the instance's FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY): posted
+  // once that day, and messages go through it unchecked until midnight UTC.
+  // No author, channel or content.
+  int64 capped_per_day = 10;
 }
 
 // What people read and answer on their way into a server.
