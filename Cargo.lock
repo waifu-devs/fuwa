@@ -1505,6 +1505,7 @@ dependencies = [
  "tracing-subscriber",
  "turso",
  "ulid",
+ "url",
 ]
 
 [[package]]

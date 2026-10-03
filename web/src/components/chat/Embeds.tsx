@@ -2,6 +2,7 @@ import { motion } from "motion/react";
 import type { Embed } from "@/gen/fuwa/v1/types_pb";
 import { InlineMarkdown, Markdown } from "@/components/Markdown";
 import { colorCss } from "@/lib/format";
+import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
 /** Only links a browser should open: http(s). */
@@ -25,8 +26,9 @@ export function Embeds({ embeds, animate }: { embeds: Embed[]; animate: boolean 
 
 function EmbedCard({ embed, delay, animate }: { embed: Embed; delay: number; animate: boolean }) {
   const url = safe(embed.url);
-  const thumbnail = safe(embed.thumbnailUrl);
-  const image = safe(embed.imageUrl);
+  // Pictures load only from fuwa instances, never straight from other sites.
+  const thumbnail = shownPicture(safe(embed.thumbnailUrl));
+  const image = shownPicture(safe(embed.imageUrl));
   const edge = embed.color ? colorCss(embed.color) : "var(--border)";
   return (
     <motion.div
