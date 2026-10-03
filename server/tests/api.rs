@@ -2990,6 +2990,44 @@ async fn next_event(stream: &mut tonic::Streaming<pb::SubscribeResponse>) -> pb:
 }
 
 #[tokio::test]
+async fn reordering_skips_hidden_categories() {
+    use pb::OverwriteTarget as T;
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let sid = create_server(&mut c, &juan, "Arranging", true).await.id;
+    join(&mut c, &mika, &sid).await;
+    let arrangers = create_role(&mut c, &juan, &sid, "Arrangers", &[P::ManageChannels]).await.unwrap();
+    give_role(&mut c, &juan, &sid, &mika_user.id, &arrangers.id).await.unwrap();
+    let staff = new_channel(&mut c, &juan, &sid, "Staff", pb::ChannelType::Category).await;
+    set_permissions(&mut c, &juan, &sid, &staff.id, vec![overwrite(&sid, T::Role, &[], &[P::ViewChannels])])
+        .await
+        .unwrap();
+    let seen = c
+        .channels
+        .list_channels(authed(&mika, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels;
+    assert!(seen.iter().all(|ch| ch.id != staff.id));
+
+    // Mika can arrange what she sees, but not into a category hidden from her, even knowing its id.
+    let place = |parent: &str| {
+        seen.iter().map(|ch| pb::ChannelPlacement { channel_id: ch.id.clone(), parent_id: parent.into() }).collect()
+    };
+    let reorder = |channels: Vec<pb::ChannelPlacement>| {
+        authed(&mika, pb::ReorderChannelsRequest { server_id: sid.clone(), channels })
+    };
+    let hidden = c.channels.reorder_channels(reorder(place(&staff.id))).await.unwrap_err();
+    assert_eq!(hidden.code(), Code::InvalidArgument);
+    c.channels.reorder_channels(reorder(place(""))).await.unwrap();
+}
+
+#[tokio::test]
 async fn roles_and_channel_permissions() {
     use pb::Permission as P;
     let dir = tempfile::tempdir().unwrap();

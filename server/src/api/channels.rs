@@ -349,9 +349,10 @@ impl ChannelService for Api {
                             if kind == pb::ChannelType::Category as i32 {
                                 return Err(Error::invalid("categories can't sit inside other channels"));
                             }
+                            // A category the caller can't see is as good as missing to them.
                             if by_id
                                 .get(placement.parent_id.as_str())
-                                .is_none_or(|p| p.r#type != pb::ChannelType::Category as i32)
+                                .is_none_or(|p| p.r#type != pb::ChannelType::Category as i32 || !access.can_see(&p.id))
                             {
                                 return Err(Error::invalid("channels can only sit inside a category"));
                             }
