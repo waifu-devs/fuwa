@@ -18,6 +18,13 @@ use crate::media;
 use crate::pb;
 use crate::servers::NewServer;
 
+/// An agent, as adding it to a server needs it.
+pub struct FoundAgent {
+    pub account: crate::node::Account,
+    pub owner_id: String,
+    pub public: bool,
+}
+
 impl App {
     // ─────────────── Asked of the directory ───────────────
 
@@ -186,7 +193,7 @@ impl App {
 
     /// Deletes the picture a change replaced, if it was one of this
     /// instance's uploads and belonged to what changed: the account's own
-    /// avatar or banner, or the server's icon or emoji.
+    /// avatar or banner, or the server's icon, emoji or webhook pictures.
     pub async fn drop_picture(&self, old_url: &str, new_url: &str, owner: PictureOwner<'_>) {
         if old_url == new_url {
             return;
@@ -214,7 +221,7 @@ impl App {
         let belongs = match owner {
             PictureOwner::Account(account_id, purpose) => row.account_id == account_id && row.purpose == purpose,
             PictureOwner::Server(server_id) => {
-                matches!(row.purpose, pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji)
+                matches!(row.purpose, pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji | pb::MediaPurpose::Avatar)
                     && row.server_id.as_deref() == Some(server_id)
             }
         };
@@ -231,6 +238,28 @@ impl App {
                 Ok(link.ask(request, |mut d, r| async move { d.count_owned_servers(r).await }).await?.count)
             }
             _ => Ok(self.index.owned_count(account_id)),
+        }
+    }
+
+    /// An agent that can be added to servers, by username: none if there's
+    /// no such agent or it's turned off.
+    pub async fn find_agent(&self, username: &str) -> Result<Option<FoundAgent>> {
+        match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::FindAgentRequest { username: username.to_string() };
+                let found = link.ask(request, |mut d, r| async move { d.find_agent(r).await }).await?;
+                Ok(found.agent.map(|agent| FoundAgent {
+                    account: super::account_from_pb(agent),
+                    owner_id: found.owner_id,
+                    public: found.public,
+                }))
+            }
+            _ => Ok(self
+                .node()?
+                .agent(None, Some(username))
+                .await?
+                .filter(|row| !row.account.disabled)
+                .map(|row| FoundAgent { account: row.account, owner_id: row.owner_id, public: row.public })),
         }
     }
 

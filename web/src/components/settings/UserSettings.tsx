@@ -3,6 +3,7 @@ import {
   AccessibilityIcon,
   BellIcon,
   BellRingIcon,
+  BotIcon,
   CodeXmlIcon,
   DatabaseIcon,
   Flower2Icon,
@@ -29,6 +30,7 @@ import { Notifications } from "@/components/settings/app/Notifications";
 import { Streamer } from "@/components/settings/app/Streamer";
 import { Voice, VOICE_SETTINGS } from "@/components/settings/app/Voice";
 import { hasPassword, LinkedSignIn, Password, Session } from "@/components/settings/Account";
+import { Agents } from "@/components/settings/account/Agents";
 import { Devices } from "@/components/settings/account/Devices";
 import { Privacy } from "@/components/settings/account/Privacy";
 import { Profile } from "@/components/settings/account/Profile";
@@ -128,7 +130,7 @@ const APP: SettingsSection[] = [
   },
 ];
 
-const ACCOUNT = new Set(["profile", "server-profiles", "devices", "security", "password", "server-notifications", "privacy", "session"]);
+const ACCOUNT = new Set(["profile", "server-profiles", "devices", "security", "password", "server-notifications", "agents", "privacy", "session"]);
 
 /**
  * Settings, opened from anywhere (the user panel, a shortcut, a link): App
@@ -221,6 +223,13 @@ export function UserSettings() {
           keywords: "mute mentions everyone here alerts",
         },
         {
+          id: "agents",
+          label: "Agents",
+          icon: BotIcon,
+          description: "Accounts your programs drive: bots, assistants, integrations.",
+          keywords: "bot bots token api key automation integration developer",
+        },
+        {
           id: "privacy",
           label: "Data and privacy",
           icon: DatabaseIcon,
@@ -264,6 +273,7 @@ export function UserSettings() {
       {key && section === "password" && <Password instanceKey={key} />}
       {key && section === "linked" && <LinkedSignIn instanceKey={key} />}
       {key && section === "server-notifications" && <ServerNotifications instanceKey={key} />}
+      {key && section === "agents" && <Agents instanceKey={key} />}
       {key && section === "privacy" && <Privacy instanceKey={key} />}
       {key && section === "session" && <Session instanceKey={key} />}
     </SettingsScreen>

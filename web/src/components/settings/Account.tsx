@@ -10,8 +10,8 @@ import { Button } from "@/components/ui/button";
 import { issuerName, WAIFU_DEV_ISSUER } from "@/lib/linked";
 import { cn } from "@/lib/utils";
 
-/** Accounts made on the instance sign in with a password; linked ones sign in through waifu.dev. */
-export const hasPassword = (user: User | undefined) => !!user && user.kind !== AccountKind.LINKED;
+/** Accounts made on the instance sign in with a password; linked ones sign in through waifu.dev, and agents with a token. */
+export const hasPassword = (user: User | undefined) => !!user && user.kind === AccountKind.LOCAL;
 
 // ───────────────────────── Linked sign-in ─────────────────────────
 

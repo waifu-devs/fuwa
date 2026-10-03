@@ -17,6 +17,7 @@ pub const FIELDS: &[&str] = &[
     "linked_accounts",
     "linked_issuer",
     "server_creation",
+    "agent_creation",
     "servers_per_account",
     "default_limits.members",
     "default_limits.channels",
@@ -42,6 +43,7 @@ pub struct Settings {
     pub linked_accounts: Accounts,
     pub linked_issuer: String,
     pub server_creation: pb::ServerCreation,
+    pub agent_creation: pb::AgentCreation,
     pub limits: Limits,
     pub telemetry: bool,
     pub web: bool,
@@ -61,6 +63,7 @@ impl Settings {
             linked_accounts: config.linked_accounts,
             linked_issuer: config.linked_issuer.clone(),
             server_creation: config.server_creation,
+            agent_creation: config.agent_creation,
             limits: config.limits.clone(),
             telemetry: config.telemetry.enabled,
             web: config.web,
@@ -131,6 +134,7 @@ impl Settings {
             } as i32,
             linked_issuer: self.linked_issuer.clone(),
             server_creation: self.server_creation as i32,
+            agent_creation: self.agent_creation as i32,
             servers_per_account: limits.servers_per_account,
             default_limits: Some(pb::ServerLimits {
                 members: limits.members,
@@ -180,6 +184,14 @@ impl Settings {
                     pb::ServerCreation::Unspecified => "",
                 },
             ),
+            "agent_creation" => Value::from(
+                match pb::AgentCreation::try_from(from.agent_creation).unwrap_or(pb::AgentCreation::Unspecified) {
+                    pb::AgentCreation::Everyone => "everyone",
+                    pb::AgentCreation::Admins => "admins",
+                    pb::AgentCreation::Disabled => "off",
+                    pb::AgentCreation::Unspecified => "",
+                },
+            ),
             "servers_per_account" => Value::from(from.servers_per_account),
             "default_limits.members" => Value::from(limits.members),
             "default_limits.channels" => Value::from(limits.channels),
@@ -210,6 +222,11 @@ impl Settings {
             "server_creation" => Value::from(match self.server_creation {
                 pb::ServerCreation::Admins => "admins",
                 pb::ServerCreation::Disabled => "off",
+                _ => "everyone",
+            }),
+            "agent_creation" => Value::from(match self.agent_creation {
+                pb::AgentCreation::Admins => "admins",
+                pb::AgentCreation::Disabled => "off",
                 _ => "everyone",
             }),
             "servers_per_account" => Value::from(limits.servers_per_account),
@@ -252,6 +269,14 @@ impl Settings {
                     Some("admins") => pb::ServerCreation::Admins,
                     Some("off") => pb::ServerCreation::Disabled,
                     _ => return Err(Error::invalid("server_creation must be everyone, admins or off")),
+                }
+            }
+            "agent_creation" => {
+                self.agent_creation = match value.as_str() {
+                    Some("everyone") => pb::AgentCreation::Everyone,
+                    Some("admins") => pb::AgentCreation::Admins,
+                    Some("off") => pb::AgentCreation::Disabled,
+                    _ => return Err(Error::invalid("agent_creation must be everyone, admins or off")),
                 }
             }
             "servers_per_account" => self.limits.servers_per_account = cap(field, value)?,
@@ -425,6 +450,7 @@ mod tests {
             ("name".to_string(), "\"Set here\"".to_string()),
             ("allowed_origins".to_string(), "[\"https://app.example.com\"]".to_string()),
             ("server_creation".to_string(), "\"admins\"".to_string()),
+            ("agent_creation".to_string(), "\"off\"".to_string()),
             ("default_limits.storage_bytes".to_string(), "5000".to_string()),
             ("picture_upload_bytes".to_string(), "1000".to_string()),
             ("web".to_string(), "false".to_string()),

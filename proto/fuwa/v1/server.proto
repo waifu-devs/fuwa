@@ -277,6 +277,14 @@ enum AuditAction {
   AUDIT_ACTION_EMOJI_CREATE = 29;
   AUDIT_ACTION_EMOJI_UPDATE = 30;
   AUDIT_ACTION_EMOJI_DELETE = 31;
+  // Webhook actions have the webhook's id as their target and its channel's
+  // name; the change names it. Resetting its address is an update of
+  // "token", with no values.
+  AUDIT_ACTION_WEBHOOK_CREATE = 32;
+  AUDIT_ACTION_WEBHOOK_UPDATE = 33;
+  AUDIT_ACTION_WEBHOOK_DELETE = 34;
+  // Someone added an agent: it's the target.
+  AUDIT_ACTION_AGENT_ADD = 35;
 }
 
 // One thing someone did with a moderator's or manager's permission.

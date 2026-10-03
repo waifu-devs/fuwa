@@ -15,7 +15,7 @@
 //! Adding shards spreads servers (and their traffic) across machines; adding
 //! gateways spreads connections. Every internal call carries the cluster key.
 
-mod calls;
+pub mod calls;
 pub mod directory;
 pub mod gateway;
 pub mod index;

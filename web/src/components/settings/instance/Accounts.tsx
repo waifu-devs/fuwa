@@ -19,6 +19,7 @@ import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { AccountFilter, type AccountSummary, type AccountTotals, type ListAccountsResponse } from "@/gen/fuwa/v1/admin_pb";
 import { AccountKind } from "@/gen/fuwa/v1/types_pb";
+import { AppBadge } from "@/components/AppBadge";
 import { listAccounts, resetAccountPassword, run, updateAccount } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction, useInstance } from "@/fuwa/hooks";
@@ -258,7 +259,8 @@ function AccountRow({
   onReset: () => void;
 }) {
   const id = a.user?.id ?? "";
-  const local = a.user?.kind !== AccountKind.LINKED;
+  const local = a.user?.kind === AccountKind.LOCAL;
+  const agent = a.user?.kind === AccountKind.AGENT;
   const joined = formatDay(toDate(a.createdAt)).replace(/^(Today|Yesterday)$/, (d) => d.toLowerCase());
   const facts = [
     `${a.servers} ${a.servers === 1 ? "server" : "servers"}`,
@@ -317,7 +319,8 @@ function AccountRow({
                 <ShieldCheckIcon className="size-3.5" />
               </span>
             )}
-            {!local && (
+            {agent && <AppBadge agent />}
+            {a.user?.kind === AccountKind.LINKED && (
               <span className="shrink-0 text-muted-foreground" title="Signs in through waifu.dev">
                 <Link2Icon className="size-3.5" />
               </span>
@@ -341,7 +344,7 @@ function AccountRow({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              {!me && !a.admin && !a.disabled && (
+              {!me && !a.admin && !a.disabled && !agent && (
                 <DropdownMenuItem onSelect={() => onAdmin(true)}>
                   <ShieldIcon /> Make instance admin
                 </DropdownMenuItem>

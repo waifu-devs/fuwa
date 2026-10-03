@@ -3,8 +3,8 @@
 
 use gpui_kit::{
     AnyElement, App, Div, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement as _, SharedString, Stateful, StatefulInteractiveElement as _, Styled, StyledImage as _, div, hsla,
-    img, px, svg,
+    ParentElement as _, Rgba, SharedString, Stateful, StatefulInteractiveElement as _, Styled, StyledImage as _, div,
+    hsla, img, px, svg,
 };
 
 use gpui_kit::component::Icon;
@@ -224,8 +224,13 @@ pub fn soft_button(id: impl Into<ElementId>, label: impl Into<SharedString>, p: 
 
 /// A round icon button that lights up on hover.
 pub fn icon_button(id: impl Into<ElementId>, name: &str, p: &Palette) -> Stateful<Div> {
-    let hover = alpha(p.primary, 0.12);
-    let fg = p.primary;
+    icon_button_in(id, name, p, p.primary)
+}
+
+/// An icon button that lights up in `color` when hovered, like red for delete.
+pub fn icon_button_in(id: impl Into<ElementId>, name: &str, p: &Palette, color: Rgba) -> Stateful<Div> {
+    let hover = alpha(color, 0.12);
+    let fg = color;
     div()
         .id(id)
         .size(px(32.0))

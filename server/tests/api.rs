@@ -77,6 +77,8 @@ struct Clients {
     join: pb::join_service_client::JoinServiceClient<Channel>,
     automod: pb::auto_mod_service_client::AutoModServiceClient<Channel>,
     emojis: pb::emoji_service_client::EmojiServiceClient<Channel>,
+    webhooks: pb::webhook_service_client::WebhookServiceClient<Channel>,
+    agents: pb::agent_service_client::AgentServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -95,7 +97,9 @@ async fn clients(instance: &Instance) -> Clients {
         invites: pb::invite_service_client::InviteServiceClient::new(channel.clone()),
         join: pb::join_service_client::JoinServiceClient::new(channel.clone()),
         automod: pb::auto_mod_service_client::AutoModServiceClient::new(channel.clone()),
-        emojis: pb::emoji_service_client::EmojiServiceClient::new(channel),
+        emojis: pb::emoji_service_client::EmojiServiceClient::new(channel.clone()),
+        webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel.clone()),
+        agents: pb::agent_service_client::AgentServiceClient::new(channel),
     }
 }
 
@@ -4369,5 +4373,427 @@ async fn custom_emoji_and_the_welcome_screen() {
         .server
         .unwrap();
     assert!(server_now.has_welcome_screen);
+    instance.stop().await;
+}
+
+/// Posts to a webhook's address the way other apps do.
+async fn post_webhook(instance: &Instance, webhook: &pb::Webhook, body: &str, wait: bool) -> reqwest::Response {
+    let url = format!(
+        "http://{}/webhooks/{}/{}/{}{}",
+        instance.addr,
+        webhook.server_id,
+        webhook.id,
+        webhook.token,
+        if wait { "?wait=true" } else { "" }
+    );
+    reqwest::Client::new()
+        .post(url)
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .send()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn webhooks_post_into_channels() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (member, _, _) = sign_up(&mut c, "member").await;
+    let server = create_server(&mut c, &owner, "Hooks", true).await;
+    join(&mut c, &member, &server.id).await;
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.name == "general")
+        .unwrap();
+    let news = new_channel(&mut c, &owner, &server.id, "news", pb::ChannelType::Text).await;
+
+    let create = |channel_id: &str, name: &str, avatar_url: &str| pb::CreateWebhookRequest {
+        server_id: server.id.clone(),
+        channel_id: channel_id.into(),
+        name: name.into(),
+        avatar_url: avatar_url.into(),
+    };
+    // Members without Manage webhooks can't make or see any.
+    assert_eq!(
+        c.webhooks.create_webhook(authed(&member, create(&general.id, "Nope", ""))).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    assert_eq!(
+        c.webhooks
+            .list_webhooks(authed(&member, pb::ListWebhooksRequest { server_id: server.id.clone() }))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::PermissionDenied
+    );
+    assert_eq!(
+        c.webhooks.create_webhook(authed(&owner, create(&general.id, "", ""))).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+    assert_eq!(
+        c.webhooks
+            .create_webhook(authed(&owner, create(&general.id, "Outside", "https://example.com/a.png")))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::InvalidArgument
+    );
+
+    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Avatar, png(300, 7)).await;
+    let hook = c
+        .webhooks
+        .create_webhook(authed(&owner, create(&general.id, "Build bot", &picture)))
+        .await
+        .unwrap()
+        .into_inner()
+        .webhook
+        .unwrap();
+    assert_eq!((hook.name.as_str(), hook.avatar_url.as_str()), ("Build bot", picture.as_str()));
+    assert_eq!(hook.token.len(), 64);
+
+    // A Discord-shaped post lands in its channel under the webhook's name.
+    let response = post_webhook(
+        &instance,
+        &hook,
+        r#"{"content":"build **passed** @everyone","embeds":[{"title":"main","color":65280,"fields":[{"name":"took","value":"3m"}]}],"tts":false}"#,
+        true,
+    )
+    .await;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let posted: serde_json::Value = response.json().await.unwrap();
+    let listed = messages(&mut c, &member, &server.id, &general.id).await;
+    let message = listed.iter().find(|m| m.id == posted["id"].as_str().unwrap()).unwrap();
+    assert_eq!(message.author_id, hook.id);
+    assert!(!message.mentions_everyone, "webhooks never ping everyone");
+    let author = message.webhook.as_ref().unwrap();
+    assert_eq!((author.name.as_str(), author.avatar_url.as_str()), ("Build bot", picture.as_str()));
+    assert_eq!(message.embeds[0].color, 0x00FF00);
+
+    // A post can go out under another name; no ?wait answers 204.
+    let response =
+        post_webhook(&instance, &hook, r#"{"content":"deploying","username":"Deploys","avatar_url":""}"#, false).await;
+    assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+    let last = messages(&mut c, &member, &server.id, &general.id).await.pop().unwrap();
+    assert_eq!(last.webhook.unwrap().name, "Deploys");
+
+    // Bad posts and wrong tokens.
+    assert_eq!(post_webhook(&instance, &hook, "not json", false).await.status(), reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(
+        post_webhook(&instance, &hook, r#"{"content":"  "}"#, false).await.status(),
+        reqwest::StatusCode::BAD_REQUEST
+    );
+    let wrong = pb::Webhook { token: "x".repeat(64), ..hook.clone() };
+    assert_eq!(
+        post_webhook(&instance, &wrong, r#"{"content":"hi"}"#, false).await.status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
+
+    // Members can't edit webhook messages; managers can delete them.
+    assert_eq!(
+        c.messages
+            .update_message(authed(
+                &owner,
+                pb::UpdateMessageRequest {
+                    server_id: server.id.clone(),
+                    message_id: message.id.clone(),
+                    content: "mine now".into()
+                }
+            ))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::PermissionDenied
+    );
+
+    // Moving it and resetting its address.
+    let moved = c
+        .webhooks
+        .update_webhook(authed(
+            &owner,
+            pb::UpdateWebhookRequest {
+                server_id: server.id.clone(),
+                webhook_id: hook.id.clone(),
+                name: "CI".into(),
+                avatar_url: picture.clone(),
+                channel_id: news.id.clone(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .webhook
+        .unwrap();
+    assert_eq!((moved.name.as_str(), moved.channel_id.as_str()), ("CI", news.id.as_str()));
+    assert_eq!(
+        post_webhook(&instance, &moved, r#"{"content":"over here"}"#, false).await.status(),
+        reqwest::StatusCode::NO_CONTENT
+    );
+    assert_eq!(messages(&mut c, &member, &server.id, &news.id).await.len(), 1);
+    let reset = c
+        .webhooks
+        .reset_webhook_token(authed(
+            &owner,
+            pb::ResetWebhookTokenRequest { server_id: server.id.clone(), webhook_id: hook.id.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .webhook
+        .unwrap();
+    assert_ne!(reset.token, hook.token);
+    assert_eq!(
+        post_webhook(&instance, &hook, r#"{"content":"old"}"#, false).await.status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
+
+    let listed = c
+        .webhooks
+        .list_webhooks(authed(&owner, pb::ListWebhooksRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(listed.webhooks.len(), 1);
+    assert_eq!(listed.webhooks[0].messages, 3);
+    assert!(listed.webhooks[0].last_used_at.is_some());
+    assert_eq!(listed.creators[0].username, "owner");
+
+    // Thirty posts a minute, then 429 with Retry-After.
+    let mut limited = None;
+    for _ in 0..30 {
+        let response = post_webhook(&instance, &reset, r#"{"content":"spam"}"#, false).await;
+        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            limited = Some(response);
+            break;
+        }
+    }
+    let limited = limited.expect("the 31st post a minute is turned away");
+    assert!(limited.headers().contains_key("retry-after"));
+
+    // The audit log has all of it, never the token.
+    let log =
+        audit_log(&mut c, &owner, pb::ListAuditLogRequest { server_id: server.id.clone(), ..Default::default() }).await;
+    let actions: Vec<_> = log.entries.iter().map(|e| e.action()).collect();
+    assert!(actions.contains(&pb::AuditAction::WebhookCreate));
+    assert!(actions.contains(&pb::AuditAction::WebhookUpdate));
+    assert!(log.entries.iter().all(|e| e.changes.iter().all(|ch| !ch.after.contains(&reset.token))));
+
+    // Deleting its channel takes the webhook and its picture with it.
+    c.channels
+        .delete_channel(authed(
+            &owner,
+            pb::DeleteChannelRequest { server_id: server.id.clone(), channel_id: news.id.clone() },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        post_webhook(&instance, &reset, r#"{"content":"gone"}"#, false).await.status(),
+        reqwest::StatusCode::NOT_FOUND
+    );
+    assert_eq!(fetch(&instance, &picture).await.0, reqwest::StatusCode::NOT_FOUND);
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn agents_are_made_by_people_and_added_by_managers() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, owner_user, _) = sign_up(&mut c, "owner").await;
+    let (other, _, _) = sign_up(&mut c, "other").await;
+    let server = create_server(&mut c, &owner, "Bots", true).await;
+    let elsewhere = create_server(&mut c, &other, "Elsewhere", true).await;
+    set_form(&mut c, &owner, &server.id, &["Be kind"], &[]).await.unwrap();
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.name == "general")
+        .unwrap();
+
+    let create = |username: &str| pb::CreateAgentRequest { username: username.into(), display_name: "Helper".into() };
+    assert_eq!(
+        c.agents.create_agent(authed(&owner, create("owner"))).await.unwrap_err().code(),
+        Code::AlreadyExists,
+        "agents share usernames with people"
+    );
+    let made = c.agents.create_agent(authed(&owner, create("helper"))).await.unwrap().into_inner();
+    let agent = made.agent.unwrap();
+    let token = made.token;
+    let agent_id = agent.user.as_ref().unwrap().id.clone();
+    assert_eq!(agent.user.as_ref().unwrap().kind, pb::AccountKind::Agent as i32);
+    assert_eq!(agent.owner_id, owner_user.id);
+    assert!(!agent.public);
+    assert!(agent.last_active_at.is_none());
+
+    // The token signs the agent in; it has no password and no devices.
+    let me_agent = me(&mut c, &token).await.unwrap();
+    assert_eq!(me_agent.username, "helper");
+    assert_eq!(sign_in(&mut c, "helper", "whatever123").await.unwrap_err().code(), Code::Unauthenticated);
+    let listed = c.agents.list_agents(authed(&owner, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents;
+    assert_eq!(listed.len(), 1);
+    assert!(listed[0].last_active_at.is_some(), "using the token shows");
+    assert!(
+        c.agents.list_agents(authed(&other, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents.is_empty()
+    );
+    assert_eq!(
+        c.agents.list_agents(authed(&token, pb::ListAgentsRequest {})).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+
+    // Agents don't make servers or come in by themselves.
+    assert_eq!(
+        c.servers
+            .create_server(authed(&token, pb::CreateServerRequest { name: "Mine".into(), ..Default::default() }))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::PermissionDenied
+    );
+    assert_eq!(
+        c.servers
+            .join_server(authed(&token, pb::JoinServerRequest { server_id: server.id.clone(), ..Default::default() }))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::FailedPrecondition
+    );
+
+    // Someone else can't touch it.
+    let update = |public: Option<bool>| pb::UpdateAgentRequest {
+        agent_id: agent_id.clone(),
+        display_name: Some("Helper Bot".into()),
+        bio: Some("I **help**.".into()),
+        public,
+        ..Default::default()
+    };
+    assert_eq!(c.agents.update_agent(authed(&other, update(None))).await.unwrap_err().code(), Code::NotFound);
+    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Avatar, png(300, 3)).await;
+    let updated = c
+        .agents
+        .update_agent(authed(&owner, pb::UpdateAgentRequest { avatar_url: Some(picture.clone()), ..update(None) }))
+        .await
+        .unwrap()
+        .into_inner()
+        .agent
+        .unwrap();
+    assert_eq!(updated.user.as_ref().unwrap().display_name, "Helper Bot");
+    assert_eq!(updated.user.as_ref().unwrap().avatar_url, picture);
+    assert_eq!(updated.bio, "I **help**.");
+
+    // A private agent: only its owner adds it, and only where they manage.
+    let add = |server_id: &str| pb::AddAgentRequest { server_id: server_id.into(), username: "Helper".into() };
+    assert_eq!(
+        c.agents.add_agent(authed(&other, add(&elsewhere.id))).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    assert_eq!(
+        c.agents.add_agent(authed(&owner, add(&elsewhere.id))).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    let member = c.agents.add_agent(authed(&owner, add(&server.id))).await.unwrap().into_inner().member.unwrap();
+    assert!(!member.pending, "agents skip the rules");
+    assert_eq!(member.user.as_ref().unwrap().kind, pb::AccountKind::Agent as i32);
+    assert_eq!(c.agents.add_agent(authed(&owner, add(&server.id))).await.unwrap_err().code(), Code::AlreadyExists);
+    let log =
+        audit_log(&mut c, &owner, pb::ListAuditLogRequest { server_id: server.id.clone(), ..Default::default() }).await;
+    assert!(log.entries.iter().any(|e| e.action == pb::AuditAction::AgentAdd as i32 && e.target_id == agent_id));
+
+    // Public: anyone managing a server may add it.
+    c.agents.update_agent(authed(&owner, update(Some(true)))).await.unwrap();
+    c.agents.add_agent(authed(&other, add(&elsewhere.id))).await.unwrap();
+    let listed = c.agents.list_agents(authed(&owner, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents;
+    assert_eq!(listed[0].servers, 2);
+
+    // In a server, it talks like anyone.
+    let sent = send(&mut c, &token, &server.id, &general.id, "beep boop").await.unwrap();
+    assert_eq!(sent.author_id, agent_id);
+
+    // It can't use direct messages.
+    let mut dms = pb::direct_message_service_client::DirectMessageServiceClient::new(instance.channel().await);
+    assert_eq!(
+        dms.open_conversation(authed(&owner, pb::OpenConversationRequest { user_id: agent_id.clone() }))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::FailedPrecondition
+    );
+
+    // A new token: the old one stops working at once.
+    let fresh = c
+        .agents
+        .reset_agent_token(authed(&owner, pb::ResetAgentTokenRequest { agent_id: agent_id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .token;
+    assert_eq!(me(&mut c, &token).await.unwrap_err(), Code::Unauthenticated);
+    assert_eq!(me(&mut c, &fresh).await.unwrap().id, agent_id);
+
+    // Admins can't make it an admin.
+    assert_eq!(
+        update_account(
+            &mut c,
+            &owner,
+            pb::UpdateAccountRequest { account_id: agent_id.clone(), admin: Some(true), ..Default::default() }
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        Code::FailedPrecondition
+    );
+
+    // Deleting it takes it out of every server; what it said stays.
+    c.agents.delete_agent(authed(&owner, pb::DeleteAgentRequest { agent_id: agent_id.clone() })).await.unwrap();
+    assert_eq!(me(&mut c, &fresh).await.unwrap_err(), Code::Unauthenticated);
+    let members = c
+        .servers
+        .list_members(authed(&owner, pb::ListMembersRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .members;
+    assert!(members.iter().all(|m| m.user.as_ref().unwrap().id != agent_id));
+    assert!(messages(&mut c, &owner, &server.id, &general.id).await.iter().any(|m| m.id == sent.id));
+    assert_eq!(fetch(&instance, &picture).await.0, reqwest::StatusCode::NOT_FOUND, "its picture goes too");
+    assert!(
+        c.agents.list_agents(authed(&owner, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents.is_empty()
+    );
+
+    // Admins can stop new ones; and a person's agents go when they do.
+    let settings = c.admin.get_settings(authed(&owner, pb::GetSettingsRequest {})).await.unwrap().into_inner();
+    let mut changed = settings.config.unwrap().settings.unwrap();
+    changed.agent_creation = pb::AgentCreation::Admins as i32;
+    c.admin.update_settings(authed(&owner, settings_update(changed, &["agent_creation"], &[]))).await.unwrap();
+    assert_eq!(c.agents.create_agent(authed(&other, create("nope"))).await.unwrap_err().code(), Code::PermissionDenied);
+    let second = c.agents.create_agent(authed(&owner, create("second"))).await.unwrap().into_inner();
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert_eq!(node.agent_creation, pb::AgentCreation::Admins as i32);
+    // Someone else stays admin, so the owner can leave.
+    let other_id = me(&mut c, &other).await.unwrap().id;
+    let make_admin = pb::UpdateAccountRequest { account_id: other_id, admin: Some(true), ..Default::default() };
+    update_account(&mut c, &owner, make_admin).await.unwrap();
+    // They own a server; it goes first.
+    c.servers.delete_server(authed(&owner, pb::DeleteServerRequest { server_id: server.id.clone() })).await.unwrap();
+    c.account
+        .delete_account(authed(
+            &owner,
+            pb::DeleteAccountRequest { password: "correct horse battery".into(), ..Default::default() },
+        ))
+        .await
+        .unwrap_or_else(|err| panic!("{err:?}"));
+    assert_eq!(me(&mut c, &second.token).await.unwrap_err(), Code::Unauthenticated);
     instance.stop().await;
 }

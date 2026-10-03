@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, respond, text};
+use super::{Api, PictureOwner, Seat, respond, text};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
@@ -250,7 +250,7 @@ impl ChannelService for Api {
             let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
             access.require_in(&req.channel_id, Permission::ManageChannels)?;
             // Alone, so no message lands in the channel while it goes.
-            let server = sdb.write_alone(&account.id, async |conn, events| {
+            let (server, pictures) = sdb.write_alone(&account.id, async |conn, events| {
                 let channel = load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
                 // Its messages go with it; take them off the usage totals first.
                 let (messages, bytes, attachments) = query_one(
@@ -263,6 +263,12 @@ impl ChannelService for Api {
                 .unwrap_or_default();
                 conn.execute("DELETE FROM messages WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 conn.execute("DELETE FROM slowmode WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
+                // Its webhooks go too: they have nowhere left to post.
+                let pictures = query_all(conn, "SELECT avatar_url FROM webhooks WHERE channel_id = ?1 AND avatar_url <> ''", [req.channel_id.as_str()], |r| {
+                    r.get::<String>(0)
+                })
+                .await?;
+                conn.execute("DELETE FROM webhooks WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 conn.execute("DELETE FROM channels WHERE id = ?1", [req.channel_id.as_str()]).await?;
                 conn.execute("DELETE FROM channel_overwrites WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 // A deleted category's channels move to the top level.
@@ -290,13 +296,16 @@ impl ChannelService for Api {
                 if conn.execute("UPDATE server SET system_channel_id = NULL, updated_at = ?2 WHERE system_channel_id = ?1", (req.channel_id.as_str(), now_ms())).await? > 0 {
                     let server = store::load_server(conn).await?;
                     events.push(Payload::ServerUpdated(pb::ServerUpdated { server: Some(server.clone()) }));
-                    return Ok(Some(server));
+                    return Ok((Some(server), pictures));
                 }
-                Ok(None)
+                Ok((None, pictures))
             })
             .await?;
             if let Some(server) = server {
                 self.app.server_changed(&server).await;
+            }
+            for picture in pictures {
+                self.drop_picture(&picture, "", PictureOwner::Server(&sdb.id)).await;
             }
             self.forget_notifications(&sdb.id, Some(&req.channel_id), None).await;
             Ok(pb::DeleteChannelResponse {})

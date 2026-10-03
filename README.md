@@ -116,6 +116,7 @@ the log filter are read only from the environment.
 | `FUWA_LINKED_ACCOUNTS` | `open` | Signing in with waifu.dev: `open` (anyone with a waifu.dev account gets one here), `closed` (existing linked accounts only), `off` |
 | `FUWA_LINKED_ISSUER` | `https://api.waifu.dev` | The OpenAuth issuer linked accounts sign in with |
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
+| `FUWA_AGENT_CREATION` | `everyone` | Who can make agents (accounts programs drive): `everyone`, `admins`, `off` |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |
 | `FUWA_ENCRYPTION_KEY` | unset | 64 hex characters (`openssl rand -hex 32`); encrypts every database at rest |
 | `FUWA_LIMIT_SERVERS_PER_ACCOUNT` | unlimited | Servers one account may own |
@@ -188,6 +189,46 @@ when the account is deleted.
 To upload one yourself, call `MediaService.CreateUpload` with the picture's type
 and size, then `PUT` the file to the `upload_url` it returns (within ten
 minutes, once) and set the returned `media.url` as the avatar, banner or icon.
+
+### Webhooks
+
+A server's managers (anyone with Manage webhooks) make webhooks under Server
+settings, Integrations. Each one is an address that posts into one channel,
+with no account: CI results, feeds, alerts. Posts are a JSON `POST` shaped like
+Discord's, so tools made for Discord webhooks work unchanged:
+
+```sh
+curl -X POST "$WEBHOOK_URL" -H 'content-type: application/json' \
+  -d '{"content": "Build **passed**", "username": "CI", "embeds": [{"title": "main", "color": 5763719}]}'
+```
+
+The address is `<FUWA_PUBLIC_URL>/webhooks/<server id>/<webhook id>/<token>`,
+on the same port as everything else. It answers `204`, or `200` with the
+message with `?wait=true`. Each webhook may post 30 messages a minute (then
+`429` with `Retry-After`), and never pings @everyone, @here or roles. Anyone
+with the address can post, so a leaked one is replaced with New address.
+
+### Agents
+
+Agents are accounts a program drives: bots, assistants, integrations that
+need to read as well as post. Anyone signed in makes them under Settings,
+Agents (instance admins can limit that to admins, or turn it off, with
+`FUWA_AGENT_CREATION`), up to 25 each. Each one gets a token, shown once,
+that the program sends as `authorization: Bearer <token>` on every call of
+the same API the apps use:
+
+```sh
+grpcurl -H "authorization: Bearer $AGENT_TOKEN" \
+  -d '{"server_id": "…", "channel_id": "…", "content": "Hello! 🤖"}' \
+  fuwa.example:443 fuwa.v1.MessageService/SendMessage
+```
+
+An agent joins a server only when someone with Manage Server adds it (Server
+settings, Integrations, or from the agent's own card). Agents are private
+until their owner marks them public: then any server's managers can add them
+by username. They talk with the roles they're given, show an AGENT badge,
+can't own servers or use direct messages, and go away with the person who
+made them.
 
 ### Looking after an instance
 
@@ -447,7 +488,10 @@ On Linux it needs the usual GPUI libraries (`libxkbcommon-dev`,
 `libxkbcommon-x11-dev`, `libwayland-dev`, `libvulkan-dev`, `libx11-xcb-dev`,
 `libfontconfig-dev`). `FUWA_DESKTOP_HOME=<folder>` keeps its instances, settings
 and encrypted messages in one folder instead, to run a second copy signed in as
-someone else. Releases attach a `fuwa-desktop` build for each system.
+someone else. Releases attach an installer for each system (`.deb` and
+AppImage, `.dmg`, `-setup.exe`) and the bare `fuwa-desktop` program; to make
+the installers yourself, `cargo install cargo-packager --locked` and then
+`cargo build --release && cargo packager --release` in `desktop/`.
 
 See [AGENTS.md](AGENTS.md) for how the code is laid out.
 

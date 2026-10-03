@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// Agents: accounts that programs drive (bots, assistants, integrations),
+// made and owned by a person. An agent signs in with its token as a bearer
+// token and then uses the same API people do: it reads with EventService,
+// posts with MessageService, and so on, in the servers it was added to.
+//
+// Agents have no password, two-step sign-in or devices of their own: the
+// token is their only way in, and it never runs out until it's reset. They
+// don't join servers by themselves; someone with MANAGE_SERVER adds them
+// (AddAgent), and they skip the rules and the account-age check. Removing one
+// is kicking it. They can't own servers or use direct messages, and clients
+// mark them (User.kind is ACCOUNT_KIND_AGENT).
+//
+// Who may make agents is the instance's agent_creation setting.
+service AgentService {
+  // The caller's agents, oldest first.
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  // Makes an agent and its first token.
+  rpc CreateAgent(CreateAgentRequest) returns (CreateAgentResponse);
+  // Changes its name, picture, bio or who may add it.
+  rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse);
+  // A new token. The old one stops working at once, and the agent is signed
+  // out everywhere.
+  rpc ResetAgentToken(ResetAgentTokenRequest) returns (ResetAgentTokenResponse);
+  // Deletes the agent: it leaves every server, and its messages stay under
+  // "Deleted account", as when a person deletes theirs.
+  rpc DeleteAgent(DeleteAgentRequest) returns (DeleteAgentResponse);
+  // Adds an agent to a server. Needs MANAGE_SERVER there, and the agent must
+  // be public or the caller's own.
+  rpc AddAgent(AddAgentRequest) returns (AddAgentResponse);
+}
+
+message Agent {
+  User user = 1;
+  // The person who made it.
+  string owner_id = 2;
+  // Anyone who manages a server may add it there. Otherwise only its owner can.
+  bool public = 3;
+  // Markdown, like a person's bio.
+  string bio = 4;
+  google.protobuf.Timestamp created_at = 5;
+  // When it last used its token; unset if it never has.
+  google.protobuf.Timestamp last_active_at = 6;
+  // How many servers it's in.
+  int32 servers = 7;
+}
+
+message ListAgentsRequest {}
+
+message ListAgentsResponse {
+  repeated Agent agents = 1;
+}
+
+message CreateAgentRequest {
+  // Its username, like a person's: 2 to 32 of a-z, 0-9, _ and .
+  string username = 1;
+  // 1 to 64 characters.
+  string display_name = 2;
+}
+
+message CreateAgentResponse {
+  Agent agent = 1;
+  // Shown this once: only its hash is kept.
+  string token = 2;
+}
+
+message UpdateAgentRequest {
+  string agent_id = 1;
+  optional string display_name = 2;
+  // Empty, or a picture the caller uploaded for it (MEDIA_PURPOSE_AVATAR).
+  optional string avatar_url = 3;
+  optional string bio = 4;
+  optional bool public = 5;
+}
+
+message UpdateAgentResponse {
+  Agent agent = 1;
+}
+
+message ResetAgentTokenRequest {
+  string agent_id = 1;
+}
+
+message ResetAgentTokenResponse {
+  // Shown this once.
+  string token = 1;
+}
+
+message DeleteAgentRequest {
+  string agent_id = 1;
+}
+
+message DeleteAgentResponse {}
+
+message AddAgentRequest {
+  string server_id = 1;
+  // The agent's username.
+  string username = 2;
+}
+
+message AddAgentResponse {
+  Member member = 1;
+}

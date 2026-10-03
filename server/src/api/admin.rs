@@ -260,7 +260,10 @@ impl AdminService for Api {
                     ));
                 }
                 let reason = text("reason", &req.reason, 0, 512)?;
-                self.app.node()?.account(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
+                let target = self.app.node()?.account(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
+                if req.admin == Some(true) && target.kind == pb::AccountKind::Agent {
+                    return Err(Error::FailedPrecondition("agents can't be instance admins".into()));
+                }
                 // Taking admin away comes before turning off, and turning on before making admin.
                 if req.admin == Some(false) {
                     self.app.node()?.set_admin(&req.account_id, false).await?;

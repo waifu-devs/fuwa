@@ -43,6 +43,10 @@ struct OnDevice {
     device: DeviceRow,
 }
 
+/// Direct messages are end-to-end encrypted between people's devices; an
+/// agent has none.
+const AGENTS_HAVE_NO_DMS: &str = "agents can't use direct messages";
+
 fn malformed(err: wire::Malformed) -> Error {
     Error::invalid(err.to_string())
 }
@@ -149,6 +153,9 @@ impl Api {
         req: pb::RegisterDeviceRequest,
     ) -> Result<pb::RegisterDeviceResponse> {
         let caller = self.caller(metadata).await?;
+        if caller.account.kind == pb::AccountKind::Agent {
+            return Err(Error::FailedPrecondition(AGENTS_HAVE_NO_DMS.into()));
+        }
         let node = self.app.node()?;
         let session_id = node.session_id(&caller.token_hash).await?.ok_or(Error::Unauthenticated)?;
         if req.signature_key.len() != 32 {
@@ -267,8 +274,9 @@ impl Api {
         if !self.app.index.share_a_server(&account.id, with) && !dms.partners(&account.id).await?.contains(with) {
             return Err(Error::denied("you can only message people you share a server with"));
         }
-        if self.app.node()?.account(with).await?.is_none() {
-            return Err(Error::NotFound("user"));
+        let other = self.app.node()?.account(with).await?.ok_or(Error::NotFound("user"))?;
+        if account.kind == pb::AccountKind::Agent || other.kind == pb::AccountKind::Agent {
+            return Err(Error::FailedPrecondition(AGENTS_HAVE_NO_DMS.into()));
         }
         let (row, created) = dms.open_conversation(&account.id, with).await?;
         let conversation = self.conversations_pb(std::slice::from_ref(&row)).await?.remove(0);

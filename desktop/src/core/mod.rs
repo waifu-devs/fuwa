@@ -6,10 +6,13 @@
 //! and GPUI has its own executor. It changes the store under a lock and bumps
 //! a version the window watches, so the window redraws after every change.
 
+pub mod account;
 pub mod api;
 pub mod config;
 pub mod dms;
 pub mod linked;
+pub mod notifications;
+pub mod permissions;
 pub mod store;
 mod sync;
 pub mod vault;
@@ -31,7 +34,15 @@ use crate::rpc;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Notice {
     /// A message (or direct message) arrived somewhere they aren't looking.
-    Message { instance: String, server_id: Option<String>, channel_id: String, title: String, body: String },
+    /// `mention` when it pings them (direct messages always do).
+    Message {
+        instance: String,
+        server_id: Option<String>,
+        channel_id: String,
+        title: String,
+        body: String,
+        mention: bool,
+    },
     /// They were removed from a server, or it was deleted.
     Removed { server: String },
     /// A session ended on its own.
@@ -74,7 +85,8 @@ impl Shared {
 
     /// A direct message from someone else arrived.
     pub(crate) fn notify_dm(&self, key: &str, c: &pb::Conversation, item: &vault::Item) {
-        if self.is_focused(key, &c.id) {
+        // Catching up on what came in while the app was closed stays quiet.
+        if self.is_focused(key, &c.id) || dms::now_ms() - item.at > 30_000 {
             return;
         }
         let title =
@@ -84,7 +96,8 @@ impl Shared {
             server_id: None,
             channel_id: c.id.clone(),
             title,
-            body: item.content.chars().take(140).collect(),
+            body: item.content.chars().take(160).collect(),
+            mention: true,
         });
     }
 }
@@ -623,18 +636,24 @@ impl Core {
 
     pub async fn send_dm(&self, key: &str, id: &str, content: Content) -> Result<(), DmError> {
         let engine = self.dm_engine(key).ok_or_else(|| DmError("Encrypted messages aren't ready yet.".into()))?;
+        // A new message shows dimmed until it's sent; an edit changes the one already there.
         let text = match &content {
-            Content::Text { text, .. } | Content::Edit { text, .. } => text.clone(),
+            Content::Text { text, .. } => Some(text.clone()),
+            Content::Edit { .. } => None,
         };
-        self.shared.instance(key, |i| i.dms.sending.entry(id.to_owned()).or_default().push(text.clone()));
+        if let Some(text) = &text {
+            self.shared.instance(key, |i| i.dms.sending.entry(id.to_owned()).or_default().push(text.clone()));
+        }
         let result = engine.send(id, content).await;
-        self.shared.instance(key, |i| {
-            if let Some(list) = i.dms.sending.get_mut(id)
-                && let Some(at) = list.iter().position(|t| *t == text)
-            {
-                list.remove(at);
-            }
-        });
+        if let Some(text) = text {
+            self.shared.instance(key, |i| {
+                if let Some(list) = i.dms.sending.get_mut(id)
+                    && let Some(at) = list.iter().position(|t| *t == text)
+                {
+                    list.remove(at);
+                }
+            });
+        }
         result
     }
 

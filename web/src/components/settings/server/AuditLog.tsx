@@ -31,6 +31,8 @@ import {
   UserCheckIcon,
   UserCogIcon,
   UserXIcon,
+  WebhookIcon,
+  UnplugIcon,
   type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -89,6 +91,10 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.EMOJI_CREATE]: { label: "New emoji", icon: SmilePlusIcon, tint: "bg-emerald-500/15 text-emerald-500" },
   [AuditAction.EMOJI_UPDATE]: { label: "Renamed emoji", icon: SmileIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.EMOJI_DELETE]: { label: "Deleted emoji", icon: FrownIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.WEBHOOK_CREATE]: { label: "New webhooks", icon: WebhookIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.WEBHOOK_UPDATE]: { label: "Webhook changes", icon: WebhookIcon, tint: "bg-sky-500/15 text-sky-500" },
+  [AuditAction.WEBHOOK_DELETE]: { label: "Deleted webhooks", icon: UnplugIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.AGENT_ADD]: { label: "Agents added", icon: BotIcon, tint: "bg-violet-500/15 text-violet-500" },
 };
 
 const FIELD: Record<string, string> = {
@@ -117,6 +123,9 @@ const FIELD: Record<string, string> = {
   applications: "Apply to join",
   linked_only: "waifu.dev accounts only",
   rules: "Rules",
+  avatar_url: "Picture",
+  channel_id: "Posts in",
+  token: "Address",
   questions: "Questions",
   enabled: "On",
   channels: "Channels",
@@ -134,6 +143,8 @@ const ONE_SIDE: Partial<Record<AuditAction, "before" | "after">> = {
   [AuditAction.AUTO_MOD_RULE_DELETE]: "before",
   [AuditAction.EMOJI_CREATE]: "after",
   [AuditAction.EMOJI_DELETE]: "before",
+  [AuditAction.WEBHOOK_CREATE]: "after",
+  [AuditAction.WEBHOOK_DELETE]: "before",
 };
 
 /** Ranks from before roles, as entries from back then keep them. */
@@ -381,7 +392,9 @@ function value(field: string, raw: string, users: Record<string, User>, channels
   }
   if (field === "default_notifications")
     return Number(raw) === NotificationLevel.MENTIONS ? "Only @mentions" : Number(raw) === NotificationLevel.ALL ? "All messages" : "Each person's own";
-  if (field === "system_channel_id" || field === "parent_id") {
+  if (field === "avatar_url") return raw ? "A picture" : "None";
+  if (field === "token") return "Replaced";
+  if (field === "system_channel_id" || field === "parent_id" || field === "channel_id") {
     if (!raw) return "None";
     const channel = channels.find((c) => c.id === raw);
     return channel ? (field === "parent_id" ? channel.name : `#${channel.name}`) : "A deleted channel";
@@ -579,6 +592,27 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
     }
     case AuditAction.EMOJI_DELETE:
       return <>{actor} deleted the emoji <b>:{change("name")?.before}:</b></>;
+    case AuditAction.WEBHOOK_CREATE:
+      return (
+        <>
+          {actor} made the webhook <b>{change("name")?.after}</b> for <b>#{entry.channelName}</b>
+        </>
+      );
+    case AuditAction.WEBHOOK_UPDATE: {
+      if (change("token")) return <>{actor} gave a webhook in <b>#{entry.channelName}</b> a new address</>;
+      const renamed = change("name");
+      if (renamed && entry.changes.length === 1)
+        return (
+          <>
+            {actor} renamed the webhook <b>{renamed.before}</b> to <b>{renamed.after}</b>
+          </>
+        );
+      return <>{actor} changed a webhook in <b>#{entry.channelName}</b></>;
+    }
+    case AuditAction.WEBHOOK_DELETE:
+      return <>{actor} deleted the webhook <b>{change("name")?.before}</b></>;
+    case AuditAction.AGENT_ADD:
+      return <>{actor} added the agent {target}</>;
     default:
       return <>{actor} did something</>;
   }

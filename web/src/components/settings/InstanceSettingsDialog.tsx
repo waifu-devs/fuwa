@@ -15,6 +15,7 @@ import {
   ServerIcon,
   SlidersHorizontalIcon,
   UserPlusIcon,
+  BotIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -25,7 +26,7 @@ import {
   type InstanceConfig,
   type InstanceSettings,
 } from "@/gen/fuwa/v1/admin_pb";
-import { AccountKind, ServerCreation, ServerLimitsSchema } from "@/gen/fuwa/v1/types_pb";
+import { AccountKind, AgentCreation, ServerCreation, ServerLimitsSchema } from "@/gen/fuwa/v1/types_pb";
 import { getSettings, run, updateSettings } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { Input } from "@/components/ui/input";
@@ -51,6 +52,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "linked_accounts", get: (s) => s.linkedAccounts },
   { path: "linked_issuer", get: (s) => s.linkedIssuer.trim().replace(/\/+$/, "") },
   { path: "server_creation", get: (s) => s.serverCreation },
+  { path: "agent_creation", get: (s) => s.agentCreation },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
   { path: "default_limits.channels", get: (s) => s.defaultLimits?.channels },
@@ -180,6 +182,7 @@ export function InstanceSettingsDialog({
                 { id: "linked-issuer", label: "Sign-in provider", keywords: "issuer openauth waifu.dev linked" },
                 { id: "server-creation", label: "Who can create servers" },
                 { id: "servers-per-account", label: "Servers per account" },
+                { id: "agent-creation", label: "Who can make agents", keywords: "bots integrations" },
               ],
             },
             {
@@ -416,6 +419,24 @@ export function InstanceSettingsDialog({
               >
                 <Cap label="Up to" value={draft.serversPerAccount} onChange={(v) => patch((d) => (d.serversPerAccount = v))} />
               </Setting>
+              <Setting
+                id="agent-creation"
+                title="Who can make agents"
+                hint="Agents are accounts programs drive, such as bots. Agents already made keep working."
+                defaultLabel={AGENT_CREATION_LABEL[defaults.agentCreation]}
+                delay={0.2}
+                {...resetter("agent_creation")}
+              >
+                <Choice
+                  value={draft.agentCreation}
+                  onChange={(v) => patch((d) => (d.agentCreation = v))}
+                  options={[
+                    { value: AgentCreation.EVERYONE, label: "Everyone", hint: "Any signed-in person.", icon: <BotIcon className="size-4" /> },
+                    { value: AgentCreation.ADMINS, label: "Admins", hint: "Instance admins only.", icon: <CrownIcon className="size-4" /> },
+                    { value: AgentCreation.DISABLED, label: "Nobody", hint: "No new agents.", icon: <BanIcon className="size-4" /> },
+                  ]}
+                />
+              </Setting>
             </>
           )}
           {tab === "limits" && (
@@ -529,6 +550,12 @@ function Notice({ show, children }: { show: boolean; children: ReactNode }) {
   );
 }
 
+const AGENT_CREATION_LABEL: Record<number, string> = {
+  [AgentCreation.EVERYONE]: "everyone",
+  [AgentCreation.ADMINS]: "admins",
+  [AgentCreation.DISABLED]: "nobody",
+};
+
 const CREATION_LABEL: Record<number, string> = {
   [ServerCreation.EVERYONE]: "everyone",
   [ServerCreation.ADMINS]: "admins",
@@ -563,6 +590,9 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "servers_per_account":
         into.serversPerAccount = from.serversPerAccount;
+        break;
+      case "agent_creation":
+        into.agentCreation = from.agentCreation;
         break;
       case "telemetry":
         into.telemetry = from.telemetry;

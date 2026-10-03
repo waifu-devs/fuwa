@@ -37,6 +37,8 @@ hyper = { version = "1", features = ["http1", "server"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "native-tokio", "webpki-tokio", "ring", "tls12", "logging"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "server", "tokio"] }
+# The system's own notifications, while the window is in the background.
+notify-rust = "4.18"
 open = "5"
 parking_lot = "0.12"
 prost = "0.14"
@@ -63,6 +65,32 @@ tonic-prost-build = "0.14"
 axum = { version = "0.8", default-features = false, features = ["http1", "http2", "tokio"] }
 fuwa-server = { path = "../server" }
 tempfile = "3"
+
+# Installers, made by cargo-packager (.github/workflows/desktop.yml).
+[package.metadata.packager]
+product-name = "fuwa"
+identifier = "dev.waifu.fuwa"
+publisher = "Waifu Devs"
+homepage = "https://www.waifu.dev/projects"
+category = "SocialNetworking"
+copyright = "Waifu Devs"
+out-dir = "target/packages"
+binaries-dir = "target/release"
+icons = [
+  "packaging/icons/32x32.png",
+  "packaging/icons/64x64.png",
+  "packaging/icons/128x128.png",
+  "packaging/icons/256x256.png",
+  "packaging/icons/512x512.png",
+  "packaging/icons/icon.ico",
+]
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"
+
+[package.metadata.packager.nsis]
+# Installs for the person running it, so it doesn't ask for an administrator.
+installer-mode = "currentUser"
 
 [profile.release]
 lto = "thin"

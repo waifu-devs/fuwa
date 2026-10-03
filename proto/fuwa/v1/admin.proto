@@ -85,6 +85,9 @@ message InstanceSettings {
   // The secret shared with the TURN servers (coturn's static-auth-secret),
   // which makes each caller a credential that expires. FUWA_TURN_SECRET.
   string turn_secret = 22;
+  // Who may make agents (bot accounts). Agents already made keep working.
+  // FUWA_AGENT_CREATION.
+  AgentCreation agent_creation = 13;
 }
 
 // Whether standalone accounts (a username and password kept on the instance) work.

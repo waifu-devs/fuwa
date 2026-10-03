@@ -23,6 +23,8 @@ message Node {
   Announcement announcement = 7;
   // The build the instance says it runs.
   Build build = 8;
+  // Who may make agents (bot accounts).
+  AgentCreation agent_creation = 9;
 }
 
 // What a fuwa binary was built from. The instance reports this about itself,
@@ -74,6 +76,14 @@ message AuthMethods {
   bool linked_sign_up = 5;
 }
 
+// Who may make agents (accounts programs drive) on an instance.
+enum AgentCreation {
+  AGENT_CREATION_UNSPECIFIED = 0;
+  AGENT_CREATION_EVERYONE = 1;
+  AGENT_CREATION_ADMINS = 2;
+  AGENT_CREATION_DISABLED = 3;
+}
+
 // Who may create community servers on an instance.
 enum ServerCreation {
   SERVER_CREATION_UNSPECIFIED = 0;
@@ -92,6 +102,9 @@ enum AccountKind {
   ACCOUNT_KIND_LOCAL = 1;
   // Signs in through waifu.dev.
   ACCOUNT_KIND_LINKED = 2;
+  // Driven by a program, made by a person; signs in with a token. See
+  // AgentService.
+  ACCOUNT_KIND_AGENT = 3;
 }
 
 // A person's public profile.
@@ -186,17 +199,19 @@ enum Permission {
 
   // Add, rename and delete the server's custom emoji.
   PERMISSION_MANAGE_EMOJI = 18;
+  // Create, change and delete the server's webhooks, and see their addresses.
+  PERMISSION_MANAGE_WEBHOOKS = 19;
 
   // Server-wide, and per channel through overwrites.
 
   // Join voice channels.
-  PERMISSION_CONNECT = 19;
+  PERMISSION_CONNECT = 20;
   // Be heard in voice channels. Without it, people join muted.
-  PERMISSION_SPEAK = 20;
+  PERMISSION_SPEAK = 21;
   // Mute and deafen others in voice channels.
-  PERMISSION_MUTE_MEMBERS = 21;
+  PERMISSION_MUTE_MEMBERS = 22;
   // Disconnect others from voice channels.
-  PERMISSION_MOVE_MEMBERS = 22;
+  PERMISSION_MOVE_MEMBERS = 23;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -292,6 +307,27 @@ message WelcomeChannel {
 }
 
 // A server's own emoji, written in messages as <:name:id>.
+// An address other apps post messages to, into one channel. See
+// WebhookService.
+message Webhook {
+  string id = 1;
+  string server_id = 2;
+  string channel_id = 3;
+  // 1 to 80 characters: the name its messages show, unless a post says otherwise.
+  string name = 4;
+  // An upload on this instance, or empty.
+  string avatar_url = 5;
+  // Who made it.
+  string creator_id = 6;
+  google.protobuf.Timestamp created_at = 7;
+  // The secret part of its address. Anyone who has it can post.
+  string token = 8;
+  // When it last posted; unset if it never has.
+  google.protobuf.Timestamp last_used_at = 9;
+  // How many messages it has posted.
+  int64 messages = 10;
+}
+
 message Emoji {
   string id = 1;
   string server_id = 2;
@@ -514,6 +550,17 @@ message Message {
   repeated string mention_role_ids = 13;
   // For MESSAGE_KIND_AUTO_MOD_ALERT.
   AutoModAlert auto_mod = 14;
+  // Posted by a webhook, whose id is the author_id: who it says it is.
+  // Clients show this instead of a profile.
+  MessageWebhook webhook = 15;
+}
+
+// The name and picture a webhook message was posted under: the webhook's
+// own, or ones the post asked for.
+message MessageWebhook {
+  string webhook_id = 1;
+  string name = 2;
+  string avatar_url = 3;
 }
 
 message Attachment {

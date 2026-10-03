@@ -1,6 +1,7 @@
 import { createClient, type Client, type Interceptor } from "@connectrpc/connect";
 import { createGrpcWebTransport } from "@connectrpc/connect-web";
 import { AccountService } from "@/gen/fuwa/v1/account_pb";
+import { AgentService } from "@/gen/fuwa/v1/agent_pb";
 import { AdminService } from "@/gen/fuwa/v1/admin_pb";
 import { AuthService } from "@/gen/fuwa/v1/auth_pb";
 import { AutoModService } from "@/gen/fuwa/v1/automod_pb";
@@ -16,6 +17,7 @@ import { MessageService } from "@/gen/fuwa/v1/message_pb";
 import { NodeService } from "@/gen/fuwa/v1/node_pb";
 import { RoleService } from "@/gen/fuwa/v1/role_pb";
 import { ServerService } from "@/gen/fuwa/v1/server_pb";
+import { WebhookService } from "@/gen/fuwa/v1/webhook_pb";
 
 /** Typed clients for every fuwa service on one instance. */
 export type Api = {
@@ -35,6 +37,8 @@ export type Api = {
   automod: Client<typeof AutoModService>;
   emojis: Client<typeof EmojiService>;
   calls: Client<typeof CallService>;
+  webhooks: Client<typeof WebhookService>;
+  agents: Client<typeof AgentService>;
 };
 
 /**
@@ -66,5 +70,7 @@ export function makeApi(url: string, token: () => string | null): Api {
     automod: createClient(AutoModService, transport),
     emojis: createClient(EmojiService, transport),
     calls: createClient(CallService, transport),
+    webhooks: createClient(WebhookService, transport),
+    agents: createClient(AgentService, transport),
   };
 }

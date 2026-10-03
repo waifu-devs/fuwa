@@ -27,7 +27,16 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { AutoModTrigger, MessageKind, Permission, type Channel, type Member, type Message, type User } from "@/gen/fuwa/v1/types_pb";
+import {
+  AutoModTrigger,
+  MessageKind,
+  Permission,
+  type Channel,
+  type Member,
+  type Message,
+  type MessageWebhook,
+  type User,
+} from "@/gen/fuwa/v1/types_pb";
 import { deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
 import { useAccess, useInstance, useRoles } from "@/fuwa/hooks";
 import type { PendingMessage } from "@/fuwa/store";
@@ -39,7 +48,9 @@ import { EMOJI_TOKEN, onlyEmoji } from "@/lib/emoji";
 import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
 import { ProfilePopover } from "@/components/ProfilePopover";
-import { displayName, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
+import { Embeds } from "@/components/chat/Embeds";
+import { AppBadge } from "@/components/AppBadge";
+import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
 import { comboLabel } from "@/lib/keybinds";
 import { pingsMe, useNotificationSettings } from "@/lib/notifications";
 import { hasIn } from "@/lib/permissions";
@@ -124,9 +135,10 @@ export const MessageList = forwardRef<
         prev = { author: "", at: date };
         continue;
       }
-      const first = !prev || prev.author !== message.authorId || date.getTime() - prev.at.getTime() > GROUP_GAP_MS;
+      const author = runKey(message);
+      const first = !prev || prev.author !== author || date.getTime() - prev.at.getTime() > GROUP_GAP_MS;
       out.push({ kind: "message", key: message.id, message, first, date });
-      prev = { author: message.authorId, at: date };
+      prev = { author, at: date };
     }
     for (const p of pending) {
       const first = !prev || prev.author !== me?.id || p.createdAt - prev.at.getTime() > GROUP_GAP_MS;
@@ -226,7 +238,9 @@ export const MessageList = forwardRef<
                     onDismiss={() => dismissPending(instanceKey, channel.id, row.pending.nonce)}
                   />
                 );
-              const author = memberById.get(row.message.authorId)?.user ?? users?.[row.message.authorId];
+              const author = row.message.webhook
+                ? webhookAuthor(row.message.webhook)
+                : (memberById.get(row.message.authorId)?.user ?? users?.[row.message.authorId]);
               if (row.kind === "automod")
                 return (
                   <AutoModAlertRow
@@ -354,16 +368,24 @@ function Skeleton({ rows }: { rows: number }) {
 }
 
 /** Someone's name in chat, in their role's color, with a crown for the server's owner. */
-export function AuthorName({ user, member }: { user: User | undefined; member: Member | undefined }) {
+export function AuthorName({ user, member, app = false }: { user: User | undefined; member: Member | undefined; app?: boolean }) {
   const { ownerId } = useServerLook();
   const color = useRoleColor(member);
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
       <RoleName id={user?.id ?? ""} name={member?.nickname || displayName(user)} color={color} />
       {!!ownerId && user?.id === ownerId && <CrownIcon aria-label="Owner" className="size-3.5 shrink-0 text-amber-400" />}
+      {(app || isAgent(user)) && <AppBadge agent={!app} />}
     </span>
   );
 }
+
+/** Who a webhook message says it's from, as a profile to draw. */
+export const webhookAuthor = (w: MessageWebhook): User =>
+  ({ id: w.webhookId, displayName: w.name, username: w.name, avatarUrl: w.avatarUrl }) as User;
+
+/** What makes a run of messages one author's: a webhook posting under another name starts a new one. */
+const runKey = (m: Message) => (m.webhook ? `${m.authorId}\n${m.webhook.name}\n${m.webhook.avatarUrl}` : m.authorId);
 
 const enter = { initial: { opacity: 0, y: 12, scale: 0.98 }, animate: { opacity: 1, y: 0, scale: 1 } };
 
@@ -380,12 +402,15 @@ export function MessageLine({
   date,
   status,
   instanceKey,
+  app = false,
   children,
 }: {
   display: MessageDisplay;
   first: boolean;
   author: User | undefined;
   member: Member | undefined;
+  /** Posted by an app through a webhook: marked, with no profile to open. */
+  app?: boolean;
   /** When it was sent; missing while it's still sending. */
   date?: Date;
   /** Shown instead of the time, like "sending…". */
@@ -395,7 +420,7 @@ export function MessageLine({
   children: React.ReactNode;
 }) {
   const card = (child: React.ReactElement) =>
-    instanceKey && author ? (
+    instanceKey && author && !app ? (
       <ProfilePopover instanceKey={instanceKey} user={author} member={member}>
         {child}
       </ProfilePopover>
@@ -415,7 +440,7 @@ export function MessageLine({
         <span className="mr-1.5 inline-flex max-w-[40%] align-bottom">
           {card(
             <button type="button" className="min-w-0 text-left hover:underline">
-              <AuthorName user={author} member={member} />
+              <AuthorName user={author} member={member} app={app} />
             </button>,
           )}
         </span>
@@ -442,7 +467,7 @@ export function MessageLine({
           <div className="flex items-baseline gap-2">
             {card(
               <button type="button" className="min-w-0 text-left hover:underline">
-                <AuthorName user={author} member={member} />
+                <AuthorName user={author} member={member} app={app} />
               </button>,
             )}
             {date ? (
@@ -525,18 +550,19 @@ function MessageRow({
         animate && mine && "landed",
       )}
     >
-      <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey}>
+      <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey} app={!!message.webhook}>
         {editing ? (
           <EditBox initial={message.content.replace(EMOJI_TOKEN, ":$2:")} onCancel={onCancelEdit} onSave={onSave} />
         ) : (
           <>
-            <MessageBody content={message.content} display={display} />
+            {message.content && <MessageBody content={message.content} display={display} />}
             {edited && (
               <span className="text-[0.7rem] text-muted-foreground" title={formatFull(toDate(message.editedAt))}>
                 {" "}
                 (edited)
               </span>
             )}
+            <Embeds embeds={message.embeds} animate={animate} />
           </>
         )}
       </MessageLine>

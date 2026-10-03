@@ -13,9 +13,10 @@ use gpui_kit::{
 };
 
 use crate::core::Core;
-use crate::core::config::{Density, MotionChoice, Prefs, ThemeChoice};
+use crate::core::config::{Density, MotionChoice, NotifyFor, Prefs, ThemeChoice};
 use crate::core::store::{Connection, user_name};
 use crate::ui::motion;
+use crate::ui::settings_account::AccountForm;
 use crate::ui::theme::{DARK, LIGHT, Palette, alpha, mix};
 use crate::ui::widgets::{avatar, conn_dot, icon, icon_button, pal, primary_button, soft_button};
 
@@ -28,6 +29,8 @@ pub enum SettingsEvent {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
+    Profile,
+    Security,
     Appearance,
     Motion,
     Notifications,
@@ -36,6 +39,10 @@ enum Page {
     Keyboard,
     About,
 }
+
+/// Your account's pages, then the app's.
+const ACCOUNT_PAGES: [(Page, &str, &str); 2] =
+    [(Page::Profile, "user-round-pen", "Profile"), (Page::Security, "key-round", "Password and devices")];
 
 const PAGES: [(Page, &str, &str); 7] = [
     (Page::Appearance, "palette", "Appearance"),
@@ -48,15 +55,16 @@ const PAGES: [(Page, &str, &str); 7] = [
 ];
 
 pub struct SettingsView {
-    core: Arc<Core>,
+    pub(crate) core: Arc<Core>,
     page: Page,
+    pub(crate) account: AccountForm,
 }
 
 impl EventEmitter<SettingsEvent> for SettingsView {}
 
 impl SettingsView {
-    pub fn new(core: Arc<Core>, _window: &mut Window, _cx: &mut Context<Self>) -> Self {
-        Self { core, page: Page::Appearance }
+    pub fn new(core: Arc<Core>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self { core, page: Page::Appearance, account: AccountForm::new(window, cx) }
     }
 
     fn set(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Prefs)) {
@@ -73,6 +81,12 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> (String, String, AnyElement) {
         match self.page {
+            Page::Profile => {
+                ("Your profile".into(), "How people see you on this instance.".into(), self.profile_page(p, window, cx))
+            }
+            Page::Security => {
+                ("Password and devices".into(), "Keep your account yours.".into(), self.security_page(p, window, cx))
+            }
             Page::Appearance => {
                 let themes = [
                     (ThemeChoice::System, "Like my computer", None),
@@ -205,15 +219,59 @@ impl SettingsView {
                 ("Motion".into(), "How much things move.".into(), body.into_any_element())
             }
             Page::Notifications => {
-                let body = toggle_row(
-                    "notify",
-                    "Message cards",
-                    "A little card in the corner for messages that arrive in other channels and conversations.",
-                    prefs.notifications,
-                    p,
-                    cx,
-                    |this, on, cx| this.set(cx, |pr| pr.notifications = on),
-                );
+                let body = div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(28.0))
+                    .child(toggle_row(
+                        "notify",
+                        "Notifications",
+                        "For messages that arrive while you're looking elsewhere: a card in the corner, or your computer's own notification while fuwa is in the background.",
+                        prefs.notifications,
+                        p,
+                        cx,
+                        |this, on, cx| this.set(cx, |pr| pr.notifications = on),
+                    ))
+                    .child(section(
+                        "Notify me about",
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.0))
+                            .child(segmented(
+                                "notify-for",
+                                vec![
+                                    ("Only @mentions", prefs.notify_for == NotifyFor::Mentions),
+                                    ("All messages", prefs.notify_for == NotifyFor::All),
+                                ],
+                                p,
+                                window,
+                                cx,
+                                |this, n, cx| {
+                                    let v = if n == 0 { NotifyFor::Mentions } else { NotifyFor::All };
+                                    this.set(cx, |pr| pr.notify_for = v)
+                                },
+                            ))
+                            .child(div().text_sm().text_color(p.muted_foreground).child(
+                                "In servers and channels you haven't set yourself, from their bell. Private messages always notify you.",
+                            )),
+                        p,
+                    ))
+                    .child(div().child(
+                        soft_button("notify-test", "Send a test notification", p)
+                            .child(icon("bell-ring").size(px(16.0)))
+                            .on_click(|_, _, _| {
+                                crate::ui::notify::show(
+                                    "fuwa".into(),
+                                    "This is how messages will reach you ✨".into(),
+                                    crate::ui::notify::Clicked {
+                                        instance: String::new(),
+                                        server: None,
+                                        channel: String::new(),
+                                    },
+                                )
+                            }),
+                    ));
                 ("Notifications".into(), "What fuwa tells you about.".into(), body.into_any_element())
             }
             Page::Streamer => {
@@ -335,6 +393,9 @@ impl SettingsView {
                 let keys = [
                     ("Send", "Enter"),
                     ("New line", "Shift + Enter"),
+                    ("Edit your last message", "↑ in an empty box"),
+                    ("Mention someone", "@, then ↑ ↓ and Enter"),
+                    ("Stop editing", "Esc"),
                     ("Settings", if cfg!(target_os = "macos") { "⌘ + ," } else { "Ctrl + ," }),
                     ("Add an instance", if cfg!(target_os = "macos") { "⌘ + Shift + N" } else { "Ctrl + Shift + N" }),
                     ("Close what's open", "Esc"),
@@ -409,41 +470,52 @@ impl Render for SettingsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let prefs = self.core.prefs();
-        let mut menu = div().flex().flex_col().gap(px(2.0)).w(px(220.0)).child(
-            div()
-                .px(px(10.0))
-                .pb(px(8.0))
-                .text_size(px(11.0))
-                .font_weight(FontWeight::EXTRA_BOLD)
-                .text_color(p.muted_foreground)
-                .child("APP SETTINGS"),
-        );
-        let active_ix = PAGES.iter().position(|(pg, _, _)| *pg == self.page).unwrap_or(0) as f32;
-        let at = motion::follow("settings-hl", 26.0 + active_ix * 40.0, _window, cx);
-        for (page, glyph, label) in PAGES {
-            let on = page == self.page;
-            let hover = alpha(p.primary, 0.08);
+        let mut menu = div().flex().flex_col().w(px(220.0));
+        let mut y = 0.0;
+        let mut at_y = 0.0;
+        for (group, pages) in [("YOUR ACCOUNT", &ACCOUNT_PAGES[..]), ("APP SETTINGS", &PAGES[..])] {
             menu = menu.child(
                 div()
-                    .id(SharedString::from(format!("menu-{label}")))
-                    .h(px(38.0))
+                    .h(px(30.0))
                     .px(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .rounded(px(10.0))
-                    .cursor_pointer()
-                    .text_color(if on { p.foreground } else { p.muted_foreground })
-                    .when(on, |el| el.font_weight(FontWeight::BOLD))
-                    .hover(move |s| s.bg(hover))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.page = page;
-                        cx.notify();
-                    }))
-                    .child(icon(glyph).size(px(17.0)).text_color(if on { p.primary } else { p.muted_foreground }))
-                    .child(label),
+                    .when(y > 0.0, |el| el.mt(px(14.0)))
+                    .text_size(px(11.0))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .text_color(p.muted_foreground)
+                    .child(group),
             );
+            y += if y > 0.0 { 44.0 } else { 30.0 };
+            for (page, glyph, label) in pages.iter().copied() {
+                let on = page == self.page;
+                if on {
+                    at_y = y;
+                }
+                let hover = alpha(p.primary, 0.08);
+                menu = menu.child(
+                    div()
+                        .id(SharedString::from(format!("menu-{label}")))
+                        .h(px(38.0))
+                        .mb(px(2.0))
+                        .px(px(10.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .rounded(px(10.0))
+                        .cursor_pointer()
+                        .text_color(if on { p.foreground } else { p.muted_foreground })
+                        .when(on, |el| el.font_weight(FontWeight::BOLD))
+                        .hover(move |s| s.bg(hover))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.page = page;
+                            cx.notify();
+                        }))
+                        .child(icon(glyph).size(px(17.0)).text_color(if on { p.primary } else { p.muted_foreground }))
+                        .child(label),
+                );
+                y += 40.0;
+            }
         }
+        let at = motion::follow("settings-hl", at_y, _window, cx);
         let menu = div()
             .relative()
             .child(
@@ -459,7 +531,12 @@ impl Render for SettingsView {
             .child(menu);
 
         let (title, sub, body) = self.page(&prefs, &p, _window, cx);
-        let page_key = PAGES.iter().find(|(pg, _, _)| *pg == self.page).map(|(_, _, l)| *l).unwrap_or("x");
+        let page_key = ACCOUNT_PAGES
+            .iter()
+            .chain(PAGES.iter())
+            .find(|(pg, _, _)| *pg == self.page)
+            .map(|(_, _, l)| *l)
+            .unwrap_or("x");
         let content = div()
             .w(px(640.0))
             .flex()
@@ -680,16 +757,17 @@ fn toggle_row(
         .child(
             div()
                 .flex_1()
+                .min_w_0()
                 .flex()
                 .flex_col()
                 .gap(px(2.0))
                 .child(div().font_weight(FontWeight::BOLD).child(title.to_owned()))
                 .child(div().text_sm().text_color(p.muted_foreground).child(body.to_owned())),
         )
-        .child(Switch::new(id).checked(on).on_change(move |checked, _, cx| {
+        .child(div().flex_none().child(Switch::new(id).checked(on).on_change(move |checked, _, cx| {
             let (set, checked) = (set.clone(), *checked);
             let _ = entity.update(cx, |this, cx| set(this, checked, cx));
-        }))
+        })))
 }
 
 /// A ball that bounces across, to show what the motion setting does.

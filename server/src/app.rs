@@ -23,13 +23,14 @@ use crate::node::NodeDb;
 use crate::pb;
 use crate::pb::{
     account_service_server::AccountServiceServer, admin_service_server::AdminServiceServer,
-    auth_service_server::AuthServiceServer, auto_mod_service_server::AutoModServiceServer,
-    channel_service_server::ChannelServiceServer, direct_message_service_server::DirectMessageServiceServer,
-    emoji_service_server::EmojiServiceServer, event_service_server::EventServiceServer,
-    invite_service_server::InviteServiceServer, join_service_server::JoinServiceServer,
-    media_service_server::MediaServiceServer, message_service_server::MessageServiceServer,
-    node_service_server::NodeServiceServer, role_service_server::RoleServiceServer,
-    server_service_server::ServerServiceServer,
+    agent_service_server::AgentServiceServer, auth_service_server::AuthServiceServer,
+    auto_mod_service_server::AutoModServiceServer, channel_service_server::ChannelServiceServer,
+    direct_message_service_server::DirectMessageServiceServer, emoji_service_server::EmojiServiceServer,
+    event_service_server::EventServiceServer, invite_service_server::InviteServiceServer,
+    join_service_server::JoinServiceServer, media_service_server::MediaServiceServer,
+    message_service_server::MessageServiceServer, node_service_server::NodeServiceServer,
+    role_service_server::RoleServiceServer, server_service_server::ServerServiceServer,
+    webhook_service_server::WebhookServiceServer,
 };
 use crate::replica::Replica;
 use crate::servers::Servers;
@@ -297,6 +298,8 @@ impl App {
             .add_service(JoinServiceServer::new(api.clone()))
             .add_service(AutoModServiceServer::new(api.clone()))
             .add_service(EmojiServiceServer::new(api.clone()))
+            .add_service(WebhookServiceServer::new(api.clone()))
+            .add_service(AgentServiceServer::new(api.clone()))
             .add_service(EventServiceServer::new(api.clone()))
             .add_service(MediaServiceServer::new(api.clone()))
             .add_service(DirectMessageServiceServer::new(api.clone()))
@@ -317,6 +320,9 @@ impl App {
             grpc.into_axum_router().layer(tonic_web::GrpcWebLayer::new()).route("/healthz", get(|| async { "ok" }));
         if self.node.is_some() {
             router = router.merge(crate::media::routes(self.clone()));
+        }
+        if matches!(self.link, Link::Alone | Link::Shard(_)) {
+            router = router.merge(crate::webhooks::routes(self.clone()));
         }
         if !self.config.cluster.is_split() {
             // The web app (when it's on) answers every other GET, so its own addresses work on reload.
@@ -372,6 +378,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
             linked_issuer: if settings.linked_sign_in() { settings.linked_issuer.clone() } else { String::new() },
         }),
         server_creation: settings.server_creation as i32,
+        agent_creation: settings.agent_creation as i32,
         telemetry: settings.telemetry,
         announcement,
         build: Some(pb::Build {

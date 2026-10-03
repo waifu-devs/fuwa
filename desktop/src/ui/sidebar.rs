@@ -12,7 +12,7 @@ use gpui_kit::{
 
 use crate::core::dms::DmStatus;
 use crate::pb;
-use crate::ui::app::{Dialog, FuwaApp, Nav};
+use crate::ui::app::{Dialog, FuwaApp, Menu, Nav};
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha};
 use crate::ui::widgets::{avatar, badge, conn_dot, icon, icon_button, pal, section_label, server_icon};
@@ -62,14 +62,26 @@ impl FuwaApp {
         cx: &mut Context<Self>,
     ) -> (AnyElement, AnyElement) {
         let p = pal(cx);
-        let (server, channels, unread) = self.core.shared.read(|s| {
+        let (server, channels, unread, muted, access, server_muted) = self.core.shared.read(|s| {
             let i = s.instance(key);
+            let now = crate::core::dms::now_ms();
+            let channels = i.and_then(|i| i.channels.get(server_id).cloned());
+            let muted: std::collections::HashSet<String> = match (i, &channels) {
+                (Some(i), Some(list)) => {
+                    list.iter().filter(|c| i.is_muted(server_id, &c.id, now)).map(|c| c.id.clone()).collect()
+                }
+                _ => Default::default(),
+            };
             (
                 i.and_then(|i| i.server(server_id).cloned()),
-                i.and_then(|i| i.channels.get(server_id).cloned()),
+                channels,
                 i.map(|i| i.unread.clone()).unwrap_or_default(),
+                muted,
+                i.map(|i| i.access(server_id)).unwrap_or_default(),
+                i.is_some_and(|i| crate::core::notifications::is_muted(i.notification_settings(server_id, ""), now)),
             )
         });
+        let manage = access.has(pb::Permission::ManageChannels);
         let Some(server) = server else {
             return (div().into_any_element(), div().into_any_element());
         };
@@ -78,7 +90,7 @@ impl FuwaApp {
         let header = div()
             .flex()
             .items_center()
-            .gap(px(8.0))
+            .gap(px(2.0))
             .w_full()
             .child(
                 div()
@@ -87,15 +99,42 @@ impl FuwaApp {
                     .text_ellipsis()
                     .whitespace_nowrap()
                     .font_weight(FontWeight::EXTRA_BOLD)
+                    .mr(px(4.0))
                     .child(server.name.clone()),
             )
-            .child(icon_button("invite", "user-plus", &p).on_click(cx.listener({
+            .child({
+                let menu = Menu::Server { key: key.to_owned(), server: server.id.clone() };
+                let open = self.menu.as_ref() == Some(&menu);
+                icon_button("server-bell", if server_muted { "bell-off" } else { "bell" }, &p)
+                    .size(px(28.0))
+                    .when(open || server_muted, |el| el.text_color(p.primary))
+                    .when(open, |el| el.bg(alpha(p.primary, 0.12)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.menu = if this.menu.as_ref() == Some(&menu) { None } else { Some(menu.clone()) };
+                        cx.notify();
+                    }))
+            })
+            .when(manage, |el| {
+                el.child(icon_button("new-channel", "plus", &p).size(px(28.0)).on_click(cx.listener({
+                    let (key, server) = (key.to_owned(), server.id.clone());
+                    move |this, _, window, cx| {
+                        let dialog = Dialog::CreateChannel {
+                            key: key.clone(),
+                            server: server.clone(),
+                            parent: String::new(),
+                            category: false,
+                        };
+                        this.open_dialog(dialog, window, cx)
+                    }
+                })))
+            })
+            .child(icon_button("invite", "user-plus", &p).size(px(28.0)).on_click(cx.listener({
                 let server = server.id.clone();
                 move |this, _, window, cx| {
                     this.open_dialog(Dialog::Invite { link: None, server: server.clone() }, window, cx)
                 }
             })))
-            .child(icon_button("leave", "log-out", &p).on_click(cx.listener({
+            .child(icon_button("leave", "log-out", &p).size(px(28.0)).on_click(cx.listener({
                 let (key, server) = (key.to_owned(), server.id.clone());
                 move |this, _, window, cx| {
                     this.open_dialog(Dialog::LeaveServer { key: key.clone(), server: server.clone() }, window, cx)
@@ -121,7 +160,37 @@ impl FuwaApp {
         let mut n = 0;
         for (cat, list) in groups {
             if let Some(cat) = cat {
-                rows = rows.child(section_label(cat.name.clone(), &p).h(px(LABEL)));
+                let label = section_label(cat.name.clone(), &p).h(px(LABEL)).flex().items_end().pr(px(4.0));
+                rows = rows.child(if manage {
+                    let (key, server, parent) = (key.to_owned(), server_id.to_owned(), cat.id.clone());
+                    label
+                        .group("cat")
+                        .child(div().flex_1())
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("cat-add|{}", cat.id)))
+                                .opacity(0.0)
+                                .group_hover("cat", |s| s.opacity(1.0))
+                                .cursor_pointer()
+                                .hover({
+                                    let fg = p.primary;
+                                    move |s| s.text_color(fg)
+                                })
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    let dialog = Dialog::CreateChannel {
+                                        key: key.clone(),
+                                        server: server.clone(),
+                                        parent: parent.clone(),
+                                        category: false,
+                                    };
+                                    this.open_dialog(dialog, window, cx)
+                                }))
+                                .child(icon("plus").size(px(14.0))),
+                        )
+                        .into_any_element()
+                } else {
+                    label.into_any_element()
+                });
                 y += LABEL;
             }
             for c in list {
@@ -129,9 +198,12 @@ impl FuwaApp {
                 if active {
                     highlight = Some(y);
                 }
-                let count = unread.get(&c.id).copied().unwrap_or(0);
+                let quiet = muted.contains(&c.id);
+                let count = if quiet { 0 } else { unread.get(&c.id).copied().unwrap_or(0) };
                 rows = rows.child(motion::rise(
-                    self.channel_row(key, server_id, c, active, count, &p, cx),
+                    self.channel_row(key, server_id, c, active, count, &p, cx).when(quiet && !active, |el| {
+                        el.opacity(0.5).child(icon("bell-off").size(px(13.0)).text_color(p.muted_foreground))
+                    }),
                     SharedString::from(format!("ch|{}|{server_id}|{}", key, c.id)),
                     Duration::from_millis(18 * n),
                     6.0,

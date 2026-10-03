@@ -546,6 +546,21 @@ impl DirectoryService for Internal {
         Ok(Response::new(cpb::CountOwnedServersResponse { count }))
     }
 
+    async fn find_agent(
+        &self,
+        request: Request<cpb::FindAgentRequest>,
+    ) -> Result<Response<cpb::FindAgentResponse>, Status> {
+        let found = self.app.find_agent(&request.into_inner().username).await?;
+        Ok(Response::new(match found {
+            Some(agent) => cpb::FindAgentResponse {
+                agent: Some(account_to_pb(&agent.account)),
+                owner_id: agent.owner_id,
+                public: agent.public,
+            },
+            None => cpb::FindAgentResponse::default(),
+        }))
+    }
+
     type TakeServersStream = TakeServersStream;
 
     async fn take_servers(

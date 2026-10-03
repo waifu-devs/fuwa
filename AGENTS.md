@@ -25,6 +25,16 @@
     can't sign in until it's turned back on. What belongs to a person but not to
     one server lives here; a server file keeps only a copy of what its members
     see (name, avatar, status) in its `users` table.
+  - Agents (`api/agents.rs`, `AgentService`) are accounts of kind
+    `ACCOUNT_KIND_AGENT` that a person makes (`accounts.owner_id`, `public`).
+    Their token is a session in `sessions` that never expires
+    (`expires_at = i64::MAX`, `last_active_at` 0 until first use); a new
+    token deletes the old sessions. An agent can't own servers, join or apply
+    by itself, use DMs or be an instance admin: someone with Manage Server
+    adds it (`AddAgent`, on the shard, which finds the agent through
+    `App::find_agent`, the cluster call `FindAgent`), and it skips rules
+    (never `pending`). Deleting a person deletes their agents
+    (`erase_account`). Who may make agents is the `agent_creation` setting.
   - `dms.rs`: direct messages (`dms.db`, on the directory): each device's
     public signature key and key packages (one-use, plus a last-resort one),
     each conversation's records in one order (MLS commits and messages, all
@@ -70,6 +80,16 @@
     (`MEDIA_PURPOSE_EMOJI`) counted in the server's attachments, and every
     change sends the whole list (`EmojisUpdated`). Messages write them
     `<:name:id>` (`<a:name:id>` when they move).
+  - `webhooks.rs`: posting through a webhook over plain HTTP
+    (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
+    body), with each webhook's 30-a-minute limit (counted only for posts
+    with the right token). Served where servers are kept; gateways pass these
+    on to the shard holding the server (`Gateway::pass_to_shard`).
+    `api/webhooks.rs` keeps the webhooks (`webhooks`, in the server file,
+    tokens in the clear like invite codes; changes are audit-only) and posts
+    the message (`execute_webhook`): its `author_id` is the webhook's id and
+    `Message.webhook` carries the name and picture it posted under. Webhook
+    messages never ping @everyone, @here or roles, and nobody can edit them.
   - `automod.rs`: what an AutoMod rule catches (words with `*` wildcards,
     pings, links to sites not allowed); `api/automod.rs` keeps the rules
     (`automod_rules`, one protobuf blob each) and `review` runs them inside
@@ -156,17 +176,31 @@
     device per install and account, through `fuwa-e2ee`'s `client` feature,
     kept in 0600 files under the app's data folder; signing out wipes it),
     `linked.rs` (waifu.dev sign-in through the browser and a loopback page),
-    `config.rs` (saved instances and the app's settings). It runs on its own
+    `config.rs` (saved instances and the app's settings), `permissions.rs`
+    (what you may do in a server, a port of `web/src/lib/permissions.ts`),
+    `notifications.rs` (per channel and server levels and mutes, kept on the
+    instance, and whether a message should notify), `account.rs` (profile,
+    pictures, password, signed-in devices, rules, creating channels). It runs on its own
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
-    `overlay.rs` draw the parts; `motion.rs` is how things move (springs,
+    `overlay.rs` draw the parts; `compose.rs` is the @ list and editing in
+    place (and the keys they take first), `mentions.rs` finds mentions and
+    makes them links, `menus.rs` the bell menus, `notify.rs` the system
+    notifications (clicks come back through a channel), `settings_account.rs`
+    the profile and security pages; `motion.rs` is how things move (springs,
     rises, glides, all settling at once with reduced motion); `theme.rs` is
     the web app's palettes and the bundled font (M PLUS Rounded 1c, whose
     files name the family "Rounded Mplus 1c").
   - `tests/core.rs`: two app cores against an in-process instance: servers,
-    live messages, unread counts, encrypted DMs both ways, and that no
-    plaintext reaches the instance's files.
+    live messages, mentions that notify, edits, mutes kept on the instance,
+    unread counts, encrypted DMs both ways, and that no plaintext reaches the
+    instance's files.
+  - `packaging/`: the icon (`icon.svg`, and the PNGs and `.ico` made from it)
+    for the installers. `[package.metadata.packager]` in `Cargo.toml` tells
+    cargo-packager what to make, and `.github/workflows/desktop.yml` makes
+    them: a `.deb` and AppImage for Linux, a `.dmg` for macOS, an NSIS
+    `-setup.exe` for Windows. Release calls it for each tag.
 - `web/`: the web app (pnpm, Vite, React 19, TanStack Router, Tailwind 4,
   shadcn/ui and Animate UI copied from the waifu.dev site, Effect).
   - `src/gen/`: protobuf code from `pnpm generate`. Generated, committed, never

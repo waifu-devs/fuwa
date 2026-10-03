@@ -38,6 +38,7 @@ export const KNOWN: P[] = [
   P.MANAGE_MESSAGES,
   P.CREATE_INVITE,
   P.MANAGE_EMOJI,
+  P.MANAGE_WEBHOOKS,
   P.CONNECT,
   P.SPEAK,
   P.MUTE_MEMBERS,
@@ -144,6 +145,10 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     about: "Disconnect people ranked below them from voice channels.",
     channel: "Disconnect people ranked below them from this voice channel.",
   },
+  [P.MANAGE_WEBHOOKS]: {
+    label: "Manage webhooks",
+    about: "Make, change and delete webhooks, and see their addresses, which let other apps post in any channel.",
+  },
 };
 
 export const permissionInfo = (p: P): PermissionInfo => (p === P.UNSPECIFIED ? { label: "", about: "" } : PERMISSIONS[p]);
@@ -153,7 +158,7 @@ export const permissionLabel = (p: P) => permissionInfo(p).label;
 export const PERMISSION_GROUPS: { title: string; permissions: P[] }[] = [
   {
     title: "Server",
-    permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.MANAGE_EMOJI, P.MANAGE_SERVER, P.VIEW_AUDIT_LOG],
+    permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.MANAGE_EMOJI, P.MANAGE_WEBHOOKS, P.MANAGE_SERVER, P.VIEW_AUDIT_LOG],
   },
   {
     title: "Membership",
