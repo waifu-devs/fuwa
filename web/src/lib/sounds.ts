@@ -17,7 +17,7 @@ const TUNES: Record<Sound, Tune> = {
 };
 
 /** What happens in a call, each with its own little tune: up for coming in or switching on, down for going. */
-export type CallCue = "connect" | "disconnect" | "someoneJoined" | "someoneLeft" | "mute" | "unmute" | "deafen" | "undeafen";
+export type CallCue = "connect" | "disconnect" | "someoneJoined" | "someoneLeft" | "mute" | "unmute" | "deafen" | "undeafen" | "recording";
 
 const CUES: Record<CallCue, Tune> = {
   connect: { notes: [523.25, 659.25, 783.99, 1046.5], step: 0.07, length: 0.2, type: "sine" },
@@ -28,6 +28,8 @@ const CUES: Record<CallCue, Tune> = {
   unmute: { notes: [523.25, 698.46], step: 0.05, length: 0.12, type: "triangle" },
   deafen: { notes: [587.33, 440, 349.23], step: 0.05, length: 0.14, type: "triangle" },
   undeafen: { notes: [349.23, 440, 587.33], step: 0.05, length: 0.14, type: "triangle" },
+  // Someone in the call started recording: two soft, even beeps, hard to miss.
+  recording: { notes: [880, 880], step: 0.16, length: 0.1, type: "sine" },
 };
 
 /** Plays a call's cue, when call sounds are on. */

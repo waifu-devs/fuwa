@@ -190,6 +190,8 @@ export class Speakers {
   private timer: ReturnType<typeof setInterval>;
   private unsubscribe: () => void;
   private sink = "";
+  /** While recording: where everyone's sound (and yours) also goes. */
+  private tap: { gain: GainNode; out: MediaStreamAudioDestinationNode; mine: MediaStreamAudioSourceNode | null } | null = null;
   deafened = false;
 
   constructor(
@@ -216,6 +218,7 @@ export class Speakers {
     analyser.fftSize = 512;
     gain.gain.value = this.volumeOf(userId);
     source.connect(gain).connect(analyser).connect(this.master);
+    if (this.tap) analyser.connect(this.tap.gain);
     this.voices.set(userId, { stream, element, source, gain, analyser, buffer: new Float32Array(analyser.fftSize), talking: false, lastLoud: 0 });
   }
 
@@ -254,9 +257,36 @@ export class Speakers {
     }
   }
 
+  /**
+   * Everyone's sound as you hear it (at the volumes you gave them, but not
+   * deafened or turned down overall), with `mine` (your microphone, as it
+   * goes out) mixed in, as one stream to record. Anyone who joins later
+   * joins the mix.
+   */
+  record(mine: MediaStreamTrack | null): MediaStream {
+    this.stopRecording();
+    const gain = this.ctx.createGain();
+    const out = this.ctx.createMediaStreamDestination();
+    gain.connect(out);
+    for (const v of this.voices.values()) v.analyser.connect(gain);
+    const source = mine ? this.ctx.createMediaStreamSource(new MediaStream([mine])) : null;
+    source?.connect(gain);
+    this.tap = { gain, out, mine: source };
+    return out.stream;
+  }
+
+  stopRecording() {
+    if (!this.tap) return;
+    for (const v of this.voices.values()) v.analyser.disconnect(this.tap.gain);
+    this.tap.mine?.disconnect();
+    this.tap.gain.disconnect();
+    this.tap = null;
+  }
+
   close() {
     clearInterval(this.timer);
     this.unsubscribe();
+    this.stopRecording();
     for (const id of [...this.voices.keys()]) this.remove(id);
     this.master.disconnect();
   }

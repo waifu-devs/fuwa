@@ -106,6 +106,22 @@ Apps show shared screens above everyone's tiles, whole (never cropped),
 with a LIVE mark, and pop them out like cameras: the window is titled
 `<name>'s screen · fuwa`.
 
+## Recordings
+
+Anyone may record a call's sound on their own device: the app mixes
+everyone's sound as they hear it (at the volumes they gave people) with
+their own microphone as it goes out, records it with `MediaRecorder` (Opus,
+128 kbit/s) and saves the file when they stop or hang up. Nothing is sent
+anywhere. Recording says `self_record` in the next keep, so everyone sees
+it: a mark by their name, a "Recording" pill on the channel, and a beep and
+a note when someone starts. That's a courtesy, not a lock: anyone can record
+what their own speakers play.
+
+In voice channels it needs RECORD, a permission nobody has by default
+(admins grant it per role or channel); without it the voice state says
+`record_suppress` and the instance clears `self_record`. In direct messages
+either person may. Recording on the server, for voice channels, comes next.
+
 ### Pop-out windows and clean feeds
 
 Any tile pops out into a window of its own: that one person's camera, edge
@@ -262,6 +278,9 @@ interruption.
 
 ## Next
 
+- **Recording on the server** for voice channels, kept in the instance's
+  storage for admins (direct-message calls stay on-device only: the server
+  can't hear them).
 - **A shared screen's sound** (a tab's or the whole system's), as a second
   track of sound next to it.
 - **The desktop app's calls**: str0m as the WebRTC client, cpal for the

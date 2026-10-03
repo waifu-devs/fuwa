@@ -44,6 +44,7 @@ export const KNOWN: P[] = [
   P.MUTE_MEMBERS,
   P.MOVE_MEMBERS,
   P.VIDEO,
+  P.RECORD,
 ];
 
 export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), 0);
@@ -62,6 +63,7 @@ export const CHANNEL: Bits = [
   P.CONNECT,
   P.SPEAK,
   P.VIDEO,
+  P.RECORD,
   P.MUTE_MEMBERS,
   P.MOVE_MEMBERS,
 ].reduce((bits, p) => bits | bit(p), 0);
@@ -140,8 +142,13 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
   },
   [P.VIDEO]: {
     label: "Video",
-    about: "Turn their camera on in voice channels.",
-    channel: "Turn their camera on in this voice channel.",
+    about: "Turn their camera on and share their screen in voice channels.",
+    channel: "Turn their camera on and share their screen in this voice channel.",
+  },
+  [P.RECORD]: {
+    label: "Record",
+    about: "Record voice channels' sound on their own device. Everyone in the channel sees while they do.",
+    channel: "Record this voice channel's sound on their own device. Everyone in it sees while they do.",
   },
   [P.MUTE_MEMBERS]: {
     label: "Mute members",
@@ -176,7 +183,7 @@ export const PERMISSION_GROUPS: { title: string; permissions: P[] }[] = [
     title: "Text channels",
     permissions: [P.SEND_MESSAGES, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
-  { title: "Voice channels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
+  { title: "Voice channels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
   { title: "Advanced", permissions: [P.ADMINISTRATOR] },
 ];
 
@@ -187,7 +194,7 @@ export const CHANNEL_GROUPS: { title: string; permissions: P[] }[] = [
     title: "Text",
     permissions: [P.SEND_MESSAGES, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
-  { title: "Voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
+  { title: "Voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
 ];
 
 /** What one member can do in one server. */

@@ -11,7 +11,7 @@ import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { ConnectionDetails, PingText, Signal } from "./Connection";
 import { HangUpButton } from "./parts";
-import { CameraButton, ScreenButton } from "./Video";
+import { CameraButton, RecordButton, ScreenButton } from "./Video";
 
 /** How long a call has gone on: 4:07, or 1:02:33. */
 export function clock(seconds: number) {
@@ -101,6 +101,7 @@ function CallPanelBody({ call }: { call: ActiveCall }) {
       <div className="flex gap-1.5">
         <CameraButton className="h-8 flex-1" />
         <ScreenButton className="h-8 flex-1" />
+        <RecordButton className="h-8 flex-1" />
       </div>
       <AnimatePresence initial={false}>
         {call.problem && (
