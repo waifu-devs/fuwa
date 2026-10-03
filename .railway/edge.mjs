@@ -1,12 +1,21 @@
 // Railway's CDN and edge rules for the public services, which railway.ts can't declare
-// yet. `node .railway/edge.mjs check` (on pull requests) shows what's set; it changes
-// nothing. RAILWAY_TOKEN is the project token the config workflow already uses.
+// yet, set through Railway's API by the config workflow (.github/workflows/railway-config.yml).
+//
+//   node .railway/edge.mjs check fuwa   what apply would change; changes nothing (pull requests)
+//   node .railway/edge.mjs apply fuwa   turns the CDN on and sets edge-rules.json (on merge, after the config apply)
+//
+// The CDN gets Railway's defaults: HTML cached only when a page says so, a 2 hour
+// fallback for assets that don't, cached HTML dropped on each deploy. Neither change
+// deploys or restarts anything. RAILWAY_TOKEN is the project token the workflow already uses.
 import { readFile } from "node:fs/promises";
 
 const API = "https://backboard.railway.com/graphql/v2";
+const [mode, list = ""] = process.argv.slice(2);
+if (mode !== "check" && mode !== "apply") throw new Error("usage: edge.mjs check|apply <service,service...>");
 const token = process.env.RAILWAY_TOKEN;
 if (!token) throw new Error("RAILWAY_TOKEN is not set");
-const SERVICES = (process.argv[3] ?? "").split(",").filter(Boolean);
+const wanted = list.split(",").filter(Boolean);
+const rules = JSON.parse(await readFile(new URL("./edge-rules.json", import.meta.url), "utf8"));
 
 async function gql(query, variables = {}) {
   const response = await fetch(API, {
@@ -15,41 +24,53 @@ async function gql(query, variables = {}) {
     body: JSON.stringify({ query, variables }),
   });
   const body = await response.json();
-  if (body.errors) throw new Error(JSON.stringify(body.errors));
+  if (!response.ok || body.errors) throw new Error(`Railway API: ${response.status} ${JSON.stringify(body.errors ?? body)}`);
   return body.data;
 }
 
-const fields = async (name) =>
-  (await gql(`query($n: String!) { __type(name: $n) { name kind inputFields { name type { name kind ofType { name kind ofType { name kind } } } } fields { name type { name kind ofType { name kind ofType { name kind } } } } enumValues { name } } }`, { n: name })).__type;
+/** A ruleset without the ids Railway gives each rule, to compare with ours. */
+const comparable = (ruleset) =>
+  ruleset && JSON.stringify({ ...ruleset, rules: (ruleset.rules ?? []).map(({ id: _, ...rule }) => rule) });
+
+const EDGE = `edgeConfig { enabled edgeRules caching { mode htmlCaching defaultTtlSeconds purgeOnDeploy } }`;
 
 const { projectToken } = await gql(`{ projectToken { projectId environmentId } }`);
-console.log("environment", projectToken.environmentId);
+const environmentId = projectToken.environmentId;
+const { project } = await gql(`query($id: String!) { project(id: $id) { services { edges { node { id name } } } } }`, {
+  id: projectToken.projectId,
+});
+const services = project.services.edges.map(({ node }) => node);
+const missing = wanted.filter((name) => !services.some((s) => s.name === name));
+if (missing.length) throw new Error(`no service named ${missing.join(", ")} in this project`);
 
-for (const type of ["EdgeConfigInput", "EdgeCachingConfigInput", "EdgeCachingConfig", "UpdateServiceEdgeRulesInput", "EdgeHtmlCaching", "EdgeCachingMode", "EdgePurgeOnDeploy"]) {
-  try {
-    console.log(type, JSON.stringify(await fields(type)));
-  } catch (err) {
-    console.log(type, "unavailable:", String(err).slice(0, 300));
-  }
-}
-try {
-  const mutation = await fields("Mutation");
-  const args = await gql(`{ __type(name: "Mutation") { fields { name args { name type { name kind ofType { name kind ofType { name kind } } } } type { name kind ofType { name } } } } }`);
-  console.log("mutations", JSON.stringify(args.__type.fields.filter((f) => /edge|cdn/i.test(f.name))));
-} catch (err) {
-  console.log("mutations unavailable:", String(err).slice(0, 300));
-}
+for (const name of wanted) {
+  const serviceId = services.find((s) => s.name === name).id;
+  const read = async () =>
+    (await gql(`query($e: String!, $s: String!) { serviceInstance(environmentId: $e, serviceId: $s) { ${EDGE} } }`, { e: environmentId, s: serviceId }))
+      .serviceInstance.edgeConfig;
+  const edge = await read();
+  const cdnOff = !edge?.caching;
+  const rulesDiffer = comparable(edge?.edgeRules) !== comparable(rules);
+  console.log(`${name}: CDN ${cdnOff ? "off" : `on (${JSON.stringify(edge.caching)})`}, edge rules ${rulesDiffer ? "differ from edge-rules.json" : "match edge-rules.json"}`);
 
-const { project } = await gql(`query($id: String!) { project(id: $id) { services { edges { node { id name } } } } }`, { id: projectToken.projectId });
-for (const { node } of project.services.edges.filter(({ node }) => SERVICES.includes(node.name))) {
-  try {
-    const { serviceInstance } = await gql(
-      `query($e: String!, $s: String!) { serviceInstance(environmentId: $e, serviceId: $s) { edgeConfig { id enabled edgeRules overrides caching { mode defaultTtlSeconds htmlCaching purgeOnDeploy staleWhileRevalidate { enabled } } } } }`,
-      { e: projectToken.environmentId, s: node.id },
-    );
-    console.log(node.name, JSON.stringify(serviceInstance.edgeConfig));
-  } catch (err) {
-    console.log(node.name, "edge config unavailable:", String(err).slice(0, 300));
+  if (mode === "check") {
+    if (cdnOff) console.log(`${name}: merging turns the CDN on with Railway's defaults`);
+    if (rulesDiffer) console.log(`${name}: merging sets the edge rules to edge-rules.json`);
+    continue;
   }
+  if (cdnOff) {
+    await gql(`mutation($input: EnableServiceCdnInput!) { enableServiceCdn(input: $input) { enabled } }`, {
+      input: { environmentId, serviceId },
+    });
+  }
+  if (rulesDiffer) {
+    await gql(`mutation($input: UpdateServiceEdgeRulesInput!) { updateServiceEdgeRules(input: $input) { enabled } }`, {
+      input: { environmentId, serviceId, edgeRules: rules },
+    });
+  }
+  const after = await read();
+  if (!after?.caching || comparable(after.edgeRules) !== comparable(rules)) {
+    throw new Error(`${name}: Railway didn't keep the CDN or edge rules: ${JSON.stringify(after)}`);
+  }
+  console.log(`${name}: CDN on (${JSON.stringify(after.caching)}), edge rules set`);
 }
-console.log("ruleset to apply:", JSON.parse(await readFile(new URL("./edge-rules.json", import.meta.url), "utf8")).rules.length, "rule(s)");
