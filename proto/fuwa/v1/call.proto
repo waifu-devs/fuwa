@@ -83,7 +83,8 @@ service CallService {
   // One person's track of a finished recording, as an Ogg Opus file sent in
   // pieces. Needs RECORD in the recording's channel.
   rpc DownloadRecording(DownloadRecordingRequest) returns (stream DownloadRecordingResponse);
-  // Deletes a finished recording. Needs RECORD in its channel.
+  // Deletes a finished recording. Needs RECORD in its channel, and to have
+  // started it or MANAGE_CHANNELS there.
   rpc DeleteRecording(DeleteRecordingRequest) returns (DeleteRecordingResponse);
 
   // Joins the call in a direct-message conversation, starting it if nobody

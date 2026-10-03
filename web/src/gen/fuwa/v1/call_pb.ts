@@ -1196,7 +1196,8 @@ export const CallService: GenService<{
     output: typeof DownloadRecordingResponseSchema;
   },
   /**
-   * Deletes a finished recording. Needs RECORD in its channel.
+   * Deletes a finished recording. Needs RECORD in its channel, and to have
+   * started it or MANAGE_CHANNELS there.
    *
    * @generated from rpc fuwa.v1.CallService.DeleteRecording
    */

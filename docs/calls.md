@@ -133,7 +133,9 @@ the server" on the channel, a mark by their name, a beep and a note). The
 recording runs while anyone in the channel has it on, and ends when the last
 of them turns it off or leaves. Admins turn it off for the whole instance
 with `FUWA_CALL_RECORDINGS=off` (or the Calls page); `GetCallSettings` says
-whether it's on (`recordings`).
+whether it's on (`recordings`). It's on by default because RECORD is on no
+role until a server's admins grant it (only new servers' Admin role starts
+with it). There's no cap yet: recordings stay until someone deletes them.
 
 The part keeping the channel's places listens through a bridge on the media
 part, like a program with ListenVoice, as nobody anyone sees, and writes
@@ -151,8 +153,9 @@ for that file alone, and unsealed as it's downloaded. A split instance's
 replica copies finished ones to its bucket (`recordings/<server>/…`), where
 downloads come from when a shard doesn't have the files. People with RECORD
 in the channel list them (`ListRecordings`, the one going on included),
-download a person's track (`DownloadRecording`, plain Ogg Opus) and delete
-them (`DeleteRecording`); apps also save all of a recording's tracks as one
+download a person's track (`DownloadRecording`, plain Ogg Opus); whoever
+started one, or someone with MANAGE_CHANNELS there, deletes it
+(`DeleteRecording`). Apps also save all of a recording's tracks as one
 .zip. Recordings stay when their server is deleted, alongside its file in
 `deleted/`.
 
