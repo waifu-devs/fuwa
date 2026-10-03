@@ -534,9 +534,8 @@ function MoveRegion({
                 <span className="truncate text-primary">{target.name}</span>
               </div>
               <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-                <li>Its messages, channels, roles and recordings go to {target.name}, and nothing of them is kept in {here}.</li>
+                <li>Its messages, channels, roles, recordings, icon, emoji and webhook pictures go to {target.name}, and nothing of them is kept in {here}.</li>
                 <li>Changes wait a moment while it travels. People in its calls are dropped and can rejoin.</li>
-                <li>Its icon, emoji and webhook pictures stay with the accounts in {regions.find((r) => r.home)?.name ?? "the home region"} for now.</li>
               </ul>
               {move.error && <p className="text-sm text-destructive first-letter:uppercase">{move.error}</p>}
               <div className="flex justify-end gap-2">

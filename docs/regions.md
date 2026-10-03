@@ -89,13 +89,14 @@ instance's Servers page). The directory runs the move:
    finishes or undoes it rather than leaving the server in two places.
 2. The new shard asks the old one for the server. The old shard stops taking
    changes to it (reads go on), folds its log into the file, ends any
-   recording and call in it, and sends the file and its recordings, each
-   checked by SHA-256.
-3. The new shard opens the server, starts replicating it to its own bucket,
-   and says it has it. The directory points the server at the new shard.
+   recording and call in it, and sends the file, its recordings and its
+   pictures, each checked by SHA-256.
+3. The new shard opens the server, starts replicating it (and its pictures)
+   to its own bucket, and says it has it. The directory points the server at the new shard.
 4. The old shard lets go: requests for the server are sent on to the new
    shard, open live streams follow it there from where they were, and the old
-   shard deletes its files, its recordings and its replica's copies (only
+   shard deletes its files, its recordings, its pictures and its replica's
+   copies (only
    those, if both shards share a bucket).
 
 Changes made during the move wait at the gateway (the same way they wait out
@@ -113,10 +114,10 @@ live with the directory:
   settings**, **agents** and instance **settings**: node.db.
 - **Direct messages**: dms.db, end-to-end encrypted, so the directory only
   holds ciphertext, key packages and which devices are in each conversation.
-- **Uploaded pictures**: avatars, banners and backgrounds, and today also
-  server icons, custom emoji and webhook pictures, in `media/` with a row in
-  node.db; pictures from other sites fetched for links and embeds are cached
-  there too.
+- **Uploaded pictures**: avatars, banners and backgrounds, in `media/`, and
+  a row in node.db for every upload (who uploaded it, its size and type),
+  servers' pictures included; pictures from other sites fetched for links
+  and embeds are cached there too.
 - The directory's **index** of every server: its profile (name, icon,
   description), its members' ids and its invite codes, in memory, rebuilt
   from the shards; and node.db's `placements`.
@@ -125,10 +126,35 @@ That makes the home region where an instance's operator should be: an
 instance run for EU communities puts its directory in the EU, and every
 region's personal data that isn't a server's content stays there too.
 
-Server icons, emoji and webhook pictures belong to a server and are the one
-part of a server's content that doesn't follow it yet. Moving them to the
-server's shard (uploads routed by `server_id`, served by the shard) is the
-next step after this one; until then the docs and the move dialog say so.
+## A server's pictures
+
+Server icons, custom emoji and webhook pictures belong to a server, so they
+live with it. They're uploaded to the directory like any picture, and once
+the server uses one, the shard holding the server takes it: it copies the
+file (checked by SHA-256) to `<data>/server-pictures/<server>/` and its
+bucket (`server-pictures/<server>/<picture>`), and the directory deletes its
+own copy and its replica's. The picture's link doesn't change:
+`/media/<picture>` answers with a permanent redirect to
+`/media/servers/<server>/<picture>`, which gateways pass to the shard holding
+the server, wherever it is. A shard that lost a picture fetches it back from
+its bucket (only pictures the server links to, so made-up ids never reach
+the bucket).
+
+Until its shard takes it, a new picture sits in the home region: on the
+directory and in its bucket, for the moment between the upload and the
+server using it (and longer if the take fails). The picture's row (who
+uploaded it, its size and type) stays in node.db at home, like the
+uploader's account. Uploading a server's pictures straight to its shard,
+once the server is placed, is the next step.
+
+They move with the server like its recordings. Pictures a server used before
+this, or that couldn't be taken when it started using them (counted as an
+anonymous `server_picture_take` failure), stay at the directory and are
+served from there until the server next moves, when its new shard takes
+them. A picture belongs to whatever used it first: an account's avatar set
+as a webhook's picture stays the account's, and an emoji added to a second
+server stays with the first. One process running everything keeps every
+picture in `media/` as before.
 
 Server **attachments** are links today (fuwa doesn't store uploaded files for
 messages), so they're kept wherever they're hosted. When fuwa stores

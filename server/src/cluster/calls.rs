@@ -215,7 +215,11 @@ impl App {
             };
             if let Err(err) = link.directory().drop_picture(request).await {
                 tracing::warn!(media = %id, error = %err.message(), "couldn't delete a replaced picture");
+                return;
             }
+            // The directory deletes it only if it was the server's, and only
+            // the server's pictures are ever kept here.
+            crate::cluster::pictures::drop(self, server_id, &id).await;
             return;
         }
         let row = match async { self.node()?.media(&id).await }.await {

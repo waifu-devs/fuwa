@@ -362,6 +362,9 @@ impl App {
         if self.node.is_some() {
             router = router.merge(crate::sso::http::instance_routes(self.clone()));
         }
+        if let Link::Shard(_) = &self.link {
+            router = router.merge(crate::cluster::pictures::routes(self.clone()));
+        }
         if matches!(self.link, Link::Alone | Link::Shard(_)) {
             router = router.merge(crate::webhooks::routes(self.clone()));
             router = router.merge(crate::sso::http::server_routes(self.clone()));
