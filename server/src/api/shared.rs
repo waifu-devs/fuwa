@@ -372,16 +372,38 @@ async fn keep_out(
     Ok(())
 }
 
-/// AutoMod times people out, but a guest isn't a member here to time out:
-/// takes that out of a review's events, saying whether it was there, so the
-/// guest is kept out of the channel instead.
-fn take_time_out(events: &mut Vec<Payload>, user_id: &str) -> bool {
-    let before = events.len();
-    events.retain(|payload| {
-        !matches!(payload, Payload::MemberUpdated(pb::MemberUpdated { member: Some(m) })
-            if m.user.as_ref().is_some_and(|u| u.id == user_id))
+/// Runs the home's AutoMod over what someone from another server writes,
+/// inside the write. They aren't a member here to time out (and may be one
+/// in their own right, whose membership this mustn't touch), so a rule that
+/// would time them out keeps them out of the channel instead.
+#[allow(clippy::too_many_arguments)]
+async fn review_guest(
+    conn: &turso::Connection,
+    server_id: &str,
+    user: &pb::User,
+    server: &pb::SharedServer,
+    access: &Access,
+    channel: &pb::Channel,
+    content: &str,
+    events: &mut Vec<Payload>,
+) -> Result<Option<String>> {
+    // Already out until the year 9999, as far as `review` can tell.
+    let member = pb::Member {
+        user: Some(user.clone()),
+        timed_out_until: Some(timestamp(253_402_300_799_000)),
+        ..Default::default()
+    };
+    let verdict = automod::review(conn, server_id, &member, access, channel, content, events).await?;
+    let times_out = store::load_automod(conn).await?.iter().any(|rule| {
+        rule.enabled
+            && !rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id)
+            && rule.actions.iter().any(|a| a.kind == pb::AutoModActionKind::TimeOut as i32)
+            && crate::automod::check(rule, content).is_some()
     });
-    events.len() != before
+    if times_out {
+        keep_out(conn, channel, &user.id, &server.id, &user.id, "AutoMod", events).await?;
+    }
+    Ok(verdict.blocked)
 }
 
 // ─────────────── Calls between the two ends ───────────────
@@ -734,12 +756,8 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
                 }
             }
             remember(conn, &user, &server).await?;
-            let member = pb::Member { user: Some(user.clone()), ..Default::default() };
-            let verdict = automod::review(conn, &sdb.id, &member, &access, &channel, &send.content, events).await?;
-            if take_time_out(events, &user.id) {
-                keep_out(conn, &channel, &user.id, &server.id, &user.id, "AutoMod", events).await?;
-            }
-            if let Some(why) = verdict.blocked {
+            let verdict = review_guest(conn, &sdb.id, &user, &server, &access, &channel, &send.content, events).await?;
+            if let Some(why) = verdict {
                 return Ok(Err(why));
             }
             let now = now_ms();
@@ -823,12 +841,9 @@ async fn home_edit(sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cpb::SharedRe
             remember(conn, &user, &server).await?;
             if message.content != edit.content {
                 let access = Access::guest(&channel.id, row.allowed);
-                let member = pb::Member { user: Some(user.clone()), ..Default::default() };
-                let verdict = automod::review(conn, &sdb.id, &member, &access, &channel, &edit.content, events).await?;
-                if take_time_out(events, &user.id) {
-                    keep_out(conn, &channel, &user.id, &server.id, &user.id, "AutoMod", events).await?;
-                }
-                if let Some(why) = verdict.blocked {
+                let verdict =
+                    review_guest(conn, &sdb.id, &user, &server, &access, &channel, &edit.content, events).await?;
+                if let Some(why) = verdict {
                     return Ok(Err(why));
                 }
             }

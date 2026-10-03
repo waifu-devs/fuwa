@@ -5795,6 +5795,44 @@ async fn channels_shared_between_servers() {
         .await
         .unwrap();
 
+    // Each side's AutoMod reads what the guest's people write. A home rule
+    // that would time someone out keeps a guest out of the channel instead.
+    let rule = |word: &str, actions: Vec<pb::AutoModAction>| pb::AutoModRule {
+        enabled: true,
+        trigger: pb::AutoModTrigger::Keywords as i32,
+        keywords: vec![word.into()],
+        actions,
+        ..Default::default()
+    };
+    let block = pb::AutoModAction { kind: pb::AutoModActionKind::Block as i32, ..Default::default() };
+    let time_out =
+        pb::AutoModAction { kind: pb::AutoModActionKind::TimeOut as i32, duration_seconds: 60, ..Default::default() };
+    save_rule(&mut c, &mika, &guest, rule("nope", vec![block.clone()])).await.unwrap();
+    let caught_here = send(&mut c, &rin, &guest, &shown.id, "nope").await.unwrap_err();
+    assert_eq!(caught_here.code(), Code::PermissionDenied);
+    save_rule(&mut c, &juan, &home, rule("forbidden", vec![block, time_out])).await.unwrap();
+    let caught_there = send(&mut c, &rin, &guest, &shown.id, "forbidden").await.unwrap_err();
+    assert!(caught_there.message().starts_with("AutoMod"), "{caught_there:?}");
+    assert!(
+        messages(&mut c, &juan, &home, &dev.id).await.iter().all(|m| m.content != "nope" && m.content != "forbidden")
+    );
+    let blocks = connections(&mut c, &juan, &home).await.blocks;
+    assert_eq!(blocks[0].user.as_ref().unwrap().id, rin_user.id);
+    assert_eq!(send(&mut c, &rin, &guest, &shown.id, "hello?").await.unwrap_err().code(), Code::PermissionDenied);
+    c.shared
+        .block_from_channel(authed(
+            &juan,
+            pb::BlockFromChannelRequest {
+                server_id: home.clone(),
+                channel_id: dev.id.clone(),
+                user_id: rin_user.id.clone(),
+                blocked: false,
+            },
+        ))
+        .await
+        .unwrap();
+    send(&mut c, &rin, &guest, &shown.id, "back again").await.unwrap();
+
     // The home decides what guests may do, never more than sending.
     let connection_id = connections(&mut c, &juan, &home).await.connections[0].id.clone();
     let too_much = c
