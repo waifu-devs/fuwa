@@ -113,6 +113,10 @@ pub(super) async fn let_in(
     if query_one(conn, "SELECT 1 FROM bans WHERE user_id = ?1", [user_id], |r| r.get::<i64>(0)).await?.is_some() {
         return Err(Error::denied("you're banned from this server"));
     }
+    let sso = store::load_sso(conn).await?;
+    if sso.required && !sso.fresh(store::sso_signed_in_at(conn, user_id).await?, now) {
+        return Err(Error::FailedPrecondition(format!("sign in with {} to join this server", sso.provider.name)));
+    }
     Ok(invite)
 }
 
@@ -419,7 +423,7 @@ impl ServerService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let sdb = self.membership(&account, &request.get_ref().server_id).await?.sdb;
+                let Seat { sdb, access, .. } = self.membership(&account, &request.get_ref().server_id).await?;
                 let conn = sdb.read()?;
                 let mut members = query_all(
                     &conn,
@@ -437,6 +441,10 @@ impl ServerService for Api {
                     let id = m.user.as_ref().map(|u| u.id.as_str()).unwrap_or_default();
                     std::cmp::Reverse(rules.access(id, &m.role_ids).rank)
                 });
+                let manager = access.has(Permission::ManageServer);
+                for member in &mut members {
+                    store::scrub_sso(member, &account.id, manager);
+                }
                 Ok(pb::ListMembersResponse { members })
             }
             .await,

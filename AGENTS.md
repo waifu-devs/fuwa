@@ -59,6 +59,32 @@
     apps the instance trusts get sign-ins back (`linked::return_origin`): its
     own address, loopback (desktop apps), and origins listed by name in
     `allowed_origins`.
+  - `sso/`: single sign-on through an identity provider, for the instance's
+    own sign-in and for one community server's. `mod.rs` is the shared
+    `Provider` (stored as JSON: node.db settings' `sso_provider`, or the server
+    file's `server.sso`), `Endpoints` (every URL from the public URL, never the
+    request), and start/identify/finish over a `sso_sign_ins` table (node.db
+    for the instance, the server file for a server). `oidc.rs` is the code
+    flow with PKCE and ID token checks against the JWKS; `saml.rs` the
+    HTTP-Redirect AuthnRequest and the signed-response checks, over the
+    hand-written exclusive C14N in `xml.rs` (fixtures signed by an
+    independent library are in `sso/testdata/`). `http.rs` takes providers'
+    answers at `/sso/instance/...` and `/sso/servers/<id>/...` and sends the
+    browser to `/auth/sso/done#...`. Server-scope providers are fetched only
+    from public addresses (`outside::PublicOnly`, shared with picture
+    fetches). The instance's flow is `AuthService`'s
+    Start/Get/FinishSsoSignIn (SSO accounts, kind `SSO`, keyed by the
+    provider and subject); a server's is `api/sso.rs` (`SsoService`),
+    whose sign-ins live in the server file's `sso_identities`. Only the
+    server's owner may set it up, at https; `Provider::trust_key` (key,
+    client ID, sign-in URL, certificate fingerprints) decides when it's a
+    new provider, while `key` alone names instance SSO accounts. A required
+    provider gates `let_in` and, through `permissions::Access::lock_out`,
+    hides every channel from members whose sign-in is missing or older than
+    `sso_recheck_days` (`app::spawn_sso_rechecks` tells their streams when one
+    runs out). The web side is `web/src/lib/sso.ts`, `pages/SsoDone.tsx`,
+    `components/settings/IdentityProviderForm.tsx` (both levels),
+    `settings/server/SingleSignOn.tsx` and `components/join/SsoGate.tsx`.
   - `servers.rs`: community servers, one Turso file each under `servers/`: the
     ones this process keeps (all of them, or a shard's share). Every change goes through
     `ServerDb::write`, which appends events to the server's log in the same

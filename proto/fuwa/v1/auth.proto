@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package fuwa.v1;
 
+import "fuwa/v1/sso.proto";
 import "fuwa/v1/types.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -34,6 +35,18 @@ service AuthService {
   // callback page can hand it on when another fuwa app started it.
   rpc GetLinkedSignIn(GetLinkedSignInRequest) returns (GetLinkedSignInResponse);
   rpc FinishLinkedSignIn(FinishLinkedSignInRequest) returns (FinishLinkedSignInResponse);
+
+  // Single sign-on through the identity provider the instance's admins set
+  // up (InstanceSettings.sso_provider), in three calls too. The provider
+  // sends the browser back to this instance (/sso/instance/...), which checks
+  // who signed in and sends it on to
+  //   <public URL>/auth/sso/done#state=<state>&code=<code>
+  // and FinishSsoSignIn trades the code for a session. Someone new gets an
+  // account here while SSO sign-ups are open. With `test`, an instance admin
+  // checks the provider works: Finish says who signed in and changes nothing.
+  rpc StartSsoSignIn(StartSsoSignInRequest) returns (StartSsoSignInResponse);
+  rpc GetSsoSignIn(GetSsoSignInRequest) returns (GetSsoSignInResponse);
+  rpc FinishSsoSignIn(FinishSsoSignInRequest) returns (FinishSsoSignInResponse);
 }
 
 message SignUpRequest {
@@ -160,4 +173,46 @@ message FinishLinkedSignInResponse {
   bool admin = 3;
   // Whether this sign-in made the account.
   bool created = 4;
+}
+
+message StartSsoSignInRequest {
+  // The origin of the app signing in. The sign-in ends at
+  // <return_origin>/auth/sso/done.
+  string return_origin = 1;
+  // The SHA-256 (hex) of a random secret the app keeps until FinishSsoSignIn.
+  string secret_hash = 2;
+  // An instance admin checking the provider: works while sso_accounts is
+  // off, and signs nobody in.
+  bool test = 3;
+}
+
+message StartSsoSignInResponse {
+  string authorize_url = 1;
+  string state = 2;
+}
+
+message GetSsoSignInRequest {
+  string state = 1;
+}
+
+message GetSsoSignInResponse {
+  string return_origin = 1;
+  string provider_name = 2;
+  bool test = 3;
+}
+
+message FinishSsoSignInRequest {
+  string state = 1;
+  string code = 2;
+  string secret = 3;
+}
+
+message FinishSsoSignInResponse {
+  // Empty for a test.
+  string token = 1;
+  User user = 2;
+  bool admin = 3;
+  bool created = 4;
+  // Who the provider signed in.
+  SsoIdentity identity = 5;
 }

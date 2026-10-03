@@ -106,18 +106,19 @@ async fn page(source: Arc<impl HasSettings>, method: Method, uri: Uri, headers: 
         return (StatusCode::NOT_FOUND, "not found\n").into_response();
     }
     let settings = source.settings();
-    // Signing in with waifu.dev comes back to its callback page (and the
-    // scripts it runs) even with the app off, since a fuwa app on another
+    // Signing in with waifu.dev or single sign-on comes back to its page (and
+    // the scripts it runs) even with the app off, since a fuwa app on another
     // address may have started the sign-in.
+    let sign_in_page = uri.path() == crate::linked::CALLBACK || uri.path() == crate::sso::DONE;
     #[cfg(feature = "web")]
-    if settings.web || uri.path() == crate::linked::CALLBACK || uri.path().starts_with("/assets/") {
+    if settings.web || sign_in_page || uri.path().starts_with("/assets/") {
         return embedded::serve(uri, headers).await;
     }
     let _ = &headers;
-    if uri.path() == crate::linked::CALLBACK {
+    if sign_in_page {
         return (
             StatusCode::NOT_FOUND,
-            "this fuwa server was built without its web app, so it can't finish signing in with waifu.dev\n",
+            "this fuwa server was built without its web app, so it can't finish signing in here\n",
         )
             .into_response();
     }

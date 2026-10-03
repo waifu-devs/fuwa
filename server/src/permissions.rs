@@ -203,6 +203,9 @@ pub struct Access {
     channels: HashMap<String, Bits>,
     /// Hasn't agreed to the server's rules yet, so can't talk.
     pub pending: bool,
+    /// Hasn't signed in through the server's single sign-on (or it ran
+    /// out), so sees no channels and can do nothing until they do.
+    pub locked: bool,
     /// Timed out, so can only read until it ends.
     pub timed_out: bool,
 }
@@ -234,7 +237,7 @@ impl Rules {
         for parent in holders {
             channels.insert(parent, bit(P::ViewChannels));
         }
-        Access { owner, server, rank, channels, pending: false, timed_out: false }
+        Access { owner, server, rank, channels, pending: false, locked: false, timed_out: false }
     }
 
     /// Permissions in a channel: its category's overwrites, then its own. In
@@ -279,6 +282,17 @@ impl Access {
         }
     }
 
+    /// Shuts out a member who has to sign in through the server's single
+    /// sign-on first: no channels, no permissions. The owner never is.
+    pub fn lock_out(&mut self) {
+        if self.owner {
+            return;
+        }
+        self.locked = true;
+        self.server = 0;
+        self.channels.clear();
+    }
+
     /// Takes away everything but seeing channels from a member who's timed
     /// out, as Discord does: until it ends they read, and change nothing in
     /// the server but leaving it or agreeing to its rules. The owner can't be
@@ -300,10 +314,12 @@ impl Access {
         if self.timed_out { Err(timed_out()) } else { Ok(()) }
     }
 
-    /// Why they can't do `p`: a time-out, the rules they haven't agreed to, or
-    /// a missing permission.
+    /// Why they can't do `p`: single sign-on, a time-out, the rules they
+    /// haven't agreed to, or a missing permission.
     fn refuse(&self, p: P) -> Error {
-        if self.timed_out && p != P::ViewChannels {
+        if self.locked {
+            Error::FailedPrecondition("sign in through this server's single sign-on first".into())
+        } else if self.timed_out && p != P::ViewChannels {
             timed_out()
         } else if self.pending && TALK & bit(p) != 0 {
             Error::FailedPrecondition("agree to this server's rules first".into())

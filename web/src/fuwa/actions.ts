@@ -29,11 +29,13 @@ import {
 } from "@/gen/fuwa/v1/types_pb";
 import { saveApplied, type Applied } from "@/lib/applied";
 import { canReturnTo, newSecret, savePending, sha256Hex, type PendingSignIn } from "@/lib/linked";
+import { rememberServerSignIn, savePendingSso, type PendingSso } from "@/lib/sso";
+import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { arranged } from "@/lib/arrange";
 import { accessOf, canSee, sortRoles } from "@/lib/permissions";
 import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
-import { normalizeUrl } from "./saved";
+import { instanceKey, normalizeUrl } from "./saved";
 import { wipeDms } from "@/e2ee/engine";
 import { addInstance, engine, follow, removeInstance } from "./sync";
 import {
@@ -141,6 +143,117 @@ export const linkedSignInOrigin = (url: string, state: string) =>
   Effect.gen(function* () {
     const res = yield* call((signal) => makeApi(url, () => null).auth.getLinkedSignIn({ state }, { signal }));
     return res.returnOrigin;
+  });
+
+// ───────────────────────── Single sign-on ─────────────────────────
+
+/** Keeps a sign-in in this tab, then sends the browser to the provider. */
+function leaveFor(authorizeUrl: string, state: string, pending: PendingSso) {
+  if (!savePendingSso(state, pending)) {
+    return Effect.fail(toFuwaError(new Error("this browser won't keep the sign-in while you visit the provider")));
+  }
+  window.location.assign(authorizeUrl);
+  return Effect.succeed(true);
+}
+
+const ssoSecret = Effect.gen(function* () {
+  const secret = newSecret();
+  return { secret, secretHash: yield* Effect.promise(() => sha256Hex(secret)) };
+});
+
+/**
+ * Signs in to an instance through its identity provider. `test` (an admin,
+ * signed in as `key`) only checks the provider and signs nobody in.
+ */
+export const startSsoSignIn = (url: string, next: string | null, test?: { key: string }) =>
+  Effect.gen(function* () {
+    const { secret, secretHash } = yield* ssoSecret;
+    const client = test ? api(test.key) : makeApi(url, () => null);
+    const res = yield* call((signal) =>
+      client.auth.startSsoSignIn({ returnOrigin: window.location.origin, secretHash, test: !!test }, { signal }),
+    );
+    return yield* leaveFor(res.authorizeUrl, res.state, { url, secret, next, test: !!test, startedAt: Date.now() });
+  });
+
+/** Finishes an instance sign-in this tab started; a test only says who signed in. */
+export const finishSsoSignIn = (pending: PendingSso, state: string, code: string) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) =>
+      makeApi(pending.url, () => null).auth.finishSsoSignIn({ state, code, secret: pending.secret }, { signal }),
+    );
+    const key = pending.test ? instanceKey(pending.url) : addInstance(pending.url, res.token);
+    return { key, user: res.user, created: res.created, identity: res.identity };
+  });
+
+/** Who a sign-in that came back to this instance belongs to, so its page can hand it on. */
+export const ssoSignInInfo = (url: string, state: string, serverId?: string) =>
+  Effect.gen(function* () {
+    const client = makeApi(url, () => null);
+    if (serverId) {
+      const r = yield* call((signal) => client.sso.getServerSsoSignIn({ serverId, state }, { signal }));
+      return { origin: r.returnOrigin, provider: r.providerName, server: r.serverName, test: false };
+    }
+    const r = yield* call((signal) => client.auth.getSsoSignIn({ state }, { signal }));
+    return { origin: r.returnOrigin, provider: r.providerName, server: "", test: r.test };
+  });
+
+/** A server's provider and who has signed in through it. Managers only. */
+export const getServerSso = (key: string, serverId: string) =>
+  call((signal) => api(key).sso.getServerSso({ serverId }, { signal }));
+
+export const updateServerSso = (
+  key: string,
+  serverId: string,
+  change: { provider?: IdentityProvider; removeProvider?: boolean; required?: boolean; recheckDays?: number },
+) =>
+  Effect.gen(function* () {
+    const { sso } = yield* call((signal) => api(key).sso.updateServerSso({ serverId, ...change }, { signal }));
+    return sso!;
+  });
+
+/**
+ * Signs in through a server's provider: to join it (`join`), or to keep
+ * seeing it once a sign-in runs out. Comes back to /auth/sso/done.
+ */
+export const startServerSso = (key: string, serverId: string, opts: { join?: boolean; inviteCode?: string; next?: string | null } = {}) =>
+  Effect.gen(function* () {
+    if (!canReturnTo(window.location.origin)) {
+      return yield* Effect.fail(toFuwaError(new Error("single sign-on needs this page on an https address")));
+    }
+    const { secret, secretHash } = yield* ssoSecret;
+    const res = yield* call((signal) =>
+      api(key).sso.startServerSso(
+        { serverId, returnOrigin: window.location.origin, secretHash, inviteCode: opts.inviteCode ?? "" },
+        { signal },
+      ),
+    );
+    return yield* leaveFor(res.authorizeUrl, res.state, {
+      url: engine(key).url,
+      secret,
+      next: opts.next ?? null,
+      serverId,
+      join: opts.join,
+      inviteCode: opts.inviteCode,
+      startedAt: Date.now(),
+    });
+  });
+
+/** Records a server sign-in this tab started, and joins when that's what it was for. */
+export const finishServerSso = (pending: PendingSso, state: string, code: string) =>
+  Effect.gen(function* () {
+    const key = instanceKey(pending.url);
+    const serverId = pending.serverId!;
+    const res = yield* call((signal) =>
+      api(key).sso.finishServerSso({ serverId, state, code, secret: pending.secret }, { signal }),
+    );
+    if (res.member) storeMember(key, serverId, res.member);
+    else rememberServerSignIn(key, serverId);
+    let joinedNow = false;
+    if (pending.join && !res.member) {
+      yield* joinServer(key, serverId, pending.inviteCode ?? "");
+      joinedNow = true;
+    }
+    return { key, serverId, identity: res.identity, joined: joinedNow };
   });
 
 /** Ends the session on the server too, then keeps the instance listed but signed out. */

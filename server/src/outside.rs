@@ -265,8 +265,9 @@ fn fetchable(url: &Url) -> Result<(), &'static str> {
 }
 
 /// Looks names up and keeps only public addresses, so a name pointing at
-/// this machine or its network can't be fetched.
-struct PublicOnly;
+/// this machine or its network can't be fetched. Single sign-on uses it too,
+/// for the providers server managers set up.
+pub(crate) struct PublicOnly;
 
 impl Resolve for PublicOnly {
     fn resolve(&self, name: Name) -> Resolving {
@@ -283,7 +284,7 @@ impl Resolve for PublicOnly {
 }
 
 /// Whether an address is on the public internet.
-fn is_public(ip: IpAddr) -> bool {
+pub(crate) fn is_public(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => is_public_v4(ip),
         IpAddr::V6(ip) => {

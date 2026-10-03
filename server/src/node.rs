@@ -23,6 +23,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0007_linked_sign_ins.sql"),
     include_str!("../migrations/node/0008_agents.sql"),
     include_str!("../migrations/node/0009_upload_days.sql"),
+    include_str!("../migrations/node/0010_sso.sql"),
 ];
 
 /// A day, for counting uploads.
@@ -122,6 +123,8 @@ pub struct LinkedSignIn {
 /// Someone new from waifu.dev, as their linked account starts out.
 #[derive(Debug, Clone)]
 pub struct NewLinkedAccount<'a> {
+    /// Linked (waifu.dev) or SSO (the instance's identity provider).
+    pub kind: pb::AccountKind,
     pub issuer: &'a str,
     pub subject: &'a str,
     /// Tried as it is, then with _2, _3, … until one is free.
@@ -365,7 +368,7 @@ impl NodeDb {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?9)",
                 (
                     id.as_str(),
-                    pb::AccountKind::Linked as i64,
+                    new.kind as i64,
                     username.as_str(),
                     new.display_name,
                     new.avatar_url,
@@ -378,7 +381,7 @@ impl NodeDb {
             .await?;
             Ok(Account {
                 id,
-                kind: pb::AccountKind::Linked,
+                kind: new.kind,
                 username,
                 display_name: new.display_name.to_string(),
                 avatar_url: new.avatar_url.to_string(),
@@ -446,6 +449,26 @@ impl NodeDb {
             Ok(conn.execute("DELETE FROM linked_sign_ins WHERE state = ?1", [state]).await? > 0)
         })
         .await
+    }
+
+    /// Holds a single sign-on to the instance until the provider answers.
+    pub async fn create_sso_sign_in(&self, sign_in: &crate::sso::SignIn) -> Result<()> {
+        db::write(&self.db, async |conn| crate::sso::save(conn, sign_in).await).await
+    }
+
+    /// A single sign-on to the instance that hasn't run out.
+    pub async fn sso_sign_in(&self, state: &str) -> Result<Option<crate::sso::SignIn>> {
+        crate::sso::load(&self.read()?, state).await
+    }
+
+    /// Records who the provider signed in, once.
+    pub async fn sso_answered(&self, state: &str, code_hash: &str, identity: &crate::sso::Identity) -> Result<bool> {
+        db::write(&self.db, async |conn| crate::sso::answered(conn, state, code_hash, identity).await).await
+    }
+
+    /// Ends a single sign-on, so its code works once. False if another request already did.
+    pub async fn take_sso_sign_in(&self, state: &str) -> Result<bool> {
+        db::write(&self.db, async |conn| crate::sso::take(conn, state).await).await
     }
 
     /// A standalone account and its password hash, by username.

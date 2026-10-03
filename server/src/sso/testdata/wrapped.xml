@@ -1,0 +1,30 @@
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_resp1" Version="2.0" IssueInstant="2026-10-03T01:00:00Z" Destination="https://chat.example.com/sso/servers/01J00000000000000000000000/saml" InResponseTo="_req1"><saml:Issuer>https://idp.example.com</saml:Issuer><samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status><samlp:Extensions><saml:Assertion xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ID="_assert1" Version="2.0" IssueInstant="2026-10-03T01:00:00Z">
+  <saml:Issuer>https://idp.example.com</saml:Issuer>
+  <saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified">ana-123</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData NotOnOrAfter="2026-10-03T01:10:00Z" Recipient="https://chat.example.com/sso/servers/01J00000000000000000000000/saml" InResponseTo="_req1"/></saml:SubjectConfirmation></saml:Subject>
+  <saml:Conditions NotBefore="2026-10-03T00:59:00Z" NotOnOrAfter="2026-10-03T01:10:00Z"><saml:AudienceRestriction><saml:Audience>https://chat.example.com/sso/servers/01J00000000000000000000000/saml/metadata</saml:Audience></saml:AudienceRestriction></saml:Conditions>
+  <saml:AuthnStatement AuthnInstant="2026-10-03T01:00:00Z"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:Password</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement>
+  <saml:AttributeStatement><saml:Attribute Name="email"><saml:AttributeValue xsi:type="xs:string">ana@acme.com</saml:AttributeValue></saml:Attribute><saml:Attribute Name="displayName"><saml:AttributeValue xsi:type="xs:string">Ana &amp; Co</saml:AttributeValue></saml:Attribute></saml:AttributeStatement>
+<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo><ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/><ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/><ds:Reference URI="#_assert1"><ds:Transforms><ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/></ds:Transforms><ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/><ds:DigestValue>VXjbsNo5XgvVz40hrQwXc7cuhGARggzEQ3/EPHdhXKc=</ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue>lKj925d3NoMcmcVFht9A2Gcozxz4lUnfKRgTtlhUouPANo56bwW992k+wc8u0Fp/JGBnLikeT/+1i74x0wZMcvjjcubY96MWq8u3USKaC0YmF9W6G6M6NdMoLH2yj8iI6wOuyblSmV2O54KnqLDql+/7WcVb0chpsV2XmLTfsNtv1Iv2lu23tif7e0tmz6JIVgiUBoMsC3qc4h4YBAf6547miAmkkmD2zMWn/avyeEyohD4cNzLQsrkCL39LfDG6diexxwmoKBQWq5oKry+Rkl2+2Gh5eAFSu+oXMhPZ3KveoMAHO6yuZkHBlERoLHFXMPfszOLsFQl3T28O5aAGYA==</ds:SignatureValue><ds:KeyInfo><ds:X509Data><ds:X509Certificate>MIIDFTCCAf2gAwIBAgIUHmJ76PqS0ZKe40nnE0fjN3xX5GMwDQYJKoZIhvcNAQEL
+BQAwGjEYMBYGA1UEAwwPaWRwLmV4YW1wbGUuY29tMB4XDTI2MTAwMzAxNDEzNloX
+DTM2MDkzMDAxNDEzNlowGjEYMBYGA1UEAwwPaWRwLmV4YW1wbGUuY29tMIIBIjAN
+BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy/aibHN5GLNLPkBv7HZe10HhPlTx
+xMFQPwGlYx9s7ePT/Dgg+Sj4gHZX12lp7yrPH81cnsxTrhgVXvx6FsiHQpZRg0tm
+vU3G474rtokgKRL+pmUMoCxb1bXgR1VEQE5t4uqqdus/FHnSNFKBfXPcyYRiB3mX
+bxQqMaews0o9mGp5d3e7HK2kGf3xqXtLFlSdIFS7H+qil9Ll2q7cZ7Slhh8iLps/
+kPLDWGm9MknrhxDJavkd/RuIoDgiu1OEEDgt+fmNr6wiBtbUlAy5ti0vIwqj03J8
+Gjqit4DamUrv9/xURL4fqKUAkFx5yYdXYeS6uR9XtDhOVnL915yDbiJHxQIDAQAB
+o1MwUTAdBgNVHQ4EFgQUsFHtvX58yMZySERne2nbRrtpxWQwHwYDVR0jBBgwFoAU
+sFHtvX58yMZySERne2nbRrtpxWQwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0B
+AQsFAAOCAQEAO0rUgvskbH2JQ9IQ+Wy9S00YiSU6Q1Swu3vR4lBtQ93VmWggh+5r
+5+gsRMjf+GrwNI2OUFFlAkdWA2QdFkmku8YSVllpweVkoVLMpWXBIIMFmLsjfhJy
+PZQPeD6lqMYkMkDMX69UnAluMH/dJhoGikF9puqowGUNBOvAOZQ8X+hjlAENXbeT
+MhrfyOjgoeoBVXXV3rvQnlZ4hLU9v8J7LARjvJS9jPex6wFC/ub5b1gK/VXZcLYT
+JaGDoxtuFJLnJJuF8uDs4IE1Cj/wGo6aXWOSZWVd4ef8XmSJBCE/4y3mrRUietUm
+HSkq5oUwGht0lI/aJ7F3rd0Ef7uhhY80RA==
+</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature></saml:Assertion></samlp:Extensions><saml:Assertion xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ID="_assert1" Version="2.0" IssueInstant="2026-10-03T01:00:00Z">
+  <saml:Issuer>https://idp.example.com</saml:Issuer>
+  <saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified">boss</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData NotOnOrAfter="2026-10-03T01:10:00Z" Recipient="https://chat.example.com/sso/servers/01J00000000000000000000000/saml" InResponseTo="_req1"/></saml:SubjectConfirmation></saml:Subject>
+  <saml:Conditions NotBefore="2026-10-03T00:59:00Z" NotOnOrAfter="2026-10-03T01:10:00Z"><saml:AudienceRestriction><saml:Audience>https://chat.example.com/sso/servers/01J00000000000000000000000/saml/metadata</saml:Audience></saml:AudienceRestriction></saml:Conditions>
+  <saml:AuthnStatement AuthnInstant="2026-10-03T01:00:00Z"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:Password</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement>
+  <saml:AttributeStatement><saml:Attribute Name="email"><saml:AttributeValue xsi:type="xs:string">boss@acme.com</saml:AttributeValue></saml:Attribute><saml:Attribute Name="displayName"><saml:AttributeValue xsi:type="xs:string">Ana &amp; Co</saml:AttributeValue></saml:Attribute></saml:AttributeStatement>
+</saml:Assertion></samlp:Response>

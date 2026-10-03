@@ -16,6 +16,7 @@ import { DmView } from "@/components/dm/DmView";
 import { InstanceHome } from "@/pages/InstanceHome";
 import { InvitePage } from "@/pages/InvitePage";
 import { LinkedCallback } from "@/pages/LinkedCallback";
+import { SsoDone } from "@/pages/SsoDone";
 import { ChannelPage, ServerIndex } from "@/pages/ServerPages";
 import { Welcome } from "@/pages/Welcome";
 import { lazyComponent } from "@/components/lazy";
@@ -94,6 +95,9 @@ const inviteHere = createRoute({
 /** Where waifu.dev sends people back to after signing in with a linked account. */
 const linkedCallback = createRoute({ getParentRoute: () => root, path: "auth/waifu/callback", component: LinkedCallback });
 
+/** Where an instance sends people back to after single sign-on (its own, or a server's). */
+const ssoDone = createRoute({ getParentRoute: () => root, path: "auth/sso/done", component: SsoDone });
+
 const instance = createRoute({ getParentRoute: () => root, path: "$instance", component: Shell });
 
 const instanceIndex = createRoute({
@@ -149,6 +153,7 @@ const routeTree = root.addChildren([
   connect,
   inviteHere,
   linkedCallback,
+  ssoDone,
   instance.addChildren([instanceIndex, invite, dm, server.addChildren([serverIndex, channel])]),
 ]);
 

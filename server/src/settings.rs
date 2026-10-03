@@ -16,6 +16,8 @@ pub const FIELDS: &[&str] = &[
     "local_accounts",
     "linked_accounts",
     "linked_issuer",
+    "sso_accounts",
+    "sso_provider",
     "server_creation",
     "agent_creation",
     "servers_per_account",
@@ -43,6 +45,9 @@ pub struct Settings {
     pub local_accounts: Accounts,
     pub linked_accounts: Accounts,
     pub linked_issuer: String,
+    pub sso_accounts: Accounts,
+    /// Unset (`Protocol::None`) until an admin sets one up.
+    pub sso_provider: crate::sso::Provider,
     pub server_creation: pb::ServerCreation,
     pub agent_creation: pb::AgentCreation,
     pub limits: Limits,
@@ -63,6 +68,8 @@ impl Settings {
             local_accounts: config.local_accounts,
             linked_accounts: config.linked_accounts,
             linked_issuer: config.linked_issuer.clone(),
+            sso_accounts: config.sso_accounts,
+            sso_provider: crate::sso::Provider::default(),
             server_creation: config.server_creation,
             agent_creation: config.agent_creation,
             limits: config.limits.clone(),
@@ -117,6 +124,16 @@ impl Settings {
         self.linked_accounts.sign_up() && self.linked_sign_in()
     }
 
+    /// Whether people can sign in through the instance's identity provider.
+    pub fn sso_sign_in(&self) -> bool {
+        self.sso_accounts.sign_in() && self.sso_provider.ready().is_ok()
+    }
+
+    /// Whether someone new can sign in through it and get an account.
+    pub fn sso_sign_up(&self) -> bool {
+        self.sso_accounts.sign_up() && self.sso_sign_in()
+    }
+
     pub fn to_pb(&self) -> pb::InstanceSettings {
         let limits = &self.limits;
         pb::InstanceSettings {
@@ -134,6 +151,12 @@ impl Settings {
                 Accounts::Off => pb::LinkedAccounts::Off,
             } as i32,
             linked_issuer: self.linked_issuer.clone(),
+            sso_accounts: match self.sso_accounts {
+                Accounts::Open => pb::SsoAccounts::Open,
+                Accounts::Closed => pb::SsoAccounts::Closed,
+                Accounts::Off => pb::SsoAccounts::Off,
+            } as i32,
+            sso_provider: Some(self.sso_provider.to_pb()),
             server_creation: self.server_creation as i32,
             agent_creation: self.agent_creation as i32,
             servers_per_account: limits.servers_per_account,
@@ -178,6 +201,20 @@ impl Settings {
                 },
             ),
             "linked_issuer" => Value::from(from.linked_issuer.clone()),
+            "sso_accounts" => Value::from(
+                match pb::SsoAccounts::try_from(from.sso_accounts).unwrap_or(pb::SsoAccounts::Unspecified) {
+                    pb::SsoAccounts::Open => "open",
+                    pb::SsoAccounts::Closed => "closed",
+                    pb::SsoAccounts::Off => "off",
+                    pb::SsoAccounts::Unspecified => "",
+                },
+            ),
+            // The secret is never sent out, so an empty one keeps this one.
+            "sso_provider" => {
+                let provider =
+                    crate::sso::Provider::from_pb(&from.sso_provider.clone().unwrap_or_default(), &self.sso_provider)?;
+                serde_json::to_value(provider).map_err(|err| Error::internal(err.to_string()))?
+            }
             "server_creation" => Value::from(
                 match pb::ServerCreation::try_from(from.server_creation).unwrap_or(pb::ServerCreation::Unspecified) {
                     pb::ServerCreation::Everyone => "everyone",
@@ -222,6 +259,10 @@ impl Settings {
             "local_accounts" => Value::from(self.local_accounts.as_str()),
             "linked_accounts" => Value::from(self.linked_accounts.as_str()),
             "linked_issuer" => Value::from(self.linked_issuer.clone()),
+            "sso_accounts" => Value::from(self.sso_accounts.as_str()),
+            "sso_provider" => {
+                serde_json::to_value(&self.sso_provider).map_err(|err| Error::internal(err.to_string()))?
+            }
             "server_creation" => Value::from(match self.server_creation {
                 pb::ServerCreation::Admins => "admins",
                 pb::ServerCreation::Disabled => "off",
@@ -255,18 +296,22 @@ impl Settings {
             "name" => self.name = name(value)?,
             "public_url" => self.public_url = public_url(value)?,
             "allowed_origins" => self.allowed_origins = origins(value)?,
-            "local_accounts" | "linked_accounts" => {
+            "local_accounts" | "linked_accounts" | "sso_accounts" => {
                 let accounts = value
                     .as_str()
                     .and_then(Accounts::parse)
                     .ok_or_else(|| Error::invalid(format!("{field} must be open, closed or off")))?;
-                if field == "local_accounts" {
-                    self.local_accounts = accounts;
-                } else {
-                    self.linked_accounts = accounts;
+                match field {
+                    "local_accounts" => self.local_accounts = accounts,
+                    "linked_accounts" => self.linked_accounts = accounts,
+                    _ => self.sso_accounts = accounts,
                 }
             }
             "linked_issuer" => self.linked_issuer = issuer(value)?,
+            "sso_provider" => {
+                self.sso_provider = serde_json::from_value(value.clone())
+                    .map_err(|err| Error::invalid(format!("sso_provider doesn't read: {err}")))?
+            }
             "server_creation" => {
                 self.server_creation = match value.as_str() {
                     Some("everyone") => pb::ServerCreation::Everyone,

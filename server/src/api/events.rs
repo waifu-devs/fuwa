@@ -86,6 +86,21 @@ impl View {
     /// for them (ChannelCreated) and go (ChannelDeleted), not stored, so
     /// sequence 0.
     async fn pass(&mut self, event: &pb::Event) -> Vec<pb::Event> {
+        let mut out = self.pass_unscrubbed(event).await;
+        let manager = self.access.has(pb::Permission::ManageServer);
+        for event in &mut out {
+            if let Some(
+                Payload::MemberJoined(pb::MemberJoined { member: Some(member) })
+                | Payload::MemberUpdated(pb::MemberUpdated { member: Some(member) }),
+            ) = &mut event.payload
+            {
+                store::scrub_sso(member, &self.account_id, manager);
+            }
+        }
+        out
+    }
+
+    async fn pass_unscrubbed(&mut self, event: &pb::Event) -> Vec<pb::Event> {
         let Some(payload) = &event.payload else { return vec![event.clone()] };
         if !changes_access(payload, &self.account_id) {
             return if shown_to(&self.access, payload) { vec![event.clone()] } else { vec![] };

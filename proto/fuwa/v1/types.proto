@@ -74,6 +74,12 @@ message AuthMethods {
   string linked_issuer = 4;
   // Whether someone new can sign in with waifu.dev and get a linked account.
   bool linked_sign_up = 5;
+  // Single sign-on through the instance's identity provider.
+  bool sso_sign_in = 6;
+  // Whether someone new can sign in through it and get an account.
+  bool sso_sign_up = 7;
+  // The provider's name, for "Continue with <name>".
+  string sso_name = 8;
 }
 
 // Who may make agents (accounts programs drive) on an instance.
@@ -105,6 +111,9 @@ enum AccountKind {
   // Driven by a program, made by a person; signs in with a token. See
   // AgentService.
   ACCOUNT_KIND_AGENT = 3;
+  // Signs in through the instance's single sign-on (an identity provider
+  // its admins set up). See AuthService.StartSsoSignIn.
+  ACCOUNT_KIND_SSO = 4;
 }
 
 // A person's public profile.
@@ -149,6 +158,11 @@ message Member {
   // Joined, but hasn't agreed to the server's rules yet: they can read, but
   // not send messages, make invites or change their nickname until they do.
   bool pending = 8;
+  // When they last signed in through the server's single sign-on; unset if
+  // they never have. While the server requires it, a member (other than the
+  // owner or an agent) without one, or whose sign-in is older than
+  // sso_recheck_days, sees no channels until they sign in again.
+  google.protobuf.Timestamp sso_signed_in_at = 9;
 }
 
 // ============================================================================
@@ -286,6 +300,17 @@ message Server {
   bool has_rules = 15;
   // It has a welcome screen turned on: new members see it once they're in.
   bool has_welcome_screen = 16;
+  // People sign in through the server's identity provider to join and to
+  // keep seeing it. See SsoService.
+  bool sso_required = 17;
+  // The provider's name, for "Continue with <name>", while it's required.
+  string sso_name = 18;
+  // How many days a member's sign-in lasts; 0 for forever.
+  int32 sso_recheck_days = 19;
+  // The host of the provider's sign-in page, while it's required: that site
+  // sees the address of whoever signs in, so apps name it before sending
+  // anyone there.
+  string sso_host = 20;
 }
 
 // What new members see once they're in: a few words and the channels to

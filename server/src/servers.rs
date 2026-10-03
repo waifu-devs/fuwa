@@ -35,6 +35,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0008_automod_emoji_welcome.sql"),
     include_str!("../migrations/server/0009_webhooks.sql"),
     include_str!("../migrations/server/0010_voice.sql"),
+    include_str!("../migrations/server/0011_sso.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -367,6 +368,18 @@ impl ServerDb {
             conn.execute(&format!("VACUUM INTO '{path}'"), ()).await?;
         }
         db::to_sqlite(dest, None).await?;
+        {
+            // Secrets stay on the instance: the provider's client secret and
+            // sign-ins under way.
+            let (_db, conn) = db::open_plain(dest).await?;
+            let mut sso = load_sso(&conn).await?.provider;
+            if !sso.oidc_client_secret.is_empty() {
+                sso.oidc_client_secret.clear();
+                conn.execute("UPDATE server SET sso = ?1", [sso.stored()]).await?;
+            }
+            conn.execute("DELETE FROM sso_sign_ins", ()).await?;
+            db::pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").await?;
+        }
         for suffix in ["-wal", "-log"] {
             let mut side = dest.as_os_str().to_owned();
             side.push(suffix);
@@ -524,7 +537,8 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
     query_one(
         conn,
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
-                default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome
+                default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome,
+                sso, sso_required, sso_recheck_days
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -545,11 +559,59 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 linked_only: r.get(13)?,
                 has_rules: r.get(14)?,
                 has_welcome_screen: from_json::<StoredWelcome>(&r.get::<String>(15)?, "welcome screen").enabled,
+                sso_required: r.get(17)?,
+                sso_name: if r.get::<bool>(17)? { crate::sso::Provider::parse(&r.get::<String>(16)?).name } else { String::new() },
+                sso_host: if r.get::<bool>(17)? { crate::sso::Provider::parse(&r.get::<String>(16)?).host() } else { String::new() },
+                sso_recheck_days: r.get(18)?,
             })
         },
     )
     .await?
     .ok_or_else(|| Error::internal("server row missing"))
+}
+
+/// A server's single sign-on, as its file has it.
+pub struct ServerSso {
+    pub provider: crate::sso::Provider,
+    pub required: bool,
+    pub recheck_days: i32,
+}
+
+impl ServerSso {
+    /// Whether a sign-in made at `signed_in_at` still counts at `now`.
+    pub fn fresh(&self, signed_in_at: Option<i64>, now: i64) -> bool {
+        match signed_in_at {
+            None => false,
+            Some(_) if self.recheck_days <= 0 => true,
+            Some(at) => now < at + i64::from(self.recheck_days) * 24 * 60 * 60 * 1000,
+        }
+    }
+}
+
+pub async fn load_sso(conn: &Connection) -> Result<ServerSso> {
+    query_one(conn, "SELECT sso, sso_required, sso_recheck_days FROM server", (), |r| {
+        Ok(ServerSso {
+            provider: crate::sso::Provider::parse(&r.get::<String>(0)?),
+            required: r.get(1)?,
+            recheck_days: r.get(2)?,
+        })
+    })
+    .await?
+    .ok_or_else(|| Error::internal("server row missing"))
+}
+
+/// When someone last signed in through the server's single sign-on.
+/// Leaves out when a member last signed in through the server's provider,
+/// unless `viewer` is that member or a manager: it's nobody else's business
+/// when they're online with their organization.
+pub fn scrub_sso(member: &mut pb::Member, viewer: &str, manager: bool) {
+    if !manager && member.user.as_ref().is_none_or(|u| u.id != viewer) {
+        member.sso_signed_in_at = None;
+    }
+}
+
+pub async fn sso_signed_in_at(conn: &Connection, user_id: &str) -> Result<Option<i64>> {
+    query_one(conn, "SELECT signed_in_at FROM sso_identities WHERE user_id = ?1", [user_id], |r| r.get::<i64>(0)).await
 }
 
 /// The community servers whose files this process keeps: all of them, or a
@@ -830,6 +892,7 @@ pub async fn add_member(
         timed_out_until: None,
         role_ids: vec![],
         pending,
+        sso_signed_in_at: sso_signed_in_at(conn, &user.id).await?.map(timestamp),
     })
 }
 
@@ -847,6 +910,7 @@ pub async fn remove_member(
     }
     conn.execute("UPDATE usage SET members = members - 1, updated_at = ?1 WHERE id = 1", [now_ms()]).await?;
     conn.execute("DELETE FROM member_roles WHERE user_id = ?1", [user_id]).await?;
+    conn.execute("DELETE FROM sso_identities WHERE user_id = ?1", [user_id]).await?;
     let channels = query_all(
         conn,
         "SELECT channel_id FROM channel_overwrites WHERE target_id = ?1 AND target = ?2",
@@ -978,7 +1042,8 @@ pub async fn user(conn: &Connection, user_id: &str) -> Result<Option<pb::User>> 
     query_one(conn, &format!("SELECT {USER_COLUMNS} FROM users WHERE users.id = ?1"), [user_id], user_row).await
 }
 
-pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, members.nickname, members.joined_at, members.timed_out_until, members.pending";
+pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, members.nickname, members.joined_at, members.timed_out_until, members.pending,
+     (SELECT signed_in_at FROM sso_identities WHERE sso_identities.user_id = members.user_id)";
 
 /// Reads a member row; their roles come from [`permissions::attach_roles`].
 pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member> + '_ {
@@ -991,6 +1056,7 @@ pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member>
             timed_out_until: r.get::<Option<i64>>(9)?.map(timestamp),
             role_ids: vec![],
             pending: r.get(10)?,
+            sso_signed_in_at: r.get::<Option<i64>>(11)?.map(timestamp),
         })
     }
 }
@@ -1028,6 +1094,11 @@ pub async fn member_access(
     }
     if member.timed_out_until.as_ref().is_some_and(|until| millis(until) > now_ms()) {
         access.time_out();
+    }
+    let sso = load_sso(conn).await?;
+    let agent = member.user.as_ref().is_some_and(|u| u.kind == pb::AccountKind::Agent as i32);
+    if sso.required && !agent && !sso.fresh(member.sso_signed_in_at.as_ref().map(millis), now_ms()) {
+        access.lock_out();
     }
     Ok(Some((member, access)))
 }

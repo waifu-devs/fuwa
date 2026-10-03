@@ -320,6 +320,7 @@ impl App {
             .add_service(EmojiServiceServer::new(api.clone()))
             .add_service(WebhookServiceServer::new(api.clone()))
             .add_service(AgentServiceServer::new(api.clone()))
+            .add_service(crate::pb::sso_service_server::SsoServiceServer::new(api.clone()))
             .add_service(EventServiceServer::new(api.clone()))
             .add_service(MediaServiceServer::new(api.clone()))
             .add_service(DirectMessageServiceServer::new(api.clone()))
@@ -341,8 +342,12 @@ impl App {
         if self.node.is_some() {
             router = router.merge(crate::media::routes(self.clone())).merge(crate::outside::routes(self.clone()));
         }
+        if self.node.is_some() {
+            router = router.merge(crate::sso::http::instance_routes(self.clone()));
+        }
         if matches!(self.link, Link::Alone | Link::Shard(_)) {
             router = router.merge(crate::webhooks::routes(self.clone()));
+            router = router.merge(crate::sso::http::server_routes(self.clone()));
         }
         if !self.config.cluster.is_split() {
             // The web app (when it's on) answers every other GET, so its own addresses work on reload.
@@ -395,6 +400,9 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
             local_sign_up: settings.local_accounts.sign_up(),
             linked_sign_in: settings.linked_sign_in(),
             linked_sign_up: settings.linked_sign_up(),
+            sso_sign_in: settings.sso_sign_in(),
+            sso_sign_up: settings.sso_sign_up(),
+            sso_name: if settings.sso_sign_in() { settings.sso_provider.name.clone() } else { String::new() },
             linked_issuer: if settings.linked_sign_in() { settings.linked_issuer.clone() } else { String::new() },
         }),
         server_creation: settings.server_creation as i32,
@@ -486,6 +494,9 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
         crate::telemetry::spawn(app.clone());
         spawn_housekeeping(app.clone());
     }
+    if matches!(app.link, Link::Alone | Link::Shard(_)) {
+        spawn_sso_rechecks(app.clone());
+    }
     spawn_signal_handler(app.shutdown.clone());
     crate::api::spawn_voice_sweeper(app.clone());
     crate::api::spawn_voice_guard(app.clone());
@@ -511,6 +522,30 @@ pub fn spawn_signal_handler(shutdown: CancellationToken) {
         wait_for_signal().await;
         tracing::info!("shutting down");
         shutdown.cancel();
+    });
+}
+
+/// Every few minutes: members whose single sign-on to a server ran out get
+/// a MemberUpdated, so open streams stop showing them its channels.
+fn spawn_sso_rechecks(app: Arc<App>) {
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(Duration::from_secs(5 * 60));
+        // Streams opened before a restart worked out what members see then.
+        let mut since = crate::id::now_ms() - 10 * 60 * 1000;
+        loop {
+            tokio::select! {
+                _ = app.shutdown.cancelled() => return,
+                _ = every.tick() => {
+                    let now = crate::id::now_ms();
+                    for sdb in app.servers.all() {
+                        if let Err(err) = crate::api::note_lapses(&sdb, since, now).await {
+                            tracing::warn!(server = %sdb.id, error = %err, "couldn't check for single sign-ons that ran out");
+                        }
+                    }
+                    since = now;
+                }
+            }
+        }
     });
 }
 
