@@ -13,7 +13,22 @@ import { Mic, micProblem, Speakers } from "./audio";
 import { canEncryptCalls, encryptedConfig, FrameCrypto } from "./frames";
 import { watchQuality } from "./quality";
 import { getCalls, sameTarget, setCalls, type CallTarget } from "./state";
-import { cameraProblem, clearRemoteVideos, ENCODINGS, getVideos, onWantsChange, openCamera, setLocalVideo, setRemoteVideo, wanted } from "./video";
+import {
+  cameraProblem,
+  clearRemoteVideos,
+  ENCODINGS,
+  getVideos,
+  onWantsChange,
+  openCamera,
+  openScreen,
+  ownerOf,
+  SCREEN_ENCODINGS,
+  screenProblem,
+  setLocalScreen,
+  setLocalVideo,
+  setRemoteVideo,
+  wanted,
+} from "./video";
 
 /**
  * This browser's call: one RTCPeerConnection to the instance's media
@@ -66,10 +81,12 @@ class Session {
   private mic: Mic | null = null;
   private camera: MediaStreamTrack | null = null;
   private video: RTCRtpTransceiver | null = null;
+  private screen: MediaStreamTrack | null = null;
+  private screenVideo: RTCRtpTransceiver | null = null;
   private layersTimer: ReturnType<typeof setTimeout> | null = null;
   private unwant: (() => void) | null = null;
   private unprefs: (() => void) | null = null;
-  /** The channel doesn't allow cameras (no VIDEO there). */
+  /** The channel doesn't allow cameras or shared screens (no VIDEO there). */
   videoSuppressed = false;
   private speakers: Speakers;
   private frames: FrameCrypto | null = null;
@@ -203,17 +220,25 @@ class Session {
     this.frames?.send(video.sender, this.me, "video");
     preferVp8(video);
     if (this.camera) void video.sender.replaceTrack(this.camera).catch(() => {});
+    // The screen's place comes second, the same way: the media server
+    // takes an app's first video track as its camera, the second as its screen.
+    const screenVideo = pc.addTransceiver("video", { direction: "sendonly", sendEncodings: SCREEN_ENCODINGS.map((e) => ({ ...e })) });
+    this.screenVideo = screenVideo;
+    this.frames?.send(screenVideo.sender, this.me, "video");
+    preferVp8(screenVideo);
+    if (this.screen) void screenVideo.sender.replaceTrack(this.screen).catch(() => {});
     const channel = pc.createDataChannel(CHANNEL, { ordered: true });
     this.channel = channel;
     channel.onmessage = (e) => void this.onSignal(pc, e.data);
     channel.onopen = () => this.sayLayers();
     pc.ontrack = (e) => {
+      // The stream names the feed: whose it is, and whether it's their screen.
       const userId = e.streams[0]?.id;
       if (!userId) return;
       const stream = e.streams[0]!;
       stream.onremovetrack = (ev) => this.trackGone(userId, stream, ev.track);
       if (e.track.kind === "video") {
-        this.frames?.receive(e.receiver, userId, "video");
+        this.frames?.receive(e.receiver, ownerOf(userId), "video");
         setRemoteVideo(userId, { track: e.track, mid: e.transceiver.mid ?? "" });
         this.sayLayers();
         return;
@@ -243,13 +268,14 @@ class Session {
     await pc.setLocalDescription(offer);
     await gathered(pc);
     if (attempt !== this.attempt || this.stopped) return;
-    const { selfMute, selfDeaf, selfVideo } = getCalls();
+    const { selfMute, selfDeaf, selfVideo, selfStream } = getCalls();
     const sdp = pc.localDescription?.sdp ?? offer.sdp ?? "";
     const t = this.target;
+    const selves = { selfMute, selfDeaf, selfVideo, selfStream, sessionId: this.sessionId };
     const joined =
       t.kind === "voice"
-        ? await this.api.calls.joinVoice({ serverId: t.serverId, channelId: t.channelId, offer: sdp, selfMute, selfDeaf, selfVideo, sessionId: this.sessionId })
-        : await this.api.calls.joinDmCall({ conversationId: t.conversationId, offer: sdp, selfMute, selfDeaf, selfVideo, sessionId: this.sessionId });
+        ? await this.api.calls.joinVoice({ serverId: t.serverId, channelId: t.channelId, offer: sdp, ...selves })
+        : await this.api.calls.joinDmCall({ conversationId: t.conversationId, offer: sdp, ...selves });
     if (attempt !== this.attempt || this.stopped) return;
     this.sessionId = joined.sessionId;
     this.videoSuppressed = !!joined.state?.videoSuppress;
@@ -317,6 +343,24 @@ class Session {
     await this.video?.sender.replaceTrack(this.camera).catch(() => {});
   }
 
+  /** Shares a screen or stops, the same way as the camera. */
+  async setScreen(on: boolean) {
+    if (on && !this.screen) {
+      const track = await openScreen();
+      if (this.stopped || !getCalls().selfStream) return track.stop();
+      this.screen = track;
+      // Stopped in the browser's own "Stop sharing" bar.
+      track.onended = () => {
+        if (this.screen === track) void setScreen(false);
+      };
+    } else if (!on && this.screen) {
+      this.screen.stop();
+      this.screen = null;
+    }
+    setLocalScreen(this.screen);
+    await this.screenVideo?.sender.replaceTrack(this.screen).catch(() => {});
+  }
+
   private async onSignal(pc: RTCPeerConnection, data: unknown) {
     if (pc !== this.pc || typeof data !== "string") return;
     let signal: Signal;
@@ -379,19 +423,24 @@ class Session {
   /** Keeps the place in the call, and tells the instance how you sound. */
   async keep() {
     if (this.stopped || !this.sessionId) return;
-    const { selfMute, selfDeaf, selfVideo } = getCalls();
+    const { selfMute, selfDeaf, selfVideo, selfStream } = getCalls();
+    const selves = { sessionId: this.sessionId, selfMute, selfDeaf, selfVideo, selfStream };
     const t = this.target;
     try {
       if (t.kind === "voice") {
-        const kept = await this.api.calls.keepVoice({ serverId: t.serverId, channelId: t.channelId, sessionId: this.sessionId, selfMute, selfDeaf, selfVideo });
+        const kept = await this.api.calls.keepVoice({ serverId: t.serverId, channelId: t.channelId, ...selves });
         this.videoSuppressed = !!kept.state?.videoSuppress;
         // The channel took VIDEO away meanwhile.
         if (this.videoSuppressed && getCalls().selfVideo) {
           toast("You can't have your camera on in this channel any more.");
           void setCamera(false);
         }
+        if (this.videoSuppressed && getCalls().selfStream) {
+          toast("You can't share your screen in this channel any more.");
+          void setScreen(false);
+        }
       } else {
-        await this.api.calls.keepDmCall({ conversationId: t.conversationId, sessionId: this.sessionId, selfMute, selfDeaf, selfVideo });
+        await this.api.calls.keepDmCall({ conversationId: t.conversationId, ...selves });
       }
     } catch (err) {
       const e = toFuwaError(err);
@@ -405,6 +454,7 @@ class Session {
     this.heard.clear();
     clearRemoteVideos();
     this.video = null;
+    this.screenVideo = null;
     this.channel?.close();
     this.pc?.close();
     this.channel = null;
@@ -427,6 +477,9 @@ class Session {
     this.camera?.stop();
     this.camera = null;
     setLocalVideo(null);
+    this.screen?.stop();
+    this.screen = null;
+    setLocalScreen(null);
     this.speakers.close();
     this.frames?.close();
     if (!tell || !this.sessionId) return;
@@ -511,7 +564,7 @@ export async function joinCall(target: CallTarget) {
   if (session) await hangUp(null);
   const s = new Session(target);
   session = s;
-  setCalls(() => ({ call: { target, status: "connecting", since: null, problem: null }, speaking: {}, ended: null, selfVideo: false }));
+  setCalls(() => ({ call: { target, status: "connecting", since: null, problem: null }, speaking: {}, ended: null, selfVideo: false, selfStream: false }));
   try {
     await s.start();
   } catch (err) {
@@ -527,7 +580,7 @@ export async function hangUp(why: string | null, tell = true) {
   const s = session;
   if (!s) return;
   session = null;
-  setCalls(() => ({ call: null, speaking: {}, ended: why, selfVideo: false }));
+  setCalls(() => ({ call: null, speaking: {}, ended: why, selfVideo: false, selfStream: false }));
   cue("disconnect");
   if (why) toast(why);
   await s.stop(tell);
@@ -569,6 +622,25 @@ export async function setCamera(on: boolean) {
 }
 
 export const toggleCamera = () => setCamera(!getCalls().selfVideo);
+
+/** Shares your screen in the call you're in, or stops. */
+export async function setScreen(on: boolean) {
+  const s = session;
+  if (!s || getCalls().selfStream === on) return;
+  if (on && s.videoSuppressed) return void toast("You can't share your screen in this channel.");
+  setCalls(() => ({ selfStream: on }));
+  try {
+    await s.setScreen(on);
+    cue(on ? "unmute" : "mute");
+  } catch (err) {
+    setCalls(() => ({ selfStream: false }));
+    const problem = screenProblem(err);
+    if (problem) toast(problem);
+  }
+  void s.keep();
+}
+
+export const toggleScreen = () => setScreen(!getCalls().selfStream);
 
 /** Push to talk's key went down or up. */
 export function setPushing(down: boolean) {

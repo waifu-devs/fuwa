@@ -16,14 +16,14 @@ import { hasIn } from "@/lib/permissions";
 import { setTitle } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceFlags } from "./parts";
-import { CameraButton, PopOutButton, TileMedia } from "./Video";
+import { CameraButton, LiveBadge, PopOutButton, ScreenButton, TileMedia } from "./Video";
 import { useVoiceIn } from "./VoiceUsers";
 
 /**
- * A voice channel, open: everyone in it as a tile that glows while they
- * talk (their camera, when it's on), and the controls for your own place
- * there. Each tile is one person's own stream, and pops out into a window
- * of its own.
+ * A voice channel, open: shared screens on top, big, then everyone in it as
+ * a tile that glows while they talk (their camera, when it's on), and the
+ * controls for your own place there. Each tile is one person's own stream,
+ * and pops out into a window of its own.
  */
 export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: string; serverId: string; channel: Channel }) {
   const inst = useInstance(instanceKey);
@@ -35,6 +35,10 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
   const canConnect = hasIn(access, channel.id, Permission.CONNECT);
   const canSpeak = hasIn(access, channel.id, Permission.SPEAK);
   const serverName = inst?.servers.find((s) => s.id === serverId)?.name;
+  const me = inst?.me?.id;
+  const myStream = useCalls((s) => s.selfStream);
+  // Screens come through only while you're in the channel; yours from this browser.
+  const sharing = joined ? states.filter((s) => (s.userId === me ? myStream : s.selfStream)) : [];
 
   useEffect(() => {
     setTitle(`🔊 ${channel.name} · ${serverName ?? "fuwa"}`);
@@ -82,7 +86,26 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
           <Empty name={channel.name} />
         ) : (
           <LayoutGroup>
-            <motion.ul layout className={cn("m-auto grid w-full max-w-5xl gap-3 sm:gap-4", gridFor(states.length))}>
+            <AnimatePresence initial={false}>
+              {sharing.length > 0 && (
+                <motion.ul
+                  key="screens"
+                  layout
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={SPRING}
+                  className={cn("mx-auto mb-4 grid w-full max-w-5xl shrink-0 gap-3 sm:gap-4", sharing.length > 1 && "lg:grid-cols-2")}
+                >
+                  <AnimatePresence initial={false} mode="popLayout">
+                    {sharing.map((state) => (
+                      <ScreenTile key={state.userId} instanceKey={instanceKey} serverId={serverId} state={state} self={state.userId === me} />
+                    ))}
+                  </AnimatePresence>
+                </motion.ul>
+              )}
+            </AnimatePresence>
+            <motion.ul layout className={cn("m-auto grid w-full max-w-5xl gap-3 sm:gap-4", sharing.length > 0 && "mt-0", gridFor(states.length))}>
               <AnimatePresence initial={false} mode="popLayout">
                 {states.map((state, n) => (
                   <Tile key={state.userId} instanceKey={instanceKey} serverId={serverId} channelId={channel.id} state={state} index={n} />
@@ -99,6 +122,7 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
             <motion.div key="in" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }} transition={SPRING} className="flex items-center gap-2">
               <MuteButtons size="lg" />
               <CameraButton size="lg" />
+              <ScreenButton size="lg" />
               <HangUpButton size="lg" onClick={() => void hangUp(null)} />
             </motion.div>
           ) : (
@@ -175,6 +199,32 @@ function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey:
         </button>
       </ParticipantMenu>
       {joined && <PopOutButton popped={{ instance: instanceKey, userId: state.userId, serverId }} name={name} className="absolute top-2 right-2" />}
+    </motion.li>
+  );
+}
+
+/** Someone's shared screen: shown whole, with whose it is and that it's live. */
+function ScreenTile({ instanceKey, serverId, state, self }: { instanceKey: string; serverId: string; state: VoiceState; self: boolean }) {
+  const user = useFuwa((s) => s.instances[instanceKey]?.users[state.userId]);
+  const member = useFuwa((s) => s.instances[instanceKey]?.members[serverId]?.find((m) => m.user?.id === state.userId));
+  const name = member ? memberName(member) : displayName(user);
+  return (
+    <motion.li
+      layout
+      initial={{ opacity: 0, scale: 0.94, y: -12 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.94, transition: { duration: 0.18 } }}
+      transition={SPRING}
+      className="group/tile relative"
+    >
+      <div className="relative aspect-video w-full overflow-hidden rounded-3xl border bg-black shadow-lg">
+        <TileMedia userId={state.userId} user={user} videoOn self={self} screen speaking={false} />
+        <span className="absolute bottom-2 left-2 flex max-w-[80%] items-center gap-1.5 rounded-xl bg-background/80 px-2.5 py-1 backdrop-blur">
+          <LiveBadge />
+          <span className="truncate text-sm font-bold">{self ? "Your screen" : `${name}'s screen`}</span>
+        </span>
+      </div>
+      <PopOutButton popped={{ instance: instanceKey, userId: state.userId, serverId, screen: true }} name={name} className="absolute top-2 right-2" />
     </motion.li>
   );
 }

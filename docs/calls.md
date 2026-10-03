@@ -1,7 +1,7 @@
 # Calls
 
 Voice channels in community servers and calls in direct messages, with
-sound and cameras. Screen sharing and the desktop app's calls come later;
+sound, cameras and shared screens. The desktop app's calls come later;
 this is how calls work now and what those build on.
 
 ## The parts
@@ -84,6 +84,27 @@ VIDEO is a permission of its own, per channel, given wherever SPEAK was
 (migration 0012). Without it, the voice state says `video_suppress`, the
 media part drops the camera's frames, and the app turns the camera off.
 Programs (bridges) never get cameras.
+
+## Shared screens
+
+A shared screen works as a second camera. Every app's first offer has a
+second send-only video track after the camera's, empty until someone shares
+(`getDisplayMedia`), and the media part takes an app's first video track as
+its camera and the second as its screen. Sharing says `self_stream` in the
+next keep, and the media part passes the screen on only while it does.
+
+The others get it on a stream of its own, named for its person and
+`-screen` (`<account id>-screen`), which is how apps tell it from the
+camera. A screen goes out at up to 1080p and 30 frames a second, in the
+same three sizes as a camera with more bits (200 kbit/s, 700 kbit/s and 2.5
+Mbit/s, since text needs them), marked as detail so browsers keep text
+sharp and drop frames first, and switches sizes the same way. VIDEO covers
+screens too, and in direct messages a screen is end-to-end encrypted like
+a camera. No sound goes with a screen yet.
+
+Apps show shared screens above everyone's tiles, whole (never cropped),
+with a LIVE mark, and pop them out like cameras: the window is titled
+`<name>'s screen · fuwa`.
 
 ### Pop-out windows and clean feeds
 
@@ -201,7 +222,7 @@ of sound the same way, checked against a frame the web app sealed; it has no
 camera yet.
 
 What the server sees of a direct-message call: that it's happening, who's in
-it and since when, their mute, deafen and camera on or off, the size and
+it and since when, their mute, deafen, camera and shared screen on or off, the size and
 timing of the sealed frames, and which camera frames are keyframes. Not the
 sound or the pictures.
 
@@ -218,12 +239,13 @@ expiry and a random name.
 
 ## What the media part accepts
 
-An app's offer may send one track of sound and one of camera, receive the
+An app's offer may send one track of sound, one of camera and one of
+screen, receive the
 others' tracks and open the data channel, and nothing else; at most 10
 offers in 10 seconds. Each person's sound is capped at 80 KB a second and
 1500 bytes a frame, far above any Opus voice, and so is each program's.
 Each camera is capped at 1 MB a second, all its sizes together, and 512 KB
-a frame. A call holds at most 99 people, programs included.
+a frame, and so is each shared screen. A call holds at most 99 people, programs included.
 
 ## Hosting the media part
 
@@ -240,8 +262,8 @@ interruption.
 
 ## Next
 
-- **Screen sharing**: a second video track per person, on the same sizes
-  and keyframe switching as cameras.
+- **A shared screen's sound** (a tab's or the whole system's), as a second
+  track of sound next to it.
 - **The desktop app's calls**: str0m as the WebRTC client, cpal for the
   microphone and speakers, Opus, the frame encryption it already has, and
   then cameras, with each person's camera in a native window of its own.

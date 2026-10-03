@@ -55,8 +55,13 @@ impl Place {
         self.state.self_video && !self.state.video_suppress
     }
 
+    /// Whether the media part should pass their shared screen on.
+    pub fn may_screen(&self) -> bool {
+        self.state.self_stream && !self.state.video_suppress
+    }
+
     pub fn may(&self) -> May {
-        May { speak: self.may_speak(), hear: self.may_hear(), video: self.may_video() }
+        May { speak: self.may_speak(), hear: self.may_hear(), video: self.may_video(), screen: self.may_screen() }
     }
 }
 
@@ -251,6 +256,7 @@ impl MediaLink {
                     may_speak: place.may_speak(),
                     may_hear: place.may_hear(),
                     may_video: place.may_video(),
+                    may_screen: place.may_screen(),
                 };
                 // Opening twice only replaces the first connection, so a
                 // media part that's restarting is waited for.
@@ -367,6 +373,7 @@ impl MediaLink {
                         may_hear: place.may_hear(),
                         session_id: place.session_id.clone(),
                         may_video: place.may_video(),
+                        may_screen: place.may_screen(),
                     })
                     .await
                     .map(|r| r.into_inner().connected)

@@ -12,7 +12,7 @@ import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { clock } from "./CallPanel";
 import { HangUpButton, MuteButtons, ParticipantMenu, useSpeaking, VoiceAvatar } from "./parts";
-import { CameraButton, PopOutButton, TileMedia } from "./Video";
+import { CameraButton, LiveBadge, PopOutButton, ScreenButton, TileMedia } from "./Video";
 
 /** The call going on in a conversation, if there is one. */
 export const useDmCall = (instanceKey: string, conversationId: string) => useFuwa((s) => s.instances[instanceKey]?.dms.calls[conversationId]);
@@ -61,6 +61,9 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
   // Cameras come through only while you're in the call.
   const filming = new Set(inCall ? (call?.participants ?? []).filter((p) => p.selfVideo && p.userId !== me.id).map((p) => p.userId) : []);
   if (inCall && mine) filming.add(me.id);
+  const myStream = useCalls((s) => s.selfStream);
+  const sharing = new Set(inCall ? (call?.participants ?? []).filter((p) => p.selfStream && p.userId !== me.id).map((p) => p.userId) : []);
+  if (inCall && myStream) sharing.add(me.id);
 
   let line: string;
   if (!inCall) line = `${displayName(startedBy ?? partner)} started a call`;
@@ -81,7 +84,7 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
         >
           <div className="flex flex-col items-center gap-3 px-4 py-5">
             <AnimatePresence mode="popLayout" initial={false}>
-              {filming.size ? (
+              {filming.size || sharing.size ? (
                 <motion.div
                   key="cameras"
                   initial={{ opacity: 0, scale: 0.96 }}
@@ -90,6 +93,11 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
                   transition={SPRING}
                   className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2"
                 >
+                  {conversation.users
+                    .filter((u) => sharing.has(u.id))
+                    .map((u) => (
+                      <Screen key={`screen-${u.id}`} instanceKey={instanceKey} user={u} self={u.id === me.id} />
+                    ))}
                   {conversation.users.map((u) => (
                     <Camera key={u.id} instanceKey={instanceKey} user={u} self={u.id === me.id} here={here.has(u.id)} videoOn={filming.has(u.id)} />
                   ))}
@@ -110,6 +118,7 @@ export function DmCallStrip({ instanceKey, conversation, me }: { instanceKey: st
               <div className="flex items-center gap-2">
                 <MuteButtons size="lg" />
                 <CameraButton size="lg" />
+                <ScreenButton size="lg" />
                 <HangUpButton size="lg" label="Hang up" onClick={() => void hangUp(null)} />
               </div>
             ) : (
@@ -167,5 +176,22 @@ function Camera({ instanceKey, user, self, here, videoOn }: { instanceKey: strin
       </ParticipantMenu>
       {here && <PopOutButton popped={{ instance: instanceKey, userId: user.id }} name={name} className="absolute top-2 right-2" />}
     </div>
+  );
+}
+
+/** A shared screen in the call: the whole width, shown whole. */
+function Screen({ instanceKey, user, self }: { instanceKey: string; user: User; self: boolean }) {
+  const name = displayName(user);
+  return (
+    <motion.div layout initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={SPRING} className="group/tile relative sm:col-span-2">
+      <div className="relative aspect-video w-full overflow-hidden rounded-2xl border bg-black shadow-lg">
+        <TileMedia userId={user.id} user={user} videoOn self={self} screen speaking={false} avatarClass="size-14 text-lg sm:size-16 sm:text-xl" />
+        <span className="absolute bottom-2 left-2 flex max-w-[80%] items-center gap-1.5 rounded-lg bg-background/80 px-2 py-0.5 backdrop-blur">
+          <LiveBadge />
+          <span className="truncate text-xs font-bold">{self ? "Your screen" : `${name}'s screen`}</span>
+        </span>
+      </div>
+      <PopOutButton popped={{ instance: instanceKey, userId: user.id, screen: true }} name={name} className="absolute top-2 right-2" />
+    </motion.div>
   );
 }

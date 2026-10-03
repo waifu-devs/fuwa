@@ -21,7 +21,9 @@ import "google/protobuf/timestamp.proto";
 // {"<mid>": "h" | "m" | "l" | "off"}}, naming the tracks the media part
 // sent it: apps send their camera in three sizes (simulcast, rids "h", "m"
 // and "l", full, half and a quarter), and each viewer gets the one that fits
-// where it shows it, or none while it isn't showing it.
+// where it shows it, or none while it isn't showing it. An app's second
+// video track is its shared screen, the same way: the others get it on a
+// stream named "<account id>-screen".
 //
 // Who's in a call is kept in memory, not stored, and each app keeps its
 // place with KeepVoice every 5 seconds; a place nobody kept for 15 seconds
@@ -117,6 +119,8 @@ message JoinVoiceRequest {
   string session_id = 6;
   // The camera is on (VIDEO there).
   bool self_video = 7;
+  // Sharing their screen (VIDEO there).
+  bool self_stream = 8;
 }
 
 message JoinVoiceResponse {
@@ -144,6 +148,7 @@ message KeepVoiceRequest {
   bool self_mute = 4;
   bool self_deaf = 5;
   bool self_video = 6;
+  bool self_stream = 7;
 }
 
 message KeepVoiceResponse {
@@ -224,6 +229,7 @@ message JoinDmCallRequest {
   bool self_deaf = 4;
   string session_id = 5;
   bool self_video = 6;
+  bool self_stream = 7;
 }
 
 message JoinDmCallResponse {
@@ -245,6 +251,7 @@ message KeepDmCallRequest {
   bool self_mute = 3;
   bool self_deaf = 4;
   bool self_video = 5;
+  bool self_stream = 6;
 }
 
 message KeepDmCallResponse {

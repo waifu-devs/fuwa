@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Channel, Server } from "@/gen/fuwa/v1/types_pb";
 import { markServerRead } from "@/fuwa/actions";
-import { toggleCamera, toggleDeafen, toggleMute } from "@/calls/engine";
+import { toggleCamera, toggleDeafen, toggleMute, toggleScreen } from "@/calls/engine";
 import { watchPushToTalk } from "@/calls/keys";
 import { IncomingCalls } from "@/components/calls/IncomingCalls";
 import { PopOuts } from "@/components/calls/Video";
@@ -160,6 +160,7 @@ export function AppOverlays() {
       toggleMute,
       toggleDeafen,
       toggleCamera: () => void toggleCamera(),
+      toggleScreen: () => void toggleScreen(),
       // Held down, not pressed: the call listens for it going down and up itself.
       pushToTalk: () => {},
       openSettings: () => (getUi().settings === null ? openSettings() : closeSettings()),
@@ -191,6 +192,7 @@ export function AppOverlays() {
           action.id === "toggleMute" ||
           action.id === "toggleDeafen" ||
           action.id === "toggleCamera" ||
+          action.id === "toggleScreen" ||
           (action.id === "openSettings" && ui.settings !== null) ||
           (action.id === "shortcuts" && ui.shortcuts) ||
           (action.id === "quickSwitcher" && ui.switcher);

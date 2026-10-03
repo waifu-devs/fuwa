@@ -2,7 +2,9 @@ import { useEffect, useSyncExternalStore, type RefObject } from "react";
 import { getPrefs } from "@/lib/prefs";
 
 /**
- * Cameras in your call: everyone else's as their tracks arrive, and yours.
+ * Cameras and shared screens in your call: everyone else's as their tracks
+ * arrive, and yours. Each is a feed: a camera's is its person's user id, a
+ * shared screen's that and "-screen" (as the media server names its stream).
  * This changes only when a camera comes or goes, never per frame: the
  * pictures themselves go straight from the track into <video> elements.
  *
@@ -17,9 +19,17 @@ export type Layer = "h" | "m" | "l" | "off";
 
 export type RemoteVideo = { track: MediaStreamTrack; mid: string };
 
-type Videos = { remote: Record<string, RemoteVideo>; local: MediaStreamTrack | null };
+type Videos = { remote: Record<string, RemoteVideo>; local: MediaStreamTrack | null; localScreen: MediaStreamTrack | null };
 
-let videos: Videos = { remote: {}, local: null };
+let videos: Videos = { remote: {}, local: null, localScreen: null };
+
+const SCREEN = "-screen";
+
+/** The feed of someone's camera, or of their shared screen. */
+export const feedOf = (userId: string, screen = false) => (screen ? userId + SCREEN : userId);
+/** Whose a feed is. */
+export const ownerOf = (feed: string) => (feed.endsWith(SCREEN) ? feed.slice(0, -SCREEN.length) : feed);
+export const isScreen = (feed: string) => feed.endsWith(SCREEN);
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -52,9 +62,18 @@ export function setLocalVideo(track: MediaStreamTrack | null) {
   emit();
 }
 
-/** Someone's camera track while it's coming in: yours with `self`. */
-export function useVideoTrack(userId: string | undefined, self = false): MediaStreamTrack | null {
-  return useSyncExternalStore(subscribe, () => (self ? videos.local : userId ? (videos.remote[userId]?.track ?? null) : null));
+export function setLocalScreen(track: MediaStreamTrack | null) {
+  if (videos.localScreen === track) return;
+  videos = { ...videos, localScreen: track };
+  emit();
+}
+
+/** A feed's track while it's coming in: yours with `self`. */
+export function useVideoTrack(feed: string | undefined, self = false): MediaStreamTrack | null {
+  return useSyncExternalStore(subscribe, () => {
+    if (self) return feed && isScreen(feed) ? videos.localScreen : videos.local;
+    return feed ? (videos.remote[feed]?.track ?? null) : null;
+  });
 }
 
 // ───────────────────────── Sizes people want ─────────────────────────
@@ -64,7 +83,7 @@ const views = new Map<number, { userId: string; layer: Layer }>();
 let nextView = 0;
 const wantListeners = new Set<() => void>();
 
-/** The biggest size anything showing `userId`'s camera wants. */
+/** The biggest size anything showing a feed wants. */
 export function wanted(userId: string): Layer {
   let best: Layer = "off";
   for (const v of views.values()) if (v.userId === userId && ORDER.indexOf(v.layer) > ORDER.indexOf(best)) best = v.layer;
@@ -80,7 +99,7 @@ const wantsChanged = () => {
   for (const l of wantListeners) l();
 };
 
-/** The size that fits a picture this tall on screen (in device pixels): a camera is 720 tall at most. */
+/** The size that fits a picture this tall on screen (in device pixels): a camera is 720 tall at most, a screen 1080. */
 export function layerFor(heightPx: number): Layer {
   if (heightPx <= 0) return "off";
   if (heightPx <= 240) return "l";
@@ -157,4 +176,41 @@ export const ENCODINGS: RTCRtpEncodingParameters[] = [
   { rid: "l", scaleResolutionDownBy: 4, maxBitrate: 150_000, maxFramerate: 15 },
   { rid: "m", scaleResolutionDownBy: 2, maxBitrate: 500_000, maxFramerate: 30 },
   { rid: "h", scaleResolutionDownBy: 1, maxBitrate: 1_500_000, maxFramerate: 30 },
+];
+
+// ───────────────────────── Your screen ─────────────────────────
+
+/** Asks the browser for a screen, window or tab to share, at up to 1080p. */
+export async function openScreen(): Promise<MediaStreamTrack> {
+  if (!navigator.mediaDevices?.getDisplayMedia) throw new DOMException("No screen sharing", "NotSupportedError");
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    audio: false,
+    video: { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 30 } },
+  });
+  const track = stream.getVideoTracks()[0];
+  if (!track) throw new DOMException("No screen", "NotFoundError");
+  // Text stays sharp; motion gives way first.
+  track.contentHint = "detail";
+  return track;
+}
+
+/** Whether this browser can share a screen at all (phones can't). */
+export const canShareScreen = () => typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia && !/Android|iPhone|iPad/.test(navigator.userAgent);
+
+/** Why sharing didn't start, in words; null when you just closed the picker. */
+export function screenProblem(err: unknown): string | null {
+  const name = err instanceof DOMException ? err.name : "";
+  if (name === "NotAllowedError" || name === "AbortError") return null;
+  if (name === "NotSupportedError") return "This browser can't share a screen.";
+  return "Sharing your screen didn't start.";
+}
+
+/**
+ * A shared screen's three sizes: a quarter for thumbnails, half, and full
+ * for reading it, with more bits than a camera, since text needs them.
+ */
+export const SCREEN_ENCODINGS: RTCRtpEncodingParameters[] = [
+  { rid: "l", scaleResolutionDownBy: 4, maxBitrate: 200_000, maxFramerate: 5 },
+  { rid: "m", scaleResolutionDownBy: 2, maxBitrate: 700_000, maxFramerate: 15 },
+  { rid: "h", scaleResolutionDownBy: 1, maxBitrate: 2_500_000, maxFramerate: 30 },
 ];

@@ -754,9 +754,11 @@ message VoiceState {
   bool suppress = 9;
   // Their camera is on.
   bool self_video = 10;
-  // They can't turn their camera on here: they don't have VIDEO in this
-  // channel. Never set in direct-message calls.
+  // They can't turn their camera on or share their screen here: they don't
+  // have VIDEO in this channel. Never set in direct-message calls.
   bool video_suppress = 11;
+  // They're sharing their screen.
+  bool self_stream = 12;
 }
 
 message ServerUpdated {

@@ -1,5 +1,5 @@
 import * as Popover from "@radix-ui/react-popover";
-import { HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon, PhoneOffIcon, ShieldOffIcon, VideoIcon, Volume2Icon, VolumeXIcon } from "lucide-react";
+import { HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon, MonitorUpIcon, PhoneOffIcon, ShieldOffIcon, VideoIcon, Volume2Icon, VolumeXIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState, type ReactNode } from "react";
 import type { User, VoiceState } from "@/gen/fuwa/v1/types_pb";
@@ -50,9 +50,10 @@ export function VoiceAvatar({ user, speaking, className, ring = 3 }: { user: Use
 }
 
 /** The little icons after someone's name: camera on, muted, deafened, or muted by a moderator (in red). */
-export function VoiceFlags({ state, className }: { state: Pick<VoiceState, "selfMute" | "selfDeaf" | "serverMute" | "serverDeaf" | "suppress" | "selfVideo"> | undefined; className?: string }) {
+export function VoiceFlags({ state, className }: { state: Pick<VoiceState, "selfMute" | "selfDeaf" | "serverMute" | "serverDeaf" | "suppress" | "selfVideo" | "selfStream"> | undefined; className?: string }) {
   if (!state) return null;
   const flags: { key: string; icon: typeof MicOffIcon; label: string; mod?: boolean }[] = [];
+  if (state.selfStream) flags.push({ key: "screen", icon: MonitorUpIcon, label: "Sharing their screen" });
   if (state.selfVideo) flags.push({ key: "video", icon: VideoIcon, label: "Camera on" });
   if (state.serverMute) flags.push({ key: "server-mute", icon: MicOffIcon, label: "Muted by a moderator", mod: true });
   else if (state.suppress) flags.push({ key: "suppress", icon: MicOffIcon, label: "Can't speak here", mod: true });
