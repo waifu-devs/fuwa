@@ -779,6 +779,10 @@ message VoiceState {
   // allowing it (InstanceSettings.call_recordings). Never set in
   // direct-message calls.
   bool server_record = 15;
+  // A moderator turned their camera and shared screen off: they can't turn
+  // either on in this server until a moderator lifts it. Like server mute,
+  // it outlasts the call. Never set in direct-message calls.
+  bool server_video_off = 16;
 }
 
 message ServerUpdated {

@@ -99,6 +99,9 @@ class Session {
   private unprefs: (() => void) | null = null;
   /** The channel doesn't allow cameras or shared screens (no VIDEO there). */
   videoSuppressed = false;
+  /** A moderator turned your camera and shared screen off in this server. */
+  videoOff = false;
+  private unmoderated: (() => void) | null = null;
   private speakers: Speakers;
   private frames: FrameCrypto | null = null;
   private sessionId = "";
@@ -165,6 +168,7 @@ class Session {
       device = getPrefs().videoDevice;
       if (this.camera) void this.reopenCamera();
     });
+    this.unmoderated = store.subscribe(() => this.watchModeration());
     await this.connect();
     this.keeper = setInterval(() => void this.keep(), KEEP_MS);
   }
@@ -315,6 +319,7 @@ class Session {
     if (attempt !== this.attempt || this.stopped) return;
     this.sessionId = joined.sessionId;
     this.videoSuppressed = !!joined.state?.videoSuppress;
+    this.videoOff = !!joined.state?.serverVideoOff;
     this.recordSuppressed = !!joined.state?.recordSuppress;
     if ("recordingsFull" in joined && joined.recordingsFull && getCalls().serverRecord) {
       toast(FULL);
@@ -530,6 +535,36 @@ class Session {
     setTimeout(() => void tryAgain(500), soon ? 150 + Math.random() * 450 : 0);
   }
 
+  /**
+   * Notices a moderator turning your camera and shared screen off (or letting
+   * you have them again) the moment it happens, not at the next keep.
+   */
+  private watchModeration() {
+    const t = this.target;
+    if (t.kind !== "voice" || this.stopped) return;
+    const mine = store.get().instances[t.instance]?.voice[t.serverId]?.find((v) => v.userId === this.me);
+    if (!mine || mine.channelId !== t.channelId) return;
+    this.moderated(mine.serverVideoOff);
+  }
+
+  private moderated(off: boolean) {
+    if (off === this.videoOff) return;
+    this.videoOff = off;
+    if (!off) return void toast("A moderator let you turn your camera on again.");
+    const { selfVideo, selfStream } = getCalls();
+    toast(
+      selfVideo && selfStream
+        ? "A moderator turned your camera and screen share off."
+        : selfStream
+          ? "A moderator stopped your screen share."
+          : selfVideo
+            ? "A moderator turned your camera off."
+            : "A moderator turned off cameras and screen sharing for you here.",
+    );
+    if (selfVideo) void setCamera(false);
+    if (selfStream) void setScreen(false);
+  }
+
   /** Keeps the place in the call, and tells the instance how you sound. */
   async keep() {
     if (this.stopped || !this.sessionId) return;
@@ -540,6 +575,7 @@ class Session {
       if (t.kind === "voice") {
         const kept = await this.api.calls.keepVoice({ serverId: t.serverId, channelId: t.channelId, serverRecord, ...selves });
         this.videoSuppressed = !!kept.state?.videoSuppress;
+        this.moderated(!!kept.state?.serverVideoOff);
         // The channel took VIDEO away meanwhile.
         if (this.videoSuppressed && getCalls().selfVideo) {
           toast("You can't have your camera on in this channel any more.");
@@ -594,6 +630,7 @@ class Session {
     this.unwatch?.();
     this.unwant?.();
     this.unprefs?.();
+    this.unmoderated?.();
     if (this.layersTimer) clearTimeout(this.layersTimer);
     if (this.broken) clearTimeout(this.broken);
     this.teardown();
@@ -739,6 +776,7 @@ export async function setCamera(on: boolean) {
   const s = session;
   if (!s || getCalls().selfVideo === on) return;
   if (on && s.videoSuppressed) return void toast("You can't turn your camera on in this channel.");
+  if (on && s.videoOff) return void toast("A moderator turned your camera off here.");
   if (on) reportUsage("call.camera");
   setCalls(() => ({ selfVideo: on }));
   try {
@@ -758,6 +796,7 @@ export async function setScreen(on: boolean) {
   const s = session;
   if (!s || getCalls().selfStream === on) return;
   if (on && s.videoSuppressed) return void toast("You can't share your screen in this channel.");
+  if (on && s.videoOff) return void toast("A moderator turned screen sharing off for you here.");
   if (on) reportUsage("call.screen_share");
   setCalls(() => ({ selfStream: on }));
   try {

@@ -202,6 +202,9 @@ message ModerateVoiceRequest {
   optional bool server_deaf = 4;
   // Takes them out of the voice channel.
   bool disconnect = 5;
+  // Turns their camera and shared screen off, and keeps them off here until
+  // a moderator lifts it (VoiceState.server_video_off). Needs MUTE_MEMBERS.
+  optional bool server_video_off = 6;
 }
 
 message ModerateVoiceResponse {}

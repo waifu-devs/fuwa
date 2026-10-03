@@ -21,7 +21,7 @@ use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::node::Account;
 use crate::pb::{self, call_service_server::CallService};
-use crate::servers::{self as store, Payload, ServerDb};
+use crate::servers::{self as store, Payload, ServerDb, VoiceModeration};
 use crate::voice::{self, LEASE, Place};
 
 /// How long a TURN credential works. Apps ask for new ones each time they
@@ -401,15 +401,13 @@ impl Api {
             _ => session_id.to_string(),
         };
         let same_channel = before.as_ref().is_some_and(|p| p.state.channel_id == channel.id);
-        let (server_mute, server_deaf) = seat.sdb.voice_moderation(&account.id).await?;
+        let moderation = seat.sdb.voice_moderation(&account.id).await?;
         let (server_record, full) = self.server_record(&seat.sdb, server_record).await?;
         let mut state = pb::VoiceState {
             user_id: account.id.clone(),
             channel_id: channel.id.clone(),
             self_mute,
             self_deaf,
-            server_mute,
-            server_deaf,
             joined_at: match &before {
                 Some(p) if same_channel => p.state.joined_at,
                 _ => Some(timestamp(now_ms())),
@@ -421,6 +419,7 @@ impl Api {
             ..Default::default()
         };
         Quiet::new(&seat.access, &channel.id).apply(&mut state);
+        moderation.apply(&mut state);
         let full = full && !state.record_suppress;
         let place = Place { session_id, room: voice::channel_room(&server_id, &channel.id), state, expires: lease() };
         Ok((server_id, place, full))
@@ -534,7 +533,7 @@ impl Api {
         }
         // What they may do now: permissions change while people talk.
         let channel_id = before.as_ref().map(|p| p.state.channel_id.clone()).unwrap_or(req.channel_id.clone());
-        let mut moderation = (false, false);
+        let mut moderation = VoiceModeration::default();
         let allowed = match self.voice_channel(&account, &server_id, &channel_id).await {
             Ok((seat, channel)) => {
                 let may = seat.access.require_in(&channel.id, pb::Permission::Connect).is_ok()
@@ -568,6 +567,7 @@ impl Api {
                 place.state.self_record = req.self_record;
                 place.state.server_record = server_record;
                 quiet.apply(&mut place.state);
+                VoiceModeration::of(&place.state).apply(&mut place.state);
                 let may_changed = place.may() != may_before;
                 place.expires = lease();
                 let kept = self.app.voice.update(&server_id, &account.id, |p| *p = place.clone());
@@ -596,12 +596,11 @@ impl Api {
                     self_stream: req.self_stream,
                     self_record: req.self_record,
                     server_record,
-                    server_mute: moderation.0,
-                    server_deaf: moderation.1,
                     joined_at: Some(timestamp(now_ms())),
                     ..Default::default()
                 };
                 quiet.apply(&mut state);
+                moderation.apply(&mut state);
                 let place = Place {
                     session_id: req.session_id.clone(),
                     room: voice::channel_room(&server_id, &channel_id),
@@ -654,7 +653,7 @@ impl Api {
         if !seat.access.can_see(&channel_id) {
             return Err(Error::NotFound("voice state"));
         }
-        if req.server_mute.is_some() || req.server_deaf.is_some() {
+        if req.server_mute.is_some() || req.server_deaf.is_some() || req.server_video_off.is_some() {
             seat.access.require_in(&channel_id, pb::Permission::MuteMembers)?;
         }
         if req.disconnect {
@@ -672,17 +671,12 @@ impl Api {
             self.disconnect(&server_id, &req.user_id).await;
             return Ok(pb::ModerateVoiceResponse {});
         }
-        let (mute, deaf) =
-            (req.server_mute.unwrap_or(place.state.server_mute), req.server_deaf.unwrap_or(place.state.server_deaf));
-        seat.sdb.set_voice_moderation(&req.user_id, mute, deaf).await?;
-        let Some(place) = self.app.voice.update(&server_id, &req.user_id, |p| {
-            if let Some(mute) = req.server_mute {
-                p.state.server_mute = mute;
-            }
-            if let Some(deaf) = req.server_deaf {
-                p.state.server_deaf = deaf;
-            }
-        }) else {
+        let mut moderation = VoiceModeration::of(&place.state);
+        moderation.mute = req.server_mute.unwrap_or(moderation.mute);
+        moderation.deaf = req.server_deaf.unwrap_or(moderation.deaf);
+        moderation.video_off = req.server_video_off.unwrap_or(moderation.video_off);
+        seat.sdb.set_voice_moderation(&req.user_id, moderation).await?;
+        let Some(place) = self.app.voice.update(&server_id, &req.user_id, |p| moderation.apply(&mut p.state)) else {
             return Err(Error::NotFound("voice state"));
         };
         self.app.media_link.update(&place).await;

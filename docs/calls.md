@@ -47,6 +47,13 @@ this is how calls work now and what those build on.
 
 Server mute and deafen (MUTE_MEMBERS) stay with the person in the server's
 file (`voice_moderation`), so leaving and joining again doesn't lift them.
+So does a moderator turning someone's camera and shared screen off
+(`ModerateVoice` with `server_video_off`, also MUTE_MEMBERS, only on people
+ranked below them): the media part stops passing both (and the screen's
+sound) at once, the person stays in the call with their voice, their app
+turns the camera and share off and says a moderator did it, and they can't
+turn either on in that server until a moderator lifts it. Everyone sees it
+as `VoiceState.server_video_off`.
 Without SPEAK, people join and listen but the media part doesn't pass their
 sound on. Losing CONNECT, a time-out, a kick, a ban or the channel going
 away hangs them up the moment it happens (`spawn_voice_guard` watches the

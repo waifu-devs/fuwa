@@ -39,9 +39,34 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0012_video.sql"),
     include_str!("../migrations/server/0013_recordings.sql"),
     include_str!("../migrations/server/0014_recording_limits.sql"),
+    include_str!("../migrations/server/0015_voice_video_off.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
+
+/// What moderators turned off for someone in a server's voice channels.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct VoiceModeration {
+    pub mute: bool,
+    pub deaf: bool,
+    /// Their camera and shared screen.
+    pub video_off: bool,
+}
+
+impl VoiceModeration {
+    pub fn of(state: &pb::VoiceState) -> Self {
+        Self { mute: state.server_mute, deaf: state.server_deaf, video_off: state.server_video_off }
+    }
+
+    /// Puts it on someone's place, turning off what it keeps off.
+    pub fn apply(self, state: &mut pb::VoiceState) {
+        state.server_mute = self.mute;
+        state.server_deaf = self.deaf;
+        state.server_video_off = self.video_off;
+        state.self_video &= !self.video_off;
+        state.self_stream &= !self.video_off;
+    }
+}
 
 /// One open community server database.
 pub struct ServerDb {
@@ -474,24 +499,31 @@ impl ServerDb {
         .ok_or_else(|| Error::internal("limits row missing"))
     }
 
-    /// Whether someone is server muted and deafened, which outlasts their calls.
-    pub async fn voice_moderation(&self, user_id: &str) -> Result<(bool, bool)> {
+    /// What moderators turned off for someone, which outlasts their calls.
+    pub async fn voice_moderation(&self, user_id: &str) -> Result<VoiceModeration> {
         let conn = self.read()?;
-        let row = query_one(&conn, "SELECT mute, deaf FROM voice_moderation WHERE user_id = ?1", [user_id], |r| {
-            Ok((r.get::<i64>(0)? != 0, r.get::<i64>(1)? != 0))
-        })
-        .await?;
-        Ok(row.unwrap_or((false, false)))
+        let row =
+            query_one(&conn, "SELECT mute, deaf, video_off FROM voice_moderation WHERE user_id = ?1", [user_id], |r| {
+                Ok(VoiceModeration {
+                    mute: r.get::<i64>(0)? != 0,
+                    deaf: r.get::<i64>(1)? != 0,
+                    video_off: r.get::<i64>(2)? != 0,
+                })
+            })
+            .await?;
+        Ok(row.unwrap_or_default())
     }
 
-    pub async fn set_voice_moderation(&self, user_id: &str, mute: bool, deaf: bool) -> Result<()> {
+    pub async fn set_voice_moderation(&self, user_id: &str, moderation: VoiceModeration) -> Result<()> {
         let user_id = user_id.to_owned();
+        let VoiceModeration { mute, deaf, video_off } = moderation;
         db::write(&self.db, async |conn| {
-            if mute || deaf {
+            if mute || deaf || video_off {
                 conn.execute(
-                    "INSERT INTO voice_moderation (user_id, mute, deaf) VALUES (?1, ?2, ?3) \
-                     ON CONFLICT (user_id) DO UPDATE SET mute = excluded.mute, deaf = excluded.deaf",
-                    (user_id.as_str(), mute as i64, deaf as i64),
+                    "INSERT INTO voice_moderation (user_id, mute, deaf, video_off) VALUES (?1, ?2, ?3, ?4) \
+                     ON CONFLICT (user_id) DO UPDATE SET mute = excluded.mute, deaf = excluded.deaf, \
+                     video_off = excluded.video_off",
+                    (user_id.as_str(), mute as i64, deaf as i64, video_off as i64),
                 )
                 .await?;
             } else {
