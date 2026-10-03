@@ -275,7 +275,11 @@ pub fn send(app: Arc<App>, server_id: String) -> mpsc::Receiver<Result<cpb::Send
 
 /// Sends one file piece by piece, ending with its SHA-256. False if the
 /// other end stopped listening.
-async fn send_file(tx: &mpsc::Sender<Result<cpb::SendServerResponse, Status>>, name: &str, path: &Path) -> Result<bool> {
+async fn send_file(
+    tx: &mpsc::Sender<Result<cpb::SendServerResponse, Status>>,
+    name: &str,
+    path: &Path,
+) -> Result<bool> {
     use sha2::{Digest, Sha256};
     use tokio::io::AsyncReadExt;
 
@@ -424,7 +428,11 @@ pub async fn adopt(app: &Arc<App>, server_id: &str, from_url: &str) -> Result<cp
 
 /// Writes what the old shard sends into `incoming`, checking each file.
 /// Returns the files' paths, from the data folder.
-async fn receive(mut stream: tonic::Streaming<cpb::SendServerResponse>, id: &str, incoming: &Path) -> Result<Vec<String>> {
+async fn receive(
+    mut stream: tonic::Streaming<cpb::SendServerResponse>,
+    id: &str,
+    incoming: &Path,
+) -> Result<Vec<String>> {
     use sha2::{Digest, Sha256};
     use tokio::io::AsyncWriteExt;
 
