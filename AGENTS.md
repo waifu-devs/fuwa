@@ -277,7 +277,8 @@
     ring, over the layout and `ReorderChannels` call in `core/arrange.rs`
     (the web's `lib/arrange.ts`); `members.rs` is the member list, a view of
     its own (cached, so the window's animations don't redraw it) that builds
-    only the rows in sight; `compose.rs` is the @ list and editing in
+    only the rows in sight, grouped under each hoisted role like the web's
+    `MemberList.tsx`; `compose.rs` is the @ list and editing in
     place (and the keys they take first), `mentions.rs` finds mentions and
     makes them links, `menus.rs` the bell menus, `notify.rs` the system
     notifications (clicks come back through a channel), `settings_account.rs`
@@ -287,14 +288,19 @@
     main thread when asked, dimming, a texture made here as a PNG or SVG
     tile and repeated), `effects.rs` the moving effects (the web's shaders
     redrawn with shadows, paths and quads, 30 frames a second while the
-    window is in front, one still frame otherwise), `keys.rs` the
+    window is in front, one still frame otherwise, and none while a
+    full-screen page like server settings covers them), `keys.rs` the
     keyboard shortcuts (one handler on the window, the quick switcher and
     the shortcut sheet) over `core/keybinds.rs` (the web's
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
     in both), `settings_keys.rs` the Keyboard page where they're changed,
     `server_settings.rs` a server's settings
-    (overview, invites, members, bans, audit log; the server's name opens
-    it), `moderate.rs` the time out, kick and ban
+    (overview, invites, roles, members, bans, audit log; the server's name
+    opens it; a cached view, so it redraws only when the server changes),
+    `server_settings/roles.rs` the Roles page (order, color, permissions
+    and members of each role, saved together from a floating bar, over the
+    role calls in `core/server_admin.rs`; you edit only roles below your own
+    and hand out only what you have, as the server checks), `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),
     `emoji_picker.rs` the picker by the composer, `embeds.rs` the cards apps
