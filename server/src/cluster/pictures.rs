@@ -223,7 +223,9 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
     }
     let key = name(&server_id, &id);
     let path = app.config.data_path.join(&key);
-    if !path.exists() && !restore(app, &key, &path).await {
+    // Only a picture the server uses is fetched back, so asking for made-up
+    // ids never reaches the bucket.
+    if !path.exists() && !(uses(app, &server_id, &id).await && restore(app, &key, &path).await) {
         return plain(StatusCode::NOT_FOUND, "not found");
     }
     let etag = format!("\"{id}\"");
@@ -241,6 +243,28 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
     };
     crate::media::picture_headers(response.headers_mut(), &etag);
     response
+}
+
+/// Whether the server links to the picture: its icon, an emoji or a
+/// webhook's picture.
+async fn uses(app: &App, server_id: &str, media_id: &str) -> bool {
+    let used = async {
+        let sdb = app.servers.get(server_id).await?;
+        let conn = sdb.read()?;
+        // Ids are letters and digits only, so nothing in one is a wildcard.
+        let link = format!("%/media/{media_id}");
+        crate::db::query_one(
+            &conn,
+            "SELECT 1 FROM server WHERE icon_url LIKE ?1
+             UNION ALL SELECT 1 FROM emojis WHERE url LIKE ?1
+             UNION ALL SELECT 1 FROM webhooks WHERE avatar_url LIKE ?1 LIMIT 1",
+            [link.as_str()],
+            |r| r.get::<i64>(0),
+        )
+        .await
+    }
+    .await;
+    matches!(used, Ok(Some(_)))
 }
 
 /// Fetches a picture this shard lost (its disk was replaced) back from its

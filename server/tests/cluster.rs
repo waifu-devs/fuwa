@@ -1219,8 +1219,9 @@ async fn servers_live_in_their_region_and_move() {
     // live stream.
     let server = make("").await.unwrap();
     let http = reqwest::Client::new();
+    let media = c.media.clone();
     let upload = |purpose: pb::MediaPurpose, fill: u8| {
-        let (mut media, http, juan) = (c.media.clone(), http.clone(), juan.clone());
+        let (mut media, http, juan) = (media.clone(), http.clone(), juan.clone());
         async move {
             let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
             png.resize(300, fill);
@@ -1330,6 +1331,12 @@ async fn servers_live_in_their_region_and_move() {
     // A shard that loses a picture gets it back from its bucket.
     std::fs::remove_file(picture_at(&shard_b, &icon.id)).unwrap();
     assert_eq!(http.get(&icon.url).send().await.unwrap().bytes().await.unwrap().to_vec(), icon_png);
+    // But only pictures it uses: other ids never reach the bucket.
+    let (stray, _) = upload(pb::MediaPurpose::Emoji, 3).await;
+    std::fs::copy(picture_at(&bucket_eu, &emoji.id), picture_at(&bucket_eu, &stray.id)).unwrap();
+    let unused = format!("{}/media/servers/{}/{}", cluster.gateway.url(), server.id, stray.id);
+    assert_eq!(http.get(&unused).send().await.unwrap().status(), 404);
+    assert!(!picture_at(&shard_b, &stray.id).exists());
     // Replacing a picture deletes it, here and in the bucket.
     let request =
         pb::UpdateServerRequest { server_id: server.id.clone(), icon_url: Some(String::new()), ..Default::default() };

@@ -137,7 +137,15 @@ own copy and its replica's. The picture's link doesn't change:
 `/media/<picture>` answers with a permanent redirect to
 `/media/servers/<server>/<picture>`, which gateways pass to the shard holding
 the server, wherever it is. A shard that lost a picture fetches it back from
-its bucket.
+its bucket (only pictures the server links to, so made-up ids never reach
+the bucket).
+
+Until its shard takes it, a new picture sits in the home region: on the
+directory and in its bucket, for the moment between the upload and the
+server using it (and longer if the take fails). The picture's row (who
+uploaded it, its size and type) stays in node.db at home, like the
+uploader's account. Uploading a server's pictures straight to its shard,
+once the server is placed, is the next step.
 
 They move with the server like its recordings. Pictures a server used before
 this, or that couldn't be taken when it started using them (counted as an
