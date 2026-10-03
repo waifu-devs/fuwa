@@ -9,7 +9,7 @@ use crate::db::EncryptionKey;
 use crate::pb;
 use crate::replica::{ReplicaConfig, Restore, S3Config, Target};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Config {
     /// Where node.db and the servers/ directory live. FUWA_DATA_PATH, default ~/.fuwa.
     pub data_path: PathBuf,
@@ -46,7 +46,8 @@ pub struct Config {
     /// FUWA_ADMIN_TOKEN: a bearer token with instance-admin rights, for a control
     /// plane or scripts. Unset means only admin accounts are admins.
     pub admin_token: Option<String>,
-    /// FUWA_LIMIT_*: caps every server gets unless it has its own. Unlimited by default.
+    /// FUWA_LIMIT_*: caps every server gets unless it has its own, and on
+    /// picture uploads. Unlimited by default, but for picture uploads.
     pub limits: Limits,
     pub telemetry: Telemetry,
     /// FUWA_WEB: on (default) | off. Serves the web client on / when the binary
@@ -73,6 +74,40 @@ pub struct Config {
     /// Where the databases and pictures are continuously copied to:
     /// FUWA_S3_* (a bucket) or FUWA_REPLICA_PATH (a directory). None is off.
     pub replica: Option<ReplicaConfig>,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("data_path", &self.data_path)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("public_url", &self.public_url)
+            .field("node_name", &self.node_name)
+            .field("allowed_origins", &self.allowed_origins)
+            .field("encryption_key", &self.encryption_key)
+            .field("local_accounts", &self.local_accounts)
+            .field("linked_accounts", &self.linked_accounts)
+            .field("linked_issuer", &self.linked_issuer)
+            .field("server_creation", &self.server_creation)
+            .field("agent_creation", &self.agent_creation)
+            .field("admin_token", &Secret(&self.admin_token))
+            .field("limits", &self.limits)
+            .field("telemetry", &self.telemetry)
+            .field("web", &self.web)
+            .field("cluster", &self.cluster)
+            .field("replica", &self.replica)
+            .finish()
+    }
+}
+
+/// A secret that may be set, for `Debug`: whether it is, never what it is.
+pub struct Secret<'a>(pub &'a Option<String>);
+
+impl std::fmt::Debug for Secret<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() { "Some(***)" } else { "None" })
+    }
 }
 
 /// Whether a kind of account works here: standalone ones (username and
@@ -116,7 +151,8 @@ impl Accounts {
 
 pub const DEFAULT_LINKED_ISSUER: &str = "https://api.waifu.dev";
 
-/// Instance-wide caps. `None` is unlimited.
+/// Instance-wide caps. `None` is unlimited, and everything is unlimited by
+/// default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Limits {
     /// FUWA_LIMIT_SERVERS_PER_ACCOUNT: servers one account may own.
@@ -134,17 +170,15 @@ pub struct Limits {
     /// FUWA_LIMIT_PICTURE_UPLOAD: the largest avatar, banner or server icon one
     /// upload may be, e.g. `8MiB`.
     pub picture_upload_bytes: Option<i64>,
+    /// FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY: how many bytes of pictures one
+    /// account may upload in a day (UTC), e.g. `256MiB`.
+    pub picture_upload_bytes_per_day: Option<i64>,
 }
 
 impl Limits {
+    /// Whether any cap differs from the defaults.
     pub fn any(&self) -> bool {
-        self.servers_per_account.is_some()
-            || self.members.is_some()
-            || self.channels.is_some()
-            || self.storage_bytes.is_some()
-            || self.attachment_bytes.is_some()
-            || self.emojis.is_some()
-            || self.picture_upload_bytes.is_some()
+        *self != Self::default()
     }
 }
 
@@ -262,6 +296,13 @@ impl Config {
         let bytes = |key: &str| -> Result<Option<i64>, String> {
             get(key).map(|value| parse_bytes(&value).map_err(|err| format!("{key} {err}"))).transpose()
         };
+        // Picture upload caps also take `unlimited`, the same as leaving them unset.
+        let upload_bytes = |key: &str| -> Result<Option<i64>, String> {
+            match get(key) {
+                Some(value) if value.trim().eq_ignore_ascii_case("unlimited") => Ok(None),
+                _ => bytes(key),
+            }
+        };
         let limits = Limits {
             servers_per_account: count("FUWA_LIMIT_SERVERS_PER_ACCOUNT")?,
             members: count("FUWA_LIMIT_MEMBERS")?,
@@ -269,7 +310,8 @@ impl Config {
             storage_bytes: bytes("FUWA_LIMIT_STORAGE")?,
             attachment_bytes: bytes("FUWA_LIMIT_ATTACHMENT_STORAGE")?,
             emojis: count("FUWA_LIMIT_EMOJIS")?,
-            picture_upload_bytes: bytes("FUWA_LIMIT_PICTURE_UPLOAD")?,
+            picture_upload_bytes: upload_bytes("FUWA_LIMIT_PICTURE_UPLOAD")?,
+            picture_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY")?,
         };
 
         let do_not_track = get("DO_NOT_TRACK").is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"));
@@ -498,6 +540,8 @@ mod tests {
         assert_eq!(config.server_creation, pb::ServerCreation::Everyone);
         assert_eq!(config.agent_creation, pb::AgentCreation::Everyone);
         assert!(!config.limits.any());
+        assert_eq!(config.limits.picture_upload_bytes, None);
+        assert_eq!(config.limits.picture_upload_bytes_per_day, None);
         assert!(config.telemetry.enabled);
         assert!(config.encryption_key.is_none());
     }
@@ -521,13 +565,15 @@ mod tests {
             ("FUWA_LIMIT_MEMBERS", "100"),
             ("FUWA_LIMIT_STORAGE", "500MB"),
             ("FUWA_LIMIT_ATTACHMENT_STORAGE", "2GiB"),
-            ("FUWA_LIMIT_PICTURE_UPLOAD", "8MiB"),
+            ("FUWA_LIMIT_PICTURE_UPLOAD", "2MiB"),
+            ("FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY", "unlimited"),
         ])
         .unwrap();
         assert_eq!(config.limits.members, Some(100));
         assert_eq!(config.limits.storage_bytes, Some(500_000_000));
         assert_eq!(config.limits.attachment_bytes, Some(2 * 1024 * 1024 * 1024));
-        assert_eq!(config.limits.picture_upload_bytes, Some(8 * 1024 * 1024));
+        assert_eq!(config.limits.picture_upload_bytes, Some(2 * 1024 * 1024));
+        assert_eq!(config.limits.picture_upload_bytes_per_day, None);
         assert!(config.limits.any());
     }
 
@@ -564,6 +610,10 @@ mod tests {
         let Target::Bucket { s3, prefix } = &railway.target else { panic!("not a bucket") };
         assert_eq!((s3.endpoint.as_str(), s3.path_style, prefix.as_str()), ("https://t3.storageapi.dev", false, ""));
         assert!(!format!("{railway:?}").contains("secret"));
+        let keyed = config(&[("FUWA_ADMIN_TOKEN", "admin-token-0123456789abcdef0123456789")]).unwrap();
+        let printed = format!("{keyed:?}");
+        assert!(!printed.contains("admin-token-0123") && !printed.contains("cluster-key-0123"), "{printed}");
+        assert!(printed.contains("admin_token: Some(***)") && printed.contains("key: Some(***)"));
 
         let aws = config(&[
             ("FUWA_S3_BUCKET", "b"),

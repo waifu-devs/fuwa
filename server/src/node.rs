@@ -22,8 +22,12 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0006_cluster.sql"),
     include_str!("../migrations/node/0007_linked_sign_ins.sql"),
     include_str!("../migrations/node/0008_agents.sql"),
-    include_str!("../migrations/node/0009_sso.sql"),
+    include_str!("../migrations/node/0009_upload_days.sql"),
+    include_str!("../migrations/node/0010_sso.sql"),
 ];
+
+/// A day, for counting uploads.
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// How long a session lasts after sign-in.
 pub const SESSION_TTL_MS: i64 = 60 * 24 * 60 * 60 * 1000;
@@ -548,7 +552,8 @@ impl NodeDb {
         .await
     }
 
-    /// Replaces the password and ends every other session.
+    /// Replaces the password and ends every other session, and any sign-in
+    /// that got past the old password and is waiting on a code.
     pub async fn set_password(&self, id: &str, password_hash: &str, keep_session: &str) -> Result<()> {
         db::write(&self.db, async |conn| {
             conn.execute(
@@ -557,6 +562,7 @@ impl NodeDb {
             )
             .await?;
             conn.execute("DELETE FROM sessions WHERE account_id = ?1 AND token_hash != ?2", (id, keep_session)).await?;
+            conn.execute("DELETE FROM sign_in_tickets WHERE account_id = ?1", [id]).await?;
             Ok(())
         })
         .await
@@ -578,7 +584,7 @@ impl NodeDb {
     }
 
     /// The account a live session belongs to, marking the session as active
-    /// and the account as seen.
+    /// and the account as seen. An agent whose owner is turned off has none.
     pub async fn session_account(&self, token_hash: &str) -> Result<Option<Account>> {
         let conn = self.read()?;
         let now = now_ms();
@@ -586,7 +592,9 @@ impl NodeDb {
             &conn,
             &format!(
                 "SELECT {}, sessions.last_active_at FROM sessions JOIN accounts ON accounts.id = sessions.account_id
-                 WHERE sessions.token_hash = ?1 AND sessions.expires_at > ?2 AND accounts.disabled_at IS NULL",
+                 LEFT JOIN accounts AS owners ON owners.id = accounts.owner_id
+                 WHERE sessions.token_hash = ?1 AND sessions.expires_at > ?2 AND accounts.disabled_at IS NULL
+                   AND owners.disabled_at IS NULL",
                 account_columns_of("accounts")
             ),
             (token_hash, now),
@@ -735,12 +743,14 @@ impl NodeDb {
         .await
     }
 
-    /// Drops sessions and sign-ins waiting on a code that have run out.
+    /// Drops sessions and sign-ins waiting on a code that have run out, and
+    /// upload counts from days gone by.
     pub async fn prune_sessions(&self) -> Result<u64> {
         db::write(&self.db, async |conn| {
             let now = now_ms();
             conn.execute("DELETE FROM sign_in_tickets WHERE expires_at <= ?1", [now]).await?;
             conn.execute("DELETE FROM linked_sign_ins WHERE expires_at <= ?1", [now]).await?;
+            conn.execute("DELETE FROM upload_days WHERE day < ?1", [now / DAY_MS]).await?;
             Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now]).await?)
         })
         .await
@@ -864,24 +874,26 @@ impl NodeDb {
         .await
     }
 
-    /// The account a sign-in waiting on a code is for, if it hasn't run out.
-    pub async fn ticket_account(&self, ticket_hash: &str) -> Result<Option<String>> {
-        let conn = self.read()?;
-        query_one(
-            &conn,
-            "SELECT account_id FROM sign_in_tickets WHERE ticket_hash = ?1 AND expires_at > ?2 AND attempts < ?3",
-            (ticket_hash, now_ms(), TICKET_ATTEMPTS),
-            |r| r.get::<String>(0),
-        )
-        .await
-    }
-
-    /// Counts a wrong code against a sign-in.
-    pub async fn ticket_failed(&self, ticket_hash: &str) -> Result<()> {
+    /// Counts a try at a sign-in waiting on a code and gives the account it's
+    /// for, or None when it has run out or used up its tries. The try is
+    /// counted before the code is checked, in the same write that finds the
+    /// sign-in, so codes sent all at once can't get past the limit.
+    pub async fn try_ticket(&self, ticket_hash: &str) -> Result<Option<String>> {
         db::write(&self.db, async |conn| {
-            conn.execute("UPDATE sign_in_tickets SET attempts = attempts + 1 WHERE ticket_hash = ?1", [ticket_hash])
+            let counted = conn
+                .execute(
+                    "UPDATE sign_in_tickets SET attempts = attempts + 1
+                     WHERE ticket_hash = ?1 AND attempts < ?2 AND expires_at > ?3",
+                    (ticket_hash, TICKET_ATTEMPTS, now_ms()),
+                )
                 .await?;
-            Ok(())
+            if counted == 0 {
+                return Ok(None);
+            }
+            query_one(conn, "SELECT account_id FROM sign_in_tickets WHERE ticket_hash = ?1", [ticket_hash], |r| {
+                r.get::<String>(0)
+            })
+            .await
         })
         .await
     }
@@ -1137,8 +1149,8 @@ impl NodeDb {
         .await
     }
 
-    /// Turns an account off, signing out its devices and any sign-in half done,
-    /// or back on. Admins have to stop being admins first.
+    /// Turns an account off, signing out its devices, any sign-in half done
+    /// and its agents, or back on. Admins have to stop being admins first.
     pub async fn set_disabled(&self, id: &str, disabled: bool, reason: &str) -> Result<()> {
         let _one_at_a_time = self.admin_changes.lock().await;
         let account = self.account(id).await?.ok_or(Error::NotFound("account"))?;
@@ -1156,6 +1168,12 @@ impl NodeDb {
                 .await?;
                 conn.execute("DELETE FROM sessions WHERE account_id = ?1", [id]).await?;
                 conn.execute("DELETE FROM sign_in_tickets WHERE account_id = ?1", [id]).await?;
+                // Their agents stop too: they act for someone who can't.
+                conn.execute(
+                    "DELETE FROM sessions WHERE account_id IN (SELECT id FROM accounts WHERE owner_id = ?1)",
+                    [id],
+                )
+                .await?;
             } else {
                 conn.execute(
                     "UPDATE accounts SET disabled_at = NULL, disabled_reason = '', updated_at = ?2 WHERE id = ?1",
@@ -1244,10 +1262,42 @@ impl NodeDb {
 
     // ───────────────────────── Uploaded pictures ─────────────────────────
 
-    /// Reserves an upload, unless the account has too many going already.
-    pub async fn reserve_media(&self, row: &MediaRow, upload_hash: &str, expires_at: i64) -> Result<()> {
+    /// Reserves an upload, unless the account has too many going already or
+    /// has used up `bytes_per_day` today.
+    pub async fn reserve_media(
+        &self,
+        row: &MediaRow,
+        upload_hash: &str,
+        expires_at: i64,
+        bytes_per_day: Option<i64>,
+    ) -> Result<()> {
         db::write(&self.db, async |conn| {
             let now = now_ms();
+            // Every reservation writes the account's row for the day, so ones
+            // made at once clash here and the counts below hold.
+            let day = now / DAY_MS;
+            conn.execute(
+                "INSERT INTO upload_days (account_id, day, bytes) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes",
+                (row.account_id.as_str(), day, row.size),
+            )
+            .await?;
+            if let Some(cap) = bytes_per_day {
+                let today = query_one(
+                    conn,
+                    "SELECT bytes FROM upload_days WHERE account_id = ?1 AND day = ?2",
+                    (row.account_id.as_str(), day),
+                    |r| r.get::<i64>(0),
+                )
+                .await?
+                .unwrap_or(0);
+                if today > cap {
+                    return Err(Error::ResourceExhausted(format!(
+                        "you can upload {} of pictures a day here; try again tomorrow",
+                        crate::media::size_label(cap)
+                    )));
+                }
+            }
             let pending = query_one(
                 conn,
                 "SELECT count(*) FROM media WHERE account_id = ?1 AND stored_at IS NULL AND expires_at > ?2",
@@ -1396,7 +1446,7 @@ impl NodeDb {
     /// Deletes an account and everything node.db keeps about it.
     pub async fn delete_account(&self, account_id: &str) -> Result<()> {
         db::write(&self.db, async |conn| {
-            for table in ["sessions", "backup_codes", "sign_in_tickets", "notification_settings"] {
+            for table in ["sessions", "backup_codes", "sign_in_tickets", "notification_settings", "upload_days"] {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
             }
             conn.execute("DELETE FROM accounts WHERE id = ?1", [account_id]).await?;

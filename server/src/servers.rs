@@ -1092,6 +1092,9 @@ pub async fn member_access(
     if member.pending {
         access.hold_back();
     }
+    if member.timed_out_until.as_ref().is_some_and(|until| millis(until) > now_ms()) {
+        access.time_out();
+    }
     let sso = load_sso(conn).await?;
     let agent = member.user.as_ref().is_some_and(|u| u.kind == pb::AccountKind::Agent as i32);
     if sso.required && !agent && !sso.fresh(member.sso_signed_in_at.as_ref().map(millis), now_ms()) {

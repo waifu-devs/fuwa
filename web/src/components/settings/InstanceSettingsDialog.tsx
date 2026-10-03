@@ -67,6 +67,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "default_limits.attachment_bytes", get: (s) => s.defaultLimits?.attachmentBytes },
   { path: "default_limits.emojis", get: (s) => s.defaultLimits?.emojis },
   { path: "picture_upload_bytes", get: (s) => s.pictureUploadBytes },
+  { path: "picture_upload_bytes_per_day", get: (s) => s.pictureUploadBytesPerDay },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
@@ -565,6 +566,21 @@ export function InstanceSettingsDialog({
               >
                 <Cap label="Up to" bytes value={draft.pictureUploadBytes} onChange={(v) => patch((d) => (d.pictureUploadBytes = v))} />
               </Setting>
+              <Setting
+                id="picture-uploads-per-day"
+                title="Pictures per day"
+                hint="How much one account may upload in a day (UTC), so nobody can fill this instance's disk."
+                defaultLabel={size(defaults.pictureUploadBytesPerDay)}
+                delay={0.08}
+                {...resetter("picture_upload_bytes_per_day")}
+              >
+                <Cap
+                  label="Up to"
+                  bytes
+                  value={draft.pictureUploadBytesPerDay}
+                  onChange={(v) => patch((d) => (d.pictureUploadBytesPerDay = v))}
+                />
+              </Setting>
             </>
           )}
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
@@ -700,6 +716,9 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
       case "picture_upload_bytes":
         into.pictureUploadBytes = from.pictureUploadBytes;
         break;
+      case "picture_upload_bytes_per_day":
+        into.pictureUploadBytesPerDay = from.pictureUploadBytesPerDay;
+        break;
       default: {
         const key = path.replace("default_limits.", "") as "members" | "channels" | "storage_bytes" | "attachment_bytes" | "emojis";
         const field = key === "storage_bytes" ? "storageBytes" : key === "attachment_bytes" ? "attachmentBytes" : key;
@@ -733,7 +752,7 @@ function Origins({
     <Setting
       id="origins"
       title="Sites that can connect"
-      hint="Web pages on other sites, such as the fuwa app on another instance, that may use this one from a browser."
+      hint="Web pages on other sites, such as the fuwa app on another instance, that may use this one from a browser. Signing in with waifu.dev from another site only works for sites listed here by name."
       defaultLabel={defaultLabel === "*" ? "any site" : defaultLabel}
       delay={0.12}
       {...reset}

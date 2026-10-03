@@ -230,8 +230,9 @@ function channelBits(
 
 /**
  * What someone with these roles can do. `everyoneId` is the server's id.
- * Someone `pending` (joined, rules not agreed yet) is held back from talking;
- * the owner never is.
+ * Someone `pending` (joined, rules not agreed yet) is held back from talking,
+ * and someone `timedOut` can only read until it ends; the owner never is
+ * either.
  */
 export function accessOf(
   everyoneId: string,
@@ -241,6 +242,7 @@ export function accessOf(
   userId: string,
   roleIds: readonly string[],
   pending = false,
+  timedOut = false,
 ): Access {
   const owner = userId === ownerId;
   const held = roles.filter((r) => roleIds.includes(r.id));
@@ -263,6 +265,10 @@ export function accessOf(
   }
   const heldBack = pending && !owner;
   if (heldBack) for (const [id, bits] of visible) visible.set(id, bits & ~TALK);
+  if (timedOut && !owner) {
+    for (const [id, bits] of visible) visible.set(id, bits & bit(P.VIEW_CHANNELS));
+    return { owner, server: (unbound ? ALL : base) & bit(P.VIEW_CHANNELS), rank, channels: visible, pending: heldBack };
+  }
   return { owner, server: (unbound ? ALL : base) & (heldBack ? ~TALK : ALL), rank, channels: visible, pending: heldBack };
 }
 

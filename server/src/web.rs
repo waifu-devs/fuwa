@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::MethodRouter;
-use http::{HeaderMap, Method, StatusCode, Uri};
+use http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use tower_http::compression::predicate::{NotForContentType, Predicate};
 use tower_http::compression::{CompressionLayer, DefaultPredicate};
 
@@ -25,9 +25,10 @@ mod embedded {
     /// The client talks to any fuwa server and shows avatars from anywhere, but
     /// runs only its own scripts. 'wasm-unsafe-eval' lets it compile its own
     /// WebAssembly (the encryption direct messages use), and nothing else.
+    /// Forms only ever submit here.
     const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; \
         style-src 'self' 'unsafe-inline'; img-src * data: blob:; connect-src *; font-src 'self' data:; \
-        object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+        object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 
     pub async fn serve(uri: Uri, headers: HeaderMap) -> Response {
         let path = uri.path().trim_start_matches('/');
@@ -78,44 +79,58 @@ mod embedded {
 /// The handler for every path the API doesn't answer: the web app when it's
 /// built in and switched on (checked per request, so admins can switch it
 /// live), otherwise a short note at `/` and 404 elsewhere. Scripts and styles
-/// go out gzipped; fonts and images are compressed already.
+/// go out gzipped; fonts and images are compressed already. Served over
+/// https (the public URL says so), browsers are told to keep to it.
 pub fn handler(source: Arc<impl HasSettings>) -> MethodRouter {
     let compress = DefaultPredicate::new().and(NotForContentType::const_new("font/"));
     axum::routing::any(move |method: Method, uri: Uri, headers: HeaderMap| {
         let source = source.clone();
         async move {
-            if method != Method::GET && method != Method::HEAD {
-                return (StatusCode::NOT_FOUND, "not found\n").into_response();
+            let https = source.settings().public_url.starts_with("https://");
+            let mut response = page(source, method, uri, headers).await;
+            if https {
+                response.headers_mut().insert(header::STRICT_TRANSPORT_SECURITY, HeaderValue::from_static(HSTS));
             }
-            let settings = source.settings();
-            // Signing in with waifu.dev or single sign-on comes back to its
-            // page (and the scripts it runs) even with the app off, since a
-            // fuwa app on another address may have started the sign-in.
-            let sign_in_page = uri.path() == crate::linked::CALLBACK || uri.path() == crate::sso::DONE;
-            #[cfg(feature = "web")]
-            if settings.web || sign_in_page || uri.path().starts_with("/assets/") {
-                return embedded::serve(uri, headers).await;
-            }
-            let _ = &headers;
-            if sign_in_page {
-                return (
-                    StatusCode::NOT_FOUND,
-                    "this fuwa server was built without its web app, so it can't finish signing in here\n",
-                )
-                    .into_response();
-            }
-            if uri.path() == "/" {
-                let info = crate::app::node_info(&settings, None);
-                return format!(
-                    "{} is a fuwa instance (fuwa {}).\nConnect to it from a fuwa client with {}\n",
-                    info.name, info.version, info.public_url
-                )
-                .into_response();
-            }
-            (StatusCode::NOT_FOUND, "not found\n").into_response()
+            response
         }
     })
     .layer(CompressionLayer::new().compress_when(compress))
+}
+
+/// Two years, as browsers' preload lists ask.
+const HSTS: &str = "max-age=63072000";
+
+/// What a path gets: the app, the sign-in callback, a note, or a 404.
+async fn page(source: Arc<impl HasSettings>, method: Method, uri: Uri, headers: HeaderMap) -> Response {
+    if method != Method::GET && method != Method::HEAD {
+        return (StatusCode::NOT_FOUND, "not found\n").into_response();
+    }
+    let settings = source.settings();
+    // Signing in with waifu.dev or single sign-on comes back to its page (and
+    // the scripts it runs) even with the app off, since a fuwa app on another
+    // address may have started the sign-in.
+    let sign_in_page = uri.path() == crate::linked::CALLBACK || uri.path() == crate::sso::DONE;
+    #[cfg(feature = "web")]
+    if settings.web || sign_in_page || uri.path().starts_with("/assets/") {
+        return embedded::serve(uri, headers).await;
+    }
+    let _ = &headers;
+    if sign_in_page {
+        return (
+            StatusCode::NOT_FOUND,
+            "this fuwa server was built without its web app, so it can't finish signing in here\n",
+        )
+            .into_response();
+    }
+    if uri.path() == "/" {
+        let info = crate::app::node_info(&settings, None);
+        return format!(
+            "{} is a fuwa instance (fuwa {}).\nConnect to it from a fuwa client with {}\n",
+            info.name, info.version, info.public_url
+        )
+        .into_response();
+    }
+    (StatusCode::NOT_FOUND, "not found\n").into_response()
 }
 
 /// Whether this binary carries the web client.

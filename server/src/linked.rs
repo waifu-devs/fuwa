@@ -49,15 +49,33 @@ pub fn can_return_to(url: &str) -> bool {
 }
 
 /// The origin of an app a sign-in goes back to, like `https://app.example.com`:
-/// https (or this machine), with nothing after the host.
-pub fn return_origin(value: &str) -> Result<String> {
+/// https (or this machine), with nothing after the host. Only apps this
+/// instance trusts get sign-ins back, or anyone could start one that returns
+/// to their own site and send a victim the waifu.dev link to approve: the
+/// instance's own address (`public_url`), apps on this machine (desktop
+/// apps listen on loopback), and origins its admins listed in
+/// `allowed_origins` (exactly; `*` lets browsers call the API, but doesn't
+/// count here).
+pub fn return_origin(value: &str, public_url: &str, allowed_origins: &[String]) -> Result<String> {
     let invalid = || Error::invalid("return_origin must be an https origin, like https://chat.example.com");
     let id = client_id(value.trim()).ok_or_else(invalid)?;
     let url = reqwest::Url::parse(&id).map_err(|_| invalid())?;
     if url.path() != "/" {
         return Err(invalid());
     }
-    Ok(url.origin().ascii_serialization())
+    let origin = url.origin().ascii_serialization();
+    let own = client_id(public_url)
+        .and_then(|id| reqwest::Url::parse(&id).ok())
+        .is_some_and(|public| public.origin().ascii_serialization() == origin);
+    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    let listed = allowed_origins.iter().any(|allowed| allowed != "*" && *allowed == origin);
+    if !(own || loopback || listed) {
+        return Err(Error::denied(
+            "this instance only sends sign-ins back to its own app, apps on this device, \
+             or apps its admins list in its allowed origins",
+        ));
+    }
+    Ok(origin)
 }
 
 /// A PKCE verifier and its S256 challenge.
@@ -214,11 +232,28 @@ mod tests {
 
     #[test]
     fn return_origins_are_origins() {
-        assert_eq!(return_origin("https://App.example.com").unwrap(), "https://app.example.com");
-        assert_eq!(return_origin("http://localhost:5173/").unwrap(), "http://localhost:5173");
-        assert!(return_origin("https://app.example.com/path").is_err());
-        assert!(return_origin("http://app.example.com").is_err());
-        assert!(return_origin("javascript:alert(1)").is_err());
+        let listed = ["https://app.example.com".to_string()];
+        let origin = |value: &str| return_origin(value, "https://chat.example.com", &listed);
+        assert_eq!(origin("https://App.example.com").unwrap(), "https://app.example.com");
+        assert_eq!(origin("http://localhost:5173/").unwrap(), "http://localhost:5173");
+        assert!(origin("https://app.example.com/path").is_err());
+        assert!(origin("http://app.example.com").is_err());
+        assert!(origin("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn sign_ins_go_back_only_to_apps_the_instance_trusts() {
+        let public = "https://chat.example.com";
+        let any = ["*".to_string()];
+        assert_eq!(return_origin("https://chat.example.com", public, &any).unwrap(), "https://chat.example.com");
+        assert!(return_origin("http://127.0.0.1:43123", public, &any).is_ok(), "desktop apps listen on loopback");
+        assert!(return_origin("https://localhost:8443", public, &any).is_ok());
+        let refused = return_origin("https://evil.example", public, &any).unwrap_err();
+        assert!(matches!(refused, Error::PermissionDenied(_)), "{refused:?}");
+        let listed = ["https://app.example.com".to_string()];
+        assert!(return_origin("https://app.example.com", public, &listed).is_ok());
+        assert!(return_origin("https://other.example.com", public, &listed).is_err());
+        assert!(return_origin("https://chat.example.com.evil.example", public, &listed).is_err());
     }
 
     #[test]

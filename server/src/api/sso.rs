@@ -237,8 +237,11 @@ impl SsoService for Api {
                     return Err(Error::FailedPrecondition("this server doesn't use single sign-on".into()));
                 }
                 let endpoints = self.server_endpoints(&sdb.id);
+                let settings = self.app.settings();
+                let origin =
+                    crate::linked::return_origin(&req.return_origin, &settings.public_url, &settings.allowed_origins)?;
                 let (authorize_url, sign_in) =
-                    sso::start(&provider, &endpoints, &req.return_origin, &req.secret_hash, &account.id, false).await?;
+                    sso::start(&provider, &endpoints, &origin, &req.secret_hash, &account.id, false).await?;
                 sdb.write(&account.id, async |conn, _| sso::save(conn, &sign_in).await).await?;
                 Ok(pb::StartServerSsoResponse { authorize_url, state: sign_in.state })
             }

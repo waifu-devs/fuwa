@@ -38,9 +38,13 @@ use crate::pb::{self, event_service_server::EventService};
 use crate::servers::Payload;
 use crate::settings::Settings;
 
-/// The largest request passed on. Client messages are far smaller; this is
-/// only a backstop.
-const MAX_REQUEST: usize = 64 * 1024 * 1024;
+/// The largest request passed on. Every part takes client messages of up to
+/// tonic's 4 MiB, a third more as gRPC-Web text (base64), so nothing a part
+/// would take is turned away; anything bigger is refused before it's all
+/// held in memory, signed in or not.
+const MAX_REQUEST: usize = 8 * 1024 * 1024;
+/// The largest event a shard's stream may send on.
+const MAX_EVENT: usize = 64 * 1024 * 1024;
 /// The biggest webhook post passed on; shards take no more.
 const MAX_WEBHOOK_BODY: usize = 256 * 1024;
 /// Most servers one stream can follow, as a single process allows.
@@ -448,7 +452,7 @@ impl Gateway {
     fn shard_client(&self, url: &str) -> Result<pb::event_service_client::EventServiceClient<Keyed>, Status> {
         let channel =
             tonic::service::interceptor::InterceptedService::new(self.shard_channel(url)?, WithKey(self.key.clone()));
-        Ok(pb::event_service_client::EventServiceClient::new(channel).max_decoding_message_size(MAX_REQUEST))
+        Ok(pb::event_service_client::EventServiceClient::new(channel).max_decoding_message_size(MAX_EVENT))
     }
 
     /// Where these servers are: remembered, or asked of the directory (always,

@@ -40,7 +40,8 @@ async fn the_app_opens_on_any_address() {
     assert_eq!(index.status(), 200);
     assert_eq!(index.headers()["content-type"], "text/html");
     assert_eq!(index.headers()["cache-control"], "no-cache");
-    assert!(index.headers()["content-security-policy"].to_str().unwrap().contains("script-src 'self'"));
+    let csp = index.headers()["content-security-policy"].to_str().unwrap().to_string();
+    assert!(csp.contains("script-src 'self'") && csp.contains("form-action 'self'"), "{csp}");
     let etag = index.headers()["etag"].clone();
     let html = index.text().await.unwrap();
     assert!(html.contains(r#"<div id="root">"#));

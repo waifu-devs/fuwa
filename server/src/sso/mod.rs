@@ -391,6 +391,8 @@ pub struct SignIn {
 }
 
 /// Begins a sign-in: the provider's page, and the row to keep until it's back.
+/// `return_origin` is already checked (`linked::return_origin`): only apps the
+/// instance trusts get sign-ins back.
 pub async fn start(
     provider: &Provider,
     endpoints: &Endpoints,
@@ -400,7 +402,7 @@ pub async fn start(
     test: bool,
 ) -> Result<(String, SignIn)> {
     provider.ready()?;
-    let return_origin = crate::linked::return_origin(return_origin)?;
+    let return_origin = return_origin.to_string();
     let secret_hash = secret_hash.trim().to_ascii_lowercase();
     if secret_hash.len() != 64 || !secret_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(Error::invalid("secret_hash must be a SHA-256 in hex"));

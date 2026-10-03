@@ -152,6 +152,7 @@ impl InviteService for Api {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
                 let seat = self.membership(&account, &req.server_id).await?;
+                seat.access.require_not_timed_out()?;
                 let manager = seat.access.has(Permission::ManageServer);
                 let sdb = seat.sdb;
                 sdb.write(&account.id, async |conn, _events| {
