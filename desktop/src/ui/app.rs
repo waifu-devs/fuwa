@@ -225,6 +225,13 @@ pub struct FuwaApp {
     /// that is: clicking again starts over, and the old one's answer is dropped.
     pub sso_waiting: Option<String>,
     pub sso_try: u64,
+    /// Dragging channels into order: where it would land, where each row of
+    /// the open server's list sits, what's being dragged, and the row that
+    /// just landed (it flashes).
+    pub arrange: Option<crate::ui::arrange::Mark>,
+    pub arrange_slots: Vec<crate::ui::arrange::Slot>,
+    pub dragging: Option<String>,
+    pub landed: Option<(String, Instant)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -368,6 +375,10 @@ impl FuwaApp {
             welcome_checked: HashSet::new(),
             sso_waiting: None,
             sso_try: 0,
+            arrange: None,
+            arrange_slots: Vec::new(),
+            dragging: None,
+            landed: None,
             emoji_open: false,
             emoji_query,
             profile: None,
