@@ -18,6 +18,23 @@ use openmls_traits::OpenMlsProvider;
 
 use crate::device_id;
 
+/// What every signature from [`Device::sign`] covers before the payload, so
+/// it can't be mistaken for a signature made for MLS itself.
+const SIGNED_LABEL: &[u8] = b"fuwa signed content v1\0";
+
+fn signed(payload: &[u8]) -> Vec<u8> {
+    [SIGNED_LABEL, payload].concat()
+}
+
+/// Whether `signature` is `signature_key`'s, from [`Device::sign`], over `payload`.
+pub fn verify(signature_key: &[u8], payload: &[u8], signature: &[u8]) -> bool {
+    use openmls_traits::crypto::OpenMlsCrypto as _;
+    OpenMlsRustCrypto::default()
+        .crypto()
+        .verify_signature(SUITE.signature_algorithm(), &signed(payload), signature_key, signature)
+        .is_ok()
+}
+
 const SUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519;
 
 /// Messages are padded to a multiple of this many bytes, so their length
@@ -180,6 +197,14 @@ impl Device {
 
     pub fn device_id(&self) -> String {
         device_id(self.signer.public())
+    }
+
+    /// Signs what this device says (outside any group) with its signature
+    /// key, so it can be checked later by anyone who knows that key, such as
+    /// a message passed on to someone who joined after it was sent.
+    pub fn sign(&self, payload: &[u8]) -> Result<Vec<u8>> {
+        use openmls_traits::signatures::Signer as _;
+        self.signer.sign(&signed(payload)).map_err(|err| Error::Mls(format!("{err:?}")))
     }
 
     fn credential(&self) -> CredentialWithKey {

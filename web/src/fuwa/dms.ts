@@ -96,3 +96,11 @@ export async function resetSecureChannel(key: string, serverId: string, channelI
   await ready(key).followChannel(serverId, channelId);
   if (write) await prepareConversation(key, channelId);
 }
+
+/** Turns passing earlier messages on to people added later on or off for a secure channel (Manage Channels). */
+export async function setSecureHistory(key: string, serverId: string, channelId: string, shareHistory: boolean) {
+  reportUsage(shareHistory ? "secure.history_on" : "secure.history_off");
+  await engine(key).api.secure.setSecureHistory({ serverId, channelId, shareHistory });
+  updateDms(key, (d) => ({ ...d, secureHistory: { ...d.secureHistory, [channelId]: shareHistory } }));
+  void dmEngine(key)?.followChannel(serverId, channelId);
+}

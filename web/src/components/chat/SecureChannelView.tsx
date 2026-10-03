@@ -2,6 +2,7 @@ import {
   BadgeCheckIcon,
   BotOffIcon,
   ChevronLeftIcon,
+  HistoryIcon,
   ImageOffIcon,
   LoaderIcon,
   LockKeyholeIcon,
@@ -17,7 +18,7 @@ import { Permission, type Channel, type Member, type User } from "@/gen/fuwa/v1/
 import { SECURE_BROKEN } from "@/e2ee/engine";
 import type { Item } from "@/e2ee/vault";
 import { focusChannel } from "@/fuwa/actions";
-import { dmProblem, markDmRead, prepareSecureChannel, resetSecureChannel } from "@/fuwa/dms";
+import { dmProblem, markDmRead, prepareSecureChannel, resetSecureChannel, setSecureHistory } from "@/fuwa/dms";
 import { useAccess } from "@/fuwa/hooks";
 import { useFuwa, type DmMember, type DmState } from "@/fuwa/store";
 import { NotificationBell } from "@/components/chat/NotificationBell";
@@ -28,6 +29,7 @@ import { InlineMarkdown } from "@/components/Markdown";
 import { SPRING, SwapText } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { displayName, memberName } from "@/lib/format";
 import { hasIn } from "@/lib/permissions";
 import { setTitle } from "@/lib/notify";
@@ -42,8 +44,12 @@ const CANT = [
   { icon: SearchXIcon, text: "Search can't find them" },
   { icon: BotOffIcon, text: "Bots, agents and webhooks can't post or read" },
   { icon: ImageOffIcon, text: "Links stay links: no previews or inline pictures" },
-  { icon: UserPlusIcon, text: "People who join later only see what's sent after they join" },
 ];
+
+const LATER = {
+  off: "People added later only see what's sent after they join",
+  on: "People added later get recent messages from members' devices, each checked against its sender's signature",
+};
 
 /**
  * A secure channel: a server's channel whose messages are end-to-end
@@ -77,6 +83,7 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
   const canSend = hasIn(access, id, Permission.SEND_MESSAGES);
   const canReset = hasIn(access, id, Permission.MANAGE_CHANNELS);
   const broken = useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] === SECURE_BROKEN);
+  const sharesHistory = useFuwa((s) => !!s.instances[instanceKey]?.dms.secureHistory[id]);
 
   // Once encryption is running here: catch up, and if you may write, bring in everyone who can see the channel.
   useEffect(() => {
@@ -86,7 +93,11 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
   const byId = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
   const userOf = useCallback((userId: string) => byId.get(userId)?.user ?? users?.[userId], [byId, users]);
   const memberOf = useCallback((userId: string) => byId.get(userId), [byId]);
-  const describe = useCallback((item: Item) => (me ? channelLine(item, (u) => nameIn(byId, users, u), me) : ""), [byId, users, me]);
+  const shared = useFuwa((s) => !!s.instances[instanceKey]?.dms.items[id]?.some((i) => i.sharedBy));
+  const describe = useCallback(
+    (item: Item) => (me ? channelLine(item, (u) => nameIn(byId, users, u), me, shared && item.kind === "joined") : ""),
+    [byId, users, me, shared],
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -160,7 +171,7 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
             userOf={userOf}
             memberOf={memberOf}
             describe={describe}
-            beginning={<SecureBeginning channel={channel} />}
+            beginning={<SecureBeginning channel={channel} sharesHistory={sharesHistory} />}
             canModerate={hasIn(access, id, Permission.MANAGE_MESSAGES)}
             deleteQuestion="Delete for everyone?"
             joiningText="Unlocking the channel on this device…"
@@ -199,12 +210,21 @@ function nameIn(byId: Map<string, Member>, users: Record<string, User> | undefin
 }
 
 /** What changed about the channel's devices, in words, from the commit itself (not from the server). */
-export function channelLine(item: Item, nameOf: (userId: string) => string, me: User): string {
+export function channelLine(item: Item, nameOf: (userId: string) => string, me: User, shared = false): string {
   const name = (id: string) => (id === me.id ? "you" : nameOf(id));
   const whose = (id: string) => (id === me.id ? "your" : `${nameOf(id)}'s`);
   const capital = (text: string) => `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
-  if (item.kind === "joined") return "This device joined the channel. Messages from before it can't be read here.";
+  if (item.kind === "joined") {
+    return shared
+      ? "This device joined the channel. The messages above were passed on by a member's device."
+      : "This device joined the channel. Messages from before it can't be read here.";
+  }
   if (item.kind === "unreadable") return `A message from ${name(item.senderId)} couldn't be opened on this device.`;
+  if (item.kind === "setting") {
+    return item.content === "on"
+      ? `${capital(name(item.senderId))} turned on sharing earlier messages: people added from now on get recent history, passed on by members' devices.`
+      : `${capital(name(item.senderId))} turned off sharing earlier messages: people added from now on only see what's sent after they join.`;
+  }
   if (item.kind === "reset") {
     return `${capital(name(item.senderId))} started this channel's encryption over. What came before stays on the devices that already read it.`;
   }
@@ -227,7 +247,7 @@ export function channelLine(item: Item, nameOf: (userId: string) => string, me: 
 
 const list = (parts: string[]) => (parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`);
 
-function SecureBeginning({ channel }: { channel: Channel }) {
+function SecureBeginning({ channel, sharesHistory }: { channel: Channel; sharesHistory: boolean }) {
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: 0.05 }} className="px-4 pt-10 pb-4">
       <span className="relative inline-grid size-16 place-items-center rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
@@ -246,8 +266,10 @@ function SecureBeginning({ channel }: { channel: Channel }) {
         <LockKeyholeIcon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
         <span>
           This is a <b>secure channel</b>. Messages here are end-to-end encrypted: only the people in this channel can read them, on their own
-          devices. Not this fuwa server, and not whoever runs it. That means AutoMod, search, link previews, bots and agents don't work here, and
-          people who join later only see messages sent after they join.
+          devices. Not this fuwa server, and not whoever runs it. That means AutoMod, search, link previews, bots and agents don't work here.{" "}
+          {sharesHistory
+            ? "People added later get recent messages, passed on by members' devices."
+            : "People who join later only see messages sent after they join."}
         </span>
       </p>
     </motion.div>
@@ -298,6 +320,17 @@ function SecureChannelDialog({
     return [...counts].sort(([a], [b]) => nameIn(byId, users, a).localeCompare(nameIn(byId, users, b)));
   }, [members, byId, users]);
   const verified = useMemo(() => (dms && me ? verifiedPeople(dms, me.id, members) : new Set<string>()), [dms, me, members]);
+  const sharesHistory = !!dms?.secureHistory[channel.id];
+  const [saving, setSaving] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const toggleHistory = (on: boolean) => {
+    setSaving(true);
+    setHistoryError(null);
+    setSecureHistory(instanceKey, serverId, channel.id, on)
+      .catch((err: unknown) => setHistoryError(dmProblem(err)))
+      .finally(() => setSaving(false));
+  };
+  const lines = [...CANT, { icon: UserPlusIcon, text: sharesHistory ? LATER.on : LATER.off }];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -310,7 +343,7 @@ function SecureChannelDialog({
           description="Messages are locked on the sender's device and only open on the devices below. This fuwa server keeps and passes along what it can't read."
         />
         <ul className="grid gap-1.5 rounded-2xl border bg-muted/40 p-3 text-sm">
-          {CANT.map(({ icon: Icon, text }, n) => (
+          {lines.map(({ icon: Icon, text }, n) => (
             <motion.li
               key={text}
               initial={{ opacity: 0, x: -8 }}
@@ -357,7 +390,21 @@ function SecureChannelDialog({
           Who's in it follows the channel's permissions. Compare safety numbers in a direct message to verify someone's devices.
         </p>
         {canReset && (
-          <div className="mt-4 flex items-center gap-3 rounded-2xl border border-dashed px-3 py-2.5">
+          <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border px-3 py-2.5 transition-colors hover:bg-muted/40">
+            <HistoryIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-bold">Share earlier messages with people added later</span>
+              <span className="block text-xs text-muted-foreground">
+                The device that adds someone passes on recent messages, still end-to-end encrypted. Each one is checked against the signature of
+                the device that sent it, so nobody can change or make one up. Turning it on doesn't send anything to people already here.
+              </span>
+              {historyError && <span className="mt-1 block text-xs text-destructive">{historyError}</span>}
+            </span>
+            <Switch checked={sharesHistory} disabled={saving} onCheckedChange={toggleHistory} aria-label="Share earlier messages with people added later" />
+          </label>
+        )}
+        {canReset && (
+          <div className="mt-3 flex items-center gap-3 rounded-2xl border border-dashed px-3 py-2.5">
             <p className="min-w-0 flex-1 text-xs text-muted-foreground">
               If the channel's encryption stops working for everyone, start it over. Messages already read stay on the devices that read them.
             </p>

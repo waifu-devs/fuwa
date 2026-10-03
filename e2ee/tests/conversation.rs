@@ -283,3 +283,14 @@ fn a_commit_that_loses_the_race_gives_way() {
     fresh.create_group(CONVERSATION).unwrap();
     assert!(matches!(fresh.process(CONVERSATION, &sealed, false, &people()), Err(Error::Behind)));
 }
+
+#[test]
+fn what_a_device_signs_can_be_checked_by_its_key_alone() {
+    let mika = Device::new("mika").unwrap();
+    let rin = Device::new("rin").unwrap();
+    let signature = mika.sign(b"meet at noon").unwrap();
+    assert!(fuwa_e2ee::verify(mika.signature_key(), b"meet at noon", &signature));
+    assert!(!fuwa_e2ee::verify(mika.signature_key(), b"meet at one", &signature));
+    assert!(!fuwa_e2ee::verify(rin.signature_key(), b"meet at noon", &signature));
+    assert!(!fuwa_e2ee::verify(mika.signature_key(), b"meet at noon", &[0; 64]));
+}
