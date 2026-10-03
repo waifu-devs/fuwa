@@ -4949,7 +4949,7 @@ async fn agents_stop_when_their_owner_is_turned_off() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn picture_uploads_have_caps_by_default() {
+async fn picture_uploads_take_the_caps_admins_set() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[]).await;
     let mut c = clients(&instance).await;
@@ -4957,21 +4957,27 @@ async fn picture_uploads_have_caps_by_default() {
     let (mika, _, _) = sign_up(&mut c, "mika").await;
     let avatar = pb::MediaPurpose::Avatar;
 
-    // 8 MiB a picture, unless an admin changes it.
-    let too_big = create_upload(&mut c, &juan, avatar, "image/png", 8 * 1024 * 1024 + 1).await.unwrap_err();
-    assert_eq!(too_big.code(), Code::ResourceExhausted);
+    // Unlimited until an admin sets them.
     let settings = c.admin.get_settings(authed(&juan, pb::GetSettingsRequest {})).await.unwrap().into_inner();
     let defaults = settings.config.unwrap().settings.unwrap();
-    assert_eq!(defaults.picture_upload_bytes, Some(8 * 1024 * 1024));
-    assert_eq!(defaults.picture_upload_bytes_per_day, Some(256 * 1024 * 1024));
+    assert_eq!(defaults.picture_upload_bytes, None);
+    assert_eq!(defaults.picture_upload_bytes_per_day, None);
+    create_upload(&mut c, &juan, avatar, "image/png", 8 * 1024 * 1024 + 1).await.unwrap();
 
-    // And so many bytes a day for each account, however many ask at once.
+    // A size for each picture, and so many bytes a day for each account,
+    // however many ask at once.
     let mut changed = defaults.clone();
-    changed.picture_upload_bytes_per_day = Some(2000);
+    changed.picture_upload_bytes = Some(8 * 1024 * 1024);
+    changed.picture_upload_bytes_per_day = Some(8 * 1024 * 1024 + 1 + 2000);
     c.admin
-        .update_settings(authed(&juan, settings_update(changed, &["picture_upload_bytes_per_day"], &[])))
+        .update_settings(authed(
+            &juan,
+            settings_update(changed, &["picture_upload_bytes", "picture_upload_bytes_per_day"], &[]),
+        ))
         .await
         .unwrap();
+    let too_big = create_upload(&mut c, &juan, avatar, "image/png", 8 * 1024 * 1024 + 1).await.unwrap_err();
+    assert_eq!(too_big.code(), Code::ResourceExhausted);
     let reservations = (0..8).map(|_| {
         let mut media = c.media.clone();
         let juan = juan.clone();

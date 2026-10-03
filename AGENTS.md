@@ -366,10 +366,9 @@
   never plays a sound or shows a notification.
 - Timestamps are unix milliseconds in the database, `google.protobuf.Timestamp` on
   the wire. Ids are ULIDs (`id::new_id`).
-- Limits are unlimited unless configured. Never hardcode a usage cap. Picture
-  uploads are the one exception: anyone signed in can fill the instance's own
-  disk with them, so they have defaults (8 MiB a picture, 256 MiB a day per
-  account) that admins can change or turn off.
+- Limits are unlimited unless configured. Never hardcode a usage cap; that
+  includes picture uploads (a size per picture and bytes per account per day),
+  which admins can turn on in instance settings.
 - Everything about an instance or a server must be configurable from the
   client. A new operator switch is a field in `InstanceSettings` (with its
   `FUWA_*` default) and a control in the app's settings, not only an
