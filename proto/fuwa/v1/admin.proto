@@ -69,7 +69,7 @@ message InstanceSettings {
   // Serve the web app at this instance's address. FUWA_WEB.
   bool web = 9;
   // The largest picture (avatar, banner, server icon) one upload may be;
-  // unset for no cap. FUWA_LIMIT_PICTURE_UPLOAD.
+  // unset for no cap. FUWA_LIMIT_PICTURE_UPLOAD, 8 MiB unless set.
   optional int64 picture_upload_bytes = 10;
   // FUWA_LINKED_ACCOUNTS.
   LinkedAccounts linked_accounts = 11;
@@ -80,6 +80,9 @@ message InstanceSettings {
   // Who may make agents (bot accounts). Agents already made keep working.
   // FUWA_AGENT_CREATION.
   AgentCreation agent_creation = 13;
+  // How many bytes of pictures one account may upload in a day (UTC); unset
+  // for no cap. FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY, 256 MiB unless set.
+  optional int64 picture_upload_bytes_per_day = 14;
 }
 
 // Whether standalone accounts (a username and password kept on the instance) work.

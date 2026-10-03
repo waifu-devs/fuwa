@@ -25,6 +25,7 @@ pub const FIELDS: &[&str] = &[
     "default_limits.attachment_bytes",
     "default_limits.emojis",
     "picture_upload_bytes",
+    "picture_upload_bytes_per_day",
     "telemetry",
     "web",
 ];
@@ -137,6 +138,7 @@ impl Settings {
             telemetry: self.telemetry,
             web: self.web,
             picture_upload_bytes: limits.picture_upload_bytes,
+            picture_upload_bytes_per_day: limits.picture_upload_bytes_per_day,
         }
     }
 
@@ -187,6 +189,7 @@ impl Settings {
             "default_limits.attachment_bytes" => Value::from(limits.attachment_bytes),
             "default_limits.emojis" => Value::from(limits.emojis),
             "picture_upload_bytes" => Value::from(from.picture_upload_bytes),
+            "picture_upload_bytes_per_day" => Value::from(from.picture_upload_bytes_per_day),
             "telemetry" => Value::from(from.telemetry),
             "web" => Value::from(from.web),
             other => return Err(unknown(other)),
@@ -221,6 +224,7 @@ impl Settings {
             "default_limits.attachment_bytes" => Value::from(limits.attachment_bytes),
             "default_limits.emojis" => Value::from(limits.emojis),
             "picture_upload_bytes" => Value::from(limits.picture_upload_bytes),
+            "picture_upload_bytes_per_day" => Value::from(limits.picture_upload_bytes_per_day),
             "telemetry" => Value::from(self.telemetry),
             "web" => Value::from(self.web),
             other => return Err(unknown(other)),
@@ -268,6 +272,7 @@ impl Settings {
             "default_limits.attachment_bytes" => self.limits.attachment_bytes = cap(field, value)?,
             "default_limits.emojis" => self.limits.emojis = cap(field, value)?,
             "picture_upload_bytes" => self.limits.picture_upload_bytes = cap(field, value)?,
+            "picture_upload_bytes_per_day" => self.limits.picture_upload_bytes_per_day = cap(field, value)?,
             "telemetry" => self.telemetry = flag(field, value)?,
             "web" => self.web = flag(field, value)?,
             other => return Err(unknown(other)),

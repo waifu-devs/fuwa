@@ -4899,19 +4899,24 @@ async fn agents_stop_when_their_owner_is_turned_off() {
     let (owner, owner_user, _) = sign_up(&mut c, "owner").await;
     let made = c
         .agents
-        .create_agent(authed(&owner, pb::CreateAgentRequest { username: "helper".into(), display_name: "Helper".into() }))
+        .create_agent(authed(
+            &owner,
+            pb::CreateAgentRequest { username: "helper".into(), display_name: "Helper".into() },
+        ))
         .await
         .unwrap()
         .into_inner();
     assert!(me(&mut c, &made.token).await.is_ok());
 
-    let off = pb::UpdateAccountRequest { account_id: owner_user.id.clone(), disabled: Some(true), ..Default::default() };
+    let off =
+        pb::UpdateAccountRequest { account_id: owner_user.id.clone(), disabled: Some(true), ..Default::default() };
     update_account(&mut c, &admin, off).await.unwrap();
     assert_eq!(me(&mut c, &owner).await.unwrap_err(), Code::Unauthenticated);
     assert_eq!(me(&mut c, &made.token).await.unwrap_err(), Code::Unauthenticated, "its agents stop with it");
 
     // Turned back on, the owner hands out a new token; the old one stays dead.
-    let on = pb::UpdateAccountRequest { account_id: owner_user.id.clone(), disabled: Some(false), ..Default::default() };
+    let on =
+        pb::UpdateAccountRequest { account_id: owner_user.id.clone(), disabled: Some(false), ..Default::default() };
     update_account(&mut c, &admin, on).await.unwrap();
     assert_eq!(me(&mut c, &made.token).await.unwrap_err(), Code::Unauthenticated);
     let owner = sign_in(&mut c, "owner", "correct horse battery").await.unwrap().token;
@@ -4924,6 +4929,56 @@ async fn agents_stop_when_their_owner_is_turned_off() {
         .into_inner()
         .token;
     assert!(me(&mut c, &fresh).await.is_ok());
+
+    instance.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn picture_uploads_have_caps_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let avatar = pb::MediaPurpose::Avatar;
+
+    // 8 MiB a picture, unless an admin changes it.
+    let too_big = create_upload(&mut c, &juan, avatar, "image/png", 8 * 1024 * 1024 + 1).await.unwrap_err();
+    assert_eq!(too_big.code(), Code::ResourceExhausted);
+    let settings = c.admin.get_settings(authed(&juan, pb::GetSettingsRequest {})).await.unwrap().into_inner();
+    let defaults = settings.config.unwrap().settings.unwrap();
+    assert_eq!(defaults.picture_upload_bytes, Some(8 * 1024 * 1024));
+    assert_eq!(defaults.picture_upload_bytes_per_day, Some(256 * 1024 * 1024));
+
+    // And so many bytes a day for each account, however many ask at once.
+    let mut changed = defaults.clone();
+    changed.picture_upload_bytes_per_day = Some(2000);
+    c.admin
+        .update_settings(authed(&juan, settings_update(changed, &["picture_upload_bytes_per_day"], &[])))
+        .await
+        .unwrap();
+    let reservations = (0..8).map(|_| {
+        let mut media = c.media.clone();
+        let juan = juan.clone();
+        tokio::spawn(async move {
+            let request =
+                pb::CreateUploadRequest { purpose: avatar as i32, content_type: "image/png".into(), size: 500 };
+            media.create_upload(authed(&juan, request)).await.map_err(|err| err.code())
+        })
+    });
+    let results: Vec<_> = futures::future::join_all(reservations).await.into_iter().map(|r| r.unwrap()).collect();
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 4, "{results:?}");
+    assert!(results.iter().filter_map(|r| r.as_ref().err()).all(|code| *code == Code::ResourceExhausted));
+    assert!(create_upload(&mut c, &mika, avatar, "image/png", 2000).await.is_ok(), "each account has its own");
+
+    // Unset, there's no cap.
+    let mut unlimited = defaults.clone();
+    unlimited.picture_upload_bytes_per_day = None;
+    c.admin
+        .update_settings(authed(&juan, settings_update(unlimited, &["picture_upload_bytes_per_day"], &[])))
+        .await
+        .unwrap();
+    assert!(create_upload(&mut c, &juan, avatar, "image/png", 500).await.is_ok());
 
     instance.stop().await;
 }

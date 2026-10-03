@@ -43,7 +43,8 @@ pub struct Config {
     /// FUWA_ADMIN_TOKEN: a bearer token with instance-admin rights, for a control
     /// plane or scripts. Unset means only admin accounts are admins.
     pub admin_token: Option<String>,
-    /// FUWA_LIMIT_*: caps every server gets unless it has its own. Unlimited by default.
+    /// FUWA_LIMIT_*: caps every server gets unless it has its own, and on
+    /// picture uploads. Unlimited by default, but for picture uploads.
     pub limits: Limits,
     pub telemetry: Telemetry,
     /// FUWA_WEB: on (default) | off. Serves the web client on / when the binary
@@ -97,8 +98,17 @@ impl Accounts {
 
 pub const DEFAULT_LINKED_ISSUER: &str = "https://api.waifu.dev";
 
-/// Instance-wide caps. `None` is unlimited.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// The largest picture one upload may be when FUWA_LIMIT_PICTURE_UPLOAD isn't set.
+pub const DEFAULT_PICTURE_UPLOAD_BYTES: i64 = 8 * 1024 * 1024;
+
+/// How many bytes of pictures one account may upload in a day when
+/// FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY isn't set.
+pub const DEFAULT_PICTURE_UPLOAD_BYTES_PER_DAY: i64 = 256 * 1024 * 1024;
+
+/// Instance-wide caps. `None` is unlimited. Everything is unlimited by
+/// default except picture uploads, which anyone signed in can make and which
+/// fill this instance's own disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
     /// FUWA_LIMIT_SERVERS_PER_ACCOUNT: servers one account may own.
     pub servers_per_account: Option<i64>,
@@ -113,19 +123,33 @@ pub struct Limits {
     /// FUWA_LIMIT_EMOJIS: custom emoji per server.
     pub emojis: Option<i64>,
     /// FUWA_LIMIT_PICTURE_UPLOAD: the largest avatar, banner or server icon one
-    /// upload may be, e.g. `8MiB`.
+    /// upload may be, e.g. `8MiB` (the default), or `unlimited`.
     pub picture_upload_bytes: Option<i64>,
+    /// FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY: how many bytes of pictures one
+    /// account may upload in a day (UTC), e.g. `256MiB` (the default), or
+    /// `unlimited`.
+    pub picture_upload_bytes_per_day: Option<i64>,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            servers_per_account: None,
+            members: None,
+            channels: None,
+            storage_bytes: None,
+            attachment_bytes: None,
+            emojis: None,
+            picture_upload_bytes: Some(DEFAULT_PICTURE_UPLOAD_BYTES),
+            picture_upload_bytes_per_day: Some(DEFAULT_PICTURE_UPLOAD_BYTES_PER_DAY),
+        }
+    }
 }
 
 impl Limits {
+    /// Whether any cap differs from the defaults.
     pub fn any(&self) -> bool {
-        self.servers_per_account.is_some()
-            || self.members.is_some()
-            || self.channels.is_some()
-            || self.storage_bytes.is_some()
-            || self.attachment_bytes.is_some()
-            || self.emojis.is_some()
-            || self.picture_upload_bytes.is_some()
+        *self != Self::default()
     }
 }
 
@@ -239,6 +263,14 @@ impl Config {
         let bytes = |key: &str| -> Result<Option<i64>, String> {
             get(key).map(|value| parse_bytes(&value).map_err(|err| format!("{key} {err}"))).transpose()
         };
+        // Picture uploads have a cap unless it's turned off.
+        let upload_bytes = |key: &str, default: i64| -> Result<Option<i64>, String> {
+            match get(key) {
+                None => Ok(Some(default)),
+                Some(value) if value.trim().eq_ignore_ascii_case("unlimited") => Ok(None),
+                Some(value) => parse_bytes(&value).map(Some).map_err(|err| format!("{key} {err}")),
+            }
+        };
         let limits = Limits {
             servers_per_account: count("FUWA_LIMIT_SERVERS_PER_ACCOUNT")?,
             members: count("FUWA_LIMIT_MEMBERS")?,
@@ -246,7 +278,11 @@ impl Config {
             storage_bytes: bytes("FUWA_LIMIT_STORAGE")?,
             attachment_bytes: bytes("FUWA_LIMIT_ATTACHMENT_STORAGE")?,
             emojis: count("FUWA_LIMIT_EMOJIS")?,
-            picture_upload_bytes: bytes("FUWA_LIMIT_PICTURE_UPLOAD")?,
+            picture_upload_bytes: upload_bytes("FUWA_LIMIT_PICTURE_UPLOAD", DEFAULT_PICTURE_UPLOAD_BYTES)?,
+            picture_upload_bytes_per_day: upload_bytes(
+                "FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY",
+                DEFAULT_PICTURE_UPLOAD_BYTES_PER_DAY,
+            )?,
         };
 
         let do_not_track = get("DO_NOT_TRACK").is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"));
@@ -415,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    fn defaults_are_open_and_unlimited() {
+    fn defaults_are_open_and_unlimited_but_for_pictures() {
         let config = config(&[("FUWA_DATA_PATH", "/data")]).unwrap();
         assert_eq!(config.port, 8080);
         assert_eq!(config.public_url, "http://localhost:8080");
@@ -425,6 +461,8 @@ mod tests {
         assert_eq!(config.server_creation, pb::ServerCreation::Everyone);
         assert_eq!(config.agent_creation, pb::AgentCreation::Everyone);
         assert!(!config.limits.any());
+        assert_eq!(config.limits.picture_upload_bytes, Some(DEFAULT_PICTURE_UPLOAD_BYTES));
+        assert_eq!(config.limits.picture_upload_bytes_per_day, Some(DEFAULT_PICTURE_UPLOAD_BYTES_PER_DAY));
         assert!(config.telemetry.enabled);
         assert!(config.encryption_key.is_none());
     }
@@ -448,13 +486,15 @@ mod tests {
             ("FUWA_LIMIT_MEMBERS", "100"),
             ("FUWA_LIMIT_STORAGE", "500MB"),
             ("FUWA_LIMIT_ATTACHMENT_STORAGE", "2GiB"),
-            ("FUWA_LIMIT_PICTURE_UPLOAD", "8MiB"),
+            ("FUWA_LIMIT_PICTURE_UPLOAD", "2MiB"),
+            ("FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY", "unlimited"),
         ])
         .unwrap();
         assert_eq!(config.limits.members, Some(100));
         assert_eq!(config.limits.storage_bytes, Some(500_000_000));
         assert_eq!(config.limits.attachment_bytes, Some(2 * 1024 * 1024 * 1024));
-        assert_eq!(config.limits.picture_upload_bytes, Some(8 * 1024 * 1024));
+        assert_eq!(config.limits.picture_upload_bytes, Some(2 * 1024 * 1024));
+        assert_eq!(config.limits.picture_upload_bytes_per_day, None);
         assert!(config.limits.any());
     }
 

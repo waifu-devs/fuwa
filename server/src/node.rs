@@ -22,7 +22,11 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0006_cluster.sql"),
     include_str!("../migrations/node/0007_linked_sign_ins.sql"),
     include_str!("../migrations/node/0008_agents.sql"),
+    include_str!("../migrations/node/0009_upload_days.sql"),
 ];
+
+/// A day, for counting uploads.
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// How long a session lasts after sign-in.
 pub const SESSION_TTL_MS: i64 = 60 * 24 * 60 * 60 * 1000;
@@ -716,12 +720,14 @@ impl NodeDb {
         .await
     }
 
-    /// Drops sessions and sign-ins waiting on a code that have run out.
+    /// Drops sessions and sign-ins waiting on a code that have run out, and
+    /// upload counts from days gone by.
     pub async fn prune_sessions(&self) -> Result<u64> {
         db::write(&self.db, async |conn| {
             let now = now_ms();
             conn.execute("DELETE FROM sign_in_tickets WHERE expires_at <= ?1", [now]).await?;
             conn.execute("DELETE FROM linked_sign_ins WHERE expires_at <= ?1", [now]).await?;
+            conn.execute("DELETE FROM upload_days WHERE day < ?1", [now / DAY_MS]).await?;
             Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now]).await?)
         })
         .await
@@ -1233,10 +1239,42 @@ impl NodeDb {
 
     // ───────────────────────── Uploaded pictures ─────────────────────────
 
-    /// Reserves an upload, unless the account has too many going already.
-    pub async fn reserve_media(&self, row: &MediaRow, upload_hash: &str, expires_at: i64) -> Result<()> {
+    /// Reserves an upload, unless the account has too many going already or
+    /// has used up `bytes_per_day` today.
+    pub async fn reserve_media(
+        &self,
+        row: &MediaRow,
+        upload_hash: &str,
+        expires_at: i64,
+        bytes_per_day: Option<i64>,
+    ) -> Result<()> {
         db::write(&self.db, async |conn| {
             let now = now_ms();
+            // Every reservation writes the account's row for the day, so ones
+            // made at once clash here and the counts below hold.
+            let day = now / DAY_MS;
+            conn.execute(
+                "INSERT INTO upload_days (account_id, day, bytes) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes",
+                (row.account_id.as_str(), day, row.size),
+            )
+            .await?;
+            if let Some(cap) = bytes_per_day {
+                let today = query_one(
+                    conn,
+                    "SELECT bytes FROM upload_days WHERE account_id = ?1 AND day = ?2",
+                    (row.account_id.as_str(), day),
+                    |r| r.get::<i64>(0),
+                )
+                .await?
+                .unwrap_or(0);
+                if today > cap {
+                    return Err(Error::ResourceExhausted(format!(
+                        "you can upload {} of pictures a day here; try again tomorrow",
+                        crate::media::size_label(cap)
+                    )));
+                }
+            }
             let pending = query_one(
                 conn,
                 "SELECT count(*) FROM media WHERE account_id = ?1 AND stored_at IS NULL AND expires_at > ?2",
@@ -1385,7 +1423,7 @@ impl NodeDb {
     /// Deletes an account and everything node.db keeps about it.
     pub async fn delete_account(&self, account_id: &str) -> Result<()> {
         db::write(&self.db, async |conn| {
-            for table in ["sessions", "backup_codes", "sign_in_tickets", "notification_settings"] {
+            for table in ["sessions", "backup_codes", "sign_in_tickets", "notification_settings", "upload_days"] {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
             }
             conn.execute("DELETE FROM accounts WHERE id = ?1", [account_id]).await?;
