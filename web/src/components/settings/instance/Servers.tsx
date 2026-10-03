@@ -9,6 +9,8 @@ import {
   HardDriveIcon,
   ImageIcon,
   LoaderCircleIcon,
+  MapPinIcon,
+  PlaneIcon,
   SearchIcon,
   ServerIcon as ServersIcon,
   Trash2Icon,
@@ -19,9 +21,10 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { InstanceServer } from "@/gen/fuwa/v1/admin_pb";
 import type { ServerLimits } from "@/gen/fuwa/v1/types_pb";
-import { deleteServer, exportServer, listInstanceServers, nodeUsage, run, serverUsage, setServerLimits } from "@/fuwa/actions";
+import type { Region } from "@/gen/fuwa/v1/types_pb";
+import { deleteServer, exportServer, listInstanceServers, moveServer, nodeUsage, run, serverUsage, setServerLimits } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
-import { useAction } from "@/fuwa/hooks";
+import { useAction, useInstance } from "@/fuwa/hooks";
 import { ServerIcon } from "@/components/Icons";
 import { Count, CountUp, SPRING } from "@/components/motion";
 import { Segmented } from "@/components/settings/account/common";
@@ -30,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { displayName, formatBytes, formatDay, toDate } from "@/lib/format";
 import { toast } from "@/lib/ui";
+import { hasRegions, regionMark, regionName, sameRegion } from "@/lib/regions";
 import { cn } from "@/lib/utils";
 import { Cap } from "../controls";
 
@@ -60,6 +64,7 @@ export function Servers({ instanceKey, onLeave }: { instanceKey: string; onLeave
   const [sort, setSort] = useState<Sort>("storage");
   const [open, setOpen] = useState<string | null>(null);
   const [pictures, setPictures] = useState({ count: 0, bytes: 0 });
+  const regions = useInstance(instanceKey)?.node?.regions ?? [];
 
   useEffect(() => {
     run(listInstanceServers(instanceKey)).then(setServers, (e: FuwaError) => setError(e.message));
@@ -159,6 +164,8 @@ export function Servers({ instanceKey, onLeave }: { instanceKey: string; onLeave
               biggest={biggest}
               open={open === s.server?.id}
               onToggle={() => setOpen((o) => (o === s.server?.id ? null : (s.server?.id ?? null)))}
+              regions={regions}
+              onMoved={(server) => setServers((list) => (list ?? []).map((x) => (x.server?.id === server.id ? { ...x, server } : x)))}
               onLimits={(limits) => setServers((list) => (list ?? []).map((x) => (x.server?.id === s.server?.id ? { ...x, limits } : x)))}
               onDeleted={() => setServers((list) => (list ?? []).filter((x) => x.server?.id !== s.server?.id))}
               onLeave={onLeave}
@@ -183,7 +190,9 @@ function ServerRow({
   index,
   biggest,
   open,
+  regions,
   onToggle,
+  onMoved,
   onLimits,
   onDeleted,
   onLeave,
@@ -191,6 +200,8 @@ function ServerRow({
   instanceKey: string;
   entry: InstanceServer;
   index: number;
+  regions: Region[];
+  onMoved: (server: NonNullable<InstanceServer["server"]>) => void;
   biggest: number;
   open: boolean;
   onToggle: () => void;
@@ -220,6 +231,21 @@ function ServerRow({
             <span className="shrink-0 text-muted-foreground" title={s.discoverable ? "Listed in Browse" : "Hidden from Browse"}>
               {s.discoverable ? <GlobeIcon className="size-3.5" /> : <EyeOffIcon className="size-3.5" />}
             </span>
+            <AnimatePresence mode="popLayout" initial={false}>
+              {hasRegions(regions) && (
+                <motion.span
+                  key={s.region}
+                  initial={{ opacity: 0, scale: 0.6, y: -6 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.6, y: 6 }}
+                  transition={SPRING}
+                  title={`Kept in ${regionName(regions, s.region)}`}
+                  className="flex shrink-0 items-center gap-0.5 rounded-full bg-muted px-1.5 py-px text-[0.65rem] font-bold text-muted-foreground"
+                >
+                  <MapPinIcon className="size-2.5" /> {regionName(regions, s.region)}
+                </motion.span>
+              )}
+            </AnimatePresence>
             {entry.member && <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-px text-[0.65rem] font-bold text-primary uppercase">You're in it</span>}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
@@ -256,7 +282,7 @@ function ServerRow({
             transition={SPRING}
             className="overflow-hidden"
           >
-            <Details instanceKey={instanceKey} entry={entry} onLimits={onLimits} onDeleted={onDeleted} onLeave={onLeave} />
+            <Details instanceKey={instanceKey} entry={entry} regions={regions} onMoved={onMoved} onLimits={onLimits} onDeleted={onDeleted} onLeave={onLeave} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -268,12 +294,16 @@ function ServerRow({
 function Details({
   instanceKey,
   entry,
+  regions,
+  onMoved,
   onLimits,
   onDeleted,
   onLeave,
 }: {
   instanceKey: string;
   entry: InstanceServer;
+  regions: Region[];
+  onMoved: (server: NonNullable<InstanceServer["server"]>) => void;
   onLimits: (limits: ServerLimits) => void;
   onDeleted: () => void;
   onLeave: () => void;
@@ -378,6 +408,8 @@ function Details({
         </AnimatePresence>
       </div>
 
+      {hasRegions(regions) && <MoveRegion instanceKey={instanceKey} server={s} regions={regions} onMoved={onMoved} />}
+
       <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
         {entry.member && (
           <Button
@@ -406,6 +438,117 @@ function Details({
         {deleting && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
             <DeleteServer instanceKey={instanceKey} name={s.name} serverId={s.id} onDeleted={onDeleted} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/**
+ * Moves a server to another region: pick one, confirm, and it travels there.
+ * Changes wait for the moment it takes; its calls drop and people rejoin.
+ */
+function MoveRegion({
+  instanceKey,
+  server,
+  regions,
+  onMoved,
+}: {
+  instanceKey: string;
+  server: NonNullable<InstanceServer["server"]>;
+  regions: Region[];
+  onMoved: (server: NonNullable<InstanceServer["server"]>) => void;
+}) {
+  const [to, setTo] = useState<string | null>(null);
+  const move = useAction(moveServer);
+  const here = regionName(regions, server.region);
+  const target = to === null ? null : regions.find((r) => r.id === to);
+
+  async function go() {
+    if (!target) return;
+    const moved = await move.go(instanceKey, server.id, target.id);
+    if (!moved) return;
+    setTo(null);
+    onMoved(moved);
+    toast(`${server.name} is now in ${target.name}`);
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
+        <MapPinIcon className="size-3.5" /> Region
+      </p>
+      <div role="radiogroup" aria-label={`Region for ${server.name}`} className="flex flex-wrap gap-2">
+        {regions.map((r) => {
+          const current = sameRegion(regions, r.id, server.region);
+          const on = current ? to === null : to === r.id;
+          return (
+            <button
+              key={r.id}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              disabled={move.pending}
+              onClick={() => {
+                setTo(current ? null : r.id);
+                move.setError(null);
+              }}
+              className={cn(
+                "relative flex items-center gap-2 rounded-full border py-1.5 pr-3 pl-1.5 text-sm font-bold transition-colors disabled:opacity-60",
+                on ? "border-primary text-primary" : "hover:border-primary/50",
+              )}
+            >
+              {on && <motion.span layoutId={`move-region-${server.id}`} transition={SPRING} className="absolute inset-0 rounded-full bg-primary/15" />}
+              <span className={cn("relative grid size-6 place-items-center rounded-full text-[0.6rem] font-extrabold", on ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
+                {regionMark(r.name)}
+              </span>
+              <span className="relative">{r.name}</span>
+              {current && <span className="relative text-xs font-normal text-muted-foreground">now</span>}
+            </button>
+          );
+        })}
+      </div>
+      <AnimatePresence initial={false}>
+        {target && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={SPRING}
+            className="overflow-hidden"
+          >
+            <div className="flex flex-col gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-4">
+              <div className="flex items-center gap-2 text-sm font-bold">
+                <span className="truncate">{here}</span>
+                <span className="relative h-px min-w-12 flex-1 bg-border">
+                  <motion.span
+                    className="absolute top-1/2 -translate-y-1/2 text-primary"
+                    initial={{ left: "0%" }}
+                    animate={move.pending ? { left: ["0%", "88%"], opacity: [0, 1, 1, 0] } : { left: "44%" }}
+                    transition={move.pending ? { duration: 1.1, repeat: Infinity, ease: "easeInOut" } : SPRING}
+                  >
+                    <PlaneIcon className="size-4" />
+                  </motion.span>
+                </span>
+                <span className="truncate text-primary">{target.name}</span>
+              </div>
+              <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+                <li>Its messages, channels, roles and recordings go to {target.name}, and nothing of them is kept in {here}.</li>
+                <li>Changes wait a moment while it travels. People in its calls are dropped and can rejoin.</li>
+                <li>Its icon, emoji and webhook pictures stay with the accounts in {regions.find((r) => r.home)?.name ?? "the home region"} for now.</li>
+              </ul>
+              {move.error && <p className="text-sm text-destructive first-letter:uppercase">{move.error}</p>}
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" size="sm" className="rounded-xl" disabled={move.pending} onClick={() => setTo(null)}>
+                  Cancel
+                </Button>
+                <Button type="button" size="sm" className="btn group rounded-xl px-4 font-bold" disabled={move.pending} onClick={go}>
+                  {move.pending ? <LoaderCircleIcon className="animate-spin" /> : <PlaneIcon className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />}
+                  {move.pending ? `Moving to ${target.name}` : `Move to ${target.name}`}
+                </Button>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

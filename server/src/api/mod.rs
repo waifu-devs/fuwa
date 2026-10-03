@@ -22,7 +22,7 @@ mod sso;
 mod webhooks;
 
 pub(crate) use account::export_server;
-pub use calls::{spawn_voice_guard, spawn_voice_sweeper};
+pub use calls::{hang_up_server, spawn_voice_guard, spawn_voice_sweeper};
 pub use media::PictureOwner;
 pub use secure::MAX_SECURE_MEMBERS;
 pub use sso::note_lapses;

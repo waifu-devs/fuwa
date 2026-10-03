@@ -109,10 +109,23 @@ impl Store {
     /// Deletes an object; one that isn't there is fine.
     pub async fn delete(&self, key: &str) -> Result<()> {
         match self {
-            Self::Dir(dir) => match tokio::fs::remove_file(file(dir, key)?).await {
-                Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err.into()),
-                _ => Ok(()),
-            },
+            Self::Dir(dir) => {
+                let path = file(dir, key)?;
+                match tokio::fs::remove_file(&path).await {
+                    Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err.into()),
+                    _ => {}
+                }
+                // Folders are only keys' prefixes, as in a bucket: take away
+                // the ones this left empty.
+                let mut folder = path.parent();
+                while let Some(at) = folder.filter(|at| *at != dir.as_path() && at.starts_with(dir)) {
+                    if tokio::fs::remove_dir(at).await.is_err() {
+                        break;
+                    }
+                    folder = at.parent();
+                }
+                Ok(())
+            }
             Self::S3 { s3, prefix } => s3.delete(&format!("{prefix}{key}")).await,
         }
     }

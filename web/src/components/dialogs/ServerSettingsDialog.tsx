@@ -22,6 +22,7 @@ import {
   LinkIcon,
   LoaderCircleIcon,
   LockIcon,
+  MapPinIcon,
   PartyPopperIcon,
   ScrollTextIcon,
   SettingsIcon,
@@ -76,6 +77,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { displayName, formatBytes, formatDuration, initials } from "@/lib/format";
 import { ACCOUNT_AGES, timeLeft } from "@/lib/invites";
 import { has } from "@/lib/permissions";
+import { hasRegions, regionName } from "@/lib/regions";
 import { cn } from "@/lib/utils";
 import { Choice, Cap, SaveBar, Toggle, WithPreview } from "@/components/settings/controls";
 import { SettingsScreen } from "@/components/settings/SettingsScreen";
@@ -381,6 +383,22 @@ function Overview({ instanceKey, server }: { instanceKey: string; server: Server
             <Textarea id="settings-description" rows={4} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} className="rounded-xl" />
             <p className="text-sm text-muted-foreground">Shown in Browse. Markdown works.</p>
           </div>
+          {hasRegions(inst?.node?.regions) && (
+            <div data-setting="region" className="flex items-center gap-3 border-b border-border/70 py-5">
+              <motion.span
+                initial={{ scale: 0.6, rotate: -20 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ type: "spring", stiffness: 500, damping: 18 }}
+                className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary"
+              >
+                <MapPinIcon className="size-5" />
+              </motion.span>
+              <span className="min-w-0">
+                <span className="block font-extrabold">Region: {regionName(inst?.node?.regions, server.region)}</span>
+                <span className="block text-sm text-muted-foreground">Its messages, recordings and calls are kept there. An admin of this fuwa server can move it.</span>
+              </span>
+            </div>
+          )}
           <div data-setting="join-messages" className="flex flex-col gap-2 border-b border-border/70 py-5">
             <span className="font-extrabold">Join messages</span>
             <span className="text-sm text-muted-foreground">A hello in a channel whenever someone joins, so people can wave.</span>
