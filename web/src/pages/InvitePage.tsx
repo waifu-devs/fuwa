@@ -250,7 +250,7 @@ function Elsewhere({ address, onContinue }: { address: string; onContinue: () =>
       </motion.span>
       <h1 className="text-xl font-extrabold">Open this invite on another fuwa?</h1>
       <p className="text-sm text-muted-foreground">
-        This invite is for a server on <b className="break-all text-foreground">{host}</b>, which you haven't added yet. Opening it
+        This invite is for a server on <b className="text-foreground [overflow-wrap:anywhere]">{host}</b>, which you haven't added yet. Opening it
         connects to that instance, so it will see your IP address. Only continue if you trust whoever sent the link.
       </p>
       <div className="mt-1 flex w-full flex-col gap-2 sm:flex-row-reverse">
