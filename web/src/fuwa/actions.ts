@@ -4,7 +4,7 @@ import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
 import type { AccountFilter, AutoModProviderSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
-import type { ChannelPlacement } from "@/gen/fuwa/v1/channel_pb";
+import type { ChannelPlacement, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
 import type { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
@@ -48,6 +48,7 @@ import {
   store,
   updateInstance,
   upsertMessage,
+  withSharedAuthors,
   withUpdatedUser,
   withUsers,
   type PendingMessage,
@@ -663,10 +664,11 @@ const joined = (key: string, server: Server | undefined) =>
     yield* follow(key, server.id);
   });
 
-export const createServer = (key: string, name: string, description: string, discoverable: boolean, iconUrl = "") =>
+/** `region` is one of the instance's `Node.regions`; empty for its home region. */
+export const createServer = (key: string, name: string, description: string, discoverable: boolean, iconUrl = "", region = "") =>
   Effect.gen(function* () {
     const { server } = yield* call((signal) =>
-      api(key).servers.createServer({ name, description, discoverable, iconUrl }, { signal }),
+      api(key).servers.createServer({ name, description, discoverable, iconUrl, region }, { signal }),
     );
     yield* joined(key, server);
     return server!;
@@ -898,6 +900,14 @@ export const updateSettings = (key: string, settings: InstanceSettings, update: 
     return config!;
   });
 
+/** Moves a server to another region (instance admins). Resolves once it's there. */
+export const moveServer = (key: string, serverId: string, region: string) =>
+  Effect.gen(function* () {
+    const { server } = yield* call((signal) => api(key).admin.moveServer({ serverId, region }, { signal }));
+    if (server) updateInstance(key, (i) => (i.servers.some((s) => s.id === server.id) ? addServer(i, server) : i));
+    return server!;
+  });
+
 /** Runs some text through a moderation provider as the form has it (an empty key uses the saved one). */
 export const testAutoModProvider = (key: string, provider: AutoModProviderSettings, content: string) =>
   call((signal) => api(key).admin.testAutoModProvider({ provider, content }, { signal }));
@@ -1081,7 +1091,7 @@ export const loadMessages = (key: string, serverId: string, channelId: string, o
       const items = res.messages.reduce(upsertMessage, existing);
       return {
         ...i,
-        users: withUsers(i.users, res.authors),
+        users: withSharedAuthors(withUsers(i.users, res.authors), res.messages),
         messages: {
           ...i.messages,
           [channelId]: { items, hasMore: older || !current ? res.hasMore : (current?.hasMore ?? false), loading: false },
@@ -1111,6 +1121,7 @@ export const sendMessage = (key: string, serverId: string, channelId: string, co
       const loaded = i.messages[channelId];
       return {
         ...i,
+        users: withSharedAuthors(i.users, [res.message]),
         pending: { ...i.pending, [channelId]: (i.pending[channelId] ?? []).filter((p) => p.nonce !== pending.nonce) },
         messages:
           loaded && res.message
@@ -1130,7 +1141,7 @@ export const editMessage = (key: string, serverId: string, channelId: string, me
   Effect.gen(function* () {
     reportUsage("message.edit");
     const { message } = yield* call((signal) =>
-      api(key).messages.updateMessage({ serverId, messageId, content }, { signal }),
+      api(key).messages.updateMessage({ serverId, messageId, content, channelId }, { signal }),
     );
     updateInstance(key, (i) => {
       const loaded = i.messages[channelId];
@@ -1141,7 +1152,7 @@ export const editMessage = (key: string, serverId: string, channelId: string, me
 
 export const deleteMessage = (key: string, serverId: string, channelId: string, messageId: string) =>
   Effect.gen(function* () {
-    yield* call((signal) => api(key).messages.deleteMessage({ serverId, messageId }, { signal }));
+    yield* call((signal) => api(key).messages.deleteMessage({ serverId, messageId, channelId }, { signal }));
     updateInstance(key, (i) => {
       const loaded = i.messages[channelId];
       if (!loaded) return i;
@@ -1298,3 +1309,70 @@ export const testWebhook = (url: string, content: string) =>
     },
     catch: (err) => toFuwaError(err),
   });
+
+// ───────────────────────── Shared channels ─────────────────────────
+
+/** Keeps a server's shared channels in the store, where the event stream finds them to read again. */
+const storeShared = (key: string, serverId: string, res: ListConnectionsResponse) =>
+  updateInstance(key, (i) => ({
+    ...i,
+    shared: { ...i.shared, [serverId]: res },
+    users: withUsers(i.users, res.blocks.map((b) => b.user)),
+  }));
+
+/** The server's shared channels both ways, requests waiting, codes that work and people kept out. */
+export const listConnections = (key: string, serverId: string) =>
+  call((signal) => api(key).shared.listConnections({ serverId }, { signal })).pipe(
+    Effect.tap((res) => Effect.sync(() => storeShared(key, serverId, res))),
+  );
+
+/** Reads the list again after a change here, without waiting for the event. */
+const relistShared = (key: string, serverId: string) => listConnections(key, serverId).pipe(Effect.ignore);
+
+export const createShareCode = (key: string, serverId: string, channelId: string) =>
+  call((signal) => api(key).shared.createShareCode({ serverId, channelId }, { signal })).pipe(
+    Effect.map((r) => r.code!),
+    Effect.tap(() => relistShared(key, serverId)),
+  );
+
+export const deleteShareCode = (key: string, serverId: string, code: string) =>
+  call((signal) => api(key).shared.deleteShareCode({ serverId, code }, { signal })).pipe(Effect.tap(() => relistShared(key, serverId)));
+
+export const previewShare = (key: string, serverId: string, code: string) =>
+  call((signal) => api(key).shared.previewShare({ serverId, code }, { signal }));
+
+export const acceptShare = (key: string, serverId: string, code: string, name: string, parentId: string) =>
+  call((signal) => api(key).shared.acceptShare({ serverId, code, name, parentId }, { signal })).pipe(
+    Effect.map((r) => r.connection),
+    Effect.tap(() => relistShared(key, serverId)),
+  );
+
+export const reviewShare = (key: string, serverId: string, connectionId: string, approve: boolean) =>
+  call((signal) => api(key).shared.reviewShare({ serverId, connectionId, approve }, { signal })).pipe(
+    Effect.map((r) => r.connection),
+    Effect.tap(() => relistShared(key, serverId)),
+  );
+
+export const updateConnection = (key: string, serverId: string, connectionId: string, allowed: Permission[]) =>
+  call((signal) => api(key).shared.updateConnection({ serverId, connectionId, allowed }, { signal })).pipe(
+    Effect.tap(({ connection }) =>
+      Effect.sync(() =>
+        updateInstance(key, (i) => {
+          const list = i.shared[serverId];
+          if (!list || !connection) return i;
+          const connections = list.connections.map((c) => (c.id === connection.id ? connection : c));
+          return { ...i, shared: { ...i.shared, [serverId]: { ...list, connections } } };
+        }),
+      ),
+    ),
+  );
+
+/** Ends a connection, or withdraws or turns down a request. The messages stay with the home. */
+export const disconnectShared = (key: string, serverId: string, connectionId: string) =>
+  call((signal) => api(key).shared.disconnect({ serverId, connectionId }, { signal })).pipe(Effect.tap(() => relistShared(key, serverId)));
+
+/** Keeps someone from another server out of one of this server's shared channels, or lets them back. */
+export const blockFromChannel = (key: string, serverId: string, channelId: string, userId: string, blocked: boolean) =>
+  call((signal) => api(key).shared.blockFromChannel({ serverId, channelId, userId, blocked }, { signal })).pipe(
+    Effect.tap(() => (store.get().instances[key]?.shared[serverId] ? relistShared(key, serverId) : Effect.void)),
+  );

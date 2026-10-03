@@ -99,7 +99,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.WebhookService"
         | "fuwa.v1.CallService"
         | "fuwa.v1.SsoService"
-        | "fuwa.v1.SecureChannelService" => Target::Shard,
+        | "fuwa.v1.SecureChannelService"
+        | "fuwa.v1.SharedChannelService" => Target::Shard,
         _ => Target::Unknown,
     }
 }
@@ -250,6 +251,7 @@ impl Gateway {
         let media = self.clone();
         let webhooks = self.clone();
         let sso_servers = self.clone();
+        let server_pictures = self.clone();
         let sso_instance = self.clone();
         let health = self.clone();
         let http = Router::new()
@@ -284,6 +286,14 @@ impl Gateway {
                 any(move |request: Request| {
                     let gateway = sso_instance.clone();
                     async move { gateway.pass(gateway.directory_channel.clone(), request).await }
+                }),
+            )
+            .route(
+                // A server's pictures, once its shard keeps them.
+                "/media/servers/{server_id}/{*rest}",
+                get(move |UrlPath((server_id, _)): UrlPath<(String, String)>, request: Request| {
+                    let gateway = server_pictures.clone();
+                    async move { gateway.pass_to_shard(&server_id, request).await }
                 }),
             )
             .route(

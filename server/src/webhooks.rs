@@ -188,6 +188,11 @@ fn failed(err: Error) -> Response {
             response.headers_mut().insert(MISROUTED, HeaderValue::from_static("1"));
             response
         }
+        Error::Moving => {
+            let mut response = answer(StatusCode::SERVICE_UNAVAILABLE, "that server is moving; try again in a moment");
+            response.headers_mut().insert(crate::error::NOT_READY, HeaderValue::from_static("1"));
+            response
+        }
         err => {
             let status = match &err {
                 Error::InvalidArgument(_) => StatusCode::BAD_REQUEST,

@@ -258,6 +258,48 @@ impl Replica {
         let _ = std::fs::remove_file(self.position_path(name));
     }
 
+    /// Brings a file's replica up to date now rather than at the next round:
+    /// for a server that just moved here, so it's backed up before the move
+    /// is over.
+    pub async fn sync_now(&self, name: &str) -> Result<()> {
+        let tracked = self.lock_files().get(name).cloned();
+        let Some(tracked) = tracked else { return Ok(()) };
+        let mut state = tracked.state.lock().await;
+        self.sync(&tracked, &mut state).await
+    }
+
+    /// Stops replicating a server that moved to another shard, and deletes
+    /// this process's copies of it: everything under its name (and its
+    /// recordings and pictures) when nobody else has written it since, as when the new
+    /// shard replicates to another region's bucket; else only the
+    /// generations not in use, leaving the new shard's.
+    pub async fn release(&self, name: &str) {
+        self.forget(name, false).await;
+        let released = async {
+            let current = current(&self.store, name).await?;
+            let ours = current.as_ref().and_then(|c| c.writer.as_deref()).is_none_or(|writer| writer == self.writer);
+            if !ours {
+                let keep: BTreeSet<String> = current.into_iter().map(|c| c.generation).collect();
+                return self.prune(name, &keep).await;
+            }
+            let mut prefixes = vec![format!("{name}/")];
+            if let Some(id) = name.strip_prefix("servers/") {
+                prefixes.push(format!("recordings/{id}/"));
+                prefixes.push(format!("{}/{id}/", crate::cluster::pictures::DIR));
+            }
+            for prefix in prefixes {
+                for object in self.store.list(&prefix).await? {
+                    self.store.delete(&object.key).await?;
+                }
+            }
+            Ok::<_, Error>(())
+        }
+        .await;
+        if let Err(err) = released {
+            tracing::warn!(file = %name, error = %err, "couldn't delete the replica of a server that moved away");
+        }
+    }
+
     /// Copies pictures from `dir` (`<data>/media`) up as they arrive.
     pub fn track_media(&self, dir: PathBuf) {
         *self.media.lock().unwrap_or_else(|p| p.into_inner()) = Some(dir);

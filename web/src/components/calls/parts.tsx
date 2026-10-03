@@ -1,5 +1,5 @@
 import * as Popover from "@radix-ui/react-popover";
-import { CircleDotIcon, HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon, MonitorUpIcon, PhoneOffIcon, ServerIcon, ShieldOffIcon, VideoIcon, Volume2Icon, VolumeXIcon } from "lucide-react";
+import { CircleDotIcon, HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon, MonitorUpIcon, PhoneOffIcon, ServerIcon, ShieldOffIcon, VideoIcon, VideoOffIcon, Volume2Icon, VolumeXIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState, type ReactNode } from "react";
 import type { User, VoiceState } from "@/gen/fuwa/v1/types_pb";
@@ -50,13 +50,14 @@ export function VoiceAvatar({ user, speaking, className, ring = 3 }: { user: Use
 }
 
 /** The little icons after someone's name: camera on, muted, deafened, or muted by a moderator (in red). */
-export function VoiceFlags({ state, className }: { state: Pick<VoiceState, "selfMute" | "selfDeaf" | "serverMute" | "serverDeaf" | "suppress" | "selfVideo" | "selfStream" | "selfRecord" | "serverRecord"> | undefined; className?: string }) {
+export function VoiceFlags({ state, className }: { state: Pick<VoiceState, "selfMute" | "selfDeaf" | "serverMute" | "serverDeaf" | "suppress" | "selfVideo" | "selfStream" | "selfRecord" | "serverRecord" | "serverVideoOff"> | undefined; className?: string }) {
   if (!state) return null;
   const flags: { key: string; icon: typeof MicOffIcon; label: string; mod?: boolean }[] = [];
   if (state.serverRecord) flags.push({ key: "server-record", icon: ServerIcon, label: "Recording this channel on the server", mod: true });
   if (state.selfRecord) flags.push({ key: "record", icon: CircleDotIcon, label: "Recording this call", mod: true });
   if (state.selfStream) flags.push({ key: "screen", icon: MonitorUpIcon, label: "Sharing their screen" });
   if (state.selfVideo) flags.push({ key: "video", icon: VideoIcon, label: "Camera on" });
+  if (state.serverVideoOff) flags.push({ key: "server-video-off", icon: VideoOffIcon, label: "Camera and screen share turned off by a moderator", mod: true });
   if (state.serverMute) flags.push({ key: "server-mute", icon: MicOffIcon, label: "Muted by a moderator", mod: true });
   else if (state.suppress) flags.push({ key: "suppress", icon: MicOffIcon, label: "Can't speak here", mod: true });
   else if (state.selfMute) flags.push({ key: "mute", icon: MicOffIcon, label: "Muted" });
@@ -202,7 +203,7 @@ export function ParticipantMenu({
     applyVolumes();
   };
 
-  const moderate = async (change: { serverMute?: boolean; serverDeaf?: boolean; disconnect?: boolean }) => {
+  const moderate = async (change: { serverMute?: boolean; serverDeaf?: boolean; serverVideoOff?: boolean; disconnect?: boolean }) => {
     try {
       await engine(instanceKey).api.calls.moderateVoice({ serverId: serverId!, userId, ...change });
       if (change.disconnect) setOpen(false);
@@ -262,6 +263,11 @@ export function ParticipantMenu({
                     {canMute && (
                       <ModItem on={state.serverDeaf} onClick={() => void moderate({ serverDeaf: !state.serverDeaf })} icon={HeadphoneOffIcon}>
                         {state.serverDeaf ? "Undeafen for everyone" : "Deafen for everyone"}
+                      </ModItem>
+                    )}
+                    {canMute && (
+                      <ModItem on={state.serverVideoOff} onClick={() => void moderate({ serverVideoOff: !state.serverVideoOff })} icon={VideoOffIcon}>
+                        {state.serverVideoOff ? "Allow camera and screen" : state.selfStream && !state.selfVideo ? "Stop their screen share" : state.selfVideo && !state.selfStream ? "Turn their camera off" : "Turn camera and screen off"}
                       </ModItem>
                     )}
                     {canMove && (

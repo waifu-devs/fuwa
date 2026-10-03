@@ -3,8 +3,10 @@ syntax = "proto3";
 package fuwa.cluster.v1;
 
 import "fuwa/v1/admin.proto";
+import "fuwa/v1/channel.proto";
 import "fuwa/v1/invite.proto";
 import "fuwa/v1/media.proto";
+import "fuwa/v1/message.proto";
 import "fuwa/v1/types.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -44,6 +46,15 @@ service DirectoryService {
   rpc KeepPicture(KeepPictureRequest) returns (KeepPictureResponse);
   // Deletes the server icon or emoji a change replaced.
   rpc DropPicture(DropPictureRequest) returns (DropPictureResponse);
+  // Sends a server's picture (its icon, an emoji, a webhook's picture) to
+  // the shard holding the server, which keeps it from then on, piece by
+  // piece and checked by SHA-256. See docs/regions.md.
+  rpc SendPicture(SendPictureRequest) returns (stream SendPictureResponse);
+  // The shard holding the server has the picture now: the directory's copy
+  // (and its replica's) goes, and its link leads to the shard.
+  rpc ForgetPicture(ForgetPictureRequest) returns (ForgetPictureResponse);
+  // A server's pictures the directory still keeps, for its shard to take.
+  rpc ServerPictures(ServerPicturesRequest) returns (ServerPicturesResponse);
   // How many servers an account owns, for the cap on that.
   rpc CountOwnedServers(CountOwnedServersRequest) returns (CountOwnedServersResponse);
   // An agent by username, for adding it to a server.
@@ -59,6 +70,9 @@ service DirectoryService {
   // The shard has a checked copy of the files TakeServers sent; the
   // directory moves its own out of the way, to handed-over/.
   rpc HandedOver(HandedOverRequest) returns (HandedOverResponse);
+  // Passes a call between the two ends of a shared channel on to the shard
+  // holding the server it's for.
+  rpc PassShared(PassSharedRequest) returns (PassSharedResponse);
 }
 
 // Run by each shard, which keeps some of the servers' files.
@@ -79,6 +93,26 @@ service ShardService {
   rpc ChannelExists(ChannelExistsRequest) returns (ChannelExistsResponse);
   // Where an invite leads, for the directory's GetInvite.
   rpc DescribeInvite(DescribeInviteRequest) returns (DescribeInviteResponse);
+  // A call from the other end of a shared channel, for one of this shard's
+  // servers: a guest server's people reading and writing in the home's
+  // channel, or the home telling a guest what changed.
+  rpc Shared(SharedRequest) returns (SharedResponse);
+
+  // Moving a server to another shard (and so maybe another region), run by
+  // the directory: it asks the new shard to AdoptServer, which takes the
+  // server's files from the old one with SendServer, then tells the old one
+  // to ReleaseServer. See docs/regions.md.
+
+  // Sends a server's files (its database, then its recordings and pictures), each
+  // checked by SHA-256. From the first piece on, the server takes no more
+  // changes here until ReleaseServer.
+  rpc SendServer(SendServerRequest) returns (stream SendServerResponse);
+  // Takes a server from the shard at `from_url`, opens it here and starts
+  // replicating it. Answers once it's ready for clients.
+  rpc AdoptServer(AdoptServerRequest) returns (AdoptServerResponse);
+  // Ends a move for this shard: lets go of the server (deleting its files
+  // here and this shard's replica of it), or keeps it and takes changes again.
+  rpc ReleaseServer(ReleaseServerRequest) returns (ReleaseServerResponse);
 }
 
 // Run by each media part, which carries calls' sound (WebRTC). The parts
@@ -244,9 +278,20 @@ message RegisterShardRequest {
   // Every server the shard holds. Servers the directory had on this shard and
   // that aren't here are gone.
   repeated ServerEntry servers = 3;
+  // The shard's FUWA_REGION; empty for the instance's home region.
+  string region = 4;
+  // Its FUWA_REGION_NAME, if set.
+  string region_name = 5;
 }
 
-message RegisterShardResponse {}
+message RegisterShardResponse {
+  // Servers this shard still has that moved to another shard: it lets go of
+  // them (as ReleaseServer without keep).
+  repeated string moved_away = 1;
+  // Servers still being moved off this shard. Any other it has stopped
+  // taking changes to for a move takes them again.
+  repeated string moving = 2;
+}
 
 message PlacementsRequest {
   repeated string server_ids = 1;
@@ -332,6 +377,34 @@ message DropPictureRequest {
 }
 
 message DropPictureResponse {}
+
+message SendPictureRequest {
+  string media_id = 1;
+  string server_id = 2;
+}
+
+// A piece of the picture, in order.
+message SendPictureResponse {
+  bytes data = 1;
+  // Set on the last piece (which may have no data): the SHA-256 of the
+  // whole file.
+  bytes sha256 = 2;
+}
+
+message ForgetPictureRequest {
+  string media_id = 1;
+  string server_id = 2;
+}
+
+message ForgetPictureResponse {}
+
+message ServerPicturesRequest {
+  string server_id = 1;
+}
+
+message ServerPicturesResponse {
+  repeated string media_ids = 1;
+}
 
 message CountOwnedServersRequest {
   string account_id = 1;
@@ -459,6 +532,40 @@ message ChannelExistsResponse {
   bool exists = 1;
 }
 
+message SendServerRequest {
+  string server_id = 1;
+}
+
+// A piece of one file. A file's pieces come in order, one file after another.
+message SendServerResponse {
+  // Where it goes, from the data folder: `servers/<id>.db` (or a file kept
+  // beside it), `recordings/<id>/<recording>/<file>`, or a picture the
+  // server keeps, `server-pictures/<id>/<picture>`.
+  string path = 1;
+  bytes data = 2;
+  // Set on a file's last piece (which may have no data): the SHA-256 of the
+  // whole file.
+  bytes sha256 = 3;
+}
+
+message AdoptServerRequest {
+  string server_id = 1;
+  // Where the shard holding it now is.
+  string from_url = 2;
+}
+
+message AdoptServerResponse {
+  ServerEntry entry = 1;
+}
+
+message ReleaseServerRequest {
+  string server_id = 1;
+  // True to keep it (the move didn't happen), false to let go of it.
+  bool keep = 2;
+}
+
+message ReleaseServerResponse {}
+
 message DescribeInviteRequest {
   string server_id = 1;
   string code = 2;
@@ -466,4 +573,139 @@ message DescribeInviteRequest {
 
 message DescribeInviteResponse {
   fuwa.v1.GetInviteResponse invite = 1;
+}
+
+message PassSharedRequest {
+  SharedCall call = 1;
+}
+
+message PassSharedResponse {
+  SharedReply reply = 1;
+}
+
+message SharedRequest {
+  SharedCall call = 1;
+}
+
+message SharedResponse {
+  SharedReply reply = 1;
+}
+
+// Between the servers at the two ends of a shared channel. Shards only trust
+// each other's word through the cluster key: the guest's shard has checked
+// what its people may do in the guest server, and the home's shard checks
+// the rest (the connection, what it allows, blocks, slow mode, AutoMod).
+message SharedCall {
+  // The server it's for: the home, or a guest.
+  string server_id = 1;
+  oneof call {
+    // To the home.
+    ShareLookup lookup = 2;
+    ShareAsk ask = 3;
+    GuestSend send = 4;
+    GuestList list = 5;
+    GuestGet get = 6;
+    GuestEdit edit = 7;
+    GuestDelete delete = 8;
+    // The guest ended the connection, or withdrew its request.
+    GuestLeft left = 9;
+    // To a guest.
+    HomeApproved approved = 10;
+    // The home ended the connection: turned the request down, disconnected,
+    // or deleted the channel or itself.
+    HomeEnded ended = 11;
+    // What just happened in the channel, for the guest's people to see live.
+    HomeEvents events = 12;
+    // What the guest's people may do changed.
+    HomeUpdated updated = 13;
+  }
+}
+
+message SharedReply {
+  fuwa.v1.PreviewShareResponse preview = 1;
+  fuwa.v1.SharedConnection connection = 2;
+  fuwa.v1.Message message = 3;
+  fuwa.v1.ListMessagesResponse page = 4;
+  fuwa.v1.User author = 5;
+}
+
+// Someone in a guest server, acting in the channel it shows.
+message Guest {
+  string connection_id = 1;
+  fuwa.v1.User user = 2;
+  // Their server as it is now.
+  fuwa.v1.SharedServer server = 3;
+  // They can manage messages in the guest's channel: they may delete
+  // messages the guest server's people wrote.
+  bool moderator = 4;
+}
+
+message ShareLookup {
+  string code = 1;
+  // The server that would show it.
+  string guest_server_id = 2;
+}
+
+message ShareAsk {
+  string code = 1;
+  // The connection's id, made by the guest.
+  string connection_id = 2;
+  fuwa.v1.SharedServer guest = 3;
+  string asked_by_id = 4;
+}
+
+message GuestSend {
+  Guest guest = 1;
+  string content = 2;
+  repeated fuwa.v1.Attachment attachments = 3;
+  repeated fuwa.v1.Embed embeds = 4;
+  string reply_to_id = 5;
+}
+
+message GuestList {
+  Guest guest = 1;
+  int32 limit = 2;
+  string before_id = 3;
+  string after_id = 4;
+}
+
+message GuestGet {
+  Guest guest = 1;
+  string message_id = 2;
+}
+
+message GuestEdit {
+  Guest guest = 1;
+  string message_id = 2;
+  string content = 3;
+}
+
+message GuestDelete {
+  Guest guest = 1;
+  string message_id = 2;
+}
+
+message GuestLeft {
+  string connection_id = 1;
+  string guest_server_id = 2;
+  string actor_id = 3;
+}
+
+message HomeApproved {
+  fuwa.v1.SharedConnection connection = 1;
+  string actor_id = 2;
+}
+
+message HomeEnded {
+  string connection_id = 1;
+  string actor_id = 2;
+}
+
+message HomeEvents {
+  string connection_id = 1;
+  repeated fuwa.v1.Event events = 2;
+}
+
+message HomeUpdated {
+  fuwa.v1.SharedConnection connection = 1;
 }

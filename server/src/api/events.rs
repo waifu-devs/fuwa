@@ -298,6 +298,10 @@ impl EventService for Api {
                             send(Err(Status::aborted(message))).await;
                             return;
                         }
+                        Some((_, Ok(event))) if crate::hub::is_moved(&event) => {
+                            send(Err(crate::error::Error::Misrouted.into())).await;
+                            return;
+                        }
                         Some((server_id, Ok(event))) => {
                             let last = last_sent.entry(server_id.clone()).or_default();
                             if event.sequence != 0 && event.sequence <= *last {

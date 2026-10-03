@@ -215,7 +215,11 @@ impl App {
             };
             if let Err(err) = link.directory().drop_picture(request).await {
                 tracing::warn!(media = %id, error = %err.message(), "couldn't delete a replaced picture");
+                return;
             }
+            // The directory deletes it only if it was the server's, and only
+            // the server's pictures are ever kept here.
+            crate::cluster::pictures::drop(self, server_id, &id).await;
             return;
         }
         let row = match async { self.node()?.media(&id).await }.await {
@@ -271,6 +275,20 @@ impl App {
         }
     }
 
+    /// The regions this instance keeps servers in, the home region first;
+    /// one or none when there's nothing to choose.
+    pub fn regions(&self) -> Vec<pb::Region> {
+        match &self.link {
+            Link::Directory(shards) => shards.regions(),
+            _ if self.config.cluster.region.is_empty() => vec![],
+            _ => {
+                let cluster = &self.config.cluster;
+                let name = super::region_name(&cluster.region, cluster.region_name.as_deref());
+                vec![pb::Region { id: cluster.region.clone(), name, home: true }]
+            }
+        }
+    }
+
     /// The caller's device and the live devices of `account_ids`, for
     /// checking a secure channel's commits. Devices live where direct
     /// messages do, on the directory.
@@ -303,19 +321,21 @@ impl App {
 
     // ─────────────── Asked of the shards ───────────────
 
-    /// Makes a new server: here, or on the shard holding the fewest.
-    pub async fn create_server(&self, owner: &pb::User, new: NewServer) -> Result<pb::Server> {
+    /// Makes a new server in `region` (empty for the home region): here, or
+    /// on the shard there holding the fewest.
+    pub async fn create_server(&self, owner: &pb::User, new: NewServer, region: &str) -> Result<pb::Server> {
+        if !region.is_empty() {
+            super::check_region(region).map_err(|err| Error::invalid(format!("region {err}")))?;
+        }
         let Link::Directory(shards) = &self.link else {
+            if !region.is_empty() && region != self.config.cluster.region {
+                return Err(Error::invalid(format!("this instance has no region {region:?}")));
+            }
             let server = self.servers.create(owner, new).await?;
             self.index.insert(server.clone(), vec![owner.id.clone()], vec![], None);
             return Ok(server);
         };
-        let sizes = self.index.shard_sizes();
-        let (shard_id, mut client) = shards
-            .up()
-            .into_iter()
-            .min_by_key(|(id, _)| (sizes.get(id).copied().unwrap_or(0), id.clone()))
-            .ok_or_else(|| Error::Unavailable("no shard is up to hold a new server; try again soon".into()))?;
+        let (shard_id, mut client) = shards.emptiest_in(region, &self.index.shard_sizes())?;
         let request = cpb::CreateServerRequest {
             owner: Some(owner.clone()),
             name: new.name,
@@ -472,5 +492,28 @@ impl App {
         let request =
             cpb::ChannelExistsRequest { server_id: server_id.to_string(), channel_id: channel_id.to_string() };
         Ok(shards.client(&shard_id)?.channel_exists(request).await?.into_inner().exists)
+    }
+
+    // ─────────────── Between shared channels' servers ───────────────
+
+    /// A call between the two ends of a shared channel, answered where the
+    /// server it's for is kept: here, or on its shard through the directory
+    /// (shards don't know each other).
+    pub async fn shared(self: &Arc<Self>, call: cpb::SharedCall) -> Result<cpb::SharedReply> {
+        if self.servers.holds(&call.server_id) {
+            return crate::api::shared_call(self, call).await;
+        }
+        match &self.link {
+            Link::Shard(link) => {
+                let request = cpb::PassSharedRequest { call: Some(call) };
+                Ok(link.directory().pass_shared(request).await?.into_inner().reply.unwrap_or_default())
+            }
+            Link::Directory(shards) => {
+                let shard_id = self.index.placement(&call.server_id).ok_or(Error::NotFound("server"))?;
+                let request = cpb::SharedRequest { call: Some(call) };
+                Ok(shards.client(&shard_id)?.shared(request).await?.into_inner().reply.unwrap_or_default())
+            }
+            Link::Alone => Err(Error::NotFound("server")),
+        }
     }
 }

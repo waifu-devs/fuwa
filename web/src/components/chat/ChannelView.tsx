@@ -10,6 +10,7 @@ import { Composer } from "@/components/chat/Composer";
 import { MemberList } from "@/components/chat/MemberList";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
 import { NotificationBell } from "@/components/chat/NotificationBell";
+import { SharedPill } from "@/components/chat/Shared";
 import { CopyId } from "@/components/CopyId";
 import { ConnDot, connectionLabel } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
@@ -71,6 +72,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
               </h1>
             </motion.span>
           </AnimatePresence>
+          <SharedPill channel={channel} />
           {channel.topic && (
             <>
               <span className="hidden h-5 w-px bg-border sm:block" />

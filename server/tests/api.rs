@@ -79,6 +79,7 @@ struct Clients {
     emojis: pb::emoji_service_client::EmojiServiceClient<Channel>,
     webhooks: pb::webhook_service_client::WebhookServiceClient<Channel>,
     agents: pb::agent_service_client::AgentServiceClient<Channel>,
+    shared: pb::shared_channel_service_client::SharedChannelServiceClient<Channel>,
 }
 
 async fn clients(instance: &Instance) -> Clients {
@@ -99,7 +100,8 @@ async fn clients(instance: &Instance) -> Clients {
         automod: pb::auto_mod_service_client::AutoModServiceClient::new(channel.clone()),
         emojis: pb::emoji_service_client::EmojiServiceClient::new(channel.clone()),
         webhooks: pb::webhook_service_client::WebhookServiceClient::new(channel.clone()),
-        agents: pb::agent_service_client::AgentServiceClient::new(channel),
+        agents: pb::agent_service_client::AgentServiceClient::new(channel.clone()),
+        shared: pb::shared_channel_service_client::SharedChannelServiceClient::new(channel),
     }
 }
 
@@ -361,6 +363,7 @@ async fn a_community_end_to_end() {
         .update_message(authed(
             &mika,
             pb::UpdateMessageRequest {
+                channel_id: String::new(),
                 server_id: sid.clone(),
                 message_id: sent[0].id.clone(),
                 content: "hijacked".into(),
@@ -374,6 +377,7 @@ async fn a_community_end_to_end() {
         .update_message(authed(
             &juan,
             pb::UpdateMessageRequest {
+                channel_id: String::new(),
                 server_id: sid.clone(),
                 message_id: sent[0].id.clone(),
                 content: "message zero".into(),
@@ -389,7 +393,11 @@ async fn a_community_end_to_end() {
     c.messages
         .delete_message(authed(
             &juan,
-            pb::DeleteMessageRequest { server_id: sid.clone(), message_id: sent[1].id.clone() },
+            pb::DeleteMessageRequest {
+                channel_id: String::new(),
+                server_id: sid.clone(),
+                message_id: sent[1].id.clone(),
+            },
         ))
         .await
         .unwrap();
@@ -1924,6 +1932,7 @@ async fn server_settings_and_moderation() {
         .update_message(authed(
             &mika,
             pb::UpdateMessageRequest {
+                channel_id: String::new(),
                 server_id: sid.clone(),
                 message_id: welcomed[0].id.clone(),
                 content: "hi".into(),
@@ -2063,12 +2072,18 @@ async fn server_settings_and_moderation() {
     // A moderator deleting someone's message is logged; deleting your own isn't.
     let spam = send(&mut c, &aoi, &sid, &general.id, "spam").await.unwrap();
     c.messages
-        .delete_message(authed(&mika, pb::DeleteMessageRequest { server_id: sid.clone(), message_id: spam.id }))
+        .delete_message(authed(
+            &mika,
+            pb::DeleteMessageRequest { channel_id: String::new(), server_id: sid.clone(), message_id: spam.id },
+        ))
         .await
         .unwrap();
     let mine = send(&mut c, &mika, &sid, &general.id, "oops").await.unwrap();
     c.messages
-        .delete_message(authed(&mika, pb::DeleteMessageRequest { server_id: sid.clone(), message_id: mine.id }))
+        .delete_message(authed(
+            &mika,
+            pb::DeleteMessageRequest { channel_id: String::new(), server_id: sid.clone(), message_id: mine.id },
+        ))
         .await
         .unwrap();
 
@@ -4333,6 +4348,7 @@ async fn automod_catches_messages() {
         .update_message(authed(
             &member,
             pb::UpdateMessageRequest {
+                channel_id: String::new(),
                 server_id: server.id.clone(),
                 message_id: sent.id.clone(),
                 content: "a scammer!".into(),
@@ -4496,6 +4512,8 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
     assert_eq!(offered.len(), 1);
     assert_eq!((offered[0].name.as_str(), offered[0].host.as_str()), ("Cloudflare Clef", "api.cloudflare.com"));
     assert!(offered[0].labels.iter().any(|l| l.id == "hate" && l.default_level == Level::Block as i32));
+    // Clef reads pictures too.
+    assert!(offered[0].pictures);
 
     // One switch: a rule with no labels gets the defaults. Flags need a channel.
     let rule = save_rule(&mut c, &owner, &server.id, smart.clone()).await.unwrap();
@@ -4510,6 +4528,35 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
     // The key is made up, so the provider turns it down (or can't be reached):
     // messages still go through, and the test says why.
     send(&mut c, &member, &server.id, &general.id, "hello there").await.unwrap();
+
+    // Showing it pictures too: a message that's only a picture is read and
+    // asked about, and still goes through when the provider doesn't answer.
+    let rule = save_rule(&mut c, &owner, &server.id, pb::AutoModRule { pictures: true, ..rule.clone() }).await.unwrap();
+    assert!(rule.pictures);
+    // A 16 by 16 PNG's headers, which is all the server looks at before sending it.
+    let mut cat = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\x10\0\0\0\x10\x08\x06\0\0\0".to_vec();
+    cat.resize(300, 0);
+    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, cat).await;
+    let sent = c
+        .messages
+        .send_message(authed(
+            &member,
+            pb::SendMessageRequest {
+                server_id: server.id.clone(),
+                channel_id: general.id.clone(),
+                attachments: vec![pb::Attachment {
+                    filename: "cat.png".into(),
+                    content_type: "image/png".into(),
+                    url: picture.clone(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(sent.message.unwrap().attachments.len(), 1);
     let tried = c
         .automod
         .test_auto_mod_rule(authed(
@@ -4581,6 +4628,8 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
         .await
         .unwrap();
     assert_eq!(switched.provider, mine.id);
+    // The admins' own providers read text only, so the rule stops asking for pictures.
+    assert!(!switched.pictures && !theirs.pictures);
     send(&mut c, &member, &server.id, &general.id, "hello again").await.unwrap();
     let tried = c
         .automod
@@ -4916,6 +4965,7 @@ async fn webhooks_post_into_channels() {
             .update_message(authed(
                 &owner,
                 pb::UpdateMessageRequest {
+                    channel_id: String::new(),
                     server_id: server.id.clone(),
                     message_id: message.id.clone(),
                     content: "mine now".into()
@@ -5453,7 +5503,14 @@ async fn timed_out_members_only_read() {
         .await;
     assert_eq!(kick.unwrap_err().code(), Code::PermissionDenied);
     let delete = |token: &str, message_id: &str| {
-        authed(token, pb::DeleteMessageRequest { server_id: sid.clone(), message_id: message_id.into() })
+        authed(
+            token,
+            pb::DeleteMessageRequest {
+                channel_id: String::new(),
+                server_id: sid.clone(),
+                message_id: message_id.into(),
+            },
+        )
     };
     assert_eq!(
         c.messages.delete_message(delete(&moderator, &theirs.id)).await.unwrap_err().code(),
@@ -5672,4 +5729,485 @@ async fn apps_send_reports_through_their_instance() {
     let again = c.node.send_report(authed(&token, report())).await.unwrap_err();
     assert_eq!(again.code(), tonic::Code::ResourceExhausted);
     instance.stop().await;
+}
+
+async fn list_channels(c: &mut Clients, token: &str, server_id: &str) -> Vec<pb::Channel> {
+    c.channels
+        .list_channels(authed(token, pb::ListChannelsRequest { server_id: server_id.into() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+}
+
+async fn connections(c: &mut Clients, token: &str, server_id: &str) -> pb::ListConnectionsResponse {
+    c.shared
+        .list_connections(authed(token, pb::ListConnectionsRequest { server_id: server_id.into() }))
+        .await
+        .unwrap()
+        .into_inner()
+}
+
+/// Shares `channel_id` from `home` into `guest`: a code, the guest's ask, the
+/// home's approval. Returns the guest's channel.
+async fn share(
+    c: &mut Clients,
+    home_token: &str,
+    home: &str,
+    channel_id: &str,
+    guest_token: &str,
+    guest: &str,
+) -> pb::Channel {
+    let code = c
+        .shared
+        .create_share_code(authed(
+            home_token,
+            pb::CreateShareCodeRequest { server_id: home.into(), channel_id: channel_id.into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap();
+    let asked = c
+        .shared
+        .accept_share(authed(
+            guest_token,
+            pb::AcceptShareRequest { server_id: guest.into(), code: code.code, ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    c.shared
+        .review_share(authed(
+            home_token,
+            pb::ReviewShareRequest { server_id: home.into(), connection_id: asked.id, approve: true },
+        ))
+        .await
+        .unwrap();
+    list_channels(c, guest_token, guest)
+        .await
+        .into_iter()
+        .find(|ch| ch.shared.as_ref().is_some_and(|s| !s.home))
+        .unwrap()
+}
+
+/// The next message created on a stream, skipping other events.
+async fn next_message(stream: &mut tonic::Streaming<pb::SubscribeResponse>) -> pb::Message {
+    loop {
+        if let Some(pb::event::Payload::MessageCreated(created)) = next_event(stream).await.payload {
+            return created.message.unwrap();
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn channels_shared_between_servers() {
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, juan_user, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let (sora, sora_user, _) = sign_up(&mut c, "sora").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    join(&mut c, &rin, &guest).await;
+    join(&mut c, &sora, &home).await;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+
+    // Only people who manage the server make codes, and only for text channels.
+    let denied = c
+        .shared
+        .create_share_code(authed(
+            &sora,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let voice = new_channel(&mut c, &juan, &home, "Lounge", pb::ChannelType::Voice).await;
+    let refused = c
+        .shared
+        .create_share_code(authed(&juan, pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: voice.id }))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
+
+    // The guest's admin sees where the messages live before asking.
+    let code = c
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap();
+    assert!(code.code.starts_with(&home));
+    let own = c
+        .shared
+        .preview_share(authed(&juan, pb::PreviewShareRequest { server_id: home.clone(), code: code.code.clone() }))
+        .await
+        .unwrap_err();
+    assert_eq!(own.code(), Code::InvalidArgument);
+    let preview = c
+        .shared
+        .preview_share(authed(&mika, pb::PreviewShareRequest { server_id: guest.clone(), code: code.code.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(preview.home_server.unwrap().name, "Home");
+    assert_eq!(preview.channel_name, "dev");
+    assert_eq!(preview.guest_count, 0);
+    let asked = c
+        .shared
+        .accept_share(authed(
+            &mika,
+            pb::AcceptShareRequest {
+                server_id: guest.clone(),
+                code: code.code.clone(),
+                name: "Partner Dev".into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    assert_eq!(asked.state, pb::SharedConnectionState::Waiting as i32);
+    // Each code lets one server ask.
+    let again = c
+        .shared
+        .preview_share(authed(&mika, pb::PreviewShareRequest { server_id: guest.clone(), code: code.code }))
+        .await
+        .unwrap_err();
+    assert_eq!(again.code(), Code::NotFound);
+    // Nothing shows until the home approves.
+    assert!(list_channels(&mut c, &rin, &guest).await.iter().all(|ch| ch.shared.is_none()));
+    let waiting = connections(&mut c, &juan, &home).await.connections;
+    assert_eq!(waiting.len(), 1);
+    assert!(waiting[0].home);
+    assert_eq!(waiting[0].server.as_ref().unwrap().name, "Guest");
+    c.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: waiting[0].id.clone(), approve: true },
+        ))
+        .await
+        .unwrap();
+
+    // Both sides see it's shared, and where it lives.
+    let shown = list_channels(&mut c, &rin, &guest).await.into_iter().find(|ch| ch.shared.is_some()).unwrap();
+    assert_eq!(shown.name, "partner-dev");
+    let link = shown.shared.clone().unwrap();
+    assert!(!link.home);
+    assert_eq!(link.home_server.unwrap().name, "Home");
+    assert_eq!(link.home_channel_name, "dev");
+    let at_home = list_channels(&mut c, &sora, &home).await.into_iter().find(|ch| ch.id == dev.id).unwrap();
+    assert_eq!(at_home.shared.unwrap().guests[0].name, "Guest");
+
+    // What's said at home reaches the guest's people live.
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: guest.clone(), after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    send(&mut c, &juan, &home, &dev.id, "@everyone hello from home").await.unwrap();
+    let live = next_message(&mut stream).await;
+    assert_eq!(live.content, "@everyone hello from home");
+    assert!(!live.mentions_everyone, "the home's @everyone doesn't ping the guest's people");
+    assert_eq!(live.channel_id, shown.id);
+    assert_eq!(live.server_id, guest);
+    let author = live.shared.unwrap();
+    assert_eq!(author.user.unwrap().id, juan_user.id);
+    assert_eq!(author.server.unwrap().name, "Home");
+
+    // A guest writes; the message lives only at home.
+    let kept_before = usage(&mut c, &mika, &guest).await.messages;
+    let hi = send(&mut c, &rin, &guest, &shown.id, "hi from guest @everyone").await.unwrap();
+    assert_eq!(hi.channel_id, shown.id);
+    let home_side = messages(&mut c, &juan, &home, &dev.id).await;
+    let stored = home_side.iter().find(|m| m.id == hi.id).unwrap();
+    assert!(!stored.mentions_everyone, "pings never cross servers");
+    assert_eq!(stored.shared.as_ref().unwrap().server.as_ref().unwrap().name, "Guest");
+    let from_home = home_side.iter().find(|m| m.content == "@everyone hello from home").unwrap();
+    assert!(from_home.shared.is_none() && from_home.mentions_everyone, "it pings the home's own people");
+    let guest_side = messages(&mut c, &rin, &guest, &shown.id).await;
+    assert_eq!(
+        guest_side.iter().map(|m| m.content.as_str()).collect::<Vec<_>>(),
+        vec!["@everyone hello from home", "hi from guest @everyone"]
+    );
+    assert!(guest_side.iter().all(|m| m.channel_id == shown.id && m.shared.is_some() && !m.mentions_everyone));
+    assert_eq!(usage(&mut c, &mika, &guest).await.messages, kept_before, "the guest keeps nothing");
+
+    // Editing works with or without the channel named; others' messages aren't theirs to touch.
+    let edited = c
+        .messages
+        .update_message(authed(
+            &rin,
+            pb::UpdateMessageRequest {
+                server_id: guest.clone(),
+                message_id: hi.id.clone(),
+                content: "hi from guest".into(),
+                channel_id: String::new(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .message
+        .unwrap();
+    assert_eq!(edited.content, "hi from guest");
+    let theirs = guest_side.iter().find(|m| m.content == "@everyone hello from home").unwrap().id.clone();
+    let not_mine = c
+        .messages
+        .delete_message(authed(
+            &rin,
+            pb::DeleteMessageRequest { server_id: guest.clone(), message_id: theirs, channel_id: shown.id.clone() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(not_mine.code(), Code::PermissionDenied);
+
+    // The home keeps a guest out; its own members are kicked or banned instead.
+    let member = c
+        .shared
+        .block_from_channel(authed(
+            &juan,
+            pb::BlockFromChannelRequest {
+                server_id: home.clone(),
+                channel_id: dev.id.clone(),
+                user_id: sora_user.id.clone(),
+                blocked: true,
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(member.code(), Code::InvalidArgument);
+    c.shared
+        .block_from_channel(authed(
+            &juan,
+            pb::BlockFromChannelRequest {
+                server_id: home.clone(),
+                channel_id: dev.id.clone(),
+                user_id: rin_user.id.clone(),
+                blocked: true,
+            },
+        ))
+        .await
+        .unwrap();
+    let kept_out = send(&mut c, &rin, &guest, &shown.id, "let me in").await.unwrap_err();
+    assert_eq!(kept_out.code(), Code::PermissionDenied);
+    assert_eq!(connections(&mut c, &juan, &home).await.blocks.len(), 1);
+    c.shared
+        .block_from_channel(authed(
+            &juan,
+            pb::BlockFromChannelRequest {
+                server_id: home.clone(),
+                channel_id: dev.id.clone(),
+                user_id: rin_user.id.clone(),
+                blocked: false,
+            },
+        ))
+        .await
+        .unwrap();
+
+    // Each side's AutoMod reads what the guest's people write. A home rule
+    // that would time someone out keeps a guest out of the channel instead.
+    let rule = |word: &str, actions: Vec<pb::AutoModAction>| pb::AutoModRule {
+        enabled: true,
+        trigger: pb::AutoModTrigger::Keywords as i32,
+        keywords: vec![word.into()],
+        actions,
+        ..Default::default()
+    };
+    let block = pb::AutoModAction { kind: pb::AutoModActionKind::Block as i32, ..Default::default() };
+    let time_out =
+        pb::AutoModAction { kind: pb::AutoModActionKind::TimeOut as i32, duration_seconds: 60, ..Default::default() };
+    save_rule(&mut c, &mika, &guest, rule("nope", vec![block.clone()])).await.unwrap();
+    let caught_here = send(&mut c, &rin, &guest, &shown.id, "nope").await.unwrap_err();
+    assert_eq!(caught_here.code(), Code::PermissionDenied);
+    save_rule(&mut c, &juan, &home, rule("forbidden", vec![block, time_out])).await.unwrap();
+    let caught_there = send(&mut c, &rin, &guest, &shown.id, "forbidden").await.unwrap_err();
+    assert!(caught_there.message().starts_with("AutoMod"), "{caught_there:?}");
+    assert!(
+        messages(&mut c, &juan, &home, &dev.id).await.iter().all(|m| m.content != "nope" && m.content != "forbidden")
+    );
+    let blocks = connections(&mut c, &juan, &home).await.blocks;
+    assert_eq!(blocks[0].user.as_ref().unwrap().id, rin_user.id);
+    assert_eq!(send(&mut c, &rin, &guest, &shown.id, "hello?").await.unwrap_err().code(), Code::PermissionDenied);
+    c.shared
+        .block_from_channel(authed(
+            &juan,
+            pb::BlockFromChannelRequest {
+                server_id: home.clone(),
+                channel_id: dev.id.clone(),
+                user_id: rin_user.id.clone(),
+                blocked: false,
+            },
+        ))
+        .await
+        .unwrap();
+    send(&mut c, &rin, &guest, &shown.id, "back again").await.unwrap();
+
+    // The home decides what guests may do, never more than sending.
+    let connection_id = connections(&mut c, &juan, &home).await.connections[0].id.clone();
+    let too_much = c
+        .shared
+        .update_connection(authed(
+            &juan,
+            pb::UpdateConnectionRequest {
+                server_id: home.clone(),
+                connection_id: connection_id.clone(),
+                allowed: vec![P::ManageMessages as i32],
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(too_much.code(), Code::InvalidArgument);
+    c.shared
+        .update_connection(authed(
+            &juan,
+            pb::UpdateConnectionRequest { server_id: home.clone(), connection_id, allowed: vec![] },
+        ))
+        .await
+        .unwrap();
+    let read_only = send(&mut c, &rin, &guest, &shown.id, "can I?").await.unwrap_err();
+    assert_eq!(read_only.code(), Code::PermissionDenied);
+
+    // Either side can end it; the messages stay at home.
+    let guest_connection = connections(&mut c, &mika, &guest).await.connections[0].id.clone();
+    c.shared
+        .disconnect(authed(&mika, pb::DisconnectRequest { server_id: guest.clone(), connection_id: guest_connection }))
+        .await
+        .unwrap();
+    assert!(list_channels(&mut c, &rin, &guest).await.iter().all(|ch| ch.id != shown.id));
+    assert!(list_channels(&mut c, &juan, &home).await.iter().all(|ch| ch.shared.is_none()));
+    assert!(connections(&mut c, &juan, &home).await.connections.is_empty());
+    assert!(messages(&mut c, &juan, &home, &dev.id).await.iter().any(|m| m.content == "hi from guest"));
+
+    // Deleting the channel at home takes it away from the guest too.
+    let shown = share(&mut c, &juan, &home, &dev.id, &mika, &guest).await;
+    c.channels
+        .delete_channel(authed(&juan, pb::DeleteChannelRequest { server_id: home.clone(), channel_id: dev.id.clone() }))
+        .await
+        .unwrap();
+    assert!(list_channels(&mut c, &rin, &guest).await.iter().all(|ch| ch.id != shown.id));
+    assert!(connections(&mut c, &mika, &guest).await.connections.is_empty());
+
+    // So does deleting the guest server, at home.
+    let ops = new_channel(&mut c, &juan, &home, "ops", pb::ChannelType::Text).await;
+    share(&mut c, &juan, &home, &ops.id, &mika, &guest).await;
+    c.servers.delete_server(authed(&mika, pb::DeleteServerRequest { server_id: guest.clone() })).await.unwrap();
+    assert!(connections(&mut c, &juan, &home).await.connections.is_empty());
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn shared_channels_can_be_turned_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_SHARED_CHANNELS", "off")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let home = create_server(&mut c, &juan, "Home", false).await.id;
+    let general = list_channels(&mut c, &juan, &home).await[0].id.clone();
+    let off = c
+        .shared
+        .create_share_code(authed(&juan, pb::CreateShareCodeRequest { server_id: home, channel_id: general }))
+        .await
+        .unwrap_err();
+    assert_eq!(off.code(), Code::FailedPrecondition);
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn shared_preview_names_outside_providers() {
+    use pb::{AutoModActionKind as Kind, AutoModTrigger as Trigger};
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let mods = new_channel(&mut c, &juan, &home, "mod-log", pb::ChannelType::Text).await;
+    let code = c
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let preview = async |c: &mut Clients| {
+        c.shared
+            .preview_share(authed(&mika, pb::PreviewShareRequest { server_id: guest.clone(), code: code.clone() }))
+            .await
+            .unwrap()
+            .into_inner()
+            .checked_by
+    };
+    // No provider rule: nothing outside reads the channel.
+    assert!(preview(&mut c).await.is_empty());
+
+    let jev = pb::AutoModProviderSettings {
+        id: "typesafe-jev".into(),
+        enabled: true,
+        api_key: "not-a-real-token-1234".into(),
+        ..Default::default()
+    };
+    c.admin
+        .update_settings(authed(
+            &admin,
+            settings_update(
+                pb::InstanceSettings { automod_providers: vec![jev], ..Default::default() },
+                &["automod_providers"],
+                &[],
+            ),
+        ))
+        .await
+        .unwrap();
+    let rule = save_rule(
+        &mut c,
+        &juan,
+        &home,
+        pb::AutoModRule {
+            enabled: true,
+            trigger: Trigger::Provider as i32,
+            provider: "typesafe-jev".into(),
+            actions: vec![pb::AutoModAction {
+                kind: Kind::Alert as i32,
+                channel_id: mods.id.clone(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    // The guest's admin sees who reads their people's messages before asking.
+    assert_eq!(preview(&mut c).await, ["TypeSafe Jev (api.typesafe.ai)"]);
+
+    // A channel the rule leaves alone isn't sent anywhere.
+    save_rule(&mut c, &juan, &home, pb::AutoModRule { exempt_channel_ids: vec![dev.id.clone()], ..rule })
+        .await
+        .unwrap();
+    assert!(preview(&mut c).await.is_empty());
 }

@@ -14,8 +14,10 @@ import type {
   User,
   VoiceState,
 } from "@/gen/fuwa/v1/types_pb";
-import { ApplicationStatus, ChannelType } from "@/gen/fuwa/v1/types_pb";
+import { equals } from "@bufbuild/protobuf";
+import { ApplicationStatus, ChannelType, UserSchema } from "@/gen/fuwa/v1/types_pb";
 import type { DmCall } from "@/gen/fuwa/v1/call_pb";
+import type { ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Item } from "@/e2ee/vault";
 import { loadApplied, type Applied } from "@/lib/applied";
@@ -130,6 +132,11 @@ export type InstanceState = {
   applied: Record<string, Applied>;
   /** Per server: who's in its voice channels, in the order they joined. */
   voice: Record<string, VoiceState[]>;
+  /**
+   * Per server whose shared channels a manager looked at: its connections,
+   * share codes and people kept out. Read again when the server says they changed.
+   */
+  shared: Record<string, ListConnectionsResponse>;
   dms: DmState;
 };
 
@@ -190,6 +197,7 @@ export function emptyInstance(key: string, url: string): InstanceState {
     applications: {},
     applied: loadApplied(key),
     voice: {},
+    shared: {},
     dms: emptyDms(),
   };
 }
@@ -236,6 +244,21 @@ export function sortMembers(members: Member[]): Member[] {
       b.nickname || b.user?.displayName || b.user?.username || "",
     ),
   );
+}
+
+/**
+ * The people a message brings with it: in a shared channel, its author from
+ * another server, who isn't a member here, so their name and picture resolve.
+ */
+export function withSharedAuthors(users: Record<string, User>, messages: (Message | undefined)[]): Record<string, User> {
+  let next = users;
+  for (const m of messages) {
+    const user = m?.shared?.user;
+    // Every message carries its own copy: keep the one we have while it says the same, so lists don't redraw.
+    if (!user || (next[user.id] && equals(UserSchema, next[user.id]!, user))) continue;
+    next = { ...next, [user.id]: user };
+  }
+  return next;
 }
 
 /** Inserts or replaces a message, keeping the list sorted by id (which is by time). */
@@ -285,6 +308,7 @@ export function removeServer(i: InstanceState, serverId: string): InstanceState 
     synced: without(i.synced, serverId),
     applications: without(i.applications, serverId),
     voice: without(i.voice, serverId),
+    shared: without(i.shared, serverId),
     messages: keep(i.messages),
     pending: keep(i.pending),
     unread: keep(i.unread),
@@ -370,7 +394,8 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
       const message = p.value.message;
       if (!message) return i;
       const loaded = i.messages[message.channelId];
-      let next = i;
+      const users = withSharedAuthors(i.users, [message]);
+      let next = users === i.users ? i : { ...i, users };
       if (loaded) {
         next = {
           ...next,
@@ -446,6 +471,9 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
     }
     case "emojisUpdated":
       return { ...i, emojis: { ...i.emojis, [sid]: p.value.emojis } };
+    // Only a signal: the list is read again where it's kept (see sync.ts).
+    case "sharedChannelsUpdated":
+      return i;
     case "applicationUpdated": {
       // Only kept for servers whose list someone opened; the rest load fresh.
       const application = p.value.application;

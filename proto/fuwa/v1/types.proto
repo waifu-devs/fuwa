@@ -27,6 +27,25 @@ message Node {
   Build build = 8;
   // Who may make agents (bot accounts).
   AgentCreation agent_creation = 9;
+  // Servers may share channels with each other here.
+  bool shared_channels = 12;
+  // Where this instance keeps community servers, the home region first.
+  // Empty, or one region, when there's no choice to make (an instance run
+  // as one process, or one whose parts are all in one place).
+  repeated Region regions = 10;
+}
+
+// A part of the world a split instance keeps servers in (docs/regions.md).
+// A server's messages, recordings and calls stay in its region.
+message Region {
+  // A short label, such as "eu" or "us-west". Empty for the home region of
+  // an instance whose parts don't name theirs.
+  string id = 1;
+  // What people see, such as "Europe".
+  string name = 2;
+  // Where accounts, sessions and direct messages are kept, and new servers
+  // go unless their creator picks another.
+  bool home = 3;
 }
 
 // What a fuwa binary was built from. The instance reports this about itself,
@@ -321,6 +340,9 @@ message Server {
   // sees the address of whoever signs in, so apps name it before sending
   // anyone there.
   string sso_host = 20;
+  // The region its data is kept in (Node.regions): its messages, files,
+  // recordings and calls. Empty for the home region.
+  string region = 21;
 }
 
 // What new members see once they're in: a few words and the channels to
@@ -474,6 +496,10 @@ message AutoModRule {
   // where flags go and its TIME_OUT action for how long; both are optional
   // until a label needs them.
   repeated AutoModLabelRule labels = 16;
+  // PROVIDER: also show the provider the message's pictures (attached ones
+  // and embeds'), when it reads pictures (AutoModProvider.pictures). Up to 4
+  // PNG, JPEG or WebP pictures per message, fetched by the server.
+  bool pictures = 17;
 }
 
 // What an AutoMod alert tells moderators.
@@ -591,6 +617,39 @@ message Channel {
   // can manage messages or channels here don't wait. Zero for off.
   int32 slowmode_seconds = 10;
   repeated PermissionOverwrite permission_overwrites = 11;
+  // Set when the channel is shared between servers (SharedChannelService):
+  // this server holds it and shows it in others, or shows another's.
+  SharedChannel shared = 12;
+}
+
+// A channel shown in more than one community server. One server, its home,
+// holds the channel and every message in it; the others (its guests) show it
+// as a channel of their own, with their own name, place and permissions,
+// and keep nothing of what's said there.
+message SharedChannel {
+  // This server is the channel's home.
+  bool home = 1;
+  // The home server, and the channel's name there.
+  SharedServer home_server = 2;
+  string home_channel_name = 3;
+  // The servers it's shown in besides its home.
+  repeated SharedServer guests = 4;
+}
+
+// A server on the other end of a shared channel, as its admins named it.
+message SharedServer {
+  string id = 1;
+  string name = 2;
+  string icon_url = 3;
+}
+
+// Who wrote a message in a shared channel and which server they're from,
+// since they needn't be a member of the server it's read in. Set on messages
+// in a shared channel read in a guest server, and on messages written by a
+// guest server's people.
+message SharedAuthor {
+  User user = 1;
+  SharedServer server = 2;
 }
 
 enum MessageKind {
@@ -627,6 +686,8 @@ message Message {
   // Posted by a webhook, whose id is the author_id: who it says it is.
   // Clients show this instead of a profile.
   MessageWebhook webhook = 15;
+  // In a shared channel: who wrote it and from which server.
+  SharedAuthor shared = 16;
 }
 
 // The name and picture a webhook message was posted under: the webhook's
@@ -765,6 +826,7 @@ message Event {
     EmojisUpdated emojis_updated = 26;
     SecureRecordAdded secure_record_added = 27;
     SecureRecordDeleted secure_record_deleted = 28;
+    SharedChannelsUpdated shared_channels_updated = 29;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).
@@ -821,6 +883,10 @@ message VoiceState {
   // allowing it (InstanceSettings.call_recordings). Never set in
   // direct-message calls.
   bool server_record = 15;
+  // A moderator turned their camera and shared screen off: they can't turn
+  // either on in this server until a moderator lifts it. Like server mute,
+  // it outlasts the call. Never set in direct-message calls.
+  bool server_video_off = 16;
 }
 
 message ServerUpdated {
@@ -898,6 +964,11 @@ message ApplicationUpdated {
 message EmojisUpdated {
   repeated Emoji emojis = 1;
 }
+
+// The server's shared channels, requests or codes changed
+// (SharedChannelService.ListConnections has them). Only members who can
+// manage the server get it.
+message SharedChannelsUpdated {}
 
 message RoleUpdated {
   Role role = 1;

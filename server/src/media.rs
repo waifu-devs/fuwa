@@ -3,7 +3,9 @@
 //! An upload is reserved with `MediaService.CreateUpload`, which makes a row
 //! in node.db's `media` table and a one-time token. The bytes arrive with an
 //! HTTP PUT to `/media/upload/<token>`, and the picture is then served at
-//! `/media/<id>` to anyone with the link. Setting that link as a picture marks
+//! `/media/<id>` to anyone with the link (on a split instance, a server's
+//! pictures are kept by its shard once it uses them; see
+//! [`crate::cluster::pictures`]). Setting that link as a picture marks
 //! it used; replacing or clearing it deletes the old one, and uploads nothing
 //! uses are swept after a day.
 //!
@@ -198,6 +200,14 @@ async fn serve(app: Arc<App>, id: String, headers: HeaderMap) -> Response {
             return plain(StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server");
         }
     };
+    if let Some(location) = crate::cluster::pictures::moved_to(&row, &app) {
+        // Its server's shard keeps it now; the new link never changes either.
+        let mut response = StatusCode::PERMANENT_REDIRECT.into_response();
+        let h = response.headers_mut();
+        h.insert(header::LOCATION, HeaderValue::from_str(&location).expect("ids are valid headers"));
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=31536000, immutable"));
+        return response;
+    }
     // A file never changes under its id, so the id is its version.
     let etag = format!("\"{id}\"");
     let fresh = headers.get(header::IF_NONE_MATCH).is_some_and(|value| value.as_bytes() == etag.as_bytes());
@@ -209,13 +219,8 @@ async fn serve(app: Arc<App>, id: String, headers: HeaderMap) -> Response {
             Err(_) => return plain(StatusCode::NOT_FOUND, "not found"),
         }
     };
+    picture_headers(response.headers_mut(), &etag);
     let h = response.headers_mut();
-    h.insert(header::ETAG, HeaderValue::from_str(&etag).expect("ids are valid headers"));
-    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=31536000, immutable"));
-    h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-    // Shown on other sites (any fuwa client), but never run as a page.
-    h.insert("cross-origin-resource-policy", HeaderValue::from_static("cross-origin"));
-    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; sandbox"));
     if !fresh {
         if let Ok(kind) = HeaderValue::from_str(&row.content_type) {
             h.insert(header::CONTENT_TYPE, kind);
@@ -223,6 +228,16 @@ async fn serve(app: Arc<App>, id: String, headers: HeaderMap) -> Response {
         h.insert(header::CONTENT_LENGTH, HeaderValue::from(row.size));
     }
     response
+}
+
+/// What every picture is served with: cached for good under its id, shown
+/// on other sites (any fuwa client), but never run as a page.
+pub fn picture_headers(h: &mut HeaderMap, etag: &str) {
+    h.insert(header::ETAG, HeaderValue::from_str(etag).expect("ids are valid headers"));
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=31536000, immutable"));
+    h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    h.insert("cross-origin-resource-policy", HeaderValue::from_static("cross-origin"));
+    h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; sandbox"));
 }
 
 async fn upload(app: Arc<App>, token: String, body: Body) -> Response {

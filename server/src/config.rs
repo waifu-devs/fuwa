@@ -60,6 +60,9 @@ pub struct Config {
     /// FUWA_CALL_RECORDINGS: on (default) | off. Recording voice channels on
     /// the server, for people with RECORD.
     pub call_recordings: bool,
+    /// FUWA_SHARED_CHANNELS: on (default) | off. Servers sharing channels
+    /// with each other.
+    pub shared_channels: bool,
     /// FUWA_CALL_RECORDINGS_KEEP_DAYS: days a finished server recording is
     /// kept before it deletes itself. Unset (default): until someone does.
     pub call_recordings_keep_days: Option<i64>,
@@ -365,6 +368,11 @@ impl Config {
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_CALL_RECORDINGS must be on or off, got {other:?}")),
         };
+        let shared_channels = match get("FUWA_SHARED_CHANNELS").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_SHARED_CHANNELS must be on or off, got {other:?}")),
+        };
         let call_recordings_keep_days = match get("FUWA_CALL_RECORDINGS_KEEP_DAYS") {
             None => None,
             Some(value) => Some(value.trim().parse::<i64>().ok().filter(|n| *n >= 1).ok_or_else(|| {
@@ -453,6 +461,7 @@ impl Config {
             cluster,
             calls,
             call_recordings,
+            shared_channels,
             call_recordings_keep_days,
             ice_urls,
             turn_secret: get("FUWA_TURN_SECRET").map(|s| s.trim().to_string()).unwrap_or_default(),
