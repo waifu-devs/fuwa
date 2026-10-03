@@ -60,6 +60,9 @@ pub struct Config {
     /// FUWA_CALL_RECORDINGS: on (default) | off. Recording voice channels on
     /// the server, for people with RECORD.
     pub call_recordings: bool,
+    /// FUWA_CALL_RECORDINGS_KEEP_DAYS: days a finished server recording is
+    /// kept before it deletes itself. Unset (default): until someone does.
+    pub call_recordings_keep_days: Option<i64>,
     /// FUWA_ICE_URLS: STUN and TURN servers apps reach the media part
     /// through (comma-separated stun:, turn: and turns: URLs). None by default.
     pub ice_urls: Vec<String>,
@@ -170,6 +173,9 @@ pub struct Limits {
     pub attachment_bytes: Option<i64>,
     /// FUWA_LIMIT_EMOJIS: custom emoji per server.
     pub emojis: Option<i64>,
+    /// FUWA_LIMIT_RECORDING_STORAGE: voice channel recordings kept on the
+    /// server, per server, e.g. `20GB`.
+    pub recording_bytes: Option<i64>,
     /// FUWA_LIMIT_PICTURE_UPLOAD: the largest avatar, banner or server icon one
     /// upload may be, e.g. `8MiB`.
     pub picture_upload_bytes: Option<i64>,
@@ -318,6 +324,7 @@ impl Config {
             storage_bytes: bytes("FUWA_LIMIT_STORAGE")?,
             attachment_bytes: bytes("FUWA_LIMIT_ATTACHMENT_STORAGE")?,
             emojis: count("FUWA_LIMIT_EMOJIS")?,
+            recording_bytes: bytes("FUWA_LIMIT_RECORDING_STORAGE")?,
             picture_upload_bytes: upload_bytes("FUWA_LIMIT_PICTURE_UPLOAD")?,
             picture_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY")?,
         };
@@ -352,6 +359,12 @@ impl Config {
             None | Some("on" | "true" | "1") => true,
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_CALL_RECORDINGS must be on or off, got {other:?}")),
+        };
+        let call_recordings_keep_days = match get("FUWA_CALL_RECORDINGS_KEEP_DAYS") {
+            None => None,
+            Some(value) => Some(value.trim().parse::<i64>().ok().filter(|n| *n >= 1).ok_or_else(|| {
+                format!("FUWA_CALL_RECORDINGS_KEEP_DAYS must be a whole number of days, 1 or more, got {value:?}")
+            })?),
         };
         let list = |key: &str| -> Vec<String> {
             get(key).unwrap_or_default().split(',').map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).collect()
@@ -435,6 +448,7 @@ impl Config {
             cluster,
             calls,
             call_recordings,
+            call_recordings_keep_days,
             ice_urls,
             turn_secret: get("FUWA_TURN_SECRET").map(|s| s.trim().to_string()).unwrap_or_default(),
             media,
@@ -591,6 +605,8 @@ mod tests {
             ("FUWA_LIMIT_ATTACHMENT_STORAGE", "2GiB"),
             ("FUWA_LIMIT_PICTURE_UPLOAD", "2MiB"),
             ("FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY", "unlimited"),
+            ("FUWA_LIMIT_RECORDING_STORAGE", "20GB"),
+            ("FUWA_CALL_RECORDINGS_KEEP_DAYS", "30"),
         ])
         .unwrap();
         assert_eq!(config.limits.members, Some(100));
@@ -598,6 +614,8 @@ mod tests {
         assert_eq!(config.limits.attachment_bytes, Some(2 * 1024 * 1024 * 1024));
         assert_eq!(config.limits.picture_upload_bytes, Some(2 * 1024 * 1024));
         assert_eq!(config.limits.picture_upload_bytes_per_day, None);
+        assert_eq!(config.limits.recording_bytes, Some(20_000_000_000));
+        assert_eq!(config.call_recordings_keep_days, Some(30));
         assert!(config.limits.any());
     }
 
@@ -608,6 +626,7 @@ mod tests {
         assert!(config(&[("FUWA_LINKED_ISSUER", "api.waifu.dev")]).unwrap_err().contains("https://"));
         assert!(config(&[("FUWA_ENCRYPTION_KEY", "short")]).unwrap_err().contains("64 hex"));
         assert!(config(&[("FUWA_LIMIT_STORAGE", "5 parsecs")]).unwrap_err().contains("unknown unit"));
+        assert!(config(&[("FUWA_CALL_RECORDINGS_KEEP_DAYS", "0")]).unwrap_err().contains("1 or more"));
     }
 
     #[test]

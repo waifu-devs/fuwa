@@ -1194,13 +1194,74 @@ async fn voice_channels_record_on_the_server() {
     let missing = c.calls.download_recording(download(&juan, &sid)).await.unwrap_err();
     assert_eq!(missing.code(), Code::NotFound, "nobody by that id spoke");
 
-    // Deleting it takes its files too.
+    // A server capped at what it holds now records no more, and says why.
+    let sdb = instance.app.servers.get(&sid).await.unwrap();
+    sdb.set_limits(&pb::ServerLimits { recording_bytes: Some(ended.size_bytes), ..Default::default() }).await.unwrap();
+    let keep = |server_record| pb::KeepVoiceRequest {
+        server_id: sid.clone(),
+        session_id: juan_session.clone(),
+        channel_id: voice.id.clone(),
+        server_record,
+        ..Default::default()
+    };
+    let kept = c.calls.keep_voice(authed(&juan, keep(true))).await.unwrap().into_inner();
+    assert!(!kept.state.unwrap().server_record && kept.recordings_full, "full: no new recording");
+    let listed = c
+        .calls
+        .list_recordings(authed(
+            &juan,
+            pb::ListRecordingsRequest { server_id: sid.clone(), channel_id: voice.id.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!((listed.used_bytes, listed.cap_bytes), (ended.size_bytes, Some(ended.size_bytes)));
+    assert_eq!(listed.recordings.len(), 1, "and none started");
+
+    // Deleting it takes its files too, and makes room again.
     let files = dir.path().join("recordings").join(&sid).join(&ended.id);
     assert!(files.exists());
     let delete = pb::DeleteRecordingRequest { server_id: sid.clone(), recording_id: ended.id.clone() };
     c.calls.delete_recording(authed(&juan, delete)).await.unwrap();
     assert!(recordings(&mut c, &juan, &sid, &voice.id).await.is_empty());
     assert!(!files.exists());
+    let kept = c.calls.keep_voice(authed(&juan, keep(true))).await.unwrap().into_inner();
+    assert!(kept.state.unwrap().server_record && !kept.recordings_full, "room to record again");
+    talk(&mut a, &mut b, Duration::from_secs(1)).await;
+    c.calls.keep_voice(authed(&juan, keep(false))).await.unwrap();
+    let again = 'ended: {
+        for _ in 0..50 {
+            let listed = recordings(&mut c, &juan, &sid, &voice.id).await;
+            if listed.first().is_some_and(|r| r.ended_at.is_some()) {
+                break 'ended listed[0].clone();
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("the second recording never ended");
+    };
+
+    // Kept for a week: a recording that ended eight days ago deletes itself,
+    // files and all; one that ended a day ago stays.
+    let mut settings = (*instance.app.settings()).clone();
+    settings.call_recordings_keep_days = Some(7);
+    instance.app.replace_settings(settings);
+    let day = 24 * 60 * 60 * 1000;
+    let tracks = serde_json::to_string(
+        &again
+            .tracks
+            .iter()
+            .map(|t| serde_json::json!({ "user_id": t.user_id, "size_bytes": t.size_bytes, "duration_ms": t.duration_ms }))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let ago = |days: i64| fuwa_server::id::now_ms() - days * day;
+    sdb.end_recording(&again.id, ago(1), &tracks, again.size_bytes).await.unwrap();
+    fuwa_server::recordings::sweep(&instance.app).await;
+    assert_eq!(recordings(&mut c, &juan, &sid, &voice.id).await.len(), 1, "a day old stays");
+    sdb.end_recording(&again.id, ago(8), &tracks, again.size_bytes).await.unwrap();
+    fuwa_server::recordings::sweep(&instance.app).await;
+    assert!(recordings(&mut c, &juan, &sid, &voice.id).await.is_empty(), "eight days old goes");
+    assert!(!dir.path().join("recordings").join(&sid).join(&again.id).exists());
     instance.app.shutdown.cancel();
     let _ = instance.serving.await;
 }

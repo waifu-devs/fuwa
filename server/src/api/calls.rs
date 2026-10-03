@@ -21,7 +21,7 @@ use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::node::Account;
 use crate::pb::{self, call_service_server::CallService};
-use crate::servers::{self as store, Payload};
+use crate::servers::{self as store, Payload, ServerDb};
 use crate::voice::{self, LEASE, Place};
 
 /// How long a TURN credential works. Apps ask for new ones each time they
@@ -387,7 +387,7 @@ impl Api {
         channel_id: &str,
         Selves { self_mute, self_deaf, self_video, self_stream, self_record, server_record }: Selves,
         session_id: &str,
-    ) -> Result<(String, Place)> {
+    ) -> Result<(String, Place, bool)> {
         self.calls_on()?;
         check_session(session_id)?;
         let (seat, channel) = self.voice_channel(account, server_id, channel_id).await?;
@@ -402,6 +402,7 @@ impl Api {
         };
         let same_channel = before.as_ref().is_some_and(|p| p.state.channel_id == channel.id);
         let (server_mute, server_deaf) = seat.sdb.voice_moderation(&account.id).await?;
+        let (server_record, full) = self.server_record(&seat.sdb, server_record).await?;
         let mut state = pb::VoiceState {
             user_id: account.id.clone(),
             channel_id: channel.id.clone(),
@@ -416,12 +417,24 @@ impl Api {
             self_video,
             self_stream,
             self_record,
-            server_record: server_record && self.app.settings().call_recordings,
+            server_record,
             ..Default::default()
         };
         Quiet::new(&seat.access, &channel.id).apply(&mut state);
+        let full = full && !state.record_suppress;
         let place = Place { session_id, room: voice::channel_room(&server_id, &channel.id), state, expires: lease() };
-        Ok((server_id, place))
+        Ok((server_id, place, full))
+    }
+
+    /// Whether someone who asks to record on the server may: the instance
+    /// allows it, and the server's recordings aren't at their cap. Then
+    /// whether they are.
+    async fn server_record(&self, sdb: &ServerDb, asked: bool) -> Result<(bool, bool)> {
+        if !asked || !self.app.settings().call_recordings {
+            return Ok((false, false));
+        }
+        let full = crate::recordings::full(&self.app, sdb).await?;
+        Ok((!full, full))
     }
 
     /// Takes a place once its connection to the media part is up, hanging
@@ -447,18 +460,18 @@ impl Api {
             self_record: req.self_record,
             server_record: req.server_record,
         };
-        let (server_id, place) =
+        let (server_id, place, recordings_full) =
             self.voice_place(&account, &req.server_id, &req.channel_id, selves, &req.session_id).await?;
         let answer = self.app.media_link.open(&place, &req.offer).await?;
         self.take_voice_place(&server_id, &place).await;
-        Ok(pb::JoinVoiceResponse { answer, session_id: place.session_id, state: Some(place.state) })
+        Ok(pb::JoinVoiceResponse { answer, session_id: place.session_id, state: Some(place.state), recordings_full })
     }
 
     async fn listen_voice(&self, metadata: &MetadataMap, req: pb::ListenVoiceRequest) -> Result<ListenStream> {
         let account = self.account(metadata).await?;
         // Programs have no camera, and record by listening.
         let selves = Selves { self_mute: req.self_mute, self_deaf: req.self_deaf, ..Default::default() };
-        let (server_id, place) =
+        let (server_id, place, _) =
             self.voice_place(&account, &req.server_id, &req.channel_id, selves, &req.session_id).await?;
         let events = self.app.media_link.bridge(&place).await?;
         self.take_voice_place(&server_id, &place).await;
@@ -513,7 +526,8 @@ impl Api {
         if req.session_id.is_empty() {
             return Err(Error::invalid("which call session?"));
         }
-        let server_id = self.app.servers.get(&req.server_id).await?.id.clone();
+        let sdb = self.app.servers.get(&req.server_id).await?;
+        let server_id = sdb.id.clone();
         let before = self.app.voice.get(&server_id, &account.id);
         if before.as_ref().is_some_and(|p| p.session_id != req.session_id) {
             return Err(moved_away());
@@ -536,10 +550,10 @@ impl Api {
             self.disconnect(&server_id, &account.id).await;
             return Err(moved_away());
         };
+        let (server_record, full) = self.server_record(&sdb, req.server_record).await?;
         let place = match before {
             Some(mut place) => {
                 let may_before = place.may();
-                let server_record = req.server_record && self.app.settings().call_recordings;
                 let changed = Quiet::of(&place.state) != quiet
                     || place.state.self_mute != req.self_mute
                     || place.state.self_deaf != req.self_deaf
@@ -581,7 +595,7 @@ impl Api {
                     self_video: req.self_video,
                     self_stream: req.self_stream,
                     self_record: req.self_record,
-                    server_record: req.server_record && self.app.settings().call_recordings,
+                    server_record,
                     server_mute: moderation.0,
                     server_deaf: moderation.1,
                     joined_at: Some(timestamp(now_ms())),
@@ -605,7 +619,8 @@ impl Api {
                 place
             }
         };
-        Ok(pb::KeepVoiceResponse { state: Some(place.state) })
+        let recordings_full = full && !place.state.record_suppress;
+        Ok(pb::KeepVoiceResponse { state: Some(place.state), recordings_full })
     }
 
     async fn list_voice_states(
@@ -692,7 +707,9 @@ impl Api {
         let seat = self.recorder(metadata, &req.server_id).await?;
         seat.access.require_in(&req.channel_id, pb::Permission::Record)?;
         let recordings = crate::recordings::list(&self.app, &seat.sdb, &req.channel_id).await?;
-        Ok(pb::ListRecordingsResponse { recordings })
+        let (used_bytes, cap_bytes) = crate::recordings::usage(&self.app, &seat.sdb).await?;
+        let keep_days = self.app.settings().call_recordings_keep_days;
+        Ok(pb::ListRecordingsResponse { recordings, used_bytes, cap_bytes, keep_days })
     }
 
     async fn download_recording(
