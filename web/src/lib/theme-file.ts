@@ -1,4 +1,5 @@
 import { sanitizeBackdrop, type Backdrop } from "@/lib/backdrop";
+import { shaderProblem } from "@/lib/effects/custom";
 import { deriveTokens, HEX, RADIUS_MAX, RADIUS_MIN, SEEDS, TOKENS, type Theme, type ThemeSeeds, type ThemeTokens } from "@/lib/themes";
 
 /**
@@ -7,7 +8,8 @@ import { deriveTokens, HEX, RADIUS_MAX, RADIUS_MIN, SEEDS, TOKENS, type Theme, t
  * (the shadcn tokens and a radius) plus, optionally, its own backdrop.
  *
  * A theme file is data only: colors, numbers and words. Nothing in it can make
- * an app load anything from anywhere. Its background picture travels inside
+ * an app load anything from anywhere (a custom shader is WGSL that can only
+ * read the inputs the app gives it). Its background picture travels inside
  * the file (a data: URL) and is uploaded to your instance on import; links in
  * a file are ignored.
  */
@@ -174,6 +176,9 @@ export function parseThemeFile(json: string): Imported {
   if (d.backdrop && typeof d.backdrop === "object") {
     const b = d.backdrop as Record<string, unknown>;
     backdrop = sanitizeBackdrop({ ...b, image: "" });
+    if (backdrop.shader && shaderProblem(backdrop.shader.code)) {
+      notes.push(`Its shader "${backdrop.shader.name}" has a problem fuwa won't run, so it shows its fallback until it's fixed.`);
+    }
     if (b.image) {
       picture = pictureFromDataUrl(b.image);
       if (!picture) {
