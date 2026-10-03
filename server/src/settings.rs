@@ -278,6 +278,12 @@ impl Settings {
                     }
                     setups.push(setup);
                 }
+                if setups.iter().filter(|s| s.is_custom()).count() > crate::automod::providers::MAX_CUSTOM {
+                    return Err(Error::invalid(format!(
+                        "at most {} moderation providers of your own",
+                        crate::automod::providers::MAX_CUSTOM
+                    )));
+                }
                 // Leave out the ones with nothing set up.
                 setups.retain(|s| *s != crate::automod::providers::Setup { id: s.id.clone(), ..Default::default() });
                 serde_json::to_value(setups).map_err(|err| Error::internal(err.to_string()))?
@@ -403,7 +409,7 @@ impl Settings {
             "automod_providers" => {
                 let setups: Vec<crate::automod::providers::Setup> = serde_json::from_value(value.clone())
                     .map_err(|err| Error::invalid(format!("automod_providers doesn't read: {err}")))?;
-                if let Some(setup) = setups.iter().find(|s| s.kind().is_none()) {
+                if let Some(setup) = setups.iter().find(|s| s.kind().is_none() && !s.is_custom()) {
                     return Err(Error::invalid(format!("fuwa doesn't know a moderation provider called {}", setup.id)));
                 }
                 self.automod_providers = setups;

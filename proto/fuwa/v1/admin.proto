@@ -112,9 +112,11 @@ message InstanceSettings {
   repeated AutoModProviderSettings automod_providers = 25;
 }
 
-// One moderation provider, as the instance's admins set it up.
+// One moderation provider, as the instance's admins set it up: one fuwa
+// knows, or their own (docs/automod.md has what fuwa sends it and expects).
 message AutoModProviderSettings {
-  // "typesafe-jev" or "cloudflare-clef".
+  // "typesafe-jev", "cloudflare-clef", or "custom-..." for one of the
+  // admins' own. "custom" adds a new one; the instance picks its id.
   string id = 1;
   // Servers can pick it for their AutoMod.
   bool enabled = 2;
@@ -128,6 +130,13 @@ message AutoModProviderSettings {
   string model = 6;
   // Cloudflare's account id, which its address needs.
   string account_id = 7;
+  // The admins' own providers: what servers see it called.
+  string name = 8;
+  // The admins' own providers: where it is, an https URL.
+  string url = 9;
+  // The admins' own providers: the header the key goes in. Empty sends it
+  // as "Authorization: Bearer <key>"; no key sends none.
+  string header = 10;
 }
 
 message TestAutoModProviderRequest {

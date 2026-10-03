@@ -4535,6 +4535,64 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
         .into_inner();
     assert!(!tested.ok && !tested.error.is_empty());
 
+    // The admins' own provider: any https address, named by them, its key in
+    // the header they pick. It gets an id; the key never comes back.
+    let ours = pb::AutoModProviderSettings {
+        id: "custom".into(),
+        enabled: true,
+        name: "Our classifier".into(),
+        url: "https://127.0.0.1:9/v1/check".into(),
+        api_key: "our-secret-key-5678".into(),
+        header: "X-Api-Key".into(),
+        ..Default::default()
+    };
+    let plain = pb::AutoModProviderSettings { url: "http://mod.example.com/check".into(), ..ours.clone() };
+    let refused = c.admin.update_settings(authed(&admin, update(vec![clef(""), plain]))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
+    let saved = c
+        .admin
+        .update_settings(authed(&admin, update(vec![clef(""), ours.clone()])))
+        .await
+        .unwrap()
+        .into_inner()
+        .config
+        .unwrap()
+        .settings
+        .unwrap()
+        .automod_providers;
+    assert_eq!(saved.len(), 3);
+    let mine = saved[2].clone();
+    assert!(mine.id.starts_with("custom-") && mine.api_key.is_empty() && mine.api_key_set, "{mine:?}");
+    assert_eq!(
+        (mine.name.as_str(), mine.header.as_str(), mine.api_key_hint.as_str()),
+        ("Our classifier", "x-api-key", "5678")
+    );
+    let offered = list(&mut c).await.providers;
+    let theirs = offered.iter().find(|p| p.id == mine.id).unwrap();
+    assert_eq!((theirs.name.as_str(), theirs.host.as_str()), ("Our classifier", "127.0.0.1"));
+
+    // A server's smart filter picks it. Nothing answers there, so messages go
+    // through, and the test says why.
+    let switched = save_rule(&mut c, &owner, &server.id, pb::AutoModRule { provider: mine.id.clone(), ..rule.clone() })
+        .await
+        .unwrap();
+    assert_eq!(switched.provider, mine.id);
+    send(&mut c, &member, &server.id, &general.id, "hello again").await.unwrap();
+    let tried = c
+        .automod
+        .test_auto_mod_rule(authed(
+            &owner,
+            pb::TestAutoModRuleRequest {
+                server_id: server.id.clone(),
+                rule: Some(switched.clone()),
+                content: "hello again".into(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(!tried.matched && tried.error.contains("couldn't"), "{tried:?}");
+
     // Turned off on the instance: servers no longer see it, and their rule lets messages through.
     let off = pb::AutoModProviderSettings { enabled: false, ..clef("") };
     c.admin.update_settings(authed(&admin, update(vec![off]))).await.unwrap();

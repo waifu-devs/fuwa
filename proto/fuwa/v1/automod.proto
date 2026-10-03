@@ -35,7 +35,7 @@ message ListAutoModRulesResponse {
 // A moderation provider a server can use. Messages it checks (their text
 // only, never who wrote them or where) go from the instance to its host.
 message AutoModProvider {
-  // "typesafe-jev" or "cloudflare-clef".
+  // "typesafe-jev", "cloudflare-clef", or "custom-..." for the instance's own.
   string id = 1;
   // "TypeSafe Jev".
   string name = 2;

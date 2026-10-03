@@ -300,6 +300,10 @@ violence, self-harm, scams and spam.
   `api.typesafe.ai` (US).
 - **Cloudflare Clef**: an API token with the Workers AI permission and your
   account id. Messages go to `api.cloudflare.com`.
+- **Your own**: press **Add your own** and give it a name, an https address
+  and, if it needs one, a key and the header it goes in. It gets the same
+  requests Jev and Clef do; [automod.md](automod.md) has what fuwa sends and
+  what it expects back.
 
 You can also start with one on: `FUWA_JEV_API_KEY`, or `FUWA_CLEF_API_TOKEN`
 with `FUWA_CLEF_ACCOUNT_ID`. Keys live in node.db (sealed when

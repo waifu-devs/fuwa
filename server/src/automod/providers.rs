@@ -3,7 +3,9 @@
 //!
 //! A provider is anything that implements [`Provider`]; [`KINDS`] lists the
 //! ones fuwa knows by name, and [`build`] makes one from how the instance's
-//! admins set it up ([`Setup`], the `automod_providers` setting). The rules
+//! admins set it up ([`Setup`], the `automod_providers` setting). Admins can
+//! also add their own ("custom-..." ids): any https address that answers the
+//! same requests Jev and Clef do (docs/automod.md). The rules
 //! a server writes itself (keywords, pings, links) are the built-in provider
 //! and need no setup: they're in `automod/mod.rs`.
 //!
@@ -16,7 +18,8 @@
 //! where, or which server. Only the instance calls providers, never an app.
 //! A provider that fails or is slow never stops a message: the caller lets it
 //! through its rule, and the failure is counted in the anonymous report by
-//! kind and provider id only.
+//! kind and provider id only ("custom" for the admins' own, never its name or
+//! address).
 
 use std::fmt;
 use std::sync::LazyLock;
@@ -35,6 +38,14 @@ pub const TIMEOUT: Duration = Duration::from_secs(3);
 /// The most characters of a message a provider reads.
 const MAX_TEXT: usize = 4000;
 const MAX_KEY: usize = 512;
+/// How many providers of their own admins can add.
+pub const MAX_CUSTOM: usize = 8;
+/// What an admin's request calls a provider of their own it adds.
+pub const NEW_CUSTOM: &str = "custom";
+const CUSTOM_PREFIX: &str = "custom-";
+/// Headers a key can't go in: the request needs them as they are.
+const FIXED_HEADERS: &[&str] =
+    &["host", "content-type", "content-length", "transfer-encoding", "connection", "user-agent", "accept"];
 
 /// A kind of provider fuwa knows: where it is and what it needs.
 #[derive(Debug)]
@@ -166,6 +177,14 @@ pub struct Setup {
     pub model: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub account_id: String,
+    /// The admins' own providers: its name, address, and the header its key
+    /// goes in (empty for `Authorization: Bearer`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub header: String,
 }
 
 impl fmt::Debug for Setup {
@@ -176,6 +195,9 @@ impl fmt::Debug for Setup {
             .field("api_key", &if self.api_key.is_empty() { "" } else { "<redacted>" })
             .field("model", &self.model)
             .field("account_id", &self.account_id)
+            .field("name", &self.name)
+            .field("url", &self.url)
+            .field("header", &self.header)
             .finish()
     }
 }
@@ -183,6 +205,29 @@ impl fmt::Debug for Setup {
 impl Setup {
     pub fn kind(&self) -> Option<&'static Kind> {
         kind(&self.id)
+    }
+
+    /// One of the admins' own.
+    pub fn is_custom(&self) -> bool {
+        is_custom_id(&self.id)
+    }
+
+    /// What servers see it called.
+    pub fn name(&self) -> &str {
+        self.kind().map_or(&self.name, |kind| kind.name)
+    }
+
+    /// Where checked messages go.
+    pub fn host(&self) -> String {
+        match self.kind() {
+            Some(kind) => kind.host.to_string(),
+            None => url::Url::parse(&self.url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default(),
+        }
+    }
+
+    /// Its id in the anonymous report: the admins' own are all "custom".
+    pub fn report_id(&self) -> &'static str {
+        self.kind().map_or(NEW_CUSTOM, |kind| kind.id)
     }
 
     /// The model asked: the one chosen, or the provider's first.
@@ -196,6 +241,16 @@ impl Setup {
 
     /// Whether it has what it needs to be asked.
     pub fn ready(&self) -> std::result::Result<(), String> {
+        if self.is_custom() {
+            if self.name.is_empty() {
+                return Err("your provider needs a name".into());
+            }
+            check_url(&self.url)?;
+            if !self.header.is_empty() && self.api_key.is_empty() {
+                return Err(format!("{} needs the key it sends in {}", self.name, self.header));
+            }
+            return Ok(());
+        }
         let kind = self.kind().ok_or_else(|| format!("fuwa doesn't know a provider called {}", self.id))?;
         if self.api_key.is_empty() {
             return Err(format!("{} needs an API key", kind.name));
@@ -225,6 +280,9 @@ impl Setup {
             api_key_hint: hint,
             model: self.model.clone(),
             account_id: self.account_id.clone(),
+            name: self.name.clone(),
+            url: self.url.clone(),
+            header: self.header.clone(),
         }
     }
 
@@ -236,21 +294,24 @@ impl Setup {
             api_key: from.api_key.clone(),
             model: from.model.clone(),
             account_id: from.account_id.clone(),
+            name: from.name.clone(),
+            url: from.url.clone(),
+            header: from.header.clone(),
         }
     }
 
     /// A setup from an admin's request, checked. An empty key keeps
     /// `previous`'s, since keys are never sent out.
     pub fn from_pb(from: &pb::AutoModProviderSettings, previous: Option<&Setup>) -> Result<Self> {
-        let kind = kind(from.id.trim()).ok_or_else(|| Error::invalid("that isn't a moderation provider fuwa knows"))?;
-        let key = from.api_key.trim();
-        if key.len() > MAX_KEY || key.chars().any(|c| c.is_whitespace() || c.is_control()) {
-            return Err(Error::invalid(format!("{}'s API key doesn't look right", kind.name)));
+        let id = from.id.trim();
+        if id == NEW_CUSTOM || is_custom_id(id) {
+            return Self::custom_from_pb(from, previous);
         }
-        let api_key = match (key, previous) {
-            ("", Some(previous)) => previous.api_key.clone(),
-            (key, _) => key.to_string(),
-        };
+        let kind = kind(id).ok_or_else(|| Error::invalid("that isn't a moderation provider fuwa knows"))?;
+        let api_key = checked_key(kind.name, &from.api_key, previous)?;
+        if !from.name.trim().is_empty() || !from.url.trim().is_empty() || !from.header.trim().is_empty() {
+            return Err(Error::invalid(format!("{}'s name and address are fuwa's", kind.name)));
+        }
         let model = from.model.trim();
         if !model.is_empty() && !kind.models.contains(&model) {
             return Err(Error::invalid(format!("{} offers {}", kind.name, kind.models.join(" and "))));
@@ -262,8 +323,62 @@ impl Setup {
         if !account_id.is_empty() && (account_id.len() != 32 || !account_id.bytes().all(|b| b.is_ascii_hexdigit())) {
             return Err(Error::invalid("a Cloudflare account id is 32 letters and digits (0-9, a-f)"));
         }
-        let setup =
-            Self { id: kind.id.to_string(), enabled: from.enabled, api_key, model: model.to_string(), account_id };
+        let setup = Self {
+            id: kind.id.to_string(),
+            enabled: from.enabled,
+            api_key,
+            model: model.to_string(),
+            account_id,
+            ..Default::default()
+        };
+        if setup.enabled {
+            setup.ready().map_err(|why| Error::invalid(format!("{why} before it can be turned on")))?;
+        }
+        Ok(setup)
+    }
+
+    /// One of the admins' own, checked; a new one ("custom") gets its id.
+    fn custom_from_pb(from: &pb::AutoModProviderSettings, previous: Option<&Setup>) -> Result<Self> {
+        let id = from.id.trim();
+        let id = if id == NEW_CUSTOM {
+            format!("{CUSTOM_PREFIX}{}", crate::id::new_id().to_ascii_lowercase())
+        } else {
+            id.into()
+        };
+        let name = from.name.trim();
+        if !(1..=40).contains(&name.chars().count()) || name.chars().any(char::is_control) {
+            return Err(Error::invalid("name your provider in 1 to 40 characters"));
+        }
+        let url = from.url.trim();
+        check_url(url).map_err(Error::invalid)?;
+        let header = from.header.trim().to_ascii_lowercase();
+        if !header.is_empty()
+            && (header.len() > 64
+                || reqwest::header::HeaderName::from_bytes(header.as_bytes()).is_err()
+                || FIXED_HEADERS.contains(&header.as_str()))
+        {
+            return Err(Error::invalid("the key's header is a name like x-api-key"));
+        }
+        let header = if header == "authorization" { String::new() } else { header };
+        let model = from.model.trim();
+        if model.chars().count() > 100 || model.chars().any(char::is_control) {
+            return Err(Error::invalid("a model is at most 100 characters"));
+        }
+        if !from.account_id.trim().is_empty() {
+            return Err(Error::invalid(format!("{name} doesn't take an account id")));
+        }
+        // A key saved for one address never goes to another unasked.
+        let previous = previous.filter(|p| p.url == url);
+        let setup = Self {
+            id,
+            enabled: from.enabled,
+            api_key: checked_key(name, &from.api_key, previous)?,
+            model: model.to_string(),
+            account_id: String::new(),
+            name: name.to_string(),
+            url: url.to_string(),
+            header,
+        };
         if setup.enabled {
             setup.ready().map_err(|why| Error::invalid(format!("{why} before it can be turned on")))?;
         }
@@ -272,11 +387,13 @@ impl Setup {
 
     /// What servers see of it.
     pub fn offer(&self) -> Option<pb::AutoModProvider> {
-        let kind = self.kind()?;
+        if self.kind().is_none() && !self.is_custom() {
+            return None;
+        }
         Some(pb::AutoModProvider {
-            id: kind.id.into(),
-            name: kind.name.into(),
-            host: kind.host.into(),
+            id: self.id.clone(),
+            name: self.name().into(),
+            host: self.host(),
             labels: LABELS
                 .iter()
                 .map(|l| pb::AutoModLabel {
@@ -290,19 +407,54 @@ impl Setup {
     }
 }
 
-/// One setup for each provider fuwa knows, in order: the saved ones, and a
-/// blank one for each of the rest.
+/// One setup for each provider fuwa knows, in order (the saved ones, and a
+/// blank one for each of the rest), then the admins' own.
 pub fn complete(saved: &[Setup]) -> Vec<Setup> {
-    KINDS
-        .iter()
-        .map(|kind| {
-            saved
-                .iter()
-                .find(|s| s.id == kind.id)
-                .cloned()
-                .unwrap_or_else(|| Setup { id: kind.id.to_string(), ..Default::default() })
-        })
-        .collect()
+    let known = KINDS.iter().map(|kind| {
+        saved
+            .iter()
+            .find(|s| s.id == kind.id)
+            .cloned()
+            .unwrap_or_else(|| Setup { id: kind.id.to_string(), ..Default::default() })
+    });
+    known.chain(saved.iter().filter(|s| s.is_custom()).cloned()).collect()
+}
+
+/// An id of one of the admins' own providers.
+pub fn is_custom_id(id: &str) -> bool {
+    id.strip_prefix(CUSTOM_PREFIX).is_some_and(|rest| {
+        (1..=40).contains(&rest.len()) && rest.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    })
+}
+
+/// A key from an admin's request: an empty one keeps `previous`'s.
+fn checked_key(name: &str, key: &str, previous: Option<&Setup>) -> Result<String> {
+    let key = key.trim();
+    if key.len() > MAX_KEY || key.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(Error::invalid(format!("{name}'s API key doesn't look right")));
+    }
+    Ok(match (key, previous) {
+        ("", Some(previous)) => previous.api_key.clone(),
+        (key, _) => key.to_string(),
+    })
+}
+
+/// An admin's own provider's address: https, a host, nothing else odd.
+fn check_url(url: &str) -> std::result::Result<(), String> {
+    let bad = || "your provider's address is an https URL, like https://moderation.example.com/v1/check".to_string();
+    if url.len() > 512 {
+        return Err(bad());
+    }
+    let parsed = url::Url::parse(url).map_err(|_| bad())?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().is_none_or(str::is_empty)
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(bad());
+    }
+    Ok(())
 }
 
 /// How likely a message is to be each label, 0 to 1, in [`LABELS`] order.
@@ -352,12 +504,18 @@ pub trait Provider: Send + Sync {
 /// A provider for `setup`, when it has what it needs.
 pub fn build(setup: &Setup) -> std::result::Result<Box<dyn Provider>, Failure> {
     setup.ready().map_err(Failure::NotSetUp)?;
-    let kind = setup.kind().expect("ready checked the kind");
-    let url = match kind.id {
-        "typesafe-jev" => format!("https://{}/v1/systemone", kind.host),
-        _ => format!("https://{}/client/v4/accounts/{}/ai/run/{}", kind.host, setup.account_id, setup.model()),
+    let url = match setup.kind().map(|kind| (kind.id, kind.host)) {
+        Some(("typesafe-jev", host)) => format!("https://{host}/v1/systemone"),
+        Some((_, host)) => format!("https://{host}/client/v4/accounts/{}/ai/run/{}", setup.account_id, setup.model()),
+        None => setup.url.clone(),
     };
-    Ok(Box::new(SystemOne { kind, url, key: setup.api_key.clone(), model: setup.model().to_string() }))
+    Ok(Box::new(SystemOne {
+        id: setup.report_id(),
+        url,
+        key: setup.api_key.clone(),
+        header: setup.header.clone(),
+        model: setup.model().to_string(),
+    }))
 }
 
 /// Asks `setup`'s provider about `text`, giving up after [`TIMEOUT`]. Counts
@@ -371,7 +529,7 @@ pub async fn check(setup: &Setup, text: &str) -> (std::result::Result<Scores, Fa
         Err(failure) => Err(failure),
     };
     let took = started.elapsed();
-    let id = setup.kind().map_or("unknown", |k| k.id);
+    let id = setup.report_id();
     reports::server_timing(&format!("automod:{id}"), took);
     if let Err(failure) = &answer {
         reports::server_error(failure.kind(), Some(id));
@@ -379,8 +537,8 @@ pub async fn check(setup: &Setup, text: &str) -> (std::result::Result<Scores, Fa
     (answer, took)
 }
 
-/// Only fuwa's fixed addresses, https, no redirects (a redirect could send
-/// the key or the text somewhere else).
+/// https only, no redirects (a redirect could send the key or the text
+/// somewhere the admins didn't pick).
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .https_only(true)
@@ -391,12 +549,16 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .expect("the HTTP client builds")
 });
 
-/// The System One decision API, which Jev and Clef both answer: one yes-or-no
-/// ("noul") question per label, all in one request.
+/// The System One decision API, which Jev and Clef both answer, and the
+/// admins' own providers too: one yes-or-no ("noul") question per label, all
+/// in one request.
 struct SystemOne {
-    kind: &'static Kind,
+    id: &'static str,
     url: String,
     key: String,
+    /// Where the key goes: empty for `Authorization: Bearer`.
+    header: String,
+    /// Left out when empty.
     model: String,
 }
 
@@ -413,25 +575,34 @@ impl SystemOne {
                 (l.id.to_string(), question)
             })
             .collect();
-        json!({
-            "model": self.model,
+        let mut body = json!({
             "state": { "chat_message": text },
             "questions": questions,
-        })
+        });
+        if !self.model.is_empty() {
+            body["model"] = Value::from(self.model.as_str());
+        }
+        body
     }
 }
 
 impl Provider for SystemOne {
     fn id(&self) -> &'static str {
-        self.kind.id
+        self.id
     }
 
     fn classify<'a>(&'a self, text: &'a str) -> BoxFuture<'a, std::result::Result<Scores, Failure>> {
         Box::pin(async move {
-            let response =
-                CLIENT.post(&self.url).bearer_auth(&self.key).json(&self.body(text)).send().await.map_err(|err| {
-                    if err.is_timeout() { Failure::TimedOut } else { Failure::Unreachable(short(err)) }
-                })?;
+            let request = CLIENT.post(&self.url).json(&self.body(text));
+            let request = match (self.key.is_empty(), self.header.is_empty()) {
+                (true, _) => request,
+                (false, true) => request.bearer_auth(&self.key),
+                (false, false) => request.header(self.header.as_str(), &self.key),
+            };
+            let response = request
+                .send()
+                .await
+                .map_err(|err| if err.is_timeout() { Failure::TimedOut } else { Failure::Unreachable(short(err)) })?;
             let status = response.status();
             let body: Value = response.json().await.unwrap_or(Value::Null);
             match status.as_u16() {
@@ -578,9 +749,10 @@ mod tests {
     fn asks_one_question_per_label_about_the_text_alone() {
         let setup = Setup { id: "typesafe-jev".into(), enabled: true, api_key: "k".repeat(20), ..Default::default() };
         let provider = SystemOne {
-            kind: setup.kind().unwrap(),
+            id: setup.report_id(),
             url: String::new(),
             key: setup.api_key.clone(),
+            header: String::new(),
             model: setup.model().into(),
         };
         let body = provider.body("hi");
@@ -588,6 +760,63 @@ mod tests {
         assert_eq!(body["state"], json!({ "chat_message": "hi" }));
         assert_eq!(body["questions"].as_object().unwrap().len(), LABELS.len());
         assert_eq!(body["questions"]["scam"]["type"], "noul");
+        let unnamed = SystemOne { model: String::new(), ..provider };
+        assert!(unnamed.body("hi").get("model").is_none());
+    }
+
+    #[test]
+    fn admins_add_their_own_at_https_addresses() {
+        let from = |url: &str| pb::AutoModProviderSettings {
+            id: NEW_CUSTOM.into(),
+            enabled: true,
+            name: "Our classifier".into(),
+            url: url.into(),
+            api_key: "secret-key-123456".into(),
+            header: "X-Api-Key".into(),
+            ..Default::default()
+        };
+        let made = Setup::from_pb(&from("https://mod.example.com/v1/check"), None).unwrap();
+        assert!(made.is_custom() && is_custom_id(&made.id), "{}", made.id);
+        assert_eq!(
+            (made.name(), made.host().as_str(), made.header.as_str()),
+            ("Our classifier", "mod.example.com", "x-api-key")
+        );
+        assert_eq!(made.report_id(), "custom");
+        assert!(build(&made).is_ok());
+        let offered = made.offer().unwrap();
+        assert_eq!((offered.id.as_str(), offered.host.as_str()), (made.id.as_str(), "mod.example.com"));
+        assert_eq!(offered.labels.len(), LABELS.len());
+        // Saving it again keeps its id and key, unless the address moves.
+        let shown = made.to_pb(false);
+        let again = Setup::from_pb(&shown, Some(&made)).unwrap();
+        assert_eq!((again.id.as_str(), again.api_key.as_str()), (made.id.as_str(), made.api_key.as_str()));
+        let moved = pb::AutoModProviderSettings { url: "https://elsewhere.example.com/".into(), ..shown.clone() };
+        assert!(Setup::from_pb(&moved, Some(&made)).is_err(), "a key never follows a new address unasked");
+        let moved = pb::AutoModProviderSettings { enabled: false, ..moved };
+        assert!(Setup::from_pb(&moved, Some(&made)).unwrap().api_key.is_empty());
+        for url in [
+            "http://mod.example.com/",
+            "https://user:pw@mod.example.com/",
+            "https://mod.example.com/#x",
+            "nope",
+            "file:///etc/passwd",
+        ] {
+            assert!(Setup::from_pb(&from(url), None).is_err(), "{url}");
+        }
+        for header in ["Host", "content-type", "bad header"] {
+            let given = pb::AutoModProviderSettings { header: header.into(), ..from("https://a.example/") };
+            assert!(Setup::from_pb(&given, None).is_err(), "{header}");
+        }
+        let bearer = pb::AutoModProviderSettings { header: "Authorization".into(), ..from("https://a.example/") };
+        assert!(Setup::from_pb(&bearer, None).unwrap().header.is_empty());
+        let keyless =
+            pb::AutoModProviderSettings { api_key: String::new(), header: String::new(), ..from("https://a.example/") };
+        assert!(Setup::from_pb(&keyless, None).unwrap().usable(), "a provider of your own may need no key");
+        let nameless = pb::AutoModProviderSettings { name: " ".into(), ..from("https://a.example/") };
+        assert!(Setup::from_pb(&nameless, None).is_err());
+        let ids: Vec<String> = complete(std::slice::from_ref(&made)).into_iter().map(|s| s.id).collect();
+        assert_eq!(ids, ["typesafe-jev", "cloudflare-clef", made.id.as_str()]);
+        assert!(!is_custom_id("custom-") && !is_custom_id("custom-../x") && !is_custom_id("typesafe-jev"));
     }
 
     #[test]

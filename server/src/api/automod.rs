@@ -136,16 +136,23 @@ async fn checked_rule(
     let (provider, labels) = match trigger {
         Trigger::Provider => {
             let provider = rule.provider.trim();
-            let kind = providers::kind(provider).ok_or_else(|| Error::invalid("pick a provider for the rule"))?;
+            let name = match providers::kind(provider) {
+                Some(kind) => kind.name.to_string(),
+                None => settings
+                    .automod_providers
+                    .iter()
+                    .find(|s| s.is_custom() && s.id == provider)
+                    .map(|s| s.name().to_string())
+                    .ok_or_else(|| Error::invalid("pick a provider for the rule"))?,
+            };
             // A rule already on keeps its provider when admins switch it off
             // (it then lets messages through); a new or changed one needs it.
-            if rule.enabled && settings.automod_provider(kind.id).is_none() {
+            if rule.enabled && settings.automod_provider(provider).is_none() {
                 return Err(Error::FailedPrecondition(format!(
-                    "{} isn't turned on for this instance; its admins set providers up",
-                    kind.name
+                    "{name} isn't turned on for this instance; its admins set providers up"
                 )));
             }
-            (kind.id.to_string(), checked_labels(&rule.labels)?)
+            (provider.to_string(), checked_labels(&rule.labels)?)
         }
         _ => (String::new(), vec![]),
     };
@@ -244,7 +251,7 @@ async fn checked_rule(
 /// mustn't wait on one).
 pub(super) struct Asked {
     rule_id: String,
-    provider: &'static str,
+    provider: String,
     scores: providers::Scores,
 }
 
@@ -277,7 +284,7 @@ pub(super) async fn ask(
     }
     drop(conn);
     let setup = app.settings().automod_provider(&rule.provider)?.clone();
-    let provider = setup.kind()?.name;
+    let provider = setup.name().to_string();
     let (answer, _) = providers::check(&setup, content).await;
     Some(Asked { rule_id: rule.id, provider, scores: answer.ok()? })
 }
@@ -398,7 +405,7 @@ pub(super) async fn review(
                 matched: hit.matched.clone(),
                 blocked: blocked.is_some(),
                 timed_out_seconds: action(rule, Kind::TimeOut).map_or(0, |a| a.duration_seconds),
-                provider: asked.filter(|a| a.rule_id == rule.id).map(|a| a.provider.to_string()).unwrap_or_default(),
+                provider: asked.filter(|a| a.rule_id == rule.id).map(|a| a.provider.clone()).unwrap_or_default(),
             }),
             ..Default::default()
         };

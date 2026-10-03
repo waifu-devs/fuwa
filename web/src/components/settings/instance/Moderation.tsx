@@ -1,5 +1,5 @@
 import { clone, create } from "@bufbuild/protobuf";
-import { CheckIcon, FlaskConicalIcon, GlobeLockIcon, KeyRoundIcon, LoaderCircleIcon, ShieldAlertIcon, SparklesIcon, TriangleAlertIcon } from "lucide-react";
+import { CheckIcon, FlaskConicalIcon, GlobeLockIcon, KeyRoundIcon, LoaderCircleIcon, PlusIcon, ShieldAlertIcon, SparklesIcon, Trash2Icon, TriangleAlertIcon, WebhookIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import {
@@ -44,7 +44,31 @@ const KNOWN: Record<string, { name: string; host: string; blurb: string; models:
   },
 };
 
-const fingerprint = (p: AutoModProviderSettings) => [p.id, p.enabled, p.apiKey.trim(), p.model, p.accountId.trim().toLowerCase()];
+/** The admins' own providers ("custom" until the instance gives them an id). */
+const isCustom = (p: AutoModProviderSettings) => p.id === "custom" || p.id.startsWith("custom-");
+/** At most this many of their own (the instance's limit). */
+const MAX_CUSTOM = 8;
+
+/** Where an address points, or "" while it isn't an https URL yet. */
+function hostOf(url: string) {
+  try {
+    const parsed = new URL(url.trim());
+    return parsed.protocol === "https:" ? parsed.hostname : "";
+  } catch {
+    return "";
+  }
+}
+
+const fingerprint = (p: AutoModProviderSettings) => [
+  p.id,
+  p.enabled,
+  p.apiKey.trim(),
+  p.model.trim(),
+  p.accountId.trim().toLowerCase(),
+  p.name.trim(),
+  p.url.trim(),
+  p.header.trim().toLowerCase(),
+];
 
 /** The instance settings the Moderation page reads. */
 export const MODERATION_FIELDS: { path: string; get: (s: InstanceSettings) => unknown; copy: (into: InstanceSettings, from: InstanceSettings) => void }[] = [
@@ -60,10 +84,11 @@ export const MODERATION_SECTION = {
   label: "Moderation",
   icon: ShieldAlertIcon,
   description: "Services servers' AutoMod can ask about messages.",
-  keywords: "automod ai jev typesafe cloudflare clef workers smart filter",
+  keywords: "automod ai jev typesafe cloudflare clef workers smart filter custom webhook own",
   settings: [
     { id: "automod-typesafe-jev", label: "TypeSafe Jev", keywords: "automod ai moderation key" },
     { id: "automod-cloudflare-clef", label: "Cloudflare Clef", keywords: "automod ai moderation workers token account" },
+    { id: "automod-custom", label: "Your own provider", keywords: "automod custom webhook classifier own endpoint" },
   ],
 };
 
@@ -85,6 +110,14 @@ export function ModerationSettings({
   resetter: (...paths: string[]) => Reset;
 }) {
   const reset = resetter("automod_providers");
+  const customs = draft.automodProviders.filter(isCustom).length;
+  const change = (n: number) => (fn: (p: AutoModProviderSettings) => void) =>
+    patch((d) => {
+      if (!d.automodProviders[n]) return;
+      const next = clone(AutoModProviderSettingsSchema, d.automodProviders[n]);
+      fn(next);
+      d.automodProviders[n] = next;
+    });
   return (
     <>
       <motion.div
@@ -106,25 +139,50 @@ export function ModerationSettings({
           through and the servers' own rules still apply.
         </p>
       </motion.div>
-      {draft.automodProviders.map((provider, n) => (
-        <ProviderCard
-          key={provider.id}
-          instanceKey={instanceKey}
-          provider={provider}
-          saved={saved.automodProviders.find((p) => p.id === provider.id)}
-          delay={0.04 + n * 0.05}
-          reset={n === 0 ? reset : undefined}
-          onChange={(fn) =>
-            patch((d) => {
-              const i = d.automodProviders.findIndex((p) => p.id === provider.id);
-              if (i < 0) return;
-              const next = clone(AutoModProviderSettingsSchema, d.automodProviders[i]);
-              fn(next);
-              d.automodProviders[i] = next;
-            })
-          }
-        />
-      ))}
+      <AnimatePresence initial={false}>
+        {draft.automodProviders.map((provider, n) => (
+          <motion.div
+            // New ones share "custom" until saved, so they go by place.
+            key={provider.id === "custom" ? `new-${n}` : provider.id}
+            layout="position"
+            exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.18 } }}
+            transition={SPRING}
+          >
+            <ProviderCard
+              instanceKey={instanceKey}
+              provider={provider}
+              saved={saved.automodProviders.find((p) => p.id === provider.id)}
+              delay={isCustom(provider) && provider.id === "custom" ? 0 : 0.04 + n * 0.05}
+              reset={n === 0 ? reset : undefined}
+              onChange={change(n)}
+              onRemove={isCustom(provider) ? () => patch((d) => void d.automodProviders.splice(n, 1)) : undefined}
+            />
+          </motion.div>
+        ))}
+      </AnimatePresence>
+      <motion.div layout="position" transition={SPRING} data-setting="automod-custom" className="pt-2">
+        <motion.button
+          type="button"
+          whileHover={{ y: -2 }}
+          whileTap={{ scale: 0.98 }}
+          transition={SPRING}
+          disabled={customs >= MAX_CUSTOM}
+          onClick={() => patch((d) => void d.automodProviders.push(create(AutoModProviderSettingsSchema, { id: "custom" })))}
+          className="group flex w-full items-center gap-3 rounded-3xl border-2 border-dashed p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/[0.03] disabled:pointer-events-none disabled:opacity-50"
+        >
+          <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-violet-500/15 text-violet-600 transition-transform group-hover:rotate-90 dark:text-violet-300">
+            <PlusIcon className="size-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-extrabold">Add your own</span>
+            <span className="block text-xs text-muted-foreground">
+              {customs >= MAX_CUSTOM
+                ? `That's ${MAX_CUSTOM}, the most an instance keeps.`
+                : "A classifier you run, or any https address that answers the same questions as Jev and Clef. What it gets and answers is in docs/automod.md."}
+            </span>
+          </span>
+        </motion.button>
+      </motion.div>
     </>
   );
 }
@@ -136,6 +194,7 @@ function ProviderCard({
   delay,
   reset,
   onChange,
+  onRemove,
 }: {
   instanceKey: string;
   provider: AutoModProviderSettings;
@@ -143,14 +202,30 @@ function ProviderCard({
   delay: number;
   reset?: Reset;
   onChange: (fn: (p: AutoModProviderSettings) => void) => void;
+  onRemove?: () => void;
 }) {
   const privateField = usePrivateField();
-  const known = KNOWN[provider.id] ?? { name: provider.id, host: "", blurb: "", models: [], keyHelp: "", tint: "" };
+  const custom = isCustom(provider);
+  const host = custom ? hostOf(provider.url) : "";
+  const known = custom
+    ? {
+        name: provider.name.trim() || "Your provider",
+        host: host || "an address you pick",
+        blurb: "Yours, at an https address you pick. It gets the same questions as Jev and Clef.",
+        models: [],
+        keyHelp: "If it needs one. It goes as Authorization: Bearer, or in the header you name.",
+        tint: "from-violet-500/25 to-fuchsia-500/10 text-violet-600 dark:text-violet-300",
+      }
+    : (KNOWN[provider.id] ?? { name: provider.id, host: "", blurb: "", models: [], keyHelp: "", tint: "" });
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<TestAutoModProviderResponse | { ok: false; error: string; elapsedMs: number; scores: [] } | null>(null);
-  const hasKey = provider.apiKeySet || provider.apiKey.trim() !== "";
+  // A saved key stays with its address: a new address needs it typed again.
+  const moved = custom && !!saved && saved.url.trim() !== provider.url.trim();
+  const hasKey = (provider.apiKeySet && !moved) || provider.apiKey.trim() !== "";
   const needsAccount = provider.id === "cloudflare-clef";
-  const ready = hasKey && (!needsAccount || provider.accountId.trim().length === 32);
+  const ready = custom
+    ? provider.name.trim() !== "" && host !== "" && (provider.header.trim() === "" || hasKey)
+    : hasKey && (!needsAccount || provider.accountId.trim().length === 32);
   const model = provider.model || known.models[0]?.id;
   const live = saved?.enabled ?? false;
 
@@ -178,21 +253,25 @@ function ProviderCard({
       onReset={reset?.onReset}
       resetting={reset?.resetting}
     >
-      <div className={cn("overflow-hidden rounded-3xl border transition-colors", provider.enabled ? "border-primary/40 bg-primary/[0.03]" : "")}>
+      <div className={cn("overflow-hidden rounded-3xl border transition-colors", provider.enabled ? "border-primary/40 bg-primary/[0.03]" : "", custom && !provider.enabled && "border-dashed")}>
         <label className="flex cursor-pointer items-center gap-3 p-3 pl-4">
           <motion.span
             animate={provider.enabled ? { scale: [1, 1.18, 1], rotate: [0, -8, 0] } : { scale: 1 }}
             transition={{ duration: 0.4 }}
             className={cn("grid size-10 shrink-0 place-items-center rounded-2xl bg-gradient-to-br text-sm font-extrabold", known.tint)}
           >
-            {known.name
-              .split(" ")
-              .map((w) => w[0])
-              .join("")}
+            {custom ? (
+              <WebhookIcon className="size-5" />
+            ) : (
+              known.name
+                .split(" ")
+                .map((w) => w[0])
+                .join("")
+            )}
           </motion.span>
           <span className="min-w-0 flex-1">
             <span className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-xs font-bold text-muted-foreground">{known.host}</span>
+              <span className={cn("font-mono text-xs font-bold text-muted-foreground", custom && !host && "font-sans font-normal italic")}>{known.host}</span>
               <AnimatePresence initial={false}>
                 {live && (
                   <motion.span
@@ -224,6 +303,73 @@ function ProviderCard({
               text. Nothing else goes: no names, ids, servers or addresses.
             </span>
           </div>
+          {custom && (
+            <>
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-extrabold">Name</span>
+                  <Input
+                    value={provider.name}
+                    maxLength={40}
+                    onChange={(e) => onChange((p) => (p.name = e.target.value))}
+                    placeholder="What servers see, like Our classifier"
+                    className="h-10 rounded-xl"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-extrabold">Address</span>
+                  <Input
+                    value={provider.url}
+                    type="url"
+                    inputMode="url"
+                    spellCheck={false}
+                    maxLength={512}
+                    onChange={(e) => onChange((p) => (p.url = e.target.value))}
+                    placeholder="https://moderation.example.com/v1/check"
+                    aria-invalid={provider.url.trim() !== "" && !host}
+                    className={cn("h-10 rounded-xl font-mono text-sm", privateField)}
+                  />
+                </label>
+              </div>
+              <AnimatePresence initial={false}>
+                {provider.url.trim() !== "" && !host && (
+                  <motion.span
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={SPRING}
+                    className="-mt-1 text-xs text-amber-700 dark:text-amber-400"
+                  >
+                    fuwa only talks to https addresses, like https://moderation.example.com/v1/check.
+                  </motion.span>
+                )}
+              </AnimatePresence>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-extrabold">Key header</span>
+                  <Input
+                    value={provider.header}
+                    spellCheck={false}
+                    maxLength={64}
+                    onChange={(e) => onChange((p) => (p.header = e.target.value.trim()))}
+                    placeholder="Authorization (Bearer)"
+                    className="h-10 rounded-xl font-mono text-sm"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-extrabold">Model</span>
+                  <Input
+                    value={provider.model}
+                    spellCheck={false}
+                    maxLength={100}
+                    onChange={(e) => onChange((p) => (p.model = e.target.value))}
+                    placeholder="Optional, sent as model"
+                    className="h-10 rounded-xl font-mono text-sm"
+                  />
+                </label>
+              </div>
+            </>
+          )}
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-extrabold">{needsAccount ? "API token" : "API key"}</span>
             <span className="text-xs text-muted-foreground">{known.keyHelp}</span>
@@ -235,7 +381,15 @@ function ProviderCard({
                 spellCheck={false}
                 value={provider.apiKey}
                 onChange={(e) => onChange((p) => (p.apiKey = e.target.value))}
-                placeholder={provider.apiKeySet ? `Saved, ends in ${provider.apiKeyHint || "••••"}. Type to replace it.` : "Paste it here"}
+                placeholder={
+                  moved && provider.apiKeySet
+                    ? "New address: type the key again"
+                    : provider.apiKeySet
+                      ? `Saved, ends in ${provider.apiKeyHint || "••••"}. Type to replace it.`
+                      : custom
+                        ? "None, or paste it here"
+                        : "Paste it here"
+                }
                 className="h-10 rounded-xl pl-9"
               />
             </span>
@@ -328,8 +482,19 @@ function ProviderCard({
                 </motion.div>
               )}
             </AnimatePresence>
-            {!ready && <span className="text-xs text-muted-foreground">Add the {needsAccount ? "token and account id" : "key"} to test it and turn it on.</span>}
+            {!ready && (
+              <span className="text-xs text-muted-foreground">
+                {custom
+                  ? `Add ${[provider.name.trim() ? "" : "a name", host ? "" : "an https address", provider.header.trim() && !hasKey ? "the key" : ""].filter(Boolean).join(" and ")} to test it and turn it on.`
+                  : `Add the ${needsAccount ? "token and account id" : "key"} to test it and turn it on.`}
+              </span>
+            )}
           </div>
+          {onRemove && (
+            <Button type="button" variant="ghost" size="sm" className="self-start rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={onRemove}>
+              <Trash2Icon /> Remove {provider.name.trim() || "this provider"}
+            </Button>
+          )}
         </div>
       </div>
     </Setting>

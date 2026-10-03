@@ -64,7 +64,7 @@ export const ListAutoModRulesResponseSchema: GenMessage<ListAutoModRulesResponse
  */
 export type AutoModProvider = Message<"fuwa.v1.AutoModProvider"> & {
   /**
-   * "typesafe-jev" or "cloudflare-clef".
+   * "typesafe-jev", "cloudflare-clef", or "custom-..." for the instance's own.
    *
    * @generated from field: string id = 1;
    */
