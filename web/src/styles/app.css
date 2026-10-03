@@ -677,3 +677,6 @@ body[data-settings-open] #root { scale: 0.94; filter: blur(3px); opacity: 0.4; }
 .signal-connecting > span { animation: bars 1.2s ease-in-out infinite; }
 .signal-connecting > span:nth-child(2) { animation-delay: 0.15s; }
 .signal-connecting > span:nth-child(3) { animation-delay: 0.3s; }
+
+/* The ping graph glides to each new sample (where the browser can animate a path). */
+.ping-graph { transition: d 0.6s cubic-bezier(0.22, 1, 0.36, 1); }

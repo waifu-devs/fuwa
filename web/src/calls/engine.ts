@@ -11,6 +11,7 @@ import { cue } from "@/lib/sounds";
 import { toast } from "@/lib/ui";
 import { Mic, micProblem, Speakers } from "./audio";
 import { canEncryptCalls, encryptedConfig, FrameCrypto } from "./frames";
+import { watchQuality } from "./quality";
 import { getCalls, sameTarget, setCalls, type CallTarget } from "./state";
 
 /**
@@ -64,6 +65,7 @@ class Session {
   private settings: GetCallSettingsResponse | null = null;
   private keeper: ReturnType<typeof setInterval> | null = null;
   private secretPoll: ReturnType<typeof setInterval> | null = null;
+  private unwatch: (() => void) | null = null;
   private broken: ReturnType<typeof setTimeout> | null = null;
   private connecting: Promise<void> | null = null;
   private attempt = 0;
@@ -109,6 +111,7 @@ class Session {
       setCalls((s) => ({ selfMute: true, call: s.call && { ...s.call, problem: micProblem(err) } }));
     }
     this.applyMute();
+    this.unwatch = watchQuality(() => this.pc);
     await this.connect();
     this.keeper = setInterval(() => void this.keep(), KEEP_MS);
   }
@@ -313,6 +316,7 @@ class Session {
     this.stopped = true;
     if (this.keeper) clearInterval(this.keeper);
     if (this.secretPoll) clearInterval(this.secretPoll);
+    this.unwatch?.();
     if (this.broken) clearTimeout(this.broken);
     this.teardown();
     this.mic?.close();
