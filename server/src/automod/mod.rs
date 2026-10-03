@@ -2,6 +2,8 @@
 //! here; `api/automod.rs` keeps the rules and `api/messages.rs` acts on what
 //! they catch.
 
+pub mod providers;
+
 use crate::pb::{self, AutoModTrigger as Trigger};
 
 /// What one rule caught in a message.
@@ -24,9 +26,36 @@ pub fn check(rule: &pb::AutoModRule, content: &str) -> Option<Hit> {
             }
         }
         Trigger::Links => link_hits(&rule.allowed, content),
-        Trigger::Unspecified => vec![],
+        // Asked of the rule's provider before the message's write: see `provider_hit`.
+        Trigger::Provider | Trigger::Unspecified => vec![],
     };
     (!matched.is_empty()).then_some(Hit { matched })
+}
+
+/// The percent a label must reach when a rule doesn't say.
+pub const DEFAULT_THRESHOLD: i32 = 80;
+
+/// What a provider rule makes of its provider's scores: the strongest level
+/// any label reached its threshold at (from FLAG up), and those labels with
+/// how sure the provider was ("Hate 97%"), surest first.
+pub fn provider_hit(rule: &pb::AutoModRule, scores: &providers::Scores) -> Option<(pb::AutoModLevel, Hit)> {
+    let mut hits: Vec<(f32, pb::AutoModLevel, String)> = Vec::new();
+    for label_rule in &rule.labels {
+        let level = pb::AutoModLevel::try_from(label_rule.level).unwrap_or(pb::AutoModLevel::Unspecified);
+        if (level as i32) < pb::AutoModLevel::Flag as i32 {
+            continue;
+        }
+        let Some(&(id, p)) = scores.iter().find(|(id, _)| *id == label_rule.label) else { continue };
+        let threshold = if label_rule.threshold == 0 { DEFAULT_THRESHOLD } else { label_rule.threshold };
+        let percent = (p * 100.0).round() as i32;
+        if percent >= threshold {
+            let name = providers::label(id).map_or(id, |l| l.name);
+            hits.push((p, level, format!("{name} {percent}%")));
+        }
+    }
+    let level = hits.iter().map(|(_, level, _)| *level).max_by_key(|l| *l as i32)?;
+    hits.sort_by(|a, b| b.0.total_cmp(&a.0));
+    Some((level, Hit { matched: hits.into_iter().map(|(_, _, shown)| shown).collect() }))
 }
 
 fn is_word(c: char) -> bool {
@@ -179,6 +208,31 @@ mod tests {
 
     fn hits(rule: &pb::AutoModRule, content: &str) -> Vec<String> {
         check(rule, content).map(|h| h.matched).unwrap_or_default()
+    }
+
+    #[test]
+    fn provider_rules_take_the_strongest_level_over_its_threshold() {
+        use pb::AutoModLevel as Level;
+        let label = |label: &str, level: Level, threshold: i32| pb::AutoModLabelRule {
+            label: label.into(),
+            level: level as i32,
+            threshold,
+        };
+        let rule = pb::AutoModRule {
+            trigger: Trigger::Provider as i32,
+            labels: vec![label("hate", Level::Block, 0), label("spam", Level::Flag, 60), label("scam", Level::Off, 50)],
+            ..Default::default()
+        };
+        let scores: providers::Scores = vec![("hate", 0.79), ("spam", 0.65), ("scam", 0.99)];
+        let (level, hit) = provider_hit(&rule, &scores).unwrap();
+        assert_eq!(level, Level::Flag);
+        assert_eq!(hit.matched, ["Spam 65%"]);
+        let scores: providers::Scores = vec![("hate", 0.97), ("spam", 0.65)];
+        let (level, hit) = provider_hit(&rule, &scores).unwrap();
+        assert_eq!(level, Level::Block);
+        assert_eq!(hit.matched, ["Hate 97%", "Spam 65%"]);
+        assert!(provider_hit(&rule, &vec![("hate", 0.1)]).is_none());
+        assert!(check(&rule, "anything").is_none());
     }
 
     #[test]

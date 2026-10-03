@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { AutoModRule } from "./types_pb";
+import type { AutoModLevel, AutoModRule } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/automod.proto.
  */
 export const file_fuwa_v1_automod: GenFile = /*@__PURE__*/
-  fileDesc("ChVmdXdhL3YxL2F1dG9tb2QucHJvdG8SB2Z1d2EudjEiLAoXTGlzdEF1dG9Nb2RSdWxlc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIj8KGExpc3RBdXRvTW9kUnVsZXNSZXNwb25zZRIjCgVydWxlcxgBIAMoCzIULmZ1d2EudjEuQXV0b01vZFJ1bGUiTwoWU2F2ZUF1dG9Nb2RSdWxlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSIgoEcnVsZRgCIAEoCzIULmZ1d2EudjEuQXV0b01vZFJ1bGUiPQoXU2F2ZUF1dG9Nb2RSdWxlUmVzcG9uc2USIgoEcnVsZRgBIAEoCzIULmZ1d2EudjEuQXV0b01vZFJ1bGUiPgoYRGVsZXRlQXV0b01vZFJ1bGVSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgdydWxlX2lkGAIgASgJIhsKGURlbGV0ZUF1dG9Nb2RSdWxlUmVzcG9uc2UiYAoWVGVzdEF1dG9Nb2RSdWxlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSIgoEcnVsZRgCIAEoCzIULmZ1d2EudjEuQXV0b01vZFJ1bGUSDwoHY29udGVudBgDIAEoCSI7ChdUZXN0QXV0b01vZFJ1bGVSZXNwb25zZRIPCgdtYXRjaGVkGAEgASgIEg8KB21hdGNoZXMYAiADKAky8QIKDkF1dG9Nb2RTZXJ2aWNlElcKEExpc3RBdXRvTW9kUnVsZXMSIC5mdXdhLnYxLkxpc3RBdXRvTW9kUnVsZXNSZXF1ZXN0GiEuZnV3YS52MS5MaXN0QXV0b01vZFJ1bGVzUmVzcG9uc2USVAoPU2F2ZUF1dG9Nb2RSdWxlEh8uZnV3YS52MS5TYXZlQXV0b01vZFJ1bGVSZXF1ZXN0GiAuZnV3YS52MS5TYXZlQXV0b01vZFJ1bGVSZXNwb25zZRJaChFEZWxldGVBdXRvTW9kUnVsZRIhLmZ1d2EudjEuRGVsZXRlQXV0b01vZFJ1bGVSZXF1ZXN0GiIuZnV3YS52MS5EZWxldGVBdXRvTW9kUnVsZVJlc3BvbnNlElQKD1Rlc3RBdXRvTW9kUnVsZRIfLmZ1d2EudjEuVGVzdEF1dG9Nb2RSdWxlUmVxdWVzdBogLmZ1d2EudjEuVGVzdEF1dG9Nb2RSdWxlUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
+  fileDesc("ChVmdXdhL3YxL2F1dG9tb2QucHJvdG8SB2Z1d2EudjEiLAoXTGlzdEF1dG9Nb2RSdWxlc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJImwKGExpc3RBdXRvTW9kUnVsZXNSZXNwb25zZRIjCgVydWxlcxgBIAMoCzIULmZ1d2EudjEuQXV0b01vZFJ1bGUSKwoJcHJvdmlkZXJzGAIgAygLMhguZnV3YS52MS5BdXRvTW9kUHJvdmlkZXIiYAoPQXV0b01vZFByb3ZpZGVyEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEaG9zdBgDIAEoCRIlCgZsYWJlbHMYBCADKAsyFS5mdXdhLnYxLkF1dG9Nb2RMYWJlbCJrCgxBdXRvTW9kTGFiZWwSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCRIsCg1kZWZhdWx0X2xldmVsGAQgASgOMhUuZnV3YS52MS5BdXRvTW9kTGV2ZWwiTwoWU2F2ZUF1dG9Nb2RSdWxlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSIgoEcnVsZRgCIAEoCzIULmZ1d2EudjEuQXV0b01vZFJ1bGUiPQoXU2F2ZUF1dG9Nb2RSdWxlUmVzcG9uc2USIgoEcnVsZRgBIAEoCzIULmZ1d2EudjEuQXV0b01vZFJ1bGUiPgoYRGVsZXRlQXV0b01vZFJ1bGVSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIPCgdydWxlX2lkGAIgASgJIhsKGURlbGV0ZUF1dG9Nb2RSdWxlUmVzcG9uc2UiYAoWVGVzdEF1dG9Nb2RSdWxlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSIgoEcnVsZRgCIAEoCzIULmZ1d2EudjEuQXV0b01vZFJ1bGUSDwoHY29udGVudBgDIAEoCSJeChdUZXN0QXV0b01vZFJ1bGVSZXNwb25zZRIPCgdtYXRjaGVkGAEgASgIEg8KB21hdGNoZXMYAiADKAkSDQoFZXJyb3IYAyABKAkSEgoKZWxhcHNlZF9tcxgEIAEoBTLxAgoOQXV0b01vZFNlcnZpY2USVwoQTGlzdEF1dG9Nb2RSdWxlcxIgLmZ1d2EudjEuTGlzdEF1dG9Nb2RSdWxlc1JlcXVlc3QaIS5mdXdhLnYxLkxpc3RBdXRvTW9kUnVsZXNSZXNwb25zZRJUCg9TYXZlQXV0b01vZFJ1bGUSHy5mdXdhLnYxLlNhdmVBdXRvTW9kUnVsZVJlcXVlc3QaIC5mdXdhLnYxLlNhdmVBdXRvTW9kUnVsZVJlc3BvbnNlEloKEURlbGV0ZUF1dG9Nb2RSdWxlEiEuZnV3YS52MS5EZWxldGVBdXRvTW9kUnVsZVJlcXVlc3QaIi5mdXdhLnYxLkRlbGV0ZUF1dG9Nb2RSdWxlUmVzcG9uc2USVAoPVGVzdEF1dG9Nb2RSdWxlEh8uZnV3YS52MS5UZXN0QXV0b01vZFJ1bGVSZXF1ZXN0GiAuZnV3YS52MS5UZXN0QXV0b01vZFJ1bGVSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types]);
 
 /**
  * @generated from message fuwa.v1.ListAutoModRulesRequest
@@ -39,6 +39,14 @@ export type ListAutoModRulesResponse = Message<"fuwa.v1.ListAutoModRulesResponse
    * @generated from field: repeated fuwa.v1.AutoModRule rules = 1;
    */
   rules: AutoModRule[];
+
+  /**
+   * The moderation providers this instance's admins turned on, which a
+   * PROVIDER rule can use.
+   *
+   * @generated from field: repeated fuwa.v1.AutoModProvider providers = 2;
+   */
+  providers: AutoModProvider[];
 };
 
 /**
@@ -47,6 +55,87 @@ export type ListAutoModRulesResponse = Message<"fuwa.v1.ListAutoModRulesResponse
  */
 export const ListAutoModRulesResponseSchema: GenMessage<ListAutoModRulesResponse> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_automod, 1);
+
+/**
+ * A moderation provider a server can use. Messages it checks (their text
+ * only, never who wrote them or where) go from the instance to its host.
+ *
+ * @generated from message fuwa.v1.AutoModProvider
+ */
+export type AutoModProvider = Message<"fuwa.v1.AutoModProvider"> & {
+  /**
+   * "typesafe-jev", "cloudflare-clef", or "custom-..." for the instance's own.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * "TypeSafe Jev".
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * Where checked messages go, such as "api.typesafe.ai".
+   *
+   * @generated from field: string host = 3;
+   */
+  host: string;
+
+  /**
+   * What it can tell apart, each with the level a new rule starts at.
+   *
+   * @generated from field: repeated fuwa.v1.AutoModLabel labels = 4;
+   */
+  labels: AutoModLabel[];
+};
+
+/**
+ * Describes the message fuwa.v1.AutoModProvider.
+ * Use `create(AutoModProviderSchema)` to create a new message.
+ */
+export const AutoModProviderSchema: GenMessage<AutoModProvider> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_automod, 2);
+
+/**
+ * @generated from message fuwa.v1.AutoModLabel
+ */
+export type AutoModLabel = Message<"fuwa.v1.AutoModLabel"> & {
+  /**
+   * "hate".
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * "Hate".
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * What it means, in a sentence.
+   *
+   * @generated from field: string description = 3;
+   */
+  description: string;
+
+  /**
+   * @generated from field: fuwa.v1.AutoModLevel default_level = 4;
+   */
+  defaultLevel: AutoModLevel;
+};
+
+/**
+ * Describes the message fuwa.v1.AutoModLabel.
+ * Use `create(AutoModLabelSchema)` to create a new message.
+ */
+export const AutoModLabelSchema: GenMessage<AutoModLabel> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_automod, 3);
 
 /**
  * @generated from message fuwa.v1.SaveAutoModRuleRequest
@@ -68,7 +157,7 @@ export type SaveAutoModRuleRequest = Message<"fuwa.v1.SaveAutoModRuleRequest"> &
  * Use `create(SaveAutoModRuleRequestSchema)` to create a new message.
  */
 export const SaveAutoModRuleRequestSchema: GenMessage<SaveAutoModRuleRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_automod, 2);
+  messageDesc(file_fuwa_v1_automod, 4);
 
 /**
  * @generated from message fuwa.v1.SaveAutoModRuleResponse
@@ -85,7 +174,7 @@ export type SaveAutoModRuleResponse = Message<"fuwa.v1.SaveAutoModRuleResponse">
  * Use `create(SaveAutoModRuleResponseSchema)` to create a new message.
  */
 export const SaveAutoModRuleResponseSchema: GenMessage<SaveAutoModRuleResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_automod, 3);
+  messageDesc(file_fuwa_v1_automod, 5);
 
 /**
  * @generated from message fuwa.v1.DeleteAutoModRuleRequest
@@ -107,7 +196,7 @@ export type DeleteAutoModRuleRequest = Message<"fuwa.v1.DeleteAutoModRuleRequest
  * Use `create(DeleteAutoModRuleRequestSchema)` to create a new message.
  */
 export const DeleteAutoModRuleRequestSchema: GenMessage<DeleteAutoModRuleRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_automod, 4);
+  messageDesc(file_fuwa_v1_automod, 6);
 
 /**
  * @generated from message fuwa.v1.DeleteAutoModRuleResponse
@@ -120,7 +209,7 @@ export type DeleteAutoModRuleResponse = Message<"fuwa.v1.DeleteAutoModRuleRespon
  * Use `create(DeleteAutoModRuleResponseSchema)` to create a new message.
  */
 export const DeleteAutoModRuleResponseSchema: GenMessage<DeleteAutoModRuleResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_automod, 5);
+  messageDesc(file_fuwa_v1_automod, 7);
 
 /**
  * @generated from message fuwa.v1.TestAutoModRuleRequest
@@ -147,7 +236,7 @@ export type TestAutoModRuleRequest = Message<"fuwa.v1.TestAutoModRuleRequest"> &
  * Use `create(TestAutoModRuleRequestSchema)` to create a new message.
  */
 export const TestAutoModRuleRequestSchema: GenMessage<TestAutoModRuleRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_automod, 6);
+  messageDesc(file_fuwa_v1_automod, 8);
 
 /**
  * @generated from message fuwa.v1.TestAutoModRuleResponse
@@ -161,11 +250,27 @@ export type TestAutoModRuleResponse = Message<"fuwa.v1.TestAutoModRuleResponse">
   matched: boolean;
 
   /**
-   * What did: the words or links, or how many pings.
+   * What did: the words or links, how many pings, or the provider's labels
+   * and how sure it was ("Hate 97%").
    *
    * @generated from field: repeated string matches = 2;
    */
   matches: string[];
+
+  /**
+   * PROVIDER: why the provider couldn't answer. Messages then go through its
+   * rule unchecked (the other rules still apply).
+   *
+   * @generated from field: string error = 3;
+   */
+  error: string;
+
+  /**
+   * PROVIDER: how long the provider took.
+   *
+   * @generated from field: int32 elapsed_ms = 4;
+   */
+  elapsedMs: number;
 };
 
 /**
@@ -173,7 +278,7 @@ export type TestAutoModRuleResponse = Message<"fuwa.v1.TestAutoModRuleResponse">
  * Use `create(TestAutoModRuleResponseSchema)` to create a new message.
  */
 export const TestAutoModRuleResponseSchema: GenMessage<TestAutoModRuleResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_automod, 7);
+  messageDesc(file_fuwa_v1_automod, 9);
 
 /**
  * A server's AutoMod: rules that catch messages as they're sent, block them,
@@ -195,7 +300,8 @@ export const AutoModService: GenService<{
   },
   /**
    * Adds a rule (with no id) or replaces one. MANAGE_SERVER. A server has up
-   * to 6 keyword rules, one mention spam rule and one link rule.
+   * to 6 keyword rules, one mention spam rule, one link rule and one
+   * provider rule.
    *
    * @generated from rpc fuwa.v1.AutoModService.SaveAutoModRule
    */
@@ -214,7 +320,8 @@ export const AutoModService: GenService<{
   },
   /**
    * What a rule, saved or not, would make of some text, without sending
-   * anything. MANAGE_SERVER.
+   * anything. MANAGE_SERVER. A PROVIDER rule asks its provider, so the text
+   * goes to the provider's host.
    *
    * @generated from rpc fuwa.v1.AutoModService.TestAutoModRule
    */

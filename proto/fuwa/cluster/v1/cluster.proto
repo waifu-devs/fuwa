@@ -224,6 +224,9 @@ message WatchRequest {
 
 message WatchResponse {
   fuwa.v1.InstanceSettings settings = 1;
+  // The moderation providers with their API keys, which settings leaves out
+  // and shards need to check messages.
+  repeated fuwa.v1.AutoModProviderSettings automod_providers = 2;
 }
 
 // A server as a shard reports it: its profile and who's in it.

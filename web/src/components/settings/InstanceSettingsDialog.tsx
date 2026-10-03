@@ -45,6 +45,7 @@ import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { Accounts } from "./instance/Accounts";
 import { Announcement } from "./instance/Announcement";
 import { CALL_FIELDS, CALL_SECTION, CallSettings } from "./instance/Calls";
+import { MODERATION_FIELDS, MODERATION_SECTION, ModerationSettings } from "./instance/Moderation";
 import { Servers } from "./instance/Servers";
 import { SettingsScreen } from "./SettingsScreen";
 
@@ -72,6 +73,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
+  ...MODERATION_FIELDS,
 ];
 
 const changedPaths = (draft: InstanceSettings, saved: InstanceSettings) =>
@@ -231,6 +233,7 @@ export function InstanceSettingsDialog({
               settings: [{ id: "telemetry", label: "Anonymous usage signal and reports", keywords: "telemetry analytics errors performance" }],
             },
             CALL_SECTION,
+            MODERATION_SECTION,
           ],
         },
         {
@@ -588,6 +591,9 @@ export function InstanceSettingsDialog({
             </>
           )}
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
+          {tab === "moderation" && saved && (
+            <ModerationSettings instanceKey={instanceKey} draft={draft} saved={saved} patch={patch} resetter={resetter} />
+          )}
           {tab === "privacy" && (
             <>
               <Setting id="telemetry" title="Anonymous usage signal and reports" defaultLabel={defaults.telemetry ? "on" : "off"} {...resetter("telemetry")}>
@@ -677,6 +683,7 @@ const CREATION_LABEL: Record<number, string> = {
 function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: string[]) {
   for (const path of paths) {
     CALL_FIELDS.find((f) => f.path === path)?.copy(into, from);
+    MODERATION_FIELDS.find((f) => f.path === path)?.copy(into, from);
     switch (path) {
       case "name":
         into.name = from.name;
