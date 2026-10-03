@@ -726,6 +726,35 @@ async fn preflight_origin(instance: &Instance, origin: &str) -> Option<String> {
 }
 
 #[tokio::test]
+async fn admins_never_read_back_the_turn_secret() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_TURN_SECRET", "secret-from-the-env-aaaa")]).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let shown = |config: pb::InstanceConfig| {
+        let settings = config.settings.unwrap();
+        let defaults = config.defaults.unwrap();
+        assert!(settings.turn_secret.is_empty() && defaults.turn_secret.is_empty(), "the secret stays on the server");
+        (settings.turn_secret_set, settings.turn_secret_hint)
+    };
+    let config = c.admin.get_settings(authed(&admin, pb::GetSettingsRequest {})).await.unwrap().into_inner();
+    assert_eq!(shown(config.config.unwrap()), (true, "aaaa".into()));
+
+    let update = |secret: &str, update: &[&str], reset: &[&str]| {
+        let settings = pb::InstanceSettings { turn_secret: secret.into(), ..Default::default() };
+        authed(&admin, settings_update(settings, update, reset))
+    };
+    let replaced = c.admin.update_settings(update("a-new-turn-secret-bbbb", &["turn_secret"], &[])).await.unwrap();
+    assert_eq!(shown(replaced.into_inner().config.unwrap()), (true, "bbbb".into()));
+    // Saving the page as shown (the field empty) keeps the saved secret.
+    let kept = c.admin.update_settings(update("", &["turn_secret"], &[])).await.unwrap();
+    assert_eq!(shown(kept.into_inner().config.unwrap()), (true, "bbbb".into()));
+    let reset = c.admin.update_settings(update("", &[], &["turn_secret"])).await.unwrap();
+    assert_eq!(shown(reset.into_inner().config.unwrap()), (true, "aaaa".into()));
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn admins_change_settings_from_a_client() {
     let dir = tempfile::tempdir().unwrap();
     let env = [("FUWA_NODE_NAME", "From env"), ("FUWA_LIMIT_MEMBERS", "10")];
