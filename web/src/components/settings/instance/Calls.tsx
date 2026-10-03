@@ -12,6 +12,7 @@ type Reset = { changed: boolean; onReset: () => void; resetting: boolean };
 /** The instance settings calls read. */
 export const CALL_FIELDS: { path: string; get: (s: InstanceSettings) => unknown; copy: (into: InstanceSettings, from: InstanceSettings) => void }[] = [
   { path: "calls", get: (s) => s.calls, copy: (into, from) => (into.calls = from.calls) },
+  { path: "call_recordings", get: (s) => s.callRecordings, copy: (into, from) => (into.callRecordings = from.callRecordings) },
   {
     path: "ice_urls",
     get: (s) => s.iceUrls.map((u) => u.trim()).filter(Boolean).join("\n"),
@@ -28,6 +29,7 @@ export const CALL_SECTION = {
   keywords: "voice webrtc stun turn ice media",
   settings: [
     { id: "calls-on", label: "Calls", keywords: "voice enable" },
+    { id: "call-recordings", label: "Recording on the server", keywords: "record recordings tracks podcast" },
     { id: "ice-urls", label: "STUN and TURN servers", keywords: "ice nat relay firewall" },
     { id: "turn-secret", label: "TURN secret", keywords: "coturn relay password" },
   ],
@@ -80,6 +82,20 @@ export function CallSettings({
             <span className="mt-0.5 block text-xs text-muted-foreground">Set when the instance starts. Calls in direct messages are end-to-end encrypted: it only ever forwards sound it can't read.</span>
           </span>
         </motion.div>
+      </Setting>
+      <Setting
+        id="call-recordings"
+        title="Recording on the server"
+        delay={0.02}
+        defaultLabel={defaults.callRecordings ? "on" : "off"}
+        {...resetter("call_recordings")}
+      >
+        <Toggle
+          checked={draft.callRecordings}
+          onChange={(on) => patch((d) => (d.callRecordings = on))}
+          label="Let people with Record keep voice channels' recordings on this instance"
+          hint="One Ogg Opus track per person, kept with the server's files (sealed when the instance encrypts its files) until someone with Record deletes it. Nobody has Record until a server's admins grant it. Turning this off stops recordings going on now; the ones kept stay."
+        />
       </Setting>
       <Setting
         id="ice-urls"

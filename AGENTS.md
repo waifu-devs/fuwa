@@ -172,7 +172,13 @@
     each viewer the size it asked for over the data channel ("layers"),
     switching on keyframes, and VIDEO gates them (`May` in `rtc.rs`). An
     app's second video track is its shared screen (`Source::Screen`), sent
-    on a stream named `<account>-screen`.
+    on a stream named `<account>-screen`. `recordings.rs` records voice
+    channels on the server while anyone there has `server_record` on: a
+    bridge per recording, a hand-written Ogg Opus file per speaker (frames
+    untouched, silence between, every track lined up from the start),
+    sealed with ChaCha20-Poly1305 under an HKDF key from
+    FUWA_ENCRYPTION_KEY, rows in the server file's `recordings` table, and
+    the finished files copied to the replica under `recordings/`.
     Calls in direct messages are end-to-end
     encrypted by the apps; the server never holds their keys and only
     forwards sealed frames. Never put a participant's address in a log or an event.

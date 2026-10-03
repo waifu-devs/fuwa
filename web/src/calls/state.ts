@@ -38,6 +38,10 @@ export type CallsState = {
   selfStream: boolean;
   /** You're recording the call's sound to a file. Every call starts without. */
   selfRecord: boolean;
+  /** You're recording the voice channel on the server. Every call starts without. */
+  serverRecord: boolean;
+  /** The instance lets voice channels be recorded on the server. */
+  serverRecordings: boolean;
   /** Who's talking right now in your call, by user id (you included). */
   speaking: Record<string, boolean>;
   /** Push to talk's key is down. */
@@ -59,7 +63,7 @@ function load(): Pick<CallsState, "selfMute" | "selfDeaf"> {
   }
 }
 
-let state: CallsState = { call: null, speaking: {}, talking: false, declined: {}, ended: null, selfVideo: false, selfStream: false, selfRecord: false, ...load() };
+let state: CallsState = { call: null, speaking: {}, talking: false, declined: {}, ended: null, selfVideo: false, selfStream: false, selfRecord: false, serverRecord: false, serverRecordings: false, ...load() };
 const listeners = new Set<() => void>();
 
 export const getCalls = () => state;

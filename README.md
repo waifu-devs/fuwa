@@ -133,6 +133,7 @@ the log filter are read only from the environment.
 | `FUWA_HOSTING` | `self_hosted` | `hosted` only on Waifu Devs' own instance; reported in the signal |
 | `FUWA_LOG` | `info,turso_core=warn` | Log filter ([syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)) |
 | `FUWA_CALLS` | `on` | Voice channels and calls in direct messages; `off` turns them off |
+| `FUWA_CALL_RECORDINGS` | `on` | Recording voice channels on the server (a track per person, for people with Record); `off` turns it off |
 | `FUWA_MEDIA_PORT` | `50000` | The port calls' sound uses, UDP and TCP, open to the internet; `off` for no calls in this process |
 | `FUWA_MEDIA_ADDRESSES` | this machine's address | Where apps reach that port: `HOST`, `HOST:PORT`, or `udp/…` or `tcp/…` for one protocol (a TCP proxy), comma-separated |
 | `FUWA_ICE_URLS` | unset | STUN and TURN servers for people on strict networks, comma-separated `stun:`, `turn:` and `turns:` URLs |

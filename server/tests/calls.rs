@@ -45,6 +45,7 @@ async fn start(dir: &Path) -> Instance {
     let shutdown = app.shutdown.clone();
     fuwa_server::api::spawn_voice_sweeper(app.clone());
     fuwa_server::api::spawn_voice_guard(app.clone());
+    fuwa_server::recordings::Recordings::spawn(app.clone());
     let serving = tokio::spawn(async move {
         axum::serve(listener, router).with_graceful_shutdown(async move { shutdown.cancelled().await }).await.unwrap();
     });
@@ -1018,4 +1019,172 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
 
     instance.app.shutdown.cancel();
     instance.serving.await.unwrap();
+}
+
+async fn recordings(c: &mut Clients, token: &str, sid: &str, channel: &str) -> Vec<pb::Recording> {
+    let request = pb::ListRecordingsRequest { server_id: sid.into(), channel_id: channel.into() };
+    c.calls.list_recordings(authed(token, request)).await.unwrap().into_inner().recordings
+}
+
+#[tokio::test]
+async fn voice_channels_record_on_the_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let (juan, juan_id) = sign_up(&mut c, "juan").await;
+    let (mika, mika_id) = sign_up(&mut c, "mika").await;
+    let sid = c
+        .servers
+        .create_server(authed(
+            &juan,
+            pb::CreateServerRequest { name: "Studio".into(), discoverable: true, ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap()
+        .id;
+    c.servers
+        .join_server(authed(&mika, pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    let voice = c
+        .channels
+        .create_channel(authed(
+            &juan,
+            pb::CreateChannelRequest {
+                server_id: sid.clone(),
+                name: "Booth".into(),
+                r#type: pb::ChannelType::Voice as i32,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .channel
+        .unwrap();
+    let settings = c.calls.get_call_settings(authed(&juan, pb::GetCallSettingsRequest {})).await.unwrap().into_inner();
+    assert!(settings.recordings, "on unless the instance turns it off");
+
+    // Mika has no RECORD: asking to record on the server does nothing.
+    let (mut b, offer) = Peer::new().await;
+    let joined = c
+        .calls
+        .join_voice(authed(
+            &mika,
+            pb::JoinVoiceRequest {
+                server_id: sid.clone(),
+                channel_id: voice.id.clone(),
+                offer,
+                server_record: true,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let state = joined.state.unwrap();
+    assert!(!state.server_record && state.record_suppress);
+    b.answer(&joined.answer);
+
+    // Juan owns the server, so he may: everyone sees it.
+    let (mut a, offer) = Peer::new().await;
+    let joined = c
+        .calls
+        .join_voice(authed(
+            &juan,
+            pb::JoinVoiceRequest {
+                server_id: sid.clone(),
+                channel_id: voice.id.clone(),
+                offer,
+                server_record: true,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(joined.state.as_ref().unwrap().server_record);
+    let juan_session = joined.session_id.clone();
+    a.answer(&joined.answer);
+    talk(&mut a, &mut b, Duration::from_secs(3)).await;
+
+    let live = recordings(&mut c, &juan, &sid, &voice.id).await;
+    assert_eq!(live.len(), 1);
+    let rec = &live[0];
+    assert!(rec.ended_at.is_none(), "still going on");
+    assert_eq!(rec.started_by, juan_id);
+    let mut voices: Vec<&str> = rec.tracks.iter().map(|t| t.user_id.as_str()).collect();
+    voices.sort();
+    let mut both = vec![juan_id.as_str(), mika_id.as_str()];
+    both.sort();
+    assert_eq!(voices, both, "a track per person who spoke");
+    let download = |token: &str, user: &str| {
+        authed(
+            token,
+            pb::DownloadRecordingRequest { server_id: sid.clone(), recording_id: rec.id.clone(), user_id: user.into() },
+        )
+    };
+    let early = c.calls.download_recording(download(&juan, &juan_id)).await.unwrap_err();
+    assert_eq!(early.code(), Code::FailedPrecondition, "not while it's going on");
+    let denied = c
+        .calls
+        .list_recordings(authed(
+            &mika,
+            pb::ListRecordingsRequest { server_id: sid.clone(), channel_id: voice.id.clone() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied, "only for people with RECORD");
+
+    // Juan stops: the recording ends, every track as long as the recording.
+    let keep = pb::KeepVoiceRequest {
+        server_id: sid.clone(),
+        session_id: juan_session.clone(),
+        channel_id: voice.id.clone(),
+        ..Default::default()
+    };
+    let kept = c.calls.keep_voice(authed(&juan, keep)).await.unwrap().into_inner();
+    assert!(!kept.state.unwrap().server_record);
+    let ended = 'ended: {
+        for _ in 0..50 {
+            let listed = recordings(&mut c, &juan, &sid, &voice.id).await;
+            if listed[0].ended_at.is_some() {
+                break 'ended listed[0].clone();
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("the recording never ended");
+    };
+    assert_eq!(ended.tracks.len(), 2);
+    let longest = ended.tracks.iter().map(|t| t.duration_ms).max().unwrap();
+    assert!(longest >= 2500, "about three seconds long: {longest} ms");
+    assert!(ended.tracks.iter().all(|t| t.duration_ms == longest), "tracks line up: {:?}", ended.tracks);
+    assert_eq!(ended.size_bytes, ended.tracks.iter().map(|t| t.size_bytes).sum::<i64>());
+
+    // Juan's track is an Ogg Opus file with his frames in it, untouched.
+    let mut stream = c.calls.download_recording(download(&juan, &juan_id)).await.unwrap().into_inner();
+    let mut file = Vec::new();
+    while let Some(piece) = stream.next().await {
+        file.extend(piece.unwrap().data);
+    }
+    assert!(file.starts_with(b"OggS"));
+    assert!(file.windows(8).any(|w| w == b"OpusHead"));
+    let frames = file.windows(6).filter(|w| *w == b"frame ").count();
+    assert!(frames > 50, "{frames} of juan's frames");
+    assert_eq!(file.len() as i64, ended.tracks.iter().find(|t| t.user_id == juan_id).unwrap().size_bytes);
+    let missing = c.calls.download_recording(download(&juan, &sid)).await.unwrap_err();
+    assert_eq!(missing.code(), Code::NotFound, "nobody by that id spoke");
+
+    // Deleting it takes its files too.
+    let files = dir.path().join("recordings").join(&sid).join(&ended.id);
+    assert!(files.exists());
+    let delete = pb::DeleteRecordingRequest { server_id: sid.clone(), recording_id: ended.id.clone() };
+    c.calls.delete_recording(authed(&juan, delete)).await.unwrap();
+    assert!(recordings(&mut c, &juan, &sid, &voice.id).await.is_empty());
+    assert!(!files.exists());
+    instance.app.shutdown.cancel();
+    let _ = instance.serving.await;
 }

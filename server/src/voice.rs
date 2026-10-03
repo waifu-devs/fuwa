@@ -157,6 +157,28 @@ impl Voice {
         self.lock().keys().filter(|k| k.starts_with(prefix)).cloned().collect()
     }
 
+    /// The voice channels someone wants recorded on the server, as (server,
+    /// channel, who turned it on first).
+    pub fn recorded(&self) -> Vec<(String, String, String)> {
+        let scopes = self.lock();
+        let mut out: Vec<(String, String, String, i64)> = Vec::new();
+        for (scope, entry) in scopes.iter().filter(|(scope, _)| !scope.starts_with("dm:")) {
+            for place in entry.places.values().filter(|p| p.state.server_record) {
+                let joined = place.state.joined_at.as_ref().map(crate::id::millis).unwrap_or_default();
+                match out.iter_mut().find(|(s, c, _, _)| s == scope && *c == place.state.channel_id) {
+                    Some(found) if found.3 <= joined => {}
+                    Some(found) => {
+                        *found = (scope.clone(), place.state.channel_id.clone(), place.state.user_id.clone(), joined)
+                    }
+                    None => {
+                        out.push((scope.clone(), place.state.channel_id.clone(), place.state.user_id.clone(), joined))
+                    }
+                }
+            }
+        }
+        out.into_iter().map(|(s, c, u, _)| (s, c, u)).collect()
+    }
+
     /// Lets go of the places nobody kept, as of `now`.
     pub fn expire(&self, now: Instant) -> Vec<(String, Place)> {
         let mut scopes = self.lock();

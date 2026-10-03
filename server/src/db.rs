@@ -25,6 +25,16 @@ impl EncryptionKey {
         }
         Ok(Self(hex.to_ascii_lowercase()))
     }
+
+    /// The key's 32 bytes, for sealing files that aren't databases (call
+    /// recordings), each under a key derived from it.
+    pub fn bytes(&self) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        for (i, byte) in out.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&self.0[2 * i..2 * i + 2], 16).unwrap_or_default();
+        }
+        out
+    }
 }
 
 impl std::fmt::Debug for EncryptionKey {
