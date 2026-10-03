@@ -105,6 +105,7 @@ const FIELD: Record<string, string> = {
   default_notifications: "Default notifications",
   system_channel_id: "Join messages",
   topic: "Topic",
+  encryption: "End-to-end encryption",
   parent_id: "Category",
   position: "Position",
   slowmode_seconds: "Slow mode",

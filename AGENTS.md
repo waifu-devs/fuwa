@@ -11,7 +11,9 @@
   RFC 9420, through OpenMLS), shared by every client and the server. Without
   features it only reads MLS message headers (`wire`), which is all the server
   uses; the `client` feature is a whole device (`Device`: keys, groups,
-  encrypting, safety numbers). The design is in `docs/e2ee.md`.
+  encrypting, safety numbers). The design is in `docs/e2ee.md`; secure
+  channels (end-to-end encrypted channels in servers) use the same devices
+  and groups, see `docs/secure-channels.md`.
 - `e2ee-wasm/`: `fuwa-e2ee` for the web app, as WebAssembly. `pnpm wasm` (in
   `web/`) builds it into `web/src/e2ee/pkg` (not committed); the wasm-bindgen
   crate and CLI versions must match.
@@ -584,6 +586,13 @@
   while it's waited for, and as a warning only once something gives up: a
   call tried again reads another part's failure with `Error::retried`, not
   `From<Status>` (which warns).
+- Secure channels (`api/secure.rs`, `docs/secure-channels.md`) hold to the
+  same: the server keeps their MLS records in the server's file and checks
+  only headers and permissions. Nothing that reads content (AutoMod, search,
+  webhooks, agents, link previews, embeds) may touch them; their plaintext is
+  a `DirectMessageContent`. Who belongs in a channel's group is
+  `secure_members` (who can see it, people only); keep it in step with any
+  change to how channel access is worked out.
 - Direct messages are end-to-end encrypted, always: no off switch, no
   server-side copy of keys or plaintext, nothing about their content in logs,
   events, exports or the usage signal. The server checks only what it can

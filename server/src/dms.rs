@@ -27,6 +27,16 @@ const MIGRATIONS: &[&str] = &[include_str!("../migrations/dms/0001_init.sql")];
 /// The most single-use key packages kept for one device.
 pub const MAX_KEY_PACKAGES: i64 = 100;
 
+/// Single-use key packages one account may take, each hour, from devices of
+/// people it has no conversation with (adding them to secure channels).
+/// Past that it gets their last-resort key package instead, so nobody can
+/// use up someone else's single-use ones by claiming them over and over.
+pub const STRANGER_CLAIMS_PER_HOUR: u32 = 2000;
+/// And at most this many from any one of those devices an hour, so even one
+/// account can't use up a device's single-use key packages.
+pub const STRANGER_CLAIMS_PER_DEVICE: u32 = 3;
+const HOUR_MS: i64 = 60 * 60 * 1000;
+
 /// How many events a watcher may fall behind before it's cut off and has to
 /// catch up from the records.
 const BUFFER: usize = 256;
@@ -210,12 +220,20 @@ pub struct DmDb {
     /// conversation's records in sequence.
     publishing: Mutex<()>,
     watchers: SyncMutex<HashMap<String, broadcast::Sender<Arc<pb::DirectMessageEvent>>>>,
+    /// Single-use key packages each account took from strangers' devices this
+    /// hour: when the hour started, and how many.
+    stranger_claims: SyncMutex<HashMap<String, (i64, u32)>>,
 }
 
 impl DmDb {
     pub async fn open(path: &Path, key: Option<&EncryptionKey>) -> Result<Self> {
         let db = Arc::new(db::open(path, key, MIGRATIONS).await?);
-        Ok(Self { db, publishing: Mutex::new(()), watchers: SyncMutex::default() })
+        Ok(Self {
+            db,
+            publishing: Mutex::new(()),
+            watchers: SyncMutex::default(),
+            stranger_claims: SyncMutex::default(),
+        })
     }
 
     /// The open file, for the replica to track.
@@ -344,21 +362,55 @@ impl DmDb {
         .await
     }
 
-    /// Hands out one key package per device: the oldest single-use one still
-    /// good, which goes, or else the device's last-resort one.
-    pub async fn claim_key_packages(&self, device_ids: &[&str]) -> Result<Vec<(String, Vec<u8>)>> {
+    /// Which of strangers' devices `account_id` may still take a single-use
+    /// key package from this hour (within its own budget and each device's),
+    /// counting them as taken. The rest get their last-resort one.
+    pub fn take_stranger_claims<'d>(&self, account_id: &str, device_ids: &[&'d str], now: i64) -> HashSet<&'d str> {
+        let mut claims = self.stranger_claims.lock().unwrap_or_else(|p| p.into_inner());
+        if claims.len() > 65_536 {
+            claims.retain(|_, (start, _)| now - *start < HOUR_MS);
+        }
+        let mut count = |key: String, cap: u32| {
+            let (start, taken) = claims.entry(key).or_insert((now, 0));
+            if now - *start >= HOUR_MS {
+                (*start, *taken) = (now, 0);
+            }
+            (*taken < cap).then(|| *taken += 1).is_some()
+        };
+        let mut allowed = HashSet::new();
+        for &device_id in device_ids {
+            if count(format!("{account_id}/{device_id}"), STRANGER_CLAIMS_PER_DEVICE)
+                && count(account_id.to_string(), STRANGER_CLAIMS_PER_HOUR)
+            {
+                allowed.insert(device_id);
+            }
+        }
+        allowed
+    }
+
+    /// Takes a key package for each device: a single-use one while it has
+    /// any (unless it's in `last_resort_only`), else its last-resort one.
+    pub async fn claim_key_packages(
+        &self,
+        device_ids: &[&str],
+        last_resort_only: &HashSet<&str>,
+    ) -> Result<Vec<(String, Vec<u8>)>> {
         db::write(&self.db, async |conn| {
             let now = now_ms();
             let mut claimed = Vec::with_capacity(device_ids.len());
             for &device_id in device_ids {
-                let single = query_one(
-                    conn,
-                    "SELECT id, data FROM key_packages WHERE device_id = ?1 AND expires_at > ?2
+                let single = if last_resort_only.contains(device_id) {
+                    None
+                } else {
+                    query_one(
+                        conn,
+                        "SELECT id, data FROM key_packages WHERE device_id = ?1 AND expires_at > ?2
                      ORDER BY expires_at, id LIMIT 1",
-                    (device_id, now),
-                    |r| Ok((r.get::<String>(0)?, r.get::<Vec<u8>>(1)?)),
-                )
-                .await?;
+                        (device_id, now),
+                        |r| Ok((r.get::<String>(0)?, r.get::<Vec<u8>>(1)?)),
+                    )
+                    .await?
+                };
                 if let Some((id, data)) = single {
                     conn.execute("DELETE FROM key_packages WHERE id = ?1", [id.as_str()]).await?;
                     claimed.push((device_id.to_string(), data));
@@ -919,11 +971,36 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 2);
-        assert_eq!(dms.claim_key_packages(&["d1", "nope"]).await.unwrap(), [("d1".to_string(), vec![1])]);
+        let none = HashSet::new();
+        // Past a stranger's budget, only the last-resort one.
+        assert_eq!(
+            dms.claim_key_packages(&["d1"], &HashSet::from(["d1"])).await.unwrap(),
+            [("d1".to_string(), vec![9])]
+        );
+        assert_eq!(dms.claim_key_packages(&["d1", "nope"], &none).await.unwrap(), [("d1".to_string(), vec![1])]);
         // The expired one isn't handed out.
-        assert_eq!(dms.claim_key_packages(&["d1"]).await.unwrap(), [("d1".to_string(), vec![9])]);
+        assert_eq!(dms.claim_key_packages(&["d1"], &none).await.unwrap(), [("d1".to_string(), vec![9])]);
         assert_eq!(dms.sweep(&live).await.unwrap(), 0);
         assert_eq!(dms.add_key_packages("d1", &[]).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn strangers_claims_are_limited_each_hour() {
+        let (_dir, dms) = open().await;
+        let now = now_ms();
+        let names: Vec<String> = (0..2500).map(|n| format!("d{n}")).collect();
+        let devices: Vec<&str> = names.iter().map(String::as_str).collect();
+        // Each account has its budget an hour...
+        assert_eq!(dms.take_stranger_claims("a", &devices[..1500], now).len(), 1500);
+        assert_eq!(dms.take_stranger_claims("a", &devices[1500..], now + 1).len(), 500);
+        assert!(dms.take_stranger_claims("a", &devices[2400..2401], now + 2).is_empty());
+        // ...and a few from any one device.
+        for n in 0..STRANGER_CLAIMS_PER_DEVICE {
+            assert_eq!(dms.take_stranger_claims("b", &["d0"], now + i64::from(n)).len(), 1);
+        }
+        assert!(dms.take_stranger_claims("b", &["d0"], now + 9).is_empty());
+        assert_eq!(dms.take_stranger_claims("b", &["d1"], now + 9).len(), 1);
+        assert_eq!(dms.take_stranger_claims("a", &devices[..10], now + HOUR_MS).len(), 10);
     }
 
     #[tokio::test]

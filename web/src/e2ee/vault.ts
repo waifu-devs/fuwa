@@ -1,8 +1,8 @@
 /**
- * What this browser keeps for encrypted direct messages, in IndexedDB: each
- * signed-in account's device (its private keys and every conversation's
- * group state), how far it has read each conversation, and the messages it
- * opened. A message can only be opened once (keys are thrown away as they're
+ * What this browser keeps for encrypted direct messages and secure channels,
+ * in IndexedDB: each signed-in account's device (its private keys and every
+ * group's state), how far it has read each conversation or channel (both are
+ * a "conversation" here, by id), and the messages it opened. A message can only be opened once (keys are thrown away as they're
  * used, which is what keeps old messages safe), so what it said lives here
  * and nowhere else. Signing out wipes it.
  *
@@ -52,9 +52,9 @@ export type Item = {
   /**
    * text: a message. devices: devices joined or left. joined: this device
    * came in here (what came before, it can't read). unreadable: a record it
-   * couldn't open.
+   * couldn't open. reset: someone started a secure channel's encryption over.
    */
-  kind: "text" | "devices" | "joined" | "unreadable";
+  kind: "text" | "devices" | "joined" | "unreadable" | "reset";
   content: string;
   replyTo: number;
   /** Unix ms of the last edit, or 0. */
@@ -154,6 +154,15 @@ export async function write(vault: string, batch: Batch): Promise<void> {
   const now = Date.now();
   for (const { hash, plaintext } of batch.sent ?? []) tx.objectStore("sent").put({ vault, hash, plaintext, at: now } satisfies Sent);
   for (const hash of batch.forgetSent ?? []) tx.objectStore("sent").delete([vault, hash]);
+  await done(tx);
+}
+
+/** Forgets what was kept for one conversation or secure channel: how far it was read, and what it said. */
+export async function forget(vault: string, conversation: string): Promise<void> {
+  const db = await open();
+  const tx = db.transaction(["notes", "items"], "readwrite");
+  tx.objectStore("notes").delete([vault, conversation]);
+  tx.objectStore("items").delete(inConversation(vault, conversation));
   await done(tx);
 }
 

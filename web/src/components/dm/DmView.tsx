@@ -5,6 +5,7 @@ import {
   ChevronLeftIcon,
   CopyIcon,
   KeyRoundIcon,
+  RotateCcwKeyIcon,
   LockKeyholeIcon,
   PencilIcon,
   RotateCwIcon,
@@ -16,9 +17,9 @@ import {
   XIcon,
 } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
-import type { User } from "@/gen/fuwa/v1/types_pb";
+import type { Member, User } from "@/gen/fuwa/v1/types_pb";
 import type { Item } from "@/e2ee/vault";
 import { MAX_DM } from "@/e2ee/engine";
 import { focusChannel } from "@/fuwa/actions";
@@ -109,7 +110,12 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
         <>
           <DmCallStrip instanceKey={instanceKey} conversation={conversation} me={me} />
           <DmMessages instanceKey={instanceKey} conversation={conversation} me={me} partner={partner} />
-          <DmComposer instanceKey={instanceKey} conversation={conversation} partner={partner} />
+          <EncryptedComposer
+            instanceKey={instanceKey}
+            id={conversation.id}
+            placeholder={`Message @${partner?.username ?? "them"}`}
+            promise="Only you two can read this"
+          />
           <EncryptionDialog open={sheet} onOpenChange={setSheet} instanceKey={instanceKey} conversation={conversation} />
         </>
       ) : status === "unsupported" || status === "failed" ? (
@@ -164,7 +170,7 @@ function TrustPill({ instanceKey, conversationId, onOpen }: { instanceKey: strin
   );
 }
 
-function Starting() {
+export function Starting() {
   return (
     <div className="grid flex-1 place-items-center p-6 text-center">
       <div className="flex flex-col items-center">
@@ -182,7 +188,7 @@ function Starting() {
   );
 }
 
-function Unavailable({ text, icon: Icon = ShieldOffIcon }: { text: string; icon?: typeof ShieldOffIcon }) {
+export function Unavailable({ text, icon: Icon = ShieldOffIcon }: { text: string; icon?: typeof ShieldOffIcon }) {
   return (
     <div className="grid flex-1 place-items-center p-6 text-center">
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={SPRING} className="flex flex-col items-center">
@@ -211,7 +217,53 @@ function DmMessages({
   me: User;
   partner: User | undefined;
 }) {
-  const id = conversation.id;
+  const users = useMemo(() => new Map(conversation.users.map((u) => [u.id, u])), [conversation.users]);
+  const userOf = useCallback((id: string) => users.get(id), [users]);
+  const describe = useCallback((item: Item) => deviceLine(item, users, me), [users, me]);
+  return (
+    <EncryptedMessages
+      instanceKey={instanceKey}
+      id={conversation.id}
+      me={me}
+      userOf={userOf}
+      describe={describe}
+      beginning={<Beginning partner={partner} />}
+      deleteQuestion="Delete for both of you?"
+      joiningText="Unlocking the conversation on this device…"
+    />
+  );
+}
+
+/**
+ * What an encrypted conversation or secure channel said, as this device
+ * opened it: messages, device lines, and what you're sending. The same list
+ * for direct messages and secure channels.
+ */
+export function EncryptedMessages({
+  instanceKey,
+  id,
+  me,
+  userOf,
+  memberOf,
+  describe,
+  beginning,
+  canModerate = false,
+  deleteQuestion,
+  joiningText,
+}: {
+  instanceKey: string;
+  id: string;
+  me: User;
+  userOf: (id: string) => User | undefined;
+  memberOf?: (id: string) => Member | undefined;
+  /** A device line, in words. */
+  describe: (item: Item) => string;
+  beginning: ReactNode;
+  /** Can delete other people's messages too. */
+  canModerate?: boolean;
+  deleteQuestion: string;
+  joiningText: string;
+}) {
   const items = useFuwa((s) => s.instances[instanceKey]?.dms.items[id]);
   const pending = useFuwa((s) => s.instances[instanceKey]?.dms.pending[id] ?? NO_PENDING);
   const joining = useFuwa((s) => !!s.instances[instanceKey]?.dms.joining[id]);
@@ -219,7 +271,6 @@ function DmMessages({
   usePrefs((p) => p.clock);
   const [editing, setEditing] = useState<number | null>(null);
   const list = items ?? NO_ITEMS;
-  const users = useMemo(() => new Map(conversation.users.map((u) => [u.id, u])), [conversation.users]);
 
   const rows = useMemo(() => {
     const out: Row[] = [];
@@ -307,8 +358,8 @@ function DmMessages({
           transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
           className="flex min-h-full flex-col justify-end pb-3"
         >
-          {skipped === 0 && <Beginning partner={partner} />}
-          {(!items || joining) && <Joining />}
+          {skipped === 0 && beginning}
+          {(!items || joining) && <Joining text={joiningText} />}
           {/* Rows don't animate their layout, so a new arrival needn't re-render every row (the default does). */}
           <AnimatePresence initial={false} presenceAffectsLayout={false}>
             {shown.map((row) => {
@@ -326,16 +377,20 @@ function DmMessages({
                 );
               const item = row.item;
               const animate = !initial.current?.has(item.seq);
-              if (item.kind !== "text") return <SystemLine key={row.key} item={item} users={users} me={me} animate={animate} />;
+              if (item.kind !== "text") return <SystemLine key={row.key} item={item} text={describe(item)} animate={animate} />;
+              const mine = item.senderId === me.id;
               return (
                 <DmRow
                   key={row.key}
                   item={item}
                   first={row.first}
                   date={row.date}
-                  author={users.get(item.senderId)}
+                  author={userOf(item.senderId)}
+                  member={memberOf?.(item.senderId)}
                   display={display}
-                  mine={item.senderId === me.id}
+                  mine={mine}
+                  deletable={mine || canModerate}
+                  deleteQuestion={deleteQuestion}
                   instanceKey={instanceKey}
                   animate={animate}
                   editing={editing === item.seq}
@@ -399,7 +454,7 @@ function Beginning({ partner }: { partner: User | undefined }) {
   );
 }
 
-function Joining() {
+function Joining({ text }: { text: string }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3 text-sm text-muted-foreground">
       <motion.span
@@ -409,7 +464,7 @@ function Joining() {
       >
         <KeyRoundIcon className="size-4" />
       </motion.span>
-      Unlocking the conversation on this device…
+      {text}
     </div>
   );
 }
@@ -441,8 +496,11 @@ const DmRow = memo(function DmRow({
   first,
   date,
   author,
+  member,
   display,
   mine,
+  deletable,
+  deleteQuestion,
   instanceKey,
   animate,
   editing,
@@ -452,8 +510,11 @@ const DmRow = memo(function DmRow({
   first: boolean;
   date: Date;
   author: User | undefined;
+  member: Member | undefined;
   display: MessageDisplay;
   mine: boolean;
+  deletable: boolean;
+  deleteQuestion: string;
   instanceKey: string;
   animate: boolean;
   editing: boolean;
@@ -468,7 +529,7 @@ const DmRow = memo(function DmRow({
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className={cn("message-row group relative flex gap-3 px-4", first && "first", display === "compact" && "compact", animate && mine && "landed")}
     >
-      <MessageLine display={display} first={first} author={author} member={undefined} date={date} instanceKey={instanceKey}>
+      <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey}>
         {item.deleted ? (
           <p className="text-sm text-muted-foreground italic">Message deleted</p>
         ) : editing ? (
@@ -494,7 +555,7 @@ const DmRow = memo(function DmRow({
               transition={{ type: "spring", stiffness: 600, damping: 32 }}
               className="flex items-center gap-0.5"
             >
-              <span className="px-2 text-xs font-bold text-destructive">Delete for both of you?</span>
+              <span className="px-2 text-xs font-bold text-destructive">{deleteQuestion}</span>
               <ToolButton label="Delete" danger onClick={() => actions.remove(item.seq).catch(() => setConfirming(false))}>
                 <CheckIcon />
               </ToolButton>
@@ -530,7 +591,7 @@ const DmRow = memo(function DmRow({
                   <PencilIcon />
                 </ToolButton>
               )}
-              {mine && (
+              {deletable && (
                 <ToolButton label="Delete" danger onClick={() => setConfirming(true)}>
                   <Trash2Icon />
                 </ToolButton>
@@ -565,8 +626,8 @@ function deviceLine(item: Item, users: Map<string, User>, me: User): string {
   return `${capital(parts.join(", and "))}. The safety number changed.`;
 }
 
-function SystemLine({ item, users, me, animate }: { item: Item; users: Map<string, User>; me: User; animate: boolean }) {
-  const Icon = item.kind === "unreadable" ? ShieldAlertIcon : KeyRoundIcon;
+function SystemLine({ item, text, animate }: { item: Item; text: string; animate: boolean }) {
+  const Icon = item.kind === "unreadable" ? ShieldAlertIcon : item.kind === "reset" ? RotateCcwKeyIcon : KeyRoundIcon;
   return (
     <motion.div
       {...(animate ? enter : {})}
@@ -577,12 +638,12 @@ function SystemLine({ item, users, me, animate }: { item: Item; users: Map<strin
         <Icon
           className={cn(
             "size-4 transition-transform duration-500 group-hover:rotate-[-20deg]",
-            item.kind === "unreadable" ? "text-amber-500" : "text-emerald-500",
+            item.kind === "unreadable" || item.kind === "reset" ? "text-amber-500" : "text-emerald-500",
           )}
         />
       </span>
       <p className="min-w-0 flex-1 text-[0.9rem] text-muted-foreground">
-        {deviceLine(item, users, me)}{" "}
+        {text}{" "}
         <time className="text-xs whitespace-nowrap" dateTime={new Date(item.at).toISOString()} title={formatFull(new Date(item.at))}>
           {new Date(item.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
         </time>
@@ -631,11 +692,30 @@ function PendingDm({
   );
 }
 
-/** Where you write. Sending seals the message (a lock clicks shut) and flies it off. */
-function DmComposer({ instanceKey, conversation, partner }: { instanceKey: string; conversation: Conversation; partner: User | undefined }) {
-  const id = conversation.id;
+/**
+ * Where you write in an encrypted conversation or secure channel. Sending
+ * seals the message (a lock clicks shut) and flies it off. `locked` says why
+ * you can't write here at all (no permission to), if you can't.
+ */
+export function EncryptedComposer({
+  instanceKey,
+  id,
+  placeholder,
+  promise,
+  locked = "",
+  action,
+}: {
+  instanceKey: string;
+  id: string;
+  placeholder: string;
+  promise: string;
+  locked?: string;
+  /** Shown where "Try again" is when you can't write; null for nothing. */
+  action?: ReactNode;
+}) {
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
-  const blocked = useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] ?? "");
+  const stuck = useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] ?? "");
+  const blocked = locked || stuck;
   const [text, setText] = useState(() => drafts.get(id) ?? "");
   const box = useRef<HTMLTextAreaElement>(null);
   const plane = useAnimationControls();
@@ -660,7 +740,6 @@ function DmComposer({ instanceKey, conversation, partner }: { instanceKey: strin
   const content = text.trim();
   const tooLong = text.length > MAX_DM;
   const ready = !!content && !tooLong && status === "ready";
-  const placeholder = `Message @${partner?.username ?? "them"}`;
 
   function send() {
     if (!ready) return;
@@ -708,16 +787,20 @@ function DmComposer({ instanceKey, conversation, partner }: { instanceKey: strin
               <KeyRoundIcon className="size-[18px]" />
             </motion.span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold">You can't write here yet</p>
+              <p className="text-sm font-bold">{locked ? "You can read this, but not write here" : "You can't write here yet"}</p>
               <p className="text-xs text-muted-foreground">{blocked}</p>
             </div>
-            <button
-              type="button"
-              onClick={() => void prepareConversation(instanceKey, id).catch(() => {})}
-              className="shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/10"
-            >
-              Try again
-            </button>
+            {action !== undefined
+              ? action
+              : !locked && (
+                  <button
+                    type="button"
+                    onClick={() => void prepareConversation(instanceKey, id).catch(() => {})}
+                    className="shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/10"
+                  >
+                    Try again
+                  </button>
+                )}
           </motion.div>
         ) : (
           <motion.div
@@ -785,7 +868,7 @@ function DmComposer({ instanceKey, conversation, partner }: { instanceKey: strin
           <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
         </p>
         <p className="ml-auto flex shrink-0 items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
-          <LockKeyholeIcon className="size-3" /> {error ?? "Only you two can read this"}
+          <LockKeyholeIcon className="size-3" /> {error ?? promise}
         </p>
       </div>
     </div>

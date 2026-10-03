@@ -16,6 +16,7 @@ mod media;
 mod messages;
 mod node;
 mod roles;
+mod secure;
 mod servers;
 mod sso;
 mod webhooks;
@@ -23,6 +24,7 @@ mod webhooks;
 pub(crate) use account::export_server;
 pub use calls::{spawn_voice_guard, spawn_voice_sweeper};
 pub use media::PictureOwner;
+pub use secure::MAX_SECURE_MEMBERS;
 pub use sso::note_lapses;
 pub use webhooks::{WebhookPost, execute_webhook, verify_webhook};
 
