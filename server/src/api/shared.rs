@@ -628,7 +628,7 @@ pub(super) async fn guest_delete(
 pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::SharedReply> {
     let sdb = app.servers.get(&call.server_id).await?;
     match call.call.ok_or_else(|| Error::invalid("call is required"))? {
-        Call::Lookup(lookup) => home_lookup(&sdb, lookup).await,
+        Call::Lookup(lookup) => home_lookup(app, &sdb, lookup).await,
         Call::Ask(ask) => home_ask(&sdb, ask).await,
         Call::Send(send) => home_send(app, &sdb, send).await,
         Call::List(list) => home_list(&sdb, list).await,
@@ -657,7 +657,7 @@ async fn connection(conn: &turso::Connection, guest: &cpb::Guest) -> Result<(Gue
     Ok((row, user, server))
 }
 
-async fn home_lookup(sdb: &ServerDb, lookup: cpb::ShareLookup) -> Result<cpb::SharedReply> {
+async fn home_lookup(app: &App, sdb: &ServerDb, lookup: cpb::ShareLookup) -> Result<cpb::SharedReply> {
     let conn = sdb.read()?;
     let code = load_code(&conn, &lookup.code).await?.ok_or(Error::NotFound("share code"))?;
     let channel = load_channel(&conn, &sdb.id, &code.channel_id).await?.ok_or(Error::NotFound("share code"))?;
@@ -665,13 +665,16 @@ async fn home_lookup(sdb: &ServerDb, lookup: cpb::ShareLookup) -> Result<cpb::Sh
     if guests.iter().any(|g| g.server.id == lookup.guest_server_id) {
         return Err(Error::AlreadyExists("this server already shows that channel, or has asked to".into()));
     }
+    // The preview names every outside provider that would read the guest's
+    // people's messages, before their admins agree.
+    let checked_by = automod::readers(app, &conn, &channel).await?;
     Ok(cpb::SharedReply {
         preview: Some(pb::PreviewShareResponse {
             home_server: Some(this_server(&conn, &sdb.id).await?),
             channel_name: channel.name,
             channel_topic: channel.topic,
             region: String::new(),
-            checked_by: vec![],
+            checked_by,
             allowed: permissions::to_list(SHAREABLE),
             expires_at: code.expires_at,
             guest_count: guests.iter().filter(|g| g.active).count() as i32,
@@ -834,9 +837,17 @@ async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply
 
 /// Asks the home's provider rule about what a guest writes, before the
 /// write, as `messages` does for the home's own people. `None` when the
-/// guest's connection is gone; the write then turns them away.
+/// guest's connection is gone or they're kept out; the write then turns
+/// them away.
 async fn ask_home(app: &App, sdb: &ServerDb, guest: &cpb::Guest, content: &str) -> Option<automod::Asked> {
-    let (row, user, _) = connection(&sdb.read().ok()?, guest).await.ok()?;
+    let conn = sdb.read().ok()?;
+    let (row, user, _) = connection(&conn, guest).await.ok()?;
+    // Someone the home kept out is turned away by the write; their text
+    // never goes to the provider.
+    if blocked(&conn, &row.channel_id, &user.id).await.ok()? {
+        return None;
+    }
+    drop(conn);
     let channel_id = row.channel_id.clone();
     let access = Access::guest(&channel_id, row.allowed);
     let member = pb::Member { user: Some(user), ..Default::default() };

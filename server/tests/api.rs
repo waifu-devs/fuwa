@@ -6097,3 +6097,84 @@ async fn shared_channels_can_be_turned_off() {
     assert_eq!(off.code(), Code::FailedPrecondition);
     instance.stop().await;
 }
+
+#[tokio::test]
+async fn shared_preview_names_outside_providers() {
+    use pb::{AutoModActionKind as Kind, AutoModTrigger as Trigger};
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let mods = new_channel(&mut c, &juan, &home, "mod-log", pb::ChannelType::Text).await;
+    let code = c
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let preview = async |c: &mut Clients| {
+        c.shared
+            .preview_share(authed(&mika, pb::PreviewShareRequest { server_id: guest.clone(), code: code.clone() }))
+            .await
+            .unwrap()
+            .into_inner()
+            .checked_by
+    };
+    // No provider rule: nothing outside reads the channel.
+    assert!(preview(&mut c).await.is_empty());
+
+    let jev = pb::AutoModProviderSettings {
+        id: "typesafe-jev".into(),
+        enabled: true,
+        api_key: "not-a-real-token-1234".into(),
+        ..Default::default()
+    };
+    c.admin
+        .update_settings(authed(
+            &admin,
+            settings_update(
+                pb::InstanceSettings { automod_providers: vec![jev], ..Default::default() },
+                &["automod_providers"],
+                &[],
+            ),
+        ))
+        .await
+        .unwrap();
+    let rule = save_rule(
+        &mut c,
+        &juan,
+        &home,
+        pb::AutoModRule {
+            enabled: true,
+            trigger: Trigger::Provider as i32,
+            provider: "typesafe-jev".into(),
+            actions: vec![pb::AutoModAction {
+                kind: Kind::Alert as i32,
+                channel_id: mods.id.clone(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    // The guest's admin sees who reads their people's messages before asking.
+    assert_eq!(preview(&mut c).await, ["TypeSafe Jev (api.typesafe.ai)"]);
+
+    // A channel the rule leaves alone isn't sent anywhere.
+    save_rule(&mut c, &juan, &home, pb::AutoModRule { exempt_channel_ids: vec![dev.id.clone()], ..rule })
+        .await
+        .unwrap();
+    assert!(preview(&mut c).await.is_empty());
+}

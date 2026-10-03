@@ -292,6 +292,33 @@ pub(super) async fn ask(
     Some(Asked { rule_id: rule.id, provider, scores: answer.ok()? })
 }
 
+/// Who a server's enabled provider rule sends a channel's messages to, as
+/// "Name (host)", for people about to write there who aren't its members
+/// (the shared channel preview). Empty when no provider reads that channel.
+pub(super) async fn readers(
+    app: &crate::app::App,
+    conn: &turso::Connection,
+    channel: &pb::Channel,
+) -> Result<Vec<String>> {
+    let mut names: Vec<String> = Vec::new();
+    for rule in store::load_automod(conn).await? {
+        if !rule.enabled
+            || rule.trigger != Trigger::Provider as i32
+            || rule.labels.iter().all(|l| l.level < Level::Flag as i32)
+            || rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id)
+        {
+            continue;
+        }
+        if let Some(setup) = app.settings().automod_provider(&rule.provider) {
+            let name = format!("{} ({})", setup.name(), setup.host());
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    Ok(names)
+}
+
 /// What a caught rule does: its own actions, or for a provider rule the ones
 /// the strongest label it reached calls for.
 fn effective(rule: &pb::AutoModRule, level: Option<Level>) -> pb::AutoModRule {

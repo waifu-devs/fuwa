@@ -62,7 +62,9 @@ the news lets go the next time it hears "gone" from the other.
   arrives. A home rule that would time someone out keeps a guest out of the
   channel instead, since they aren't the home's member. Provider rules
   (docs/automod.md) count too: each side asks its own provider before its
-  write, as for its own channels.
+  write, as for its own channels. The preview names the home's (`Name
+  (host)` in `checked_by`) before the guest's admins ask, and a guest the
+  home kept out is turned away before anything goes to its provider.
 - **Each side moderates its own people.** A guest's moderators (Manage
   Messages in their channel) can delete their own server's people's messages
   there; the home's moderators can delete anyone's. The home can keep a guest
