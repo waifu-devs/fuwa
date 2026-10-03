@@ -667,8 +667,9 @@ impl AutoModService for Api {
                         Error::FailedPrecondition("that provider isn't turned on for this instance".into())
                     })?;
                     let rule = pb::AutoModRule { labels: checked_labels(&rule.labels)?, ..rule };
-                    if let Some(per_day) = settings.limits.automod_checks_per_day
-                        && !take_check(&server_id, Some(per_day))
+                    let cap = settings.limits.automod_checks_per_day;
+                    if !take_check(&server_id, cap)
+                        && let Some(per_day) = cap
                     {
                         crate::reports::server_error("automod_provider_capped", Some(setup.report_id()));
                         return Ok(pb::TestAutoModRuleResponse {
