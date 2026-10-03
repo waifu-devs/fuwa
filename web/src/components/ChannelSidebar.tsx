@@ -21,9 +21,9 @@ import {
   Volume2Icon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useState, type Ref } from "react";
+import { useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
-import { leaveServer, listApplications, run, updateNotifications } from "@/fuwa/actions";
+import { leaveServer, listApplications, reorderChannels, run, updateNotifications } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useAction } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
@@ -50,6 +50,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useArrange } from "@/hooks/use-arrange";
+import { layoutOf, placements } from "@/lib/arrange";
 import { isMuted, MUTE_FOR, mutedLabel, useMuted, useNotificationSettings, useNow } from "@/lib/notifications";
 import { has, hasIn, isPrivate } from "@/lib/permissions";
 import { usePrefs } from "@/lib/prefs";
@@ -136,6 +138,15 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   const canCreate = has(access, Permission.MANAGE_CHANNELS);
   const usage = settingsTabs.includes("usage");
   const groups = useMemo(() => groupChannels(channels ?? []), [channels]);
+  const layout = useMemo(() => layoutOf(channels ?? []), [channels]);
+  const list = useRef<HTMLDivElement>(null);
+  // Whoever can manage the server's channels drags them into order, Discord-style.
+  useArrange({
+    container: list,
+    enabled: canCreate && !!synced,
+    layout,
+    onArrange: (next) => void run(reorderChannels(instanceKey, serverId, placements(next))).catch((err: FuwaError) => toast(err.message)),
+  });
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [creating, setCreating] = useState<{ parentId: string } | null>(null);
   const [settings, setSettings] = useState<{ tab: string; target?: string } | null>(null);
@@ -248,7 +259,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <div className="scroll-thin flex-1 overflow-y-auto px-2 pt-3 pb-4">
+      <div ref={list} className="scroll-thin relative flex-1 overflow-y-auto px-2 pt-3 pb-4">
         <AnimatePresence initial={false}>
           {reviews && waiting > 0 && (
             <motion.button
@@ -278,68 +289,45 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
             ))}
           </div>
         ) : (
-          groups.map((group) => {
-            const id = group.category?.id ?? "";
-            const closed = !!collapsed[id];
-            return (
-              <div key={id || "loose"} className={cn(group.category && "mt-4")}>
-                {group.category && (
-                  <div className="group flex items-center pr-1">
-                    <button
-                      type="button"
-                      onClick={() => setCollapsed((c) => ({ ...c, [id]: !closed }))}
-                      className="flex flex-1 items-center gap-1 px-1 py-1 text-xs font-bold tracking-wide text-muted-foreground uppercase transition hover:text-foreground"
-                    >
-                      <ChevronDownIcon className={cn("size-3 transition-transform duration-200", closed && "-rotate-90")} />
-                      <span className="truncate">{group.category.name}</span>
-                    </button>
-                    {hasIn(access, id, Permission.MANAGE_CHANNELS) && (
-                      <button
-                        type="button"
-                        aria-label={`Create a channel in ${group.category.name}`}
-                        onClick={() => setCreating({ parentId: id })}
-                        className="grid size-5 place-items-center rounded text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-foreground"
-                      >
-                        <PlusIcon className="size-3.5" />
-                      </button>
-                    )}
-                  </div>
-                )}
-                <AnimatePresence initial={false}>
-                  {!closed && (
-                    <motion.ul
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                      className="flex flex-col gap-0.5 overflow-hidden"
-                    >
-                      <AnimatePresence mode="popLayout">
-                        {group.channels.map((c, n) => (
-                          <ChannelRow
-                            key={c.id}
-                            index={n}
-                            instanceKey={instanceKey}
-                            channel={c}
-                            active={params.channel === c.id}
-                            canConnect={hasIn(access, c.id, Permission.CONNECT)}
-                            onEdit={
-                              hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)
-                                ? () => setSettings({ tab: "channels", target: c.id })
-                                : undefined
-                            }
-                            onInvite={
-                              c.type !== ChannelType.VOICE && hasIn(access, c.id, Permission.CREATE_INVITE) ? () => setInviting(c.id) : undefined
-                            }
-                          />
-                        ))}
-                      </AnimatePresence>
-                    </motion.ul>
-                  )}
-                </AnimatePresence>
-              </div>
-            );
-          })
+          <ul className="flex flex-col gap-0.5">
+            <AnimatePresence mode="popLayout" initial={false}>
+              {groups.flatMap((group) => {
+                const id = group.category?.id ?? "";
+                const closed = !!collapsed[id];
+                const rows = closed
+                  ? []
+                  : group.channels.map((c, n) => (
+                      <ChannelRow
+                        key={c.id}
+                        index={n}
+                        parent={id}
+                        instanceKey={instanceKey}
+                        channel={c}
+                        active={params.channel === c.id}
+                        canConnect={hasIn(access, c.id, Permission.CONNECT)}
+                        onEdit={
+                          hasIn(access, c.id, Permission.MANAGE_CHANNELS) || hasIn(access, c.id, Permission.MANAGE_ROLES)
+                            ? () => setSettings({ tab: "channels", target: c.id })
+                            : undefined
+                        }
+                        onInvite={c.type !== ChannelType.VOICE && hasIn(access, c.id, Permission.CREATE_INVITE) ? () => setInviting(c.id) : undefined}
+                      />
+                    ));
+                if (!group.category) return rows;
+                return [
+                  <CategoryRow
+                    key={id}
+                    category={group.category}
+                    closed={closed}
+                    count={group.channels.length}
+                    onToggle={() => setCollapsed((c) => ({ ...c, [id]: !closed }))}
+                    onAdd={hasIn(access, id, Permission.MANAGE_CHANNELS) ? () => setCreating({ parentId: id }) : undefined}
+                  />,
+                  ...rows,
+                ];
+              })}
+            </AnimatePresence>
+          </ul>
         )}
       </div>
       <CallPanel />
@@ -375,11 +363,78 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   );
 }
 
+/** A category's header: folds its channels away, and (with Manage Channels) adds one or drags the whole category. */
+function CategoryRow({
+  category,
+  closed,
+  count,
+  onToggle,
+  onAdd,
+  ref,
+}: {
+  category: Channel;
+  closed: boolean;
+  count: number;
+  onToggle: () => void;
+  onAdd?: () => void;
+  ref?: Ref<HTMLLIElement>;
+}) {
+  return (
+    <motion.li
+      ref={ref}
+      data-arrange="category"
+      data-id={category.id}
+      data-collapsed={closed || undefined}
+      layout="position"
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, transition: { duration: 0.15 } }}
+      transition={SPRING}
+      className="group relative mt-4 flex items-center rounded-lg pr-1 transition-colors"
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!closed}
+        className="flex min-w-0 flex-1 items-center gap-1 px-1 py-1 text-xs font-bold tracking-wide text-muted-foreground uppercase transition group-data-[drop-into]:text-primary hover:text-foreground"
+      >
+        <ChevronDownIcon className={cn("size-3 shrink-0 transition-transform duration-200", closed && "-rotate-90")} />
+        <span className="truncate">{category.name}</span>
+        <AnimatePresence initial={false}>
+          {closed && count > 0 && (
+            <motion.span
+              initial={{ opacity: 0, scale: 0.6 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.6 }}
+              transition={SPRING}
+              className="ml-0.5 rounded-full bg-muted px-1.5 text-[0.62rem] tabular-nums"
+            >
+              {count}
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </button>
+      {onAdd && (
+        <button
+          type="button"
+          data-arrange-skip
+          aria-label={`Create a channel in ${category.name}`}
+          onClick={onAdd}
+          className="grid size-5 place-items-center rounded text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:rotate-90 hover:text-foreground"
+        >
+          <PlusIcon className="size-3.5" />
+        </button>
+      )}
+    </motion.li>
+  );
+}
+
 function ChannelRow({
   instanceKey,
   channel,
   active,
   index,
+  parent,
   ref,
   onEdit,
   onInvite,
@@ -391,6 +446,8 @@ function ChannelRow({
   channel: Channel;
   active: boolean;
   index: number;
+  /** The category it shows under, or "" for none. */
+  parent: string;
   ref?: Ref<HTMLLIElement>;
   /** With Manage Channels or Manage Roles there: opens the channel's settings. */
   onEdit?: () => void;
@@ -407,6 +464,9 @@ function ChannelRow({
   return (
     <motion.li
       ref={ref}
+      data-arrange="channel"
+      data-id={channel.id}
+      data-parent={parent}
       layout="position"
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0, transition: { ...SPRING, delay: Math.min(index, 12) * 0.025 } }}

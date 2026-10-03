@@ -680,3 +680,115 @@ body[data-settings-open] #root { scale: 0.94; filter: blur(3px); opacity: 0.4; }
 
 /* The ping graph glides to each new sample (where the browser can animate a path). */
 .ping-graph { transition: d 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* Arranging channels (hooks/use-arrange.ts): the picked-up copy, the drop line,
+   the category a channel would go into, and the row once it lands. Only
+   transform and opacity move. */
+:root[data-grabbing], :root[data-grabbing] * { cursor: grabbing !important; user-select: none !important; }
+[data-arrange] { -webkit-touch-callout: none; }
+[data-arrange][data-pressing] { scale: 0.97; transition: scale 0.3s cubic-bezier(0.3, 1.4, 0.5, 1); }
+[data-arrange][data-dragging] { opacity: 0.3 !important; transition: opacity 0.2s ease; }
+[data-arranging] [data-arrange]:not([data-dragging]) { pointer-events: none; }
+.arrange-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  pointer-events: none;
+  will-change: transform;
+}
+.arrange-ghost > :first-child {
+  list-style: none;
+  border-radius: 0.6rem;
+  background: var(--card);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary) 35%, transparent);
+  transition: scale 0.25s cubic-bezier(0.3, 1.5, 0.5, 1), box-shadow 0.25s ease;
+}
+.arrange-ghost.lifted > :first-child {
+  scale: 1.05;
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--primary) 45%, transparent),
+    0 18px 36px -14px rgb(0 0 0 / 0.5);
+}
+.arrange-ghost.landing { transition: transform 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.15), opacity 0.22s ease; }
+.arrange-ghost.stacked::before,
+.arrange-ghost.stacked::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 0.6rem;
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--border);
+  transform: translate(5px, 5px) rotate(2.5deg);
+  opacity: 0.8;
+}
+.arrange-ghost.stacked::after { transform: translate(9px, 9px) rotate(5deg); opacity: 0.45; }
+.arrange-count {
+  position: absolute;
+  top: -0.45rem;
+  right: -0.45rem;
+  display: grid;
+  place-items: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 0.68rem;
+  font-weight: 800;
+  animation: arrange-pop 0.35s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+.arrange-line,
+.arrange-ring {
+  position: absolute;
+  top: 0;
+  left: 0.25rem;
+  right: 0.25rem;
+  z-index: 20;
+  pointer-events: none;
+  opacity: 0;
+  transition: transform 0.16s cubic-bezier(0.3, 1.3, 0.5, 1), opacity 0.15s ease;
+}
+.arrange-line { height: 2px; border-radius: 2px; background: var(--primary); }
+.arrange-line::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 2px solid var(--primary);
+  background: var(--background);
+}
+.arrange-line.on { opacity: 1; }
+.arrange-ring {
+  border-radius: 0.6rem;
+  border: 2px solid var(--primary);
+  background: color-mix(in oklab, var(--primary) 12%, transparent);
+}
+.arrange-ring.on { opacity: 1; animation: arrange-pop 0.3s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.arrange-ring::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  border: 2px solid var(--primary);
+  opacity: 0;
+}
+.arrange-ring.on::after { animation: arrange-ping 1.1s ease-out infinite; }
+[data-arrange="category"][data-drop-into] { color: var(--primary); }
+[data-arrange][data-landed]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 0.5rem;
+  background: var(--primary);
+  pointer-events: none;
+  animation: arrange-landed 0.7s ease-out both;
+}
+@keyframes arrange-pop { from { scale: 0.92; } }
+@keyframes arrange-ping { from { opacity: 0.6; scale: 1; } to { opacity: 0; scale: 1.06; } }
+@keyframes arrange-landed { from { opacity: 0.22; } to { opacity: 0; } }
