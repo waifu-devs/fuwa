@@ -93,8 +93,8 @@ const HOME = { id: "us-east", name: "US East" };
  * `fuwa-<id>-replica` bucket, all in `railway` / `bucket`. Their servers' messages,
  * recordings and calls stay there; requests reach them through the home gateways.
  *
- * Empty, fuwa.chat is one region and runs exactly as before. Adding one deploys new
- * services, so it waits for Juan to say so. Railway can't move a service to another
+ * Empty, fuwa.chat is one region. Adding one deploys new services, so it waits for
+ * Juan to say so; Europe (Netherlands) and US West (California) run since 2026-10. Railway can't move a service to another
  * region: a region is added, never moved, and removing one deletes its volumes and
  * every server on them (move them home first, in Settings > Instance > Servers).
  *
@@ -102,7 +102,11 @@ const HOME = { id: "us-east", name: "US East" };
  * Railway regions: us-west2, us-east4-eqdc4a, europe-west4-drams3a, asia-southeast1-eqsg3a.
  * Bucket regions: sjc, iad, ams, sin.
  */
-const REGIONS: { id: string; name: string; railway: string; bucket: string; shards: number }[] = [];
+const REGIONS: { id: string; name: string; railway: string; bucket: string; shards: number }[] = [
+  // Juan 2026-10-03: "deploy the eu region to fuwa.chat", "also the us-west".
+  { id: "eu", name: "Europe", railway: "europe-west4-drams3a", bucket: "ams", shards: 1 },
+  { id: "us-west", name: "US West", railway: "us-west2", bucket: "sjc", shards: 1 },
+];
 
 export default defineRailway((ctx) => {
   // The image every merge to master publishes; the publish workflow redeploys every

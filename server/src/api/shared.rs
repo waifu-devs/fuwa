@@ -681,12 +681,14 @@ async fn home_lookup(app: &App, sdb: &ServerDb, lookup: cpb::ShareLookup) -> Res
     // The preview names every outside provider that would read the guest's
     // people's messages, before their admins agree.
     let checked_by = automod::readers(app, &conn, &channel).await?;
+    // Where its messages are kept, so the guest's admins know before asking.
+    let region = store::load_server(&conn).await?.region;
     Ok(cpb::SharedReply {
         preview: Some(pb::PreviewShareResponse {
             home_server: Some(this_server(&conn, &sdb.id).await?),
             channel_name: channel.name,
             channel_topic: channel.topic,
-            region: String::new(),
+            region,
             checked_by,
             allowed: permissions::to_list(SHAREABLE),
             expires_at: code.expires_at,
