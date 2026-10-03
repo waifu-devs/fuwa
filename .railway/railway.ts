@@ -32,6 +32,12 @@ const MAX_VOLUMES = 10;
 /** The port calls' sound uses (FUWA_MEDIA_PORT), reached through a Railway TCP proxy. */
 const MEDIA_PORT = 50000;
 /**
+ * The home region's media part when it runs on a host of its own, with real UDP and port
+ * 443 (deploy/media-host, docs/self-hosting.md), such as "https://media.fuwa.chat:8443".
+ * Empty: the `fuwa-media` service here carries calls, over the TCP proxy.
+ */
+const MEDIA_HOST_URL = "";
+/**
  * How long a split part has to finish what it's doing once told to stop: calls a gateway
  * holds while another part restarts wait up to 30 seconds.
  */
@@ -188,16 +194,20 @@ export default defineRailway((ctx) => {
   // through a TCP proxy, whose address it hands them. It keeps nothing: on a deploy or
   // restart it tells every app in a call, and they join again on the new one with their
   // places kept (docs/calls.md, "Restarts").
-  const media = service("fuwa-media", {
-    source: fuwaImage(),
-    healthcheck: "/healthz",
-    regions: { [REGION]: 1 },
-    tcp: [MEDIA_PORT],
-    deploy: { drainingSeconds: 5 },
-    env: mediaEnv(HOME),
-  });
+  const media = MEDIA_HOST_URL
+    ? []
+    : [
+        service("fuwa-media", {
+          source: fuwaImage(),
+          healthcheck: "/healthz",
+          regions: { [REGION]: 1 },
+          tcp: [MEDIA_PORT],
+          deploy: { drainingSeconds: 5 },
+          env: mediaEnv(HOME),
+        }),
+      ];
   // Where the directory (calls in direct messages) and shards (voice channels) open calls.
-  const mediaUrl = { FUWA_MEDIA_URL: internalUrl(media.name) };
+  const mediaUrl = { FUWA_MEDIA_URL: MEDIA_HOST_URL || internalUrl("fuwa-media") };
 
   const directory = service("fuwa-directory", {
     source: fuwaImage(),
@@ -306,6 +316,6 @@ export default defineRailway((ctx) => {
   });
 
   return project("fuwa", {
-    resources: [data, replica, directory, ...shardParts.flat(), gateway, media, ...regionParts],
+    resources: [data, replica, directory, ...shardParts.flat(), gateway, ...media, ...regionParts],
   });
 });

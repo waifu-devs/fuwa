@@ -34,7 +34,7 @@ use axum::response::{IntoResponse, Response};
 use tonic::metadata::{AsciiMetadataValue, MetadataMap};
 use tonic::service::Interceptor;
 use tonic::service::interceptor::InterceptedService;
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 
 use crate::cpb;
 use crate::error::{Error, Result};
@@ -283,10 +283,17 @@ pub async fn require_key(State(key): State<Arc<str>>, request: Request, next: Ne
 }
 
 /// A connection to another part: made when first used, kept alive, and made
-/// again after it drops.
+/// again after it drops. An `https://` part (a media part on a host of its
+/// own, reached over the internet) is checked against the public roots.
 pub fn channel(url: &str) -> Result<Channel> {
-    let endpoint = Endpoint::from_shared(url.to_string())
-        .map_err(|err| Error::internal(format!("{url} isn't a URL to call: {err}")))?
+    let mut endpoint = Endpoint::from_shared(url.to_string())
+        .map_err(|err| Error::internal(format!("{url} isn't a URL to call: {err}")))?;
+    if url.starts_with("https://") {
+        endpoint = endpoint
+            .tls_config(ClientTlsConfig::new().with_webpki_roots())
+            .map_err(|err| Error::internal(format!("couldn't set up TLS for {url}: {err}")))?;
+    }
+    let endpoint = endpoint
         .connect_timeout(Duration::from_secs(5))
         .tcp_nodelay(true)
         .http2_keep_alive_interval(Duration::from_secs(20))
@@ -545,6 +552,13 @@ mod tests {
         assert_eq!(shard_id(&config, dir.path()).unwrap(), first);
         let named = ClusterConfig { shard_id: Some("eu-1".into()), ..config };
         assert_eq!(shard_id(&named, dir.path()).unwrap(), "eu-1");
+    }
+
+    #[tokio::test]
+    async fn parts_on_other_hosts_are_reached_over_tls() {
+        assert!(channel("https://media.example.net:8443").is_ok());
+        assert!(channel("http://fuwa-media.railway.internal:8080").is_ok());
+        assert!(channel("not a url").is_err());
     }
 
     #[tokio::test]

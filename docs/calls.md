@@ -356,8 +356,12 @@ It needs one port reachable from the internet, UDP and TCP (`FUWA_MEDIA_PORT`,
 [self-hosting.md](self-hosting.md#calls).
 
 Railway has no public UDP. There the media part goes behind a TCP proxy
-(`FUWA_MEDIA_ADDRESSES=tcp/<proxy host>:<proxy port>`), so apps use ICE-TCP,
-and a TURN server helps people on networks that block unusual ports. With a
+(`FUWA_MEDIA_ADDRESSES=tcp/<proxy host>:<proxy port>`), so apps use ICE-TCP
+on the proxy's random port. A TURN server can't help there: it relays to
+the media part over UDP. For UDP and port 443, which strict networks still
+allow, the media part runs on a host of its own and the shards reach it
+over HTTPS with the cluster key ([self-hosting.md](self-hosting.md#the-media-part-on-a-host-of-its-own),
+`deploy/media-host`). With a
 volume-less media service, deploys overlap, so the restart above is the only
 interruption.
 
