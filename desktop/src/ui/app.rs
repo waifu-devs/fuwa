@@ -893,6 +893,14 @@ impl FuwaApp {
                         let dialog = Dialog::Moderate { key, server, user_id: user_id.clone(), action: *action };
                         this.open_dialog(dialog, window, cx);
                     }
+                    ServerSettingsEvent::CreateChannel { parent } => {
+                        let (key, server) = {
+                            let v = view.read(cx);
+                            (v.key.clone(), v.server.clone())
+                        };
+                        let dialog = Dialog::CreateChannel { key, server, parent: parent.clone(), category: false };
+                        this.open_dialog(dialog, window, cx);
+                    }
                 }
                 cx.notify();
             },
@@ -1192,7 +1200,8 @@ impl FuwaApp {
                         match result {
                             Ok(channel) => {
                                 this.dialog = None;
-                                if !category {
+                                // From server settings, stay there: the new channel shows in its list.
+                                if !category && this.server_settings.is_none() {
                                     this.open_channel(&key, &server, &channel.id, window, cx);
                                 }
                             }

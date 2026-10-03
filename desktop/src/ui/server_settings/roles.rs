@@ -108,11 +108,11 @@ fn color_of(c: u32) -> Hsla {
     rgb(c).into()
 }
 
-fn role_color(r: &pb::Role) -> Option<u32> {
+pub(super) fn role_color(r: &pb::Role) -> Option<u32> {
     r.color.map(|c| c as u32)
 }
 
-fn member_name(m: &pb::Member) -> String {
+pub(super) fn member_name(m: &pb::Member) -> String {
     match &m.user {
         Some(u) if m.nickname.is_empty() => user_name(u),
         Some(_) => m.nickname.clone(),
@@ -121,7 +121,7 @@ fn member_name(m: &pb::Member) -> String {
 }
 
 /// A small dot in a role's color, or an outline for one without.
-fn dot(color: Option<u32>, size: f32, p: &Palette) -> gpui_kit::Div {
+pub(super) fn dot(color: Option<u32>, size: f32, p: &Palette) -> gpui_kit::Div {
     let d = div().flex_none().size(px(size)).rounded_full();
     match color {
         Some(c) => d.bg(color_of(c)),

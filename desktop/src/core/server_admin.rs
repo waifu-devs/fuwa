@@ -115,6 +115,94 @@ impl Core {
     }
 }
 
+/// What changes about a channel; `None` keeps it. An empty `parent_id` takes it out of its category.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChannelPatch {
+    pub name: Option<String>,
+    pub topic: Option<String>,
+    pub parent_id: Option<String>,
+    pub slowmode_seconds: Option<i32>,
+}
+
+impl Core {
+    fn put_channel(&self, key: &str, channel: &pb::Channel) {
+        self.shared.instance(key, |i| {
+            let list = i.channels.entry(channel.server_id.clone()).or_default();
+            list.retain(|c| c.id != channel.id);
+            list.push(channel.clone());
+            crate::core::store::sort_channels(list);
+        });
+    }
+
+    pub async fn update_channel(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+        patch: ChannelPatch,
+    ) -> Result<pb::Channel, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.channels(),
+            update_channel(pb::UpdateChannelRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                name: patch.name,
+                topic: patch.topic,
+                position: None,
+                parent_id: patch.parent_id,
+                slowmode_seconds: patch.slowmode_seconds,
+            })
+        )
+        .await?;
+        let channel = res.channel.unwrap_or_default();
+        self.put_channel(key, &channel);
+        Ok(channel)
+    }
+
+    pub async fn delete_channel(&self, key: &str, server_id: &str, channel_id: &str) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        rpc!(
+            api.channels(),
+            delete_channel(pb::DeleteChannelRequest { server_id: server_id.into(), channel_id: channel_id.into() })
+        )
+        .await?;
+        self.shared.instance(key, |i| {
+            if let Some(list) = i.channels.get_mut(server_id) {
+                list.retain(|c| c.id != channel_id);
+                // A category's channels stay, outside any category.
+                for c in list.iter_mut().filter(|c| c.parent_id == channel_id) {
+                    c.parent_id.clear();
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// Replaces who can do what in a channel, every overwrite at once.
+    pub async fn set_channel_permissions(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+        overwrites: Vec<pb::PermissionOverwrite>,
+    ) -> Result<pb::Channel, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(
+            api.channels(),
+            set_channel_permissions(pb::SetChannelPermissionsRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                overwrites,
+            })
+        )
+        .await?;
+        let channel = res.channel.unwrap_or_default();
+        self.put_channel(key, &channel);
+        Ok(channel)
+    }
+}
+
 /// What changes about a role; `None` keeps it. `color: Some(None)` clears it.
 #[derive(Debug, Clone, Default)]
 pub struct RolePatch {
