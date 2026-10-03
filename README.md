@@ -206,7 +206,10 @@ until someone sets it up, with the same settings form for both:
   signed in, and when, is shown only to that member and to managers.
 
 Both can list email domains: only people whose verified email is on one of
-them get in. The settings page shows what to tell the provider (the OIDC
+them get in. Sign-ins started are capped per 10 minutes (2,000 through the
+instance's provider, 1,000 through one server's, 10 by one person at one
+server), counted without ever looking at client addresses. A signed SAML
+response must name this instance as its Destination. The settings page shows what to tell the provider (the OIDC
 redirect URI, or the SAML entity ID, which is also the metadata URL, and the
 Assertion Consumer Service). Everything comes back to this instance's public
 address, so `FUWA_PUBLIC_URL` has to be its https address (or `http://localhost`

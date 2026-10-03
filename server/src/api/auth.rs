@@ -208,6 +208,7 @@ impl Api {
         }
         let endpoints = sso::Endpoints::new(&settings.public_url, &sso::Scope::Instance);
         let origin = linked::return_origin(&req.return_origin, &settings.public_url, &settings.allowed_origins)?;
+        sso::starts().start(&[(&format!("instance {}", settings.public_url), sso::MAX_STARTS_INSTANCE)])?;
         let (authorize_url, sign_in) =
             sso::start(&settings.sso_provider, &endpoints, &origin, &req.secret_hash, "", req.test).await?;
         self.app.node()?.create_sso_sign_in(&sign_in).await?;

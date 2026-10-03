@@ -639,6 +639,28 @@ async fn servers_require_their_own_saml_sign_in_to_join_and_stay() {
     assert!(!signed_in(&seen, "bea"), "not someone else's");
     let seen = c.servers.list_members(members_seen_by(&owner)).await.unwrap().into_inner().members;
     assert!(signed_in(&seen, "bea"), "managers see it");
+    // Not moderators who only time people out, even in what they get back.
+    let roles = c.roles.list_roles(authed(&owner, pb::ListRolesRequest { server_id: id.clone() })).await.unwrap();
+    let admin_role = roles.into_inner().roles.into_iter().find(|r| r.name == "Admin").unwrap();
+    let take = pb::RemoveMemberRoleRequest { server_id: id.clone(), user_id: bea_id.clone(), role_id: admin_role.id };
+    c.roles.remove_member_role(authed(&owner, take)).await.unwrap();
+    let mods = pb::CreateRoleRequest {
+        server_id: id.clone(),
+        name: "Mods".into(),
+        permissions: vec![pb::Permission::TimeOutMembers as i32],
+        ..Default::default()
+    };
+    let mods = c.roles.create_role(authed(&owner, mods)).await.unwrap().into_inner().role.unwrap();
+    let ana_id = c.auth.get_me(authed(&ana, pb::GetMeRequest {})).await.unwrap().into_inner().user.unwrap().id;
+    let give = pb::AddMemberRoleRequest { server_id: id.clone(), user_id: ana_id, role_id: mods.id };
+    c.roles.add_member_role(authed(&owner, give)).await.unwrap();
+    let time_out =
+        pb::TimeOutMemberRequest { server_id: id.clone(), user_id: bea_id.clone(), seconds: 60, ..Default::default() };
+    let timed = c.servers.time_out_member(authed(&ana, time_out)).await.unwrap().into_inner().member.unwrap();
+    assert!(timed.sso_signed_in_at.is_none(), "a moderator doesn't learn when they signed in");
+    let undo =
+        pb::TimeOutMemberRequest { server_id: id.clone(), user_id: bea_id.clone(), seconds: 0, ..Default::default() };
+    c.servers.time_out_member(authed(&owner, undo)).await.unwrap();
 
     // Managers see how many members have signed in.
     let got = c.sso.get_server_sso(authed(&owner, get(&id))).await.unwrap().into_inner();
