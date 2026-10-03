@@ -618,6 +618,8 @@ message SharedCall {
     HomeEvents events = 12;
     // What the guest's people may do changed.
     HomeUpdated updated = 13;
+    // To the home: who its AutoMod sends the channel's messages to.
+    GuestReaders readers = 14;
   }
 }
 
@@ -627,6 +629,14 @@ message SharedReply {
   fuwa.v1.Message message = 3;
   fuwa.v1.ListMessagesResponse page = 4;
   fuwa.v1.User author = 5;
+  // For GuestReaders: as in PreviewShareResponse.checked_by.
+  repeated string checked_by = 6;
+}
+
+// A guest server's admins reading their Shared channels page.
+message GuestReaders {
+  string connection_id = 1;
+  string guest_server_id = 2;
 }
 
 // Someone in a guest server, acting in the channel it shows.

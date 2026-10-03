@@ -581,8 +581,9 @@ impl DmEngine {
                     change.items.push((id, target));
                 }
             }
-            // Anything else is from a newer app: there's nothing to show for it here.
-            None => {}
+            // Anything else is from a newer app (or for secure channels, which
+            // this app doesn't open yet): there's nothing to show for it here.
+            Some(Body::Signed(_) | Body::History(_)) | None => {}
         }
         Ok(())
     }

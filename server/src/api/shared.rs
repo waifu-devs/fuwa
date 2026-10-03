@@ -151,6 +151,7 @@ fn home_connection(row: &GuestRow, channel_name: &str) -> pb::SharedConnection {
         state: state(row.active),
         allowed: permissions::to_list(row.allowed),
         created_at: Some(timestamp(row.created_at)),
+        checked_by: vec![],
     }
 }
 
@@ -164,6 +165,7 @@ fn guest_connection(row: &LinkRow) -> pb::SharedConnection {
         state: state(row.active),
         allowed: permissions::to_list(row.allowed),
         created_at: Some(timestamp(row.created_at)),
+        checked_by: vec![],
     }
 }
 
@@ -642,6 +644,7 @@ pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::S
         Call::Ended(ended) => guest_ended(app, &sdb, ended).await,
         Call::Events(events) => guest_events(app, &sdb, events).await,
         Call::Updated(updated) => guest_updated(&sdb, updated).await,
+        Call::Readers(readers) => home_readers(app, &sdb, readers).await,
     }
 }
 
@@ -684,6 +687,46 @@ async fn home_lookup(app: &App, sdb: &ServerDb, lookup: cpb::ShareLookup) -> Res
         ..Default::default()
     })
 }
+
+/// Who the home's AutoMod sends a shared channel's messages to, for the
+/// guest's admins. Only the server at the other end of the connection asks.
+async fn home_readers(app: &App, sdb: &ServerDb, readers: cpb::GuestReaders) -> Result<cpb::SharedReply> {
+    let conn = sdb.read()?;
+    let row = guest_by_id(&conn, &readers.connection_id)
+        .await?
+        .filter(|row| row.server.id == readers.guest_server_id)
+        .ok_or(Error::NotFound(GONE))?;
+    let channel = load_channel(&conn, &sdb.id, &row.channel_id).await?.ok_or(Error::NotFound(GONE))?;
+    let checked_by = automod::readers(app, &conn, &channel).await?;
+    Ok(cpb::SharedReply { checked_by, ..Default::default() })
+}
+
+/// Asks each home who its AutoMod sends the channel's messages to, all at
+/// once. A home that doesn't answer in time leaves its list empty.
+async fn ask_readers(app: &Arc<App>, server_id: &str, connections: &mut [pb::SharedConnection]) {
+    let asks: Vec<_> = connections
+        .iter()
+        .map(|c| {
+            let call = cpb::SharedCall {
+                server_id: c.server.as_ref().map(|s| s.id.clone()).unwrap_or_default(),
+                call: Some(Call::Readers(cpb::GuestReaders {
+                    connection_id: c.id.clone(),
+                    guest_server_id: server_id.to_string(),
+                })),
+            };
+            tokio::time::timeout(READERS_WAIT, app.shared(call))
+        })
+        .collect();
+    for (connection, answer) in connections.iter_mut().zip(futures::future::join_all(asks).await) {
+        match answer {
+            Ok(Ok(reply)) => connection.checked_by = reply.checked_by,
+            _ => crate::reports::server_error("shared_readers", Some("SharedChannels/ListConnections")),
+        }
+    }
+}
+
+/// How long the Shared channels page waits for each home's providers.
+const READERS_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 async fn home_ask(sdb: &ServerDb, ask: cpb::ShareAsk) -> Result<cpb::SharedReply> {
     let guest = ask.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
@@ -736,6 +779,7 @@ async fn home_ask(sdb: &ServerDb, ask: cpb::ShareAsk) -> Result<cpb::SharedReply
                 state: pb::SharedConnectionState::Waiting as i32,
                 allowed: permissions::to_list(SHAREABLE),
                 created_at: Some(timestamp(now)),
+                checked_by: vec![],
             })
         })
         .await?;
@@ -751,8 +795,7 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
     {
         return Err(Error::ResourceExhausted("this channel's home server is out of storage".into()));
     }
-    let pictures = automod::picture_links(&send.attachments, &send.embeds);
-    let asked = ask_home(app, sdb, &guest, &send.content, &pictures).await;
+    let asked = ask_home(app, sdb, &guest, &send.content, &send.attachments, &send.embeds).await;
     let message = sdb
         .write(&author_id, async |conn, events| {
             let (row, user, server) = connection(conn, &guest).await?;
@@ -840,14 +883,15 @@ async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply
 
 /// Asks the home's provider rule about what a guest writes, before the
 /// write, as `messages` does for the home's own people. `None` when the
-/// guest's connection is gone or they're kept out; the write then turns
-/// them away.
+/// guest's connection is gone, they're kept out, or the home doesn't let
+/// them send this; the write then turns them away.
 async fn ask_home(
     app: &App,
     sdb: &ServerDb,
     guest: &cpb::Guest,
     content: &str,
-    pictures: &[String],
+    attachments: &[pb::Attachment],
+    embeds: &[pb::Embed],
 ) -> Option<automod::Asked> {
     let conn = sdb.read().ok()?;
     let (row, user, _) = connection(&conn, guest).await.ok()?;
@@ -859,8 +903,16 @@ async fn ask_home(
     drop(conn);
     let channel_id = row.channel_id.clone();
     let access = Access::guest(&channel_id, row.allowed);
+    // Nothing of a message the write will refuse goes to the provider.
+    if !access.has_in(&channel_id, Permission::SendMessages)
+        || (!attachments.is_empty() && !access.has_in(&channel_id, Permission::AttachFiles))
+        || (!embeds.is_empty() && !access.has_in(&channel_id, Permission::EmbedLinks))
+    {
+        return None;
+    }
+    let pictures = automod::picture_links(attachments, embeds);
     let member = pb::Member { user: Some(user), ..Default::default() };
-    automod::ask(app, sdb, &member, &access, &channel_id, content, pictures).await
+    automod::ask(app, sdb, &member, &access, &channel_id, content, &pictures).await
 }
 
 async fn home_edit(app: &App, sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cpb::SharedReply> {
@@ -870,7 +922,7 @@ async fn home_edit(app: &App, sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cp
     let before = load_message(&sdb.read()?, &sdb.id, &edit.message_id).await?;
     let asked = match before {
         Some(m) if m.author_id == author_id && m.content != edit.content => {
-            ask_home(app, sdb, &guest, &edit.content, &[]).await
+            ask_home(app, sdb, &guest, &edit.content, &[], &[]).await
         }
         _ => None,
     };
@@ -1715,12 +1767,26 @@ impl SharedChannelService for Api {
                 let Seat { sdb, .. } =
                     self.with(&account, &request.get_ref().server_id, Permission::ManageServer).await?;
                 let conn = sdb.read()?;
-                let names: HashMap<String, String> =
-                    store::load_channels(&conn, &sdb.id).await?.into_iter().map(|c| (c.id, c.name)).collect();
-                let name = |id: &str| names.get(id).cloned().unwrap_or_default();
-                let mut connections: Vec<pb::SharedConnection> =
-                    all_guests(&conn).await?.iter().map(|row| home_connection(row, &name(&row.channel_id))).collect();
-                connections.extend(all_links(&conn).await?.iter().map(guest_connection));
+                let channels: HashMap<String, pb::Channel> =
+                    store::load_channels(&conn, &sdb.id).await?.into_iter().map(|c| (c.id.clone(), c)).collect();
+                let name = |id: &str| channels.get(id).map(|c| c.name.clone()).unwrap_or_default();
+                let mut connections: Vec<pb::SharedConnection> = Vec::new();
+                // Each side sees who reads the channel's messages: the home its
+                // own providers, a guest the home's, asked of it now.
+                let mut readers: HashMap<String, Vec<String>> = HashMap::new();
+                for row in all_guests(&conn).await? {
+                    let mut connection = home_connection(&row, &name(&row.channel_id));
+                    if let Some(channel) = channels.get(&row.channel_id) {
+                        if !readers.contains_key(&channel.id) {
+                            readers.insert(channel.id.clone(), automod::readers(&self.app, &conn, channel).await?);
+                        }
+                        connection.checked_by = readers[&channel.id].clone();
+                    }
+                    connections.push(connection);
+                }
+                let mut links: Vec<pb::SharedConnection> = all_links(&conn).await?.iter().map(guest_connection).collect();
+                ask_readers(&self.app, &sdb.id, &mut links).await;
+                connections.extend(links);
                 let codes = query_all(
                     &conn,
                     "SELECT code, channel_id, creator_id, created_at, expires_at FROM share_codes WHERE expires_at > ?1 ORDER BY created_at DESC",

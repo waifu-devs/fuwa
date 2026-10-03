@@ -466,9 +466,16 @@ async fn a_split_instance_works_like_one() {
     // Pictures go up and come back through the gateway, and a shard's server
     // can use one as its icon.
     let png = {
-        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
-        bytes.resize(600, 7);
-        bytes
+        // A header, a private chunk and the end: kept as it is.
+        let chunk =
+            |kind: &[u8; 4], data: &[u8]| [&(data.len() as u32).to_be_bytes()[..], kind, data, &[0, 0, 0, 0]].concat();
+        [
+            &b"\x89PNG\r\n\x1a\n"[..],
+            &chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]),
+            &chunk(b"fuWa", &[7; 543]),
+            &chunk(b"IEND", &[]),
+        ]
+        .concat()
     };
     let reserved = c
         .media
@@ -1223,8 +1230,17 @@ async fn servers_live_in_their_region_and_move() {
     let upload = |purpose: pb::MediaPurpose, fill: u8| {
         let (mut media, http, juan) = (media.clone(), http.clone(), juan.clone());
         async move {
-            let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
-            png.resize(300, fill);
+            // A header, a private chunk and the end, 300 bytes: kept as it is.
+            let chunk = |kind: &[u8; 4], data: &[u8]| {
+                [&(data.len() as u32).to_be_bytes()[..], kind, data, &[0, 0, 0, 0]].concat()
+            };
+            let png = [
+                &b"\x89PNG\r\n\x1a\n"[..],
+                &chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]),
+                &chunk(b"fuWa", &[fill; 243]),
+                &chunk(b"IEND", &[]),
+            ]
+            .concat();
             let request =
                 pb::CreateUploadRequest { purpose: purpose as i32, content_type: "image/png".into(), size: 300 };
             let reserved = media.create_upload(authed(&juan, request)).await.unwrap().into_inner();

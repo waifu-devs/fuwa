@@ -40,6 +40,9 @@ export type Note = {
 export type DeviceRef = { userId: string; deviceId: string };
 
 /** One line of a conversation as this device saw it. */
+/** A SignedContent's parts, and the signature key of the device that signed it. */
+export type Signed = { payload: Uint8Array; signature: Uint8Array; key: Uint8Array };
+
 export type Item = {
   vault: string;
   conversation: string;
@@ -53,8 +56,10 @@ export type Item = {
    * text: a message. devices: devices joined or left. joined: this device
    * came in here (what came before, it can't read). unreadable: a record it
    * couldn't open. reset: someone started a secure channel's encryption over.
+   * setting: someone turned a secure channel's history sharing on ("on") or
+   * off ("off"), in content.
    */
-  kind: "text" | "devices" | "joined" | "unreadable" | "reset";
+  kind: "text" | "devices" | "joined" | "unreadable" | "reset" | "setting";
   content: string;
   replyTo: number;
   /** Unix ms of the last edit, or 0. */
@@ -62,6 +67,12 @@ export type Item = {
   deleted: boolean;
   added: DeviceRef[];
   removed: DeviceRef[];
+  /** A secure channel message as its sender's device signed it, to pass on to devices added later. */
+  signed?: Signed;
+  /** Its latest edit, signed the same way. */
+  editSigned?: Signed;
+  /** Who passed it on to this device, when it came as shared history rather than as it was sent. */
+  sharedBy?: string;
 };
 
 /** What this device sent, by the SHA-256 of its ciphertext: it can't open its own messages. */

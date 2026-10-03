@@ -138,6 +138,7 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_EMOJIS` | unlimited | Custom emoji per server |
 | `FUWA_LIMIT_PICTURE_UPLOAD` | unlimited | Largest avatar, banner, server icon or emoji one upload may be, like `8MB` |
 | `FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY` | unlimited | Pictures one account may upload in a day (UTC), like `256MiB` |
+| `FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY` | unlimited | Times a day (UTC) one server's Smart filter may ask its moderation provider; past it, messages go through the Smart filter unchecked (also set from the app: Instance settings, Moderation) |
 | `FUWA_TELEMETRY` | `on` | The anonymous usage signal and health reports; `off` turns both off (so does `DO_NOT_TRACK=1`), and apps on the instance then send no reports either |
 | `FUWA_TELEMETRY_URL` | `https://analytics.waifu.dev/v1/fuwa/signals` | Where the signal goes |
 | `FUWA_REPORTS_URL` | `FUWA_TELEMETRY_URL` with `/signals` changed to `/reports` | Where the hourly health report goes |
@@ -273,7 +274,9 @@ What's checked:
 Avatars, banners and server icons can be uploaded to the instance itself. The
 app crops them in the browser and saves them as small WebP files (GIFs go up as
 they are, so they keep moving). The file is checked to really be a PNG, JPEG,
-GIF, WebP or AVIF picture, then served at `<FUWA_PUBLIC_URL>/media/<id>` to
+GIF, WebP or AVIF picture, and a JPEG, PNG or WebP loses what it says about
+where and how it was taken (EXIF with a photo's GPS position, XMP, text and
+comments; colour profiles stay), then it's served at `<FUWA_PUBLIC_URL>/media/<id>` to
 anyone with the link, so set `FUWA_PUBLIC_URL` to the address people use before
 anyone uploads. Pictures aren't encrypted by `FUWA_ENCRYPTION_KEY`, since
 they're public at their links. A picture that gets replaced, or that nothing

@@ -59,8 +59,9 @@ static CLEF: Known = Known {
         ("@cf/cloudflare/clef", "Clef", "Most accurate"),
         ("@cf/cloudflare/clef-flash", "Clef flash", "Fastest, cheapest"),
     ],
-    key_help: "An API token with Workers AI permission (Cloudflare dashboard, My Profile, API Tokens), and your \
-               account id from the dashboard's sidebar. Billed by Cloudflare.",
+    key_help: "An API token with Workers AI Read, either an account token (Manage Account, Account API Tokens) \
+               or a user token (My Profile, API Tokens), and your account id from the dashboard's sidebar. Billed \
+               by Cloudflare.",
     hue: 0.07,
 };
 
