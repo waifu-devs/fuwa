@@ -282,7 +282,10 @@ person, in `<data>/recordings/` (sealed with `FUWA_ENCRYPTION_KEY` when
 it's set, and in your backups with the rest of the data directory). An
 hour of one person talking is about 15 to 30 MB. `FUWA_CALL_RECORDINGS=off`
 (or the Calls page) turns it off; recordings already kept stay until
-someone deletes them.
+someone deletes them. To bound the disk they take, cap each server's
+recordings (`FUWA_LIMIT_RECORDING_STORAGE=20GB`, or per server in Settings >
+Servers) and have old ones delete themselves
+(`FUWA_CALL_RECORDINGS_KEEP_DAYS=30`).
 
 On Railway, which has no public UDP, add a TCP proxy for port 50000 and set
 `FUWA_MEDIA_ADDRESSES=tcp/<proxy host>:<proxy port>`; a TURN server elsewhere

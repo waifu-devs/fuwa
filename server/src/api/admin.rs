@@ -224,6 +224,7 @@ impl AdminService for Api {
                 check_limit("storage_bytes", limits.storage_bytes)?;
                 check_limit("attachment_bytes", limits.attachment_bytes)?;
                 check_limit("emojis", limits.emojis)?;
+                check_limit("recording_bytes", limits.recording_bytes)?;
                 let sdb = self.app.servers.get(&req.server_id).await?;
                 sdb.set_limits(&limits).await?;
                 Ok(pb::SetServerLimitsResponse { limits: Some(sdb.limits(&self.app.settings().limits).await?) })

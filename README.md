@@ -125,6 +125,7 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_CHANNELS` | unlimited | Channels per server |
 | `FUWA_LIMIT_STORAGE` | unlimited | Database size per server, like `500MB` or `2GiB` |
 | `FUWA_LIMIT_ATTACHMENT_STORAGE` | unlimited | Uploaded files per server, custom emoji included |
+| `FUWA_LIMIT_RECORDING_STORAGE` | unlimited | Voice channel recordings kept on the server, per server, e.g. `20GB` |
 | `FUWA_LIMIT_EMOJIS` | unlimited | Custom emoji per server |
 | `FUWA_LIMIT_PICTURE_UPLOAD` | unlimited | Largest avatar, banner, server icon or emoji one upload may be, like `8MB` |
 | `FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY` | unlimited | Pictures one account may upload in a day (UTC), like `256MiB` |
@@ -135,6 +136,7 @@ the log filter are read only from the environment.
 | `FUWA_LOG` | `info,turso_core=warn` | Log filter ([syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)) |
 | `FUWA_CALLS` | `on` | Voice channels and calls in direct messages; `off` turns them off |
 | `FUWA_CALL_RECORDINGS` | `on` | Recording voice channels on the server (a track per person, for people with Record); `off` turns it off |
+| `FUWA_CALL_RECORDINGS_KEEP_DAYS` | unset | Days a finished server recording is kept before it deletes itself; unset keeps them until someone does |
 | `FUWA_MEDIA_PORT` | `50000` | The port calls' sound uses, UDP and TCP, open to the internet; `off` for no calls in this process |
 | `FUWA_MEDIA_ADDRESSES` | this machine's address | Where apps reach that port: `HOST`, `HOST:PORT`, or `udp/…` or `tcp/…` for one protocol (a TCP proxy), comma-separated |
 | `FUWA_ICE_URLS` | unset | STUN and TURN servers for people on strict networks, comma-separated `stun:`, `turn:` and `turns:` URLs |

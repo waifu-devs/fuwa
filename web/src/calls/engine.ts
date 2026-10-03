@@ -54,6 +54,7 @@ const KEEP_MS = 5_000;
 /** How long a broken connection gets to come back by itself before joining again. */
 const GRACE_MS = 2_500;
 const CHANNEL = "fuwa";
+const FULL = "This server's recordings are full. Delete some in Recordings to record again.";
 
 type Signal =
   | { type: "offer" | "answer"; sdp: string }
@@ -315,6 +316,10 @@ class Session {
     this.sessionId = joined.sessionId;
     this.videoSuppressed = !!joined.state?.videoSuppress;
     this.recordSuppressed = !!joined.state?.recordSuppress;
+    if ("recordingsFull" in joined && joined.recordingsFull && getCalls().serverRecord) {
+      toast(FULL);
+      setCalls(() => ({ serverRecord: false }));
+    }
     await pc.setRemoteDescription({ type: "answer", sdp: joined.answer });
   }
 
@@ -551,8 +556,9 @@ class Session {
         }
         // RECORD went away, or the instance stopped recording on the server.
         if (serverRecord && getCalls().serverRecord && !kept.state?.serverRecord) {
-          if (!this.recordSuppressed) toast("This instance stopped recording voice channels on the server.");
-          else toast("You can't record in this channel any more.");
+          if (this.recordSuppressed) toast("You can't record in this channel any more.");
+          else if (kept.recordingsFull) toast(FULL);
+          else toast("This instance stopped recording voice channels on the server.");
           setCalls(() => ({ serverRecord: false }));
         }
       } else {

@@ -5,7 +5,7 @@ import { usePrivateField } from "@/components/Private";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { Setting, SPRING, Toggle } from "../controls";
+import { Cap, Setting, SPRING, Toggle } from "../controls";
 
 type Reset = { changed: boolean; onReset: () => void; resetting: boolean };
 
@@ -13,6 +13,11 @@ type Reset = { changed: boolean; onReset: () => void; resetting: boolean };
 export const CALL_FIELDS: { path: string; get: (s: InstanceSettings) => unknown; copy: (into: InstanceSettings, from: InstanceSettings) => void }[] = [
   { path: "calls", get: (s) => s.calls, copy: (into, from) => (into.calls = from.calls) },
   { path: "call_recordings", get: (s) => s.callRecordings, copy: (into, from) => (into.callRecordings = from.callRecordings) },
+  {
+    path: "call_recordings_keep_days",
+    get: (s) => s.callRecordingsKeepDays,
+    copy: (into, from) => (into.callRecordingsKeepDays = from.callRecordingsKeepDays),
+  },
   {
     path: "ice_urls",
     get: (s) => s.iceUrls.map((u) => u.trim()).filter(Boolean).join("\n"),
@@ -30,6 +35,7 @@ export const CALL_SECTION = {
   settings: [
     { id: "calls-on", label: "Calls", keywords: "voice enable" },
     { id: "call-recordings", label: "Recording on the server", keywords: "record recordings tracks podcast" },
+    { id: "call-recordings-keep", label: "Keep recordings for", keywords: "retention expire delete days old recordings" },
     { id: "ice-urls", label: "STUN and TURN servers", keywords: "ice nat relay firewall" },
     { id: "turn-secret", label: "TURN secret", keywords: "coturn relay password" },
   ],
@@ -94,8 +100,18 @@ export function CallSettings({
           checked={draft.callRecordings}
           onChange={(on) => patch((d) => (d.callRecordings = on))}
           label="Let people with Record keep voice channels' recordings on this instance"
-          hint="One Ogg Opus track per person, kept with the server's files (sealed when the instance encrypts its files) until someone with Record deletes it. Nobody has Record until a server's admins grant it. Turning this off stops recordings going on now; the ones kept stay."
+          hint="One Ogg Opus track per person, kept with the server's files (sealed when the instance encrypts its files). Nobody has Record until a server's admins grant it. Turning this off stops recordings going on now; the ones kept stay. How much each server may keep is a cap under Limits."
         />
+      </Setting>
+      <Setting
+        id="call-recordings-keep"
+        title="Keep recordings for"
+        hint="Finished recordings older than this delete themselves, files and copies included. Off keeps them until someone deletes them."
+        delay={0.03}
+        defaultLabel={defaults.callRecordingsKeepDays === undefined ? "until deleted" : `${defaults.callRecordingsKeepDays} days`}
+        {...resetter("call_recordings_keep_days")}
+      >
+        <Cap label="Days" value={draft.callRecordingsKeepDays} onChange={(v) => patch((d) => (d.callRecordingsKeepDays = v))} />
       </Setting>
       <Setting
         id="ice-urls"
