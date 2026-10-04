@@ -170,7 +170,7 @@ fn encode(content: &Content) -> Vec<u8> {
 }
 
 fn ts_ms(t: Option<&prost_types::Timestamp>) -> i64 {
-    t.map(|t| t.seconds * 1000 + i64::from(t.nanos) / 1_000_000).unwrap_or_else(now_ms)
+    t.map(|t| t.seconds.saturating_mul(1000).saturating_add(i64::from(t.nanos) / 1_000_000)).unwrap_or_else(now_ms)
 }
 
 pub fn now_ms() -> i64 {
@@ -472,8 +472,8 @@ impl DmEngine {
             let Some(res) = next else { return Ok(()) };
             if res.ready {
                 self.update(|d| d.problem = None);
-                if let Err(err) = self.resync().await {
-                    tracing::warn!("couldn't list conversations: {err}");
+                if self.resync().await.is_err() {
+                    tracing::warn!("couldn't list conversations");
                 }
             }
             if let Some(event) = res.event.and_then(|e| e.payload) {
@@ -574,7 +574,7 @@ impl DmEngine {
             match self.catch_up(&mut inner, id, 0).await {
                 Ok(()) => self.set_broken(id, false),
                 Err(err) if err.0 == SECURE_BROKEN => self.set_broken(id, true),
-                Err(err) => tracing::warn!("couldn't catch up on a conversation: {err}"),
+                Err(_) => tracing::warn!("couldn't catch up on a conversation"),
             }
         }
         self.refresh(id).await;
@@ -913,6 +913,9 @@ impl DmEngine {
             {
                 before.deleted = true;
                 before.content.clear();
+                // The signed copies hold the words too.
+                before.signed = None;
+                before.edit_signed = None;
                 change.items.push((id, before));
             }
             return Ok(Opened::Fine);
@@ -1298,7 +1301,7 @@ impl DmEngine {
                     return Ok(Some(next));
                 }
                 // Used up or out of date: join by itself instead.
-                Err(err) => tracing::warn!("couldn't join an encrypted group from its welcome: {err}"),
+                Err(_) => tracing::warn!("couldn't join an encrypted group from its welcome"),
             }
         }
         for _ in 0..3 {
@@ -1387,8 +1390,8 @@ impl DmEngine {
                     self.catch_up(inner, &id, 0).await?;
                     if adding && channel {
                         // Best effort: messages keep working whether or not this goes through.
-                        if let Err(err) = self.share_history(inner, room).await {
-                            tracing::warn!("couldn't pass history on: {err}");
+                        if self.share_history(inner, room).await.is_err() {
+                            tracing::warn!("couldn't pass history on");
                         }
                         self.catch_up(inner, &id, 0).await?;
                     }
@@ -1517,6 +1520,9 @@ impl DmEngine {
             {
                 before.deleted = true;
                 before.content.clear();
+                // The signed copies hold the words too.
+                before.signed = None;
+                before.edit_signed = None;
                 let _ = inner.vault.write(Change { items: vec![(id.to_owned(), before)], ..Change::default() });
             }
         }
@@ -1746,8 +1752,8 @@ impl DmEngine {
                         }
                     }
                     .await;
-                    if let Err(err) = result {
-                        tracing::warn!("couldn't bring a secure channel in step: {err}");
+                    if result.is_err() {
+                        tracing::warn!("couldn't bring a secure channel in step");
                     }
                 }
                 this.refresh(&id).await;
@@ -1796,8 +1802,8 @@ impl DmEngine {
             let mut inner = self.inner.lock().await;
             let _ = inner.device.forget(id);
             let _ = inner.save(Change::default());
-            if let Err(err) = inner.vault.forget(id) {
-                tracing::warn!("couldn't forget a secure channel's messages: {err}");
+            if inner.vault.forget(id).is_err() {
+                tracing::warn!("couldn't forget a secure channel's messages");
             }
         }
         self.shared.instance(&self.key, |i| {

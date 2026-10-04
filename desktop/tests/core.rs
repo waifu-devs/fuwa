@@ -138,7 +138,15 @@ fn two_people_talk_in_a_server_and_in_private() {
     until(&bob, "Alice's mention", |s| {
         s.instance(&key).unwrap().messages[&general].items.iter().any(|m| m.content == ping)
     });
-    let notice = notices.try_recv().expect("the mention notified");
+    // The notification goes out just after the store shows the message.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let notice = loop {
+        match notices.try_recv() {
+            Ok(notice) => break notice,
+            Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => panic!("the mention didn't notify"),
+        }
+    };
     assert!(matches!(notice, Notice::Message { ref body, mention: true, .. } if *body == ping), "{notice:?}");
 
     // Alice edits it; Bob sees the edit.

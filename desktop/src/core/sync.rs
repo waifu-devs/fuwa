@@ -189,7 +189,7 @@ fn start_dms(
                 engine.follow().await;
             }
             Err(err) => {
-                tracing::warn!("direct messages didn't start: {err}");
+                tracing::warn!("direct messages didn't start");
                 core.shared.instance(&key, |i| {
                     i.dms.status = DmStatus::Failed;
                     i.dms.problem = Some(if err.0.contains("support that yet") {
