@@ -657,7 +657,11 @@ impl DirectMessageService for Api {
 
     async fn watch(&self, request: Request<pb::WatchRequest>) -> Result<Response<WatchStream>, Status> {
         let caller = self.caller(request.metadata()).await?;
-        let ticket = self.app.streams.open(&caller.account.id, self.app.settings().streams_per_account())?;
+        let ticket = self.app.streams.open(
+            crate::streams::Kind::Dms,
+            &caller.account.id,
+            self.app.settings().streams_per_account(),
+        )?;
         let mut events = self.app.dms()?.watch(&caller.account.id);
         let (tx, rx) = mpsc::channel::<Result<pb::WatchResponse, Status>>(64);
         let app = self.app.clone();

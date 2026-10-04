@@ -68,7 +68,7 @@ rather than limit what people do. Each can be raised, or turned off with
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `FUWA_STREAMS_PER_ACCOUNT` | 32 (protective) | Apps and tabs one account keeps open at once, per part. Against a runaway client or script. Admins can change it live in the instance settings (`streams_per_account`; unset is no limit). Past it the account is asked to close one. |
+| `FUWA_STREAMS_PER_ACCOUNT` | 32 (protective) | Apps and tabs one account keeps open at once, per part. An app or tab holds an events stream and a direct-message stream, each counted on its own, so 32 means 32 tabs. Against a runaway client or script. Admins can change it live in the instance settings (`streams_per_account`; unset is no limit). On a split instance it's set on the directory, which sends it to every part; while a directory older than this release runs, the other parts see no limit. Past it the account is asked to close one. |
 | `FUWA_MAX_STREAMS` | unlimited | People online at once on this part, for everyone. Set it from the table above to answer "this instance is full" instead of slowing down for everyone. |
 | `FUWA_LIMIT_*` | unlimited | Members, channels and storage per server ([self-hosting](self-hosting.md)). |
 | `FUWA_WRITE_QUEUE` | 512 (protective) | Writes one server's file may have waiting. Past it, that server's writes are told it's busy. 4 run at once, built in. |

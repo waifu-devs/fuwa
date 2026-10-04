@@ -280,16 +280,19 @@ impl Db {
         }
         let (database, gate, fold) = (self.database.clone(), self.gate.clone(), self.fold.clone());
         tokio::spawn(async move {
+            // Counts as failed unless it gets to the end: a panic, or the task
+            // dropped at shutdown, still frees the fold for a later try.
+            let mut running = Running { fold, log, ok: false };
             let started = std::time::Instant::now();
             let folded = {
                 let _alone = gate.write_owned().await;
-                checkpoint_with(&database, FOLD_ATTEMPTS).await
+                checkpoint_with(&database, FOLD_ATTEMPTS, Some(FOLD_WAIT)).await
             };
             crate::reports::server_timing("db.fold", started.elapsed());
             if folded.is_err() {
                 tracing::warn!("couldn't fold a database's log into it; trying again later");
             }
-            fold.finished(folded.is_ok(), log);
+            running.ok = folded.is_ok();
         });
     }
 
@@ -302,19 +305,41 @@ impl Db {
     /// writers wait while it runs; it answers busy if a transaction is open,
     /// so it tries again a few times.
     pub async fn checkpoint(&self) -> Result<()> {
-        checkpoint_with(self, ATTEMPTS).await
+        checkpoint_with(self, ATTEMPTS, None).await
     }
 }
 
-/// [`Db::checkpoint`], giving up after `attempts`.
-async fn checkpoint_with(database: &Database, attempts: u32) -> Result<()> {
+/// [`Db::checkpoint`], giving up after `attempts`, each waiting up to `wait`
+/// for a lock (the connection's usual 10 s when `None`).
+async fn checkpoint_with(database: &Database, attempts: u32, wait: Option<std::time::Duration>) -> Result<()> {
     let conn = connect(database)?;
+    if let Some(wait) = wait {
+        conn.busy_timeout(wait)?;
+    }
     let mut attempt = 0;
     loop {
         match pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").await {
-            Err(err) if is_conflict(&err) && attempt + 1 < attempts => retry_after(&err, &mut attempt).await?,
+            Err(err) if is_conflict(&err) && attempt + 1 >= attempts => return Err(Error::Busy),
+            Err(err) if is_conflict(&err) => retry_after(&err, &mut attempt).await?,
             other => return other,
         }
+    }
+}
+
+/// How long each of a fold's own attempts waits for a lock: writes wait
+/// while it runs, so it gives up soon and tries again later.
+const FOLD_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// A fold under way, marked finished when dropped.
+struct Running {
+    fold: Arc<Fold>,
+    log: u64,
+    ok: bool,
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.fold.finished(self.ok, self.log);
     }
 }
 

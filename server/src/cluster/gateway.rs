@@ -869,7 +869,11 @@ impl EventService for Events {
         for cursor in &mut cursors {
             cursor.server_id = parse_id("server_id", &cursor.server_id).map_err(Status::from)?;
         }
-        let ticket = gateway.followers.open(&account_id, gateway.settings().streams_per_account())?;
+        let ticket = gateway.followers.open(
+            crate::streams::Kind::Events,
+            &account_id,
+            gateway.settings().streams_per_account(),
+        )?;
         let (opened, gone) =
             Self::open(&gateway, &metadata, &cursors, Patience::new(gateway.config.cluster.ride_out)).await?;
 
