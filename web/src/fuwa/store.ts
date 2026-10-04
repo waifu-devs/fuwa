@@ -54,6 +54,8 @@ export type PendingMessage = {
   /** In a secure channel: the thread it's going to, and whether it's also going to the channel. */
   thread?: number;
   inChannel?: boolean;
+  /** A voice message on its way: how it looks until it's sent. */
+  voice?: { durationMs: number; waveform: Uint8Array };
 };
 
 /** A device in an encrypted conversation, as its group says. */

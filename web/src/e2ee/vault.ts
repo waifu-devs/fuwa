@@ -62,10 +62,12 @@ export type Item = {
    * came in here (what came before, it can't read). unreadable: a record it
    * couldn't open. reset: someone started a secure channel's encryption over.
    * setting: someone turned a secure channel's history sharing on ("on") or
-   * off ("off"), in content. thread: someone locked ("locked") or unlocked
-   * ("unlocked") the thread under the message `thread` names.
+   * off ("off"), in content. voice: a voice message (`voice`), with a
+   * line about it in content for previews and notifications. thread: someone
+   * locked ("locked") or unlocked ("unlocked") the thread under the message
+   * `thread` names.
    */
-  kind: "text" | "devices" | "joined" | "unreadable" | "reset" | "setting" | "thread";
+  kind: "text" | "devices" | "joined" | "unreadable" | "reset" | "setting" | "voice" | "thread";
   content: string;
   replyTo: number;
   /** Unix ms of the last edit, or 0. */
@@ -83,7 +85,22 @@ export type Item = {
   thread?: number;
   /** A thread reply its author also sent to the channel. */
   inChannel?: boolean;
+  /** A voice message: what fetching, opening and showing it takes. */
+  voice?: Voice;
 };
+
+/** A voice message's sealed file and what it sounds like, from inside the encrypted message. */
+export type Voice = {
+  mediaId: string;
+  key: Uint8Array;
+  sha256: Uint8Array;
+  size: number;
+  durationMs: number;
+  waveform: Uint8Array;
+};
+
+/** Something someone said: text or a voice message. */
+export const isMessage = (i: Pick<Item, "kind">) => i.kind === "text" || i.kind === "voice";
 
 /** This device's hold on the account's message backup: the recovery key, which never leaves the browser. */
 export type StoredBackup = { vault: string; key: Uint8Array; check: Uint8Array };

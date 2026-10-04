@@ -583,6 +583,20 @@ impl DmEngine {
                     change.items.push((id, target));
                 }
             }
+            // Voice messages play in the web app for now; here they're a line
+            // saying one came, so the conversation still reads in order.
+            Some(Body::Voice(voice)) => {
+                let secs = voice.duration_ms / 1000;
+                let mut item = Item::new(seq, ItemKind::Text, at, sender_id, device_id);
+                item.content =
+                    format!("Voice message ({}:{:02}), open it in the web app to play it", secs / 60, secs % 60);
+                item.reply_to = voice.reply_to_sequence;
+                let had = inner.vault.items(&id)?.iter().any(|i| i.seq == seq);
+                if !had && sender_id != self.me.id {
+                    fresh.push(item.clone());
+                }
+                change.items.push((id, item));
+            }
             // Anything else is from a newer app (or for secure channels, which
             // this app doesn't open yet): there's nothing to show for it here.
             Some(Body::Signed(_) | Body::History(_) | Body::Thread(_)) | None => {}
@@ -799,7 +813,11 @@ impl DmEngine {
                 inner.save(Change { sent: vec![(hash.clone(), plaintext.clone())], ..Change::default() })?;
                 let posted = rpc!(
                     self.api.dms(),
-                    post_message(pb::PostMessageRequest { conversation_id: id.to_owned(), message: ciphertext }),
+                    post_message(pb::PostMessageRequest {
+                        conversation_id: id.to_owned(),
+                        message: ciphertext,
+                        ..Default::default()
+                    }),
                 )
                 .await;
                 match posted {

@@ -17,6 +17,7 @@ import {
 } from "@/gen/fuwa/v1/dm_pb";
 import { deriveKeys, formatRecoveryKey, newer, newRecoveryKey, open, paddingFor, parseRecoveryKey, sameBytes, seal, type BackupKeys } from "./backupkey";
 import * as vault from "./vault";
+import { toVoiceMessage, voiceOf } from "./voice";
 
 /**
  * The account's message backup, as this device takes part in it: every line
@@ -41,6 +42,7 @@ const KINDS: Partial<Record<vault.Item["kind"], BackupItemKind>> = {
   reset: BackupItemKind.RESET,
   setting: BackupItemKind.SETTING,
   thread: BackupItemKind.THREAD,
+  voice: BackupItemKind.VOICE,
 };
 const FROM_KIND: Record<number, vault.Item["kind"]> = {
   [BackupItemKind.TEXT]: "text",
@@ -48,6 +50,7 @@ const FROM_KIND: Record<number, vault.Item["kind"]> = {
   [BackupItemKind.RESET]: "reset",
   [BackupItemKind.SETTING]: "setting",
   [BackupItemKind.THREAD]: "thread",
+  [BackupItemKind.VOICE]: "voice",
 };
 
 const signedForm = (s: vault.Signed | undefined) =>
@@ -78,6 +81,7 @@ function toBackup(i: vault.Item): BackupItem | null {
     threadSequence: BigInt(i.thread ?? 0),
     inChannel: !!i.inChannel,
     locked: i.kind === "thread" && i.content === "locked",
+    voice: i.voice ? toVoiceMessage(i.voice) : undefined,
   });
 }
 
@@ -90,6 +94,8 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
   // but not its signed copy); a device takes a lock only signed.
   const threaded = thread > 0 && (!!b.signed || b.deleted);
   if (kind === "thread" && !(thread > 0 && b.signed)) return null;
+  const voice = kind === "voice" && !b.deleted ? voiceOf(b.voice) : null;
+  if (kind === "voice" && !voice && !b.deleted) return null;
   return {
     vault: vaultKey,
     conversation: b.conversationId,
@@ -109,6 +115,7 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
     sharedBy: b.sharedBy || undefined,
     ...(threaded ? { thread, inChannel: b.inChannel } : {}),
     ...(kind === "thread" ? { content: b.locked ? "locked" : "unlocked" } : {}),
+    voice: voice ?? undefined,
   };
 }
 

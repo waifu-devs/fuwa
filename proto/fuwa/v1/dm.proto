@@ -54,8 +54,18 @@ service DirectMessageService {
   rpc PostCommit(PostCommitRequest) returns (PostCommitResponse);
   // Adds an encrypted message, for the current epoch like a commit.
   rpc PostMessage(PostMessageRequest) returns (PostMessageResponse);
-  // Deletes a record you sent: its ciphertext goes, a gap stays.
+  // Deletes a record you sent: its ciphertext goes, a gap stays, and so do
+  // the sealed files it carried.
   rpc DeleteRecord(DeleteRecordRequest) returns (DeleteRecordResponse);
+  // Reserves a place for a sealed file: something a message carries that's
+  // too big to go in it, such as a voice message, encrypted on the device
+  // under a key that travels only inside the message. Upload it like a
+  // picture (MediaService.CreateUpload has how), then name its id in
+  // PostMessage's media_ids, which keeps it for as long as the message.
+  // The instance takes any bytes and never opens them.
+  rpc CreateSealedUpload(CreateSealedUploadRequest) returns (CreateSealedUploadResponse);
+  // The instance's caps on voice messages, for the recorder to stop at.
+  rpc GetVoiceLimits(GetVoiceLimitsRequest) returns (GetVoiceLimitsResponse);
   // Live changes to your conversations. The stream says `ready` once it's
   // listening; anything from before then, read with ListConversations and
   // ListRecords. A response with nothing set is a heartbeat.
@@ -260,6 +270,10 @@ message PostMessageRequest {
   string conversation_id = 1;
   // An MLSMessage carrying an encrypted application message.
   bytes message = 2;
+  // Sealed files the message carries (CreateSealedUpload), at most 10: your
+  // own uploads, stored and not carried by another message yet. They're
+  // deleted with the message.
+  repeated string media_ids = 3;
 }
 
 message PostMessageResponse {
@@ -272,6 +286,33 @@ message DeleteRecordRequest {
 }
 
 message DeleteRecordResponse {}
+
+message CreateSealedUploadRequest {
+  // The conversation the file is for.
+  string conversation_id = 1;
+  // The sealed file's exact size in bytes. Sealed files are voice messages
+  // for now, so the instance's voice_message_bytes cap applies.
+  int64 size = 2;
+}
+
+message CreateSealedUploadResponse {
+  // Where to PUT the bytes. Works once, until `expires_at`.
+  string upload_url = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  // Its id, for media_ids, and where it's served (as
+  // application/octet-stream, to anyone with the link: it's ciphertext).
+  string media_id = 3;
+  string url = 4;
+}
+
+message GetVoiceLimitsRequest {}
+
+message GetVoiceLimitsResponse {
+  // The longest voice message, in seconds; unset for no cap.
+  optional int64 max_seconds = 1;
+  // The biggest sealed voice message, in bytes; unset for no cap.
+  optional int64 max_bytes = 2;
+}
 
 message WatchRequest {}
 
@@ -311,6 +352,8 @@ message DirectMessageContent {
     // A moderator locking or unlocking a thread in a secure channel; sent
     // signed (inside `signed`), like a text.
     ThreadChange thread = 6;
+    // A recorded voice message (direct messages only, for now).
+    DirectMessageVoice voice = 5;
   }
 }
 
@@ -375,6 +418,36 @@ message ThreadChange {
 message DirectMessageEdit {
   int64 sequence = 1;
   string content = 2;
+}
+
+// A voice message: Ogg Opus, sealed as a SealedFile. What it sounds like
+// and its waveform travel only in here, inside the encryption.
+message DirectMessageVoice {
+  SealedFile file = 1;
+  // How long it plays, in milliseconds.
+  uint32 duration_ms = 2;
+  // Its loudness over time, worked out on the sender's device: up to 128
+  // values, 0 (silence) to 255 (loudest), evenly spread over the clip.
+  bytes waveform = 3;
+  // The record it answers, if any.
+  int64 reply_to_sequence = 4;
+}
+
+// A file kept on the instance as ciphertext (CreateSealedUpload). Only the
+// devices that read the message holding this ever have its key.
+message SealedFile {
+  // The upload's id, and where it's fetched from.
+  string media_id = 1;
+  string url = 2;
+  // AES-256-GCM: a random 32-byte key for this file alone. The stored
+  // bytes are a 12-byte nonce followed by the ciphertext and its tag.
+  bytes key = 3;
+  // SHA-256 of the stored bytes, checked before they're opened.
+  bytes sha256 = 4;
+  // The stored bytes' size.
+  int64 size = 5;
+  // What it is once opened, such as "audio/ogg; codecs=opus".
+  string content_type = 6;
 }
 
 // ───────────────────────── Message backup ─────────────────────────
@@ -488,6 +561,9 @@ message BackupItem {
   bool in_channel = 17;
   // For a THREAD item: whether it locked the thread or unlocked it.
   bool locked = 18;
+  // A voice message's file, key and waveform (BACKUP_ITEM_KIND_VOICE). The
+  // file itself stays on the instance, until the message is deleted.
+  DirectMessageVoice voice = 19;
 }
 
 enum BackupItemKind {
@@ -498,6 +574,7 @@ enum BackupItemKind {
   BACKUP_ITEM_KIND_SETTING = 4;
   // A moderator locked or unlocked a thread in a secure channel.
   BACKUP_ITEM_KIND_THREAD = 5;
+  BACKUP_ITEM_KIND_VOICE = 6;
 }
 
 message BackupDevice {
