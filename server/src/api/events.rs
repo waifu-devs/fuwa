@@ -11,7 +11,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, respond};
+use super::{Api, Seat, commands, respond};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::pb::{self, event_service_server::EventService};
@@ -97,6 +97,12 @@ impl View {
         let mut out = self.pass_unscrubbed(event).await;
         let manager = self.access.has(pb::Permission::ManageServer);
         for event in &mut out {
+            if let Some(Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(interaction) })) =
+                &mut event.payload
+                && let Ok(conn) = self.sdb.read()
+            {
+                commands::fill_arguments(&conn, interaction, now_ms()).await;
+            }
             if let Some(
                 Payload::MemberJoined(pb::MemberJoined { member: Some(member) })
                 | Payload::MemberUpdated(pb::MemberUpdated { member: Some(member) }),
@@ -426,6 +432,16 @@ impl EventService for Api {
                     Some(Payload::ChannelDeleted(_)) | None => true,
                     Some(payload) => shown_to(&account.id, &access, payload),
                 });
+                if events.iter().any(|e| matches!(e.payload, Some(Payload::InteractionCreated(_)))) {
+                    let conn = sdb.read()?;
+                    for event in &mut events {
+                        if let Some(Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(i) })) =
+                            &mut event.payload
+                        {
+                            commands::fill_arguments(&conn, i, now_ms()).await;
+                        }
+                    }
+                }
                 Ok(pb::ListEventsResponse { events, has_more })
             }
             .await,

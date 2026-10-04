@@ -259,7 +259,16 @@ async fn people_run_an_agents_commands_and_only_the_agent_hears() {
         .unwrap()
         .into_inner()
         .events;
-    assert!(agent_log.iter().any(|e| matches!(e.payload, Some(pb::event::Payload::InteractionCreated(_)))));
+    let typed = |log: &[pb::Event]| {
+        log.iter()
+            .find_map(|e| match &e.payload {
+                Some(pb::event::Payload::InteractionCreated(c)) => c.interaction.as_ref().map(|i| i.arguments.len()),
+                _ => None,
+            })
+            .expect("the agent's interaction")
+    };
+    // While it can be answered, catching up brings what was typed too.
+    assert_eq!(typed(&agent_log), 2);
 
     // Answered only by its agent, only in its own channel.
     let mut messages = pb::message_service_client::MessageServiceClient::new(channel.clone());
@@ -283,6 +292,33 @@ async fn people_run_an_agents_commands_and_only_the_agent_hears() {
     let sent = messages.send_message(answer(&w.agent, &w.general_id)).await.unwrap().into_inner().message.unwrap();
     let shown = sent.interaction.unwrap();
     assert_eq!((shown.command.as_str(), shown.user_id.as_str()), ("roll", w.owner_id.as_str()));
+
+    // What was typed lives only with the interaction: once it's gone (here
+    // with the agent, kicked and added back), the logged event has none.
+    let mut servers = pb::server_service_client::ServerServiceClient::new(channel.clone());
+    servers
+        .kick_member(authed(
+            &w.owner,
+            pb::KickMemberRequest {
+                server_id: w.server_id.clone(),
+                user_id: w.agent_id.clone(),
+                reason: String::new(),
+            },
+        ))
+        .await
+        .unwrap();
+    let mut agents = pb::agent_service_client::AgentServiceClient::new(channel.clone());
+    agents
+        .add_agent(authed(&w.owner, pb::AddAgentRequest { server_id: w.server_id.clone(), username: "helper".into() }))
+        .await
+        .unwrap();
+    let replayed = events
+        .list_events(authed(&w.agent, pb::ListEventsRequest { server_id: w.server_id.clone(), ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .events;
+    assert_eq!(typed(&replayed), 0);
 
     instance.stop().await;
 }

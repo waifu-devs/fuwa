@@ -13,7 +13,9 @@ CREATE TABLE commands (
 
 -- Interactions an agent may still answer: 15 minutes from `created_at`
 -- (Unix milliseconds), at most 5 answers. Older rows are dropped as new ones
--- come. What was typed isn't kept here, only in the agent's event.
+-- come. `arguments` is what was typed (an Interaction holding only its
+-- arguments, as protobuf): kept only here, for the agent's events to carry
+-- while the interaction lives, never in the event log.
 CREATE TABLE interactions (
     id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
@@ -21,6 +23,7 @@ CREATE TABLE interactions (
     channel_id TEXT NOT NULL,
     kind INTEGER NOT NULL,
     command TEXT NOT NULL DEFAULT '',
+    arguments BLOB,
     created_at INTEGER NOT NULL,
     answers INTEGER NOT NULL DEFAULT 0
 );

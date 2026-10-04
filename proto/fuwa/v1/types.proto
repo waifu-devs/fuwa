@@ -942,6 +942,9 @@ message Interaction {
   InteractionKind kind = 6;
   // COMMAND: its name and what was filled in, checked against its options.
   string command = 7;
+  // Only while the interaction can be answered (15 minutes), live or caught
+  // up: the server's event log never keeps what was typed, so an event read
+  // later has none.
   repeated CommandArgument arguments = 8;
   // BUTTON: the message and the button's custom_id.
   string message_id = 9;

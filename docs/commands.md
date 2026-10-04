@@ -60,6 +60,12 @@ That event reaches **only the agent it's for**: in `EventService.Subscribe`,
 in replay after a reconnect, and in `ListEvents` (MCP's `list_events`).
 Nobody else's stream, replay or list ever has it.
 
+The `arguments` come only while the interaction can be answered (15
+minutes), live or catching up. The server's event log never keeps what was
+typed: it's kept with the interaction alone and added to the agent's events
+as they're sent, so the same event read later has no arguments. Agents that
+need them later keep them themselves.
+
 ### Answering
 
 Answer with an ordinary `SendMessage` in the same channel, with
@@ -102,6 +108,9 @@ Buttons stay as they were sent: edits change the text, not the buttons.
   address.
 - Arguments are only what the person typed, sent to an agent the server's
   managers added. Nothing is fetched for them.
-- An interaction's row is kept for 15 minutes (so the agent can answer) and
-  then deleted. Account exports list the commands an agent set in each
-  server; deleting an account deletes its interactions.
+- What was typed is kept with the interaction for 15 minutes (so the agent
+  can answer) and then deleted, and sooner if the person or the agent leaves
+  the server or their account is deleted. The event log keeps only that an
+  interaction happened: who, which command or button, where and when, like
+  any other event. Account exports list the commands an agent set in each
+  server.

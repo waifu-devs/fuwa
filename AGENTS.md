@@ -198,10 +198,12 @@
     Commands (`api/commands.rs`, `CommandService`, docs/commands.md): an
     agent's slash commands per server in the server file's `commands` (one
     protobuf blob each), and `interactions` (a run or a press, kept 15
-    minutes and swept on write, counting answers, at most 5). The
-    `InteractionCreated` event carries the arguments, so `events::shown_to`
-    passes it only to its agent: any new event only one account should see
-    goes there too. Answers are `SendMessage` with `interaction_id`
+    minutes and swept on write, counting answers, at most 5, and holding
+    what was typed). `InteractionCreated` is logged without the arguments;
+    `commands::fill_arguments` adds them from the row as events go out
+    (`View::pass`, `list_events`), so the log never keeps them.
+    `events::shown_to` passes it only to its agent: any new event only one
+    account should see goes there too. Answers are `SendMessage` with `interaction_id`
     (`commands::answer`, inside the send's write); buttons are
     `SendMessage.components`, kept in extras tag 11 and checked by
     `commands::check_components`. Not in threads, secure or shared channels

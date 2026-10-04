@@ -273,9 +273,10 @@ async fn start(
     events: &mut Vec<Payload>,
 ) -> Result<()> {
     conn.execute("DELETE FROM interactions WHERE created_at < ?1", [now - ANSWER_WITHIN_MS]).await?;
+    let typed = pb::Interaction { arguments: interaction.arguments.clone(), ..Default::default() }.encode_to_vec();
     conn.execute(
-        "INSERT INTO interactions (id, agent_id, user_id, channel_id, kind, command, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO interactions (id, agent_id, user_id, channel_id, kind, command, arguments, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         (
             interaction.id.as_str(),
             interaction.agent_id.as_str(),
@@ -283,12 +284,37 @@ async fn start(
             interaction.channel_id.as_str(),
             i64::from(interaction.kind),
             interaction.command.as_str(),
+            typed,
             now,
         ),
     )
     .await?;
-    events.push(Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(interaction.clone()) }));
+    // The log keeps the event as long as any other; what was typed stays in
+    // the row, which goes after 15 minutes, and `fill_arguments` adds it back.
+    let stored = pb::Interaction { arguments: Vec::new(), ..interaction.clone() };
+    events.push(Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(stored) }));
     Ok(())
+}
+
+/// What was typed for an interaction its agent is being shown, from its row
+/// while it can still be answered; after that (or once the row is gone with
+/// the person or the agent) the event carries none.
+pub(super) async fn fill_arguments(conn: &turso::Connection, interaction: &mut pb::Interaction, now: i64) {
+    if interaction.kind != pb::InteractionKind::Command as i32 || !interaction.arguments.is_empty() {
+        return;
+    }
+    let typed = query_one(
+        conn,
+        "SELECT arguments FROM interactions WHERE id = ?1 AND agent_id = ?2 AND created_at >= ?3",
+        (interaction.id.as_str(), interaction.agent_id.as_str(), now - ANSWER_WITHIN_MS),
+        |r| r.get::<Option<Vec<u8>>>(0),
+    )
+    .await;
+    if let Ok(Some(Some(bytes))) = typed
+        && let Ok(typed) = pb::Interaction::decode(bytes.as_slice())
+    {
+        interaction.arguments = typed.arguments;
+    }
 }
 
 /// An agent answering `interaction_id` with a message in `channel_id`,
