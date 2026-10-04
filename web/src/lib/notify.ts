@@ -5,6 +5,7 @@ import { doNotDisturb } from "@/fuwa/presence";
 import { displayName, memberName } from "@/lib/format";
 import { effectiveNotifications, pingsMe, shouldAlert } from "@/lib/notifications";
 import { getPrefs, subscribePrefs } from "@/lib/prefs";
+import { requestThread } from "@/lib/threads";
 import { play } from "@/lib/sounds";
 import { toast } from "@/lib/ui";
 
@@ -56,14 +57,19 @@ export function onLiveEvent(key: string, event: Event) {
     const message = p.value.message;
     // Join messages chime through memberJoined instead.
     if (!message || message.authorId === me.id || message.kind !== MessageKind.UNSPECIFIED) return;
-    const looking = !document.hidden && s.focus?.instance === key && s.focus.channel === message.channelId;
+    // A thread reply reaches the people following the thread and the people it mentions, not the whole channel.
+    const thread = message.threadId && !message.alsoInChannel ? message.threadId : "";
+    const following = !!thread && !!inst.followed[event.serverId]?.[thread];
+    const looking =
+      !document.hidden && s.focus?.instance === key && (thread ? s.focus.thread === thread : s.focus.channel === message.channelId);
     const settings = effectiveNotifications(inst, event.serverId, message.channelId);
     const mention = pingsMe(inst, event.serverId, message, settings.suppressEveryone);
-    const alert = shouldAlert(settings, mention, getPrefs());
+    if (thread && !mention && !following) return;
+    const alert = shouldAlert(settings, mention || following, getPrefs());
     if (alert.sound && !looking) playSome(mention ? "mention" : "message", mention ? 600 : 1500);
     if (!alert.notify || (!document.hidden && document.hasFocus())) return;
     const body = message.content || message.embeds[0]?.title || message.embeds[0]?.description || "";
-    notify(inst, event.serverId, message.channelId, message.authorId, body, mention, message.webhook?.name);
+    notify(inst, event.serverId, message.channelId, message.authorId, body, mention, message.webhook?.name, thread);
   } else if (p.case === "memberJoined") {
     const user = p.value.member?.user;
     const viewing = s.focus?.instance === key && (inst.channels[event.serverId] ?? []).some((c) => c.id === s.focus!.channel);
@@ -133,7 +139,16 @@ export function onRemoved(serverName: string, reason: LeaveReason) {
   else if (reason === LeaveReason.BANNED) toast(`You were banned from ${serverName}`);
 }
 
-function notify(inst: InstanceState, serverId: string, channelId: string, authorId: string, content: string, mention: boolean, app?: string) {
+function notify(
+  inst: InstanceState,
+  serverId: string,
+  channelId: string,
+  authorId: string,
+  content: string,
+  mention: boolean,
+  app?: string,
+  thread = "",
+) {
   const p = getPrefs();
   if (!p.desktopNotifications || (p.streamer && p.streamerMuteNotifications)) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
@@ -142,13 +157,14 @@ function notify(inst: InstanceState, serverId: string, channelId: string, author
   const author = app ?? (member ? memberName(member) : displayName(inst.users[authorId]));
   const body = content.replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
   try {
-    const n = new Notification(`${author}${channel ? ` in #${channel.name}` : ""}`, {
+    const n = new Notification(`${author}${thread ? " replied in a thread" : ""}${channel ? ` in #${channel.name}` : ""}`, {
       body: `${mention ? "Mentioned you: " : ""}${body.length > 160 ? `${body.slice(0, 159)}…` : body}`,
       icon: "/favicon.svg",
-      tag: channelId,
+      tag: thread || channelId,
     });
     n.onclick = () => {
       window.focus();
+      if (thread) requestThread(channelId, thread);
       openChannel?.(inst.key, serverId, channelId);
       n.close();
     };
@@ -191,6 +207,7 @@ function unreadTotal(): number {
       }
     }
     for (const n of Object.values(inst.dms.unread)) total += n;
+    for (const n of Object.values(inst.threadUnread)) total += n;
   }
   return total;
 }
