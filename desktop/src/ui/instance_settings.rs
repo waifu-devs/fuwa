@@ -481,6 +481,15 @@ impl InstanceSettingsView {
                 state.update(cx, |s, cx| s.set_value(want, window, cx));
             }
         }
+        // The saved TURN secret never comes back; an empty box keeps it.
+        if let Some(state) = self.texts.get("turn_secret") {
+            let saved = match (draft.turn_secret_set, draft.turn_secret_hint.as_str()) {
+                (false, _) => "No TURN secret".to_owned(),
+                (true, "") => "Saved. Type to replace it".to_owned(),
+                (true, end) => format!("Saved, ending in {end}. Type to replace it"),
+            };
+            state.update(cx, |s, cx| s.set_placeholder(saved, window, cx));
+        }
         for (path, _, get, _) in AREAS {
             let Some(state) = self.areas.get(path) else { continue };
             let want = get(&draft);
