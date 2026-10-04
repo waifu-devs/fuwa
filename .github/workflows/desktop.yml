@@ -64,7 +64,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
-            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libfuse2t64
+            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libfuse2t64 libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
       # The version is pinned so a new cargo-packager can't change the installers by surprise.
       - uses: taiki-e/install-action@v2
