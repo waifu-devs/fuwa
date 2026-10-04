@@ -37,8 +37,8 @@ message SendMessageRequest {
   // Makes the message a poll; its text may then be empty. Needs
   // CREATE_POLLS. Not in direct messages, secure channels or channels
   // shared with other servers.
-  // (7 is the emoji picker's.)
-  NewPoll poll = 8;
+  // (7 is the emoji picker's, 8 and 9 are threads'.)
+  NewPoll poll = 10;
 }
 
 // A poll as its creator writes it.

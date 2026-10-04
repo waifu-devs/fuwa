@@ -309,7 +309,7 @@ enum AuditAction {
   AUDIT_ACTION_AUTO_MOD_MESSAGE_DELETE = 48;
   // Someone else's poll, ended early by a moderator: its creator is the
   // target. Votes are never recorded.
-  AUDIT_ACTION_POLL_END = 49;
+  AUDIT_ACTION_POLL_END = 52;
 }
 
 // One thing someone did with a moderator's or manager's permission.

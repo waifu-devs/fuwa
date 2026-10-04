@@ -33,9 +33,9 @@ CREATE TABLE poll_votes (
 
 CREATE INDEX poll_votes_by_answer ON poll_votes (message_id, answer_id, account_id);
 
--- CREATE_POLLS (bit 26) goes to whoever could send messages (bit 12), and a
+-- CREATE_POLLS (bit 27) goes to whoever could send messages (bit 12), and a
 -- channel that allowed or kept someone from sending does the same for polls.
 -- Nothing could have named this bit before, so nobody loses a choice they made.
-UPDATE roles SET permissions = permissions | 67108864 WHERE permissions & 4096 = 4096;
-UPDATE channel_overwrites SET allow = allow | 67108864 WHERE allow & 4096 = 4096;
-UPDATE channel_overwrites SET deny = deny | 67108864 WHERE deny & 4096 = 4096;
+UPDATE roles SET permissions = permissions | 134217728 WHERE permissions & 4096 = 4096;
+UPDATE channel_overwrites SET allow = allow | 134217728 WHERE allow & 4096 = 4096;
+UPDATE channel_overwrites SET deny = deny | 134217728 WHERE deny & 4096 = 4096;

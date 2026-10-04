@@ -258,8 +258,8 @@ enum Permission {
   // sees while someone records.
   PERMISSION_RECORD = 25;
   // Send polls (SendMessageRequest.poll). Voting needs only to see the
-  // channel.
-  PERMISSION_CREATE_POLLS = 26;
+  // channel. (26 is threads'.)
+  PERMISSION_CREATE_POLLS = 27;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -698,8 +698,8 @@ message Message {
   MessageWebhook webhook = 15;
   // In a shared channel: who wrote it and from which server.
   SharedAuthor shared = 16;
-  // The message is a poll. (17 is the emoji picker's.)
-  Poll poll = 18;
+  // The message is a poll. (17 is the emoji picker's, 18 to 20 are threads'.)
+  Poll poll = 21;
 }
 
 // A poll and how it stands. Counts are everyone's; my_answer_ids is the
@@ -873,7 +873,7 @@ message Event {
     SecureRecordAdded secure_record_added = 27;
     SecureRecordDeleted secure_record_deleted = 28;
     SharedChannelsUpdated shared_channels_updated = 29;
-    PollUpdated poll_updated = 30;
+    PollUpdated poll_updated = 31;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).
