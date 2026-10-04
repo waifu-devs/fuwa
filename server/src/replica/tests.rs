@@ -522,3 +522,86 @@ async fn replicates_to_a_bucket() {
     replica.store().delete("servers/a/current").await.unwrap();
     assert_eq!(replica.store().get("servers/a/current").await.unwrap(), None);
 }
+
+#[tokio::test]
+async fn a_release_that_fails_is_tried_again_unless_the_server_came_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let (data, bucket) = (dir.path().join("data"), dir.path().join("bucket"));
+    std::fs::create_dir_all(&data).unwrap();
+    let replica = replica(&data, &bucket, CHECKPOINT_BYTES, REBASE_BYTES);
+    let name = format!("servers/{}", new_id());
+    let db = open(&data.join("a.db")).await;
+    replica.track(&name, db.clone()).await.unwrap();
+    insert(&db, 0, 10, 10).await;
+    replica.sync_files().await;
+    let kept = async || replica.store().list(&format!("{name}/")).await.unwrap().len();
+    assert!(kept().await > 0);
+    // The bucket can't be reached: a file stands where it was.
+    let away = dir.path().join("away");
+    let unreachable = || {
+        std::fs::rename(&bucket, &away).unwrap();
+        std::fs::write(&bucket, b"").unwrap();
+    };
+    let reachable = || {
+        std::fs::remove_file(&bucket).unwrap();
+        std::fs::rename(&away, &bucket).unwrap();
+    };
+
+    unreachable();
+    replica.release(&name).await;
+    assert_eq!(replica.retry_releases().await, 0, "still unreachable");
+    reachable();
+    assert!(kept().await > 0, "the failed release left it");
+    assert_eq!(replica.retry_releases().await, 1);
+    assert_eq!(kept().await, 0, "tried again, nothing is left");
+    assert_eq!(replica.retry_releases().await, 0, "and it isn't owed any more");
+
+    // A server that came back before the retry keeps its replica.
+    replica.track(&name, db.clone()).await.unwrap();
+    insert(&db, 10, 10, 10).await;
+    replica.sync_files().await;
+    unreachable();
+    replica.release(&name).await;
+    reachable();
+    replica.track(&name, db.clone()).await.unwrap();
+    replica.sync_files().await;
+    assert_eq!(replica.retry_releases().await, 0);
+    assert!(kept().await > 0, "the server that came back keeps its replica");
+}
+
+#[tokio::test]
+async fn a_server_coming_back_waits_out_a_release_and_is_never_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let (data, bucket) = (dir.path().join("data"), dir.path().join("bucket"));
+    std::fs::create_dir_all(&data).unwrap();
+    let replica = replica(&data, &bucket, CHECKPOINT_BYTES, REBASE_BYTES);
+    let name = format!("servers/{}", new_id());
+    let db = open(&data.join("a.db")).await;
+    replica.track(&name, db.clone()).await.unwrap();
+    insert(&db, 0, 10, 10).await;
+    replica.sync_files().await;
+    replica.forget(&name, false).await;
+    std::fs::create_dir_all(replica.release_path(&name).parent().unwrap()).unwrap();
+    std::fs::write(replica.release_path(&name), b"").unwrap();
+
+    // While a release deletes, the server coming back waits for it.
+    let deleting = replica.release_lock(&name).lock_owned().await;
+    // Another server isn't held up by it.
+    let other = open(&data.join("b.db")).await;
+    let other_name = format!("servers/{}", new_id());
+    tokio::time::timeout(Duration::from_secs(1), replica.track(&other_name, other)).await.unwrap().unwrap();
+    let back = tokio::spawn({
+        let (replica, name, db) = (replica.clone(), name.clone(), db.clone());
+        async move { replica.track(&name, db).await.unwrap() }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!back.is_finished(), "tracking waits for the release");
+    drop(deleting);
+    back.await.unwrap();
+
+    // Once it's back, a retry deletes nothing and the note is gone.
+    assert_eq!(replica.retry_releases().await, 0);
+    assert!(!replica.release_path(&name).exists());
+    assert!(!replica.try_release(&name).await);
+    assert!(!replica.store().list(&format!("{name}/")).await.unwrap().is_empty());
+}
