@@ -745,7 +745,7 @@ impl MessageService for Api {
                 if req.also_send_to_channel && req.thread_id.is_empty() {
                     return Err(Error::invalid("only thread replies are also sent to the channel"));
                 }
-                if let Some(link) = shared::link_of(&sdb.read()?, &req.channel_id).await? {
+                if let Some(link) = shared::link_of(&*sdb.read()?, &req.channel_id).await? {
                     if poll.is_some() {
                         return Err(Error::invalid("polls can't go in channels shared from another server yet"));
                     }
@@ -1011,7 +1011,7 @@ impl MessageService for Api {
                 check_content(&req.content, true)?;
                 // A provider is asked about new text the author wrote, and its
                 // answer acted on when it comes.
-                let before = load_message(&sdb.read()?, &sdb.id, &req.message_id).await?;
+                let before = load_message(&*sdb.read()?, &sdb.id, &req.message_id).await?;
                 // With a poll's question and answers, which an edit leaves as they are.
                 let reviewed = before.as_ref().map(|m| {
                     reviewed_text(&pb::Message {
