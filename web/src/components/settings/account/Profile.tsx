@@ -141,6 +141,7 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
     <ProfileCard
       editing
       me
+      instanceKey={instanceKey}
       loading={!ready}
       user={{ ...me, displayName: draft.displayName.trim() || me.username, avatarUrl: isUrl(draft.avatarUrl) ? draft.avatarUrl.trim() : me.avatarUrl, status: draft.status.trim(), statusExpiresAt: undefined }}
       profile={{

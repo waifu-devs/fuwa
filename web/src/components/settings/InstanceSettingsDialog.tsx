@@ -63,6 +63,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "server_creation", get: (s) => s.serverCreation },
   { path: "agent_creation", get: (s) => s.agentCreation },
   { path: "shared_channels", get: (s) => s.sharedChannels },
+  { path: "rich_presence", get: (s) => s.richPresence },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
   { path: "default_limits.channels", get: (s) => s.defaultLimits?.channels },
@@ -204,6 +205,7 @@ export function InstanceSettingsDialog({
                 { id: "servers-per-account", label: "Servers per account" },
                 { id: "agent-creation", label: "Who can make agents", keywords: "bots integrations" },
                 { id: "shared-channels", label: "Shared channels", keywords: "share connect servers slack connect" },
+                { id: "rich-presence", label: "Rich presence", keywords: "activity playing game status discord presence" },
               ],
             },
             {
@@ -487,6 +489,20 @@ export function InstanceSettingsDialog({
                   hint="Admins of two servers here can show one channel in both. Turned off, nobody can start a new one; channels already shared stay until either side ends them."
                 />
               </Setting>
+              <Setting
+                id="rich-presence"
+                title="Rich presence"
+                defaultLabel={defaults.richPresence ? "on" : "off"}
+                delay={0.28}
+                {...resetter("rich_presence")}
+              >
+                <Toggle
+                  checked={draft.richPresence}
+                  onChange={(on) => patch((d) => (d.richPresence = on))}
+                  label="People can show what they're doing"
+                  hint="Games and apps people's desktop apps see, shown to people they share a server with, once each person turns it on. Kept in memory only. Turned off, nobody's activity shows; statuses still do."
+                />
+              </Setting>
             </>
           )}
           {tab === "sso" && (
@@ -702,7 +718,11 @@ const CREATION_LABEL: Record<number, string> = {
 };
 
 /** Settings copied by a function of their own, beside the switch below. */
-const COPIED = [...CALL_FIELDS, { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) }];
+const COPIED = [
+  ...CALL_FIELDS,
+  { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) },
+  { path: "rich_presence", copy: (into: InstanceSettings, from: InstanceSettings) => (into.richPresence = from.richPresence) },
+];
 
 /** Copies the named settings from one draft into another. */
 function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: string[]) {

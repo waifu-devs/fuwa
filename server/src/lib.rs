@@ -22,6 +22,7 @@ pub mod media;
 pub mod node;
 pub mod outside;
 pub mod permissions;
+pub mod presence;
 pub mod probes;
 pub mod recordings;
 pub mod replica;

@@ -40,6 +40,18 @@
     `App::find_agent`, the cluster call `FindAgent`), and it skips rules
     (never `pending`). Deleting a person deletes their agents
     (`erase_account`). Who may make agents is the `agent_creation` setting.
+  - `presence.rs`: who's online and what they're doing (docs/presence.md),
+    in memory only where accounts are: each app's lease (`UpdatePresence`,
+    150 seconds), people's saved choices (node.db's `presence_settings`) and
+    the live streams of people who share a server (`Index::neighbours`),
+    at most 5 changes per 20 seconds each, the rest merged by `tick`.
+    `api/presence.rs` is `PresenceService`; joins call `Presence::joined`
+    where the index learns of them. Activities are user content: checked
+    and capped in `check_activities`, pictures through `picture_link`, and
+    never logged or written down. The web app's side is `web/src/fuwa/presence.ts`
+    (its own small store, one subscription per person) and
+    `web/src/components/Presence.tsx` (dots, activity lines and cards, one
+    shared clock for timers that writes text without React).
   - `dms.rs`: direct messages (`dms.db`, on the directory): each device's
     public signature key and key packages (one-use, plus a last-resort one),
     each conversation's records in one order (MLS commits and messages, all

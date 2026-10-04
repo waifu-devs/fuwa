@@ -77,7 +77,10 @@ impl App {
                 };
                 link.tell("about a membership", async |mut d| d.index_membership(request).await).await;
             }
-            _ if joined => self.index.join(account_id, server_id),
+            _ if joined => {
+                self.index.join(account_id, server_id);
+                self.presence.joined(&self.index, account_id, server_id);
+            }
             _ => self.index.leave(account_id, server_id),
         }
     }

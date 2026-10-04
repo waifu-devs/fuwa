@@ -35,6 +35,7 @@ pub const FIELDS: &[&str] = &[
     "calls",
     "call_recordings",
     "shared_channels",
+    "rich_presence",
     "federation",
     "federation_blocked_hosts",
     "call_recordings_keep_days",
@@ -64,6 +65,8 @@ pub struct Settings {
     pub calls: bool,
     pub call_recordings: bool,
     pub shared_channels: bool,
+    /// People may show what they're doing (docs/presence.md).
+    pub rich_presence: bool,
     /// Sharing channels with other fuwa instances (docs/federation.md).
     pub federation: bool,
     /// Instances this one won't talk to, by host name.
@@ -96,6 +99,7 @@ impl Settings {
             calls: config.calls,
             call_recordings: config.call_recordings,
             shared_channels: config.shared_channels,
+            rich_presence: config.rich_presence,
             federation: config.federation,
             federation_blocked_hosts: Vec::new(),
             call_recordings_keep_days: config.call_recordings_keep_days,
@@ -206,6 +210,7 @@ impl Settings {
             calls: self.calls,
             call_recordings: self.call_recordings,
             shared_channels: self.shared_channels,
+            rich_presence: self.rich_presence,
             federation: self.federation,
             federation_blocked_hosts: self.federation_blocked_hosts.clone(),
             call_recordings_keep_days: self.call_recordings_keep_days,
@@ -300,6 +305,7 @@ impl Settings {
             "calls" => Value::from(from.calls),
             "call_recordings" => Value::from(from.call_recordings),
             "shared_channels" => Value::from(from.shared_channels),
+            "rich_presence" => Value::from(from.rich_presence),
             "federation" => Value::from(from.federation),
             "federation_blocked_hosts" => Value::from(from.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(from.call_recordings_keep_days),
@@ -370,6 +376,7 @@ impl Settings {
             "calls" => Value::from(self.calls),
             "call_recordings" => Value::from(self.call_recordings),
             "shared_channels" => Value::from(self.shared_channels),
+            "rich_presence" => Value::from(self.rich_presence),
             "federation" => Value::from(self.federation),
             "federation_blocked_hosts" => Value::from(self.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(self.call_recordings_keep_days),
@@ -435,6 +442,7 @@ impl Settings {
             "calls" => self.calls = flag(field, value)?,
             "call_recordings" => self.call_recordings = flag(field, value)?,
             "shared_channels" => self.shared_channels = flag(field, value)?,
+            "rich_presence" => self.rich_presence = flag(field, value)?,
             "federation" => self.federation = flag(field, value)?,
             "federation_blocked_hosts" => self.federation_blocked_hosts = blocked_hosts(value)?,
             "call_recordings_keep_days" => {

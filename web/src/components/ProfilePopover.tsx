@@ -102,6 +102,7 @@ export function ProfilePopover({
                   owner={owner}
                   roles={member && <MemberRoles instanceKey={instanceKey} member={member} />}
                   me={me}
+                  instanceKey={instanceKey}
                   loading={!profile && !failed}
                   className="w-[19rem] max-w-[calc(100vw-1.5rem)]"
                 />

@@ -160,6 +160,11 @@ message InstanceSettings {
   bool federation = 34;
   // Instances this one never talks to, by host name (chat.example.com).
   repeated string federation_blocked_hosts = 35;
+  // People may show what they're doing (their games and apps) to people
+  // they share a server with, once they turn it on themselves. Off drops
+  // every activity; statuses still show. On unless changed.
+  // FUWA_RICH_PRESENCE.
+  bool rich_presence = 41;
 }
 
 // One moderation provider, as the instance's admins set it up: one fuwa

@@ -649,6 +649,20 @@ body {
 .conn-dot[data-state="signed-out"] { background: var(--muted-foreground); }
 @keyframes breathe { 50% { opacity: 0.35; } }
 
+/* Presence: a dot on avatars (docs/presence.md). Online a full dot, idle a
+   moon, do not disturb a dot with a bar, offline a ring. The shape changes
+   by mask and a scaled bar, so switching only moves transform and opacity. */
+@layer components {
+  .presence-dot { --presence: #3ecf8e; position: relative; display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 9999px; background: var(--presence); }
+}
+.presence-dot[data-status="idle"] { --presence: #f5a524; mask: radial-gradient(circle at 22% 22%, transparent 34%, #000 36%); }
+.presence-dot[data-status="dnd"] { --presence: #f04848; }
+.presence-dot::after { content: ""; position: absolute; left: 22%; right: 22%; top: 42%; height: 16%; border-radius: 9999px; background: var(--card); transform: scaleX(0); transition: transform 0.25s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.presence-dot[data-status="dnd"]::after { transform: scaleX(1); }
+.presence-dot[data-status="offline"] { --presence: transparent; box-shadow: inset 0 0 0 0.16rem color-mix(in srgb, var(--muted-foreground) 70%, transparent); }
+/* An activity with no picture of its own: the app's kind on the theme's color. */
+.activity-tile { background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 45%, #7dd3fc)); }
+
 /* The composer's border lights up while focused. */
 .composer { transition: border-color 0.2s ease, box-shadow 0.25s ease; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--primary) 60%, var(--border)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 14%, transparent), 0 12px 30px -18px var(--primary); }

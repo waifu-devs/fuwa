@@ -63,6 +63,9 @@ pub struct Config {
     /// FUWA_SHARED_CHANNELS: on (default) | off. Servers sharing channels
     /// with each other.
     pub shared_channels: bool,
+    /// People may show what they're doing (docs/presence.md). On unless
+    /// FUWA_RICH_PRESENCE turns it off.
+    pub rich_presence: bool,
     /// FUWA_FEDERATION: on | off (default). Sharing channels with servers on
     /// other fuwa instances (docs/federation.md).
     pub federation: bool,
@@ -384,6 +387,11 @@ impl Config {
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_SHARED_CHANNELS must be on or off, got {other:?}")),
         };
+        let rich_presence = match get("FUWA_RICH_PRESENCE").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_RICH_PRESENCE must be on or off, got {other:?}")),
+        };
         let federation = match get("FUWA_FEDERATION").as_deref().map(str::trim) {
             None | Some("off" | "false" | "0") => false,
             Some("on" | "true" | "1") => true,
@@ -489,6 +497,7 @@ impl Config {
             calls,
             call_recordings,
             shared_channels,
+            rich_presence,
             federation,
             federation_allow_private,
             call_recordings_keep_days,

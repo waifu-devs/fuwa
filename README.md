@@ -127,6 +127,7 @@ the log filter are read only from the environment.
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
 | `FUWA_AGENT_CREATION` | `everyone` | Who can make agents (accounts programs drive): `everyone`, `admins`, `off` |
 | `FUWA_SHARED_CHANNELS` | `on` | Servers sharing a text channel with another server on this instance ([docs/shared-channels.md](docs/shared-channels.md)); `off` stops new shares |
+| `FUWA_RICH_PRESENCE` | `on` | People may show what they're doing (games and apps) to people they share a server with, once they turn it on themselves ([docs/presence.md](docs/presence.md)); `off` drops every activity, statuses still show |
 | `FUWA_FEDERATION` | `off` | Talking to other fuwa instances with signed calls, for sharing channels across instances ([docs/federation.md](docs/federation.md)); needs an https `FUWA_PUBLIC_URL` |
 | `FUWA_FEDERATION_ALLOW_PRIVATE` | `off` | Lets federation reach private, loopback and internal addresses and plain http, for tests and private deployments |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |

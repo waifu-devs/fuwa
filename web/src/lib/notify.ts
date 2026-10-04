@@ -1,6 +1,7 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { LeaveReason, MessageKind, type Event, type User } from "@/gen/fuwa/v1/types_pb";
 import { store, type InstanceState } from "@/fuwa/store";
+import { doNotDisturb } from "@/fuwa/presence";
 import { displayName, memberName } from "@/lib/format";
 import { effectiveNotifications, pingsMe, shouldAlert } from "@/lib/notifications";
 import { getPrefs, subscribePrefs } from "@/lib/prefs";
@@ -43,6 +44,8 @@ function playSome(sound: keyof typeof lastSound, gap: number) {
 
 /** Called for each event as it arrives live. */
 export function onLiveEvent(key: string, event: Event) {
+  // Do not disturb: nothing chimes or pops up from this instance.
+  if (doNotDisturb(key)) return;
   if (event.createdAt && Date.now() - timestampDate(event.createdAt).getTime() > FRESH_MS) return;
   const s = store.get();
   const inst = s.instances[key];
@@ -74,6 +77,8 @@ export function onLiveEvent(key: string, event: Event) {
  * this device's own notifications.
  */
 export function onDirectMessage(key: string, conversationId: string, author: User | undefined, content: string, at: number) {
+  // Do not disturb: nothing chimes or pops up from this instance.
+  if (doNotDisturb(key)) return;
   if (Date.now() - at > FRESH_MS) return;
   const s = store.get();
   const inst = s.instances[key];
@@ -107,6 +112,8 @@ export function onDirectMessage(key: string, conversationId: string, author: Use
  * Otherwise it chimes and notifies like any channel's message.
  */
 export function onSecureMessage(key: string, serverId: string, channelId: string, authorId: string, content: string, at: number) {
+  // Do not disturb: nothing chimes or pops up from this instance.
+  if (doNotDisturb(key)) return;
   if (Date.now() - at > FRESH_MS) return;
   const s = store.get();
   const inst = s.instances[key];

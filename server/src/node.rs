@@ -26,6 +26,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0010_sso.sql"),
     include_str!("../migrations/node/0011_regions.sql"),
     include_str!("../migrations/node/0012_federation.sql"),
+    include_str!("../migrations/node/0013_presence.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
@@ -1033,6 +1034,47 @@ impl NodeDb {
         .await
     }
 
+    // ───────────────────────── Presence settings ─────────────────────────
+
+    /// What a person picked for their presence; the defaults (online, nothing
+    /// shared) when they never changed it.
+    pub async fn presence_settings(&self, account_id: &str) -> Result<pb::PresenceSettings> {
+        let conn = self.read()?;
+        let found = query_one(
+            &conn,
+            "SELECT status, show_activity, hidden_servers FROM presence_settings WHERE account_id = ?1",
+            [account_id],
+            |r| Ok((r.get::<i64>(0)?, r.get::<i64>(1)? != 0, r.get::<String>(2)?)),
+        )
+        .await?;
+        Ok(match found {
+            Some((status, show_activity, hidden)) => pb::PresenceSettings {
+                status: status as i32,
+                show_activity,
+                hidden_server_ids: serde_json::from_str(&hidden).unwrap_or_default(),
+            },
+            None => pb::PresenceSettings { status: pb::PresenceStatus::Online as i32, ..Default::default() },
+        })
+    }
+
+    pub async fn set_presence_settings(&self, account_id: &str, settings: &pb::PresenceSettings) -> Result<()> {
+        let hidden =
+            serde_json::to_string(&settings.hidden_server_ids).map_err(|err| Error::internal(err.to_string()))?;
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "INSERT INTO presence_settings (account_id, status, show_activity, hidden_servers, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT (account_id) DO UPDATE SET
+                   status = excluded.status, show_activity = excluded.show_activity,
+                   hidden_servers = excluded.hidden_servers, updated_at = excluded.updated_at",
+                (account_id, settings.status as i64, settings.show_activity, hidden.as_str(), now_ms()),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
     // ───────────────────────── Notification settings ─────────────────────────
 
     pub async fn notification_settings(&self, account_id: &str) -> Result<Vec<pb::NotificationSettings>> {
@@ -1694,7 +1736,14 @@ impl NodeDb {
     /// Deletes an account and everything node.db keeps about it.
     pub async fn delete_account(&self, account_id: &str) -> Result<()> {
         db::write(&self.db, async |conn| {
-            for table in ["sessions", "backup_codes", "sign_in_tickets", "notification_settings", "upload_days"] {
+            for table in [
+                "sessions",
+                "backup_codes",
+                "sign_in_tickets",
+                "notification_settings",
+                "upload_days",
+                "presence_settings",
+            ] {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
             }
             conn.execute("DELETE FROM accounts WHERE id = ?1", [account_id]).await?;
