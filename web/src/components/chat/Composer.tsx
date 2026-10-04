@@ -72,6 +72,7 @@ function useSendGate(instanceKey: string, serverId: string, channel: Channel) {
     now,
     /** Synced and allowed to write here. */
     canSend: !member || hasIn(access, channel.id, Permission.SEND_MESSAGES),
+    canStartThreads: !member || hasIn(access, channel.id, Permission.CREATE_THREADS),
     /** Joined, but hasn't agreed to the server's rules yet. */
     pending: !!member && access.pending,
     slowmode,
@@ -92,17 +93,23 @@ export function Composer({
   instanceKey,
   serverId,
   channel,
+  thread,
   placeholder,
   onEditLast,
 }: {
   instanceKey: string;
   serverId: string;
   channel: Channel;
+  /** Replying in the thread under this message: locked keeps you out; not started yet needs Start threads. */
+  thread?: { id: string; locked: boolean; started: boolean };
   placeholder: string;
   onEditLast: () => void;
 }) {
   const channelId = channel.id;
-  const [text, setText] = useState(() => drafts.get(channelId) ?? "");
+  // Drafts are kept per channel, and per thread apart from their channel.
+  const draftKey = thread ? `thread:${thread.id}` : channelId;
+  const [text, setText] = useState(() => drafts.get(draftKey) ?? "");
+  const [alsoToChannel, setAlsoToChannel] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
   const plane = useAnimationControls();
   const nudge = useAnimationControls();
@@ -131,12 +138,12 @@ export function Composer({
   }
 
   useEffect(() => {
-    setText(drafts.get(channelId) ?? "");
+    setText(drafts.get(draftKey) ?? "");
     if (window.matchMedia("(pointer: fine)").matches) box.current?.focus();
-  }, [channelId]);
+  }, [draftKey]);
   useEffect(() => {
-    drafts.set(channelId, text);
-  }, [channelId, text]);
+    drafts.set(draftKey, text);
+  }, [draftKey, text]);
 
   // Grow with the text, up to a point.
   useLayoutEffect(() => {
@@ -156,7 +163,7 @@ export function Composer({
       return;
     }
     setText("");
-    drafts.delete(channelId);
+    drafts.delete(draftKey);
     void plane.start({
       x: [0, 28, -18, 0],
       y: [0, -14, 8, 0],
@@ -164,7 +171,9 @@ export function Composer({
       rotate: [0, -20, 0, 0],
       transition: { duration: 0.55, times: [0, 0.45, 0.5, 1], ease: "easeOut" },
     });
-    run(sendMessage(instanceKey, serverId, channelId, picker.encode(content))).catch(() => {
+    run(
+      sendMessage(instanceKey, serverId, channelId, picker.encode(content), thread ? { threadId: thread.id, alsoToChannel } : undefined),
+    ).catch(() => {
       // The message stays in the list, marked as failed, with a retry.
     });
   }
@@ -190,8 +199,14 @@ export function Composer({
           <AgreeFirst key="rules" onRead={() => setRules(true)} />
         ) : timedOut ? (
           <TimedOut key="timed-out" left={gate.timedOutUntil - gate.now} />
-        ) : !gate.canSend ? (
-          <ReadOnly key="read-only" name={channel.name} />
+        ) : thread?.locked ? (
+          <ReadOnly key="locked" title="This thread is locked" about="A moderator locked it: you can read along, not reply." />
+        ) : !gate.canSend || (thread && !thread.started && !gate.canStartThreads) ? (
+          <ReadOnly
+            key="read-only"
+            title={gate.canSend ? `You can't start threads in #${channel.name}` : `You can't send messages in #${channel.name}`}
+            about="Your roles let you read along here, not write."
+          />
         ) : (
           <motion.div
             key="composer"
@@ -283,7 +298,18 @@ export function Composer({
         )}
       </AnimatePresence>
       <div className="mt-1 flex items-center gap-3 px-1 text-[0.7rem] text-muted-foreground">
-        <p className="hidden min-w-0 flex-1 truncate sm:block">
+        {thread && gate.canSend && !thread.locked && (
+          <label className="flex shrink-0 cursor-pointer items-center gap-1.5 font-bold select-none">
+            <input
+              type="checkbox"
+              checked={alsoToChannel}
+              onChange={(e) => setAlsoToChannel(e.target.checked)}
+              className="size-3.5 accent-[var(--primary)]"
+            />
+            Also send to #{channel.name}
+          </label>
+        )}
+        <p className={cn("hidden min-w-0 flex-1 truncate", !thread && "sm:block")}>
           <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
           <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
         </p>
@@ -387,7 +413,7 @@ function Cooldown({ left, total }: { left: number; total: number }) {
 }
 
 /** In place of the box where your roles don't let you write. */
-function ReadOnly({ name }: { name: string }) {
+function ReadOnly({ title, about }: { title: string; about: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -406,8 +432,8 @@ function ReadOnly({ name }: { name: string }) {
         <LockIcon className="size-[18px]" />
       </motion.span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold">You can't send messages in #{name}</p>
-        <p className="text-xs text-muted-foreground">Your roles let you read along here, not write.</p>
+        <p className="truncate text-sm font-bold">{title}</p>
+        <p className="text-xs text-muted-foreground">{about}</p>
       </div>
     </motion.div>
   );

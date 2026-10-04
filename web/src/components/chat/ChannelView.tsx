@@ -11,6 +11,8 @@ import { MemberList } from "@/components/chat/MemberList";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
 import { NotificationBell } from "@/components/chat/NotificationBell";
 import { SharedPill } from "@/components/chat/Shared";
+import { ThreadSide, ThreadsButton } from "@/components/chat/Threads";
+import { ThreadOpenerProvider, useThreadPanel } from "@/lib/threads";
 import { CopyId } from "@/components/CopyId";
 import { ConnDot, connectionLabel } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
@@ -42,6 +44,21 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
   useEffect(() => () => setTitle("fuwa"), []);
 
   const connection = useFuwa((s) => s.instances[instanceKey]?.connection ?? "connecting");
+
+  // ── Threads beside the channel: one open thread, or the channel's list of them.
+  const { panel, setPanel, openThread, closePanel, jump } = useThreadPanel(instanceKey, serverId, channel, list, docked);
+  const side = panel ? (
+    <ThreadSide
+      instanceKey={instanceKey}
+      serverId={serverId}
+      channel={channel}
+      panel={panel}
+      onOpen={openThread}
+      onClose={closePanel}
+      onJump={jump}
+    />
+  ) : null;
+  const sideOpen = !!side || membersOpen;
 
   return (
     <div className="flex h-full min-h-0">
@@ -110,23 +127,39 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
             )}
           </AnimatePresence>
           <NotificationBell instanceKey={instanceKey} serverId={serverId} channel={channel} />
+          {!channel.shared && (
+            <ThreadsButton
+              open={panel?.kind === "threads"}
+              active={!!panel}
+              onClick={() => setPanel(panel?.kind === "threads" ? null : { kind: "threads" })}
+            />
+          )}
           <motion.button
             type="button"
             aria-label={membersOpen ? "Hide members" : "Show members"}
-            aria-pressed={membersOpen}
-            onClick={() => setMembersOpen(!membersOpen)}
+            aria-pressed={membersOpen && !panel}
+            onClick={() => {
+              setPanel(null);
+              setMembersOpen(!(membersOpen && !panel));
+            }}
             whileTap={{ scale: 0.85 }}
             className={cn(
               "grid size-9 place-items-center rounded-full transition-colors hover:bg-muted",
-              membersOpen ? "bg-primary/10 text-primary" : "text-muted-foreground",
+              membersOpen && !panel ? "bg-primary/10 text-primary" : "text-muted-foreground",
             )}
           >
-            <motion.span initial={false} animate={{ rotate: membersOpen ? 0 : -12, scale: membersOpen ? 1.08 : 1 }} transition={SPRING}>
+            <motion.span
+              initial={false}
+              animate={{ rotate: membersOpen && !panel ? 0 : -12, scale: membersOpen && !panel ? 1.08 : 1 }}
+              transition={SPRING}
+            >
               <UsersIcon className="size-5" />
             </motion.span>
           </motion.button>
         </header>
-        <MessageList key={channel.id} ref={list} instanceKey={instanceKey} serverId={serverId} channel={channel} />
+        <ThreadOpenerProvider value={openThread}>
+          <MessageList key={channel.id} ref={list} instanceKey={instanceKey} serverId={serverId} channel={channel} />
+        </ThreadOpenerProvider>
         <Composer
           instanceKey={instanceKey}
           serverId={serverId}
@@ -135,40 +168,60 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
           onEditLast={() => list.current?.editLast()}
         />
       </div>
-      <AnimatePresence initial={false}>
-        {membersOpen &&
-          (docked ? (
-            // The panel takes its width at once and slides in on the compositor: growing its width every frame would
-            // lay the whole message list out again each frame.
-            <motion.aside
-              key="members"
-              initial={{ x: 32, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 32, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 400, damping: 40 }}
-              className="surface-side h-full w-60 shrink-0 overflow-hidden border-l"
-            >
-              <MemberList instanceKey={instanceKey} serverId={serverId} />
-            </motion.aside>
-          ) : (
-            <motion.div key="members-sheet" className="absolute inset-0 z-30 flex justify-end" initial="closed" animate="open" exit="closed">
-              <motion.button
-                type="button"
-                aria-label="Close members"
-                className="absolute inset-0 bg-black/40"
-                variants={{ open: { opacity: 1 }, closed: { opacity: 0 } }}
-                onClick={() => setMembersOpen(false)}
-              />
+      <ThreadOpenerProvider value={openThread}>
+        <AnimatePresence initial={false} mode="popLayout">
+          {sideOpen &&
+            (docked ? (
+              // The panel takes its width at once and slides in on the compositor: growing its width every frame would
+              // lay the whole message list out again each frame.
               <motion.aside
-                className="surface-side relative h-full w-72 max-w-[85vw] border-l shadow-2xl"
-                variants={{ open: { x: 0 }, closed: { x: "100%" } }}
-                transition={{ type: "spring", stiffness: 420, damping: 40 }}
+                key={side ? "threads" : "members"}
+                initial={{ x: 32, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: 32, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 400, damping: 40 }}
+                className={cn("surface-side h-full shrink-0 overflow-hidden border-l", side ? "w-[400px] xl:w-[440px]" : "w-60")}
               >
-                <MemberList instanceKey={instanceKey} serverId={serverId} />
+                {side ?? <MemberList instanceKey={instanceKey} serverId={serverId} />}
               </motion.aside>
-            </motion.div>
-          ))}
-      </AnimatePresence>
+            ) : side ? (
+              // On a narrow screen a thread takes the whole width, sliding over the channel.
+              <motion.aside
+                key="threads-sheet"
+                initial={{ x: "100%" }}
+                animate={{ x: 0 }}
+                exit={{ x: "100%" }}
+                transition={{ type: "spring", stiffness: 420, damping: 40 }}
+                className="surface-side absolute inset-0 z-30 flex flex-col shadow-2xl"
+              >
+                {side}
+              </motion.aside>
+            ) : (
+              <motion.div
+                key="members-sheet"
+                className="absolute inset-0 z-30 flex justify-end"
+                initial="closed"
+                animate="open"
+                exit="closed"
+              >
+                <motion.button
+                  type="button"
+                  aria-label="Close members"
+                  className="absolute inset-0 bg-black/40"
+                  variants={{ open: { opacity: 1 }, closed: { opacity: 0 } }}
+                  onClick={() => setMembersOpen(false)}
+                />
+                <motion.aside
+                  className="surface-side relative h-full w-72 max-w-[85vw] border-l shadow-2xl"
+                  variants={{ open: { x: 0 }, closed: { x: "100%" } }}
+                  transition={{ type: "spring", stiffness: 420, damping: 40 }}
+                >
+                  <MemberList instanceKey={instanceKey} serverId={serverId} />
+                </motion.aside>
+              </motion.div>
+            ))}
+        </AnimatePresence>
+      </ThreadOpenerProvider>
     </div>
   );
 }

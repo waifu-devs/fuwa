@@ -41,6 +41,7 @@ fn channel_of(payload: &Payload) -> Option<&str> {
         Payload::VoiceStateRemoved(r) => Some(&r.channel_id),
         Payload::SecureRecordAdded(pb::SecureRecordAdded { record: Some(r) }) => Some(&r.channel_id),
         Payload::SecureRecordDeleted(d) => Some(&d.channel_id),
+        Payload::ThreadUpdated(t) => Some(&t.channel_id),
         _ => None,
     }
 }
