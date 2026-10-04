@@ -430,6 +430,9 @@ message StartServerUploadResponse {
   string media_id = 1;
   // The size it was said to be, in bytes.
   int64 size = 2;
+  // What it's for (fuwa.v1.MediaPurpose): an attachment may be any kind of
+  // file, everything else must be a picture.
+  int32 purpose = 3;
 }
 
 message FinishServerUploadRequest {

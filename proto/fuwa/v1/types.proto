@@ -786,12 +786,24 @@ message MessageWebhook {
   string avatar_url = 3;
 }
 
+// A file sent with a message: an upload of this instance's
+// (MEDIA_PURPOSE_ATTACHMENT), sent by its `url` and `filename`. The server
+// fills in the rest from the upload and keeps the file for as long as the
+// message has it.
 message Attachment {
+  // The upload's id.
   string id = 1;
+  // What it's called, up to 255 characters. Shown, and the name it downloads as.
   string filename = 2;
+  // What its bytes are: a picture type, an audio or video type apps can
+  // play, or application/octet-stream for anything else.
   string content_type = 3;
   int64 size = 4;
   string url = 5;
+  // A picture's or video's size in pixels, as the sending app measured it,
+  // so apps can save its place before it loads; 0 when unknown.
+  int32 width = 6;
+  int32 height = 7;
 }
 
 message Embed {
@@ -853,6 +865,7 @@ message ServerUsage {
   int64 messages_sent = 5;
   // Bytes of message text currently stored.
   int64 message_bytes = 6;
+  // Files attached to messages, and their bytes.
   int64 attachments = 7;
   int64 attachment_bytes = 8;
   // Lifetime count of events in the server's log.
