@@ -33,6 +33,8 @@ import { canReturnTo, newSecret, savePending, sha256Hex, type PendingSignIn } fr
 import { rememberServerSignIn, savePendingSso, type PendingSso } from "@/lib/sso";
 import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { arranged } from "@/lib/arrange";
+import { fromItems, sameRail, toItems, type RailLayout } from "@/lib/rail";
+import type { SetServerArrangementRequest } from "@/gen/fuwa/v1/account_pb";
 import { accessOf, canSee, sortRoles } from "@/lib/permissions";
 import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
@@ -429,9 +431,43 @@ export const refreshNotifications = (key: string) =>
     updateInstance(key, (i) => ({ ...i, notifications }));
   });
 
+/** Reads how you arranged your servers again, for changes made on another device. */
+export const refreshRail = (key: string) =>
+  Effect.gen(function* () {
+    const sentBefore = railWrites.get(key) ?? 0;
+    const r = yield* call((signal) => api(key).account.getServerArrangement({}, { signal }));
+    // A change made here meanwhile is newer than what this read saw.
+    if ((railWrites.get(key) ?? 0) !== sentBefore) return;
+    const rail = r.updatedAt ? fromItems(r.items) : null;
+    updateInstance(key, (i) => (i.rail && rail && sameRail(i.rail, rail) ? i : { ...i, rail }));
+  });
+
+/** Arrangements sent per instance, so only the latest answer lands. */
+const railWrites = new Map<string, number>();
+
+/**
+ * Arranges your servers on an instance's rail, on every device: shown at
+ * once, put back if the instance refuses it.
+ */
+export const arrangeServers = (key: string, layout: RailLayout) =>
+  Effect.gen(function* () {
+    const before = store.get().instances[key]?.rail ?? null;
+    const n = (railWrites.get(key) ?? 0) + 1;
+    railWrites.set(key, n);
+    updateInstance(key, (i) => ({ ...i, rail: layout }));
+    const res = yield* call((signal) =>
+      api(key).account.setServerArrangement({ items: toItems(layout) as SetServerArrangementRequest["items"] }, { signal }),
+    ).pipe(Effect.tapError(() => Effect.sync(() => railWrites.get(key) === n && updateInstance(key, (i) => ({ ...i, rail: before })))));
+    if (railWrites.get(key) !== n) return;
+    const saved = fromItems(res.items);
+    // The instance drops servers you left meanwhile; anything else stays as shown.
+    updateInstance(key, (i) => (i.rail && sameRail(i.rail, saved) ? i : { ...i, rail: saved }));
+  });
+
 /**
  * Picks up what changed without an event while you were away: notification
- * settings from another device, and the instance's details and announcement.
+ * settings and server arrangement from another device, and the instance's
+ * details and announcement.
  */
 export function refreshOnFocus() {
   let last = Date.now();
@@ -441,6 +477,7 @@ export function refreshOnFocus() {
     for (const [key, i] of Object.entries(store.get().instances)) {
       if (i.me && i.connection === "live") {
         run(refreshNotifications(key)).catch(() => {});
+        run(refreshRail(key)).catch(() => {});
         run(refreshNode(key)).catch(() => {});
       }
     }
