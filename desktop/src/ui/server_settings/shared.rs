@@ -16,6 +16,8 @@ use crate::ui::shared_marks::{glyph, server_picture, server_tag};
 /// What a confirm strip ends.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Ask {
+    /// Letting a waiting server in: a misclick hands it the whole channel.
+    Approve,
     Disconnect,
     TurnDown,
     Cancel,
@@ -138,6 +140,23 @@ fn ask_copy(
     here: Option<&str>,
 ) -> (String, String, &'static str, String) {
     match ask {
+        Ask::Approve if !c.instance.is_empty() => (
+            format!("Let {other} on {} read #{home_name}?", c.instance),
+            format!(
+                "Their people will read everything said in #{home_name}, earlier messages included, and write there. \
+                 They're on another instance, so check their key fingerprint first."
+            ),
+            "Approve",
+            format!("#{home_name} is now shared with {other}"),
+        ),
+        Ask::Approve => (
+            format!("Let {other} read #{home_name}?"),
+            format!(
+                "Their people will read everything said in #{home_name}, earlier messages included, and write there."
+            ),
+            "Approve",
+            format!("#{home_name} is now shared with {other}"),
+        ),
         Ask::TurnDown => (
             format!("Turn down {other}?"),
             format!("#{home_name} won't show up in their server. They can ask again with a new code."),
@@ -372,12 +391,6 @@ impl ServerSettingsView {
         cx.notify();
     }
 
-    fn approve_share(&mut self, c: &pb::SharedConnection, done: String, cx: &mut Context<Self>) {
-        let (core, key, sid, cid) = (self.core.clone(), self.key.clone(), self.server.clone(), c.id.clone());
-        let work = async move { core.review_share(&key, &sid, &cid, true).await };
-        self.shared_change(c.id.clone(), cx, work, Some(("check", done)));
-    }
-
     fn answer_share(&mut self, c: &pb::SharedConnection, ask: Ask, done: String, cx: &mut Context<Self>) {
         let (core, key, sid, cid) = (self.core.clone(), self.key.clone(), self.server.clone(), c.id.clone());
         let id = c.id.clone();
@@ -387,6 +400,7 @@ impl ServerSettingsView {
             cx,
             async move {
                 match ask {
+                    Ask::Approve => core.review_share(&key, &sid, &cid, true).await,
                     Ask::TurnDown => core.review_share(&key, &sid, &cid, false).await,
                     _ => core.disconnect_shared(&key, &sid, &cid).await,
                 }
@@ -396,7 +410,12 @@ impl ServerSettingsView {
                 match result {
                     Ok(()) => {
                         this.shared.confirm = None;
-                        this.toast(if ask == Ask::TurnDown { "x" } else { "unplug" }, done, cx);
+                        let glyph = match ask {
+                            Ask::Approve => "check",
+                            Ask::TurnDown => "x",
+                            _ => "unplug",
+                        };
+                        this.toast(glyph, done, cx);
                     }
                     Err(err) => this.shared.confirm_error = Some(capitalized(&err.message)),
                 }
@@ -762,9 +781,7 @@ impl ServerSettingsView {
                 .child(text)
         };
         let actions = if c.home && is_waiting {
-            let c2 = c.clone();
-            let approved = format!("#{home_name} is now shared with {other}");
-            let id2 = id.clone();
+            let (id2, id3) = (id.clone(), id.clone());
             div()
                 .flex_none()
                 .flex()
@@ -781,7 +798,11 @@ impl ServerSettingsView {
                     primary_button(SharedString::from(format!("conn-approve-{id}")), "Approve", p)
                         .when(busy, |el| el.opacity(0.6))
                         .child(icon("check").size(px(15.0)))
-                        .on_click(cx.listener(move |this, _, _, cx| this.approve_share(&c2, approved.clone(), cx))),
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.shared.confirm = Some((id3.clone(), Ask::Approve));
+                            this.shared.confirm_error = None;
+                            cx.notify();
+                        })),
                 )
                 .into_any_element()
         } else {
@@ -872,7 +893,7 @@ impl ServerSettingsView {
                     .gap(px(8.0))
                     .p(px(12.0))
                     .rounded(corner(12.0))
-                    .bg(alpha(p.destructive, 0.08))
+                    .bg(alpha(if ask == Ask::Approve { p.primary } else { p.destructive }, 0.08))
                     .child(div().font_weight(FontWeight::EXTRA_BOLD).child(title))
                     .child(div().text_sm().text_color(p.muted_foreground).child(body))
                     .when_some(self.shared.confirm_error.clone(), |el, e| {
@@ -883,20 +904,32 @@ impl ServerSettingsView {
                             .flex()
                             .justify_end()
                             .gap(px(8.0))
-                            .child(soft_button(SharedString::from(format!("conn-keep-{id}")), "Keep it", p).on_click(
-                                cx.listener(|this, _, _, cx| {
+                            .child(
+                                soft_button(
+                                    SharedString::from(format!("conn-keep-{id}")),
+                                    if ask == Ask::Approve { "Not yet" } else { "Keep it" },
+                                    p,
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| {
                                     this.shared.confirm = None;
                                     cx.notify();
-                                }),
-                            ))
+                                })),
+                            )
                             .child(
-                                danger_button(SharedString::from(format!("conn-yes-{id}")), action, p)
-                                    .when(busy, |el| el.opacity(0.6))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if !this.shared.busy.contains(&c2.id) {
-                                            this.answer_share(&c2, ask, done.clone(), cx)
-                                        }
-                                    })),
+                                {
+                                    let yes = SharedString::from(format!("conn-yes-{id}"));
+                                    if ask == Ask::Approve {
+                                        primary_button(yes, action, p)
+                                    } else {
+                                        danger_button(yes, action, p)
+                                    }
+                                }
+                                .when(busy, |el| el.opacity(0.6))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if !this.shared.busy.contains(&c2.id) {
+                                        this.answer_share(&c2, ask, done.clone(), cx)
+                                    }
+                                })),
                             ),
                     ),
                 SharedString::from(format!("conn-ask-{id}")),
