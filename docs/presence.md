@@ -7,7 +7,7 @@ Discord.
 ## What people see
 
 - A dot on every avatar: online, idle (a moon), do not disturb (a dot with a
-  bar) or offline (a ring). Invisible looks offline to everyone else.
+  bar) or offline (a ring). Invisible looks offline to everyone else, friends lists included.
 - Your own status from the menu on your name at the bottom of the sidebar:
   online, idle, do not disturb (no sounds or notifications from that
   instance) or invisible. The custom status ("at the gym") is the one on
