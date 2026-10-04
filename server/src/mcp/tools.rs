@@ -126,7 +126,7 @@ const TOOLS: &[Tool] = &[
         destructive: false,
     },
     Tool {
-        name: "edit_message",
+        name: "update_message",
         title: "Edit a message",
         description: "Changes the text of a message this agent sent.",
         properties: || {
@@ -157,7 +157,7 @@ const TOOLS: &[Tool] = &[
         destructive: true,
     },
     Tool {
-        name: "get_events",
+        name: "list_events",
         title: "Follow what happens",
         description: "What happened in a server since a cursor: messages sent, edited and deleted, members \
                       joining and leaving, channels and roles changing. Call it once without after_sequence \
@@ -489,7 +489,7 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
             call!(cx, message_service_client::MessageServiceClient.send_message(req))
                 .map(|r| json!({ "message": view::messages(r.message.as_slice(), std::slice::from_ref(&cx.me)).pop() }))
         }
-        "edit_message" => {
+        "update_message" => {
             let req = pb::UpdateMessageRequest {
                 server_id: sid()?,
                 message_id: args.text("message_id")?,
@@ -507,7 +507,7 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
             };
             call!(cx, message_service_client::MessageServiceClient.delete_message(req)).map(|_| json!({ "deleted": true }))
         }
-        "get_events" => {
+        "list_events" => {
             let limit = args.number("limit")?.unwrap_or(50).clamp(1, 200) as i32;
             match args.number("after_sequence")? {
                 Some(after) if after < 0 => return Err(RpcError::invalid("after_sequence can't be negative")),

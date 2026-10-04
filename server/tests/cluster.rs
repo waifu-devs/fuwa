@@ -695,7 +695,7 @@ async fn a_split_instance_works_like_one() {
     let messages = &read["result"]["structuredContent"]["messages"];
     assert!(messages.as_array().unwrap().iter().any(|m| m["content"] == "relayed"), "{read}");
     let head: serde_json::Value =
-        mcp("get_events", serde_json::json!({ "server_id": on_b.id })).await.unwrap().json().await.unwrap();
+        mcp("list_events", serde_json::json!({ "server_id": on_b.id })).await.unwrap().json().await.unwrap();
     assert!(head["result"]["structuredContent"]["cursor"].as_i64().unwrap() > 0, "{head}");
 
     // A moderation provider set up on the directory reaches the shards, key

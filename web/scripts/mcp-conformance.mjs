@@ -26,16 +26,16 @@ check(transport.sessionId === undefined, "it keeps no session");
 await client.ping();
 
 const { tools } = await client.listTools();
-for (const name of ["list_servers", "list_channels", "list_messages", "send_message", "get_events"]) {
+for (const name of ["list_servers", "list_channels", "list_messages", "send_message", "list_events"]) {
   check(tools.some((t) => t.name === name), `tools/list has ${name}`);
 }
 
 const servers = await client.callTool({ name: "list_servers", arguments: {} });
 check(!servers.isError && servers.structuredContent.servers.some((s) => s.id === serverId), "list_servers finds the server");
 
-const start = await client.callTool({ name: "get_events", arguments: { server_id: serverId } });
+const start = await client.callTool({ name: "list_events", arguments: { server_id: serverId } });
 const cursor = start.structuredContent.cursor;
-check(typeof cursor === "number", "get_events returns a cursor");
+check(typeof cursor === "number", "list_events returns a cursor");
 
 const sent = await client.callTool({
   name: "send_message",
@@ -43,7 +43,7 @@ const sent = await client.callTool({
 });
 check(!sent.isError, "send_message works");
 
-const events = await client.callTool({ name: "get_events", arguments: { server_id: serverId, after_sequence: cursor } });
+const events = await client.callTool({ name: "list_events", arguments: { server_id: serverId, after_sequence: cursor } });
 check(
   events.structuredContent.events.some((e) => e.type === "message_created" && e.message.content === "hello from the MCP client"),
   "the message comes back as an event",

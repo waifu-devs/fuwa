@@ -240,7 +240,7 @@ async fn tools_do_what_the_agent_could_do_anyway() {
     let tools = rpc(&instance, &w.agent, "tools/list", json!({})).await;
     let names: Vec<&str> =
         tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-    for name in ["list_servers", "list_messages", "send_message", "get_events", "ban_member", "upload_picture"] {
+    for name in ["list_servers", "list_messages", "send_message", "list_events", "ban_member", "upload_picture"] {
         assert!(names.contains(&name), "{name}");
     }
     for t in tools["result"]["tools"].as_array().unwrap() {
@@ -254,7 +254,7 @@ async fn tools_do_what_the_agent_could_do_anyway() {
     assert!(channels["channels"].as_array().unwrap().iter().any(|c| c["id"] == gid && c["type"] == "text"));
 
     // Events from a cursor: none yet, then the message the agent sends.
-    let start = tool(&instance, &w.agent, "get_events", json!({ "server_id": sid })).await.unwrap();
+    let start = tool(&instance, &w.agent, "list_events", json!({ "server_id": sid })).await.unwrap();
     let cursor = start["cursor"].as_i64().unwrap();
     assert!(cursor > 0);
     let sent = tool(
@@ -268,12 +268,12 @@ async fn tools_do_what_the_agent_could_do_anyway() {
     let message_id = sent["message"]["id"].as_str().unwrap().to_string();
     assert_eq!(sent["message"]["author"]["username"], "helper");
     let events =
-        tool(&instance, &w.agent, "get_events", json!({ "server_id": sid, "after_sequence": cursor })).await.unwrap();
+        tool(&instance, &w.agent, "list_events", json!({ "server_id": sid, "after_sequence": cursor })).await.unwrap();
     let created = events["events"].as_array().unwrap().iter().find(|e| e["type"] == "message_created").unwrap();
     assert_eq!(created["message"]["id"], message_id.as_str());
     assert!(events["cursor"].as_i64().unwrap() > cursor);
     let later =
-        tool(&instance, &w.agent, "get_events", json!({ "server_id": sid, "after_sequence": events["cursor"] }))
+        tool(&instance, &w.agent, "list_events", json!({ "server_id": sid, "after_sequence": events["cursor"] }))
             .await
             .unwrap();
     assert_eq!(later["events"], json!([]));
@@ -282,7 +282,7 @@ async fn tools_do_what_the_agent_could_do_anyway() {
     let edited = tool(
         &instance,
         &w.agent,
-        "edit_message",
+        "update_message",
         json!({ "server_id": sid, "message_id": message_id, "content": "hello" }),
     )
     .await

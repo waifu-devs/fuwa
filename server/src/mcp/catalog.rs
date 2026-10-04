@@ -138,7 +138,7 @@ const PROMPTS: &[Prompt] = &[
         title: "Answer mentions",
         description: "Find recent messages that mention this agent and answer them.",
         arguments: &[("server_id", "The server's id.")],
-        text: "Call get_me to learn your user id, then get_events for server {server_id} (once without \
+        text: "Call get_me to learn your user id, then list_events for server {server_id} (once without \
                after_sequence for the cursor if you don't have one, then with it). For each message_created that \
                mentions you as <@your id> or replies to one of your messages, read the conversation around it \
                with list_messages and answer with send_message, using reply_to_id. Keep answers short and stay \
@@ -158,7 +158,7 @@ const PROMPTS: &[Prompt] = &[
         title: "Welcome new members",
         description: "Greet people who joined since a cursor.",
         arguments: &[("server_id", "The server's id."), ("channel_id", "Where to post the welcome.")],
-        text: "Use get_events on server {server_id} to find member_joined events since your last cursor. Post one \
+        text: "Use list_events on server {server_id} to find member_joined events since your last cursor. Post one \
                friendly welcome in channel {channel_id} that mentions each new member as <@their id>, and point \
                them to the server's channels from list_channels if that helps.",
     },

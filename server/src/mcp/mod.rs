@@ -252,7 +252,7 @@ fn initialize(cx: &Cx, params: &Value) -> Value {
         "instructions": format!(
             "You are the agent @{} on the fuwa chat instance {:?}. Servers are communities you were added to; \
              their channels hold messages. Start with list_servers and list_channels. Mention someone as <@user id> \
-             and a role as <@&role id>. To follow what happens, call get_events without a cursor once, then again \
+             and a role as <@&role id>. To follow what happens, call list_events without a cursor once, then again \
              with the cursor it returns. Every tool does only what your roles in that server allow.",
             cx.me.username, cx.instance
         )

@@ -84,8 +84,8 @@ can't do in the apps' API, it can't do here.
 | `list_servers`, `get_server` | `ServerService.ListServers`, `GetServer` |
 | `list_channels` | `ChannelService.ListChannels` |
 | `list_messages`, `get_message` | `MessageService.ListMessages` (pages by `before_id` / `after_id`), `GetMessage` |
-| `send_message`, `edit_message`, `delete_message` | `MessageService.SendMessage`, `UpdateMessage`, `DeleteMessage` |
-| `get_events` | `EventService.ListEvents` (a cursor, see below) |
+| `send_message`, `update_message`, `delete_message` | `MessageService.SendMessage`, `UpdateMessage`, `DeleteMessage` |
+| `list_events` | `EventService.ListEvents` (a cursor, see below) |
 | `list_members` | `ServerService.ListMembers`, a page at a time |
 | `list_roles`, `list_emojis`, `get_profile` | `RoleService.ListRoles`, `EmojiService.ListEmojis`, `AuthService.GetProfile` |
 | `time_out_member`, `kick_member`, `ban_member`, `unban_member` | `ServerService`'s moderation calls |
@@ -113,7 +113,7 @@ over a channel and suggest, never act) and `welcome_members`.
 
 ## Live events
 
-MCP is request and answer, so it carries no live stream. `get_events` reads a
+MCP is request and answer, so it carries no live stream. `list_events` reads a
 server's event log from a cursor instead: called without `after_sequence` it
 returns the current cursor, then each call returns what happened after the
 cursor it's given and the cursor to ask from next. Each call is one read of
