@@ -7048,6 +7048,46 @@ async fn replies_start_threads_under_messages() {
     instance.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn threads_stay_home_when_a_channel_is_shared() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (sora, _, _) = sign_up(&mut c, "sora").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    join(&mut c, &sora, &home).await;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let parent = send(&mut c, &juan, &home, &dev.id, "movie night?").await.unwrap();
+    let kept = reply(&mut c, &sora, &home, &dev.id, &parent.id, "only in the thread", false).await.unwrap();
+    let also = reply(&mut c, &sora, &home, &dev.id, &parent.id, "in both", true).await.unwrap();
+
+    // Shared after the thread started: guests see the channel, not who replied in its threads.
+    let shared = share(&mut c, &juan, &home, &dev.id, &mika, &guest).await;
+    let seen = messages(&mut c, &mika, &guest, &shared.id).await;
+    assert!(seen.iter().all(|m| m.id != kept.id), "{seen:?}");
+    let first = seen.iter().find(|m| m.id == parent.id).unwrap();
+    assert!(first.thread.is_none());
+    let both = seen.iter().find(|m| m.id == also.id).unwrap();
+    assert!(both.thread_id.is_empty() && !both.also_in_channel);
+    let hidden = c
+        .messages
+        .get_message(authed(
+            &mika,
+            pb::GetMessageRequest {
+                server_id: guest.clone(),
+                channel_id: shared.id.clone(),
+                message_id: kept.id.clone(),
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(hidden.code(), Code::NotFound);
+    instance.stop().await;
+}
+
 /// A channel shared with a server on another instance: a code made for
 /// other instances, a preview naming the home instance and its key, the ask
 /// (which pins each instance's key at the other), approval and ending.

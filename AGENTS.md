@@ -117,6 +117,11 @@
     (`MEDIA_PURPOSE_EMOJI`) counted in the server's attachments, and every
     change sends the whole list (`EmojisUpdated`). Messages write them
     `<:name:id>` (`<a:name:id>` when they move).
+    Threads (`api/threads.rs`, docs/threads.md): a reply is a message with
+    `thread_id` (its parent) and `in_channel`; `threads` sums each one up
+    and every send or delete of a reply calls `threads::refresh` in the
+    same write (`ThreadUpdated`). Paths that delete messages call
+    `threads::after_delete`; shared channels strip threads for guests.
     Shared channels (`api/shared.rs`, docs/shared-channels.md): a channel's
     home keeps it and every message (`channel_guests`, `share_codes`,
     `channel_blocks`); a guest server shows it as a channel of its own

@@ -3,6 +3,8 @@
 //! AutoMod, slow mode, mentions and permissions treat it like any other; the
 //! `threads` table only sums each thread up for the channel to show.
 
+use std::collections::{HashMap, VecDeque};
+
 use super::{Api, Seat, users};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
@@ -19,6 +21,11 @@ const MAX_PAGE: i32 = 50;
 const MAX_SEARCHED: i64 = 500;
 /// Replies a search reads in one thread.
 const MAX_SEARCHED_REPLIES: i64 = 1000;
+/// Replies one search reads in all, across the threads it looks through.
+const MAX_SEARCH_READ: i64 = 5000;
+/// Searches one account may make a minute, over all its servers.
+const SEARCHES_PER_MINUTE: usize = 30;
+const MINUTE_MS: i64 = 60_000;
 /// Longest search, in characters.
 const MAX_QUERY: usize = 100;
 /// Most followed threads ListFollowedThreads returns.
@@ -276,6 +283,9 @@ impl Api {
         if query.chars().count() > MAX_QUERY {
             return Err(Error::invalid(format!("searches are at most {MAX_QUERY} characters")));
         }
+        if !query.is_empty() {
+            take_search(&account.id, now_ms())?;
+        }
         let conn = sdb.read()?;
         let channel = load_channel(&conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
         if channel.shared.is_some() {
@@ -317,16 +327,24 @@ impl Api {
         .await?;
         let mut threads = Vec::new();
         let mut has_more = false;
+        let mut budget = MAX_SEARCH_READ;
         for (id, summary) in candidates {
             let Some(mut parent) = super::messages::load_message(&conn, &sdb.id, &id).await? else { continue };
             if !query.is_empty() && !parent.content.to_lowercase().contains(&query) {
+                // A search reads a bounded number of replies in all; past that it
+                // stops, and the next page picks up after the last match.
+                if budget <= 0 {
+                    has_more = !threads.is_empty();
+                    break;
+                }
                 let replies = query_all(
                     &conn,
                     "SELECT content FROM messages WHERE thread_id = ?1 ORDER BY id DESC LIMIT ?2",
-                    (id.as_str(), MAX_SEARCHED_REPLIES),
+                    (id.as_str(), budget.min(MAX_SEARCHED_REPLIES)),
                     |r| r.get::<String>(0),
                 )
                 .await?;
+                budget -= replies.len().max(1) as i64;
                 if !replies.iter().any(|c| c.to_lowercase().contains(&query)) {
                     continue;
                 }
@@ -427,4 +445,43 @@ pub(super) async fn may_delete_with_thread(
         return Ok(true);
     }
     Err(Error::denied("others replied in the thread under this message; a moderator can delete it"))
+}
+
+/// The last minute of thread searches, per account, so no one can keep a
+/// server busy reading replies. Kept in memory: limits reset on restart.
+static SEARCHES: std::sync::LazyLock<std::sync::Mutex<HashMap<String, VecDeque<i64>>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Counts a search now, or refuses it while the account is over its minute's share.
+fn take_search(account_id: &str, now: i64) -> Result<()> {
+    let mut searches = SEARCHES.lock().unwrap_or_else(|p| p.into_inner());
+    // Forget accounts that have been quiet a minute, so the map stays small.
+    if searches.len() > 4096 {
+        searches.retain(|_, times| times.back().is_some_and(|&t| now - t < MINUTE_MS));
+    }
+    let times = searches.entry(account_id.to_string()).or_default();
+    while times.front().is_some_and(|&t| now - t >= MINUTE_MS) {
+        times.pop_front();
+    }
+    if times.len() >= SEARCHES_PER_MINUTE {
+        return Err(Error::ResourceExhausted("too many thread searches; try again in a minute".into()));
+    }
+    times.push_back(now);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn searches_are_limited_per_account_per_minute() {
+        let now = 1_000_000;
+        for _ in 0..SEARCHES_PER_MINUTE {
+            take_search("limited", now).unwrap();
+        }
+        assert!(take_search("limited", now + 1).is_err());
+        take_search("someone else", now + 1).unwrap();
+        take_search("limited", now + MINUTE_MS).unwrap();
+    }
 }
