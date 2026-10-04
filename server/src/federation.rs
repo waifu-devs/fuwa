@@ -58,6 +58,8 @@ const HEARD_EVERY_MS: i64 = 60 * 1000;
 const FOLLOW_EVERY: Duration = Duration::from_secs(5 * 60);
 /// The most looks remembered at once; past it, none until some expire.
 const MAX_FOLLOWS: usize = 1024;
+/// The most looks remembered for one instance at once.
+const FOLLOWS_PER_INSTANCE: usize = 8;
 /// What a key rotation's signature starts with.
 const ROTATION_CONTEXT: &[u8] = b"fuwa-federation-v1 rotation";
 /// The most rotations read from another instance's key.
@@ -296,14 +298,17 @@ impl Federation {
     /// Whether an instance's key may be looked at again now, for an envelope
     /// signed with another key (`looking_for`: the instance and that key):
     /// at most once every [`FOLLOW_EVERY`], whatever came of the last look.
-    fn take_follow(&self, looking_for: &str) -> bool {
+    fn take_follow(&self, origin: &str, looking_for: &str) -> bool {
         let mut followed = self.followed.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let now = Instant::now();
         if followed.len() >= 64 {
             followed.retain(|_, at| now.duration_since(*at) < FOLLOW_EVERY);
         }
         // Envelopes each naming a new key can't make it grow without end.
-        if followed.len() >= MAX_FOLLOWS && !followed.contains_key(looking_for) {
+        // Nor can ones claiming one instance keep others' looks out.
+        let new = !followed.contains_key(looking_for);
+        let under = || followed.keys().filter(|key| key.split(' ').next() == Some(origin)).count();
+        if new && (followed.len() >= MAX_FOLLOWS || under() >= FOLLOWS_PER_INSTANCE) {
             return false;
         }
         match followed.get(looking_for) {
@@ -696,7 +701,7 @@ async fn follow(
         format!("{} {}", peer.origin, to_hex(&envelope.key))
     };
     if peer.needs_check
-        || !(by_admin || app.federation.take_follow(&looking_for))
+        || !(by_admin || app.federation.take_follow(&peer.origin, &looking_for))
         || !app.federation.take_hello(&peer.origin)
     {
         return None;
@@ -1550,12 +1555,19 @@ mod tests {
     #[test]
     fn looks_for_rotations_are_capped() {
         let federation = Federation::new(true);
-        assert!(federation.take_follow("https://a.example k0"));
-        assert!(!federation.take_follow("https://a.example k0"));
-        for n in 1..MAX_FOLLOWS {
-            assert!(federation.take_follow(&format!("https://a.example k{n}")));
+        let a = "https://a.example";
+        assert!(federation.take_follow(a, &format!("{a} k0")));
+        assert!(!federation.take_follow(a, &format!("{a} k0")));
+        for n in 1..FOLLOWS_PER_INSTANCE {
+            assert!(federation.take_follow(a, &format!("{a} k{n}")));
         }
-        assert!(!federation.take_follow("https://a.example one more"));
+        // One instance's share is used up; others still get theirs.
+        assert!(!federation.take_follow(a, &format!("{a} one more")));
+        let mut n = 0;
+        while federation.take_follow(&format!("https://{n}.example"), &format!("https://{n}.example k")) {
+            n += 1;
+        }
+        assert_eq!(n + FOLLOWS_PER_INSTANCE, MAX_FOLLOWS);
     }
 
     #[test]

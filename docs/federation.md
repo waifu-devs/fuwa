@@ -59,7 +59,8 @@ settings). Off, the instance answers other instances with nothing but "off".
   fetches that instance's key again: no more than once every 5 minutes for
   one instance and named key (an admin's check looks every time), and
   within the caps on fetching strangers' keys. Envelopes forged with other
-  keys get looks of their own, so they can't use up a real rotation's. It moves to the new key only if the rotations lead there
+  keys get looks of their own, so they can't use up a real rotation's (at
+  most 8 kept for one instance and 1024 in all at a time). It moves to the new key only if the rotations lead there
   from the key it pinned, each one signed by the key before it for that
   origin, never back to a key it already left. Then it checks the call
   again with the new key. Otherwise the call is refused as before.
