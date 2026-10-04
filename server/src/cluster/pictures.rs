@@ -122,8 +122,8 @@ pub async fn take(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
 /// when the server next moves.
 pub fn take_soon(app: Arc<App>, server_id: String, media_id: String) {
     tokio::spawn(async move {
-        if let Err(err) = take(&app, &server_id, &media_id).await {
-            tracing::warn!(server = %server_id, media = %media_id, error = %err, "couldn't take a server's picture");
+        if take(&app, &server_id, &media_id).await.is_err() {
+            tracing::warn!("couldn't take a server's picture");
             crate::reports::server_error("server_picture_take", Some("cluster::pictures"));
         }
     });
@@ -148,16 +148,16 @@ pub async fn drop(app: &App, server_id: &str, media_id: &str) {
     let key = name(&server_id, &media_id);
     match std::fs::remove_file(app.config.data_path.join(&key)) {
         Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
-            tracing::warn!(media = %media_id, error = %err, "couldn't delete a server's picture");
+            tracing::warn!("couldn't delete a server's picture");
         }
         // A file no message had is gone now, so it needn't be noted.
         _ if app.servers.holds(&server_id) => crate::attachments::forget_loose(app, &server_id, &media_id).await,
         _ => {}
     }
     if let Some(replica) = app.servers.replica()
-        && let Err(err) = replica.store().delete(&key).await
+        && let Err(_) = replica.store().delete(&key).await
     {
-        tracing::warn!(media = %media_id, error = %err, "couldn't delete a server's picture from the replica");
+        tracing::warn!("couldn't delete a server's picture from the replica");
     }
 }
 
@@ -167,7 +167,7 @@ pub async fn drop_all(app: &App, server_id: &str) {
     let Ok(server_id) = parse_id("server_id", server_id) else { return };
     match std::fs::remove_dir_all(server_dir(&app.config.data_path, &server_id)) {
         Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
-            tracing::warn!(server = %server_id, "couldn't delete a deleted server's pictures");
+            tracing::warn!("couldn't delete a deleted server's pictures");
             crate::reports::server_error("server_pictures_drop", Some("cluster::pictures"));
         }
         _ => {}
@@ -181,7 +181,7 @@ pub async fn drop_all(app: &App, server_id: &str) {
         Ok::<_, Error>(())
     };
     if dropped.await.is_err() {
-        tracing::warn!(server = %server_id, "couldn't delete a deleted server's pictures from the replica");
+        tracing::warn!("couldn't delete a deleted server's pictures from the replica");
         crate::reports::server_error("server_pictures_drop_replica", Some("cluster::pictures"));
     }
 }
@@ -267,8 +267,8 @@ async fn upload(app: &App, server_id: &str, token: &str, body: Body) -> Response
         Err(status) if status.code() == tonic::Code::NotFound => {
             return plain(StatusCode::NOT_FOUND, "this upload link has been used or ran out; start the upload again");
         }
-        Err(status) => {
-            tracing::warn!(error = %status.message(), "couldn't start a server picture's upload");
+        Err(_) => {
+            tracing::warn!("couldn't start a server picture's upload");
             return plain(StatusCode::BAD_GATEWAY, "part of this instance is unreachable right now; try again soon");
         }
     };
@@ -281,7 +281,7 @@ async fn upload(app: &App, server_id: &str, token: &str, body: Body) -> Response
     let dest = dir.join(&id);
     let purpose = pb::MediaPurpose::try_from(started.purpose).unwrap_or(pb::MediaPurpose::Unspecified);
     let kept = async {
-        std::fs::create_dir_all(&dir).map_err(|err| failed_io(&id, err))?;
+        std::fs::create_dir_all(&dir).map_err(|_| failed_io())?;
         let wait = std::time::Duration::from_millis(crate::media::RECEIVE_TTL_MS as u64);
         let received = crate::media::receive_file(purpose, started.size, &temp, body);
         let (kind, size) = tokio::time::timeout(wait, received)
@@ -291,13 +291,13 @@ async fn upload(app: &App, server_id: &str, token: &str, body: Body) -> Response
         if purpose == pb::MediaPurpose::Attachment
             && crate::attachments::note_loose(app, &server_id, &id).await.is_err()
         {
-            tracing::warn!(media = %id, "couldn't note an uploaded file");
+            tracing::warn!("couldn't note an uploaded file");
             return Err((StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string()));
         }
-        std::fs::rename(&temp, &dest).map_err(|err| failed_io(&id, err))?;
+        std::fs::rename(&temp, &dest).map_err(|_| failed_io())?;
         if let Some(replica) = app.servers.replica() {
-            replica.store().put_file(&name(&server_id, &id), &dest).await.map_err(|err| {
-                tracing::error!(media = %id, error = %err, "couldn't back up an uploaded picture");
+            replica.store().put_file(&name(&server_id, &id), &dest).await.map_err(|_| {
+                tracing::error!("couldn't back up an uploaded picture");
                 (StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string())
             })?;
         }
@@ -325,8 +325,8 @@ async fn upload(app: &App, server_id: &str, token: &str, body: Body) -> Response
     }
     let _ = std::fs::remove_file(&temp);
     drop(app, &server_id, &id).await;
-    if let Err(err) = finished {
-        tracing::warn!(media = %id, error = %err, "couldn't record a server picture's upload");
+    if finished.is_err() {
+        tracing::warn!("couldn't record a server picture's upload");
         if finish.is_some() {
             return plain(StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server");
         }
@@ -334,8 +334,8 @@ async fn upload(app: &App, server_id: &str, token: &str, body: Body) -> Response
     plain(status, &message)
 }
 
-fn failed_io(id: &str, err: std::io::Error) -> (StatusCode, String) {
-    tracing::error!(media = %id, error = %err, "couldn't store an uploaded picture");
+fn failed_io() -> (StatusCode, String) {
+    tracing::error!("couldn't store an uploaded picture");
     (StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string())
 }
 
@@ -360,7 +360,7 @@ pub fn spawn_sweep(app: Arc<App>) {
                 _ = every.tick() => match sweep(&app, crate::id::now_ms()).await {
                     Ok(0) => {}
                     Ok(swept) => tracing::info!(swept, "deleted server pictures nothing used"),
-                    Err(err) => tracing::warn!(error = %err, "couldn't sweep server pictures"),
+                    Err(_) => tracing::warn!("couldn't sweep server pictures"),
                 },
             }
         }
@@ -384,7 +384,7 @@ pub async fn sweep(app: &App, now: i64) -> Result<usize> {
         for (id, path) in pictures(&app.config.data_path, &server_id)? {
             let arrived = std::fs::metadata(&path)?.modified()?;
             let arrived = arrived.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
-            if now - arrived >= UNUSED_FOR_MS && unused(uses(app, &server_id, &id).await, &id) {
+            if now - arrived >= UNUSED_FOR_MS && unused(uses(app, &server_id, &id).await) {
                 drop(app, &server_id, &id).await;
                 swept += 1;
             }
@@ -418,7 +418,7 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
                 Ok(false) => {}
                 Ok(true) => return plain(StatusCode::NOT_FOUND, "not found"),
                 Err(_) => {
-                    tracing::warn!(media = %id, "couldn't look up an attachment");
+                    tracing::warn!("couldn't look up an attachment");
                     return plain(
                         StatusCode::SERVICE_UNAVAILABLE,
                         "that file can't be reached right now; try again soon",
@@ -427,7 +427,7 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
             }
         }
         Err(_) => {
-            tracing::warn!(media = %id, "couldn't look up an attachment");
+            tracing::warn!("couldn't look up an attachment");
             return plain(StatusCode::SERVICE_UNAVAILABLE, "that file can't be reached right now; try again soon");
         }
     }
@@ -465,11 +465,11 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
 /// Whether a picture is certainly unused, so the sweep may delete it. When
 /// the server couldn't be asked (it's busy, restarting or moving), it's
 /// kept: only a definite no deletes anything.
-fn unused(used: Result<bool>, media_id: &str) -> bool {
+fn unused(used: Result<bool>) -> bool {
     match used {
         Ok(used) => !used,
-        Err(err) => {
-            tracing::warn!(media = %media_id, error = %err, "couldn't tell whether a server uses a picture; keeping it");
+        Err(_) => {
+            tracing::warn!("couldn't tell whether a server uses a picture; keeping it");
             false
         }
     }
@@ -510,8 +510,8 @@ async fn restore(app: &App, key: &str, path: &Path) -> bool {
     match replica.store().get_to_file(key, &partial).await {
         Ok(true) => std::fs::rename(&partial, path).is_ok(),
         Ok(false) => false,
-        Err(err) => {
-            tracing::warn!(picture = %key, error = %err, "couldn't fetch a server's picture from the replica");
+        Err(_) => {
+            tracing::warn!("couldn't fetch a server's picture from the replica");
             let _ = std::fs::remove_file(&partial);
             false
         }
@@ -679,10 +679,10 @@ mod tests {
 
     #[test]
     fn only_a_definite_no_sweeps_a_picture() {
-        assert!(unused(Ok(false), "x"));
-        assert!(!unused(Ok(true), "x"));
+        assert!(unused(Ok(false)));
+        assert!(!unused(Ok(true)));
         for failed in [Error::Busy, Error::Misrouted, Error::Moving, Error::internal("the read failed")] {
-            assert!(!unused(Err(failed), "x"));
+            assert!(!unused(Err(failed)));
         }
     }
 
