@@ -1658,6 +1658,7 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::AutoModRuleUpdate => ("shield-alert", sky),
         A::AutoModRuleDelete => ("shield-x", red),
         A::AutoModTimeOut => ("bot", amber),
+        A::AutoModMessageDelete => ("bot", red),
         A::EmojiCreate => ("face-slightly-smiling-plus", green),
         A::EmojiUpdate => ("face-slightly-smiling", sky),
         A::EmojiDelete => ("face-slightly-frowning", red),
@@ -1923,6 +1924,13 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
             if let Some(until) = change("timed_out_until").and_then(|c| c.after.parse::<i64>().ok()) {
                 s.push_str(&format!(" for {}", duration(((until - at) / 1000).max(1))));
             }
+            if !entry.channel_name.is_empty() {
+                s.push_str(&format!(" in {}", named_channel(&entry.channel_name)));
+            }
+            s
+        }
+        A::AutoModMessageDelete => {
+            let mut s = format!("**AutoMod** took down a message from {target}");
             if !entry.channel_name.is_empty() {
                 s.push_str(&format!(" in {}", named_channel(&entry.channel_name)));
             }

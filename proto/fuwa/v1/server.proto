@@ -303,9 +303,13 @@ enum AuditAction {
   // they're the target.
   AUDIT_ACTION_SHARED_CHANNEL_BLOCK = 46;
   AUDIT_ACTION_SHARED_CHANNEL_UNBLOCK = 47;
+  // AutoMod took a message down after it was sent, when its provider's
+  // answer came late: the author is both actor and target, the channel is
+  // where it was, and the reason names the rule.
+  AUDIT_ACTION_AUTO_MOD_MESSAGE_DELETE = 48;
   // Someone else's poll, ended early by a moderator: its creator is the
   // target. Votes are never recorded.
-  AUDIT_ACTION_POLL_END = 48;
+  AUDIT_ACTION_POLL_END = 49;
 }
 
 // One thing someone did with a moderator's or manager's permission.
