@@ -22,6 +22,7 @@ import type { ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Item } from "@/e2ee/vault";
 import { loadApplied, type Applied } from "@/lib/applied";
+import { emptyFriends, type FriendsState } from "@/lib/friends";
 import type { RailLayout } from "@/lib/rail";
 import { sortRoles } from "@/lib/permissions";
 
@@ -186,6 +187,8 @@ export type InstanceState = {
    */
   shared: Record<string, ListConnectionsResponse>;
   dms: DmState;
+  /** Your friends, requests and blocks here. */
+  friends: FriendsState;
 };
 
 /** Where a server's (channel "") or a channel's notification settings are kept. */
@@ -251,6 +254,7 @@ export function emptyInstance(key: string, url: string): InstanceState {
     voice: {},
     shared: {},
     dms: emptyDms(),
+    friends: emptyFriends(),
   };
 }
 
