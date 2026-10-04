@@ -390,6 +390,9 @@ impl App {
             router = router.merge(crate::sso::http::server_routes(self.clone()));
         }
         if !self.config.cluster.is_split() {
+            // MCP answers through every route above, as clients reach them.
+            let mcp = crate::mcp::routes(router.clone(), self.clone());
+            router = router.merge(mcp);
             // The web app (when it's on) answers every other GET, so its own addresses work on reload.
             return router
                 .fallback(crate::web::handler(self.clone()))
@@ -455,6 +458,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         telemetry: settings.telemetry,
         shared_channels: settings.shared_channels,
         federation: settings.shared_channels && settings.federation && !settings.public_url.is_empty(),
+        mcp: settings.mcp,
         profile_effects: settings.profile_effects,
         announcement,
         build: Some(pb::Build {
@@ -495,8 +499,11 @@ pub fn cors(source: Arc<impl HasSettings>) -> CorsLayer {
             "grpc-accept-encoding",
             "connect-protocol-version",
             "connect-timeout-ms",
+            "mcp-protocol-version",
+            "mcp-session-id",
+            "last-event-id",
         ]))
-        .expose_headers(headers(&["grpc-status", "grpc-message", "grpc-status-details-bin"]))
+        .expose_headers(headers(&["grpc-status", "grpc-message", "grpc-status-details-bin", "www-authenticate"]))
         .max_age(Duration::from_secs(2 * 60 * 60))
 }
 
