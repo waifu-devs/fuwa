@@ -568,7 +568,8 @@ impl DmEngine {
                         n => format!("{n} files"),
                     };
                     let line = format!("{files} came with this message, open it in the web app to see them");
-                    item.content = clip(&if item.content.is_empty() { line } else { format!("{}\n{line}", item.content) });
+                    item.content =
+                        clip(&if item.content.is_empty() { line } else { format!("{}\n{line}", item.content) });
                 }
                 item.reply_to = text.reply_to_sequence;
                 let had = inner.vault.items(&id)?.iter().any(|i| i.seq == seq);
