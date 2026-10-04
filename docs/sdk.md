@@ -89,6 +89,52 @@ By default an agent skips its own messages, other agents' (so two agents
 can't answer each other forever) and webhook posts; turn the last two off
 with `ignoreAgents: false` and `ignoreWebhooks: false`.
 
+### Slash commands and buttons
+
+Instances with slash commands (docs/commands.md) list an agent's commands
+when members type "/", with typed options, and let it put buttons under its
+messages. Using either sends the agent an interaction that only it sees:
+
+```ts
+import { CommandOptionType, InteractionKind } from "@waifu-devs/fuwa";
+
+const commands = [
+  { name: "roll", description: "Rolls dice", options: [{ name: "sides", description: "How many sides", type: CommandOptionType.INTEGER }] },
+];
+agent.on("ready", ({ servers }) => {
+  for (const serverId of servers) void agent.setCommands(serverId, commands);
+});
+agent.on("serverAdded", (serverId) => void agent.setCommands(serverId, commands));
+
+agent.on("interaction", async (ctx) => {
+  if (ctx.kind === InteractionKind.COMMAND && ctx.command === "roll") {
+    const sides = Number(ctx.options.sides ?? 6);
+    await ctx.reply({
+      content: `rolled ${1 + Math.floor(Math.random() * sides)}`,
+      components: [{ buttons: [{ customId: "again", label: "Roll again" }] }],
+    });
+  } else if (ctx.kind === InteractionKind.BUTTON && ctx.customId === "again") {
+    await ctx.reply("rolled again");
+  }
+});
+```
+
+- `agent.setCommands(serverId, commands)` replaces the agent's commands in
+  a server (up to 50); commands are per server, so set them as the agent
+  joins each one.
+- `ctx.reply` answers with a message showing who used what (it sends
+  `interactionId`), up to five times within 15 minutes. `components` on any
+  message the agent sends adds rows of buttons; a `LINK` button opens its
+  `url` and tells nobody.
+- `ctx.options` has what was filled in, as text by option name. **The
+  instance keeps typed arguments only while the interaction can be
+  answered**: its event log never stores them, so an `interactionCreated`
+  caught up later has none. Keep anything you need from them yourself.
+  `interaction` handlers only get interactions that can still be
+  answered; older ones come only as `interactionCreated`.
+- `agent.api.commands` is the whole CommandService: `listCommands`, and
+  `runCommand` and `pressButton` for apps that act for a person.
+
 ### Typed events
 
 Every event kind has a handler named after its payload, with that payload's
@@ -299,8 +345,9 @@ for await (const { message, author } of messages(fuwa, { serverId, channelId }))
 ```
 
 `fuwa.node`, `auth`, `account`, `servers`, `channels`, `messages`, `events`,
-`admin`, `media`, `roles`, `invites`, `join`, `dms`, `secure`, `automod`,
-`emojis`, `calls`, `webhooks`, `agents`, `sso` and `shared` are the services;
+`admin`, `media`, `roles`, `invites`, `join`, `dms`, `friends`, `secure`,
+`automod`, `emojis`, `calls`, `webhooks`, `agents`, `sso`, `shared`,
+`commands`, `gifs`, `presence` and `search` are the services;
 every message type and enum is exported from the package too. `token` can be
 a function, read on every call.
 
