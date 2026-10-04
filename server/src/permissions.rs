@@ -21,7 +21,7 @@ pub const fn bit(p: P) -> Bits {
     1 << p as u64
 }
 
-const KNOWN: [P; 26] = [
+const KNOWN: [P; 27] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -47,6 +47,7 @@ const KNOWN: [P; 26] = [
     P::MoveMembers,
     P::Video,
     P::Record,
+    P::CreateThreads,
     P::CreatePolls,
 ];
 
@@ -66,6 +67,7 @@ pub const CHANNEL: Bits = bit(P::ManageChannels)
     | bit(P::ManageRoles)
     | bit(P::ViewChannels)
     | bit(P::SendMessages)
+    | bit(P::CreateThreads)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
     | bit(P::MentionEveryone)
@@ -82,6 +84,7 @@ pub const CHANNEL: Bits = bit(P::ManageChannels)
 /// What @everyone can do in a new server.
 pub const EVERYONE: Bits = bit(P::ViewChannels)
     | bit(P::SendMessages)
+    | bit(P::CreateThreads)
     | bit(P::CreatePolls)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
@@ -111,6 +114,7 @@ pub const ADMIN: Bits = bit(P::ManageServer)
 /// What a member who hasn't agreed to the server's rules yet can't do: talk
 /// (in text or voice), bring people in, or rename themselves.
 pub const TALK: Bits = bit(P::SendMessages)
+    | bit(P::CreateThreads)
     | bit(P::CreatePolls)
     | bit(P::Connect)
     | bit(P::Speak)
@@ -164,6 +168,7 @@ pub fn label(p: P) -> &'static str {
         P::Record => "Record",
         P::CreatePolls => "Create polls",
         P::ManageWebhooks => "Manage webhooks",
+        P::CreateThreads => "Start threads",
     }
 }
 

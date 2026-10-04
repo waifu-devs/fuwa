@@ -45,6 +45,7 @@ export const KNOWN: P[] = [
   P.MOVE_MEMBERS,
   P.VIDEO,
   P.RECORD,
+  P.CREATE_THREADS,
   P.CREATE_POLLS,
 ];
 
@@ -56,6 +57,7 @@ export const CHANNEL: Bits = [
   P.MANAGE_ROLES,
   P.VIEW_CHANNELS,
   P.SEND_MESSAGES,
+  P.CREATE_THREADS,
   P.EMBED_LINKS,
   P.ATTACH_FILES,
   P.MENTION_EVERYONE,
@@ -73,6 +75,7 @@ export const CHANNEL: Bits = [
 /** What a member who hasn't agreed to the server's rules yet can't do, as on the server. */
 export const TALK: Bits = [
   P.SEND_MESSAGES,
+  P.CREATE_THREADS,
   P.CREATE_POLLS,
   P.EMBED_LINKS,
   P.ATTACH_FILES,
@@ -123,7 +126,12 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     about: "See channels and read their messages, unless a channel says otherwise.",
     channel: "See this channel and read its messages.",
   },
-  [P.SEND_MESSAGES]: { label: "Send messages", about: "Write in channels." },
+  [P.SEND_MESSAGES]: { label: "Send messages", about: "Write in channels, and reply in threads." },
+  [P.CREATE_THREADS]: {
+    label: "Start threads",
+    about: "Start a thread of replies under a message. Replying in a thread that's there needs Send messages.",
+    channel: "Start a thread of replies under a message in this channel.",
+  },
   [P.CREATE_POLLS]: {
     label: "Create polls",
     about: "Ask a question with answers people vote on. Anyone who can see the channel can vote.",
@@ -191,7 +199,7 @@ export const PERMISSION_GROUPS: { title: string; permissions: P[] }[] = [
   },
   {
     title: "Text channels",
-    permissions: [P.SEND_MESSAGES, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
+    permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
   { title: "Voice channels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
   { title: "Advanced", permissions: [P.ADMINISTRATOR] },
@@ -202,7 +210,7 @@ export const CHANNEL_GROUPS: { title: string; permissions: P[] }[] = [
   { title: "General", permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.CREATE_INVITE] },
   {
     title: "Text",
-    permissions: [P.SEND_MESSAGES, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
+    permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
   { title: "Voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
 ];

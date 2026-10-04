@@ -21,6 +21,8 @@ import {
   LinkIcon,
   LoaderCircleIcon,
   LockIcon,
+  LockOpenIcon,
+  MessagesSquareIcon,
   MessageSquareXIcon,
   ScrollTextIcon,
   SettingsIcon,
@@ -111,6 +113,9 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.SHARED_CHANNEL_UPDATE]: { label: "Shared channel changes", icon: SlidersHorizontalIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.SHARED_CHANNEL_BLOCK]: { label: "Kept out of shared channels", icon: BanIcon, tint: "bg-orange-500/15 text-orange-500" },
   [AuditAction.SHARED_CHANNEL_UNBLOCK]: { label: "Let back into shared channels", icon: UndoIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.THREAD_LOCK]: { label: "Locked threads", icon: LockIcon, tint: "bg-amber-500/15 text-amber-500" },
+  [AuditAction.THREAD_UNLOCK]: { label: "Unlocked threads", icon: LockOpenIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.THREAD_DELETE]: { label: "Deleted threads", icon: MessagesSquareIcon, tint: "bg-destructive/15 text-destructive" },
   [AuditAction.POLL_END]: { label: "Ended polls", icon: BarChart3Icon, tint: "bg-amber-500/15 text-amber-500" },
 };
 
@@ -139,6 +144,7 @@ const FIELD: Record<string, string> = {
   expires_at: "Expires",
   uses: "People it let in",
   min_account_age_seconds: "Minimum account age",
+  thread_archive_hours: "Archive quiet threads after",
   applications: "Apply to join",
   linked_only: "waifu.dev accounts only",
   rules: "Rules",
@@ -429,6 +435,7 @@ function value(field: string, raw: string, users: Record<string, User>, channels
   if (field === "max_uses") return raw === "0" ? "No limit" : raw;
   if (field === "expires_at") return raw ? formatStamp(new Date(Number(raw))) : "Never";
   if (field === "min_account_age_seconds") return raw === "0" ? "Any age" : formatDuration(Number(raw));
+  if (field === "thread_archive_hours") return raw === "0" ? "Never" : formatDuration(Number(raw) * 3600);
   return raw || "Nothing";
 }
 
@@ -697,6 +704,24 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
               in <b>#{entry.channelName}</b>
             </>
           )}
+        </>
+      );
+    case AuditAction.THREAD_LOCK:
+      return (
+        <>
+          {actor} locked {target}'s thread in <b>#{entry.channelName}</b>
+        </>
+      );
+    case AuditAction.THREAD_UNLOCK:
+      return (
+        <>
+          {actor} unlocked {target}'s thread in <b>#{entry.channelName}</b>
+        </>
+      );
+    case AuditAction.THREAD_DELETE:
+      return (
+        <>
+          {actor} deleted {target}'s thread in <b>#{entry.channelName}</b>
         </>
       );
     default:
