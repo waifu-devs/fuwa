@@ -26,6 +26,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0010_sso.sql"),
     include_str!("../migrations/node/0011_regions.sql"),
     include_str!("../migrations/node/0012_federation.sql"),
+    include_str!("../migrations/node/0013_profile_effects.sql"),
     include_str!("../migrations/node/0018_gifs.sql"),
 ];
 
@@ -158,6 +159,8 @@ pub struct ProfileChange {
     pub accent_color: Option<Option<i32>>,
     /// The status and when it runs out, set together.
     pub status: Option<(String, Option<i64>)>,
+    /// A profile effect's id; empty for none.
+    pub effect: Option<String>,
 }
 
 /// A device signed in to an account.
@@ -636,7 +639,7 @@ impl NodeDb {
                    accent_color = CASE WHEN ?7 IS NULL THEN accent_color WHEN ?7 < 0 THEN NULL ELSE ?7 END,
                    status = coalesce(?8, status),
                    status_expires_at = CASE WHEN ?8 IS NULL THEN status_expires_at ELSE ?9 END,
-                   updated_at = ?10
+                   updated_at = ?10, profile_effect = coalesce(?11, profile_effect)
                  WHERE id = ?1",
                 (
                     id,
@@ -649,6 +652,7 @@ impl NodeDb {
                     status,
                     status_expires_at,
                     now_ms(),
+                    change.effect.as_deref(),
                 ),
             )
             .await?;
@@ -663,7 +667,9 @@ impl NodeDb {
         let conn = self.read()?;
         query_one(
             &conn,
-            &format!("SELECT {ACCOUNT_COLUMNS}, pronouns, bio, banner_url, accent_color FROM accounts WHERE id = ?1"),
+            &format!(
+                "SELECT {ACCOUNT_COLUMNS}, pronouns, bio, banner_url, accent_color, profile_effect FROM accounts WHERE id = ?1"
+            ),
             [id],
             |row| {
                 let account = account(row)?;
@@ -674,6 +680,7 @@ impl NodeDb {
                     banner_url: row.get(ACCOUNT_COLUMN_COUNT + 2)?,
                     accent_color: row.get(ACCOUNT_COLUMN_COUNT + 3)?,
                     created_at: Some(timestamp(account.created_at)),
+                    effect: row.get(ACCOUNT_COLUMN_COUNT + 4)?,
                 })
             },
         )

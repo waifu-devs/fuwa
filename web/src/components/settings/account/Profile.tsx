@@ -12,10 +12,13 @@ import { PictureField } from "@/components/PictureField";
 import { Private } from "@/components/Private";
 import { ProfileCard } from "@/components/ProfileCard";
 import { Chips, Row, Segmented, Warn } from "@/components/settings/account/common";
+import { EffectPicker } from "@/components/settings/account/EffectPicker";
 import { SaveBar, WithPreview } from "@/components/settings/controls";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { builtinEffect } from "@/lib/effects/profile";
 import { colorCss, shownStatus } from "@/lib/format";
+import { reportUsage } from "@/lib/reports";
 import { cn } from "@/lib/utils";
 
 const NAME_MAX = 64;
@@ -66,13 +69,16 @@ type Draft = {
   bannerUrl: string;
   /** 0xRRGGBB, or -1 for the color fuwa picks from your id. */
   accent: number;
+  /** A profile effect's id, or "" for none. */
+  effect: string;
 };
 
 const isUrl = (value: string) => !value.trim() || /^https?:\/\/\S+$/i.test(value.trim());
 
 /**
  * Your profile on this instance, beside a live copy of the card others open
- * from your name: name, pronouns, status, about me, pictures and color.
+ * from your name: name, pronouns, status, about me, pictures, color and
+ * effect.
  */
 export function Profile({ instanceKey }: { instanceKey: string }) {
   const inst = useInstance(instanceKey);
@@ -82,6 +88,8 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
   const [edits, setEdits] = useState<Partial<Draft>>({});
   const [bioTab, setBioTab] = useState<"write" | "preview">("write");
   const save = useAction(updateProfile);
+  // Instances from before profile effects don't say, and can't keep one.
+  const effectsOn = useFuwa((s) => !!s.instances[instanceKey]?.node?.profileEffects);
 
   const meId = me?.id;
   useEffect(() => {
@@ -101,11 +109,12 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
     avatarUrl: me.avatarUrl,
     bannerUrl: profile?.bannerUrl ?? "",
     accent: profile?.accentColor ?? -1,
+    effect: profile?.effect ?? "",
   };
   const draft: Draft = { ...base, ...edits };
   const differs = (k: keyof Draft) => edits[k] !== undefined && edits[k] !== base[k];
   const statusChanged = differs("status") || (draft.status.trim() !== "" && differs("clear"));
-  const changed = (["displayName", "pronouns", "bio", "avatarUrl", "bannerUrl", "accent"] as const).filter(differs).length + (statusChanged ? 1 : 0);
+  const changed = (["displayName", "pronouns", "bio", "avatarUrl", "bannerUrl", "accent", "effect"] as const).filter(differs).length + (statusChanged ? 1 : 0);
   const set = (patch: Partial<Draft>) => {
     setEdits((e) => ({ ...e, ...patch }));
     save.setError(null);
@@ -130,11 +139,14 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
     if (differs("avatarUrl")) patch.avatarUrl = draft.avatarUrl.trim();
     if (differs("bannerUrl")) patch.bannerUrl = draft.bannerUrl.trim();
     if (differs("accent")) patch.accentColor = draft.accent;
+    if (differs("effect")) patch.effect = draft.effect;
     if (statusChanged) {
       patch.status = draft.status.trim();
       patch.statusExpiresAt = draft.clear === "keep" ? keptUntil : clearsAt(draft.clear);
     }
-    if (await save.go(instanceKey, patch)) setEdits({});
+    if (!(await save.go(instanceKey, patch))) return;
+    if (patch.effect) reportUsage("profile-effect/picked");
+    setEdits({});
   }
 
   const preview = (
@@ -149,6 +161,7 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
         bannerUrl: isUrl(draft.bannerUrl) ? draft.bannerUrl.trim() : "",
         accentColor: draft.accent < 0 ? undefined : draft.accent,
         createdAt: profile?.createdAt,
+        effect: draft.effect,
       }}
     />
   );
@@ -207,6 +220,15 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
           <Row id="profile-color" label="Profile color" hint="Colors your card's banner when there's no picture.">
             <ColorPicker value={draft.accent} userId={me.id} disabled={!ready} onChange={(accent) => set({ accent })} />
           </Row>
+          {effectsOn && (
+            <Row
+              id="profile-effect"
+              label="Profile effect"
+              hint={builtinEffect(draft.effect)?.description ?? "Plays over your card when people open it. Hovering the card plays it again."}
+            >
+              <EffectPicker value={draft.effect} userId={me.id} accent={draft.accent} disabled={!ready} onChange={(effect) => set({ effect })} />
+            </Row>
+          )}
           <Row id="status" label="Custom status" htmlFor="profile-status" hint="Under your name in member lists, on every server here.">
             <div className="relative">
               <Input
