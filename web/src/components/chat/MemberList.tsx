@@ -13,6 +13,7 @@ import { Private } from "@/components/Private";
 import { InlineMarkdown } from "@/components/Markdown";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { AppBadge } from "@/components/AppBadge";
+import { useMemberMenu } from "@/components/menus/member";
 import { displayName, formatStamp, isAgent, memberName, shownStatus, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { colorOf, hoistedRole } from "@/lib/permissions";
@@ -180,6 +181,7 @@ const MemberRow = memo(function MemberRow({
   now: number;
   enter: boolean;
 }) {
+  const menu = useMemberMenu(instanceKey, m.serverId, m.user, m);
   return (
     <motion.div
       initial={enter ? { opacity: 0, x: 16 } : false}
@@ -191,10 +193,10 @@ const MemberRow = memo(function MemberRow({
           present.has(m.user?.id ?? "") ? { opacity: 1, transition: { duration: 0 } } : { opacity: 0, x: 16 },
       }}
       transition={{ type: "spring", stiffness: 500, damping: 36 }}
-      className="row-y group flex items-center gap-1 rounded-lg px-2 transition hover:bg-muted/70"
+      className="row-y group flex items-center gap-1 rounded-lg px-2 transition hover:bg-muted/70 has-[[data-menu-open]]:bg-muted/70"
     >
       <ProfilePopover instanceKey={instanceKey} user={m.user} member={m} side="left">
-        <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+        <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" {...menu}>
           <UserAvatar user={m.user} className="size-8 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:scale-105 group-active:scale-95" />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1">
