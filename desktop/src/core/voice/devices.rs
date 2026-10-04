@@ -29,21 +29,25 @@ pub struct Listener {
     listening: Arc<AtomicBool>,
     /// What was last asked for, so asking again changes nothing (a failed
     /// open isn't retried until the next unmute).
-    wanted: Arc<AtomicBool>,
+    wanted: Arc<Mutex<bool>>,
     thread: Option<std::thread::Thread>,
 }
 
 impl Listener {
     /// One with no sound thread behind it: for calls without devices (the tests).
     pub fn detached(on: bool) -> Self {
-        Self { listening: Arc::new(AtomicBool::new(on)), wanted: Arc::new(AtomicBool::new(on)), thread: None }
+        Self { listening: Arc::new(AtomicBool::new(on)), wanted: Arc::new(Mutex::new(on)), thread: None }
     }
 
     pub fn listen(&self, on: bool) {
-        if self.wanted.swap(on, Ordering::Relaxed) == on {
+        // Both change together, so two calls at once can't leave them disagreeing.
+        let mut wanted = self.wanted.lock();
+        if *wanted == on {
             return;
         }
+        *wanted = on;
         self.listening.store(on, Ordering::Relaxed);
+        drop(wanted);
         if let Some(thread) = &self.thread {
             thread.unpark();
         }
@@ -51,7 +55,7 @@ impl Listener {
 
     /// Whether the microphone is meant to be open.
     pub fn is_listening(&self) -> bool {
-        self.wanted.load(Ordering::Relaxed)
+        *self.wanted.lock()
     }
 }
 
@@ -78,7 +82,7 @@ impl Devices {
                 .spawn(move || run(microphone, speakers, stop, listening, trouble))
                 .ok()
         };
-        let wanted = Arc::new(AtomicBool::new(listening.load(Ordering::Relaxed)));
+        let wanted = Arc::new(Mutex::new(listening.load(Ordering::Relaxed)));
         let listener = Listener { listening, wanted, thread: thread.as_ref().map(|t| t.thread().clone()) };
         Self { stop, listener, thread, trouble }
     }

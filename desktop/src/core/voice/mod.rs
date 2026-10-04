@@ -198,6 +198,8 @@ impl Core {
     /// Leaves the call you're in.
     pub fn leave_voice(&self) {
         if let Some(active) = self.voice.active.lock().take() {
+            // Closed now, not once the call has wound down.
+            active.microphone.listen(false);
             let _ = active.commands.send(Command::Leave);
         }
         if self.voice.view.lock().take().is_some() {
