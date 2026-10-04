@@ -380,6 +380,55 @@ fn two_people_talk_in_a_server_and_in_private() {
         assert!(!bytes.windows(8).any(|w| w == b"OpusHead"));
     }
 
+    // Alice sends a picture and a file; Bob sees them and saves the file as it was.
+    {
+        let (core, key, sid, cid) = (alice.clone(), key.clone(), server.id.clone(), general.clone());
+        wait(&alice, async move { core.load_messages(&key, &sid, &cid, false).await }).unwrap();
+    }
+    let files = tempfile::tempdir().unwrap();
+    let picture = files.path().join("tiny.png");
+    let notes = files.path().join("notes.txt");
+    std::fs::write(&picture, TINY_PNG).unwrap();
+    std::fs::write(&notes, b"bring snacks").unwrap();
+    {
+        let (core, key, sid, cid) = (alice.clone(), key.clone(), server.id.clone(), general.clone());
+        let (picture, notes) = (picture.clone(), notes.clone());
+        wait(&alice, async move {
+            let a = core.upload_attachment(&key, &sid, &picture).await?;
+            let b = core.upload_attachment(&key, &sid, &notes).await?;
+            assert_eq!((a.width, a.height), (1, 1));
+            core.send_message_with(&key, &sid, &cid, "files!", vec![a, b]).await
+        })
+        .unwrap();
+    }
+    let sent = |s: &Store| {
+        s.instance(&key).unwrap().messages.get(&general).and_then(|m| {
+            m.items.iter().find(|m| m.content == "files!" && m.attachments.len() == 2).map(|m| m.attachments.clone())
+        })
+    };
+    until(&bob, "the files", |s| sent(s).is_some());
+    let got = bob.shared.read(sent).unwrap();
+    assert_eq!(
+        fuwa_desktop::core::attachments::look_of(&got[0].content_type),
+        fuwa_desktop::core::attachments::Look::Picture
+    );
+    let saved = files.path().join("saved.txt");
+    {
+        let (core, key, url, saved) = (bob.clone(), key.clone(), got[1].url.clone(), saved.clone());
+        wait(&bob, async move { core.save_attachment(&key, &url, 12, &saved).await }).unwrap();
+    }
+    assert_eq!(std::fs::read(&saved).unwrap(), b"bring snacks");
+    // Nothing half-written is left beside it.
+    assert!(!files.path().join("saved.txt.part").exists());
+    // Only the instance's own files are fetched, whatever the link says.
+    {
+        let (core, key, url) = (bob.clone(), key.clone(), got[1].url.replace("/media/", "/api/"));
+        let away = files.path().join("away.txt");
+        assert!(wait(&bob, async move { core.save_attachment(&key, &url, 12, &away).await }).is_err());
+        assert!(!files.path().join("away.txt").exists());
+    }
+    assert_eq!(got[1].filename, "notes.txt");
+
     // Alice asks a question; Bob votes, Alice sees the count live and who
     // voted, then ends it. Bob's own pick stays with him.
     {

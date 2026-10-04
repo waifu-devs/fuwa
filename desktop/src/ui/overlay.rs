@@ -86,6 +86,9 @@ impl FuwaApp {
         if let Dialog::Poll { .. } = &dialog {
             return Some(self.render_poll_editor(window, cx));
         }
+        if let Dialog::Picture { .. } = &dialog {
+            return Some(self.render_picture(&dialog, window, cx));
+        }
         if let Dialog::PollVoters { key, server, channel, message } = &dialog {
             return Some(self.render_voters(key, server, channel, message, cx));
         }
@@ -381,7 +384,8 @@ impl FuwaApp {
             | Dialog::Welcome { .. }
             | Dialog::Secure { .. }
             | Dialog::Poll { .. }
-            | Dialog::PollVoters { .. } => unreachable!("drawn on its own"),
+            | Dialog::PollVoters { .. }
+            | Dialog::Picture { .. } => unreachable!("drawn on its own"),
         };
         let danger = matches!(
             dialog,
@@ -470,6 +474,7 @@ impl FuwaApp {
             Dialog::AllowGame { .. } => "game",
             Dialog::Poll { .. } => "poll",
             Dialog::PollVoters { .. } => "voters",
+            Dialog::Picture { .. } => "picture",
         };
         Some(
             motion::fade_in(

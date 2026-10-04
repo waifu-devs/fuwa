@@ -68,6 +68,7 @@ fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg 
         keeping_out: false,
         poll: None,
         voice: None,
+        attachments: Vec::new(),
         sig: 0,
     }
 }
@@ -243,6 +244,8 @@ pub struct Msg {
     pub poll: Option<Rc<crate::ui::polls::PollCard>>,
     /// The voice message it is, in a private conversation.
     pub voice: Option<Rc<crate::ui::voice_notes::VoiceCard>>,
+    /// The files it came with.
+    pub attachments: Vec<pb::Attachment>,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
 }
@@ -392,6 +395,7 @@ impl FuwaApp {
                     }
                     (&m.content, m.edited_at.as_ref().map(|t| (t.seconds, t.nanos)), m.embeds.len()).hash(&mut h);
                     m.emojis.iter().map(|e| (&e.id, &e.url)).for_each(|e| e.hash(&mut h));
+                    m.attachments.iter().map(|a| (&a.url, &a.filename)).for_each(|a| a.hash(&mut h));
                     (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
                     user.as_ref().map(|u| (&u.avatar_url, &u.username)).hash(&mut h);
                     (look.digest, editing, manage, suppress, &me, &mine).hash(&mut h);
@@ -435,6 +439,7 @@ impl FuwaApp {
                             keeping_out,
                             poll: card.clone(),
                             voice: None,
+                            attachments: m.attachments.clone(),
                             sig,
                         }),
                     };
@@ -467,6 +472,7 @@ impl FuwaApp {
                         keeping_out: false,
                         poll: None,
         voice: None,
+                        attachments: p.attachments.clone(),
         sig: 0,
                     })));
                 }
@@ -831,6 +837,7 @@ impl FuwaApp {
         }
         let emoji_panel = self.emoji_open.then(|| self.emoji_panel(&p, cx));
         let time_panel = self.time_picker_panel(&p, cx);
+        let tray = self.file_tray(&p, cx);
         let recording = self.recording_here();
         // The microphone takes the send button's place while nothing's typed, as on the web.
         let voice = (recording || (!typed && self.can_record())).then(|| self.voice_button(&p, cx));
@@ -852,8 +859,10 @@ impl FuwaApp {
             .when_some(self.picker.clone(), |el, picker| el.child(self.picker_list(picker, &p, cx)))
             .children(emoji_panel)
             .children(time_panel)
+            .children(tray)
             .child(
                 div()
+                    .id("composer-box")
                     .flex()
                     .items_end()
                     .gap(px(8.0))
@@ -871,7 +880,9 @@ impl FuwaApp {
                         spread_radius: px(-8.0),
                         inset: false,
                     }])
+                    .map(|el| self.droppable(el, &p, cx))
                     .child(field)
+                    .when(!recording && self.can_attach(), |el| el.child(self.attach_button(&p, cx)))
                     .when(!recording, |el| el.child(self.timestamp_button(&p, cx)).child(self.emoji_button(&p, cx)))
                     .when(self.can_poll(), |el| {
                         el.child(
@@ -1551,6 +1562,16 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
     if let Some(card) = &m.poll {
         body = body.child(crate::ui::polls::poll_card(&m.id, card, p, &ctx.this));
     }
+    if !m.attachments.is_empty() {
+        body = body.child(crate::ui::attachments::attachments_view(
+            &m.id,
+            &m.attachments,
+            &ctx.url,
+            p,
+            &ctx.this,
+            &ctx.key,
+        ));
+    }
     if let Some(reason) = &m.failed {
         let (retry, dismiss) = (ctx.this.clone(), ctx.this.clone());
         let nonce = m.nonce;
@@ -2058,6 +2079,7 @@ fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::Au
         keeping_out: false,
         poll: None,
         voice: None,
+        attachments: Vec::new(),
         sig: 0,
     }
 }

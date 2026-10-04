@@ -5,6 +5,7 @@ mod announcement;
 pub mod app;
 mod arrange;
 mod assets;
+mod attachments;
 mod backdrop;
 mod call_bar;
 pub(crate) mod chat;
