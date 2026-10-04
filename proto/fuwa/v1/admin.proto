@@ -61,6 +61,14 @@ service AdminService {
   // key uses the saved one), to see that it answers. The text goes to the
   // provider's host.
   rpc TestAutoModProvider(TestAutoModProviderRequest) returns (TestAutoModProviderResponse);
+
+  // This instance as other instances see it (its address and key
+  // fingerprint), and the instances it knows. Makes the key the first time.
+  rpc GetFederation(GetFederationRequest) returns (GetFederationResponse);
+  // Reaches another instance with a signed call and back, to see that the two
+  // can talk: fetches its key, introduces this instance and pins each side's
+  // key on the other. Needs federation on.
+  rpc CheckInstance(CheckInstanceRequest) returns (CheckInstanceResponse);
 }
 
 // Everything about an instance an admin can change while it runs. Each setting
@@ -144,6 +152,12 @@ message InstanceSettings {
   // Smart filter unchecked (the server's other rules still apply).
   // FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY.
   optional int64 automod_checks_per_day = 31;
+  // Servers here may share channels with servers on other fuwa instances,
+  // which this instance then talks to with signed calls (docs/federation.md).
+  // Off unless changed. Needs an https public_url. FUWA_FEDERATION.
+  bool federation = 34;
+  // Instances this one never talks to, by host name (chat.example.com).
+  repeated string federation_blocked_hosts = 35;
 }
 
 // One moderation provider, as the instance's admins set it up: one fuwa
@@ -449,4 +463,42 @@ message SetAnnouncementRequest {
 message SetAnnouncementResponse {
   // What clients now show, if anything.
   Announcement announcement = 1;
+}
+
+message GetFederationRequest {}
+
+message GetFederationResponse {
+  // This instance's address as other instances know it (public_url's
+  // origin), empty while public_url can't be used for federation.
+  string origin = 1;
+  // Why it can't, when origin is empty.
+  string origin_problem = 2;
+  // SHA-256 of this instance's public key, as 8 groups of 4 hex digits, for
+  // admins to compare over a channel they trust.
+  string fingerprint = 3;
+  // Instances this one has pinned a key for, most recently heard from first.
+  repeated FederationPeer peers = 4;
+}
+
+// Another instance this one knows.
+message FederationPeer {
+  // Its address, like https://chat.example.com.
+  string origin = 1;
+  // Its pinned key's fingerprint.
+  string fingerprint = 2;
+  google.protobuf.Timestamp first_seen = 3;
+  google.protobuf.Timestamp last_heard = 4;
+  // Its host is in federation_blocked_hosts.
+  bool blocked = 5;
+}
+
+message CheckInstanceRequest {
+  // Its address or host name, like chat.example.com.
+  string address = 1;
+}
+
+message CheckInstanceResponse {
+  FederationPeer peer = 1;
+  // How long the signed call took there and back.
+  int64 round_trip_ms = 2;
 }

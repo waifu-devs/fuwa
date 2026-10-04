@@ -924,6 +924,13 @@ export const endServerShare = (key: string, serverId: string, connectionId: stri
 export const testAutoModProvider = (key: string, provider: AutoModProviderSettings, content: string) =>
   call((signal) => api(key).admin.testAutoModProvider({ provider, content }, { signal }));
 
+/** This instance as other instances see it, and the instances it knows. */
+export const getFederation = (key: string) => call((signal) => api(key).admin.getFederation({}, { signal }));
+
+/** Reaches another instance with a signed call and back, pinning each side's key. */
+export const checkInstance = (key: string, address: string) =>
+  call((signal) => api(key).admin.checkInstance({ address }, { signal }));
+
 export const nodeUsage = (key: string) => call((signal) => api(key).admin.getNodeUsage({}, { signal }));
 
 /** Replaces a server's own caps; unset ones follow the instance defaults. */

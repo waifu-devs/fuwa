@@ -25,6 +25,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0009_upload_days.sql"),
     include_str!("../migrations/node/0010_sso.sql"),
     include_str!("../migrations/node/0011_regions.sql"),
+    include_str!("../migrations/node/0012_federation.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
@@ -193,6 +194,21 @@ pub fn clip_user_agent(user_agent: &str) -> String {
     user_agent.trim().chars().take(MAX_USER_AGENT).collect()
 }
 
+/// Another instance whose key this one pinned.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FederationPeer {
+    pub origin: String,
+    pub public_key: Vec<u8>,
+    pub first_seen: i64,
+    pub last_heard: i64,
+}
+
+impl FederationPeer {
+    fn from_row(r: &Row) -> turso::Result<Self> {
+        Ok(Self { origin: r.get(0)?, public_key: r.get(1)?, first_seen: r.get(2)?, last_heard: r.get(3)? })
+    }
+}
+
 pub struct NodeDb {
     db: Arc<Db>,
     /// Sign-ups one at a time, so only the very first account becomes admin.
@@ -274,6 +290,92 @@ impl NodeDb {
             let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('picture_key', ?1)", [hex.as_str()]).await?;
             Ok(crate::outside::Key::from_hex(&hex).expect("hex just written"))
+        })
+        .await
+    }
+
+    /// This instance's Ed25519 key for talking to other instances (PKCS#8),
+    /// made the first time it's asked for. Never shown; kept in node.db, which
+    /// is encrypted when the instance has a key.
+    pub async fn federation_key(&self) -> Result<Vec<u8>> {
+        db::write(&self.db, async |conn| {
+            if let Some(key) =
+                query_one(conn, "SELECT value FROM meta WHERE key = 'federation_key'", (), |r| r.get::<String>(0))
+                    .await?
+                && let Some(key) = crate::federation::from_hex(&key)
+            {
+                return Ok(key);
+            }
+            let key = crate::federation::new_key()?;
+            let hex = crate::federation::to_hex(&key);
+            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('federation_key', ?1)", [hex.as_str()])
+                .await?;
+            Ok(key)
+        })
+        .await
+    }
+
+    /// The key pinned for another instance.
+    pub async fn federation_peer(&self, origin: &str) -> Result<Option<FederationPeer>> {
+        let conn = self.read()?;
+        query_one(
+            &conn,
+            "SELECT origin, public_key, first_seen, last_heard FROM federation_peers WHERE origin = ?1",
+            [origin],
+            FederationPeer::from_row,
+        )
+        .await
+    }
+
+    /// Every instance this one has pinned a key for, most recently heard from first.
+    pub async fn federation_peers(&self) -> Result<Vec<FederationPeer>> {
+        let conn = self.read()?;
+        query_all(
+            &conn,
+            "SELECT origin, public_key, first_seen, last_heard FROM federation_peers ORDER BY last_heard DESC",
+            (),
+            FederationPeer::from_row,
+        )
+        .await
+    }
+
+    /// Pins another instance's key the first time it's seen. A different key
+    /// for an instance already pinned is refused: the pinned one stays.
+    pub async fn pin_federation_peer(&self, origin: &str, public_key: &[u8]) -> Result<FederationPeer> {
+        let (origin, public_key) = (origin.to_string(), public_key.to_vec());
+        db::write(&self.db, async |conn| {
+            let now = now_ms();
+            conn.execute(
+                "INSERT INTO federation_peers (origin, public_key, first_seen, last_heard) VALUES (?1, ?2, ?3, ?3)
+                 ON CONFLICT (origin) DO NOTHING",
+                (origin.as_str(), public_key.clone(), now),
+            )
+            .await?;
+            let peer = query_one(
+                conn,
+                "SELECT origin, public_key, first_seen, last_heard FROM federation_peers WHERE origin = ?1",
+                [origin.as_str()],
+                FederationPeer::from_row,
+            )
+            .await?
+            .ok_or_else(|| Error::internal("a pinned instance went missing"))?;
+            if peer.public_key != public_key {
+                return Err(Error::FailedPrecondition(format!(
+                    "{origin} has a different key from the one this instance pinned for it"
+                )));
+            }
+            Ok(peer)
+        })
+        .await
+    }
+
+    /// Notes that a signed call from or answer by another instance checked out.
+    pub async fn heard_from_peer(&self, origin: &str) -> Result<()> {
+        let origin = origin.to_string();
+        db::write(&self.db, async |conn| {
+            conn.execute("UPDATE federation_peers SET last_heard = ?2 WHERE origin = ?1", (origin.as_str(), now_ms()))
+                .await?;
+            Ok(())
         })
         .await
     }

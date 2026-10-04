@@ -71,6 +71,8 @@ pub struct App {
     pub recordings: crate::recordings::Recordings,
     /// What links to pictures from other sites are signed with.
     picture_key: crate::outside::Key,
+    /// How this instance talks to other fuwa instances (docs/federation.md).
+    pub federation: crate::federation::Federation,
 }
 
 /// Where the parts this process doesn't run are.
@@ -184,6 +186,7 @@ impl App {
             _ => {}
         }
 
+        let federation = crate::federation::Federation::new(config.federation_allow_private);
         let shutdown = CancellationToken::new();
         let media_link = media_link(&config, &shutdown).await;
 
@@ -206,6 +209,7 @@ impl App {
             recordings: crate::recordings::Recordings::default(),
             media_link,
             picture_key,
+            federation,
         });
         if app.node.is_some() {
             app.sweep_media(crate::id::now_ms()).await?;
@@ -342,6 +346,10 @@ impl App {
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
             .add_service(reflection);
+        // Other instances' calls, where node.db is (docs/federation.md).
+        if self.node.is_some() {
+            grpc = grpc.add_service(crate::federation::server(self.clone()));
+        }
         grpc = match &self.link {
             Link::Alone => grpc,
             Link::Directory(_) => grpc

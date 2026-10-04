@@ -1,0 +1,888 @@
+//! How fuwa instances talk to each other (docs/federation.md): each instance
+//! has an Ed25519 key, pins the keys of the instances it talks to, and signs
+//! every call and every answer. Only the part keeping node.db (a single
+//! process, or the directory) runs it; gateways pass it on.
+//!
+//! Nothing here sends or keeps anything about the people using either
+//! instance: calls carry no forwarded addresses or user agents, and what's
+//! counted for the anonymous reports never names another instance.
+
+use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use prost::Message;
+use ring::rand::{SecureRandom, SystemRandom};
+use ring::signature::{ED25519, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
+use sha2::{Digest, Sha256};
+use tokio::sync::OnceCell;
+use tonic::{Request, Response, Status};
+
+use crate::app::App;
+use crate::error::{Error, Result};
+use crate::fpb;
+
+/// What every signature starts with, so a federation signature can't be
+/// taken for anything else signed with the same key.
+const CONTEXT: &[u8] = b"fuwa-federation-v1";
+/// How far an envelope's time may be from the receiver's clock.
+const WINDOW_MS: i64 = 5 * 60 * 1000;
+/// How long a nonce is remembered: past the window both ways.
+const NONCE_KEEP_MS: i64 = 2 * WINDOW_MS;
+/// The most nonces remembered at once; past it, signed calls wait.
+const MAX_NONCES: usize = 200_000;
+/// The largest payload an envelope carries.
+pub const MAX_PAYLOAD: usize = 1 << 20;
+/// How long a call to another instance may take.
+const TIMEOUT: Duration = Duration::from_secs(10);
+/// How many instances this one fetches keys for a minute, when greeted by
+/// ones it doesn't know yet.
+const HELLOS_PER_MINUTE: usize = 60;
+/// How often the time an instance was last heard from is written down.
+const HEARD_EVERY_MS: i64 = 60 * 1000;
+
+/// A new Ed25519 key, as PKCS#8.
+pub fn new_key() -> Result<Vec<u8>> {
+    let document = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
+        .map_err(|_| Error::internal("couldn't make the instance's federation key"))?;
+    Ok(document.as_ref().to_vec())
+}
+
+pub fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+pub fn from_hex(hex: &str) -> Option<Vec<u8>> {
+    if !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()).collect()
+}
+
+/// SHA-256 of a public key, as 8 groups of 4 hex digits, for people to compare.
+pub fn fingerprint(public_key: &[u8]) -> String {
+    let hash = to_hex(&Sha256::digest(public_key)[..16]);
+    hash.as_bytes().chunks(4).map(|group| std::str::from_utf8(group).unwrap_or_default()).collect::<Vec<_>>().join(" ")
+}
+
+/// The host name in an address or a bare host name, lowercased, for the block
+/// list. None for something that isn't one.
+pub fn host_of(entry: &str) -> Option<String> {
+    let entry = entry.trim();
+    let with_scheme = if entry.contains("://") { entry.to_string() } else { format!("https://{entry}") };
+    let url = url::Url::parse(&with_scheme).ok()?;
+    let host = url.host_str()?.trim_end_matches('.').to_ascii_lowercase();
+    (!host.is_empty() && host.len() <= 253).then_some(host)
+}
+
+/// The origin (https://chat.example.com) an admin's address for another
+/// instance stands for, or why it can't be one. Only https, and only public
+/// addresses, unless `allow_private` (FUWA_FEDERATION_ALLOW_PRIVATE).
+pub fn origin(address: &str, allow_private: bool) -> std::result::Result<String, String> {
+    let bad = || "an instance's address is its host name or an https URL, like chat.example.com".to_string();
+    let address = address.trim().trim_end_matches('/');
+    if address.is_empty() || address.len() > 512 {
+        return Err(bad());
+    }
+    let with_scheme = if address.contains("://") { address.to_string() } else { format!("https://{address}") };
+    let url = url::Url::parse(&with_scheme).map_err(|_| bad())?;
+    let scheme_ok = url.scheme() == "https" || (allow_private && url.scheme() == "http");
+    if !scheme_ok
+        || url.host_str().is_none_or(str::is_empty)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.path(), "" | "/")
+    {
+        return Err(bad());
+    }
+    let internal = match url.host() {
+        Some(url::Host::Ipv4(ip)) => !crate::outside::is_public(IpAddr::V4(ip)),
+        Some(url::Host::Ipv6(ip)) => !crate::outside::is_public(IpAddr::V6(ip)),
+        Some(url::Host::Domain(name)) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            name == "localhost" || [".localhost", ".internal", ".local"].iter().any(|end| name.ends_with(end))
+        }
+        None => true,
+    };
+    if internal && !allow_private {
+        return Err(PRIVATE.into());
+    }
+    Ok(url.origin().ascii_serialization())
+}
+
+/// Why an instance at an internal address is refused.
+const PRIVATE: &str = "other instances have to be on the internet, not a private or internal address \
+     (whoever runs this instance can allow those with FUWA_FEDERATION_ALLOW_PRIVATE=1)";
+
+/// What one instance keeps for talking to others.
+pub struct Federation {
+    allow_private: bool,
+    client: reqwest::Client,
+    key: OnceCell<Arc<Ed25519KeyPair>>,
+    /// Nonces seen from each instance, until they can't be replayed anyway.
+    nonces: Mutex<HashMap<(String, Vec<u8>), i64>>,
+    /// When the last greetings from unknown instances came, for a global cap.
+    hellos: Mutex<Vec<Instant>>,
+    /// When each instance's last_heard was written down.
+    heard: Mutex<HashMap<String, i64>>,
+    /// Instances this process said Hello to, and that answered.
+    introduced: Mutex<HashSet<String>>,
+}
+
+impl Federation {
+    pub fn new(allow_private: bool) -> Self {
+        let client = reqwest::Client::builder()
+            .dns_resolver(Arc::new(Resolver { allow_private }))
+            // A proxy would look names up itself, past the resolver.
+            .no_proxy()
+            .https_only(!allow_private)
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(TIMEOUT)
+            .connect_timeout(Duration::from_secs(5))
+            .build()
+            .expect("the HTTP client builds");
+        Self {
+            allow_private,
+            client,
+            key: OnceCell::new(),
+            nonces: Mutex::default(),
+            hellos: Mutex::default(),
+            heard: Mutex::default(),
+            introduced: Mutex::default(),
+        }
+    }
+
+    pub fn allows_private(&self) -> bool {
+        self.allow_private
+    }
+
+    /// Remembers a nonce, or says it was seen.
+    fn fresh_nonce(&self, from: &str, nonce: &[u8], now: i64) -> std::result::Result<(), Refusal> {
+        let mut nonces = self.nonces.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if nonces.len() >= MAX_NONCES / 2 {
+            nonces.retain(|_, seen| now - *seen < NONCE_KEEP_MS);
+        }
+        if nonces.len() >= MAX_NONCES {
+            return Err(Refusal::Busy);
+        }
+        match nonces.entry((from.to_string(), nonce.to_vec())) {
+            std::collections::hash_map::Entry::Occupied(_) => Err(Refusal::Replayed),
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(now);
+                Ok(())
+            }
+        }
+    }
+
+    /// Whether another greeting from an unknown instance may be looked into now.
+    fn take_hello(&self) -> bool {
+        let mut hellos = self.hellos.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let now = Instant::now();
+        hellos.retain(|at| now.duration_since(*at) < Duration::from_secs(60));
+        if hellos.len() >= HELLOS_PER_MINUTE {
+            return false;
+        }
+        hellos.push(now);
+        true
+    }
+
+    fn introduced(&self, origin: &str) -> bool {
+        self.introduced.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).contains(origin)
+    }
+
+    fn set_introduced(&self, origin: &str, introduced: bool) {
+        let mut set = self.introduced.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if introduced {
+            set.insert(origin.to_string());
+        } else {
+            set.remove(origin);
+        }
+    }
+
+    /// Whether it's time to write down when `origin` was last heard from.
+    fn note_heard(&self, origin: &str, now: i64) -> bool {
+        let mut heard = self.heard.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match heard.get(origin) {
+            Some(at) if now - at < HEARD_EVERY_MS => false,
+            _ => {
+                heard.insert(origin.to_string(), now);
+                true
+            }
+        }
+    }
+}
+
+/// Looks names up and drops internal addresses, so another instance's name
+/// that points (or later re-points) inside this instance's network isn't called.
+struct Resolver {
+    allow_private: bool,
+}
+
+impl reqwest::dns::Resolve for Resolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let allow_private = self.allow_private;
+        Box::pin(async move {
+            let found = tokio::net::lookup_host((name.as_str(), 0)).await?;
+            let public: Vec<SocketAddr> =
+                found.filter(|a| allow_private || crate::outside::is_public(a.ip())).collect();
+            if public.is_empty() {
+                return Err(PRIVATE.into());
+            }
+            Ok(Box::new(public.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+/// Why a signed envelope was turned down. What the other side is told is
+/// fixed text; nothing about this instance's insides.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Refusal {
+    Malformed,
+    NotForUs,
+    Clock,
+    Signature,
+    Replayed,
+    NotAnAnswer,
+    Busy,
+}
+
+impl Refusal {
+    fn report(self) -> &'static str {
+        match self {
+            Refusal::Malformed => "federation_malformed",
+            Refusal::NotForUs => "federation_not_for_us",
+            Refusal::Clock => "federation_clock",
+            Refusal::Signature => "federation_signature",
+            Refusal::Replayed => "federation_replayed",
+            Refusal::NotAnAnswer => "federation_not_an_answer",
+            Refusal::Busy => "federation_busy",
+        }
+    }
+
+    fn message(self) -> &'static str {
+        match self {
+            Refusal::Malformed => "that envelope doesn't read",
+            Refusal::NotForUs => "that envelope is for another instance",
+            Refusal::Clock => "that envelope's time is more than 5 minutes off this instance's clock",
+            Refusal::Signature => "that envelope's signature doesn't check out",
+            Refusal::Replayed => "that envelope was already sent",
+            Refusal::NotAnAnswer => "that answer isn't for this call",
+            Refusal::Busy => "this instance is busy; try again",
+        }
+    }
+
+    fn status(self) -> Status {
+        crate::reports::server_error(self.report(), Some("federation"));
+        match self {
+            Refusal::Busy => Status::unavailable(self.message()),
+            Refusal::Signature => Status::unauthenticated(self.message()),
+            _ => Status::invalid_argument(self.message()),
+        }
+    }
+
+    fn error(self, origin: &str) -> Error {
+        crate::reports::server_error(self.report(), Some("federation"));
+        Error::FailedPrecondition(format!("{}'s answer was turned down: {}", display(origin), self.message()))
+    }
+}
+
+/// An origin as people read it: the host, and the port when there is one.
+pub fn display(origin: &str) -> &str {
+    origin.split_once("://").map_or(origin, |(_, rest)| rest)
+}
+
+/// The bytes an envelope's signature covers.
+fn signed_bytes(envelope: &fpb::Envelope) -> Vec<u8> {
+    let mut out = Vec::with_capacity(CONTEXT.len() + envelope.payload.len() + 128);
+    out.extend_from_slice(CONTEXT);
+    for part in [envelope.from.as_bytes(), envelope.to.as_bytes()] {
+        out.extend_from_slice(&(part.len() as u64).to_be_bytes());
+        out.extend_from_slice(part);
+    }
+    out.extend_from_slice(&envelope.sent_at_ms.to_be_bytes());
+    for part in [envelope.nonce.as_slice(), envelope.reply_to.as_slice(), envelope.payload.as_slice()] {
+        out.extend_from_slice(&(part.len() as u64).to_be_bytes());
+        out.extend_from_slice(part);
+    }
+    out
+}
+
+/// What can be checked about an envelope before its sender's key is known.
+fn precheck(own: &str, envelope: &fpb::Envelope) -> std::result::Result<(), Refusal> {
+    if envelope.nonce.len() != 16 || envelope.payload.len() > MAX_PAYLOAD || envelope.signature.len() != 64 {
+        return Err(Refusal::Malformed);
+    }
+    if envelope.to != own {
+        return Err(Refusal::NotForUs);
+    }
+    if (crate::id::now_ms() - envelope.sent_at_ms).abs() > WINDOW_MS {
+        return Err(Refusal::Clock);
+    }
+    Ok(())
+}
+
+/// Checks an envelope that came in against the key pinned for its sender:
+/// addressed here, on time, signed, not seen before, and (for an answer)
+/// answering `call`.
+fn check(
+    federation: &Federation,
+    own: &str,
+    envelope: &fpb::Envelope,
+    public_key: &[u8],
+    call: Option<&[u8]>,
+) -> std::result::Result<(), Refusal> {
+    precheck(own, envelope)?;
+    UnparsedPublicKey::new(&ED25519, public_key)
+        .verify(&signed_bytes(envelope), &envelope.signature)
+        .map_err(|_| Refusal::Signature)?;
+    match call {
+        Some(call) if envelope.reply_to != call => return Err(Refusal::NotAnAnswer),
+        None if !envelope.reply_to.is_empty() => return Err(Refusal::Malformed),
+        _ => {}
+    }
+    federation.fresh_nonce(&envelope.from, &envelope.nonce, crate::id::now_ms())
+}
+
+/// This instance's origin, or why it can't talk to others yet.
+pub fn own_origin(app: &App) -> Result<String> {
+    let public_url = app.settings().public_url.clone();
+    if public_url.is_empty() {
+        return Err(Error::FailedPrecondition(
+            "set this instance's public URL first: other instances know it by that address".into(),
+        ));
+    }
+    origin(&public_url, app.federation.allows_private()).map_err(|why| {
+        Error::FailedPrecondition(format!("this instance's public URL can't be used with other instances: {why}"))
+    })
+}
+
+/// Whether an instance is on the block list.
+pub fn blocked(app: &App, origin: &str) -> bool {
+    host_of(origin).is_some_and(|host| app.settings().federation_blocked_hosts.contains(&host))
+}
+
+/// This instance's key pair, read (or made) once.
+async fn key_pair(app: &App) -> Result<Arc<Ed25519KeyPair>> {
+    app.federation
+        .key
+        .get_or_try_init(|| async {
+            let pkcs8 = app.node()?.federation_key().await?;
+            Ed25519KeyPair::from_pkcs8(&pkcs8)
+                .map(Arc::new)
+                .map_err(|_| Error::internal("the instance's federation key doesn't read"))
+        })
+        .await
+        .cloned()
+}
+
+/// This instance's public key.
+pub async fn public_key(app: &App) -> Result<Vec<u8>> {
+    Ok(key_pair(app).await?.public_key().as_ref().to_vec())
+}
+
+/// A signed envelope from this instance to `to`.
+async fn seal(app: &App, own: &str, to: &str, payload: Vec<u8>, reply_to: Vec<u8>) -> Result<fpb::Envelope> {
+    let mut nonce = vec![0u8; 16];
+    SystemRandom::new().fill(&mut nonce).map_err(|_| Error::internal("the OS random number generator failed"))?;
+    let mut envelope = fpb::Envelope {
+        from: own.to_string(),
+        to: to.to_string(),
+        sent_at_ms: crate::id::now_ms(),
+        nonce,
+        reply_to,
+        payload,
+        signature: Vec::new(),
+    };
+    envelope.signature = key_pair(app).await?.sign(&signed_bytes(&envelope)).as_ref().to_vec();
+    Ok(envelope)
+}
+
+/// Writes down that `origin` was heard from, now and then.
+async fn heard(app: &App, origin: &str) {
+    if app.federation.note_heard(origin, crate::id::now_ms())
+        && let Ok(node) = app.node()
+        && node.heard_from_peer(origin).await.is_err()
+    {
+        crate::reports::server_error("federation_heard", Some("federation"));
+    }
+}
+
+// --- Calling other instances ---
+
+/// One gRPC-Web call to another instance, as a browser would make it, so it
+/// goes through that instance's gateway like any other call.
+async fn unary<Req: Message, Res: Message + Default>(
+    app: &App,
+    origin: &str,
+    method: &str,
+    request: &Req,
+) -> Result<Res> {
+    let shown = display(origin);
+    let body = request.encode_to_vec();
+    let mut framed = Vec::with_capacity(body.len() + 5);
+    framed.push(0);
+    framed.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    framed.extend_from_slice(&body);
+    let started = Instant::now();
+    let sent = app
+        .federation
+        .client
+        .post(format!("{origin}/fuwa.federation.v1.FederationService/{method}"))
+        .header("content-type", "application/grpc-web+proto")
+        .header("x-grpc-web", "1")
+        .body(framed)
+        .send()
+        .await;
+    let mut response = match sent {
+        Ok(response) => response,
+        Err(err) => {
+            crate::reports::server_error("federation_unreachable", Some("federation"));
+            let why = if err.is_timeout() {
+                "it didn't answer in time"
+            } else if err.is_connect() {
+                "couldn't connect to it"
+            } else {
+                "the connection failed"
+            };
+            return Err(Error::Unavailable(format!("couldn't reach {shown}: {why}")));
+        }
+    };
+    if !response.status().is_success() {
+        crate::reports::server_error("federation_http_status", Some("federation"));
+        return Err(Error::Unavailable(format!(
+            "{shown} answered HTTP {}: is fuwa running there, with federation on?",
+            response.status().as_u16()
+        )));
+    }
+    if let Some(status) = grpc_status(response.headers().get("grpc-status"), response.headers().get("grpc-message")) {
+        return Err(remote_error(shown, status));
+    }
+    let mut bytes = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                if bytes.len() + chunk.len() > MAX_PAYLOAD + 64 * 1024 {
+                    return Err(Error::Unavailable(format!("{shown}'s answer is too big")));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(_) => return Err(Error::Unavailable(format!("{shown}'s answer was cut off"))),
+        }
+    }
+    crate::reports::server_timing(&format!("federation:{method}"), started.elapsed());
+    let mut message = None;
+    let mut rest = bytes.as_slice();
+    while rest.len() >= 5 {
+        let flag = rest[0];
+        let len = u32::from_be_bytes([rest[1], rest[2], rest[3], rest[4]]) as usize;
+        let Some(frame) = rest.get(5..5 + len) else { break };
+        if flag & 0x80 == 0 {
+            message.get_or_insert(frame);
+        } else if let Some(status) = trailer_status(frame) {
+            return Err(remote_error(shown, status));
+        }
+        rest = &rest[5 + len..];
+    }
+    let frame = message.ok_or_else(|| Error::Unavailable(format!("{shown}'s answer didn't read")))?;
+    Res::decode(frame).map_err(|_| Error::Unavailable(format!("{shown}'s answer didn't read")))
+}
+
+/// A non-OK status from headers, as (code, message).
+fn grpc_status(
+    code: Option<&reqwest::header::HeaderValue>,
+    message: Option<&reqwest::header::HeaderValue>,
+) -> Option<(i32, String)> {
+    let code: i32 = code?.to_str().ok()?.trim().parse().ok()?;
+    (code != 0).then(|| (code, message.and_then(|m| m.to_str().ok()).map(percent_decode).unwrap_or_default()))
+}
+
+/// A non-OK status from a gRPC-Web trailers frame.
+fn trailer_status(frame: &[u8]) -> Option<(i32, String)> {
+    let text = std::str::from_utf8(frame).ok()?;
+    let mut code = None;
+    let mut message = String::new();
+    for line in text.split("\r\n") {
+        if let Some((name, value)) = line.split_once(':') {
+            match name.trim().to_ascii_lowercase().as_str() {
+                "grpc-status" => code = value.trim().parse::<i32>().ok(),
+                "grpc-message" => message = percent_decode(value.trim()),
+                _ => {}
+            }
+        }
+    }
+    code.filter(|code| *code != 0).map(|code| (code, message))
+}
+
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && let Some(byte) = text.get(i + 1..i + 3).and_then(|hex| u8::from_str_radix(hex, 16).ok())
+        {
+            out.push(byte);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// What another instance said went wrong, for this instance's admins: its own
+/// words, clipped and on one line.
+fn remote_error(shown: &str, (code, message): (i32, String)) -> Error {
+    crate::reports::server_error("federation_refused", Some("federation"));
+    let message: String = message.chars().filter(|c| !c.is_control()).take(200).collect::<String>().trim().to_string();
+    let message = if message.is_empty() { format!("error {code}") } else { message };
+    let text = format!("{shown} said: {message}");
+    match tonic::Code::from(code) {
+        tonic::Code::Unavailable | tonic::Code::DeadlineExceeded => Error::Unavailable(text),
+        _ => Error::FailedPrecondition(text),
+    }
+}
+
+/// Another instance's key, fetched from it, checked to be for the address
+/// asked, and pinned (or checked against the one already pinned).
+async fn pin(app: &App, origin: &str) -> Result<crate::node::FederationPeer> {
+    let shown = display(origin);
+    let key: fpb::GetKeyResponse = unary(app, origin, "GetKey", &fpb::GetKeyRequest {}).await?;
+    if key.origin != origin {
+        return Err(Error::FailedPrecondition(format!(
+            "{shown} says it's {}, so its public URL doesn't match the address it was reached on",
+            display(&key.origin)
+        )));
+    }
+    if key.public_key.len() != 32 {
+        return Err(Error::FailedPrecondition(format!("{shown}'s key doesn't read")));
+    }
+    app.node()?.pin_federation_peer(origin, &key.public_key).await
+}
+
+/// Sends a signed envelope to another instance and checks its signed answer.
+/// The signed calls.
+#[derive(Clone, Copy)]
+enum Method {
+    Hello,
+    Call,
+}
+
+async fn exchange(
+    app: &App,
+    own: &str,
+    peer: &crate::node::FederationPeer,
+    method: Method,
+    payload: Vec<u8>,
+) -> Result<Vec<u8>> {
+    let envelope = seal(app, own, &peer.origin, payload, Vec::new()).await?;
+    let answer = match method {
+        Method::Hello => {
+            let request = fpb::HelloRequest { envelope: Some(envelope.clone()) };
+            unary::<_, fpb::HelloResponse>(app, &peer.origin, "Hello", &request).await?.envelope
+        }
+        Method::Call => {
+            let request = fpb::CallRequest { envelope: Some(envelope.clone()) };
+            unary::<_, fpb::CallResponse>(app, &peer.origin, "Call", &request).await?.envelope
+        }
+    };
+    let answer = answer.ok_or_else(|| Refusal::Malformed.error(&peer.origin))?;
+    if answer.from != peer.origin {
+        return Err(Refusal::NotAnAnswer.error(&peer.origin));
+    }
+    check(&app.federation, own, &answer, &peer.public_key, Some(&envelope.nonce))
+        .map_err(|refusal| refusal.error(&peer.origin))?;
+    heard(app, &peer.origin).await;
+    Ok(answer.payload)
+}
+
+/// Makes sure another instance can be talked to: federation is on, it isn't
+/// blocked, its key is pinned here and this instance's is pinned there (said
+/// Hello once per process, or again when `hello`).
+async fn reach(app: &App, address: &str, hello: bool) -> Result<(String, crate::node::FederationPeer)> {
+    if !app.settings().federation {
+        return Err(Error::FailedPrecondition("federation is off on this instance".into()));
+    }
+    let own = own_origin(app)?;
+    let origin = origin(address, app.federation.allows_private()).map_err(Error::invalid)?;
+    if origin == own {
+        return Err(Error::invalid("that's this instance's own address"));
+    }
+    if blocked(app, &origin) {
+        return Err(Error::FailedPrecondition(format!("{} is on this instance's block list", display(&origin))));
+    }
+    let peer = match app.node()?.federation_peer(&origin).await? {
+        Some(peer) => peer,
+        None => pin(app, &origin).await?,
+    };
+    if hello || !app.federation.introduced(&origin) {
+        exchange(app, &own, &peer, Method::Hello, fpb::Hello {}.encode_to_vec()).await?;
+        app.federation.set_introduced(&origin, true);
+    }
+    Ok((own, peer))
+}
+
+/// A signed call to another instance, and its answer.
+pub async fn call(app: &App, address: &str, request: fpb::Request) -> Result<fpb::Response> {
+    call_with(app, address, request, false).await
+}
+
+async fn call_with(app: &App, address: &str, request: fpb::Request, hello: bool) -> Result<fpb::Response> {
+    let (own, peer) = reach(app, address, hello).await?;
+    let answer = match exchange(app, &own, &peer, Method::Call, request.encode_to_vec()).await {
+        Ok(answer) => answer,
+        Err(err) => {
+            // Say Hello again next time, in case the other side forgot this one.
+            app.federation.set_introduced(&peer.origin, false);
+            return Err(err);
+        }
+    };
+    fpb::Response::decode(answer.as_slice())
+        .map_err(|_| Error::Unavailable(format!("{}'s answer didn't read", display(&peer.origin))))
+}
+
+/// An admin's check that another instance can be talked to: pins keys both
+/// ways and times a signed ping there and back.
+pub async fn check_instance(app: &App, address: &str) -> Result<(crate::node::FederationPeer, Duration)> {
+    let started = Instant::now();
+    let ping = fpb::Request { call: Some(fpb::request::Call::Ping(fpb::Ping {})) };
+    let answer = call_with(app, address, ping, true).await?;
+    let took = started.elapsed();
+    if !matches!(answer.answer, Some(fpb::response::Answer::Pong(_))) {
+        return Err(Error::Unavailable("the other instance didn't answer the ping".into()));
+    }
+    let origin = origin(address, app.federation.allows_private()).map_err(Error::invalid)?;
+    let peer =
+        app.node()?.federation_peer(&origin).await?.ok_or_else(|| Error::internal("a pinned instance went missing"))?;
+    Ok((peer, took))
+}
+
+/// A peer for the admin API.
+pub fn peer_pb(app: &App, peer: &crate::node::FederationPeer) -> crate::pb::FederationPeer {
+    crate::pb::FederationPeer {
+        origin: peer.origin.clone(),
+        fingerprint: fingerprint(&peer.public_key),
+        first_seen: Some(crate::id::timestamp(peer.first_seen)),
+        last_heard: Some(crate::id::timestamp(peer.last_heard)),
+        blocked: blocked(app, &peer.origin),
+    }
+}
+
+// --- Answering other instances ---
+
+/// FederationService, on the instance's public port.
+pub struct Service(pub Arc<App>);
+
+impl Service {
+    /// Federation is on and this instance has an address to be known by.
+    fn ready(&self) -> std::result::Result<String, Status> {
+        if !self.0.settings().federation {
+            return Err(Status::failed_precondition("federation is off on this instance"));
+        }
+        own_origin(&self.0).map_err(|_| Status::failed_precondition("this instance isn't set up for federation"))
+    }
+
+    /// An envelope's sender, if it's an address this instance would talk to.
+    fn sender(&self, envelope: &fpb::Envelope) -> std::result::Result<String, Status> {
+        let from = origin(&envelope.from, self.0.federation.allows_private())
+            .ok()
+            .filter(|from| *from == envelope.from)
+            .ok_or_else(|| Refusal::Malformed.status())?;
+        if blocked(&self.0, &from) {
+            return Err(Status::permission_denied("this instance doesn't talk to yours"));
+        }
+        Ok(from)
+    }
+
+    async fn answer(
+        &self,
+        own: &str,
+        to: &str,
+        call: &[u8],
+        payload: Vec<u8>,
+    ) -> std::result::Result<fpb::Envelope, Status> {
+        seal(&self.0, own, to, payload, call.to_vec()).await.map_err(|_| {
+            crate::reports::server_error("federation_seal", Some("federation"));
+            Status::internal("this instance couldn't sign its answer")
+        })
+    }
+
+    fn node(&self) -> std::result::Result<&crate::node::NodeDb, Status> {
+        self.0.node().map_err(|_| Status::internal("this part keeps no data"))
+    }
+}
+
+#[tonic::async_trait]
+impl fpb::federation_service_server::FederationService for Service {
+    async fn get_key(
+        &self,
+        _request: Request<fpb::GetKeyRequest>,
+    ) -> std::result::Result<Response<fpb::GetKeyResponse>, Status> {
+        let own = self.ready()?;
+        let public_key =
+            public_key(&self.0).await.map_err(|_| Status::internal("this instance's key isn't readable"))?;
+        Ok(Response::new(fpb::GetKeyResponse { origin: own, public_key }))
+    }
+
+    async fn hello(
+        &self,
+        request: Request<fpb::HelloRequest>,
+    ) -> std::result::Result<Response<fpb::HelloResponse>, Status> {
+        let own = self.ready()?;
+        let envelope = request.into_inner().envelope.ok_or_else(|| Refusal::Malformed.status())?;
+        let from = self.sender(&envelope)?;
+        precheck(&own, &envelope).map_err(Refusal::status)?;
+        let pinned =
+            self.node()?.federation_peer(&from).await.map_err(|_| Status::internal("couldn't read the pinned keys"))?;
+        let public_key = match pinned {
+            Some(peer) => peer.public_key,
+            None => {
+                // Someone new: fetch its key from its own address, which only
+                // whoever runs that address can answer, but no more often
+                // than the cap, so greetings can't make this instance fetch
+                // endlessly.
+                if !self.0.federation.take_hello() {
+                    crate::reports::server_error("federation_hellos_capped", Some("federation"));
+                    return Err(Status::resource_exhausted(
+                        "this instance is meeting too many instances; try again in a minute",
+                    ));
+                }
+                let key: fpb::GetKeyResponse =
+                    unary(&self.0, &from, "GetKey", &fpb::GetKeyRequest {}).await.map_err(|_| {
+                        Status::failed_precondition("this instance couldn't fetch your key from your address")
+                    })?;
+                if key.origin != from || key.public_key.len() != 32 {
+                    return Err(Status::failed_precondition("the key at your address isn't for that address"));
+                }
+                key.public_key
+            }
+        };
+        check(&self.0.federation, &own, &envelope, &public_key, None).map_err(Refusal::status)?;
+        fpb::Hello::decode(envelope.payload.as_slice()).map_err(|_| Refusal::Malformed.status())?;
+        self.node()?.pin_federation_peer(&from, &public_key).await.map_err(|err| match err {
+            Error::FailedPrecondition(_) => {
+                Status::failed_precondition("this instance has a different key pinned for your address")
+            }
+            _ => Status::internal("couldn't pin your key"),
+        })?;
+        heard(&self.0, &from).await;
+        let answer = self.answer(&own, &from, &envelope.nonce, fpb::Hello {}.encode_to_vec()).await?;
+        Ok(Response::new(fpb::HelloResponse { envelope: Some(answer) }))
+    }
+
+    async fn call(
+        &self,
+        request: Request<fpb::CallRequest>,
+    ) -> std::result::Result<Response<fpb::CallResponse>, Status> {
+        let own = self.ready()?;
+        let envelope = request.into_inner().envelope.ok_or_else(|| Refusal::Malformed.status())?;
+        let from = self.sender(&envelope)?;
+        let peer = self
+            .node()?
+            .federation_peer(&from)
+            .await
+            .map_err(|_| Status::internal("couldn't read the pinned keys"))?
+            .ok_or_else(|| Status::unauthenticated("this instance doesn't know your key yet: say Hello first"))?;
+        check(&self.0.federation, &own, &envelope, &peer.public_key, None).map_err(Refusal::status)?;
+        let call = fpb::Request::decode(envelope.payload.as_slice()).map_err(|_| Refusal::Malformed.status())?;
+        heard(&self.0, &from).await;
+        let started = Instant::now();
+        let answer = match call.call {
+            Some(fpb::request::Call::Ping(_)) => {
+                fpb::Response { answer: Some(fpb::response::Answer::Pong(fpb::Pong {})) }
+            }
+            None => {
+                return Err(Status::unimplemented("this instance doesn't know that call; it may run an older fuwa"));
+            }
+        };
+        crate::reports::server_timing("federation:answer", started.elapsed());
+        let answer = self.answer(&own, &from, &envelope.nonce, answer.encode_to_vec()).await?;
+        Ok(Response::new(fpb::CallResponse { envelope: Some(answer) }))
+    }
+}
+
+/// The service, with incoming messages capped.
+pub fn server(app: Arc<App>) -> fpb::federation_service_server::FederationServiceServer<Service> {
+    fpb::federation_service_server::FederationServiceServer::new(Service(app))
+        .max_decoding_message_size(MAX_PAYLOAD + 64 * 1024)
+        .max_encoding_message_size(MAX_PAYLOAD + 64 * 1024)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn origins_are_https_and_public_unless_allowed() {
+        assert_eq!(origin("chat.example.com", false).unwrap(), "https://chat.example.com");
+        assert_eq!(origin("https://Chat.Example.com/", false).unwrap(), "https://chat.example.com");
+        assert_eq!(origin("https://chat.example.com:8443", false).unwrap(), "https://chat.example.com:8443");
+        assert!(origin("http://chat.example.com", false).is_err());
+        assert!(origin("https://chat.example.com/path", false).is_err());
+        assert!(origin("https://user@chat.example.com", false).is_err());
+        assert!(origin("https://chat.example.com?x=1", false).is_err());
+        for internal in
+            ["localhost", "127.0.0.1", "10.0.0.2", "[::1]", "db.railway.internal", "printer.local", "169.254.169.254"]
+        {
+            assert_eq!(origin(internal, false), Err(PRIVATE.to_string()), "{internal}");
+        }
+        assert_eq!(origin("http://127.0.0.1:4000", true).unwrap(), "http://127.0.0.1:4000");
+    }
+
+    #[test]
+    fn hosts_for_the_block_list() {
+        assert_eq!(host_of("Chat.Example.com").as_deref(), Some("chat.example.com"));
+        assert_eq!(host_of("https://chat.example.com:8443/").as_deref(), Some("chat.example.com"));
+        assert_eq!(host_of("not a host"), None);
+    }
+
+    #[test]
+    fn fingerprints_are_eight_groups_of_four() {
+        let print = fingerprint(&[7u8; 32]);
+        assert_eq!(print.split(' ').count(), 8);
+        assert!(print.split(' ').all(|group| group.len() == 4));
+    }
+
+    #[test]
+    fn signatures_cover_every_field() {
+        let pkcs8 = new_key().unwrap();
+        let pair = Ed25519KeyPair::from_pkcs8(&pkcs8).unwrap();
+        let federation = Federation::new(true);
+        let mut envelope = fpb::Envelope {
+            from: "https://a.example".into(),
+            to: "https://b.example".into(),
+            sent_at_ms: crate::id::now_ms(),
+            nonce: vec![1; 16],
+            reply_to: Vec::new(),
+            payload: b"hi".to_vec(),
+            signature: Vec::new(),
+        };
+        envelope.signature = pair.sign(&signed_bytes(&envelope)).as_ref().to_vec();
+        let key = pair.public_key().as_ref().to_vec();
+        let changed: [fn(&mut fpb::Envelope); 5] = [
+            |e| e.from = "https://c.example".into(),
+            |e| e.sent_at_ms += 1,
+            |e| e.nonce = vec![2; 16],
+            |e| e.reply_to = vec![3; 16],
+            |e| e.payload = b"ho".to_vec(),
+        ];
+        for change in changed {
+            let mut tampered = envelope.clone();
+            change(&mut tampered);
+            let checked = check(&federation, "https://b.example", &tampered, &key, None);
+            assert!(matches!(checked, Err(Refusal::Signature | Refusal::Malformed)), "{checked:?}");
+        }
+        assert_eq!(check(&federation, "https://c.example", &envelope, &key, None), Err(Refusal::NotForUs));
+        assert_eq!(check(&federation, "https://b.example", &envelope, &key, None), Ok(()));
+        assert_eq!(check(&federation, "https://b.example", &envelope, &key, None), Err(Refusal::Replayed));
+        let mut old = envelope.clone();
+        old.sent_at_ms -= WINDOW_MS + 1000;
+        old.signature = pair.sign(&signed_bytes(&old)).as_ref().to_vec();
+        assert_eq!(check(&federation, "https://b.example", &old, &key, None), Err(Refusal::Clock));
+    }
+}

@@ -398,6 +398,49 @@ impl AdminService for Api {
         )
     }
 
+    async fn get_federation(
+        &self,
+        request: Request<pb::GetFederationRequest>,
+    ) -> Result<Response<pb::GetFederationResponse>, Status> {
+        respond(
+            async {
+                self.require_instance_admin(request.metadata()).await?;
+                let app = &self.app;
+                let (origin, origin_problem) = match crate::federation::own_origin(app) {
+                    Ok(origin) => (origin, String::new()),
+                    Err(err) => (String::new(), err.to_string()),
+                };
+                let fingerprint = crate::federation::fingerprint(&crate::federation::public_key(app).await?);
+                let peers = app.node()?.federation_peers().await?;
+                Ok(pb::GetFederationResponse {
+                    origin,
+                    origin_problem,
+                    fingerprint,
+                    peers: peers.iter().map(|peer| crate::federation::peer_pb(app, peer)).collect(),
+                })
+            }
+            .await,
+        )
+    }
+
+    async fn check_instance(
+        &self,
+        request: Request<pb::CheckInstanceRequest>,
+    ) -> Result<Response<pb::CheckInstanceResponse>, Status> {
+        respond(
+            async {
+                self.require_instance_admin(request.metadata()).await?;
+                let address = request.into_inner().address;
+                let (peer, took) = crate::federation::check_instance(&self.app, &address).await?;
+                Ok(pb::CheckInstanceResponse {
+                    peer: Some(crate::federation::peer_pb(&self.app, &peer)),
+                    round_trip_ms: took.as_millis().min(i64::MAX as u128) as i64,
+                })
+            }
+            .await,
+        )
+    }
+
     async fn move_server(
         &self,
         request: Request<pb::MoveServerRequest>,

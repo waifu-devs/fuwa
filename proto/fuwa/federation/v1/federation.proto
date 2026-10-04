@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package fuwa.federation.v1;
+
+// How fuwa instances talk to each other, for servers sharing channels across
+// instances (docs/federation.md). Apps never call this: only another
+// instance does, on the instance's public address, and only while the
+// instance's federation setting is on.
+//
+// Every call but GetKey is an Envelope signed with the calling instance's
+// Ed25519 key, and every answer is an Envelope signed with the answering
+// instance's, bound to the call it answers.
+service FederationService {
+  // This instance's address and public key. Unsigned: the https connection
+  // it's fetched over vouches for the address.
+  rpc GetKey(GetKeyRequest) returns (GetKeyResponse);
+  // A signed greeting from an instance the receiver may not know yet. The
+  // receiver fetches the caller's key from the caller's own address (GetKey),
+  // checks the greeting with it and pins it. Its payload is a Hello.
+  rpc Hello(HelloRequest) returns (HelloResponse);
+  // Everything else, from an instance whose key the receiver already pinned.
+  // Its payload is a Request, the answer's a Response.
+  rpc Call(CallRequest) returns (CallResponse);
+}
+
+message GetKeyRequest {}
+
+message GetKeyResponse {
+  // The instance's address, like https://chat.example.com.
+  string origin = 1;
+  // Its Ed25519 public key, 32 bytes.
+  bytes public_key = 2;
+}
+
+message HelloRequest {
+  Envelope envelope = 1;
+}
+
+message HelloResponse {
+  Envelope envelope = 1;
+}
+
+message CallRequest {
+  Envelope envelope = 1;
+}
+
+message CallResponse {
+  Envelope envelope = 1;
+}
+
+// A signed message between two instances.
+message Envelope {
+  // The sender's address and the receiver's, as origins
+  // (https://chat.example.com).
+  string from = 1;
+  string to = 2;
+  // When the sender signed it, in milliseconds since 1970 (UTC). The
+  // receiver refuses one more than 5 minutes off its own clock.
+  int64 sent_at_ms = 3;
+  // 16 random bytes; the receiver refuses one it saw in the last 10 minutes.
+  bytes nonce = 4;
+  // On an answer, the nonce of the call it answers.
+  bytes reply_to = 5;
+  // A Hello, Request or Response, encoded. At most 1 MiB.
+  bytes payload = 6;
+  // Ed25519 over "fuwa-federation-v1", then from, to, sent_at_ms, nonce,
+  // reply_to and payload, each after its length as 8 bytes (big-endian),
+  // sent_at_ms as 8 bytes itself.
+  bytes signature = 7;
+}
+
+message Hello {}
+
+message Request {
+  oneof call {
+    Ping ping = 1;
+  }
+}
+
+message Response {
+  oneof answer {
+    Pong pong = 1;
+  }
+}
+
+// Checks that two instances can reach each other and read each other's
+// signatures.
+message Ping {}
+
+message Pong {}

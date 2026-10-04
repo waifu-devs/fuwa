@@ -35,6 +35,8 @@ pub const FIELDS: &[&str] = &[
     "calls",
     "call_recordings",
     "shared_channels",
+    "federation",
+    "federation_blocked_hosts",
     "call_recordings_keep_days",
     "ice_urls",
     "turn_secret",
@@ -62,6 +64,10 @@ pub struct Settings {
     pub calls: bool,
     pub call_recordings: bool,
     pub shared_channels: bool,
+    /// Sharing channels with other fuwa instances (docs/federation.md).
+    pub federation: bool,
+    /// Instances this one won't talk to, by host name.
+    pub federation_blocked_hosts: Vec<String>,
     pub call_recordings_keep_days: Option<i64>,
     pub ice_urls: Vec<String>,
     pub turn_secret: String,
@@ -90,6 +96,8 @@ impl Settings {
             calls: config.calls,
             call_recordings: config.call_recordings,
             shared_channels: config.shared_channels,
+            federation: config.federation,
+            federation_blocked_hosts: Vec::new(),
             call_recordings_keep_days: config.call_recordings_keep_days,
             ice_urls: config.ice_urls.clone(),
             turn_secret: config.turn_secret.clone(),
@@ -198,6 +206,8 @@ impl Settings {
             calls: self.calls,
             call_recordings: self.call_recordings,
             shared_channels: self.shared_channels,
+            federation: self.federation,
+            federation_blocked_hosts: self.federation_blocked_hosts.clone(),
             call_recordings_keep_days: self.call_recordings_keep_days,
             ice_urls: self.ice_urls.clone(),
             turn_secret: self.turn_secret.clone(),
@@ -290,6 +300,8 @@ impl Settings {
             "calls" => Value::from(from.calls),
             "call_recordings" => Value::from(from.call_recordings),
             "shared_channels" => Value::from(from.shared_channels),
+            "federation" => Value::from(from.federation),
+            "federation_blocked_hosts" => Value::from(from.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(from.call_recordings_keep_days),
             "ice_urls" => Value::from(from.ice_urls.clone()),
             "turn_secret" => Value::from(from.turn_secret.clone()),
@@ -358,6 +370,8 @@ impl Settings {
             "calls" => Value::from(self.calls),
             "call_recordings" => Value::from(self.call_recordings),
             "shared_channels" => Value::from(self.shared_channels),
+            "federation" => Value::from(self.federation),
+            "federation_blocked_hosts" => Value::from(self.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(self.call_recordings_keep_days),
             "ice_urls" => Value::from(self.ice_urls.clone()),
             "turn_secret" => Value::from(self.turn_secret.clone()),
@@ -421,6 +435,8 @@ impl Settings {
             "calls" => self.calls = flag(field, value)?,
             "call_recordings" => self.call_recordings = flag(field, value)?,
             "shared_channels" => self.shared_channels = flag(field, value)?,
+            "federation" => self.federation = flag(field, value)?,
+            "federation_blocked_hosts" => self.federation_blocked_hosts = blocked_hosts(value)?,
             "call_recordings_keep_days" => {
                 self.call_recordings_keep_days = match cap(field, value)? {
                     Some(0) => {
@@ -518,6 +534,28 @@ fn public_url(value: &Value) -> Result<String> {
         return Err(Error::invalid("public_url must be an http(s) URL, like https://chat.example.com"));
     }
     Ok(url.to_string())
+}
+
+/// Up to 500 host names, like chat.example.com, each once. A full address
+/// (https://chat.example.com/) is taken for its host.
+fn blocked_hosts(value: &Value) -> Result<Vec<String>> {
+    let invalid = || Error::invalid("federation_blocked_hosts must be up to 500 host names, like chat.example.com");
+    let list = value.as_array().ok_or_else(invalid)?;
+    let mut hosts: Vec<String> = Vec::new();
+    for entry in list {
+        let entry = entry.as_str().ok_or_else(invalid)?.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let host = crate::federation::host_of(entry).ok_or_else(invalid)?;
+        if !hosts.contains(&host) {
+            hosts.push(host);
+        }
+    }
+    if hosts.len() > 500 {
+        return Err(invalid());
+    }
+    Ok(hosts)
 }
 
 fn issuer(value: &Value) -> Result<String> {
