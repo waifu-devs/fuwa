@@ -14,6 +14,11 @@ export const CALL_FIELDS: { path: string; get: (s: InstanceSettings) => unknown;
   { path: "calls", get: (s) => s.calls, copy: (into, from) => (into.calls = from.calls) },
   { path: "call_recordings", get: (s) => s.callRecordings, copy: (into, from) => (into.callRecordings = from.callRecordings) },
   {
+    path: "call_recording_video",
+    get: (s) => s.callRecordingVideo,
+    copy: (into, from) => (into.callRecordingVideo = from.callRecordingVideo),
+  },
+  {
     path: "call_recordings_keep_days",
     get: (s) => s.callRecordingsKeepDays,
     copy: (into, from) => (into.callRecordingsKeepDays = from.callRecordingsKeepDays),
@@ -110,6 +115,20 @@ export function CallSettings({
           onChange={(on) => patch((d) => (d.callRecordings = on))}
           label="Let people with Record keep voice channels' recordings on this instance"
           hint="One Ogg Opus track per person, kept with the server's files (sealed when the instance encrypts its files). Nobody has Record until a server's admins grant it. Turning this off stops recordings going on now; the ones kept stay. How much each server may keep is a cap under Limits."
+        />
+      </Setting>
+      <Setting
+        id="call-recording-video"
+        title="Video in recordings"
+        delay={0.025}
+        defaultLabel={defaults.callRecordingVideo ? "on" : "off"}
+        {...resetter("call_recording_video")}
+      >
+        <Toggle
+          checked={draft.callRecordingVideo}
+          onChange={(on) => patch((d) => (d.callRecordingVideo = on))}
+          label="Let servers keep cameras and shared screens in their recordings too"
+          hint="Each server's admins choose it under Recordings in their settings. A WebM file per camera and screen, next to the sound: an hour of a camera takes several times the room of the sound, against the same caps under Limits. Turning this off turns it off in every server and ends the recordings filming now."
         />
       </Setting>
       <Setting

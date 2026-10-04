@@ -136,6 +136,12 @@ message InstanceSettings {
   // unset keeps them until someone deletes them.
   // FUWA_CALL_RECORDINGS_KEEP_DAYS.
   optional int64 call_recordings_keep_days = 24;
+  // Servers may have their recordings keep cameras and shared screens too
+  // (Server.record_video), as WebM files: far bigger than sound, against
+  // the same caps. Turning it off turns it off in every server, and ends
+  // the recordings it was filming. FUWA_CALL_RECORDING_VIDEO, off unless
+  // set.
+  bool call_recording_video = 49;
   // Who may make agents (bot accounts). Agents already made keep working.
   // FUWA_AGENT_CREATION.
   AgentCreation agent_creation = 13;

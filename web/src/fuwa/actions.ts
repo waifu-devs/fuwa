@@ -880,6 +880,13 @@ export const listApplications = (key: string, serverId: string) =>
     return applications;
   });
 
+/** Whether the instance lets servers keep video in their recordings. */
+export const getRecordingVideo = (key: string) =>
+  Effect.gen(function* () {
+    const settings = yield* call((signal) => api(key).calls.getCallSettings({}, { signal }));
+    return settings.recordingVideo;
+  });
+
 export const reviewApplication = (key: string, serverId: string, application: Application, approve: boolean, reason = "") =>
   Effect.gen(function* () {
     const userId = application.user!.id;
@@ -953,6 +960,8 @@ export const updateServer = (
     bannerFocusY?: number;
     /** 0xRRGGBB, or -1 for none. */
     accentColor?: number;
+    /** Recordings on the server keep cameras and shared screens too. */
+    recordVideo?: boolean;
   },
 ) =>
   Effect.gen(function* () {

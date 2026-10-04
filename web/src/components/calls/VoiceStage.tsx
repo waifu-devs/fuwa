@@ -207,9 +207,10 @@ function Tile({ instanceKey, serverId, channelId, state, index }: { instanceKey:
   );
 }
 
-/** Who's recording the channel, for everyone to see, while anyone is: on the server, or on their device. */
+/** Who's recording the channel, for everyone to see, while anyone is: on the server (with video, when the server keeps cameras too), or on their device. */
 function RecordingPill({ instanceKey, serverId, states }: { instanceKey: string; serverId: string; states: VoiceState[] }) {
   const onServer = states.some((v) => v.serverRecord);
+  const video = useFuwa((s) => !!s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.recordVideo) && onServer;
   const names = useFuwa((s) =>
     states
       .filter((v) => v.selfRecord || v.serverRecord)
@@ -227,7 +228,7 @@ function RecordingPill({ instanceKey, serverId, states }: { instanceKey: string;
           animate={{ opacity: 1, scale: 1, x: 0 }}
           exit={{ opacity: 0, scale: 0.8 }}
           transition={SPRING}
-          title={`${names} ${names.includes(",") ? "are" : "is"} recording this channel${onServer ? " (on the server)" : ""}`}
+          title={`${names} ${names.includes(",") ? "are" : "is"} recording this channel${video ? " on the server, with cameras and shared screens" : onServer ? " (on the server)" : ""}`}
           className="flex max-w-[45%] items-center gap-1.5 rounded-full bg-[#ed4245]/12 px-2.5 py-1 text-xs font-bold text-[#ed4245]"
         >
           <span aria-hidden className="relative grid size-2 place-items-center">
@@ -235,7 +236,7 @@ function RecordingPill({ instanceKey, serverId, states }: { instanceKey: string;
             <span className="size-2 rounded-full bg-[#ed4245]" />
           </span>
           <span className="truncate">
-            {onServer ? "Recording on the server" : "Recording"} · {names}
+            {video ? "Recording with video" : onServer ? "Recording on the server" : "Recording"} · {names}
           </span>
         </motion.span>
       )}

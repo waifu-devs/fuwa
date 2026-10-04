@@ -31,6 +31,7 @@ import {
   Trash2Icon,
   TriangleAlertIcon,
   UsersIcon,
+  VideoIcon,
   WebhookIcon,
   XIcon,
   type LucideIcon,
@@ -54,6 +55,7 @@ import { SharedGlyph } from "@/components/chat/Shared";
 import { SharedConnectionState } from "@/gen/fuwa/v1/channel_pb";
 import { listConnections } from "@/fuwa/actions";
 import { SingleSignOn } from "@/components/settings/server/SingleSignOn";
+import { RecordingSettings } from "@/components/settings/server/Recordings";
 import { ServerAgents } from "@/components/settings/server/ServerAgents";
 import { WelcomeAndOnboarding } from "@/components/settings/server/WelcomeAndOnboarding";
 import { JoinFormEditor } from "@/components/settings/server/JoinFormEditor";
@@ -250,6 +252,14 @@ export function ServerSettingsDialog({
       description: "Channels shown in another server, or from one. Messages stay with the server the channel comes from.",
       keywords: "share connect slack connect other server guest home code external partner",
     },
+    {
+      id: "recordings",
+      label: "Recordings",
+      icon: VideoIcon,
+      description: "What recordings on the server keep: sound, or cameras and shared screens too.",
+      keywords: "record recording call voice video camera screen webm",
+      settings: [{ id: "record-video", label: "Record video", keywords: "camera screen share webm" }],
+    },
     { id: "usage", label: "Usage", icon: ChartColumnIcon, description: "What the server holds, against its caps.", keywords: "storage members messages" },
     {
       id: "limits",
@@ -312,6 +322,7 @@ export function ServerSettingsDialog({
       {tab === "invites" && can("invites") && <Invites instanceKey={instanceKey} serverId={server.id} />}
       {tab === "roles" && can("roles") && <Roles instanceKey={instanceKey} serverId={server.id} initial={target} />}
       {tab === "channels" && can("channels") && <Channels instanceKey={instanceKey} serverId={server.id} initial={target} />}
+      {tab === "recordings" && can("recordings") && <RecordingSettings instanceKey={instanceKey} server={server} />}
       {tab === "usage" && can("usage") && <Usage instanceKey={instanceKey} serverId={server.id} />}
       {tab === "limits" && can("limits") && <Limits instanceKey={instanceKey} serverId={server.id} />}
       {tab === "applications" && can("applications") && (

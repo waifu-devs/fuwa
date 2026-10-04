@@ -183,8 +183,9 @@ impl Peer {
     }
 
     /// A frame of each size, from the camera and the screen. Not real VP8,
-    /// but its first byte says keyframe or not as VP8's does, the next says
-    /// which size it is, and the rest whether it's the camera or the screen.
+    /// but its first byte says keyframe or not as VP8's does (and a
+    /// keyframe has VP8's start code and size), the next says which size it
+    /// is, and the rest whether it's the camera or the screen.
     fn film(&mut self) {
         let time = MediaTime::new(self.filmed * 3600, str0m::media::Frequency::NINETY_KHZ);
         self.filmed += 1;
@@ -200,6 +201,18 @@ impl Peer {
                 };
                 let mut frame = vec![if keyframe { 0x00 } else { 0x01 }];
                 frame.extend(format!("{size} {what} {}", self.filmed).into_bytes());
+                if keyframe {
+                    // A keyframe's start code and size, where VP8's are.
+                    let width: u16 = match size {
+                        "l" => 160,
+                        "m" => 320,
+                        _ => 640,
+                    };
+                    let mut code = vec![0x9D, 0x01, 0x2A];
+                    code.extend(width.to_le_bytes());
+                    code.extend((width * 9 / 16).to_le_bytes());
+                    frame.splice(3..3, code);
+                }
                 writer.rid(rid).write(pt, Instant::now(), time, frame).unwrap();
             }
         }
