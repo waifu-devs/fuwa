@@ -356,6 +356,7 @@ impl App {
             .add_service(DirectMessageServiceServer::new(api.clone()))
             .add_service(crate::pb::call_service_server::CallServiceServer::new(api.clone()))
             .add_service(crate::pb::secure_channel_service_server::SecureChannelServiceServer::new(api.clone()))
+            .add_service(crate::pb::search_service_server::SearchServiceServer::new(api.clone()))
             .add_service(crate::pb::shared_channel_service_server::SharedChannelServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
@@ -583,6 +584,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     }
     if matches!(app.link, Link::Alone | Link::Shard(_)) {
         spawn_sso_rechecks(app.clone());
+        crate::api::spawn_search_indexer(app.clone());
     }
     spawn_signal_handler(app.shutdown.clone());
     crate::api::spawn_voice_sweeper(app.clone());
