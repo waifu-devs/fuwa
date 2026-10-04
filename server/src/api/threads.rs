@@ -185,13 +185,14 @@ pub(super) async fn check_reply(
 /// Takes away a thread with the message it's under, inside a write: its
 /// replies, summary and follows, off the totals too. Replies also in the
 /// channel are said to be deleted; the rest go with the parent's
-/// MessageDeleted. Returns how many replies there were.
+/// MessageDeleted. Returns the replies' files, to drop after the write
+/// ([`crate::attachments::drop_soon`]).
 pub(super) async fn remove(
     conn: &turso::Connection,
     channel_id: &str,
     thread_id: &str,
     events: &mut Vec<Payload>,
-) -> Result<i64> {
+) -> Result<Vec<String>> {
     let (count, bytes, attachments) = query_one(
         conn,
         "SELECT count(*), coalesce(sum(size), 0), coalesce(sum(attachment_count), 0) FROM messages WHERE thread_id = ?1",
@@ -205,6 +206,7 @@ pub(super) async fn remove(
     })
     .await?;
     super::polls::forget_thread(conn, thread_id).await?;
+    let files = crate::attachments::forget_thread(conn, thread_id).await?;
     conn.execute("DELETE FROM messages WHERE thread_id = ?1", [thread_id]).await?;
     conn.execute("DELETE FROM threads WHERE id = ?1", [thread_id]).await?;
     conn.execute("DELETE FROM thread_follows WHERE thread_id = ?1", [thread_id]).await?;
@@ -218,27 +220,28 @@ pub(super) async fn remove(
     for message_id in shown {
         events.push(Payload::MessageDeleted(pb::MessageDeleted { channel_id: channel_id.to_string(), message_id }));
     }
-    Ok(count)
+    Ok(files)
 }
 
 /// After a message is deleted, inside the same write: the thread it was a
 /// reply in sums itself up again, and a thread under it goes with it.
+/// Returns the files of the replies that went, to drop after the write.
 pub(super) async fn after_delete(
     conn: &turso::Connection,
     channel_id: &str,
     message_id: &str,
     thread_id: &str,
     events: &mut Vec<Payload>,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     if !thread_id.is_empty() {
         // Gone already when its parent went first.
         if query_one(conn, "SELECT 1 FROM messages WHERE id = ?1", [thread_id], |_| Ok(())).await?.is_some() {
             refresh(conn, channel_id, thread_id, events).await?;
         }
     } else if load(conn, message_id).await?.is_some() {
-        remove(conn, channel_id, message_id, events).await?;
+        return remove(conn, channel_id, message_id, events).await;
     }
-    Ok(())
+    Ok(vec![])
 }
 
 /// Whether someone other than `author_id` replied in the thread under a message.

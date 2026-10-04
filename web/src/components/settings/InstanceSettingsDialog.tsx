@@ -75,6 +75,8 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "default_limits.recording_bytes", get: (s) => s.defaultLimits?.recordingBytes },
   { path: "picture_upload_bytes", get: (s) => s.pictureUploadBytes },
   { path: "picture_upload_bytes_per_day", get: (s) => s.pictureUploadBytesPerDay },
+  { path: "attachment_upload_bytes", get: (s) => s.attachmentUploadBytes },
+  { path: "attachment_upload_bytes_per_day", get: (s) => s.attachmentUploadBytesPerDay },
   { path: "poll_votes_per_minute", get: (s) => s.pollVotesPerMinute },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
@@ -644,11 +646,36 @@ export function InstanceSettingsDialog({
                 />
               </Setting>
               <Setting
+                id="attachment-uploads"
+                title="Largest file in a message"
+                hint="Any file people send with a message: documents, archives, audio, video. Leave it empty for no limit."
+                defaultLabel={size(defaults.attachmentUploadBytes)}
+                delay={0.12}
+                {...resetter("attachment_upload_bytes")}
+              >
+                <Cap label="Up to" bytes value={draft.attachmentUploadBytes} onChange={(v) => patch((d) => (d.attachmentUploadBytes = v))} />
+              </Setting>
+              <Setting
+                id="attachment-uploads-per-day"
+                title="Files per day"
+                hint="How much one account may send in files in a day (UTC), apart from pictures."
+                defaultLabel={size(defaults.attachmentUploadBytesPerDay)}
+                delay={0.16}
+                {...resetter("attachment_upload_bytes_per_day")}
+              >
+                <Cap
+                  label="Up to"
+                  bytes
+                  value={draft.attachmentUploadBytesPerDay}
+                  onChange={(v) => patch((d) => (d.attachmentUploadBytesPerDay = v))}
+                />
+              </Setting>
+              <Setting
                 id="poll-votes-per-minute"
                 title="Poll votes per minute"
                 hint="How many times one account may vote, change or take back a vote in polls in a minute. Every vote is a live update to everyone in the channel."
                 defaultLabel={defaults.pollVotesPerMinute === undefined ? "no limit" : `${defaults.pollVotesPerMinute.toLocaleString()} a minute`}
-                delay={0.12}
+                delay={0.2}
                 {...resetter("poll_votes_per_minute")}
               >
                 <Cap label="Up to" placeholder="30" value={draft.pollVotesPerMinute} onChange={(v) => patch((d) => (d.pollVotesPerMinute = v))} />
@@ -810,6 +837,12 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "picture_upload_bytes_per_day":
         into.pictureUploadBytesPerDay = from.pictureUploadBytesPerDay;
+        break;
+      case "attachment_upload_bytes":
+        into.attachmentUploadBytes = from.attachmentUploadBytes;
+        break;
+      case "attachment_upload_bytes_per_day":
+        into.attachmentUploadBytesPerDay = from.attachmentUploadBytesPerDay;
         break;
       case "poll_votes_per_minute":
         into.pollVotesPerMinute = from.pollVotesPerMinute;

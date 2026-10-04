@@ -347,10 +347,12 @@ impl ServerService for Api {
                 }
                 // Servers its channels are shown in, and that show its own, let go too.
                 let ended = super::shared::take_server(&sdb.read()?).await?;
+                let files = crate::attachments::all(&sdb.read()?).await?;
                 self.app.servers.delete(&sdb.id, &actor).await?;
                 self.app.server_gone(&sdb.id).await;
-                // Its pictures go with it, here and wherever its uploads are kept.
+                // Its pictures and files go with it, here and wherever its uploads are kept.
                 crate::cluster::pictures::drop_all(&self.app, &sdb.id).await;
+                crate::attachments::drop_soon(&self.app, &sdb.id, files);
                 super::shared::tell_ended(&self.app, &sdb.id, &actor, ended).await;
                 tracing::info!(server = %sdb.id, "server deleted");
                 Ok(pb::DeleteServerResponse {})
@@ -664,6 +666,7 @@ impl ServerService for Api {
                         remove_member(conn, &sdb.id, &req.user_id, pb::LeaveReason::Banned, events).await?;
                     store::drop_application(conn, &sdb.id, &req.user_id, &account.id, events).await?;
                     let mut deleted = 0;
+                    let mut files = Vec::new();
                     if req.delete_message_seconds > 0 {
                         let messages = query_all(
                             conn,
@@ -688,10 +691,13 @@ impl ServerService for Api {
                                 continue;
                             }
                             super::polls::forget(conn, &id).await?;
+                            files.extend(crate::attachments::forget_message(conn, &id).await?);
                             change.messages -= 1;
                             change.message_bytes -= size;
                             change.attachments -= attachments;
-                            super::threads::after_delete(conn, &channel_id, &id, &thread_id, events).await?;
+                            files.extend(
+                                super::threads::after_delete(conn, &channel_id, &id, &thread_id, events).await?,
+                            );
                             events.push(Payload::MessageDeleted(pb::MessageDeleted { channel_id, message_id: id }));
                             deleted += 1;
                         }
@@ -711,14 +717,15 @@ impl ServerService for Api {
                         banned_by_id: account.id.clone(),
                         created_at: Some(timestamp(now)),
                     };
-                    Ok((ban, deleted, was_member))
+                    Ok((ban, deleted, was_member, files))
                 };
                 // Taking their messages sweeps rows they could still be adding to.
-                let (ban, deleted, was_member) = if req.delete_message_seconds > 0 {
+                let (ban, deleted, was_member, files) = if req.delete_message_seconds > 0 {
                     sdb.write_alone(&account.id, ban).await?
                 } else {
                     sdb.write(&account.id, ban).await?
                 };
+                crate::attachments::drop_soon(&self.app, &sdb.id, files);
                 if was_member {
                     self.app.membership_changed(&req.user_id, &sdb.id, false).await;
                     self.forget_notifications(&sdb.id, None, Some(&req.user_id)).await;

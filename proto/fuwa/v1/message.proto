@@ -44,6 +44,10 @@ message SendMessageRequest {
   string server_id = 1;
   string channel_id = 2;
   string content = 3;
+  // Up to 10 files uploaded for this server (MEDIA_PURPOSE_ATTACHMENT), each
+  // by its `url` and `filename` (and `width` and `height` for pictures and
+  // videos). Needs ATTACH_FILES. Not yet in channels shared from another
+  // server.
   repeated Attachment attachments = 4;
   repeated Embed embeds = 5;
   string reply_to_id = 6;

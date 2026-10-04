@@ -64,6 +64,7 @@ import { items } from "@/lib/context-menu";
 import { Embeds } from "@/components/chat/Embeds";
 import { PollCard } from "@/components/chat/Poll";
 import { PollPlace, type PollPlaceValue } from "@/components/chat/pollPlace";
+import { Attachments, PendingFiles } from "@/components/chat/Attachments";
 import { GifMessage } from "@/components/chat/GifMessage";
 import { AppBadge } from "@/components/AppBadge";
 import { ServerTag, SharedNote } from "@/components/chat/Shared";
@@ -252,7 +253,7 @@ export const MessageList = forwardRef<
       wave: (username) => run(sendMessage(instanceKey, serverId, channel.id, `👋 @${username}`)),
       retry: (p) => {
         dismissPending(instanceKey, at, p.nonce);
-        run(sendMessage(instanceKey, serverId, channel.id, p.content, threadId ? { threadId } : undefined)).catch(() => {});
+        run(sendMessage(instanceKey, serverId, channel.id, p.content, p.files, threadId ? { threadId } : undefined)).catch(() => {});
       },
       dismiss: (nonce) => dismissPending(instanceKey, at, nonce),
       keepOut: async (userId, name) => {
@@ -773,6 +774,7 @@ const MessageRow = memo(function MessageRow({
                 (edited)
               </span>
             )}
+            <Attachments files={message.attachments} animate={animate} />
             <Embeds embeds={message.embeds} animate={animate} />
             <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
             {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
@@ -1271,7 +1273,10 @@ const PendingRow = memo(function PendingRow({
       className={cn("message-row flex gap-3 px-4", first && "first", display === "compact" && "compact")}
     >
       <MessageLine display={display} first={first} author={me} member={member} status="sending…">
-        <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive", blocked && "line-through decoration-destructive/50")} />
+        {pending.content && (
+          <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive", blocked && "line-through decoration-destructive/50")} />
+        )}
+        <PendingFiles files={pending.files ?? EMPTY} />
         {blocked ? (
           <motion.div
             initial={{ opacity: 0, y: -4, scale: 0.97 }}
