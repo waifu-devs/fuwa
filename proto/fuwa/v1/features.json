@@ -6,6 +6,7 @@
     { "id": "shared-channels", "date": "2026-10-04", "title": "Channels shared between servers" },
     { "id": "federation", "date": "2026-10-04", "title": "Talking with other fuwa instances" },
     { "id": "regions", "date": "2026-10-04", "title": "Servers kept in a region" },
-    { "id": "compatibility-dates", "date": "2026-10-04", "title": "Compatibility dates" }
+    { "id": "compatibility-dates", "date": "2026-10-04", "title": "Compatibility dates" },
+    { "id": "polls", "date": "2026-10-04", "title": "Polls" }
   ]
 }
