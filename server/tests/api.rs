@@ -7535,6 +7535,83 @@ async fn channels_shared_across_instances() {
     b.stop().await;
 }
 
+#[tokio::test]
+async fn channels_are_created_with_their_permissions() {
+    use pb::OverwriteTarget as T;
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let sid = create_server(&mut c, &juan, "Copies", true).await.id;
+    join(&mut c, &mika, &sid).await;
+    join(&mut c, &rin, &sid).await;
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels[0]
+        .id
+        .clone();
+    // A new role goes in at the bottom: Admins above Mods above Builders.
+    let admins = create_role(&mut c, &juan, &sid, "Admins", &[]).await.unwrap();
+    let mods =
+        create_role(&mut c, &juan, &sid, "Mods", &[P::ManageChannels, P::ManageRoles, P::ViewChannels]).await.unwrap();
+    let builders = create_role(&mut c, &juan, &sid, "Builders", &[P::ManageChannels]).await.unwrap();
+    give_role(&mut c, &juan, &sid, &mika_user.id, &mods.id).await.unwrap();
+    give_role(&mut c, &juan, &sid, &rin_user.id, &builders.id).await.unwrap();
+    let create = |token: &str, name: &str, overwrites: Vec<pb::PermissionOverwrite>| {
+        authed(
+            token,
+            pb::CreateChannelRequest {
+                server_id: sid.clone(),
+                name: name.into(),
+                topic: "only staff".into(),
+                slowmode_seconds: 30,
+                permission_overwrites: overwrites,
+                ..Default::default()
+            },
+        )
+    };
+    let hidden = || overwrite(&sid, T::Role, &[], &[P::ViewChannels]);
+    let mika_sees = overwrite(&mika_user.id, T::Member, &[P::ViewChannels], &[]);
+
+    // Made private in one step: Rin never hears of it, and it keeps its topic and slow mode.
+    let mut rin_stream = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let made = c.channels.create_channel(create(&mika, "staff", vec![hidden(), mika_sees])).await.unwrap();
+    let made = made.into_inner().channel.unwrap();
+    assert_eq!(made.permission_overwrites.len(), 2);
+    assert_eq!((made.topic.as_str(), made.slowmode_seconds), ("only staff", 30));
+    let public = send(&mut c, &juan, &sid, &general, "hello").await.unwrap();
+    let next = next_event(&mut rin_stream).await;
+    assert!(matches!(&next.payload, Some(Payload::MessageCreated(e)) if e.message.as_ref().unwrap().id == public.id));
+    drop(rin_stream);
+    assert!(!channel_names(&mut c, &rin, &sid).await.contains(&"staff".to_string()));
+
+    // An overwrite for a role at or above Mika's is refused, and no channel is left behind.
+    let admin_sees = overwrite(&admins.id, T::Role, &[P::ViewChannels], &[]);
+    let refused = c.channels.create_channel(create(&mika, "over", vec![hidden(), admin_sees])).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    assert!(!channel_names(&mut c, &juan, &sid).await.contains(&"over".to_string()));
+
+    // Without Manage Roles, a channel can be made, but not with permissions.
+    let denied = c.channels.create_channel(create(&rin, "nope", vec![hidden()])).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    c.channels.create_channel(create(&rin, "fine", vec![])).await.unwrap();
+}
+
 /// Uploads a file to attach in `server_id`, and says where it's served.
 async fn attach(c: &mut Clients, instance: &Instance, token: &str, server_id: &str, bytes: Vec<u8>) -> String {
     let reserved = c

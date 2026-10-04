@@ -10,6 +10,9 @@ import { useFuwa } from "@/fuwa/store";
 import { MentionPicker, useMentionPicker } from "@/components/chat/MentionPicker";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
 import { EmojiPicker } from "@/components/EmojiPicker";
+import { useContextMenu } from "@/components/ContextMenu";
+import { composerMenu } from "@/components/menus/composer";
+import { COMPOSER_INSERT } from "@/components/menus/member";
 import { useCatalog } from "@/lib/emoji-catalog";
 import { RulesDialog } from "@/components/join/Rules";
 import { SPRING } from "@/components/motion";
@@ -18,6 +21,7 @@ import { formatDuration, formatLeft, timedOutUntil, toDate } from "@/lib/format"
 import { hasIn } from "@/lib/permissions";
 import { comboLabel, isMac } from "@/lib/keybinds";
 import { usePrefs, type SendWith } from "@/lib/prefs";
+import { onCommand } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 const MAX = 4000;
@@ -146,6 +150,40 @@ export function Composer({
     });
   }
 
+  /** Replaces what's selected (or nothing, at the caret) with `piece`, for the right-click menu's paste and cut. */
+  function replaceSelection(piece: string) {
+    const el = box.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    setText(text.slice(0, start) + piece + text.slice(end));
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(start + piece.length, start + piece.length);
+    });
+  }
+
+  const menu = useContextMenu("composer", () =>
+    box.current
+      ? composerMenu(
+          { instanceKey, serverId, channel, insert },
+          {
+            box: box.current,
+            replaceSelection,
+            openEmoji: () => box.current?.parentElement?.querySelector<HTMLElement>("[data-composer-emoji]")?.click(),
+          },
+        )
+      : null,
+    { touch: false },
+  );
+
+  // "Mention" in someone's menu types their name here.
+  const typing = gate.canSend && !gate.pending && !timedOut;
+  const inserts = useRef(insert);
+  useEffect(() => {
+    inserts.current = insert;
+  });
+  useEffect(() => (typing ? onCommand(COMPOSER_INSERT, (piece) => piece && inserts.current(piece)) : undefined), [typing]);
+
   useEffect(() => {
     setText(drafts.get(draftKey) ?? "");
     if (window.matchMedia("(pointer: fine)").matches) box.current?.focus();
@@ -247,7 +285,12 @@ export function Composer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onSelect={picker.onSelect}
-          onKeyDown={onKeyDown}
+          onKeyDown={(e) => {
+            menu.onKeyDown(e);
+            if (!e.defaultPrevented) onKeyDown(e);
+          }}
+          onContextMenu={menu.onContextMenu}
+          data-context-menu=""
           onPaste={(e) => {
             const pasted = Array.from(e.clipboardData.files);
             if (!pasted.length || !gate.canAttach) return;
@@ -280,6 +323,7 @@ export function Composer({
             <motion.button
               type="button"
               aria-label="Emoji"
+              data-composer-emoji
               whileHover={{ scale: 1.12, rotate: -10 }}
               whileTap={{ scale: 0.85 }}
               className={cn("group mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition-colors hover:text-primary", open && "bg-primary/10 text-primary")}

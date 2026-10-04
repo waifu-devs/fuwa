@@ -5,6 +5,7 @@ import {
   CopyIcon,
   CrownIcon,
   FingerprintIcon,
+  HandIcon,
   MessageSquareReplyIcon,
   PencilIcon,
   RotateCwIcon,
@@ -55,6 +56,11 @@ import { encodeEmoji, useCatalog } from "@/lib/emoji-catalog";
 import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
 import { ProfilePopover } from "@/components/ProfilePopover";
+import { useContextMenu } from "@/components/ContextMenu";
+import { useMemberMenu } from "@/components/menus/member";
+import { copyIdItem } from "@/components/menus/common";
+import { messageMenu } from "@/components/menus/message";
+import { items } from "@/lib/context-menu";
 import { Embeds } from "@/components/chat/Embeds";
 import { Attachments, PendingFiles } from "@/components/chat/Attachments";
 import { AppBadge } from "@/components/AppBadge";
@@ -110,6 +116,9 @@ const webhookAuthorOf = (w: MessageWebhook) => {
 
 /** What a row can do to its message, the same object for the whole channel. */
 type RowActions = {
+  /** Where the rows are, for their right-click menus. */
+  serverId: string;
+  channel: Channel;
   edit: (id: string) => void;
   cancelEdit: () => void;
   save: (id: string, content: string) => Promise<void>;
@@ -218,6 +227,8 @@ export const MessageList = forwardRef<
 
   const actions = useMemo<RowActions>(
     () => ({
+      serverId,
+      channel,
       edit: setEditing,
       cancelEdit: () => setEditing(null),
       save: async (id, content) => {
@@ -237,7 +248,7 @@ export const MessageList = forwardRef<
       },
       thread: (id) => openThread?.(id),
     }),
-    [instanceKey, serverId, channel.id, channel.name, catalog, at, threadId, openThread],
+    [instanceKey, serverId, channel, catalog, at, threadId, openThread],
   );
 
   const rows = useMemo(() => {
@@ -567,9 +578,11 @@ export function MessageLine({
   instanceKey?: string;
   children: React.ReactNode;
 }) {
+  const profiled = !!instanceKey && !!author && !app;
+  const menu = useMemberMenu(instanceKey ?? "", member?.serverId ?? "", profiled ? author : undefined, member);
   const card = (child: React.ReactElement) =>
-    instanceKey && author && !app ? (
-      <ProfilePopover instanceKey={instanceKey} user={author} member={member}>
+    profiled ? (
+      <ProfilePopover instanceKey={instanceKey!} user={author} member={member}>
         {child}
       </ProfilePopover>
     ) : (
@@ -587,7 +600,7 @@ export function MessageLine({
         )}
         <span className="mr-1.5 inline-flex max-w-[40%] align-bottom">
           {card(
-            <button type="button" className="min-w-0 text-left hover:underline">
+            <button type="button" className="min-w-0 text-left hover:underline" {...menu}>
               <AuthorName user={author} member={member} app={app} />
             </button>,
           )}
@@ -601,7 +614,7 @@ export function MessageLine({
       <div className="w-10 shrink-0">
         {first ? (
           card(
-            <button type="button" aria-label="Open profile" className="mt-0.5 block rounded-full transition hover:brightness-110 active:scale-95">
+            <button type="button" aria-label="Open profile" className="mt-0.5 block rounded-full transition hover:brightness-110 active:scale-95" {...menu}>
               <UserAvatar user={author} />
             </button>,
           )
@@ -615,7 +628,7 @@ export function MessageLine({
         {first && (
           <div className="flex items-baseline gap-2">
             {card(
-              <button type="button" className="min-w-0 text-left hover:underline">
+              <button type="button" className="min-w-0 text-left hover:underline" {...menu}>
                 <AuthorName user={author} member={member} app={app} />
               </button>,
             )}
@@ -707,9 +720,20 @@ const MessageRow = memo(function MessageRow({
   const [confirming, setConfirming] = useState<"delete" | "keep-out" | false>(false);
   const [copied, setCopied] = useState(false);
   const edited = !!message.editedAt;
+  const menu = useContextMenu("message", (trigger) =>
+    messageMenu({ instanceKey, serverId: actions.serverId, channel: actions.channel, message, mine }, trigger, {
+      thread: canThread ? { open: !!message.thread, go: () => actions.thread(message.id) } : undefined,
+      edit: mine && !editing && message.kind === MessageKind.UNSPECIFIED ? () => actions.edit(message.id) : undefined,
+      copyText: message.content ? () => copy(message.content, "text") : undefined,
+      keepOut: canKeepOut ? { name: displayName(author), ask: () => setConfirming("keep-out") } : undefined,
+      delete: canDelete ? () => setConfirming("delete") : undefined,
+    }),
+  );
   return (
     <motion.div
       {...(animate ? enter : {})}
+      {...menu}
+      data-confirming={confirming ? "" : undefined}
       exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       data-message-id={message.id}
@@ -870,10 +894,17 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
   const alert = message.autoMod;
   const color = useRoleColor(member);
   const [confirming, setConfirming] = useState(false);
+  const nameMenu = useMemberMenu(instanceKey, member?.serverId ?? actions.serverId, author, member);
+  const menu = useContextMenu("automod_alert", () => [
+    { id: "developer", items: items(copyIdItem(message.id, "message")) },
+    { id: "danger", items: items(canDelete && { id: "delete", label: "Delete alert", icon: Trash2Icon, danger: true, onSelect: () => setConfirming(true) }) },
+  ]);
   if (!alert) return null;
   return (
     <motion.div
       {...(animate ? enter : {})}
+      {...menu}
+      data-confirming={confirming ? "" : undefined}
       exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className="message-row group relative flex gap-3 px-4 py-1.5"
@@ -916,7 +947,7 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
           <p className="text-sm">
             {alert.blocked ? "Blocked a message from " : "Flagged a message from "}
             <ProfilePopover instanceKey={instanceKey} user={author} member={member}>
-              <button type="button" className="inline-flex align-bottom font-bold hover:underline">
+              <button type="button" className="inline-flex align-bottom font-bold hover:underline" {...nameMenu}>
                 <RoleName id={message.authorId} name={member?.nickname || displayName(author)} color={color} />
               </button>
             </ProfilePopover>
@@ -1018,9 +1049,26 @@ const JoinRow = memo(function JoinRow({
   const [waving, setWaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const color = useRoleColor(member);
+  const wave = async () => {
+    if (!author) return;
+    setWaving(true);
+    try {
+      await actions.wave(author.username);
+      waved.add(message.id);
+      setDone(true);
+    } finally {
+      setWaving(false);
+    }
+  };
+  const menu = useContextMenu("join", () => [
+    { id: "primary", items: items(!mine && !!author && canWave && !done && !waving && { id: "wave", label: "Wave", icon: HandIcon, onSelect: () => void wave().catch(() => {}) }) },
+    { id: "developer", items: items(copyIdItem(message.id, "message")) },
+    { id: "danger", items: items(canDelete && { id: "delete", label: "Delete message", icon: Trash2Icon, danger: true, onSelect: () => setConfirming(true) }) },
+  ]);
+  const nameMenu = useMemberMenu(instanceKey, member?.serverId ?? actions.serverId, author, member);
   const name = (
     <ProfilePopover instanceKey={instanceKey} user={author} member={member}>
-      <button type="button" className="inline-flex align-bottom hover:underline">
+      <button type="button" className="inline-flex align-bottom hover:underline" {...nameMenu}>
         <RoleName id={message.authorId} name={member?.nickname || displayName(author)} color={color} />
       </button>
     </ProfilePopover>
@@ -1028,6 +1076,8 @@ const JoinRow = memo(function JoinRow({
   return (
     <motion.div
       {...(animate ? enter : {})}
+      {...menu}
+      data-confirming={confirming ? "" : undefined}
       exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className="message-row join-row group relative flex items-center gap-3 px-4 py-1.5"
@@ -1046,16 +1096,7 @@ const JoinRow = memo(function JoinRow({
           type="button"
           disabled={done || waving}
           whileTap={{ scale: 0.9 }}
-          onClick={async () => {
-            setWaving(true);
-            try {
-              await actions.wave(author.username);
-              waved.add(message.id);
-              setDone(true);
-            } finally {
-              setWaving(false);
-            }
-          }}
+          onClick={wave}
           className={cn(
             "group/wave flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold transition-colors",
             done ? "border-transparent bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "hover:border-primary/40 hover:bg-primary/10 hover:text-primary",
@@ -1194,8 +1235,19 @@ const PendingRow = memo(function PendingRow({
   const onDismiss = () => actions.dismiss(pending.nonce);
   // A message AutoMod stopped: why, without a retry that would only be stopped again.
   const blocked = pending.failed?.startsWith("AutoMod: ") ? pending.failed.slice("AutoMod: ".length) : null;
+  const menu = useContextMenu("pending", () => [
+    {
+      id: "primary",
+      items: items(
+        !!pending.failed && !blocked && { id: "retry", label: "Retry", icon: RotateCwIcon, onSelect: onRetry },
+        { id: "copy-text", label: "Copy text", icon: CopyIcon, onSelect: () => copy(pending.content, "text") },
+      ),
+    },
+    { id: "danger", items: items(!!pending.failed && { id: "dismiss", label: "Dismiss", icon: XIcon, onSelect: onDismiss }) },
+  ]);
   return (
     <motion.div
+      {...menu}
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: pending.failed ? 1 : 0.55, y: 0 }}
       exit={{ opacity: 0 }}
