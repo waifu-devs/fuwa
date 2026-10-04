@@ -2163,7 +2163,7 @@ async fn targets(app: &App, server_id: &str) -> HashMap<String, Vec<Target>> {
                     .push(Target { connection_id: row.id, guest_server_id: row.server.id });
             }
         }
-        Err(_) => tracing::warn!(server = %server_id, "couldn't read a server's shared channels"),
+        Err(_) => tracing::warn!("couldn't read a server's shared channels"),
     }
     targets
 }
@@ -2224,7 +2224,7 @@ async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
         .await;
         if decorated.is_err() {
             crate::reports::server_error("shared_decorate", Some("SharedChannels/fanout"));
-            tracing::warn!(server = %event.server_id, "couldn't say who wrote a shared message");
+            tracing::warn!("couldn't say who wrote a shared message");
             return None;
         }
     }
@@ -2335,7 +2335,7 @@ fn spawn_queue(app: Arc<App>) -> mpsc::Sender<Outgoing> {
                     .await;
                     if healed.is_err() {
                         crate::reports::server_error("shared_heal", Some("SharedChannels/fanout"));
-                        tracing::warn!(server = %home_id, "couldn't end a shared channel its guest left");
+                        tracing::warn!("couldn't end a shared channel its guest left");
                     }
                 }
                 // What the other end said stays out of the log: it's theirs.
@@ -2365,7 +2365,7 @@ fn spawn_block_sweeper(app: Arc<App>) {
                 for sdb in app.servers.all() {
                     if end_blocked(&app, &sdb).await.is_err() {
                         crate::reports::server_error("shared_block", Some("SharedChannels/block"));
-                        tracing::warn!(server = %sdb.id, "couldn't end a server's shares with a blocked instance");
+                        tracing::warn!("couldn't end a server's shares with a blocked instance");
                     }
                 }
             }

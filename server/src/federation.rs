@@ -56,6 +56,8 @@ const HEARD_EVERY_MS: i64 = 60 * 1000;
 /// How often this instance looks again at the key of one it pinned, when
 /// that one's signature doesn't check out (a rotation it may follow).
 const FOLLOW_EVERY: Duration = Duration::from_secs(5 * 60);
+/// The most looks remembered at once; past it, none until some expire.
+const MAX_FOLLOWS: usize = 1024;
 /// What a key rotation's signature starts with.
 const ROTATION_CONTEXT: &[u8] = b"fuwa-federation-v1 rotation";
 /// The most rotations read from another instance's key.
@@ -299,6 +301,10 @@ impl Federation {
         let now = Instant::now();
         if followed.len() >= 64 {
             followed.retain(|_, at| now.duration_since(*at) < FOLLOW_EVERY);
+        }
+        // Envelopes each naming a new key can't make it grow without end.
+        if followed.len() >= MAX_FOLLOWS && !followed.contains_key(looking_for) {
+            return false;
         }
         match followed.get(looking_for) {
             Some(at) if now.duration_since(*at) < FOLLOW_EVERY => false,
@@ -1539,6 +1545,17 @@ mod tests {
         assert_eq!(followed(A, &public(1), &public(0), &chain[..1], &left), Followed::Fork);
         // Nothing at all: the key it serves isn't vouched for.
         assert_eq!(followed(A, &public(0), &public(1), &[], &none), Followed::Broken);
+    }
+
+    #[test]
+    fn looks_for_rotations_are_capped() {
+        let federation = Federation::new(true);
+        assert!(federation.take_follow("https://a.example k0"));
+        assert!(!federation.take_follow("https://a.example k0"));
+        for n in 1..MAX_FOLLOWS {
+            assert!(federation.take_follow(&format!("https://a.example k{n}")));
+        }
+        assert!(!federation.take_follow("https://a.example one more"));
     }
 
     #[test]
