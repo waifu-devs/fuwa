@@ -65,9 +65,11 @@ service AdminService {
   // This instance as other instances see it (its address and key
   // fingerprint), and the instances it knows. Makes the key the first time.
   rpc GetFederation(GetFederationRequest) returns (GetFederationResponse);
-  // Reaches another instance with a signed call and back, to see that the two
-  // can talk: fetches its key, introduces this instance and pins each side's
-  // key on the other. Needs federation on.
+  // Reaches another instance with a signed Hello and back, to see that the
+  // two can talk: fetches and pins its key here. The other instance checks
+  // the Hello with this one's key but doesn't pin it: its own admins check
+  // this instance for that (or, later, a share request does). Needs
+  // federation on.
   rpc CheckInstance(CheckInstanceRequest) returns (CheckInstanceResponse);
 }
 
@@ -499,6 +501,9 @@ message CheckInstanceRequest {
 
 message CheckInstanceResponse {
   FederationPeer peer = 1;
-  // How long the signed call took there and back.
+  // How long the signed Hello took there and back.
   int64 round_trip_ms = 2;
+  // The other instance pinned this one's key too (its admins checked this
+  // one), so signed calls go through both ways.
+  bool known_there = 3;
 }

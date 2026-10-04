@@ -431,10 +431,11 @@ impl AdminService for Api {
             async {
                 self.require_instance_admin(request.metadata()).await?;
                 let address = request.into_inner().address;
-                let (peer, took) = crate::federation::check_instance(&self.app, &address).await?;
+                let checked = crate::federation::check_instance(&self.app, &address).await?;
                 Ok(pb::CheckInstanceResponse {
-                    peer: Some(crate::federation::peer_pb(&self.app, &peer)),
-                    round_trip_ms: took.as_millis().min(i64::MAX as u128) as i64,
+                    peer: Some(crate::federation::peer_pb(&self.app, &checked.peer)),
+                    round_trip_ms: checked.took.as_millis().min(i64::MAX as u128) as i64,
+                    known_there: checked.known_there,
                 })
             }
             .await,

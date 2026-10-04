@@ -154,7 +154,7 @@ export function FederationSettings({
 
       <Setting id="federation-peers" title="Instances this one knows" delay={0.12} badge={false}>
         {!info || info.peers.length === 0 ? (
-          <p className="text-xs text-muted-foreground">None yet. An instance shows here once one of the two checks the other.</p>
+          <p className="text-xs text-muted-foreground">None yet. An instance shows here once an admin here checks it.</p>
         ) : (
           <ul className="flex flex-col gap-2">
             <AnimatePresence initial={false}>
@@ -252,7 +252,7 @@ function CheckCard({ instanceKey, enabled, onChecked }: { instanceKey: string; e
     <Setting
       id="federation-check"
       title="Check an instance"
-      hint="Fetches its key, introduces this instance to it, and sends a signed ping there and back. Both sides then know each other's key."
+      hint="Fetches its key and pins it here, then sends it a signed greeting there and back. The other instance only checks the greeting: it pins this one's key when its own admins check this instance."
       delay={0.08}
       badge={false}
     >
@@ -293,7 +293,10 @@ function CheckCard({ instanceKey, enabled, onChecked }: { instanceKey: string; e
             {"ok" in result ? (
               <span>
                 Reached <b><Private text={shown(result.ok.peer?.origin ?? "")} /></b> and back in {result.ok.roundTripMs.toString()} ms. Its key:{" "}
-                <code className="font-mono">{result.ok.peer?.fingerprint}</code>
+                <code className="font-mono">{result.ok.peer?.fingerprint}</code>.{" "}
+                {result.ok.knownThere
+                  ? "It knows this instance too, so signed calls go both ways."
+                  : "It doesn't know this instance yet: its admins check this one from their side to pin its key."}
               </span>
             ) : (
               <span className="first-letter:uppercase">{result.error}</span>
