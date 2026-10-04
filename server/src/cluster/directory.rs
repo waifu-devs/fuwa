@@ -572,6 +572,7 @@ impl DirectoryService for Internal {
             self.app.presence.joined(&self.app.index, &req.account_id, &req.server_id);
         } else {
             self.app.index.leave(&req.account_id, &req.server_id);
+            self.app.presence.left(&self.app.index, &req.account_id, &req.server_id);
         }
         Ok(Response::new(cpb::IndexMembershipResponse {}))
     }

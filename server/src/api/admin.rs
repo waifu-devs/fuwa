@@ -184,6 +184,9 @@ impl AdminService for Api {
 
                 self.app.node()?.save_settings(&store, &reset).await?;
                 self.app.replace_settings(Settings::load(&self.app.config, &self.app.node()?.settings().await?));
+                if !self.app.settings().rich_presence {
+                    self.app.presence.clear_activities(&self.app.index);
+                }
                 tracing::info!(changed = ?update, reset = ?reset, "instance settings updated");
                 Ok(pb::UpdateSettingsResponse { config: Some(self.instance_config().await?) })
             }

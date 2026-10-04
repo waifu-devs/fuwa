@@ -81,7 +81,10 @@ impl App {
                 self.index.join(account_id, server_id);
                 self.presence.joined(&self.index, account_id, server_id);
             }
-            _ => self.index.leave(account_id, server_id),
+            _ => {
+                self.index.leave(account_id, server_id);
+                self.presence.left(&self.index, account_id, server_id);
+            }
         }
     }
 
@@ -97,6 +100,14 @@ impl App {
         }
     }
 
+    /// Takes a deleted server out of the index, and tells its members who
+    /// they no longer share a server with.
+    fn forget_server_presence(&self, server_id: &str) {
+        let members = self.index.members_where(server_id, |_| true);
+        self.index.remove(server_id);
+        self.presence.server_gone(&self.index, &members);
+    }
+
     /// Forgets a deleted server: its place in the index, and notification
     /// settings for it.
     pub async fn server_gone(&self, server_id: &str) {
@@ -106,7 +117,7 @@ impl App {
                 link.tell("a server was deleted", async |mut d| d.drop_server(request).await).await;
             }
             Link::Directory(_) => {
-                self.index.remove(server_id);
+                self.forget_server_presence(server_id);
                 if let Err(err) = async { self.node()?.place(server_id, None).await }.await {
                     tracing::warn!(server = %server_id, error = %err, "couldn't forget where a deleted server was");
                 }
@@ -114,7 +125,7 @@ impl App {
                 self.drop_server_media(server_id).await;
             }
             Link::Alone => {
-                self.index.remove(server_id);
+                self.forget_server_presence(server_id);
                 self.forget_notifications(server_id, None, None).await;
                 self.drop_server_media(server_id).await;
             }

@@ -27,8 +27,9 @@ Discord.
   can then turn it off in single servers ("Share my activity here"): someone
   sees it if any server you share with them isn't hidden.
 - Admins can turn rich presence off for the whole instance
-  (`FUWA_RICH_PRESENCE`, or Instance settings → Rich presence). Activities are
-  then dropped as they arrive; statuses still show.
+  (`FUWA_RICH_PRESENCE`, or Instance settings → Rich presence). Activities
+  shown are taken down at once and new ones dropped as they arrive; statuses
+  still show.
 
 ## How it works
 
@@ -51,6 +52,16 @@ through like `DirectMessageService`).
 - Changes go out at most 5 times per 20 seconds per person; more are merged
   and the latest goes out when the window opens. Nothing is refused, so a
   game updating every second costs its viewers nothing extra.
+- Each viewer is sent someone's presence only when what *they* see of it
+  changes. An invisible person's apps coming and going, going idle or
+  starting a game send nothing at all, and neither does an activity hidden
+  from the servers a viewer shares.
+- Leaving a server (or being removed, or the server being deleted) shows
+  people who no longer share one as offline to each other at once.
+- One account holds at most 16 streams (a tab or app each); a 17th ends the
+  oldest, whose app watches again if it's still open. Streams give their
+  place back however they end.
+- Agents report their own presence but can't watch anyone's.
 
 What someone is doing lives only in memory (`server/src/presence.rs`): it's
 never written to disk, logged, put in a server's event log or in a report. A
@@ -62,7 +73,8 @@ you pick and the two switches are stored (node.db's `presence_settings`).
 Every field is the person's own content, checked as it arrives:
 
 - name 1 to 128 characters; details, state and picture texts at most 128;
-  control characters become spaces;
+  control characters become spaces, and direction overrides and
+  zero-width characters are removed (the zero-width joiner stays, for emoji);
 - party size and maximum at most 1,000,000;
 - at most 2 buttons: a label of 1 to 32 characters and an `https` link of at
   most 512 characters with no user name or password. Apps open them only
@@ -75,7 +87,9 @@ Every field is the person's own content, checked as it arrives:
 
 No app ever loads a picture from anywhere but its instance. An activity's
 picture sent as an `https` link becomes a link the instance fetches itself
-(`App::picture_link`, as for embeds). Discord's own pictures are asset keys
+(`App::picture_link`, as for embeds). One account gets at most 30 new
+links signed an hour, so the fetcher can't be used as anyone's proxy; past
+that its pictures are dropped until the hour is up. Discord's own pictures are asset keys
 that point at Discord's CDN, which we never load: they're dropped, and apps
 show the activity's kind (a gamepad, headphones…) in the theme's color
 instead. A list of app pictures kept on the instance (uploaded by admins,

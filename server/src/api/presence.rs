@@ -30,6 +30,19 @@ impl Api {
     }
 }
 
+/// A watch stream's place in `presence`, given back when dropped.
+struct Watching {
+    app: std::sync::Arc<crate::app::App>,
+    account_id: String,
+    id: u64,
+}
+
+impl Drop for Watching {
+    fn drop(&mut self) {
+        self.app.presence.unwatch(&self.account_id, self.id);
+    }
+}
+
 #[tonic::async_trait]
 impl PresenceService for Api {
     async fn update_presence(
@@ -44,20 +57,27 @@ impl PresenceService for Api {
                     "web" | "desktop" | "agent" => req.app.as_str(),
                     _ => "other",
                 };
+                let account_id = &caller.account.id;
                 let activities = match self.app.settings().rich_presence {
-                    true => presence::check_activities(req.activities, |url| self.app.picture_link(url))?,
+                    true => presence::check_activities(req.activities, |url| {
+                        match self.app.presence.allow_picture(account_id, url) {
+                            true => self.app.picture_link(url),
+                            false => String::new(),
+                        }
+                    })?,
                     false => Vec::new(),
                 };
-                let settings = self.presence_settings_if_new(&caller.account.id).await?;
-                self.app.presence.update(
-                    &self.app.index,
-                    &caller.account.id,
-                    &caller.token_hash,
-                    kind,
-                    req.idle,
-                    activities,
-                    settings,
-                );
+                let presence = &self.app.presence;
+                let update = |activities, settings| {
+                    let (index, session) = (&self.app.index, &caller.token_hash);
+                    presence.update(index, account_id, session, kind, req.idle, activities, settings)
+                };
+                let settings = self.presence_settings_if_new(account_id).await?;
+                // Forgotten between the check and the update: load them for real.
+                if !update(activities.clone(), settings) {
+                    let saved = self.app.node()?.presence_settings(account_id).await?;
+                    update(activities, Some(saved));
+                }
                 Ok(pb::UpdatePresenceResponse { renew_seconds: RENEW.as_secs() as u32 })
             }
             .await,
@@ -71,6 +91,10 @@ impl PresenceService for Api {
         request: Request<pb::WatchPresenceRequest>,
     ) -> Result<Response<WatchStream>, Status> {
         let caller = self.caller(request.metadata()).await?;
+        // Agents report their own presence but don't watch anyone's.
+        if caller.account.kind == pb::AccountKind::Agent {
+            return Err(Error::PermissionDenied("agents can't watch presence".into()).into());
+        }
         let account_id = caller.account.id.clone();
         let settings = self.presence_settings_if_new(&account_id).await?;
         let watch = self.app.presence.watch(&self.app.index, &account_id, settings);
@@ -78,6 +102,8 @@ impl PresenceService for Api {
         let app = self.app.clone();
         tokio::spawn(async move {
             let presence::Watch { id, snapshot, rx: mut changes } = watch;
+            // Gives the stream's place back however this task ends.
+            let _watching = Watching { app: app.clone(), account_id, id };
             let followed = async {
                 let send = async |item| tx.send(item).await.is_ok();
                 for presence in snapshot {
@@ -114,9 +140,9 @@ impl PresenceService for Api {
                                     return;
                                 }
                             }
-                            // Fell behind: its place was given up.
+                            // Fell behind, or a newer stream took its place.
                             None => {
-                                let _ = tx.send(Err(Status::aborted("fell behind; watch again"))).await;
+                                let _ = tx.send(Err(Status::aborted("this stream ended; watch again"))).await;
                                 return;
                             }
                         },
@@ -124,7 +150,6 @@ impl PresenceService for Api {
                 }
             };
             followed.await;
-            app.presence.unwatch(&account_id, id);
         });
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
