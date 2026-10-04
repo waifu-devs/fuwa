@@ -3097,6 +3097,13 @@ async fn pictures_upload_serve_and_clean_up() {
         .unwrap();
     assert_eq!(fetch(&instance, &rin_avatar).await.0, reqwest::StatusCode::NOT_FOUND);
 
+    // Deleting a server deletes its pictures, and only its.
+    c.servers.delete_server(authed(&juan, pb::DeleteServerRequest { server_id: server.id.clone() })).await.unwrap();
+    assert_eq!(fetch(&instance, &new_icon).await.0, reqwest::StatusCode::NOT_FOUND);
+    for kept in [&second_avatar, &banner] {
+        assert_eq!(fetch(&instance, kept).await.0, reqwest::StatusCode::OK, "{kept} isn't the server's");
+    }
+
     // A file no row points to (a crash between the two) is cleared on start.
     let stray = fuwa_server::media::new_id();
     std::fs::write(dir.path().join("media").join(&stray), b"left behind").unwrap();
