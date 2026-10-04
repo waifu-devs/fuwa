@@ -195,6 +195,10 @@ const paint = (value: unknown): Paint | null =>
  * known shapes, motions, regions and colors, and every number held to a
  * range, so no spec can ask for thousands of particles or minute-long frames.
  * Null when there's nothing left to play.
+ *
+ * Nothing calls it yet: profiles only name built-in effects by id. When
+ * custom specs ship, every spec that didn't come with the app goes through
+ * this before `planEffect`, and the cap on colors stays ahead of the mapping.
  */
 export function sanitizeEffect(raw: unknown): ProfileEffectSpec | null {
   if (!raw || typeof raw !== "object") return null;
@@ -210,7 +214,7 @@ export function sanitizeEffect(raw: unknown): ProfileEffectSpec | null {
     const count = num(x.count, 0, MAX_PER_LAYER);
     const size = range(x.size, 2, 96);
     const duration = range(x.duration, 300, 20000);
-    const colors = (Array.isArray(x.colors) ? x.colors : []).map(paint).filter((c): c is Paint => !!c).slice(0, 8);
+    const colors = (Array.isArray(x.colors) ? x.colors.slice(0, 32) : []).map(paint).filter((c): c is Paint => !!c).slice(0, 8);
     if (!shape || !motion || !phase || !from || !count || !size || !duration || !colors.length) return [];
     const layer: EffectLayer = { shape, motion, phase, count: Math.round(count), from, size, duration, colors };
     const delay = range(x.delay, 0, 3000);
