@@ -95,13 +95,14 @@ pub(crate) fn attachments_view(
     let shown = |f: &&pb::Attachment| {
         attachments::look_of(&f.content_type) == Look::Picture && attachments::on_instance(&f.url, instance)
     };
-    let pictures: Vec<&pb::Attachment> = files.iter().filter(shown).collect();
+    // Each with its place among the message's files, for its right-click menu.
+    let pictures: Vec<(usize, &pb::Attachment)> = files.iter().enumerate().filter(|(_, f)| shown(f)).collect();
     let rest: Vec<&pb::Attachment> = files.iter().filter(|f| !shown(f)).collect();
     let tiled = pictures.len() > 1;
     let mut out = div().mt(px(4.0)).flex().flex_col().gap(px(6.0));
     if !pictures.is_empty() {
         let mut grid = div().flex().flex_wrap().gap(px(6.0)).when(tiled, |el| el.max_w(px(TILE * 2.0 + 6.0)));
-        for (n, file) in pictures.into_iter().enumerate() {
+        for (n, (place, file)) in pictures.into_iter().enumerate() {
             let (w, h) = if tiled { (TILE, TILE) } else { attachments::fit_box(file.width, file.height, MEDIA_BOX) };
             let open = Dialog::Picture {
                 key: key.to_owned(),
@@ -122,6 +123,11 @@ pub(crate) fn attachments_view(
                     .bg(alpha(p.foreground, 0.06))
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.92))
+                    .on_mouse_down(gpui_kit::MouseButton::Right, {
+                        let (this, mid) = (this.clone(), mid.to_owned());
+                        // Says which picture it was; the message's own handler opens the menu.
+                        move |_, _, cx| _ = this.update(cx, |this, _| this.right_picture = Some((mid.clone(), place)))
+                    })
                     .on_click(move |_, window, cx| {
                         let _ = this.update(cx, |this, cx| this.open_dialog(open.clone(), window, cx));
                     })

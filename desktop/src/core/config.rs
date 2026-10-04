@@ -177,6 +177,8 @@ pub struct Prefs {
     pub language: Option<String>,
     /// Searches made lately, newest first, by `instance/account/server` (see `search::place`).
     pub recent_searches: std::collections::BTreeMap<String, Vec<String>>,
+    /// Shows "Copy … ID" on servers, channels, people and messages.
+    pub developer_mode: bool,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -216,6 +218,7 @@ impl Default for Prefs {
             skin_tone: 0,
             language: None,
             recent_searches: Default::default(),
+            developer_mode: false,
         }
     }
 }

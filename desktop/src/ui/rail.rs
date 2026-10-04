@@ -14,6 +14,7 @@ use gpui_kit::{
 use crate::core::store::Connection;
 use crate::pb;
 use crate::ui::app::{FuwaApp, Nav};
+use crate::ui::context_menu::MenuOf;
 use crate::ui::motion;
 use crate::ui::theme::{alpha, corner, mix};
 use crate::ui::widgets::{badge, conn_dot, fuwa_mark, icon, initials, pal, server_icon};
@@ -170,7 +171,13 @@ impl FuwaApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let p = pal(cx);
-        let hovered = self.hovered.as_deref() == Some(id.as_str());
+        let of = match &nav {
+            Nav::Server { key, server } => Some(MenuOf::Server { key: key.clone(), server: server.clone() }),
+            _ => None,
+        };
+        // A server whose menu is open stays lit as if hovered.
+        let lit = of.as_ref().is_some_and(|of| self.context.as_ref().is_some_and(|m| m.of.lit() == of.lit()));
+        let hovered = self.hovered.as_deref() == Some(id.as_str()) || lit;
         let pill = motion::follow_bouncy(
             SharedString::from(format!("{id}|pill")),
             if active {
@@ -186,6 +193,7 @@ impl FuwaApp {
             cx,
         );
         let hover_id = id.clone();
+        let hover_of = of.clone();
         div()
             .id(SharedString::from(id.clone()))
             .relative()
@@ -200,8 +208,12 @@ impl FuwaApp {
                 } else if this.hovered.as_deref() == Some(hover_id.as_str()) {
                     this.hovered = None;
                 }
+                if let Some(of) = &hover_of {
+                    this.set_hover_target(of.clone(), *hovered);
+                }
                 cx.notify();
             }))
+            .when_some(of, |el, of| el.on_mouse_down(gpui_kit::MouseButton::Right, self.right_click(of, cx)))
             .on_click(cx.listener(move |this, _, window, cx| this.navigate(nav.clone(), window, cx)))
             .child(
                 div()
@@ -216,7 +228,7 @@ impl FuwaApp {
             )
             .child(div().relative().child(face.overflow_hidden()))
             .when(count > 0, |el| el.child(div().absolute().right(px(10.0)).bottom(px(-2.0)).child(badge(count, &p))))
-            .when(hovered, |el| {
+            .when(hovered && self.context.is_none(), |el| {
                 // Drawn last and over everything, so the rail's scrolling doesn't clip it.
                 el.child(
                     div().absolute().left(px(RAIL + 2.0)).top(px(9.0)).child(gpui_kit::deferred(

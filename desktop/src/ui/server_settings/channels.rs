@@ -242,6 +242,15 @@ impl ServerSettingsView {
         })
     }
 
+    /// Opens on a channel's (or category's) settings, from its right-click
+    /// menu; `permissions` goes straight to who can see and use it.
+    pub fn edit_channel(&mut self, id: String, permissions: bool, cx: &mut Context<Self>) {
+        self.open(Page::Channels, cx);
+        self.pick_channel(id, cx);
+        self.channels.tab = if permissions { Tab::Permissions } else { Tab::Overview };
+        cx.notify();
+    }
+
     fn pick_channel(&mut self, id: String, cx: &mut Context<Self>) {
         let c = &mut self.channels;
         if c.selected.as_deref() != Some(id.as_str()) {

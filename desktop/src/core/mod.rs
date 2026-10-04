@@ -44,7 +44,7 @@ pub mod vault;
 pub mod voice;
 pub mod voice_notes;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -643,6 +643,53 @@ impl Core {
         {
             self.runtime.spawn(async move { engine.mark_read(&id).await });
         }
+    }
+
+    /// Marks channels and conversations as read on this computer, with the
+    /// followed threads under the channels. How many had something unread.
+    pub fn mark_read(self: &Arc<Self>, key: &str, ids: &[String]) -> usize {
+        let (cleared, encrypted) = self
+            .shared
+            .instance(key, |i| {
+                let wanted: HashSet<&str> = ids.iter().map(String::as_str).collect();
+                let threads: Vec<String> = i
+                    .thread_parents
+                    .values()
+                    .filter(|p| wanted.contains(p.channel_id.as_str()))
+                    .map(|p| p.id.clone())
+                    .collect();
+                let mut cleared = 0;
+                for id in ids {
+                    let channel = i.unread.remove(id).unwrap_or(0);
+                    let dm = i.dms.unread.get(id).copied().unwrap_or(0);
+                    let under: u32 = threads
+                        .iter()
+                        .filter(|t| i.thread_parents.get(*t).is_some_and(|p| p.channel_id == *id))
+                        .filter_map(|t| i.thread_unread.get(t).copied())
+                        .sum();
+                    if channel + dm + under > 0 {
+                        cleared += 1;
+                    }
+                }
+                for t in &threads {
+                    i.thread_unread.remove(t);
+                }
+                // A conversation, or a secure channel: what's been read is kept with its messages.
+                let encrypted: Vec<String> = ids
+                    .iter()
+                    .filter(|id| i.dms.conversations.iter().any(|c| c.id == **id) || i.dms.items.contains_key(*id))
+                    .cloned()
+                    .collect();
+                (cleared, encrypted)
+            })
+            .unwrap_or_default();
+        if let Some(engine) = self.dm_engine(key) {
+            for id in encrypted {
+                let engine = engine.clone();
+                self.runtime.spawn(async move { engine.mark_read(&id).await });
+            }
+        }
+        cleared
     }
 
     /// Loads the latest messages of a channel the first time it's opened, or older ones.

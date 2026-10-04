@@ -28,7 +28,19 @@ const ROW: f32 = 44.0;
 const ENTERING: Duration = Duration::from_millis(900);
 
 pub enum MembersEvent {
-    Open { user_id: String },
+    Open {
+        user_id: String,
+    },
+    /// Right-clicked: their menu, at the pointer.
+    Menu {
+        user_id: String,
+        at: gpui_kit::Point<gpui_kit::Pixels>,
+    },
+    /// The pointer's on them, or left, for Shift+F10.
+    Hover {
+        user_id: String,
+        on: bool,
+    },
 }
 
 /// A line in the list: a group's heading, or someone in it.
@@ -230,6 +242,17 @@ fn member_row(
         .hover(move |s| s.bg(hover))
         .cursor_pointer()
         .on_click(cx.listener(move |_, _, _, cx| cx.emit(MembersEvent::Open { user_id: uid.clone() })))
+        .on_mouse_down(gpui_kit::MouseButton::Right, {
+            let uid = user.id.clone();
+            cx.listener(move |_, ev: &gpui_kit::MouseDownEvent, _, cx| {
+                cx.stop_propagation();
+                cx.emit(MembersEvent::Menu { user_id: uid.clone(), at: ev.position });
+            })
+        })
+        .on_hover({
+            let uid = user.id.clone();
+            cx.listener(move |_, on: &bool, _, cx| cx.emit(MembersEvent::Hover { user_id: uid.clone(), on: *on }))
+        })
         .child(avatar(Some(user), 32.0, p))
         .child(
             div()

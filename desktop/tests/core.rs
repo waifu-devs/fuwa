@@ -510,6 +510,23 @@ fn two_people_talk_in_a_server_and_in_private() {
         let shown = |at: &str| i.messages[at].items.iter().any(|m| m.content == "everyone, look");
         shown(&general) && shown(&threads::thread_key(&parent)) && i.thread_unread.get(&parent) == Some(&1)
     });
+    // "Mark as read" on the channel clears the followed thread under it too.
+    assert_eq!(alice.mark_read(&key, std::slice::from_ref(&general)), 1);
+    alice.shared.read(|s| {
+        let i = s.instance(&key).unwrap();
+        assert!(!i.thread_unread.contains_key(&parent) && !i.unread.contains_key(&general));
+    });
+    // "Duplicate channel": a copy with its name, kind and category, then gone again.
+    {
+        let original = alice.shared.read(|s| s.instance(&key).unwrap().channel(&server.id, &general).cloned()).unwrap();
+        let (core, k, sid) = (alice.clone(), key.clone(), server.id.clone());
+        let of = original.clone();
+        let copy = wait(&alice, async move { core.duplicate_channel(&k, &sid, &of).await }).unwrap();
+        assert!(copy.id != original.id && copy.name == original.name && copy.r#type == original.r#type);
+        assert!(alice.shared.read(|s| s.instance(&key).unwrap().channel(&server.id, &copy.id).is_some()));
+        let (core, k, sid) = (alice.clone(), key.clone(), server.id.clone());
+        wait(&alice, async move { core.delete_channel(&k, &sid, &copy.id).await }).unwrap();
+    }
     {
         let (core, key, sid, cid) = (alice.clone(), key.clone(), server.id.clone(), general.clone());
         let listed = wait(&alice, async move { core.list_threads(&key, &sid, &cid, "", false, "").await }).unwrap();

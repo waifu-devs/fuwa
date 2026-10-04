@@ -22,16 +22,17 @@ const LEVELS: [(Level, &str); 3] =
     [(Level::All, "All messages"), (Level::Mentions, "Only @mentions"), (Level::Nothing, "Nothing")];
 
 /// How long a mute can last, like Discord's menu. `None` is until you turn it back on.
-const MUTE_FOR: [(&str, Option<i64>); 5] = [
+pub(crate) const MUTE_FOR: [(&str, Option<i64>); 6] = [
     ("For 15 minutes", Some(15 * 60_000)),
     ("For 1 hour", Some(60 * 60_000)),
+    ("For 3 hours", Some(3 * 60 * 60_000)),
     ("For 8 hours", Some(8 * 60 * 60_000)),
     ("For 24 hours", Some(24 * 60 * 60_000)),
     ("Until I turn it back on", None),
 ];
 
 /// "Muted until 16:30", "Muted until Tue 09:00", or "Muted".
-fn muted_label(n: Option<&pb::NotificationSettings>) -> String {
+pub(crate) fn muted_label(n: Option<&pb::NotificationSettings>) -> String {
     use chrono::TimeZone as _;
     let Some(until) = n.and_then(|n| n.muted_until.as_ref()) else { return "Muted".into() };
     let Some(at) = chrono::Local.timestamp_millis_opt(until.seconds * 1000).single() else { return "Muted".into() };
@@ -231,22 +232,9 @@ impl FuwaApp {
             .when(on, |el| el.text_color(p.primary).font_weight(FontWeight::BOLD))
             .hover(move |s| s.bg(hover))
             .active(|s| s.top(px(1.0)))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.menu = None;
-                let core = this.core.clone();
-                let (key, server, channel, patch) = (key.clone(), server.clone(), channel.clone(), patch.clone());
-                this.run(
-                    cx,
-                    async move { core.update_notifications(&key, &server, &channel, patch).await },
-                    |this, result, cx| {
-                        if let Err(err) = result {
-                            this.toast("circle-alert", "Couldn't change that".into(), err.message, None, None, cx);
-                        }
-                        cx.notify();
-                    },
-                );
-                cx.notify();
-            }))
+            .on_click(
+                cx.listener(move |this, _, _, cx| this.save_notifications(&key, &server, &channel, patch.clone(), cx)),
+            )
             .child(icon(glyph).size(px(16.0)))
             .child(label.to_owned())
     }

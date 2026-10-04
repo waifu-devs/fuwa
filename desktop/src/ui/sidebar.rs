@@ -7,13 +7,15 @@ use std::time::Duration;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, AppContext as _, Context, FontWeight, InteractiveElement as _,
-    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    IntoElement, MouseButton, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
+    div, px,
 };
 
 use crate::core::dms::DmStatus;
 use crate::pb;
 use crate::ui::app::{Dialog, FuwaApp, Menu, Nav};
 use crate::ui::arrange::{ChannelDrag, Slot};
+use crate::ui::context_menu::MenuOf;
 use crate::ui::motion;
 use crate::ui::theme::{Palette, alpha, corner};
 use crate::ui::widgets::{avatar, badge, conn_dot, icon, icon_button, pal, section_label, server_icon};
@@ -288,8 +290,16 @@ impl FuwaApp {
                     top: y,
                     bottom: y + LABEL,
                 });
+                let of =
+                    MenuOf::Category { key: key.to_owned(), server: server_id.to_owned(), category: cat.id.clone() };
+                let lit = self.context.as_ref().is_some_and(|m| m.of.lit() == of.lit());
                 let label = section_label(cat.name.clone(), &p)
                     .id(SharedString::from(format!("cat|{}", cat.id)))
+                    .when(lit, |el| el.text_color(p.foreground))
+                    .on_mouse_down(MouseButton::Right, self.right_click(of.clone(), cx))
+                    .on_hover(
+                        cx.listener(move |this, hovered: &bool, _, _| this.set_hover_target(of.clone(), *hovered)),
+                    )
                     .h(px(LABEL))
                     .flex()
                     .items_end()
@@ -443,9 +453,17 @@ impl FuwaApp {
         } else {
             0
         };
+        let of = MenuOf::Channel { key: key.to_owned(), server: server.to_owned(), channel: c.id.clone() };
+        let lit = self.context.as_ref().is_some_and(|m| m.of.lit() == of.lit());
         div()
             .id(SharedString::from(format!("row|{}", c.id)))
             .relative()
+            .when(lit, |el| el.bg(hover))
+            .on_mouse_down(MouseButton::Right, self.right_click(of.clone(), cx))
+            .on_hover(cx.listener({
+                let of = of.clone();
+                move |this, hovered: &bool, _, _| this.set_hover_target(of.clone(), *hovered)
+            }))
             .h(px(ROW - 2.0))
             .mb(px(2.0))
             .px(px(10.0))
@@ -559,6 +577,14 @@ impl FuwaApp {
             list = list.child(motion::rise(
                 div()
                     .id(SharedString::from(format!("dm|{}|{}", row.key, row.id)))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        self.right_click(MenuOf::Dm { key: row.key.clone(), conversation: row.id.clone() }, cx),
+                    )
+                    .when(
+                        self.context.as_ref().is_some_and(|m| m.of.lit() == format!("dm|{}|{}", row.key, row.id)),
+                        |el| el.bg(hover),
+                    )
                     .h(px(46.0))
                     .mb(px(2.0))
                     .px(px(8.0))

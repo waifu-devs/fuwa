@@ -142,7 +142,7 @@ impl FuwaApp {
             .into_any_element()
     }
 
-    fn open_emoji(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_emoji(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.emoji_open = true;
         self.picker = None;
         self.emoji = EmojiPicker { recent: self.core.prefs().recent_emoji, ..Default::default() };
