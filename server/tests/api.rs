@@ -6701,8 +6701,8 @@ async fn channels_shared_across_instances() {
     let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let (a, b) = (start(dir_a.path(), &federated).await, start(dir_b.path(), &federated).await);
     let (mut ca, mut cb) = (clients(&a).await, clients(&b).await);
-    let (juan, _, _) = sign_up(&mut ca, "juan").await;
-    let (mika, _, _) = sign_up(&mut cb, "mika").await;
+    let (juan, juan_user, _) = sign_up(&mut ca, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut cb, "mika").await;
     let (origin_a, origin_b) = (format!("http://{}", a.addr), format!("http://{}", b.addr));
     for (c, admin, origin) in [(&mut ca, &juan, &origin_a), (&mut cb, &mika, &origin_b)] {
         let settings = pb::InstanceSettings { public_url: origin.clone(), ..Default::default() };
@@ -6830,10 +6830,109 @@ async fn channels_shared_across_instances() {
     assert_eq!(listed[0].state, pb::SharedConnectionState::Active as i32);
     assert_eq!(listed[0].instance, a.addr.to_string());
 
-    // Messages don't cross instances yet.
-    let not_yet = send(&mut cb, &mika, &guest, &shown.id, "hi").await.unwrap_err();
-    assert_eq!(not_yet.code(), Code::FailedPrecondition, "{not_yet:?}");
-    assert!(not_yet.message().contains("can't do that yet"), "{not_yet:?}");
+    // What's said at home reaches the guest's people live, its people and
+    // server named under the home's instance.
+    let mut stream = cb
+        .events
+        .subscribe(authed(
+            &mika,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: guest.clone(), after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    send(&mut ca, &juan, &home, &dev.id, "@everyone hello from home").await.unwrap();
+    let live = next_message(&mut stream).await;
+    assert_eq!(live.content, "@everyone hello from home");
+    assert!(!live.mentions_everyone);
+    assert_eq!((live.server_id.as_str(), live.channel_id.as_str()), (guest.as_str(), shown.id.as_str()));
+    assert_eq!(live.author_id, format!("{}@{origin_a}", juan_user.id));
+    let author = live.shared.clone().unwrap();
+    assert_eq!(author.user.as_ref().unwrap().username, "juan");
+    assert!(author.user.unwrap().avatar_url.is_empty(), "nothing to fetch from the other instance");
+    let from = author.server.unwrap();
+    assert_eq!((from.id, from.name, from.instance), (format!("{home}@{origin_a}"), "Home".into(), a.addr.to_string()));
+
+    // The guest writes; the message lives only at home, and comes back to
+    // the guest as theirs.
+    let hi = send(&mut cb, &mika, &guest, &shown.id, "hi from guest @everyone").await.unwrap();
+    assert_eq!((hi.server_id.as_str(), hi.channel_id.as_str()), (guest.as_str(), shown.id.as_str()));
+    assert_eq!(hi.author_id, mika_user.id, "the guest's own people keep their own ids");
+    let at_home = messages(&mut ca, &juan, &home, &dev.id).await;
+    let stored = at_home.iter().find(|m| m.id == hi.id).unwrap();
+    assert!(!stored.mentions_everyone, "pings never cross servers");
+    assert_eq!(stored.author_id, format!("{}@{origin_b}", mika_user.id));
+    let by = stored.shared.as_ref().unwrap();
+    assert_eq!(by.server.as_ref().unwrap().instance, b.addr.to_string());
+    assert_eq!(by.user.as_ref().unwrap().username, "mika");
+    let at_guest = messages(&mut cb, &mika, &guest, &shown.id).await;
+    assert_eq!(
+        at_guest.iter().map(|m| m.content.as_str()).collect::<Vec<_>>(),
+        vec!["@everyone hello from home", "hi from guest @everyone"]
+    );
+    assert_eq!(at_guest[1].author_id, mika_user.id);
+    assert_eq!(at_guest[1].shared.as_ref().unwrap().server.as_ref().unwrap().id, guest);
+
+    // Files don't cross yet; editing and deleting their own does, and the
+    // home's messages aren't theirs to touch.
+    let with_file = cb
+        .messages
+        .send_message(authed(
+            &mika,
+            pb::SendMessageRequest {
+                server_id: guest.clone(),
+                channel_id: shown.id.clone(),
+                content: "look".into(),
+                attachments: vec![pb::Attachment { id: "01HZZZZZZZZZZZZZZZZZZZZZZZ".into(), ..Default::default() }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(with_file.code(), Code::InvalidArgument, "{with_file:?}");
+    let edited = cb
+        .messages
+        .update_message(authed(
+            &mika,
+            pb::UpdateMessageRequest {
+                server_id: guest.clone(),
+                message_id: hi.id.clone(),
+                content: "hi from guest".into(),
+                channel_id: shown.id.clone(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .message
+        .unwrap();
+    assert_eq!(edited.content, "hi from guest");
+    assert!(messages(&mut ca, &juan, &home, &dev.id).await.iter().any(|m| m.content == "hi from guest"));
+    let not_mine = cb
+        .messages
+        .delete_message(authed(
+            &mika,
+            pb::DeleteMessageRequest {
+                server_id: guest.clone(),
+                message_id: at_guest[0].id.clone(),
+                channel_id: shown.id.clone(),
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(not_mine.code(), Code::PermissionDenied, "{not_mine:?}");
+    cb.messages
+        .delete_message(authed(
+            &mika,
+            pb::DeleteMessageRequest {
+                server_id: guest.clone(),
+                message_id: hi.id.clone(),
+                channel_id: shown.id.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    assert!(messages(&mut ca, &juan, &home, &dev.id).await.iter().all(|m| m.id != hi.id));
 
     // The home ends it, and the guest's channel goes.
     ca.shared
@@ -6873,6 +6972,34 @@ async fn channels_shared_across_instances() {
         .unwrap_err();
     assert_eq!(refused.code(), Code::FailedPrecondition);
 
+    // With the home's instance down, the guest hears why.
+    let on = pb::InstanceSettings { federation: true, ..Default::default() };
+    ca.admin.update_settings(authed(&juan, settings_update(on, &["federation"], &[]))).await.unwrap();
+    let code = make_code(&ca, true).await;
+    let asked = cb
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    ca.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
+        ))
+        .await
+        .unwrap();
+    let shown = list_channels(&mut cb, &mika, &guest)
+        .await
+        .into_iter()
+        .find(|ch| ch.shared.as_ref().is_some_and(|s| !s.home))
+        .unwrap();
+    let a_addr = a.addr.to_string();
     a.stop().await;
+    let unreachable = send(&mut cb, &mika, &guest, &shown.id, "anyone?").await.unwrap_err();
+    assert_eq!(unreachable.code(), Code::Unavailable, "{unreachable:?}");
+    assert!(unreachable.message().contains(&format!("can't reach {a_addr}")), "{unreachable:?}");
     b.stop().await;
 }

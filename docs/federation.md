@@ -122,11 +122,23 @@ On "Other instances" in Instance settings (`GetFederation`,
 - Each instance reads every id another instance sends as that instance's
   own: a server there is kept here as `<id>@<its host>`, and so is anyone
   acting there, so another instance can't speak for this one's servers and
-  people, or a third instance's. Only the calls above cross instances so
-  far, and a call to a guest is taken only from its home's instance.
-- Nothing from the other instance is fetched by apps: its servers' icons
-  aren't kept (pictures come through each instance's own proxy later), and
-  files can't be let across instances yet.
+  people, or a third instance's. A call to a guest is taken only from its
+  home's instance, and only for a connection with that instance.
+- Once approved, the guest's people read, write, edit and delete their own
+  messages as on one instance: the guest's instance relays each to the
+  home's, which keeps them. What's said reaches the guest's instance live,
+  each message naming its author and server under the home's host; the
+  guest's own people read back as its own. People's names show with their
+  instance's host ("Home · chat.example.com").
+- A guest server on another instance that can't be reached gets three more
+  tries (after 1, 4 and 15 seconds); after that, what waited for it is
+  dropped, and its people see it when they next open the channel. When the
+  home's instance can't be reached, the guest's people are told "can't
+  reach <host> right now" and nothing is sent.
+- Nothing from the other instance is fetched by apps: its servers' icons,
+  people's avatars and link previews' pictures aren't kept (pictures come
+  through each instance's own proxy later), a link preview keeps only its
+  words and an https link, and files can't be sent across instances yet.
 - Stored in server migration 0020: `instance` and `instance_fingerprint` on
   `channel_guests` and `channel_links`, and `other_instances` on
   `share_codes`.
@@ -140,6 +152,4 @@ who talks to whom.
 
 ## Next
 
-Messages and live events across instances (and "Can't reach" when the
-other instance is away), then pictures through each reader's own instance,
-blocking that ends shares, key rotation, and attachments. The plan is in the shared channels phase 2 design.
+Pictures through each reader's own instance, blocking that ends shares, key rotation, and attachments. The plan is in the shared channels phase 2 design.

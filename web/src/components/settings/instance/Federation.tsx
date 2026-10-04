@@ -103,7 +103,7 @@ export function FederationSettings({
         <p className="text-muted-foreground">
           With this on, this instance talks to other fuwa instances so servers can share channels across them. Only the instances talk: apps here never connect to
           another instance, and no one's address is passed on. Every call is signed with this instance's key and checked against the key pinned for the other one.
-          Sharing channels across instances comes in a later update; for now you can check that two instances reach each other.
+          With shared channels on too, a server here can share a channel with a server on another instance, and messages pass between the two through the instances. Below you can check that two instances reach each other.
         </p>
       </motion.div>
 
