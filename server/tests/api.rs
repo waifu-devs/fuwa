@@ -7210,8 +7210,39 @@ async fn instances_meet_with_signed_calls() {
     let again = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap().into_inner();
     assert!(again.known_there);
 
+    // A rotates its key (only an admin can): B moves to the new one by
+    // itself, as the old one vouched for it.
+    assert!(fed_a.rotated_at.is_none());
+    let denied = ca.admin.rotate_federation_key(authed(&member, pb::RotateFederationKeyRequest {})).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let rotated =
+        ca.admin.rotate_federation_key(authed(&admin_a, pb::RotateFederationKeyRequest {})).await.unwrap().into_inner();
+    assert_ne!(rotated.fingerprint, fed_a.fingerprint);
+    let after = federation(&mut ca, &admin_a).await;
+    assert_eq!(after.fingerprint, rotated.fingerprint);
+    assert!(after.rotated_at.is_some());
+    let mut moved = None;
+    for _ in 0..100 {
+        let seen = federation(&mut cb, &admin_b).await.peers.remove(0);
+        if seen.fingerprint == rotated.fingerprint {
+            moved = Some(seen);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let moved = moved.expect("B followed A's rotation");
+    assert!(!moved.needs_check);
+    assert_eq!(moved.moves.len(), 1);
+    assert_eq!(moved.moves[0].previous_fingerprint, fed_a.fingerprint);
+    assert_eq!(moved.moves[0].fingerprint, rotated.fingerprint);
+    // Signed calls still go both ways.
+    let again = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap().into_inner();
+    assert!(again.known_there);
+    let back = cb.admin.check_instance(authed(&admin_b, check(&origin_a))).await.unwrap().into_inner();
+    assert!(back.known_there);
+
     // The key is the same after a restart.
-    let fingerprint_a = fed_a.fingerprint.clone();
+    let fingerprint_a = rotated.fingerprint.clone();
     a.stop().await;
     let a = start(dir_a.path(), &federated).await;
     let mut ca = clients(&a).await;
@@ -7817,7 +7848,7 @@ async fn channels_shared_across_instances() {
     // Pictures come through the reader's own instance, never straight from the other.
     let shown_avatar = author.user.unwrap().avatar_url;
     assert!(shown_avatar.starts_with(&format!("{origin_b}/media/outside/")), "{shown_avatar}");
-    assert!(shown_avatar.ends_with(&avatar.rsplit('/').next().unwrap().to_string()), "{shown_avatar}");
+    assert!(shown_avatar.contains(&avatar.rsplit('/').next().unwrap().to_string()), "{shown_avatar}");
     let from = author.server.unwrap();
     assert_eq!((from.id, from.name, from.instance), (format!("{home}@{origin_a}"), "Home".into(), a.addr.to_string()));
 

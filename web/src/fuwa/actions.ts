@@ -1018,6 +1018,9 @@ export const getFederation = (key: string) => call((signal) => api(key).admin.ge
 export const checkInstance = (key: string, address: string) =>
   call((signal) => api(key).admin.checkInstance({ address }, { signal }));
 
+/** Replaces this instance's federation key; others move to the new one by themselves. */
+export const rotateFederationKey = (key: string) => call((signal) => api(key).admin.rotateFederationKey({}, { signal }));
+
 export const nodeUsage = (key: string) => call((signal) => api(key).admin.getNodeUsage({}, { signal }));
 
 /** Replaces a server's own caps; unset ones follow the instance defaults. */
