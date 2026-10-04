@@ -1,7 +1,7 @@
 import { DoorOpenIcon, GavelIcon, HourglassIcon, LoaderCircleIcon, PencilIcon, TimerOffIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
-import { Permission, type Member, type Role } from "@/gen/fuwa/v1/types_pb";
+import type { Member } from "@/gen/fuwa/v1/types_pb";
 import { banMember, kickMember, setNickname, timeOutMember } from "@/fuwa/actions";
 import { useAccess, useAction, useRoles } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
@@ -15,11 +15,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDuration, formatLeft, formatStamp, memberName, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
-import { has, outranks, standing, type Access } from "@/lib/permissions";
+import { moderationFor, type ModAction } from "@/lib/permissions";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
-export type ModAction = "timeout" | "kick" | "ban" | "nickname";
+export type { ModAction };
 
 /** Discord's time-out lengths. */
 const TIME_OUT = [60, 5 * 60, 10 * 60, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60].map((s) => ({ value: s, label: formatDuration(s) }));
@@ -220,17 +220,4 @@ export function useModeration(instanceKey: string, serverId: string, target: Mem
   const ownerId = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.ownerId ?? "");
   const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id);
   return moderationFor(access, ownerId, roles, meId, target);
-}
-
-/** What you may do to someone, from access already worked out: only to people ranked below you, never yourself. */
-export function moderationFor(access: Access, ownerId: string, roles: readonly Role[], meId: string | undefined, target: Member | undefined) {
-  const below = !!target?.user && target.user.id !== meId && outranks(access, standing(ownerId, roles, target));
-  const can = (p: Permission) => below && has(access, p);
-  const allowed: Record<ModAction, boolean> = {
-    timeout: can(Permission.TIME_OUT_MEMBERS),
-    kick: can(Permission.KICK_MEMBERS),
-    ban: can(Permission.BAN_MEMBERS),
-    nickname: can(Permission.MANAGE_NICKNAMES),
-  };
-  return { ...allowed, any: Object.values(allowed).some(Boolean) };
 }

@@ -14,7 +14,7 @@ import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { createChannel, deleteChannel, markChannelsRead, run, setChannelPermissions, updateChannel } from "@/fuwa/actions";
 import { accessNow, getInstance } from "@/fuwa/hooks";
 import { copyIdItem, notificationEntries, placeLink } from "@/components/menus/common";
-import { attempt, confirmFirst } from "@/components/menus/MenuDialogs";
+import { attempt, confirmFirst } from "@/components/menus/dialogs";
 import { items, withExtensions, type MenuContexts, type MenuSection } from "@/lib/context-menu";
 import { has, hasIn } from "@/lib/permissions";
 import { reportError } from "@/lib/reports";

@@ -3,7 +3,7 @@ import { NotificationLevel } from "@/gen/fuwa/v1/types_pb";
 import { run, updateNotifications, type NotificationPatch } from "@/fuwa/actions";
 import { getInstance } from "@/fuwa/hooks";
 import { notificationKey } from "@/fuwa/store";
-import { attempt } from "@/components/menus/MenuDialogs";
+import { attempt } from "@/components/menus/dialogs";
 import type { MenuAction, MenuEntry } from "@/lib/context-menu";
 import { isMuted, LEVELS, MUTE_FOR, mutedLabel } from "@/lib/notifications";
 import { getPrefs } from "@/lib/prefs";

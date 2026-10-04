@@ -5,7 +5,7 @@ import { accessNow, getInstance } from "@/fuwa/hooks";
 import { openableChannels } from "@/components/ChannelSidebar";
 import { settingsTabsFor } from "@/components/dialogs/serverSettingsTabs";
 import { copyIdItem, goTo, notificationEntries } from "@/components/menus/common";
-import { confirmFirst, openMenuDialog } from "@/components/menus/MenuDialogs";
+import { confirmFirst, openMenuDialog } from "@/components/menus/dialogs";
 import { items, withExtensions, type MenuContexts, type MenuSection } from "@/lib/context-menu";
 import { effectiveNotifications } from "@/lib/notifications";
 import { has, hasIn } from "@/lib/permissions";

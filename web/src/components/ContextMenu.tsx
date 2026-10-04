@@ -74,7 +74,7 @@ function showMenu(menu: OpenMenu) {
   set({ current: menu, shown: [...menus.shown, menu] });
 }
 
-export function closeContextMenu() {
+function closeContextMenu() {
   const closing = menus.current;
   if (!closing) return;
   set({ current: null, shown: menus.shown });

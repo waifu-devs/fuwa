@@ -5,8 +5,8 @@ import { openConversation } from "@/fuwa/dms";
 import { accessNow, getInstance } from "@/fuwa/hooks";
 import { useContextMenu, type MenuTrigger } from "@/components/ContextMenu";
 import { copyIdItem, goTo } from "@/components/menus/common";
-import { attempt, openMenuDialog } from "@/components/menus/MenuDialogs";
-import { moderationFor } from "@/components/ModerateDialog";
+import { attempt, openMenuDialog } from "@/components/menus/dialogs";
+import { moderationFor } from "@/lib/permissions";
 import { items, withExtensions, type MenuContexts, type MenuSection } from "@/lib/context-menu";
 import { isAgent, timedOutUntil } from "@/lib/format";
 import { above, cssColor, has } from "@/lib/permissions";
@@ -35,6 +35,7 @@ export function memberMenu(ctx: MenuContexts["member"], trigger: MenuTrigger): M
   const roles = server ? (inst?.roles[serverId] ?? []) : [];
   const allowed = access && server && member ? moderationFor(access, server.ownerId, roles, meId, member) : null;
   const assignable = access && member && has(access, Permission.MANAGE_ROLES) ? roles.filter((r) => r.id !== serverId && above(access, r.position)) : [];
+  const held = member ? new Set(member.roleIds) : null;
   const timedOut = !!member && !!timedOutUntil(member, Date.now());
   const moderate = (action: "timeout" | "kick" | "ban" | "nickname") => () => member && openMenuDialog({ kind: "moderate", instanceKey, serverId, member, action });
   // A button that opens their profile card: the one right-clicked, when it is one.
@@ -62,20 +63,20 @@ export function memberMenu(ctx: MenuContexts["member"], trigger: MenuTrigger): M
         me && !!server && { id: "server-profile", label: "Edit server profile", icon: IdCardIcon, onSelect: () => openSettings("server-profiles", serverId) },
         !me && allowed?.nickname && { id: "nickname", label: "Change nickname", icon: PencilIcon, onSelect: moderate("nickname") },
         assignable.length > 0 &&
-          !!member && {
+          !!held && {
             kind: "sub",
             id: "roles",
             label: "Roles",
             icon: ShieldIcon,
-            hint: String(member.roleIds.filter((id) => id !== serverId).length || ""),
+            hint: String(held.size - (held.has(serverId) ? 1 : 0) || ""),
             items: assignable.map((role) => ({
               kind: "check" as const,
               id: role.id,
               label: role.name,
               color: role.color !== undefined ? cssColor(role.color) : undefined,
-              checked: member.roleIds.includes(role.id),
+              checked: held.has(role.id),
               keepOpen: true,
-              onSelect: () => attempt(run((member.roleIds.includes(role.id) ? takeRole : giveRole)(instanceKey, serverId, user.id, role.id))),
+              onSelect: () => attempt(run((held.has(role.id) ? takeRole : giveRole)(instanceKey, serverId, user.id, role.id))),
             })),
           },
       ),

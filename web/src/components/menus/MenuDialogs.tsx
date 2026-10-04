@@ -1,13 +1,12 @@
 import { LoaderCircleIcon, TriangleAlertIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useState, useSyncExternalStore } from "react";
-import type { Member, Server } from "@/gen/fuwa/v1/types_pb";
 import { InviteDialog } from "@/components/dialogs/InviteDialog";
 import { lazyComponent } from "@/components/lazy";
-import { ModerateDialog, type ModAction } from "@/components/ModerateDialog";
+import { ModerateDialog } from "@/components/ModerateDialog";
+import { closeMenuDialog as close, subscribeMenuDialogs as subscribe, menuDialogs, type Confirm } from "@/components/menus/dialogs";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
-import { toast } from "@/lib/ui";
 
 /*
  * Dialogs a right-click menu opens from places that don't have them already:
@@ -20,42 +19,8 @@ const ServerSettingsDialog = lazyComponent(
   (p) => p.open,
 );
 
-export type Confirm = {
-  title: string;
-  body: string;
-  /** The button's word, like "Leave". */
-  action: string;
-  /** What happens; a failure shows its message and leaves the dialog open. */
-  run: () => Promise<unknown>;
-};
-
-type MenuDialog =
-  | { kind: "moderate"; instanceKey: string; serverId: string; member: Member; action: ModAction }
-  | { kind: "confirm"; confirm: Confirm }
-  | { kind: "invite"; instanceKey: string; serverId: string; channelId: string }
-  | { kind: "server-settings"; instanceKey: string; server: Server; tab: string; target?: string };
-
-/** The dialog open now, and the last of each kind, kept while it closes. */
-type State = { open: MenuDialog | null; last: Partial<Record<MenuDialog["kind"], MenuDialog>> };
-let state: State = { open: null, last: {} };
-const listeners = new Set<() => void>();
-const set = (next: State) => {
-  state = next;
-  for (const l of listeners) l();
-};
-const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => listeners.delete(l);
-};
-
-export const openMenuDialog = (dialog: MenuDialog) => set({ open: dialog, last: { ...state.last, [dialog.kind]: dialog } });
-const close = () => set({ ...state, open: null });
-
-/** Asks before something that can't be taken back, like leaving a server. */
-export const confirmFirst = (confirm: Confirm) => openMenuDialog({ kind: "confirm", confirm });
-
 export function MenuDialogs() {
-  const { open, last } = useSyncExternalStore(subscribe, () => state);
+  const { open, last } = useSyncExternalStore(subscribe, menuDialogs);
   const moderate = last.moderate?.kind === "moderate" ? last.moderate : null;
   const invite = last.invite?.kind === "invite" ? last.invite : null;
   const settings = last["server-settings"]?.kind === "server-settings" ? last["server-settings"] : null;
@@ -141,9 +106,4 @@ function ConfirmBody({ confirm }: { confirm: Confirm }) {
       </div>
     </>
   );
-}
-
-/** Runs a menu's action and says so if it fails, since the menu is gone by then. */
-export function attempt(work: Promise<unknown>) {
-  work.catch((err: Error) => toast(err.message));
 }
