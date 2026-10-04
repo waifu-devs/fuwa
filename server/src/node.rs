@@ -1647,20 +1647,21 @@ impl NodeDb {
         .await
     }
 
-    /// A server's files in use: its icon, emoji, webhooks' pictures and
-    /// messages' attachments.
+    /// A server's files in use: its icon, banner, emoji, webhooks' pictures
+    /// and messages' attachments.
     pub async fn server_media(&self, server_id: &str) -> Result<Vec<String>> {
         let conn = self.read()?;
         query_all(
             &conn,
             "SELECT id FROM media WHERE server_id = ?1 AND stored_at IS NOT NULL AND used_at IS NOT NULL
-             AND purpose IN (?2, ?3, ?4, ?5) ORDER BY id",
+             AND purpose IN (?2, ?3, ?4, ?5, ?6) ORDER BY id",
             (
                 server_id,
                 pb::MediaPurpose::ServerIcon as i64,
                 pb::MediaPurpose::Emoji as i64,
                 pb::MediaPurpose::Avatar as i64,
                 pb::MediaPurpose::Attachment as i64,
+                pb::MediaPurpose::Banner as i64,
             ),
             |r| r.get::<String>(0),
         )

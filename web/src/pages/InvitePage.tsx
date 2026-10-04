@@ -9,6 +9,7 @@ import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { Account } from "@/components/Connect";
 import { ServerIcon, UserAvatar } from "@/components/Icons";
+import { ServerBanner } from "@/components/join/Banner";
 import { JoinButton } from "@/components/join/JoinButton";
 import { ServerDoor } from "@/components/join/ServerDoor";
 import { InlineMarkdown } from "@/components/Markdown";
@@ -18,6 +19,7 @@ import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { displayName } from "@/lib/format";
 import { expiresAt, timeLeft } from "@/lib/invites";
+import { accentVars } from "@/lib/banner";
 import { allowPicturesFrom } from "@/lib/shown";
 import { loadSaved, normalizeUrl } from "@/fuwa/saved";
 import { store } from "@/fuwa/store";
@@ -110,26 +112,29 @@ export function InvitePage({ instanceKey, code }: { instanceKey: string; code: s
               transition={{ duration: 0.5, ease: EASE_OUT }}
               className="w-full max-w-md overflow-hidden rounded-3xl border bg-card shadow-2xl"
             >
-              <div className="relative flex flex-col items-center gap-2 px-6 pt-8 pb-6 text-center sm:px-8">
-                <div aria-hidden className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-primary/20 to-transparent" />
+              <ServerBanner server={found.server} className="h-32 sm:h-36">
                 {found.inviter && (
                   <motion.p
                     initial={{ opacity: 0, y: -6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.15 }}
-                    className="relative flex items-center gap-1.5 text-sm text-muted-foreground"
+                    className="absolute top-3 left-1/2 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/35 px-2.5 py-1 text-xs whitespace-nowrap text-white/85 backdrop-blur-md"
                   >
                     <UserAvatar user={found.inviter} className="size-5 text-[0.55rem]" />
-                    <b className="text-foreground">{displayName(found.inviter)}</b> invited you to join
+                    <span className="truncate">
+                      <b className="text-white">{displayName(found.inviter)}</b> invited you to join
+                    </span>
                   </motion.p>
                 )}
+              </ServerBanner>
+              <div style={accentVars(found.server)} className="relative -mt-12 flex flex-col items-center gap-2 px-6 pb-6 text-center sm:px-8">
                 <motion.div
-                  initial={{ scale: 0.5, rotate: -14 }}
-                  animate={{ scale: 1, rotate: 0 }}
+                  initial={{ scale: 0.5, rotate: -14, y: 12 }}
+                  animate={{ scale: 1, rotate: 0, y: 0 }}
                   transition={{ type: "spring", stiffness: 380, damping: 13, delay: 0.1 }}
-                  className="relative mt-2"
+                  className="relative"
                 >
-                  <ServerIcon server={found.server} active className="float size-20 text-2xl shadow-[0_14px_30px_-10px_color-mix(in_srgb,var(--primary)_60%,transparent)]" />
+                  <ServerIcon server={found.server} active className="float size-20 text-2xl ring-4 ring-card shadow-[0_14px_30px_-10px_color-mix(in_srgb,var(--accent-server)_70%,transparent)]" />
                 </motion.div>
                 <h1 className="relative mt-1 text-2xl font-extrabold tracking-tight">{found.server.name}</h1>
                 <p className="relative flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-muted-foreground">

@@ -200,6 +200,10 @@ message Member {
   // owner or an agent) without one, or whose sign-in is older than
   // sso_recheck_days, sees no channels until they sign in again.
   google.protobuf.Timestamp sso_signed_in_at = 9;
+  // When they last went through the server's onboarding (or skipped it);
+  // unset if they never have. Only the member themselves and managers
+  // (MANAGE_SERVER) see it.
+  google.protobuf.Timestamp onboarded_at = 10;
 }
 
 // ============================================================================
@@ -369,6 +373,22 @@ message Server {
   // leave the channel's list of threads until someone replies again. Zero
   // never archives them.
   int32 thread_archive_hours = 22;
+  // A wide picture across the top of its welcome, applying and onboarding
+  // screens, its invites and its Browse card: an upload on this instance
+  // (MEDIA_PURPOSE_BANNER, uploaded for this server), or empty for none.
+  string banner_url = 23;
+  // The point of the banner to keep in view where it's shown in another
+  // shape than it was cropped to (a phone, a card), in percent of its width
+  // and height from the top left: 50, 50 is the middle.
+  int32 banner_focus_x = 24;
+  int32 banner_focus_y = 25;
+  // A color to go with the banner, as 0xRRGGBB, picked from it or by hand.
+  // Apps tint the welcome, applying and onboarding screens with it. Unset
+  // for the app's own.
+  optional int32 accent_color = 26;
+  // It has onboarding turned on: new members go through its steps once
+  // they're in. See JoinService.GetOnboarding.
+  bool has_onboarding = 27;
 }
 
 // What new members see once they're in: a few words and the channels to
@@ -387,6 +407,69 @@ message WelcomeChannel {
   string description = 2;
   // A Unicode emoji, or one of the server's own written <:name:id>. Empty for none.
   string emoji = 3;
+}
+
+// What new members go through once they're in, a step at a time, before the
+// welcome screen: picking what they're into (which hands out roles and
+// suggests channels), the rules, and saying hello. Discord calls it
+// onboarding.
+message Onboarding {
+  bool enabled = 1;
+  // Up to 6, in order.
+  repeated OnboardingStep steps = 2;
+  // Who last saved it. Kept by the server only, never sent: its roles are
+  // handed out only while they still rank below this person's.
+  string set_by = 3;
+}
+
+enum OnboardingStepKind {
+  ONBOARDING_STEP_KIND_UNSPECIFIED = 0;
+  // Pick from options, each of which can hand out roles and suggest channels.
+  ONBOARDING_STEP_KIND_PICK = 1;
+  // Read the server's rules and agree to them. Shown only to members who
+  // haven't agreed yet, and never skippable.
+  ONBOARDING_STEP_KIND_RULES = 2;
+  // Say hello in a channel, through the message box (MessageService), so
+  // it's an ordinary message.
+  ONBOARDING_STEP_KIND_HELLO = 3;
+}
+
+message OnboardingStep {
+  // Given by the server and kept while the step is. Empty for a new one.
+  string id = 1;
+  OnboardingStepKind kind = 2;
+  // 1 to 80 characters.
+  string title = 3;
+  // Inline Markdown, up to 200 characters.
+  string description = 4;
+  // People can go on without doing it. PICK steps that aren't skippable
+  // need at least one option picked.
+  bool skippable = 5;
+  // PICK: 1 to 12 options.
+  repeated OnboardingOption options = 6;
+  // PICK: more than one option can be picked.
+  bool multiple = 7;
+  // HELLO: the text channel to say hello in. Members who can't see it or
+  // talk there skip the step.
+  string channel_id = 8;
+  // HELLO: what the message box starts with, up to 200 characters.
+  string hello = 9;
+}
+
+message OnboardingOption {
+  // Given by the server and kept while the option is. Empty for a new one.
+  string id = 1;
+  // 1 to 50 characters.
+  string label = 2;
+  // Up to 100 characters.
+  string description = 3;
+  // A Unicode emoji, or one of the server's own written <:name:id>. Empty for none.
+  string emoji = 4;
+  // Up to 5 roles picking it hands out: ranked below whoever set them here,
+  // and never ones with moderating or managing permissions.
+  repeated string role_ids = 5;
+  // Up to 5 channels it suggests. Members only get the ones they can see.
+  repeated string channel_ids = 6;
 }
 
 // A server's own emoji, written in messages as <:name:id>.
