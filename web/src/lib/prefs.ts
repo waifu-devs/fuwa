@@ -43,6 +43,8 @@ export type Prefs = {
   /** The whole app's size, in percent. */
   zoom: number;
   reduceMotion: ReduceMotion;
+  /** Effects on other people's profile cards play (your own always shows to you). */
+  othersEffects: boolean;
   /** Color saturation, in percent. */
   saturation: number;
   underlineLinks: boolean;
@@ -109,6 +111,7 @@ export const DEFAULT_PREFS: Prefs = {
   chatFontSize: 15,
   zoom: 100,
   reduceMotion: "system",
+  othersEffects: true,
   saturation: 100,
   underlineLinks: false,
   roleColors: "names",
@@ -215,6 +218,7 @@ function sanitize(p: Prefs): Prefs {
         ? Object.fromEntries(Object.entries(p.userVolumes).filter(([, v]) => typeof v === "number" && v >= 0 && v <= 200))
         : {},
     shareReports: p.shareReports !== false,
+    othersEffects: p.othersEffects !== false,
     keybinds: p.keybinds && typeof p.keybinds === "object" ? p.keybinds : {},
     customKeybinds: Array.isArray(p.customKeybinds)
       ? p.customKeybinds.filter((k) => typeof k?.id === "string" && typeof k.action === "string" && typeof k.combo === "string")

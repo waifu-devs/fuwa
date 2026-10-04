@@ -1,0 +1,69 @@
+name: Release SDK
+
+# Pushing a release tag like v0.2.0 (the same tag that makes the server
+# release, release.yml) publishes the TypeScript SDK, @waifu-devs/fuwa, to npm
+# at that version, with provenance: npm shows the commit and workflow that
+# built it. The SDK's version follows the server's, so an app can tell which
+# server release it was made against.
+#
+# It needs the NPM_TOKEN secret (an npm automation token that can publish
+# @waifu-devs/fuwa), kept in the "npm" environment, limited to v* tags.
+# Without it, the job says so and publishes nothing.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish @waifu-devs/fuwa
+    runs-on: ubuntu-latest
+    # Holds NPM_TOKEN; its deployment rule lets only v* tags in.
+    environment: npm
+    permissions:
+      contents: read
+      # For npm provenance.
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: sdk/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: sdk/pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - name: Version from the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$GITHUB_REF_NAME isn't a version tag like v1.2.3"
+            exit 1
+          fi
+          npm pkg set version="$version"
+      - name: Generated protocol code matches proto/
+        run: |
+          pnpm run generate
+          git diff --exit-code -- src/gen
+          test -z "$(git status --porcelain -- src/gen)"
+      - run: pnpm run build
+      - run: pnpm test
+      - run: npm pack --dry-run
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::warning::NPM_TOKEN isn't set, so the SDK wasn't published. Add it to the npm environment (Settings > Environments), then re-run this run."
+            exit 0
+          fi
+          npm publish --provenance --access public

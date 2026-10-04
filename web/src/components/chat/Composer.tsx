@@ -6,6 +6,7 @@ import { run, sendMessage } from "@/fuwa/actions";
 import { useAccess } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { MentionPicker, useMentionPicker } from "@/components/chat/MentionPicker";
+import { TimestampPicker } from "@/components/chat/TimestampPicker";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { PollEditor } from "@/components/chat/PollEditor";
 import { RulesDialog } from "@/components/join/Rules";
@@ -229,6 +230,7 @@ export function Composer({
             </motion.span>
           )}
         </AnimatePresence>
+        <TimestampPicker onPick={insert} />
         <EmojiPicker
           emojis={emojis}
           server={server}

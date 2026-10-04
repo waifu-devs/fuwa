@@ -97,7 +97,8 @@ export type NewPoll = Message<"fuwa.v1.NewPoll"> & {
    * Other members, moderators and admins never see who voted for what, and
    * the counts per answer show only once it ends. The instance's operator
    * could still work out votes from its database while the poll runs; when
-   * it ends they're deleted and only the counts stay.
+   * it ends they're removed from the live tables and only the counts stay
+   * (backups and the file's log can hold them for a while after).
    *
    * @generated from field: bool anonymous = 4;
    */
