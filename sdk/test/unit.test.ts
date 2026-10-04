@@ -53,6 +53,7 @@ test("errors become typed classes", () => {
 
 test("retry-after comes from the header or slow mode's words", () => {
   assert.equal(retryAfterOf("x", new Headers({ "retry-after": "2" })), 2000);
+  assert.equal(retryAfterOf("again in 1 minute", new Headers({ "fuwa-retry-after-ms": "1234" })), 1234);
   assert.equal(retryAfterOf("you can send again in 1 minute"), 60_000);
   assert.equal(retryAfterOf("you can send again in 2 hours"), 7_200_000);
   assert.equal(retryAfterOf("this server is out of storage"), undefined);

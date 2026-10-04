@@ -300,7 +300,9 @@ impl AgentService for Api {
                 let agent = self.own_agent(&owner, &request.get_ref().agent_id).await?;
                 let token = auth::new_token();
                 self.app.node()?.reset_agent_token(&agent.account.id, &auth::hash_token(&token)).await?;
-                tracing::info!(agent = %agent.account.id, "agent token reset");
+                // Streams on the old token end now, not at their next heartbeat.
+                self.app.sessions_ended(&agent.account.id);
+                tracing::info!("agent token reset");
                 Ok(pb::ResetAgentTokenResponse { token })
             }
             .await,

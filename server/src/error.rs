@@ -5,6 +5,9 @@ pub const MISROUTED: &str = "fuwa-misrouted";
 /// Set on the answer to a request a part turned away without doing anything,
 /// because it isn't ready yet: the gateway tries again shortly.
 pub const NOT_READY: &str = "fuwa-not-ready";
+/// Set on a RESOURCE_EXHAUSTED answer that will work again after a wait: how
+/// many milliseconds, so programs (agents, say) can wait exactly that long.
+pub const RETRY_AFTER_MS: &str = "fuwa-retry-after-ms";
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -26,6 +29,10 @@ pub enum Error {
     FailedPrecondition(String),
     #[error("{0}")]
     ResourceExhausted(String),
+    /// Too soon (slow mode, a rate limit): the same request works after the
+    /// wait, in milliseconds, which reaches the client as [`RETRY_AFTER_MS`].
+    #[error("{0}")]
+    Limited(String, i64),
     #[error("the server is busy; try again")]
     Busy,
     /// A part of a split instance this needs is down.
@@ -113,6 +120,13 @@ impl From<Error> for Status {
             Error::Moving => {
                 let mut status = Status::unavailable(err.to_string());
                 status.metadata_mut().insert(NOT_READY, "1".parse().expect("a valid header value"));
+                return status;
+            }
+            Error::Limited(message, wait_ms) => {
+                let mut status = Status::resource_exhausted(message.clone());
+                if let Ok(value) = (*wait_ms).max(1).to_string().parse() {
+                    status.metadata_mut().insert(RETRY_AFTER_MS, value);
+                }
                 return status;
             }
             Error::Remote(status) => return status.clone(),
