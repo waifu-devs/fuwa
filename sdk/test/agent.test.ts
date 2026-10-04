@@ -336,6 +336,14 @@ test("agents hold a conversation: utterances in, streamed speech out, barge-in",
   // The bot answers at length; the caller talks over it and it stops.
   const answer = new OggOpusWriter();
   for (let i = 0; i < 250; i++) answer.add(Uint8Array.of(0xfc, i & 0xff, 1, 2, 3)); // five seconds
+  // The caller hears it, and stops hearing it as soon as it's talked over.
+  let lastHeard = 0;
+  const off = mouth.on("utterance", (u) => {
+    if (u.userId !== bot.me.id) return;
+    void (async () => {
+      for await (const _ of u) lastHeard = Date.now();
+    })();
+  });
   const started = Date.now();
   const answering = ear.play(new Blob([answer.finish()]).stream(), { interruptible: true });
   await new Promise((r) => setTimeout(r, 400));
@@ -344,6 +352,12 @@ test("agents hold a conversation: utterances in, streamed speech out, barge-in",
   assert.equal(result.interrupted, true);
   assert.equal(result.by, caller.me.id);
   assert.ok(Date.now() - started < 2500, "it stopped well before the end");
+  const stoppedAt = Date.now();
+  await new Promise((r) => setTimeout(r, 500));
+  off();
+  assert.ok(lastHeard > started, "the caller heard the answer");
+  // What the instance had queued (up to 200 ms) is dropped, not played out.
+  assert.ok(lastHeard - stoppedAt < 100, `it went quiet at once (${lastHeard - stoppedAt} ms after)`);
 
   await mouth.leave();
   await ear.leave();

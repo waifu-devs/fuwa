@@ -35,6 +35,13 @@ export interface JoinVoiceOptions {
   utteranceGapMs?: number;
   /** The longest an utterance runs before it ends and the next begins. Default 60 s. */
   maxUtteranceMs?: number;
+  /**
+   * How long without anything from the instance before the stream counts as
+   * gone and it rejoins. Instances send a keepalive every 15 s while nobody
+   * talks; this only applies once one has come (older instances send none).
+   * Default 45 s.
+   */
+  keepaliveTimeoutMs?: number;
   /** Leaves when it aborts. */
   signal?: AbortSignal;
 }
@@ -82,8 +89,9 @@ export interface SpeakOptions {
   signal?: AbortSignal;
   /**
    * Stops when someone starts talking over it (barge-in), resolving with
-   * `interrupted`: true for anyone, or a test of who may cut in. What the
-   * instance already has queued still plays, a fraction of a second.
+   * `interrupted`: true for anyone, or a test of who may cut in. The
+   * instance drops what it still has queued, so the sound stops at once
+   * (older instances play that out, a fraction of a second).
    */
   interruptible?: boolean | ((userId: string) => boolean);
 }
@@ -281,6 +289,11 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
   #utteranceReaders = new Set<{ queue: Utterance[]; wake?: () => void }>();
   #speeches = new Set<Speech>();
   #turn: Promise<unknown> = Promise.resolve();
+  /** The stream being read now, which a silent stream's watchdog aborts. */
+  #current: AbortController | undefined;
+  #lastMessage = Date.now();
+  #keepalives = false;
+  #wentQuiet = false;
 
   private constructor(fuwa: Fuwa, options: JoinVoiceOptions, first: AsyncIterator<ListenVoiceResponse>) {
     this.#fuwa = fuwa;
@@ -290,8 +303,14 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
     options.signal?.addEventListener("abort", () => void this.leave(), { once: true });
     const silenceMs = options.silenceMs ?? 300;
     const gapMs = options.utteranceGapMs ?? 600;
+    const quietMs = options.keepaliveTimeoutMs ?? 45_000;
     this.#sweeper = setInterval(() => {
       const now = Date.now();
+      if (this.#keepalives && !this.#wentQuiet && !this.#reconnecting && now - this.#lastMessage >= quietMs) {
+        // Nothing, not even a keepalive: the stream is gone without saying so.
+        this.#wentQuiet = true;
+        this.#current?.abort();
+      }
       for (const [userId, at] of this.#lastHeard) {
         if (now - at >= silenceMs) {
           this.#lastHeard.delete(userId);
@@ -304,7 +323,7 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
           open.utterance.finish();
         }
       }
-    }, Math.min(100, silenceMs, gapMs));
+    }, Math.min(100, silenceMs, gapMs, quietMs));
     this.#closed = this.#run(first);
     this.#closed.catch(() => {});
   }
@@ -312,11 +331,17 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
   /** Joins the voice channel; resolves once the instance says the account is in. */
   static async join(fuwa: Fuwa, options: JoinVoiceOptions): Promise<VoiceConnection> {
     const holder = { session: "", state: undefined as VoiceState | undefined };
-    const stream = await VoiceConnection.#listen(fuwa, options, "", holder, new AbortController());
+    const stop = new AbortController();
+    const first = new AbortController();
+    const link = () => first.abort();
+    stop.signal.addEventListener("abort", link, { once: true });
+    const stream = await VoiceConnection.#listen(fuwa, options, "", holder, first);
     const voice = new VoiceConnection(fuwa, options, stream.iterator);
     voice.#session = holder.session;
     voice.#state = holder.state;
-    voice.#stop = stream.controller;
+    voice.#stop = stop;
+    voice.#current = first;
+    voice.#unlink = () => stop.signal.removeEventListener("abort", link);
     return voice;
   }
 
@@ -642,6 +667,13 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
         room?.();
         void Promise.resolve(iterator.return?.()).catch(() => {});
       }
+      // Cut short: drop what the instance still has queued, so it stops now
+      // rather than a fraction of a second later (older instances ignore it).
+      if (sent > 0 && (speech.stopped || signal?.aborted) && !this.#done) {
+        await this.#fuwa.calls
+          .speakVoice({ serverId: this.serverId, sessionId: this.#session, frames: [], interrupt: true })
+          .catch(() => {});
+      }
     }
     return { interrupted: speech.stopped, by: speech.by, sentMs: sent * FRAME_MS };
   }
@@ -664,13 +696,19 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
           for (;;) {
             const { done, value } = await iterator!.next();
             if (done) break;
+            this.#lastMessage = Date.now();
             if (value.event.case === "frame") this.#heard(value.event.value);
+            else if (value.event.case === "keepalive") this.#keepalives = true;
           }
           error = new UnavailableError(Code.Unavailable, "the instance closed the voice stream");
         } catch (cause) {
           error = toFuwaError(cause, "fuwa.v1.CallService/ListenVoice");
         }
         if (this.#stop.signal.aborted) return;
+        if (this.#wentQuiet) {
+          this.#wentQuiet = false;
+          error = new UnavailableError(Code.Unavailable, "the voice stream went quiet");
+        }
         if (FINAL.has(error.code)) throw error;
         // Only a stream that stayed up a while starts the waits over, so one
         // that keeps dropping right after it joins backs off.
@@ -699,6 +737,8 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
             const out = { session: this.#session, state: this.#state };
             const stream = await VoiceConnection.#listen(this.#fuwa, this.#opts, this.#session, out, attempt);
             upSince = Date.now();
+            this.#current = attempt;
+            this.#lastMessage = upSince;
             this.#session = out.session;
             this.#state = out.state;
             iterator = stream.iterator;
