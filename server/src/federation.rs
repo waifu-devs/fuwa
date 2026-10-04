@@ -30,15 +30,20 @@ const CONTEXT: &[u8] = b"fuwa-federation-v1";
 const WINDOW_MS: i64 = 5 * 60 * 1000;
 /// How long a nonce is remembered: past the window both ways.
 const NONCE_KEEP_MS: i64 = 2 * WINDOW_MS;
-/// The most nonces remembered at once; past it, signed calls wait.
-const MAX_NONCES: usize = 200_000;
+/// The most nonces remembered for one instance at once; past it, its
+/// signed calls wait (others' don't).
+const MAX_NONCES_PER_PEER: usize = 50_000;
 /// The largest payload an envelope carries.
 pub const MAX_PAYLOAD: usize = 1 << 20;
 /// How long a call to another instance may take.
 const TIMEOUT: Duration = Duration::from_secs(10);
 /// How many instances this one fetches keys for a minute, when greeted by
-/// ones it doesn't know yet.
+/// ones it doesn't know yet: in all, and under one domain (so a wildcard
+/// domain's endless names can't use up the rest).
 const HELLOS_PER_MINUTE: usize = 60;
+const HELLOS_PER_DOMAIN_PER_MINUTE: usize = 5;
+/// The most instances this one pins a key for.
+pub const MAX_PEERS: i64 = 1000;
 /// How often the time an instance was last heard from is written down.
 const HEARD_EVERY_MS: i64 = 60 * 1000;
 
@@ -117,15 +122,22 @@ pub fn origin(address: &str, allow_private: bool) -> std::result::Result<String,
 const PRIVATE: &str = "other instances have to be on the internet, not a private or internal address \
      (whoever runs this instance can allow those with FUWA_FEDERATION_ALLOW_PRIVATE=1)";
 
+/// Recent greetings from unknown instances: in all, and by domain.
+type Hellos = (Vec<Instant>, HashMap<String, Vec<Instant>>);
+
 /// What one instance keeps for talking to others.
 pub struct Federation {
     allow_private: bool,
     client: reqwest::Client,
     key: OnceCell<Arc<Ed25519KeyPair>>,
     /// Nonces seen from each instance, until they can't be replayed anyway.
-    nonces: Mutex<HashMap<(String, Vec<u8>), i64>>,
-    /// When the last greetings from unknown instances came, for a global cap.
-    hellos: Mutex<Vec<Instant>>,
+    nonces: Mutex<HashMap<String, HashMap<Vec<u8>, i64>>>,
+    /// When this process started: envelopes signed before it are refused, as
+    /// their nonces were forgotten with the last process.
+    started_ms: i64,
+    /// When the last greetings from unknown instances came, in all and by
+    /// domain, for the caps.
+    hellos: Mutex<Hellos>,
     /// When each instance's last_heard was written down.
     heard: Mutex<HashMap<String, i64>>,
     /// Instances this process said Hello to, and that answered.
@@ -149,6 +161,7 @@ impl Federation {
             client,
             key: OnceCell::new(),
             nonces: Mutex::default(),
+            started_ms: crate::id::now_ms(),
             hellos: Mutex::default(),
             heard: Mutex::default(),
             introduced: Mutex::default(),
@@ -161,14 +174,21 @@ impl Federation {
 
     /// Remembers a nonce, or says it was seen.
     fn fresh_nonce(&self, from: &str, nonce: &[u8], now: i64) -> std::result::Result<(), Refusal> {
-        let mut nonces = self.nonces.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if nonces.len() >= MAX_NONCES / 2 {
+        let mut all = self.nonces.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if all.len() > 64 && !all.contains_key(from) {
+            all.retain(|_, seen| {
+                seen.retain(|_, at| now - *at < NONCE_KEEP_MS);
+                !seen.is_empty()
+            });
+        }
+        let nonces = all.entry(from.to_string()).or_default();
+        if nonces.len() >= MAX_NONCES_PER_PEER / 2 {
             nonces.retain(|_, seen| now - *seen < NONCE_KEEP_MS);
         }
-        if nonces.len() >= MAX_NONCES {
+        if nonces.len() >= MAX_NONCES_PER_PEER {
             return Err(Refusal::Busy);
         }
-        match nonces.entry((from.to_string(), nonce.to_vec())) {
+        match nonces.entry(nonce.to_vec()) {
             std::collections::hash_map::Entry::Occupied(_) => Err(Refusal::Replayed),
             std::collections::hash_map::Entry::Vacant(slot) => {
                 slot.insert(now);
@@ -177,15 +197,25 @@ impl Federation {
         }
     }
 
-    /// Whether another greeting from an unknown instance may be looked into now.
-    fn take_hello(&self) -> bool {
+    /// Whether another greeting from an instance this one doesn't know may
+    /// be looked into now.
+    fn take_hello(&self, origin: &str) -> bool {
         let mut hellos = self.hellos.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (all, by_domain) = &mut *hellos;
         let now = Instant::now();
-        hellos.retain(|at| now.duration_since(*at) < Duration::from_secs(60));
-        if hellos.len() >= HELLOS_PER_MINUTE {
+        let recent = |at: &Instant| now.duration_since(*at) < Duration::from_secs(60);
+        all.retain(recent);
+        by_domain.retain(|_, times| {
+            times.retain(recent);
+            !times.is_empty()
+        });
+        let domain = domain_of(origin);
+        let under_domain = by_domain.get(&domain).map_or(0, Vec::len);
+        if all.len() >= HELLOS_PER_MINUTE || under_domain >= HELLOS_PER_DOMAIN_PER_MINUTE {
             return false;
         }
-        hellos.push(now);
+        all.push(now);
+        by_domain.entry(domain).or_default().push(now);
         true
     }
 
@@ -246,6 +276,7 @@ enum Refusal {
     Signature,
     Replayed,
     NotAnAnswer,
+    BeforeStart,
     Busy,
 }
 
@@ -258,6 +289,7 @@ impl Refusal {
             Refusal::Signature => "federation_signature",
             Refusal::Replayed => "federation_replayed",
             Refusal::NotAnAnswer => "federation_not_an_answer",
+            Refusal::BeforeStart => "federation_before_start",
             Refusal::Busy => "federation_busy",
         }
     }
@@ -270,6 +302,7 @@ impl Refusal {
             Refusal::Signature => "that envelope's signature doesn't check out",
             Refusal::Replayed => "that envelope was already sent",
             Refusal::NotAnAnswer => "that answer isn't for this call",
+            Refusal::BeforeStart => "that envelope was signed before this instance last started; send a new one",
             Refusal::Busy => "this instance is busy; try again",
         }
     }
@@ -287,6 +320,22 @@ impl Refusal {
         crate::reports::server_error(self.report(), Some("federation"));
         Error::FailedPrecondition(format!("{}'s answer was turned down: {}", display(origin), self.message()))
     }
+}
+
+/// The domain an origin's host is under, roughly: its last two labels (three
+/// when the second-to-last is short, as in example.co.uk), or the address
+/// itself. Only for capping greetings, so rough is enough.
+fn domain_of(origin: &str) -> String {
+    let host = host_of(origin).unwrap_or_default();
+    if host.parse::<IpAddr>().is_ok() || host.starts_with('[') {
+        return host;
+    }
+    let labels: Vec<&str> = host.split('.').collect();
+    let keep = match labels.as_slice() {
+        [.., second, _] if second.len() <= 3 && labels.len() >= 3 => 3,
+        _ => 2,
+    };
+    labels[labels.len().saturating_sub(keep)..].join(".")
 }
 
 /// An origin as people read it: the host, and the port when there is one.
@@ -324,6 +373,12 @@ fn precheck(own: &str, envelope: &fpb::Envelope) -> std::result::Result<(), Refu
     Ok(())
 }
 
+/// Envelopes signed before this process started can't be checked for
+/// replays (their nonces went with the last process), so they're refused.
+fn after_start(federation: &Federation, envelope: &fpb::Envelope) -> std::result::Result<(), Refusal> {
+    if envelope.sent_at_ms < federation.started_ms { Err(Refusal::BeforeStart) } else { Ok(()) }
+}
+
 /// Checks an envelope that came in against the key pinned for its sender:
 /// addressed here, on time, signed, not seen before, and (for an answer)
 /// answering `call`.
@@ -335,6 +390,7 @@ fn check(
     call: Option<&[u8]>,
 ) -> std::result::Result<(), Refusal> {
     precheck(own, envelope)?;
+    after_start(federation, envelope)?;
     UnparsedPublicKey::new(&ED25519, public_key)
         .verify(&signed_bytes(envelope), &envelope.signature)
         .map_err(|_| Refusal::Signature)?;
@@ -602,9 +658,10 @@ async fn exchange(
 }
 
 /// Makes sure another instance can be talked to: federation is on, it isn't
-/// blocked, its key is pinned here and this instance's is pinned there (said
-/// Hello once per process, or again when `hello`).
-async fn reach(app: &App, address: &str, hello: bool) -> Result<(String, crate::node::FederationPeer)> {
+/// blocked, and its key is pinned here (fetched and pinned now only when
+/// `pin_new`: an admin's check, never on another instance's say-so). Says
+/// Hello once per process, or again when `hello`.
+async fn reach(app: &App, address: &str, pin_new: bool, hello: bool) -> Result<(String, crate::node::FederationPeer)> {
     if !app.settings().federation {
         return Err(Error::FailedPrecondition("federation is off on this instance".into()));
     }
@@ -618,7 +675,13 @@ async fn reach(app: &App, address: &str, hello: bool) -> Result<(String, crate::
     }
     let peer = match app.node()?.federation_peer(&origin).await? {
         Some(peer) => peer,
-        None => pin(app, &origin).await?,
+        None if pin_new => pin(app, &origin).await?,
+        None => {
+            return Err(Error::FailedPrecondition(format!(
+                "this instance doesn't know {} yet: an admin here has to check it first",
+                display(&origin)
+            )));
+        }
     };
     if hello || !app.federation.introduced(&origin) {
         exchange(app, &own, &peer, Method::Hello, fpb::Hello {}.encode_to_vec()).await?;
@@ -629,12 +692,17 @@ async fn reach(app: &App, address: &str, hello: bool) -> Result<(String, crate::
 
 /// A signed call to another instance, and its answer.
 pub async fn call(app: &App, address: &str, request: fpb::Request) -> Result<fpb::Response> {
-    call_with(app, address, request, false).await
+    let (own, peer) = reach(app, address, false, false).await?;
+    call_peer(app, &own, &peer, request).await
 }
 
-async fn call_with(app: &App, address: &str, request: fpb::Request, hello: bool) -> Result<fpb::Response> {
-    let (own, peer) = reach(app, address, hello).await?;
-    let answer = match exchange(app, &own, &peer, Method::Call, request.encode_to_vec()).await {
+async fn call_peer(
+    app: &App,
+    own: &str,
+    peer: &crate::node::FederationPeer,
+    request: fpb::Request,
+) -> Result<fpb::Response> {
+    let answer = match exchange(app, own, peer, Method::Call, request.encode_to_vec()).await {
         Ok(answer) => answer,
         Err(err) => {
             // Say Hello again next time, in case the other side forgot this one.
@@ -646,20 +714,31 @@ async fn call_with(app: &App, address: &str, request: fpb::Request, hello: bool)
         .map_err(|_| Error::Unavailable(format!("{}'s answer didn't read", display(&peer.origin))))
 }
 
-/// An admin's check that another instance can be talked to: pins keys both
-/// ways and times a signed ping there and back.
-pub async fn check_instance(app: &App, address: &str) -> Result<(crate::node::FederationPeer, Duration)> {
+/// What an admin's check of another instance found.
+pub struct Checked {
+    pub peer: crate::node::FederationPeer,
+    /// How long the signed Hello took there and back.
+    pub took: Duration,
+    /// The other instance has this one's key pinned too (its admins checked
+    /// this one), so signed calls go through both ways.
+    pub known_there: bool,
+}
+
+/// An admin's check that another instance can be talked to: pins its key
+/// here, and times a signed Hello there and back, which it checks with this
+/// instance's key fetched from this instance's address (without pinning it).
+/// Then a signed ping says whether it pinned this instance too.
+pub async fn check_instance(app: &App, address: &str) -> Result<Checked> {
     let started = Instant::now();
-    let ping = fpb::Request { call: Some(fpb::request::Call::Ping(fpb::Ping {})) };
-    let answer = call_with(app, address, ping, true).await?;
+    let (own, peer) = reach(app, address, true, true).await?;
     let took = started.elapsed();
-    if !matches!(answer.answer, Some(fpb::response::Answer::Pong(_))) {
-        return Err(Error::Unavailable("the other instance didn't answer the ping".into()));
-    }
-    let origin = origin(address, app.federation.allows_private()).map_err(Error::invalid)?;
-    let peer =
-        app.node()?.federation_peer(&origin).await?.ok_or_else(|| Error::internal("a pinned instance went missing"))?;
-    Ok((peer, took))
+    let ping = fpb::Request { call: Some(fpb::request::Call::Ping(fpb::Ping {})) };
+    let known_there = matches!(
+        call_peer(app, &own, &peer, ping).await,
+        Ok(fpb::Response { answer: Some(fpb::response::Answer::Pong(_)) })
+    );
+    let peer = app.node()?.federation_peer(&peer.origin).await?.unwrap_or(peer);
+    Ok(Checked { peer, took, known_there })
 }
 
 /// A peer for the admin API.
@@ -739,14 +818,16 @@ impl fpb::federation_service_server::FederationService for Service {
         precheck(&own, &envelope).map_err(Refusal::status)?;
         let pinned =
             self.node()?.federation_peer(&from).await.map_err(|_| Status::internal("couldn't read the pinned keys"))?;
+        let known = pinned.is_some();
         let public_key = match pinned {
             Some(peer) => peer.public_key,
             None => {
                 // Someone new: fetch its key from its own address, which only
-                // whoever runs that address can answer, but no more often
-                // than the cap, so greetings can't make this instance fetch
-                // endlessly.
-                if !self.0.federation.take_hello() {
+                // whoever runs that address can answer, to check the greeting.
+                // It isn't pinned: only an admin's check here (or, later, a
+                // share request) does that. No more often than the caps, so
+                // greetings can't make this instance fetch endlessly.
+                if !self.0.federation.take_hello(&from) {
                     crate::reports::server_error("federation_hellos_capped", Some("federation"));
                     return Err(Status::resource_exhausted(
                         "this instance is meeting too many instances; try again in a minute",
@@ -764,13 +845,9 @@ impl fpb::federation_service_server::FederationService for Service {
         };
         check(&self.0.federation, &own, &envelope, &public_key, None).map_err(Refusal::status)?;
         fpb::Hello::decode(envelope.payload.as_slice()).map_err(|_| Refusal::Malformed.status())?;
-        self.node()?.pin_federation_peer(&from, &public_key).await.map_err(|err| match err {
-            Error::FailedPrecondition(_) => {
-                Status::failed_precondition("this instance has a different key pinned for your address")
-            }
-            _ => Status::internal("couldn't pin your key"),
-        })?;
-        heard(&self.0, &from).await;
+        if known {
+            heard(&self.0, &from).await;
+        }
         let answer = self.answer(&own, &from, &envelope.nonce, fpb::Hello {}.encode_to_vec()).await?;
         Ok(Response::new(fpb::HelloResponse { envelope: Some(answer) }))
     }
@@ -842,6 +919,28 @@ mod tests {
     }
 
     #[test]
+    fn greetings_are_capped_by_domain() {
+        assert_eq!(domain_of("https://a.b.example.com"), "example.com");
+        assert_eq!(domain_of("https://chat.example.co.uk"), "example.co.uk");
+        assert_eq!(domain_of("http://127.0.0.1:4000"), "127.0.0.1");
+        let federation = Federation::new(false);
+        for n in 0..HELLOS_PER_DOMAIN_PER_MINUTE {
+            assert!(federation.take_hello(&format!("https://x{n}.wild.example")));
+        }
+        assert!(!federation.take_hello("https://another.wild.example"), "one domain's names share a cap");
+        assert!(federation.take_hello("https://chat.example.org"), "other domains still get through");
+    }
+
+    #[test]
+    fn nonces_are_kept_per_instance() {
+        let federation = Federation::new(false);
+        let now = crate::id::now_ms();
+        assert_eq!(federation.fresh_nonce("https://a.example", &[1; 16], now), Ok(()));
+        assert_eq!(federation.fresh_nonce("https://b.example", &[1; 16], now), Ok(()));
+        assert_eq!(federation.fresh_nonce("https://a.example", &[1; 16], now), Err(Refusal::Replayed));
+    }
+
+    #[test]
     fn fingerprints_are_eight_groups_of_four() {
         let print = fingerprint(&[7u8; 32]);
         assert_eq!(print.split(' ').count(), 8);
@@ -880,6 +979,13 @@ mod tests {
         assert_eq!(check(&federation, "https://c.example", &envelope, &key, None), Err(Refusal::NotForUs));
         assert_eq!(check(&federation, "https://b.example", &envelope, &key, None), Ok(()));
         assert_eq!(check(&federation, "https://b.example", &envelope, &key, None), Err(Refusal::Replayed));
+        // Signed before this process started: its nonce may have been seen
+        // by the last one.
+        let mut stale = envelope.clone();
+        stale.nonce = vec![9; 16];
+        stale.sent_at_ms = federation.started_ms - 1;
+        stale.signature = pair.sign(&signed_bytes(&stale)).as_ref().to_vec();
+        assert_eq!(check(&federation, "https://b.example", &stale, &key, None), Err(Refusal::BeforeStart));
         let mut old = envelope.clone();
         old.sent_at_ms -= WINDOW_MS + 1000;
         old.signature = pair.sign(&signed_bytes(&old)).as_ref().to_vec();

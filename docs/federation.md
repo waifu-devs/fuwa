@@ -31,9 +31,11 @@ settings). Off, the instance answers other instances with nothing but "off".
 - An instance is known by its **origin**, the scheme and host of its public
   URL (`https://chat.example.com`), so federation needs `FUWA_PUBLIC_URL`
   (or the Public address setting) to be https.
-- An instance **pins** another's key the first time the two meet. A
-  different key for an instance already pinned is refused (rotation comes in
-  a later update).
+- An instance **pins** another's key only when one of its own admins checks
+  that instance (and, from the next update, when a guest server asks with a
+  share code), never because another instance said Hello. A different key
+  for an instance already pinned is refused (rotation comes in a later
+  update), and an instance keeps at most 1000 pinned keys.
 
 ## The wire
 
@@ -45,9 +47,11 @@ in reflection: apps never use it.
 - `GetKey`: the instance's origin and public key. Unsigned: the https
   connection it's fetched over vouches for the address.
 - `Hello`: a signed greeting. An instance that doesn't know the caller yet
-  fetches the caller's key from the caller's own address (`GetKey`), checks
-  the greeting with it, and pins it. Greetings from unknown instances are
-  capped at 60 a minute, so they can't make an instance fetch without end.
+  fetches the caller's key from the caller's own address (`GetKey`) and
+  checks the greeting with it, without pinning it. Greetings from unknown
+  instances are capped at 60 a minute in all and 5 a minute under one
+  domain, so a wildcard domain's endless names can't make an instance fetch
+  without end or crowd out other instances.
 - `Call`: everything else, from an instance whose key is pinned. Today its
   only call is a ping.
 
@@ -58,6 +62,9 @@ on, the sender's origin reads and isn't blocked, it's addressed to this
 instance, its time is within 5 minutes of the receiver's clock, the
 signature checks out with the sender's pinned key, and its 16-byte nonce
 wasn't seen in the last 10 minutes; only then does it read the payload.
+Nonces are kept per sending instance (so one can't crowd out the others),
+and an envelope signed before the receiving process started is refused,
+since the nonces it saw before went with the last process.
 Answers are signed the same way and carry the call's nonce in `reply_to`, so
 an answer can't be replayed onto another call. Payloads are at most 1 MiB.
 
@@ -80,9 +87,10 @@ On "Other instances" in Instance settings (`GetFederation`,
 - the switch (`federation`, InstanceSettings field 34);
 - this instance's origin and key fingerprint, or why its public URL can't be
   used;
-- **Check an instance**: fetches its key, says Hello and sends a signed ping
-  there and back, so both sides pin each other's key, and shows its
-  fingerprint and the round trip;
+- **Check an instance**: fetches and pins its key, says Hello there and
+  back, and shows its fingerprint, the round trip, and whether it knows this
+  instance too (a signed ping goes through once its admins have checked
+  this instance);
 - the instances this one knows: origin, fingerprint, when it was last heard
   from, and whether it's blocked;
 - **Blocked instances** (`federation_blocked_hosts`, field 35): host names

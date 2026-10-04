@@ -1511,6 +1511,14 @@ async fn split_instances_meet_through_their_gateways() {
         .await
         .unwrap()
         .into_inner();
+    assert!(!met.known_there);
+    let back = cb
+        .admin
+        .check_instance(authed(&admin_b, pb::CheckInstanceRequest { address: format!("http://{}", a.gateway.addr) }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(back.known_there);
     let fed_b = cb.admin.get_federation(authed(&admin_b, pb::GetFederationRequest {})).await.unwrap().into_inner();
     assert_eq!(met.peer.unwrap().fingerprint, fed_b.fingerprint);
     assert_eq!(fed_b.peers.len(), 1);

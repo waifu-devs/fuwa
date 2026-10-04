@@ -6611,6 +6611,12 @@ async fn instances_meet_with_signed_calls() {
     let met = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap().into_inner();
     let seen_by_a = met.peer.unwrap();
     assert_eq!(seen_by_a.origin, origin_b);
+    // B checked A's Hello with A's key but didn't pin it: only B's admins can.
+    assert!(!met.known_there);
+    let before = cb.admin.get_federation(authed(&admin_b, pb::GetFederationRequest {})).await.unwrap().into_inner();
+    assert!(before.peers.is_empty());
+    let back = cb.admin.check_instance(authed(&admin_b, check(&origin_a))).await.unwrap().into_inner();
+    assert!(back.known_there, "A pinned B when A's admin checked it");
 
     // Each side pinned the other's real key.
     let federation = |c: &mut Clients, admin: &str| {
@@ -6628,9 +6634,9 @@ async fn instances_meet_with_signed_calls() {
     assert_eq!(fed_b.peers[0].fingerprint, fed_a.fingerprint);
     assert_eq!(fed_a.fingerprint.split(' ').count(), 8);
 
-    // Checking again uses the pinned keys; the other way works too.
-    ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap();
-    cb.admin.check_instance(authed(&admin_b, check(&origin_a))).await.unwrap();
+    // Checking again uses the pinned keys, and signed calls go both ways.
+    let again = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap().into_inner();
+    assert!(again.known_there);
 
     // The key is the same after a restart.
     let fingerprint_a = fed_a.fingerprint.clone();

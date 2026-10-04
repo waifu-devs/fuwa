@@ -339,12 +339,25 @@ impl NodeDb {
         .await
     }
 
-    /// Pins another instance's key the first time it's seen. A different key
+    /// Pins another instance's key the first time it's seen, up to
+    /// [`crate::federation::MAX_PEERS`] instances. A different key
     /// for an instance already pinned is refused: the pinned one stays.
     pub async fn pin_federation_peer(&self, origin: &str, public_key: &[u8]) -> Result<FederationPeer> {
         let (origin, public_key) = (origin.to_string(), public_key.to_vec());
         db::write(&self.db, async |conn| {
             let now = now_ms();
+            let known = query_one(conn, "SELECT 1 FROM federation_peers WHERE origin = ?1", [origin.as_str()], |r| {
+                r.get::<i64>(0)
+            })
+            .await?
+            .is_some();
+            let count = query_one(conn, "SELECT count(*) FROM federation_peers", (), |r| r.get::<i64>(0)).await?;
+            if !known && count.unwrap_or(0) >= crate::federation::MAX_PEERS {
+                return Err(Error::ResourceExhausted(format!(
+                    "this instance already knows {} instances, the most it keeps",
+                    crate::federation::MAX_PEERS
+                )));
+            }
             conn.execute(
                 "INSERT INTO federation_peers (origin, public_key, first_seen, last_heard) VALUES (?1, ?2, ?3, ?3)
                  ON CONFLICT (origin) DO NOTHING",
