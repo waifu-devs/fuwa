@@ -283,7 +283,7 @@ async fn upload(app: &App, server_id: &str, token: &str, body: Body) -> Response
     let kept = async {
         std::fs::create_dir_all(&dir).map_err(|err| failed_io(&id, err))?;
         let wait = std::time::Duration::from_millis(crate::media::RECEIVE_TTL_MS as u64);
-        let received = crate::media::receive_file(&id, purpose, started.size, &temp, body);
+        let received = crate::media::receive_file(purpose, started.size, &temp, body);
         let (kind, size) = tokio::time::timeout(wait, received)
             .await
             .map_err(|_| (StatusCode::REQUEST_TIMEOUT, "the upload took too long".to_string()))??;
