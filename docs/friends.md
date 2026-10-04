@@ -24,6 +24,15 @@ told to nobody.
   a friend reads to them as being unfriended; blocking someone you asked
   withdraws your request. The blocker has to unblock to write or call, and
   a blocker in a call with them is taken out of it.
+- Hiding is decided when the blocker reads, not when the message is sent:
+  while the block lasts nothing from that person shows on any of their
+  devices, and the blocker's list keeps that conversation where it was when
+  they blocked (one the blocked person opened since isn't in it at all, nor
+  are its welcomes). After an unblock, a device that reads the conversation
+  again (a new one, or a full re-sync) gets what was sent during the block.
+- Single-use key packages: anyone claiming another person's devices gets a
+  few an hour per device, partners included, then the device's last-resort
+  one; so a partner who blocked you answers exactly as one who didn't.
 - Profiles only answer for people you'd see anyway: friends, requests either
   way, people in a server with you and people you've talked with. Anyone
   else is "not found".
@@ -59,8 +68,6 @@ setting says; blocking is what stops one. The settings follow the account
   once clash and the second counts again).
 - A request runs out after 30 days; the hourly housekeeping deletes them,
   500 at a time.
-- A partner who blocked you gives up key packages to you as a stranger's
-  devices do (a few an hour), so you can't use theirs up.
 - Agents have no friends and can't be asked.
 
 ## How it's kept

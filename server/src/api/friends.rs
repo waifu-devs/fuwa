@@ -256,14 +256,17 @@ impl Api {
             Sent::Already(mine) => mine,
             Sent::Asked { mine, delivered } => {
                 crate::reports::server_used("friends.request", 1);
+                // Built whether or not it's delivered, so a block takes no
+                // less time to answer.
+                let theirs = Link {
+                    account_id: other.id.clone(),
+                    other_id: me.id.clone(),
+                    state: FriendState::Incoming,
+                    ..mine.clone()
+                };
+                let theirs = self.friend_pb(&theirs).await?;
                 if delivered {
-                    let theirs = Link {
-                        account_id: other.id.clone(),
-                        other_id: me.id.clone(),
-                        state: FriendState::Incoming,
-                        ..mine.clone()
-                    };
-                    friends.publish([other.id.as_str()], changed(self.friend_pb(&theirs).await?));
+                    friends.publish([other.id.as_str()], changed(theirs));
                 }
                 mine
             }
@@ -345,7 +348,11 @@ impl Api {
         req: pb::GetRelationshipRequest,
     ) -> Result<pb::GetRelationshipResponse> {
         let me = self.befriender(metadata).await?;
-        let other = self.other_person(&me, &req.user_id, "").await?;
+        // An agent reads as nobody here, as a stranger does.
+        let other = match self.other_person(&me, &req.user_id, "").await {
+            Err(Error::FailedPrecondition(_)) => return Err(Error::NotFound("user")),
+            other => other?,
+        };
         let friends = self.app.friends()?;
         let now = now_ms();
         let link = friends.link(&me.id, &other.id, now).await?;

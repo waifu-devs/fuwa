@@ -302,6 +302,14 @@ async fn friends_end_to_end() {
     assert_eq!(to_juan[0].data, hidden.data);
     // The conversation still opens for Juan, and calling it never rings for Mika.
     dms.open_conversation(authed(&juan.token, pb::OpenConversationRequest { user_id: mika.id.clone() })).await.unwrap();
+    // Mika still has the conversation from before the block.
+    let kept = dms
+        .list_conversations(authed(&mika.token, pb::ListConversationsRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .conversations;
+    assert_eq!(kept.len(), 1);
     // Mika has to unblock to write.
     let own = dms.post_message(authed(&mika.token, post(&mika, b"bye"))).await.unwrap_err();
     assert_eq!(own.code(), Code::FailedPrecondition);

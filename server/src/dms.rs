@@ -27,8 +27,8 @@ const MIGRATIONS: &[&str] = &[include_str!("../migrations/dms/0001_init.sql")];
 /// The most single-use key packages kept for one device.
 pub const MAX_KEY_PACKAGES: i64 = 100;
 
-/// Single-use key packages one account may take, each hour, from devices of
-/// people it has no conversation with (adding them to secure channels).
+/// Single-use key packages one account may take, each hour, from other
+/// people's devices (partners' too, so a block never shows in the answer).
 /// Past that it gets their last-resort key package instead, so nobody can
 /// use up someone else's single-use ones by claiming them over and over.
 pub const STRANGER_CLAIMS_PER_HOUR: u32 = 2000;
