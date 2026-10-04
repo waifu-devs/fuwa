@@ -716,6 +716,11 @@ message Message {
   MessageWebhook webhook = 15;
   // In a shared channel: who wrote it and from which server.
   SharedAuthor shared = 16;
+  // Emoji from the author's other servers on this instance that the text
+  // writes as <:name:id>, so everyone can draw them: their id, server_id,
+  // name, url (on this instance) and animated. The server's own emoji aren't
+  // here; they're in ListEmojis.
+  repeated Emoji emojis = 17;
   // A reply in a thread: the id of the message the thread is under. Thread
   // replies stay out of the channel's own list unless also_in_channel.
   string thread_id = 18;
@@ -723,6 +728,8 @@ message Message {
   ThreadSummary thread = 19;
   // A thread reply its author also sent to the channel.
   bool also_in_channel = 20;
+  // A GIF sent with it (GifService), kept on this instance.
+  MessageGif gif = 22;
 }
 
 // A thread under a message, as the channel shows it.
@@ -743,6 +750,29 @@ message ThreadUpdated {
   // The message the thread is under.
   string thread_id = 2;
   ThreadSummary thread = 3;
+}
+
+// Where a GIF came from: a search provider the instance's admins set up,
+// or unspecified for one somebody uploaded.
+enum GifProvider {
+  GIF_PROVIDER_UNSPECIFIED = 0;
+  GIF_PROVIDER_GIPHY = 1;
+  GIF_PROVIDER_KLIPY = 2;
+}
+
+// A GIF in a message. The file is on this instance (a /media/ link), stored
+// when it was first sent, so it keeps working if the provider drops it.
+message MessageGif {
+  string url = 1;
+  int32 width = 2;
+  int32 height = 3;
+  // What it shows, for screen readers. May be empty.
+  string title = 4;
+  // Who to credit, where their terms ask for it.
+  GifProvider provider = 5;
+  // From GifService: what lets SendMessage take it. Never on a message read
+  // back.
+  string seal = 6;
 }
 
 // The name and picture a webhook message was posted under: the webhook's

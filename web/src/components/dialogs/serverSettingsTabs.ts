@@ -42,5 +42,9 @@ const SECTION_RULES: Record<string, (a: Access, instanceAdmin: boolean) => boole
 export function useServerSettingsTabs(instanceKey: string, serverId: string): string[] {
   const access = useAccess(instanceKey, serverId);
   const admin = useFuwa((s) => !!s.instances[instanceKey]?.admin);
-  return useMemo(() => Object.keys(SECTION_RULES).filter((id) => SECTION_RULES[id]!(access, admin)), [access, admin]);
+  return useMemo(() => settingsTabsFor(access, admin), [access, admin]);
 }
+
+/** The same, from access already worked out (for a right-click menu). */
+export const settingsTabsFor = (access: Access, instanceAdmin: boolean): string[] =>
+  Object.keys(SECTION_RULES).filter((id) => SECTION_RULES[id]!(access, instanceAdmin));

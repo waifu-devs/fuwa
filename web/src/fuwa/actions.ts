@@ -2,10 +2,10 @@ import { Effect } from "effect";
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
-import type { AccountFilter, AutoModProviderSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
+import type { AccountFilter, AutoModProviderSettings, GifSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { McpAccessMode } from "@/gen/fuwa/v1/agent_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
-import type { ChannelPlacement, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
+import type { ChannelPlacement, CreateChannelRequest, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
 import type { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
@@ -41,6 +41,7 @@ import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
 import { instanceKey, normalizeUrl } from "./saved";
 import { wipeDms } from "@/e2ee/engine";
+import { outsideEmojis } from "@/lib/emoji-catalog";
 import { reportUsage } from "@/lib/reports";
 import { addInstance, engine, follow, removeInstance } from "./sync";
 import {
@@ -967,6 +968,10 @@ export const endServerShare = (key: string, serverId: string, connectionId: stri
 export const testAutoModProvider = (key: string, provider: AutoModProviderSettings, content: string) =>
   call((signal) => api(key).admin.testAutoModProvider({ provider, content }, { signal }));
 
+/** Asks a GIF provider for a few trending GIFs with settings not saved yet. */
+export const testGifProvider = (key: string, settings: GifSettings) =>
+  call((signal) => api(key).gifs.testGifProvider({ settings }, { signal }));
+
 /** This instance as other instances see it, and the instances it knows. */
 export const getFederation = (key: string) => call((signal) => api(key).admin.getFederation({}, { signal }));
 
@@ -1062,10 +1067,13 @@ export const refreshNode = (key: string) =>
 
 // ───────────────────────── Channels ─────────────────────────
 
-export const createChannel = (key: string, serverId: string, name: string, type: ChannelType, parentId = "") =>
+/** What else a new channel starts with, in the same write: a copy's topic, slow mode and permissions. */
+export type NewChannelExtras = Partial<Pick<CreateChannelRequest, "topic" | "slowmodeSeconds" | "permissionOverwrites">>;
+
+export const createChannel = (key: string, serverId: string, name: string, type: ChannelType, parentId = "", extras: NewChannelExtras = {}) =>
   Effect.gen(function* () {
     const { channel } = yield* call((signal) =>
-      api(key).channels.createChannel({ serverId, name, type, parentId }, { signal }),
+      api(key).channels.createChannel({ serverId, name, type, parentId, ...extras }, { signal }),
     );
     // So opening it right away doesn't race its event.
     if (channel) storeChannels(key, serverId, [channel]);
@@ -1181,9 +1189,11 @@ export const sendMessage = (key: string, serverId: string, channelId: string, co
     const setPending = (fn: (list: PendingMessage[]) => PendingMessage[]) =>
       updateInstance(key, (i) => ({ ...i, pending: { ...i.pending, [at]: fn(i.pending[at] ?? []) } }));
     setPending((list) => [...list, pending]);
+    // Other servers' emoji go along so the instance can check them and keep their pictures with the message.
+    const emojis = outsideEmojis(store.get().instances[key]?.emojis, serverId, content);
     const res = yield* call((signal) =>
       api(key).messages.sendMessage(
-        { serverId, channelId, content, threadId: thread?.threadId ?? "", alsoSendToChannel: !!thread?.alsoToChannel },
+        { serverId, channelId, content, emojis, threadId: thread?.threadId ?? "", alsoSendToChannel: !!thread?.alsoToChannel },
         { signal },
       ),
     ).pipe(
@@ -1224,7 +1234,7 @@ export const editMessage = (key: string, serverId: string, channelId: string, me
   Effect.gen(function* () {
     reportUsage("message.edit");
     const { message } = yield* call((signal) =>
-      api(key).messages.updateMessage({ serverId, messageId, content, channelId }, { signal }),
+      api(key).messages.updateMessage({ serverId, messageId, content, channelId, emojis: outsideEmojis(store.get().instances[key]?.emojis, serverId, content) }, { signal }),
     );
     if (!message) return;
     updateInstance(key, (i) => {
@@ -1326,6 +1336,21 @@ export function markServerRead(key: string, serverId: string): number {
     for (const channel of i.channels[serverId] ?? []) {
       if (!unread[channel.id]) continue;
       delete unread[channel.id];
+      cleared++;
+    }
+    return cleared ? { ...i, unread } : i;
+  });
+  return cleared;
+}
+
+/** Clears the unread counts of some channels, such as one channel or a category's. Returns how many had some. */
+export function markChannelsRead(key: string, channelIds: string[]): number {
+  let cleared = 0;
+  updateInstance(key, (i) => {
+    const unread = { ...i.unread };
+    for (const id of channelIds) {
+      if (!unread[id]) continue;
+      delete unread[id];
       cleared++;
     }
     return cleared ? { ...i, unread } : i;
