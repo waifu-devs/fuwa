@@ -1,7 +1,7 @@
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, automod, respond, shared, url, users};
+use super::{Api, Seat, automod, respond, shared, threads, url, users};
 use crate::app::App;
 use crate::db::{is_unique_violation, query_all, query_one};
 use crate::error::{Error, Result};
@@ -111,7 +111,8 @@ async fn mentions(
     Ok((everyone, ids))
 }
 
-const MESSAGE_COLUMNS: &str = "id, channel_id, author_id, content, extras, reply_to_id, created_at, edited_at, kind";
+const MESSAGE_COLUMNS: &str =
+    "id, channel_id, author_id, content, extras, reply_to_id, created_at, edited_at, kind, thread_id, in_channel";
 
 fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Message, Option<Vec<u8>>)> + '_ {
     move |r| {
@@ -133,6 +134,9 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 auto_mod: None,
                 webhook: None,
                 shared: None,
+                thread_id: r.get::<Option<String>>(9)?.unwrap_or_default(),
+                thread: None,
+                also_in_channel: r.get(10)?,
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -432,8 +436,9 @@ pub(super) async fn insert_message(conn: &turso::Connection, message: &pb::Messa
     let size = message.content.len() as i64;
     let attachment_count = message.attachments.len() as i64;
     conn.execute(
-        "INSERT INTO messages (id, channel_id, author_id, content, size, extras, attachment_count, reply_to_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO messages (id, channel_id, author_id, content, size, extras, attachment_count, reply_to_id, created_at,
+           thread_id, in_channel)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         (
             message.id.as_str(),
             message.channel_id.as_str(),
@@ -444,6 +449,8 @@ pub(super) async fn insert_message(conn: &turso::Connection, message: &pb::Messa
             attachment_count,
             (!message.reply_to_id.is_empty()).then_some(message.reply_to_id.as_str()),
             now,
+            (!message.thread_id.is_empty()).then_some(message.thread_id.as_str()),
+            message.also_in_channel,
         ),
     )
     .await?;
@@ -490,12 +497,16 @@ pub(super) async fn remove_message(conn: &turso::Connection, message: &pb::Messa
 }
 
 /// A page of a channel's messages, oldest first, and whether there are more
-/// beyond it. `plain` leaves out what isn't a message someone wrote (join
-/// messages, AutoMod alerts), as other servers showing the channel see it.
+/// beyond it: the channel's own (thread replies only when also sent to it), or
+/// with `thread_id` the replies in the thread under that message. `plain`
+/// leaves out what isn't a message someone wrote (join messages, AutoMod
+/// alerts), as other servers showing the channel see it.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn page(
     conn: &turso::Connection,
     server_id: &str,
     channel_id: &str,
+    thread_id: &str,
     limit: i32,
     before_id: &str,
     after_id: &str,
@@ -509,12 +520,17 @@ pub(super) async fn page(
     };
     let order = if newest_first { "DESC" } else { "ASC" };
     let kinds = if plain { "AND kind = 0" } else { "" };
+    let (scope, scope_id) = if thread_id.is_empty() {
+        ("channel_id = ?1 AND (thread_id IS NULL OR in_channel = 1)", channel_id)
+    } else {
+        ("thread_id = ?1", thread_id)
+    };
     let rows = query_all(
         conn,
         &format!(
-            "SELECT {MESSAGE_COLUMNS} FROM messages WHERE channel_id = ?1 {condition} {kinds} ORDER BY id {order} LIMIT ?3"
+            "SELECT {MESSAGE_COLUMNS} FROM messages WHERE {scope} {condition} {kinds} ORDER BY id {order} LIMIT ?3"
         ),
-        (channel_id, cursor, limit + 1),
+        (scope_id, cursor, limit + 1),
         message_row(server_id),
     )
     .await?;
@@ -552,7 +568,13 @@ impl MessageService for Api {
                 check_content(&req.content, !req.attachments.is_empty() || !req.embeds.is_empty())?;
                 check_extras(&mut req.attachments, &req.embeds)?;
                 check_embed_links(&self.app, &mut req.embeds)?;
+                if req.also_send_to_channel && req.thread_id.is_empty() {
+                    return Err(Error::invalid("only thread replies are also sent to the channel"));
+                }
                 if let Some(link) = shared::link_of(&sdb.read()?, &req.channel_id).await? {
+                    if !req.thread_id.is_empty() {
+                        return Err(Error::invalid("threads aren't in channels shared between servers yet"));
+                    }
                     let message = shared::guest_send(&self.app, &sdb, &account, &member, &access, &link, req).await?;
                     return Ok(pb::SendMessageResponse { message: Some(message) });
                 }
@@ -580,6 +602,11 @@ impl MessageService for Api {
                         ) {
                             return Err(Error::invalid("messages can only go in text channels"));
                         }
+                        let parent = if req.thread_id.is_empty() {
+                            None
+                        } else {
+                            Some(threads::check_reply(conn, &sdb.id, &access, &channel, &req.thread_id).await?)
+                        };
                         if !req.reply_to_id.is_empty() {
                             let replied = load_message(conn, &sdb.id, &req.reply_to_id).await?;
                             if replied.is_none_or(|m| m.channel_id != channel.id) {
@@ -625,9 +652,19 @@ impl MessageService for Api {
                             auto_mod: None,
                             webhook: None,
                             shared: None,
+                            thread_id: req.thread_id.clone(),
+                            thread: None,
+                            also_in_channel: parent.is_some() && req.also_send_to_channel,
                         };
                         insert_message(conn, &message, now).await?;
                         events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
+                        if let Some(parent) = parent {
+                            threads::follow_quietly(conn, &parent.id, &account.id).await?;
+                            if parent.webhook.is_none() {
+                                threads::follow_quietly(conn, &parent.id, &parent.author_id).await?;
+                            }
+                            threads::refresh(conn, &channel.id, &parent.id, events).await?;
+                        }
                         Ok(Ok(message))
                     })
                     .await?
@@ -662,6 +699,7 @@ impl MessageService for Api {
                     .filter(|m| access.can_see(&m.channel_id))
                     .ok_or(Error::NotFound("message"))?;
                 shared::mark_guests(&conn, std::slice::from_mut(&mut message)).await?;
+                threads::attach(&conn, std::slice::from_mut(&mut message)).await?;
                 let author = authors(&conn, std::slice::from_ref(&message)).await?.into_iter().next();
                 Ok(pb::GetMessageResponse { message: Some(message), author })
             }
@@ -682,14 +720,37 @@ impl MessageService for Api {
                 let conn = sdb.read()?;
                 load_channel(&conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
                 if let Some(link) = shared::link_of(&conn, &req.channel_id).await? {
+                    if !req.thread_id.is_empty() {
+                        return Err(Error::NotFound("thread"));
+                    }
                     let guest = shared::guest_of(&conn, &sdb.id, &account, &access, &link).await?;
                     return shared::guest_list(&self.app, &sdb.id, &link, guest, &req).await;
                 }
-                let (mut messages, has_more) =
-                    page(&conn, &sdb.id, &req.channel_id, req.limit, &req.before_id, &req.after_id, false).await?;
+                let mut parent = None;
+                if !req.thread_id.is_empty() {
+                    let mut found = load_message(&conn, &sdb.id, &req.thread_id)
+                        .await?
+                        .filter(|m| m.channel_id == req.channel_id && m.thread_id.is_empty())
+                        .ok_or(Error::NotFound("thread"))?;
+                    shared::mark_guests(&conn, std::slice::from_mut(&mut found)).await?;
+                    threads::attach(&conn, std::slice::from_mut(&mut found)).await?;
+                    parent = Some(found);
+                }
+                let (mut messages, has_more) = page(
+                    &conn,
+                    &sdb.id,
+                    &req.channel_id,
+                    &req.thread_id,
+                    req.limit,
+                    &req.before_id,
+                    &req.after_id,
+                    false,
+                )
+                .await?;
                 shared::mark_guests(&conn, &mut messages).await?;
-                let authors = authors(&conn, &messages).await?;
-                Ok(pb::ListMessagesResponse { messages, authors, has_more })
+                threads::attach(&conn, &mut messages).await?;
+                let authors = authors(&conn, &[messages.as_slice(), parent.as_slice()].concat()).await?;
+                Ok(pb::ListMessagesResponse { messages, authors, has_more, parent })
             }
             .await,
         )
@@ -780,6 +841,7 @@ impl MessageService for Api {
                         )
                         .await?;
                         store::add_usage(conn, UsageChange { message_bytes: growth, ..Default::default() }).await?;
+                        threads::attach(conn, std::slice::from_mut(&mut message)).await?;
                         events.push(Payload::MessageUpdated(pb::MessageUpdated { message: Some(message.clone()) }));
                         Ok(Ok(message))
                     })
@@ -828,7 +890,19 @@ impl MessageService for Api {
                     {
                         return Err(Error::denied("you can only delete your own messages"));
                     }
+                    let with_thread = threads::may_delete_with_thread(conn, &access, &account.id, &message).await?;
                     conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
+                    if with_thread && threads::others_replied(conn, &message.id, &account.id).await? {
+                        let channel =
+                            load_channel(conn, &sdb.id, &message.channel_id).await?.map(|c| c.name).unwrap_or_default();
+                        store::audit(
+                            conn,
+                            &account.id,
+                            Audit::new(pb::AuditAction::ThreadDelete, &message.author_id).channel(channel),
+                        )
+                        .await?;
+                    }
+                    threads::after_delete(conn, &message.channel_id, &message.id, &message.thread_id, events).await?;
                     if message.author_id != account.id {
                         let channel =
                             load_channel(conn, &sdb.id, &message.channel_id).await?.map(|c| c.name).unwrap_or_default();
@@ -857,6 +931,58 @@ impl MessageService for Api {
                 })
                 .await?;
                 Ok(pb::DeleteMessageResponse {})
+            }
+            .await,
+        )
+    }
+
+    async fn list_threads(
+        &self,
+        request: Request<pb::ListThreadsRequest>,
+    ) -> Result<Response<pb::ListThreadsResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                self.list_threads_impl(&account, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
+    async fn update_thread(
+        &self,
+        request: Request<pb::UpdateThreadRequest>,
+    ) -> Result<Response<pb::UpdateThreadResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                self.update_thread_impl(&account, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
+    async fn follow_thread(
+        &self,
+        request: Request<pb::FollowThreadRequest>,
+    ) -> Result<Response<pb::FollowThreadResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                self.follow_thread_impl(&account, request.into_inner()).await
+            }
+            .await,
+        )
+    }
+
+    async fn list_followed_threads(
+        &self,
+        request: Request<pb::ListFollowedThreadsRequest>,
+    ) -> Result<Response<pb::ListFollowedThreadsResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                self.list_followed_threads_impl(&account, request.into_inner()).await
             }
             .await,
         )

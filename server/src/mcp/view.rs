@@ -201,6 +201,15 @@ pub fn event(e: &pb::Event) -> Value {
         Some(Payload::SecureRecordAdded(_)) | Some(Payload::SecureRecordDeleted(_)) => ("secure_channel", json!({})),
         Some(Payload::SharedChannelsUpdated(_)) => ("shared_channels_updated", json!({})),
         Some(Payload::VoiceStateUpdated(_)) | Some(Payload::VoiceStateRemoved(_)) => ("voice", json!({})),
+        Some(Payload::ThreadUpdated(p)) => (
+            "thread_updated",
+            json!({
+                "channel_id": p.channel_id,
+                "thread_id": p.thread_id,
+                "reply_count": p.thread.as_ref().map_or(0, |t| t.reply_count),
+                "locked": p.thread.as_ref().is_some_and(|t| t.locked),
+            }),
+        ),
         None => ("unknown", json!({})),
     };
     let mut value = trim(json!({

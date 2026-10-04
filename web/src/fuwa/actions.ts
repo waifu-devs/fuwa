@@ -11,6 +11,7 @@ import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
   ApplicationStatus,
   ChannelType,
+  EventSchema,
   JoinFormSchema,
   WelcomeScreenSchema,
   type AnnouncementTone,
@@ -45,13 +46,17 @@ import { reportUsage } from "@/lib/reports";
 import { addInstance, engine, follow, removeInstance } from "./sync";
 import {
   addServer,
+  applyEvent,
   notificationKey,
   removeServer,
   sortChannels,
   sortMembers,
   store,
+  threadKey,
   updateInstance,
   upsertMessage,
+  withThreadSummary,
+  without,
   withSharedAuthors,
   withUpdatedUser,
   withUsers,
@@ -1122,56 +1127,70 @@ export const deleteChannel = (key: string, serverId: string, channelId: string) 
 
 const PAGE = 50;
 
-/** Loads the latest messages of a channel the first time it's opened, or older ones when scrolling up. */
-export const loadMessages = (key: string, serverId: string, channelId: string, older = false) =>
+/**
+ * Loads the latest messages of a channel the first time it's opened, or older ones when scrolling up. With
+ * `threadId`, the replies in the thread under that message instead, and the message itself.
+ */
+export const loadMessages = (key: string, serverId: string, channelId: string, older = false, threadId = "") =>
   Effect.gen(function* () {
-    const current = store.get().instances[key]?.messages[channelId];
+    const at = threadId ? threadKey(threadId) : channelId;
+    const current = store.get().instances[key]?.messages[at];
     if (current?.loading || (current && !older) || (older && !current?.hasMore)) return;
     const beforeId = older ? (current?.items[0]?.id ?? "") : "";
     updateInstance(key, (i) => ({
       ...i,
       messages: {
         ...i.messages,
-        [channelId]: { ...(i.messages[channelId] ?? { items: [], hasMore: false }), loading: true },
+        [at]: { ...(i.messages[at] ?? { items: [], hasMore: false }), loading: true },
       },
     }));
     const res = yield* call((signal) =>
-      api(key).messages.listMessages({ serverId, channelId, limit: PAGE, beforeId }, { signal }),
+      api(key).messages.listMessages({ serverId, channelId, limit: PAGE, beforeId, threadId }, { signal }),
     ).pipe(
       Effect.tapError(() =>
         Effect.sync(() =>
           updateInstance(key, (i) => {
-            const { [channelId]: _, ...messages } = i.messages;
-            return { ...i, messages: current ? { ...messages, [channelId]: { ...current, loading: false } } : messages };
+            const { [at]: _, ...messages } = i.messages;
+            return { ...i, messages: current ? { ...messages, [at]: { ...current, loading: false } } : messages };
           }),
         ),
       ),
     );
     updateInstance(key, (i) => {
-      const existing = i.messages[channelId]?.items ?? [];
+      const existing = i.messages[at]?.items ?? [];
       const items = res.messages.reduce(upsertMessage, existing);
-      return {
+      const next = {
         ...i,
-        users: withSharedAuthors(withUsers(i.users, res.authors), res.messages),
+        users: withSharedAuthors(withUsers(i.users, res.authors), [...res.messages, res.parent]),
         messages: {
           ...i.messages,
-          [channelId]: { items, hasMore: older || !current ? res.hasMore : (current?.hasMore ?? false), loading: false },
+          [at]: { items, hasMore: older || !current ? res.hasMore : (current?.hasMore ?? false), loading: false },
         },
       };
+      return res.parent ? { ...next, threadParents: { ...next.threadParents, [res.parent.id]: res.parent } } : next;
     });
   });
 
 let nonce = 0;
 
-/** Sends a message. It shows up right away, dimmed until the server confirms it. */
-export const sendMessage = (key: string, serverId: string, channelId: string, content: string) =>
+/** Where a reply goes: the thread under a message, and whether the channel shows it too. */
+export type ThreadTarget = { threadId: string; alsoToChannel?: boolean };
+
+/** Sends a message, or a reply in a thread. It shows up right away, dimmed until the server confirms it. */
+export const sendMessage = (key: string, serverId: string, channelId: string, content: string, thread?: ThreadTarget) =>
   Effect.gen(function* () {
-    reportUsage("message.send");
+    reportUsage(thread ? "thread.reply" : "message.send");
+    const at = thread ? threadKey(thread.threadId) : channelId;
     const pending: PendingMessage = { nonce: `n${++nonce}`, content, createdAt: Date.now(), failed: null };
     const setPending = (fn: (list: PendingMessage[]) => PendingMessage[]) =>
-      updateInstance(key, (i) => ({ ...i, pending: { ...i.pending, [channelId]: fn(i.pending[channelId] ?? []) } }));
+      updateInstance(key, (i) => ({ ...i, pending: { ...i.pending, [at]: fn(i.pending[at] ?? []) } }));
     setPending((list) => [...list, pending]);
-    const res = yield* call((signal) => api(key).messages.sendMessage({ serverId, channelId, content }, { signal })).pipe(
+    const res = yield* call((signal) =>
+      api(key).messages.sendMessage(
+        { serverId, channelId, content, threadId: thread?.threadId ?? "", alsoSendToChannel: !!thread?.alsoToChannel },
+        { signal },
+      ),
+    ).pipe(
       Effect.tapError((err) =>
         Effect.sync(() =>
           setPending((list) => list.map((p) => (p.nonce === pending.nonce ? { ...p, failed: err.message } : p))),
@@ -1179,23 +1198,30 @@ export const sendMessage = (key: string, serverId: string, channelId: string, co
       ),
     );
     updateInstance(key, (i) => {
-      const loaded = i.messages[channelId];
+      const loaded = i.messages[at];
+      const shown = res.message?.alsoInChannel ? i.messages[channelId] : undefined;
+      let messages =
+        loaded && res.message ? { ...i.messages, [at]: { ...loaded, items: upsertMessage(loaded.items, res.message) } } : i.messages;
+      if (shown && res.message) messages = { ...messages, [channelId]: { ...shown, items: upsertMessage(shown.items, res.message) } };
       return {
         ...i,
         users: withSharedAuthors(i.users, [res.message]),
-        pending: { ...i.pending, [channelId]: (i.pending[channelId] ?? []).filter((p) => p.nonce !== pending.nonce) },
-        messages:
-          loaded && res.message
-            ? { ...i.messages, [channelId]: { ...loaded, items: upsertMessage(loaded.items, res.message) } }
-            : i.messages,
+        pending: { ...i.pending, [at]: (i.pending[at] ?? []).filter((p) => p.nonce !== pending.nonce) },
+        messages,
       };
     });
+    // Replying follows a thread unless you unfollowed it once, which only the server knows: ask it again.
+    const followed = store.get().instances[key]?.followed[serverId];
+    if (thread && followed && !followed[thread.threadId]) {
+      updateInstance(key, (i) => ({ ...i, followed: without(i.followed, serverId) }));
+      yield* loadFollowed(key, serverId);
+    }
   });
 
-export const dismissPending = (key: string, channelId: string, pendingNonce: string) =>
+export const dismissPending = (key: string, at: string, pendingNonce: string) =>
   updateInstance(key, (i) => ({
     ...i,
-    pending: { ...i.pending, [channelId]: (i.pending[channelId] ?? []).filter((p) => p.nonce !== pendingNonce) },
+    pending: { ...i.pending, [at]: (i.pending[at] ?? []).filter((p) => p.nonce !== pendingNonce) },
   }));
 
 export const editMessage = (key: string, serverId: string, channelId: string, messageId: string, content: string) =>
@@ -1204,25 +1230,83 @@ export const editMessage = (key: string, serverId: string, channelId: string, me
     const { message } = yield* call((signal) =>
       api(key).messages.updateMessage({ serverId, messageId, content, channelId }, { signal }),
     );
+    if (!message) return;
     updateInstance(key, (i) => {
-      const loaded = i.messages[channelId];
-      if (!loaded || !message) return i;
-      return { ...i, messages: { ...i.messages, [channelId]: { ...loaded, items: upsertMessage(loaded.items, message) } } };
+      let messages = i.messages;
+      for (const at of [channelId, message.threadId && threadKey(message.threadId)]) {
+        const loaded = at ? messages[at] : undefined;
+        if (loaded?.items.some((m) => m.id === message.id)) messages = { ...messages, [at!]: { ...loaded, items: upsertMessage(loaded.items, message) } };
+      }
+      const parent = i.threadParents[message.id];
+      const threadParents = parent ? { ...i.threadParents, [message.id]: { ...message, thread: message.thread ?? parent.thread } } : i.threadParents;
+      return { ...i, messages, threadParents };
     });
   });
 
 export const deleteMessage = (key: string, serverId: string, channelId: string, messageId: string) =>
   Effect.gen(function* () {
     yield* call((signal) => api(key).messages.deleteMessage({ serverId, messageId, channelId }, { signal }));
+    // As the server's event will: off the channel, out of any thread, and a thread under it gone too.
+    updateInstance(key, (i) =>
+      applyEvent(
+        i,
+        create(EventSchema, { serverId, payload: { case: "messageDeleted", value: { channelId, messageId } } }),
+        null,
+      ),
+    );
+  });
+
+/** A channel's threads, the latest reply first, matching `query` when there is one. */
+export const listThreads = (key: string, serverId: string, channelId: string, opts: { query?: string; archived?: boolean; afterThreadId?: string } = {}) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) =>
+      api(key).messages.listThreads(
+        { serverId, channelId, query: opts.query ?? "", archived: !!opts.archived, afterThreadId: opts.afterThreadId ?? "", limit: 25 },
+        { signal },
+      ),
+    );
+    updateInstance(key, (i) => ({ ...i, users: withSharedAuthors(withUsers(i.users, res.authors), res.threads) }));
+    return res;
+  });
+
+/** Locks or unlocks a thread, for people who manage messages. */
+export const lockThread = (key: string, serverId: string, channelId: string, threadId: string, locked: boolean) =>
+  Effect.gen(function* () {
+    const { thread } = yield* call((signal) => api(key).messages.updateThread({ serverId, channelId, threadId, locked }, { signal }));
+    updateInstance(key, (i) => withThreadSummary(i, channelId, threadId, thread));
+  });
+
+/** The threads you follow in a server, once per session (replying and following keep it current after). */
+export const loadFollowed = (key: string, serverId: string) =>
+  Effect.gen(function* () {
+    if (store.get().instances[key]?.followed[serverId]) return;
+    const { threadIds } = yield* call((signal) => api(key).messages.listFollowedThreads({ serverId }, { signal }));
+    updateInstance(key, (i) => ({
+      ...i,
+      followed: { ...i.followed, [serverId]: Object.fromEntries(threadIds.map((id) => [id, true as const])) },
+    }));
+  });
+
+export const followThread = (key: string, serverId: string, channelId: string, threadId: string, follow: boolean) =>
+  Effect.gen(function* () {
+    yield* call((signal) => api(key).messages.followThread({ serverId, channelId, threadId, follow }, { signal }));
     updateInstance(key, (i) => {
-      const loaded = i.messages[channelId];
-      if (!loaded) return i;
-      return {
-        ...i,
-        messages: { ...i.messages, [channelId]: { ...loaded, items: loaded.items.filter((m) => m.id !== messageId) } },
-      };
+      const { [threadId]: _, ...rest } = i.followed[serverId] ?? {};
+      return { ...i, followed: { ...i.followed, [serverId]: follow ? { ...rest, [threadId]: true } : rest } };
     });
   });
+
+/** Marks a thread as open beside its channel and clears its unread count; null when it closes. */
+export function focusThread(key: string, threadId: string | null) {
+  store.update((s) => {
+    if (s.focus?.instance !== key || (s.focus.thread ?? null) === threadId) return s;
+    const focus = { ...s.focus, thread: threadId ?? undefined };
+    const inst = s.instances[key];
+    if (!inst || !threadId || !inst.threadUnread[threadId]) return { ...s, focus };
+    const { [threadId]: _, ...threadUnread } = inst.threadUnread;
+    return { ...s, focus, instances: { ...s.instances, [key]: { ...inst, threadUnread } } };
+  });
+}
 
 /** Marks a channel as the one on screen and clears its unread count. */
 export function focusChannel(key: string | null, channelId: string | null) {
