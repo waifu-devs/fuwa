@@ -5,6 +5,7 @@ import {
   CopyIcon,
   CrownIcon,
   FingerprintIcon,
+  MessageSquareReplyIcon,
   PencilIcon,
   RotateCwIcon,
   ShieldAlertIcon,
@@ -42,7 +43,9 @@ import {
 } from "@/gen/fuwa/v1/types_pb";
 import { blockFromChannel, deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
 import { useAccess, useRoles } from "@/fuwa/hooks";
-import { useFuwa, type PendingMessage } from "@/fuwa/store";
+import { threadKey, useFuwa, type PendingMessage } from "@/fuwa/store";
+import { AlsoSentNote, RepliesRow } from "@/components/chat/Threads";
+import { useThreadOpener } from "@/lib/threads";
 import { sendsMessage } from "@/components/chat/Composer";
 import { Mention, remarkMentions, ServerLookProvider, useRoleColor, useServerLook, type ServerLook } from "@/components/chat/mentions";
 import { Markdown, type MarkdownExtension } from "@/components/Markdown";
@@ -74,7 +77,11 @@ type Row =
   | { kind: "automod"; key: string; message: Message; date: Date }
   | { kind: "pending"; key: string; pending: PendingMessage; first: boolean };
 
-export type MessageListHandle = { editLast: () => void };
+export type MessageListHandle = {
+  editLast: () => void;
+  /** Scrolls to a message and lights it up. False when it isn't loaded here. */
+  jumpTo: (id: string) => boolean;
+};
 
 /** Rows drawn when a channel opens; older ones already loaded come in as you scroll up. */
 const FIRST_ROWS = 80;
@@ -110,15 +117,27 @@ type RowActions = {
   dismiss: (nonce: string) => void;
   /** At a shared channel's home: keeps someone from another server out of it. */
   keepOut: (userId: string, name: string) => Promise<void>;
+  /** Opens the thread under a message (starting it with the first reply). */
+  thread: (id: string) => void;
 };
 
 export const MessageList = forwardRef<
   MessageListHandle,
-  { instanceKey: string; serverId: string; channel: Channel }
->(function MessageList({ instanceKey, serverId, channel }, ref) {
+  {
+    instanceKey: string;
+    serverId: string;
+    channel: Channel;
+    /** The replies in the thread under this message, instead of the channel. */
+    threadId?: string;
+    /** What a thread starts with, in place of the channel's welcome. */
+    header?: ReactNode;
+  }
+>(function MessageList({ instanceKey, serverId, channel, threadId = "", header }, ref) {
+  // Where this list's messages are kept: the channel's, or a thread's.
+  const at = threadId ? threadKey(threadId) : channel.id;
   // Only the pieces this list draws, so events elsewhere on the instance don't re-render it.
-  const state = useFuwa((s) => s.instances[instanceKey]?.messages[channel.id]);
-  const pending = useFuwa((s) => s.instances[instanceKey]?.pending[channel.id] ?? EMPTY);
+  const state = useFuwa((s) => s.instances[instanceKey]?.messages[at]);
+  const pending = useFuwa((s) => s.instances[instanceKey]?.pending[at] ?? EMPTY);
   const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? EMPTY);
   const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[serverId] ?? EMPTY);
   const users = useFuwa((s) => s.instances[instanceKey]?.users);
@@ -128,6 +147,11 @@ export const MessageList = forwardRef<
   const access = useAccess(instanceKey, serverId);
   const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
   const canSend = hasIn(access, channel.id, Permission.SEND_MESSAGES);
+  // Threads go under messages in the channel itself, not under replies, and not in shared channels yet.
+  const threads = !threadId && !channel.shared;
+  const canStart = threads && hasIn(access, channel.id, Permission.CREATE_THREADS);
+  const canReply = threads && canSend;
+  const openThread = useThreadOpener();
   // In a shared channel each side moderates its own people: a guest's moderators can't delete the home's, and
   // only the home keeps someone from another server out.
   const guestSide = !!channel.shared && !channel.shared.home;
@@ -146,11 +170,29 @@ export const MessageList = forwardRef<
       const mine = [...items].reverse().find((m) => m.authorId === me?.id && m.kind === MessageKind.UNSPECIFIED);
       if (mine) setEditing(mine.id);
     },
+    jumpTo(id) {
+      const index = rowsRef.current.findIndex((r) => r.key === id);
+      if (index === -1) return false;
+      // Draw the rows down to it first if they're hidden above.
+      if (index < skippedRef.current) setHidden(Math.max(0, index - 10));
+      atBottom.current = false;
+      const light = (tries: number) =>
+        requestAnimationFrame(() => {
+          const el = scroller.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
+          if (!el) return tries > 0 && light(tries - 1);
+          el.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+          el.classList.remove("jumped");
+          void el.offsetWidth;
+          el.classList.add("jumped");
+        });
+      light(5);
+      return true;
+    },
   }));
 
   useEffect(() => {
-    run(loadMessages(instanceKey, serverId, channel.id)).catch(() => {});
-  }, [instanceKey, serverId, channel.id]);
+    run(loadMessages(instanceKey, serverId, channel.id, false, threadId)).catch(() => {});
+  }, [instanceKey, serverId, channel.id, threadId]);
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
   const myRoleIds = memberById.get(me?.id ?? "")?.roleIds;
@@ -177,16 +219,17 @@ export const MessageList = forwardRef<
       remove: (id) => run(deleteMessage(instanceKey, serverId, channel.id, id)),
       wave: (username) => run(sendMessage(instanceKey, serverId, channel.id, `👋 @${username}`)),
       retry: (p) => {
-        dismissPending(instanceKey, channel.id, p.nonce);
-        run(sendMessage(instanceKey, serverId, channel.id, p.content)).catch(() => {});
+        dismissPending(instanceKey, at, p.nonce);
+        run(sendMessage(instanceKey, serverId, channel.id, p.content, threadId ? { threadId } : undefined)).catch(() => {});
       },
-      dismiss: (nonce) => dismissPending(instanceKey, channel.id, nonce),
+      dismiss: (nonce) => dismissPending(instanceKey, at, nonce),
       keepOut: async (userId, name) => {
         await run(blockFromChannel(instanceKey, serverId, channel.id, userId, true));
         toast(`${name} can't see #${channel.name} anymore`);
       },
+      thread: (id) => openThread?.(id),
     }),
-    [instanceKey, serverId, channel.id, channel.name, emojis],
+    [instanceKey, serverId, channel.id, channel.name, emojis, at, threadId, openThread],
   );
 
   const rows = useMemo(() => {
@@ -224,6 +267,13 @@ export const MessageList = forwardRef<
   if (hidden === null && ready) setHidden(skipped);
   const shown = skipped ? rows.slice(skipped) : rows;
   const rowCount = useRef(rows.length);
+  // What jumpTo reads, kept as of the last render.
+  const rowsRef = useRef(rows);
+  const skippedRef = useRef(skipped);
+  useLayoutEffect(() => {
+    rowsRef.current = rows;
+    skippedRef.current = skipped;
+  }, [rows, skipped]);
 
   // ── Scrolling: stick to the bottom while you're there, keep your place when older messages load above.
   const scroller = useRef<HTMLDivElement>(null);
@@ -276,9 +326,9 @@ export const MessageList = forwardRef<
     if (bottom && rowCount.current - skipped > FIRST_ROWS + MORE_ROWS) setHidden(rowCount.current - FIRST_ROWS);
     if (el.scrollTop < 300) {
       if (skipped > 0) setHidden(Math.max(0, skipped - MORE_ROWS));
-      else if (state?.hasMore && !state.loading) run(loadMessages(instanceKey, serverId, channel.id, true)).catch(() => {});
+      else if (state?.hasMore && !state.loading) run(loadMessages(instanceKey, serverId, channel.id, true, threadId)).catch(() => {});
     }
-  }, [instanceKey, serverId, channel.id, state?.hasMore, state?.loading, skipped]);
+  }, [instanceKey, serverId, channel.id, threadId, state?.hasMore, state?.loading, skipped]);
 
   const jump = () => {
     const el = scroller.current;
@@ -303,7 +353,7 @@ export const MessageList = forwardRef<
           className="flex min-h-full flex-col justify-end pb-3"
         >
           {state?.loading && items.length > 0 && <Skeleton rows={2} />}
-          {beginning && <Beginning channel={channel} />}
+          {beginning && (threadId ? header : <Beginning channel={channel} />)}
           {!state && <Skeleton rows={6} />}
           {state?.loading && items.length === 0 && <Skeleton rows={6} />}
           {/* Rows don't animate their layout, so a new arrival needn't re-render every row (the default does). */}
@@ -377,6 +427,8 @@ export const MessageList = forwardRef<
                   canDelete={row.message.authorId === meId || (manager && !(guestSide && from))}
                   animate={!initial.current?.has(row.message.id)}
                   editing={editing === row.message.id}
+                  canThread={!row.message.threadId && (row.message.thread ? canReply : canStart)}
+                  inThread={!!threadId}
                   actions={actions}
                   clock={clock}
                 />
@@ -605,6 +657,8 @@ const MessageRow = memo(function MessageRow({
   canDelete,
   animate,
   editing,
+  canThread,
+  inThread,
   actions,
 }: Redraw & {
   message: Message;
@@ -623,6 +677,10 @@ const MessageRow = memo(function MessageRow({
   canDelete: boolean;
   animate: boolean;
   editing: boolean;
+  /** Can open the thread under it: reply in the one there, or start one. */
+  canThread: boolean;
+  /** Drawn in a thread's own list, where replies don't get threads of their own. */
+  inThread: boolean;
   actions: RowActions;
 }) {
   const [confirming, setConfirming] = useState<"delete" | "keep-out" | false>(false);
@@ -633,6 +691,7 @@ const MessageRow = memo(function MessageRow({
       {...(animate ? enter : {})}
       exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
+      data-message-id={message.id}
       className={cn(
         "message-row group relative flex gap-3 px-4",
         first && "first",
@@ -646,6 +705,7 @@ const MessageRow = memo(function MessageRow({
           <EditBox initial={message.content.replace(EMOJI_TOKEN, ":$2:")} onCancel={actions.cancelEdit} onSave={(content) => actions.save(message.id, content)} />
         ) : (
           <>
+            {message.threadId && <AlsoSentNote message={message} inThread={inThread} onOpen={actions.thread} />}
             {message.content && <MessageBody content={message.content} display={display} />}
             {edited && (
               <span className="text-[0.7rem] text-muted-foreground" title={formatFull(toDate(message.editedAt))}>
@@ -654,6 +714,7 @@ const MessageRow = memo(function MessageRow({
               </span>
             )}
             <Embeds embeds={message.embeds} animate={animate} />
+            {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
           </>
         )}
       </MessageLine>
@@ -707,6 +768,11 @@ const MessageRow = memo(function MessageRow({
                   </motion.span>
                 </AnimatePresence>
               </ToolButton>
+              {canThread && (
+                <ToolButton label={message.thread ? "Open thread" : "Reply in thread"} onClick={() => actions.thread(message.id)}>
+                  <MessageSquareReplyIcon />
+                </ToolButton>
+              )}
               {developer && (
                 <ToolButton label="Copy message ID" onClick={() => copy(message.id, "message ID")}>
                   <FingerprintIcon />
