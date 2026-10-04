@@ -345,3 +345,19 @@ export const isPrivate = (channel: Channel, everyoneId: string) =>
 
 /** Whether a message says @everyone or @here. */
 export const saysEveryone = (content: string) => /(^|[^\w@])@(everyone|here)\b/i.test(content);
+
+/** What a moderator can do to someone: time out, kick, ban, rename. */
+export type ModAction = "timeout" | "kick" | "ban" | "nickname";
+
+/** What you may do to someone, from access already worked out: only to people ranked below you, never yourself. */
+export function moderationFor(access: Access, ownerId: string, roles: readonly Role[], meId: string | undefined, target: Member | undefined) {
+  const below = !!target?.user && target.user.id !== meId && outranks(access, standing(ownerId, roles, target));
+  const can = (p: P) => below && has(access, p);
+  const allowed: Record<ModAction, boolean> = {
+    timeout: can(P.TIME_OUT_MEMBERS),
+    kick: can(P.KICK_MEMBERS),
+    ban: can(P.BAN_MEMBERS),
+    nickname: can(P.MANAGE_NICKNAMES),
+  };
+  return { ...allowed, any: Object.values(allowed).some(Boolean) };
+}

@@ -39,6 +39,8 @@ enum MediaPurpose {
   MEDIA_PURPOSE_EMOJI = 4;
   // A picture behind the app, kept with KeepBackground.
   MEDIA_PURPOSE_BACKGROUND = 5;
+  // A GIF of your own to send (GifService.SaveGif keeps it). Only image/gif.
+  MEDIA_PURPOSE_GIF = 8;
 }
 
 // A stored file.
