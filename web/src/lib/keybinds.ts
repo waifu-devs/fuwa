@@ -25,6 +25,7 @@ export type KeyAction = {
 
 export const ACTIONS: KeyAction[] = [
   { id: "quickSwitcher", label: "Find a server or channel", group: "Navigation", combo: "Mod+K", whileTyping: true },
+  { id: "searchServer", label: "Search this server's messages", group: "Navigation", combo: "Mod+F", whileTyping: true },
   { id: "previousServer", label: "Previous server", group: "Navigation", combo: "Mod+Alt+ArrowUp", whileTyping: true },
   { id: "nextServer", label: "Next server", group: "Navigation", combo: "Mod+Alt+ArrowDown", whileTyping: true },
   { id: "previousChannel", label: "Previous channel", group: "Navigation", combo: "Alt+ArrowUp", whileTyping: true },
