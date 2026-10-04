@@ -8,6 +8,8 @@ import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
 import { useLayout } from "@/components/Shell";
 import { Count, SPRING } from "@/components/motion";
+import { useContextMenu } from "@/components/ContextMenu";
+import { dmMenu } from "@/components/menus/dm";
 import { displayName } from "@/lib/format";
 import { blockedIds } from "@/lib/friends";
 import { cn } from "@/lib/utils";
@@ -114,6 +116,7 @@ function DmLink({
   const calling = useFuwa((s) => !!s.instances[instanceKey]?.dms.calls[conversation.id]?.participants.length);
   const other = conversation.users.find((u) => u.id !== meId) ?? conversation.users[0];
   const line = preview(items, meId);
+  const menu = useContextMenu("dm", () => dmMenu({ instanceKey, conversation, other }));
   return (
     <motion.div
       ref={ref}
@@ -127,7 +130,8 @@ function DmLink({
         to="/$instance/dm/$conversation"
         params={{ instance: instanceKey, conversation: conversation.id }}
         onClick={() => compact && setNavOpen(false)}
-        className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm transition hover:bg-muted data-[status=active]:bg-primary/15"
+        {...menu}
+        className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm transition hover:bg-muted data-[menu-open]:bg-muted data-[status=active]:bg-primary/15"
       >
         <span className="relative shrink-0">
           <UserAvatar user={other} className="size-8 text-xs transition-transform duration-300 group-hover:scale-105 group-hover:-rotate-3" />

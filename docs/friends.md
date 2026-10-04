@@ -72,7 +72,7 @@ setting says; blocking is what stops one. The settings follow the account
 
 ## How it's kept
 
-node.db (`migrations/node/0016_friends.sql`), on a split instance's
+node.db (`migrations/node/0020_friends.sql`), on a split instance's
 directory, which answers every `FriendService` call:
 
 - `friend_links (account_id, other_id, state, created_at, expires_at)`: each

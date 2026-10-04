@@ -122,3 +122,22 @@ export function useAccess(key: string, serverId: string): Access {
     [serverId, ownerId, meId, member, roles, channels, hasRules],
   );
 }
+
+/** What you can do in a server right now, worked out as `useAccess` does, for code that runs outside rendering (a right-click menu). */
+export function accessNow(key: string, serverId: string): Access {
+  const i = store.get().instances[key];
+  const server = i?.servers.find((x) => x.id === serverId);
+  const meId = i?.me?.id;
+  if (!i || !server?.ownerId || !meId) return NO_ACCESS;
+  const member = i.members[serverId]?.find((m) => m.user?.id === meId);
+  return accessOf(
+    serverId,
+    server.ownerId,
+    i.roles[serverId] ?? NO_ROLES,
+    i.channels[serverId] ?? NO_CHANNELS,
+    meId,
+    member?.roleIds ?? [],
+    !!member?.pending && server.hasRules,
+    !!member?.timedOutUntil && timestampDate(member.timedOutUntil).getTime() > Date.now(),
+  );
+}

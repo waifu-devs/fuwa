@@ -348,6 +348,7 @@ impl App {
             .add_service(crate::pb::sso_service_server::SsoServiceServer::new(api.clone()))
             .add_service(EventServiceServer::new(api.clone()))
             .add_service(MediaServiceServer::new(api.clone()))
+            .add_service(crate::pb::gif_service_server::GifServiceServer::new(api.clone()))
             .add_service(DirectMessageServiceServer::new(api.clone()))
             .add_service(crate::pb::friend_service_server::FriendServiceServer::new(api.clone()))
             .add_service(crate::pb::call_service_server::CallServiceServer::new(api.clone()))

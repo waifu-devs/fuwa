@@ -72,6 +72,7 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.AuthService"
         | "fuwa.v1.AccountService"
         | "fuwa.v1.MediaService"
+        | "fuwa.v1.GifService"
         | "fuwa.v1.DirectMessageService"
         | "fuwa.v1.FriendService" => Target::Directory,
         "fuwa.v1.AdminService" if matches!(method, "SetServerLimits" | "ExportServer") => Target::Shard,
