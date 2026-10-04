@@ -45,7 +45,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0018_voice_video_off.sql"),
     include_str!("../migrations/server/0019_secure_history.sql"),
     include_str!("../migrations/server/0020_federation.sql"),
-    include_str!("../migrations/server/0024_attachments.sql"),
+    include_str!("../migrations/server/0023_attachments.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
