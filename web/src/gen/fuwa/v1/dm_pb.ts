@@ -1236,7 +1236,7 @@ export type ListBackupPartsRequest = Message<"fuwa.v1.ListBackupPartsRequest"> &
   afterSequence: bigint;
 
   /**
-   * 1 to 100; defaults to 50. Fewer come back if they'd pass 4 MiB.
+   * 1 to 100; defaults to 50. Fewer come back if they'd pass 3 MiB.
    *
    * @generated from field: int32 limit = 2;
    */
