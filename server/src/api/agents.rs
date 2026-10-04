@@ -16,6 +16,37 @@ use crate::servers::{self as store, Audit, Payload};
 /// Most agents one person may make.
 pub const MAX_AGENTS: i64 = 25;
 
+/// Most agents a server may name in its MCP access.
+pub const MAX_MCP_AGENTS: usize = 100;
+
+/// A server's MCP access as its file keeps it (`server.mcp_access`).
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct StoredMcpAccess {
+    mode: i32,
+    #[serde(default)]
+    agents: Vec<String>,
+}
+
+impl StoredMcpAccess {
+    fn parse(json: &str) -> pb::McpAccess {
+        let stored: Self =
+            if json.is_empty() { Self::default() } else { serde_json::from_str(json).unwrap_or_default() };
+        let mode = match pb::McpAccessMode::try_from(stored.mode).unwrap_or_default() {
+            pb::McpAccessMode::Unspecified => pb::McpAccessMode::All,
+            mode => mode,
+        };
+        let agent_ids = if mode == pb::McpAccessMode::Chosen { stored.agents } else { vec![] };
+        pb::McpAccess { mode: mode as i32, agent_ids }
+    }
+}
+
+async fn load_mcp_access(conn: &turso::Connection) -> Result<pb::McpAccess> {
+    let json = crate::db::query_one(conn, "SELECT mcp_access FROM server", (), |r| r.get::<String>(0))
+        .await?
+        .unwrap_or_default();
+    Ok(StoredMcpAccess::parse(&json))
+}
+
 impl Api {
     /// The caller, who must be a person: agents don't make or manage agents.
     async fn person(&self, metadata: &tonic::metadata::MetadataMap) -> Result<Account> {
@@ -117,8 +148,83 @@ impl Api {
     }
 }
 
+impl Api {
+    async fn set_mcp_access(&self, account: &Account, req: pb::SetMcpAccessRequest) -> Result<pb::McpAccess> {
+        let seat = self.with(account, &req.server_id, Permission::ManageServer).await?;
+        let access = req.access.unwrap_or_default();
+        let mode = match pb::McpAccessMode::try_from(access.mode) {
+            Ok(pb::McpAccessMode::Unspecified) => pb::McpAccessMode::All,
+            Ok(mode) => mode,
+            Err(_) => return Err(Error::invalid("that isn't an MCP access mode")),
+        };
+        let mut agents = Vec::new();
+        if mode == pb::McpAccessMode::Chosen {
+            for id in access.agent_ids {
+                let id = id.trim().to_string();
+                if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    return Err(Error::invalid("agent_ids must be account ids"));
+                }
+                if !agents.contains(&id) {
+                    agents.push(id);
+                }
+            }
+            if agents.len() > MAX_MCP_AGENTS {
+                return Err(Error::invalid(format!("at most {MAX_MCP_AGENTS} agents")));
+            }
+        }
+        let stored = StoredMcpAccess { mode: mode as i32, agents };
+        let json = if mode == pb::McpAccessMode::All {
+            String::new()
+        } else {
+            serde_json::to_string(&stored).map_err(|_| Error::internal("couldn't save the MCP access"))?
+        };
+        let sdb = seat.sdb;
+        sdb.write(&account.id, async |conn, _events| {
+            let before = load_mcp_access(conn).await?;
+            conn.execute("UPDATE server SET mcp_access = ?1", [json.as_str()]).await?;
+            let entry = Audit::new(pb::AuditAction::ServerUpdate, "")
+                .change("mcp_access", before.mode, stored.mode)
+                .change("mcp_access.agents", before.agent_ids.len(), stored.agents.len());
+            store::audit(conn, &account.id, entry).await?;
+            Ok(())
+        })
+        .await?;
+        let conn = sdb.read()?;
+        load_mcp_access(&conn).await
+    }
+}
+
 #[tonic::async_trait]
 impl AgentService for Api {
+    async fn get_mcp_access(
+        &self,
+        request: Request<pb::GetMcpAccessRequest>,
+    ) -> Result<Response<pb::GetMcpAccessResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let seat = self.membership(&account, &request.get_ref().server_id).await?;
+                let conn = seat.sdb.read()?;
+                Ok(pb::GetMcpAccessResponse { access: Some(load_mcp_access(&conn).await?) })
+            }
+            .await,
+        )
+    }
+
+    async fn set_mcp_access(
+        &self,
+        request: Request<pb::SetMcpAccessRequest>,
+    ) -> Result<Response<pb::SetMcpAccessResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let access = Api::set_mcp_access(self, &account, request.into_inner()).await?;
+                Ok(pb::SetMcpAccessResponse { access: Some(access) })
+            }
+            .await,
+        )
+    }
+
     async fn list_agents(
         &self,
         request: Request<pb::ListAgentsRequest>,

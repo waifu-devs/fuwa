@@ -63,6 +63,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "server_creation", get: (s) => s.serverCreation },
   { path: "agent_creation", get: (s) => s.agentCreation },
   { path: "shared_channels", get: (s) => s.sharedChannels },
+  { path: "mcp", get: (s) => s.mcp },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
   { path: "default_limits.channels", get: (s) => s.defaultLimits?.channels },
@@ -474,6 +475,20 @@ export function InstanceSettingsDialog({
                 />
               </Setting>
               <Setting
+                id="mcp"
+                title="Agents through MCP"
+                defaultLabel={defaults.mcp ? "on" : "off"}
+                delay={0.22}
+                {...resetter("mcp")}
+              >
+                <Toggle
+                  checked={draft.mcp}
+                  onChange={(on) => patch((d) => (d.mcp = on))}
+                  label="Agents can use this instance as an MCP server"
+                  hint="AI apps such as Claude reach it at /mcp with an agent's token and get the same permissions the agent has. Server managers can still pick which agents may use theirs."
+                />
+              </Setting>
+              <Setting
                 id="shared-channels"
                 title="Shared channels"
                 defaultLabel={defaults.sharedChannels ? "on" : "off"}
@@ -702,7 +717,11 @@ const CREATION_LABEL: Record<number, string> = {
 };
 
 /** Settings copied by a function of their own, beside the switch below. */
-const COPIED = [...CALL_FIELDS, { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) }];
+const COPIED = [
+  ...CALL_FIELDS,
+  { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) },
+  { path: "mcp", copy: (into: InstanceSettings, from: InstanceSettings) => (into.mcp = from.mcp) },
+];
 
 /** Copies the named settings from one draft into another. */
 function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: string[]) {

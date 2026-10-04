@@ -678,6 +678,26 @@ async fn a_split_instance_works_like_one() {
     let mine = c.agents.list_agents(authed(&juan, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents;
     assert_eq!(mine[0].servers, 1);
 
+    // MCP through the gateway: its tools reach the shard holding the server.
+    let mcp = |name: &str, arguments: serde_json::Value| {
+        http.post(format!("{}/mcp", cluster.gateway.url()))
+            .bearer_auth(&made.token)
+            .json(&serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": name, "arguments": arguments } }))
+            .send()
+    };
+    let read: serde_json::Value =
+        mcp("list_messages", serde_json::json!({ "server_id": on_b.id, "channel_id": channel.id }))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+    let messages = &read["result"]["structuredContent"]["messages"];
+    assert!(messages.as_array().unwrap().iter().any(|m| m["content"] == "relayed"), "{read}");
+    let head: serde_json::Value =
+        mcp("get_events", serde_json::json!({ "server_id": on_b.id })).await.unwrap().json().await.unwrap();
+    assert!(head["result"]["structuredContent"]["cursor"].as_i64().unwrap() > 0, "{head}");
+
     // A moderation provider set up on the directory reaches the shards, key
     // and all (they check messages), while clients only learn a key is set.
     let jev = pb::AutoModProviderSettings {
