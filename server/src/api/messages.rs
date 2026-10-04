@@ -547,9 +547,13 @@ impl MessageService for Api {
                     return Err(Error::ResourceExhausted("this server is out of storage".into()));
                 }
                 let pictures = automod::picture_links(&req.attachments, &req.embeds);
-                let (asked, later) =
-                    automod::ask_soon(&self.app, &sdb, &member, &access, &req.channel_id, &req.content, &pictures)
-                        .await;
+                // The Smart filter's provider is asked alongside: the message
+                // goes out at once, and its answer is acted on when it comes.
+                let (asked, later) = (
+                    None,
+                    automod::ask_after(&self.app, &sdb, &member, &access, &req.channel_id, &req.content, &pictures)
+                        .await,
+                );
                 let message = sdb
                     .write(&account.id, async |conn, events| {
                         let channel =
@@ -739,12 +743,14 @@ impl MessageService for Api {
                     let message = shared::guest_edit(&self.app, &sdb, &member, &access, &link, guest, &req).await?;
                     return Ok(pb::UpdateMessageResponse { message: Some(message) });
                 }
-                // A provider is asked before the write, about new text the author wrote.
+                // A provider is asked about new text the author wrote, and its
+                // answer acted on when it comes.
                 let before = load_message(&sdb.read()?, &sdb.id, &req.message_id).await?;
                 let (asked, later) = match before {
-                    Some(m) if m.author_id == account.id && m.content != req.content => {
-                        automod::ask_soon(&self.app, &sdb, &member, &access, &m.channel_id, &req.content, &[]).await
-                    }
+                    Some(m) if m.author_id == account.id && m.content != req.content => (
+                        None,
+                        automod::ask_after(&self.app, &sdb, &member, &access, &m.channel_id, &req.content, &[]).await,
+                    ),
                     _ => (None, None),
                 };
                 let message = sdb
