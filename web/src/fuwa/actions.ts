@@ -1211,6 +1211,21 @@ export function markServerRead(key: string, serverId: string): number {
   return cleared;
 }
 
+/** Clears the unread counts of some channels, such as one channel or a category's. Returns how many had some. */
+export function markChannelsRead(key: string, channelIds: string[]): number {
+  let cleared = 0;
+  updateInstance(key, (i) => {
+    const unread = { ...i.unread };
+    for (const id of channelIds) {
+      if (!unread[id]) continue;
+      delete unread[id];
+      cleared++;
+    }
+    return cleared ? { ...i, unread } : i;
+  });
+  return cleared;
+}
+
 export { ChannelType };
 
 // ───────────────────────── AutoMod, emoji and the welcome screen ─────────────────────────

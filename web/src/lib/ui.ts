@@ -79,10 +79,10 @@ export function copy(text: string, what: string) {
   );
 }
 
-const commands = new Map<string, () => void>();
+const commands = new Map<string, (arg?: string) => void>();
 
 /** Lets the part of the app that owns something handle a command for it from anywhere, like the members list. */
-export function onCommand(name: string, run: () => void) {
+export function onCommand(name: string, run: (arg?: string) => void) {
   commands.set(name, run);
   return () => {
     if (commands.get(name) === run) commands.delete(name);
@@ -90,8 +90,11 @@ export function onCommand(name: string, run: () => void) {
 }
 
 /** Runs a command if something on screen handles it; false otherwise. */
-export function runCommand(name: string) {
+export function runCommand(name: string, arg?: string) {
   const run = commands.get(name);
-  run?.();
+  run?.(arg);
   return !!run;
 }
+
+/** Whether something on screen handles a command right now. */
+export const hasCommand = (name: string) => commands.has(name);

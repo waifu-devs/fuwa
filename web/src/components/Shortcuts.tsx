@@ -11,6 +11,7 @@ import { IncomingCalls } from "@/components/calls/IncomingCalls";
 import { PopOuts, RecordingWatch } from "@/components/calls/Video";
 import { store, useFuwa, type FuwaState } from "@/fuwa/store";
 import { CHANNEL_ICON, openableChannels } from "@/components/ChannelSidebar";
+import { ContextMenuHost } from "@/components/ContextMenu";
 import { ServerIcon } from "@/components/Icons";
 import { Count, EASE_OUT, SPRING } from "@/components/motion";
 import { Keycaps } from "@/components/settings/app/common";
@@ -217,6 +218,7 @@ export function AppOverlays() {
       <PopOuts />
       <RecordingWatch />
       <Toaster />
+      <ContextMenuHost />
     </>
   );
 }

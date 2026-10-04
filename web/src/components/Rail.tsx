@@ -12,6 +12,8 @@ import { AppliedButton } from "@/components/join/Applied";
 import { Count, SPRING } from "@/components/motion";
 import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
+import { useContextMenu } from "@/components/ContextMenu";
+import { serverMenu } from "@/components/menus/server";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -190,8 +192,9 @@ function ServerButton({ inst, server, active }: { inst: RailInstance; server: Se
     }
     return n;
   });
+  const menu = useContextMenu("server", () => serverMenu({ instanceKey: inst.key, server }));
   return (
-    <RailItem label={server.name} active={active} unread={unread > 0} to="/$instance/$server" params={{ instance: inst.key, server: server.id }}>
+    <RailItem label={server.name} active={active} unread={unread > 0} to="/$instance/$server" params={{ instance: inst.key, server: server.id }} menu={menu}>
       <span className="relative">
         <ServerIcon server={server} active={active} />
         <AnimatePresence>
@@ -221,7 +224,10 @@ function RailItem({
   children,
   to,
   params,
+  menu,
 }: {
+  /** Right-click handlers, for a server's menu. */
+  menu?: ReturnType<typeof useContextMenu>;
   label: string;
   active: boolean;
   unread?: boolean;
@@ -250,7 +256,11 @@ function RailItem({
             aria-label={label}
             aria-current={active ? "page" : undefined}
             onClick={() => compact && setNavOpen(true)}
-            className={cn("rounded-[50%] outline-none focus-visible:ring-2 focus-visible:ring-ring", small && "my-0.5")}
+            {...menu}
+            className={cn(
+              "rounded-[50%] outline-none focus-visible:ring-2 focus-visible:ring-ring data-[menu-open]:ring-2 data-[menu-open]:ring-primary/60",
+              small && "my-0.5",
+            )}
           >
             {children}
           </Link>
