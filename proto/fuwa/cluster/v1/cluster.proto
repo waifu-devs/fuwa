@@ -100,6 +100,9 @@ service ShardService {
   rpc DescribeServers(DescribeServersRequest) returns (DescribeServersResponse);
   // Whether a server has a channel, before notification settings point at it.
   rpc ChannelExists(ChannelExistsRequest) returns (ChannelExistsResponse);
+  // A server's emoji with these ids, as stored, for the directory's
+  // CheckEmojis.
+  rpc ServerEmojis(ServerEmojisRequest) returns (ServerEmojisResponse);
   // Where an invite leads, for the directory's GetInvite.
   rpc DescribeInvite(DescribeInviteRequest) returns (DescribeInviteResponse);
   // A call from the other end of a shared channel, for one of this shard's
@@ -575,6 +578,15 @@ message ChannelExistsRequest {
 
 message ChannelExistsResponse {
   bool exists = 1;
+}
+
+message ServerEmojisRequest {
+  string server_id = 1;
+  repeated string ids = 2;
+}
+
+message ServerEmojisResponse {
+  repeated fuwa.v1.Emoji emojis = 1;
 }
 
 message SendServerRequest {

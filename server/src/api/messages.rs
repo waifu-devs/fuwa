@@ -86,19 +86,26 @@ fn role_tokens(content: &str) -> Vec<&str> {
 }
 
 /// The ids of the custom emoji written as `<:name:id>` or `<a:name:id>` in
-/// `content`, once each, in order.
+/// `content`, once each, in order. One pass: a token is at most 70 bytes, so
+/// its end is looked for only that far.
 fn emoji_tokens(content: &str) -> Vec<&str> {
+    const LONGEST: usize = 70;
     let mut ids = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let bytes = content.as_bytes();
     for (start, _) in content.match_indices('<') {
-        let rest = &content[start + 1..];
-        let rest = rest.strip_prefix('a').unwrap_or(rest);
-        let Some(rest) = rest.strip_prefix(':') else { continue };
-        let Some(end) = rest.find('>') else { continue };
-        let Some((name, id)) = rest[..end].split_once(':') else { continue };
+        let window = &bytes[start + 1..bytes.len().min(start + 1 + LONGEST)];
+        let Some(end) = window.iter().position(|&b| b == b'>') else { continue };
+        // Everything before '>' in a token is ASCII, so this slice is on char
+        // boundaries whenever it can be one.
+        let Ok(token) = std::str::from_utf8(&window[..end]) else { continue };
+        let token = token.strip_prefix('a').unwrap_or(token);
+        let Some(token) = token.strip_prefix(':') else { continue };
+        let Some((name, id)) = token.split_once(':') else { continue };
         let word = |s: &str, min: usize, under: bool| {
             (min..=32).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || (under && b == b'_'))
         };
-        if word(name, 2, true) && word(id, 10, false) && !ids.contains(&id) {
+        if word(name, 2, true) && word(id, 10, false) && seen.insert(id) {
             ids.push(id);
         }
     }
@@ -116,11 +123,14 @@ async fn outside_emojis(
     content: &str,
     sent: Vec<pb::Emoji>,
 ) -> Vec<pb::Emoji> {
-    let used = emoji_tokens(content);
+    let used: std::collections::HashSet<&str> = emoji_tokens(content).into_iter().collect();
+    let mut taken = std::collections::HashSet::new();
     let mut wanted: Vec<pb::Emoji> = Vec::new();
     for emoji in sent {
-        if emoji.server_id != server_id && used.contains(&emoji.id.as_str()) && !wanted.iter().any(|w| w.id == emoji.id)
-        {
+        if wanted.len() == crate::cluster::calls::MAX_OUTSIDE_EMOJIS {
+            break;
+        }
+        if emoji.server_id != server_id && used.contains(emoji.id.as_str()) && taken.insert(emoji.id.clone()) {
             wanted.push(emoji);
         }
     }
@@ -136,10 +146,10 @@ async fn outside_emojis(
 /// An edited message's emoji from other servers: the ones it had that the
 /// new text still uses, then newly checked ones.
 fn kept_emojis(had: Vec<pb::Emoji>, checked: Vec<pb::Emoji>, content: &str) -> Vec<pb::Emoji> {
-    let used = emoji_tokens(content);
+    let used: std::collections::HashSet<&str> = emoji_tokens(content).into_iter().collect();
     let mut kept: Vec<pb::Emoji> = Vec::new();
     for emoji in had.into_iter().chain(checked) {
-        if used.contains(&emoji.id.as_str())
+        if used.contains(emoji.id.as_str())
             && !kept.iter().any(|k| k.id == emoji.id)
             && kept.len() < crate::cluster::calls::MAX_OUTSIDE_EMOJIS
         {
@@ -755,12 +765,18 @@ impl MessageService for Api {
                     let message = shared::guest_edit(&self.app, &sdb, &member, &access, &link, guest, &req).await?;
                     return Ok(pb::UpdateMessageResponse { message: Some(message) });
                 }
-                let checked =
-                    outside_emojis(&self.app, &account.id, &sdb.id, &req.content, std::mem::take(&mut req.emojis))
-                        .await;
+                // Too long is refused before anything reads the text.
+                check_content(&req.content, true)?;
                 // A provider is asked about new text the author wrote, and its
                 // answer acted on when it comes.
                 let before = load_message(&sdb.read()?, &sdb.id, &req.message_id).await?;
+                let sent = std::mem::take(&mut req.emojis);
+                let checked = match &before {
+                    Some(m) if m.author_id == account.id => {
+                        outside_emojis(&self.app, &account.id, &sdb.id, &req.content, sent).await
+                    }
+                    _ => vec![],
+                };
                 let (asked, later) = match before {
                     Some(m) if m.author_id == account.id && m.content != req.content => (
                         None,

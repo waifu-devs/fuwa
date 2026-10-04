@@ -4985,17 +4985,19 @@ async fn emoji_from_other_servers_go_with_the_message() {
     );
     assert!(carried.creator_id.is_empty() && carried.size == 0 && !carried.animated);
 
-    // Someone who isn't in the emoji's server can't, and nor can a link
-    // that isn't one of its emoji's pictures; a lookalike address is
-    // rebuilt at the instance's own.
+    // Someone who isn't in the emoji's server can't. Only the id sent counts:
+    // the name and picture come from the server, whatever was sent, and an
+    // id it has no emoji for is left out.
     assert!(sent(&friend, format!("hi {token}"), vec![wave.clone()]).await.emojis.is_empty());
-    let forged = pb::Emoji { url: icon, ..wave.clone() };
-    assert!(sent(&owner, format!("hi {token}"), vec![forged]).await.emojis.is_empty());
+    let forged = pb::Emoji { url: icon, name: "renamed".into(), ..wave.clone() };
+    let back = sent(&owner, format!("hi {token}"), vec![forged]).await.emojis;
+    assert_eq!((back[0].name.as_str(), back[0].url.as_str()), ("wave", picture.as_str()));
+    let made_up = pb::Emoji { id: "madeup0000000000".into(), ..wave.clone() };
+    assert!(sent(&owner, "hi <:wave:madeup0000000000>".into(), vec![made_up]).await.emojis.is_empty());
     let elsewhere = pb::Emoji {
         url: format!("https://evil.example{}", &picture[picture.find("/media/").unwrap()..]),
         ..wave.clone()
     };
-    assert!(elsewhere.url.starts_with("https://evil.example/media/"), "{}", elsewhere.url);
     assert_eq!(sent(&owner, format!("hi {token}"), vec![elsewhere]).await.emojis[0].url, picture);
     // One the text doesn't use is left out.
     assert!(sent(&owner, "no emoji here".into(), vec![wave.clone()]).await.emojis.is_empty());
@@ -5029,6 +5031,11 @@ async fn emoji_from_other_servers_go_with_the_message() {
     assert_eq!(kept.into_inner().message.unwrap().emojis.len(), 1);
     let dropped = c.messages.update_message(authed(&owner, edit("gone".into()))).await.unwrap();
     assert!(dropped.into_inner().message.unwrap().emojis.is_empty());
+    // Too long an edit is refused before anything reads it, even of a
+    // message that isn't there.
+    let long = pb::UpdateMessageRequest { message_id: "nothere000000000".into(), ..edit("<:a".repeat(5000)) };
+    let refused = c.messages.update_message(authed(&friend, long)).await.unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
     instance.stop().await;
 }
 
