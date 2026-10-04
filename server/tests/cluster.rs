@@ -624,6 +624,12 @@ async fn a_split_instance_works_like_one() {
     assert!(parts.contains(&serde_json::json!({ "part": "directory", "up": true })));
     assert_eq!(parts.iter().filter(|p| p["part"] == "shard" && p["up"] == true).count(), cluster.shards.len());
     assert!(!parts.iter().any(|p| p.to_string().contains("http")), "no addresses: {parts:?}");
+    // How busy each shard is, and this gateway's streams, but the busiest servers only for an admin.
+    assert!(parts.iter().filter(|p| p["part"] == "shard").all(|p| p["load"]["streams"].is_u64()), "{parts:?}");
+    assert!(parts.iter().any(|p| p["part"] == "gateway" && p["load"]["streams"].is_u64()), "{parts:?}");
+    assert!(!parts.iter().any(|p| p.to_string().contains("busiest")), "busiest is for admins: {parts:?}");
+    let shard_load = http.get(format!("{}/healthz/load", cluster.shards[0].url())).send().await.unwrap();
+    assert_eq!(shard_load.headers().get("grpc-status").map(|v| v.to_str().unwrap()), Some("7"));
     let direct = http.get(format!("{}/healthz/parts", cluster.directory.url())).send().await.unwrap();
     // Refused like any call without the cluster key.
     assert_eq!(direct.headers().get("grpc-status").map(|v| v.to_str().unwrap()), Some("7"));
@@ -855,6 +861,61 @@ async fn agents_follow_servers_they_are_added_to_across_shards() {
     };
     assert_eq!(ended.code(), tonic::Code::Unauthenticated);
     assert!(started.elapsed() < Duration::from_secs(5), "ended at the reset, not a heartbeat");
+
+    cluster.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_agent_joining_many_servers_stays_within_its_stream_limit() {
+    let root = tempfile::tempdir().unwrap();
+    // Two streams per account, so a handful of joins is well past it.
+    let cluster = start_cluster(root.path(), &[("FUWA_STREAMS_PER_ACCOUNT", "2".to_string())]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let made = c
+        .agents
+        .create_agent(authed(
+            &juan,
+            pb::CreateAgentRequest { username: "helper".into(), display_name: "Helper".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let request = pb::SubscribeRequest { follow_new_servers: true, ..Default::default() };
+    let mut stream = c.events.subscribe(authed(&made.token, request)).await.unwrap().into_inner();
+    assert!(next(&mut stream).await.ready.unwrap().servers.is_empty());
+
+    // Each join opens another stream from the gateway to that server's shard;
+    // with six servers on two shards, one shard gets at least three.
+    let mut last = None;
+    for n in 0..6 {
+        let server = create_server(&mut c, &juan, &format!("Server {n}")).await;
+        let add = pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() };
+        c.agents.add_agent(authed(&juan, add)).await.unwrap();
+        let followed = loop {
+            if let Some(followed) = next(&mut stream).await.followed {
+                break followed;
+            }
+        };
+        assert_eq!(followed.server_id, server.id);
+        last = Some(server);
+    }
+
+    // The stream still carries events, and the person who added it can still
+    // open their own: the shards didn't count the agent's joins as tabs.
+    let last = last.unwrap();
+    let channel = general(&mut c, &juan, &last.id).await;
+    send(&mut c, &juan, &last.id, &channel.id, "still here").await;
+    let said = until(&mut stream, |e| matches!(&e.payload, Some(Payload::MessageCreated(_)))).await;
+    assert_eq!(said.server_id, last.id);
+    let cursors = vec![pb::ServerCursor { server_id: last.id.clone(), after_sequence: None }];
+    let mut own = c
+        .events
+        .subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(next(&mut own).await.ready.is_some());
 
     cluster.stop().await;
 }

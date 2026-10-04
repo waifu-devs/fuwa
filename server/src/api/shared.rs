@@ -633,7 +633,7 @@ async fn from_elsewhere(app: &App, sdb: &ServerDb, call: &cpb::SharedCall, from:
         // At the home, the guest's server id (under its instance) is checked.
         _ => return Ok(()),
     };
-    let link = link_by_id(&sdb.read()?, connection_id).await?;
+    let link = link_by_id(&*sdb.read()?, connection_id).await?;
     let home = match &call.call {
         Some(Call::Approved(cpb::HomeApproved { connection: Some(c), .. })) => c.server.as_ref().map(|s| s.id.as_str()),
         _ => None,
@@ -1086,7 +1086,7 @@ async fn review_here(
     text: automod::Text<'_>,
     pictures: &[String],
 ) -> Result<()> {
-    if access.has(Permission::ManageServer) || store::load_automod(&sdb.read()?).await?.is_empty() {
+    if access.has(Permission::ManageServer) || store::load_automod(&*sdb.read()?).await?.is_empty() {
         return Ok(());
     }
     let asked = automod::ask(app, sdb, member, access, channel_id, text, pictures).await;
@@ -1161,7 +1161,7 @@ pub(super) async fn guest_send(
     req: pb::SendMessageRequest,
 ) -> Result<pb::Message> {
     let channel_id = link.channel_id.clone().unwrap_or_default();
-    let guest = guest_of(&sdb.read()?, &sdb.id, account, access, link).await?;
+    let guest = guest_of(&*sdb.read()?, &sdb.id, account, access, link).await?;
     let pictures = automod::picture_links(&req.attachments, &req.embeds, &[]);
     let reviewed = messages::reviewed_text(&pb::Message {
         content: req.content.clone(),
@@ -1640,7 +1640,7 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
     let guest = edit.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
     let author_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
     // Only new text the author wrote goes to a provider.
-    let before = load_message(&sdb.read()?, &sdb.id, &edit.message_id).await?;
+    let before = load_message(&*sdb.read()?, &sdb.id, &edit.message_id).await?;
     let asked = match before {
         Some(m) if m.author_id == author_id && m.content != edit.content => {
             let all = edited_text(&m, &edit.content);
@@ -1884,7 +1884,7 @@ async fn guest_ended(app: &Arc<App>, sdb: &ServerDb, ended: cpb::HomeEnded) -> R
 
 async fn guest_events(app: &Arc<App>, sdb: &ServerDb, home: cpb::HomeEvents) -> Result<cpb::SharedReply> {
     let link =
-        link_by_id(&sdb.read()?, &home.connection_id).await?.filter(|l| l.active).ok_or(Error::NotFound(GONE))?;
+        link_by_id(&*sdb.read()?, &home.connection_id).await?.filter(|l| l.active).ok_or(Error::NotFound(GONE))?;
     let Some(channel_id) = link.channel_id.clone() else { return Err(Error::NotFound(GONE)) };
     let mut events = home.events;
     if link.instance.origin.is_some() {
@@ -2098,7 +2098,7 @@ struct Target {
 async fn targets(app: &App, server_id: &str) -> HashMap<String, Vec<Target>> {
     let loaded = async {
         let sdb = app.servers.get(server_id).await?;
-        let rows = all_guests(&sdb.read()?).await?;
+        let rows = all_guests(&*sdb.read()?).await?;
         Ok::<_, Error>(rows)
     }
     .await;
@@ -2651,7 +2651,7 @@ impl SharedChannelService for Api {
                 // The guest makes its channel first, so an approval it can't
                 // take (no room for another channel, say) doesn't stand here.
                 let mut offered = home_connection(&row, &channel.name);
-                offered.server = Some(this_server(&sdb.read()?, &sdb.id).await?);
+                offered.server = Some(this_server(&*sdb.read()?, &sdb.id).await?);
                 let approved = cpb::HomeApproved { connection: Some(offered), actor_id: account.id.clone() };
                 self.app
                     .shared(cpb::SharedCall { server_id: row.server.id.clone(), call: Some(Call::Approved(approved)), ..Default::default() })
@@ -2764,7 +2764,7 @@ impl SharedChannelService for Api {
                 let req = request.into_inner();
                 let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageServer).await?;
                 let allowed = allowed_from(&req.allowed)?;
-                let row = guest_by_id(&sdb.read()?, &req.connection_id).await?.ok_or(Error::NotFound("connection"))?;
+                let row = guest_by_id(&*sdb.read()?, &req.connection_id).await?.ok_or(Error::NotFound("connection"))?;
                 access.require_in(&row.channel_id, Permission::ManageChannels)?;
                 let (row, channel_name) = sdb
                     .write(&account.id, async |conn, events| {

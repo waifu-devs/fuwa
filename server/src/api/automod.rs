@@ -816,7 +816,7 @@ impl AutoModService for Api {
                     .filter(|setup| setup.usable())
                     .filter_map(|setup| setup.offer())
                     .collect();
-                Ok(pb::ListAutoModRulesResponse { rules: store::load_automod(&sdb.read()?).await?, providers })
+                Ok(pb::ListAutoModRulesResponse { rules: store::load_automod(&*sdb.read()?).await?, providers })
             }
             .await,
         )

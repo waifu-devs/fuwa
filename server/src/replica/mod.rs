@@ -233,6 +233,7 @@ impl Replica {
     /// its log into it.
     pub async fn track(&self, name: &str, db: Arc<Db>) -> Result<()> {
         db::pragma(&db::connect(&db)?, "PRAGMA mvcc_checkpoint_threshold = -1").await?;
+        db.replicated();
         // Waits out a release of it that's under way.
         let _released = self.release_lock(name).lock_owned().await;
         let position = self.load_position(name);
