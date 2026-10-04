@@ -705,11 +705,11 @@ message Message {
   SharedAuthor shared = 16;
   // A reply in a thread: the id of the message the thread is under. Thread
   // replies stay out of the channel's own list unless also_in_channel.
-  string thread_id = 17;
+  string thread_id = 18;
   // On a message with a thread under it: how the thread stands.
-  ThreadSummary thread = 18;
+  ThreadSummary thread = 19;
   // A thread reply its author also sent to the channel.
-  bool also_in_channel = 19;
+  bool also_in_channel = 20;
 }
 
 // A thread under a message, as the channel shows it.

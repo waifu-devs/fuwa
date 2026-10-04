@@ -96,6 +96,7 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.AUTO_MOD_RULE_UPDATE]: { label: "AutoMod changes", icon: ShieldAlertIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.AUTO_MOD_RULE_DELETE]: { label: "Deleted AutoMod rules", icon: ShieldXIcon, tint: "bg-destructive/15 text-destructive" },
   [AuditAction.AUTO_MOD_TIME_OUT]: { label: "AutoMod time-outs", icon: BotIcon, tint: "bg-amber-500/15 text-amber-500" },
+  [AuditAction.AUTO_MOD_MESSAGE_DELETE]: { label: "Taken down by AutoMod", icon: BotIcon, tint: "bg-destructive/15 text-destructive" },
   [AuditAction.EMOJI_CREATE]: { label: "New emoji", icon: SmilePlusIcon, tint: "bg-emerald-500/15 text-emerald-500" },
   [AuditAction.EMOJI_UPDATE]: { label: "Renamed emoji", icon: SmileIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.EMOJI_DELETE]: { label: "Deleted emoji", icon: FrownIcon, tint: "bg-destructive/15 text-destructive" },
@@ -604,6 +605,18 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
         </>
       );
     }
+    case AuditAction.AUTO_MOD_MESSAGE_DELETE:
+      return (
+        <>
+          <b>AutoMod</b> took down a message from {target}
+          {entry.channelName && (
+            <>
+              {" "}
+              in <b>#{entry.channelName}</b>
+            </>
+          )}
+        </>
+      );
     case AuditAction.EMOJI_CREATE:
       return <>{actor} added the emoji <b>:{change("name")?.after}:</b></>;
     case AuditAction.EMOJI_UPDATE: {

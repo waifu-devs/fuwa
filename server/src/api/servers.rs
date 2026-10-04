@@ -349,8 +349,10 @@ impl ServerService for Api {
                 let ended = super::shared::take_server(&sdb.read()?).await?;
                 self.app.servers.delete(&sdb.id, &actor).await?;
                 self.app.server_gone(&sdb.id).await;
+                // Its pictures go with it, here and wherever its uploads are kept.
+                crate::cluster::pictures::drop_all(&self.app, &sdb.id).await;
                 super::shared::tell_ended(&self.app, &sdb.id, &actor, ended).await;
-                tracing::info!(server = %sdb.id, by = %actor, "server deleted");
+                tracing::info!(server = %sdb.id, "server deleted");
                 Ok(pb::DeleteServerResponse {})
             }
             .await,

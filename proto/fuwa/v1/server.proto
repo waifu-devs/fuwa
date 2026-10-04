@@ -305,11 +305,15 @@ enum AuditAction {
   // they're the target.
   AUDIT_ACTION_SHARED_CHANNEL_BLOCK = 46;
   AUDIT_ACTION_SHARED_CHANNEL_UNBLOCK = 47;
+  // AutoMod took a message down after it was sent, when its provider's
+  // answer came late: the author is both actor and target, the channel is
+  // where it was, and the reason names the rule.
+  AUDIT_ACTION_AUTO_MOD_MESSAGE_DELETE = 48;
   // A moderator locked a thread, unlocked one, or deleted one with its
   // replies. The target is the author of the message it's under.
-  AUDIT_ACTION_THREAD_LOCK = 48;
-  AUDIT_ACTION_THREAD_UNLOCK = 49;
-  AUDIT_ACTION_THREAD_DELETE = 50;
+  AUDIT_ACTION_THREAD_LOCK = 49;
+  AUDIT_ACTION_THREAD_UNLOCK = 50;
+  AUDIT_ACTION_THREAD_DELETE = 51;
 }
 
 // One thing someone did with a moderator's or manager's permission.

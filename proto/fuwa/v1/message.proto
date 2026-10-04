@@ -40,9 +40,9 @@ message SendMessageRequest {
   string reply_to_id = 6;
   // Reply in the thread under this message, starting it if there's none
   // yet (that needs CREATE_THREADS).
-  string thread_id = 7;
+  string thread_id = 8;
   // With thread_id: show the reply in the channel too.
-  bool also_send_to_channel = 8;
+  bool also_send_to_channel = 9;
 }
 
 message SendMessageResponse {
