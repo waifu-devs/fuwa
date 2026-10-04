@@ -1321,6 +1321,13 @@ pub async fn load_channel(conn: &Connection, server_id: &str, channel_id: &str) 
     Ok(Some(channel))
 }
 
+/// A server at either end of a shared channel, marked with its instance
+/// when it's on another one ("<id>@<instance>").
+pub fn shared_server(id: String, name: String, icon_url: String) -> pb::SharedServer {
+    let instance = id.split_once('@').map_or("", |(_, at)| crate::federation::display(at)).to_string();
+    pb::SharedServer { id, name, icon_url, instance }
+}
+
 /// Says which channels are shared with other servers, and which show
 /// another server's (docs/shared-channels.md).
 pub async fn attach_shared(conn: &Connection, channels: &mut [pb::Channel]) -> Result<()> {
@@ -1328,7 +1335,7 @@ pub async fn attach_shared(conn: &Connection, channels: &mut [pb::Channel]) -> R
         conn,
         "SELECT channel_id, guest_server_id, guest_name, guest_icon_url FROM channel_guests WHERE active = 1 ORDER BY created_at",
         (),
-        |r| Ok((r.get::<String>(0)?, pb::SharedServer { id: r.get(1)?, name: r.get(2)?, icon_url: r.get(3)? })),
+        |r| Ok((r.get::<String>(0)?, shared_server(r.get(1)?, r.get(2)?, r.get(3)?))),
     )
     .await?;
     let links = query_all(
@@ -1336,13 +1343,7 @@ pub async fn attach_shared(conn: &Connection, channels: &mut [pb::Channel]) -> R
         "SELECT channel_id, home_server_id, home_server_name, home_server_icon_url, home_channel_name
          FROM channel_links WHERE active = 1 AND channel_id IS NOT NULL",
         (),
-        |r| {
-            Ok((
-                r.get::<String>(0)?,
-                pb::SharedServer { id: r.get(1)?, name: r.get(2)?, icon_url: r.get(3)? },
-                r.get::<String>(4)?,
-            ))
-        },
+        |r| Ok((r.get::<String>(0)?, shared_server(r.get(1)?, r.get(2)?, r.get(3)?), r.get::<String>(4)?)),
     )
     .await?;
     if guests.is_empty() && links.is_empty() {
@@ -1352,7 +1353,7 @@ pub async fn attach_shared(conn: &Connection, channels: &mut [pb::Channel]) -> R
         None
     } else {
         let server = load_server(conn).await?;
-        Some(pb::SharedServer { id: server.id, name: server.name, icon_url: server.icon_url })
+        Some(shared_server(server.id, server.name, server.icon_url))
     };
     for channel in channels.iter_mut() {
         if let Some((_, home, home_channel_name)) = links.iter().find(|(id, ..)| *id == channel.id) {
