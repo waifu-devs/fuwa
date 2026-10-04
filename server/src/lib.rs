@@ -15,6 +15,7 @@ pub mod db;
 pub mod dms;
 pub mod error;
 pub mod federation;
+pub mod gifs;
 pub mod hub;
 pub mod id;
 pub mod linked;

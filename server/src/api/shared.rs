@@ -333,8 +333,10 @@ fn their_message(message: &mut pb::Message, at: &str, own: &str) -> Result<()> {
     message.auto_mod = None;
     // Threads stay in the channel's own server for now.
     no_threads(message);
-    // Custom emoji are pictures on the other instance: they show as their names.
+    // Custom emoji and GIFs are pictures on the other instance: emoji show
+    // as their names, GIFs not at all.
     message.emojis.clear();
+    message.gif = None;
     if let Some(webhook) = &mut message.webhook {
         webhook.webhook_id.clear();
         webhook.name = one_line(&webhook.name, 80);
@@ -2154,9 +2156,11 @@ fn leaving(event: &pb::Event) -> pb::Event {
 }
 
 /// A message as it leaves for another instance, as [`leaving`] says, and
-/// without its custom emoji (pictures here, which show there as their names).
+/// without its custom emoji or GIF (pictures here; emoji show there as their
+/// names).
 fn plain_message(message: &mut pb::Message) {
     message.emojis.clear();
+    message.gif = None;
     if let Some(shared) = &mut message.shared {
         shared.user = shared.user.as_ref().map(plain_user);
         if let Some(server) = &mut shared.server {
@@ -2925,6 +2929,7 @@ mod tests {
             content: "hi @everyone".into(),
             mentions_everyone: true,
             emojis: vec![pb::Emoji { id: new_id(), name: "owl".into(), ..Default::default() }],
+            gif: Some(pb::MessageGif { url: "https://night-owls.example/g.gif".into(), ..Default::default() }),
             thread_id: "elsewhere".into(),
             also_in_channel: true,
             attachments: vec![pb::Attachment::default()],
@@ -2965,6 +2970,7 @@ mod tests {
         assert!(!m.mentions_everyone && m.attachments.is_empty());
         assert!(m.thread_id.is_empty() && !m.also_in_channel, "threads stay at home for now");
         assert!(m.emojis.is_empty(), "custom emoji show as their names");
+        assert!(m.gif.is_none(), "apps here never fetch from another instance");
         assert_eq!((m.embeds[0].title.as_str(), m.embeds[0].url.as_str()), ("alink", ""));
         assert!(m.embeds[0].image_url.is_empty(), "apps here never fetch from another instance");
         let user = m.shared.as_ref().unwrap().user.as_ref().unwrap();
@@ -3026,6 +3032,7 @@ mod tests {
             payload: Some(Payload::MessageCreated(pb::MessageCreated {
                 message: Some(pb::Message {
                     emojis: vec![pb::Emoji { id: new_id(), name: "sakura".into(), ..Default::default() }],
+                    gif: Some(pb::MessageGif { url: "https://fuwa.example/media/g.gif".into(), ..Default::default() }),
                     shared: Some(pb::SharedAuthor {
                         user: Some(user.clone()),
                         server: Some(store::shared_server(
@@ -3042,6 +3049,7 @@ mod tests {
         let Some(Payload::MessageCreated(created)) = leaving(&event).payload else { panic!() };
         let message = created.message.unwrap();
         assert!(message.emojis.is_empty(), "custom emoji are pictures here");
+        assert!(message.gif.is_none(), "GIFs are pictures here");
         let shared = message.shared.unwrap();
         assert_eq!(
             shared.user.unwrap(),
