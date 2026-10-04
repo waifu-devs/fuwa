@@ -11,6 +11,7 @@ pub mod api;
 pub mod arrange;
 pub mod backgrounds;
 pub mod calls;
+pub mod compat;
 pub mod config;
 pub mod dms;
 pub mod history;
@@ -30,6 +31,7 @@ pub mod sso;
 pub mod store;
 mod sync;
 pub mod themes;
+pub mod updates;
 pub mod vault;
 pub mod voice;
 
@@ -238,6 +240,7 @@ impl Core {
                 tokio::time::sleep(reports::SEND_EVERY).await;
             }
         });
+        core.watch_updates();
         Ok(core)
     }
 

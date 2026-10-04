@@ -1583,6 +1583,7 @@ impl FuwaApp {
         // Under a full-window page the banner can't be seen, so it doesn't move there either.
         let covered = self.server_settings.is_some() || self.instance_settings.is_some();
         let announcement = if covered { None } else { self.render_announcement(window, cx) };
+        let update_note = if covered { None } else { self.render_update_note(window, cx) };
         base.child(
             div().size_full().flex().flex_col().when_some(announcement, |el, banner| el.child(banner)).child(
                 div()
@@ -1594,6 +1595,7 @@ impl FuwaApp {
                     .child(self.render_main(window, cx)),
             ),
         )
+        .when_some(update_note, |el, note| el.child(note))
         .when_some(self.connect.clone(), |el, connect| {
             el.child(crate::ui::overlay::scrim("connect-scrim", &p).child(connect))
         })

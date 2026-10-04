@@ -1,0 +1,14 @@
+{
+  "//": "Every fuwa feature an app must know to use, with the compatibility date it arrived with (docs/compatibility.md). The server, the web app (a copy in web/src/gen, made by `pnpm generate`) and the desktop app all read this file. Add a feature at the end, dated the day it merges; never change or remove a date.",
+  "min_client_date": "2026-10-04",
+  "features": [
+    { "id": "secure-channels", "date": "2026-10-04", "title": "End-to-end encrypted channels" },
+    { "id": "shared-channels", "date": "2026-10-04", "title": "Channels shared between servers" },
+    { "id": "federation", "date": "2026-10-04", "title": "Talking with other fuwa instances" },
+    { "id": "regions", "date": "2026-10-04", "title": "Servers kept in a region" },
+    { "id": "compatibility-dates", "date": "2026-10-04", "title": "Compatibility dates" },
+    { "id": "polls", "date": "2026-10-04", "title": "Polls" },
+    { "id": "rich-presence", "date": "2026-10-04", "title": "Showing what people are playing" },
+    { "id": "voice-messages", "date": "2026-10-04", "title": "Voice messages" }
+  ]
+}
