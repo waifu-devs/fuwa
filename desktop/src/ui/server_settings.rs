@@ -1721,6 +1721,7 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::ThreadLock => ("lock", amber),
         A::ThreadUnlock => ("lock-open", green),
         A::ThreadDelete => ("message-square-x", red),
+        A::PollEnd => ("check", amber),
         A::Unspecified => ("scroll-text", p.muted_foreground.into()),
     }
 }
@@ -2016,6 +2017,7 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         A::ThreadLock => format!("{actor} locked {target}'s thread in {}", named_channel(&entry.channel_name)),
         A::ThreadUnlock => format!("{actor} unlocked {target}'s thread in {}", named_channel(&entry.channel_name)),
         A::ThreadDelete => format!("{actor} deleted {target}'s thread in {}", named_channel(&entry.channel_name)),
+        A::PollEnd => format!("{actor} ended {target}'s poll in {}", named_channel(&entry.channel_name)),
         A::Unspecified => format!("{actor} did something"),
     }
 }

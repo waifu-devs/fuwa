@@ -374,7 +374,7 @@ mod tests {
     }
 
     fn server(id: &str, name: &str) -> pb::SharedServer {
-        pb::SharedServer { id: id.into(), name: name.into(), icon_url: String::new(), instance: String::new() }
+        pb::SharedServer { id: id.into(), name: name.into(), icon_url: String::new(), ..Default::default() }
     }
 
     #[test]

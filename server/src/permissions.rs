@@ -21,7 +21,7 @@ pub const fn bit(p: P) -> Bits {
     1 << p as u64
 }
 
-const KNOWN: [P; 26] = [
+const KNOWN: [P; 27] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -48,6 +48,7 @@ const KNOWN: [P; 26] = [
     P::Video,
     P::Record,
     P::CreateThreads,
+    P::CreatePolls,
 ];
 
 /// Every permission there is.
@@ -76,6 +77,7 @@ pub const CHANNEL: Bits = bit(P::ManageChannels)
     | bit(P::Speak)
     | bit(P::Video)
     | bit(P::Record)
+    | bit(P::CreatePolls)
     | bit(P::MuteMembers)
     | bit(P::MoveMembers);
 
@@ -83,6 +85,7 @@ pub const CHANNEL: Bits = bit(P::ManageChannels)
 pub const EVERYONE: Bits = bit(P::ViewChannels)
     | bit(P::SendMessages)
     | bit(P::CreateThreads)
+    | bit(P::CreatePolls)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
     | bit(P::ChangeNickname)
@@ -112,6 +115,7 @@ pub const ADMIN: Bits = bit(P::ManageServer)
 /// (in text or voice), bring people in, or rename themselves.
 pub const TALK: Bits = bit(P::SendMessages)
     | bit(P::CreateThreads)
+    | bit(P::CreatePolls)
     | bit(P::Connect)
     | bit(P::Speak)
     | bit(P::Video)
@@ -162,6 +166,7 @@ pub fn label(p: P) -> &'static str {
         P::MoveMembers => "Move members",
         P::Video => "Video",
         P::Record => "Record",
+        P::CreatePolls => "Create polls",
         P::ManageWebhooks => "Manage webhooks",
         P::CreateThreads => "Start threads",
     }
