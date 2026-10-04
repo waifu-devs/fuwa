@@ -27,6 +27,7 @@ fn channel_glyph(c: &pb::Channel) -> &'static str {
     match pb::ChannelType::try_from(c.r#type).unwrap_or(pb::ChannelType::Text) {
         pb::ChannelType::Voice => "volume-2",
         pb::ChannelType::Announcement => "megaphone",
+        pb::ChannelType::Secure => "shield-check",
         _ => "hash",
     }
 }
@@ -167,7 +168,7 @@ impl FuwaApp {
                             key: key.clone(),
                             server: server.clone(),
                             parent: String::new(),
-                            category: false,
+                            kind: pb::ChannelType::Text,
                         };
                         this.open_dialog(dialog, window, cx)
                     }
@@ -318,7 +319,7 @@ impl FuwaApp {
                                         key: key.clone(),
                                         server: server.clone(),
                                         parent: parent.clone(),
-                                        category: false,
+                                        kind: pb::ChannelType::Text,
                                     };
                                     this.open_dialog(dialog, window, cx)
                                 }))

@@ -303,7 +303,11 @@
     `store.rs` (state and reducers), `sync.rs` (one task per instance:
     subscribe, snapshot, apply, reconnect), `dms.rs` and `vault.rs` (one MLS
     device per install and account, through `fuwa-e2ee`'s `client` feature,
-    kept in 0600 files under the app's data folder; signing out wipes it),
+    kept in 0600 files under the app's data folder; signing out wipes it;
+    a `Room` is a direct message or a secure channel, which share
+    everything but how they reach the server, like the web's
+    `e2ee/engine.ts`; `history.rs` checks history passed on to a new
+    device against the channel's log),
     `linked.rs` (waifu.dev sign-in through the browser and a loopback page;
     the sign-in page must be https, or http on this computer), `sso.rs`
     (single sign-on the same way: an instance's provider on the sign-in
@@ -400,7 +404,9 @@
     disconnect; what each side may do; codes still out; people kept out)
     and the Share tab, with `shared_marks.rs` drawing the linked rings, the
     sidebar badge, the header pill and the other server's tag beside a name
-    (a server picture only from this instance),
+    (a server picture only from this instance), `secure.rs` a secure
+    channel's header, start, device lines and the dialog of who can read it
+    (history sharing and starting encryption over for people who manage it),
     `instance_settings.rs` an instance's settings for its admins (the gear
     by the instance's name; General, Sign-ups, Single sign-on
     (`instance_settings/sso.rs`: the identity provider, SAML metadata read

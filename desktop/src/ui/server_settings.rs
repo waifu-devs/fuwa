@@ -36,7 +36,7 @@ mod agents;
 mod automod;
 mod channels;
 mod emoji;
-mod roles;
+pub(crate) mod roles;
 pub(crate) use roles::switch;
 mod shared;
 mod webhooks;

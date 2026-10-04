@@ -71,7 +71,7 @@ pub fn scrim(id: impl Into<ElementId>, p: &Palette) -> Stateful<Div> {
 }
 
 impl FuwaApp {
-    pub(crate) fn render_dialog(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.dialog.clone()?;
         let p = pal(cx);
         if let Dialog::Profile { key, user_id, server } = &dialog {
@@ -79,6 +79,9 @@ impl FuwaApp {
         }
         if let Dialog::Welcome { key, server } = &dialog {
             return Some(self.render_welcome(key, server, cx));
+        }
+        if let Dialog::Secure { key, server, channel } = &dialog {
+            return Some(self.render_secure(key, server, channel, window, cx));
         }
         let busy = self.dialog_busy;
         let field = || Input::new(&self.dialog_input).large();
@@ -212,60 +215,100 @@ impl FuwaApp {
                     (!is_verified && safety.is_some()).then_some("They match"),
                 )
             }
-            Dialog::CreateChannel { key, server, parent, category } => {
+            Dialog::CreateChannel { key, server, parent, kind } => {
+                let category = *kind == crate::pb::ChannelType::Category;
                 let under = self
                     .core
                     .shared
                     .read(|s| s.instance(key).and_then(|i| i.channel(server, parent)).map(|c| c.name.clone()));
-                let kinds = div().flex().gap(px(8.0)).children(
-                    [(false, "hash", "Text channel"), (true, "folder", "Category")].into_iter().map(
-                        |(cat, glyph, label)| {
-                            let on = cat == *category;
+                let in_category = !parent.is_empty();
+                let tiles = crate::ui::secure::KINDS
+                    .into_iter()
+                    .filter(|(k, ..)| !(in_category && *k == crate::pb::ChannelType::Category))
+                    .enumerate()
+                    .map(|(n, (k, glyph, label, hint))| {
+                        let on = k == *kind;
+                        let tint = if k == crate::pb::ChannelType::Secure { p.success } else { p.primary };
+                        let hover = alpha(tint, 0.06);
+                        motion::rise(
                             div()
                                 .id(SharedString::from(format!("kind-{label}")))
-                                .flex_1()
+                                .w(px(200.0))
+                                .flex_grow(1.0)
                                 .flex()
                                 .items_center()
-                                .gap(px(8.0))
-                                .px(px(12.0))
-                                .h(px(44.0))
-                                .rounded(corner(12.0))
+                                .gap(px(10.0))
+                                .p(px(10.0))
+                                .rounded(corner(14.0))
                                 .border_1()
-                                .border_color(if on { p.primary } else { p.border })
-                                .bg(if on { alpha(p.primary, 0.12) } else { p.secondary.into() })
-                                .text_color(if on { p.primary } else { p.foreground })
-                                .font_weight(FontWeight::BOLD)
+                                .border_color(if on { tint } else { p.border })
+                                .bg(if on { alpha(tint, 0.1) } else { p.secondary.into() })
+                                .when(!on, |el| el.hover(move |s| s.bg(hover)))
                                 .cursor_pointer()
+                                .active(|s| s.top(px(1.0)))
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    if let Some(Dialog::CreateChannel { category, parent, .. }) = &mut this.dialog {
-                                        *category = cat;
-                                        if cat {
+                                    if let Some(Dialog::CreateChannel { kind, parent, .. }) = &mut this.dialog {
+                                        *kind = k;
+                                        if k == crate::pb::ChannelType::Category {
                                             parent.clear();
                                         }
                                     }
-                                    let hint = if cat { "Cozy corner" } else { "new-channel" };
+                                    let hint = crate::ui::secure::name_hint(k);
                                     this.dialog_input.update(cx, |s, cx| s.set_placeholder(hint, window, cx));
                                     cx.notify();
                                 }))
-                                .child(icon(glyph).size(px(16.0)))
-                                .child(label)
-                        },
-                    ),
-                );
+                                .child(
+                                    div()
+                                        .size(px(34.0))
+                                        .flex_none()
+                                        .rounded(corner(10.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .bg(if on { tint } else { p.muted })
+                                        .text_color(if on { p.primary_foreground } else { p.muted_foreground })
+                                        .child(motion::rise(
+                                            icon(glyph).size(px(18.0)),
+                                            SharedString::from(format!("kind-glyph-{label}-{on}")),
+                                            Duration::ZERO,
+                                            4.0,
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .flex()
+                                        .flex_col()
+                                        .child(div().text_sm().font_weight(FontWeight::BOLD).child(label))
+                                        .child(div().text_xs().text_color(p.muted_foreground).child(hint)),
+                                ),
+                            SharedString::from(format!("kind-in-{n}")),
+                            Duration::from_millis(30 * n as u64),
+                            6.0,
+                        )
+                    });
+                let kinds = div().flex().flex_wrap().gap(px(8.0)).children(tiles);
                 (
-                    if *category { "folder-plus" } else { "hash" },
-                    if *category { "Make a category".into() } else { "Make a channel".into() },
+                    match kind {
+                        crate::pb::ChannelType::Category => "folder-plus",
+                        crate::pb::ChannelType::Secure => "shield-check",
+                        crate::pb::ChannelType::Voice => "volume-2",
+                        crate::pb::ChannelType::Announcement => "megaphone",
+                        _ => "hash",
+                    },
+                    if category { "Make a category".into() } else { "Make a channel".into() },
                     match under {
-                        Some(name) if !*category => format!("It goes in {name}."),
-                        _ if *category => "Categories group channels together in the sidebar.".into(),
+                        Some(name) if !category => format!("It goes in {name}."),
+                        _ if category => "Categories group channels together in the sidebar.".into(),
                         _ => "A place to talk about one thing.".into(),
                     },
                     div()
                         .flex()
                         .flex_col()
                         .gap(px(14.0))
-                        .when(parent.is_empty(), |el| el.child(kinds))
-                        .child(labeled(if *category { "Category name" } else { "Channel name" }, field(), &p))
+                        .child(kinds)
+                        .child(labeled(if category { "Category name" } else { "Channel name" }, field(), &p))
                         .into_any_element(),
                     Some(if busy { "Making it…" } else { "Make it" }),
                 )
@@ -321,7 +364,7 @@ impl FuwaApp {
                 )
             }
             Dialog::Moderate { key, server, user_id, action } => self.moderate_parts(key, server, user_id, *action, cx),
-            Dialog::Profile { .. } | Dialog::Welcome { .. } => unreachable!("drawn on its own"),
+            Dialog::Profile { .. } | Dialog::Welcome { .. } | Dialog::Secure { .. } => unreachable!("drawn on its own"),
         };
         let danger = matches!(
             dialog,
@@ -401,6 +444,7 @@ impl FuwaApp {
             Dialog::Rules { .. } => "rules",
             Dialog::Profile { .. } => "profile",
             Dialog::Welcome { .. } => "welcome",
+            Dialog::Secure { .. } => "secure",
             Dialog::Moderate { .. } => "moderate",
             Dialog::SsoJoin { .. } => "sso",
         };
