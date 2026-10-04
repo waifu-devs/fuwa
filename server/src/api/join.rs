@@ -254,7 +254,7 @@ async fn checked_onboarding(
     if draft.enabled && steps.is_empty() {
         return Err(Error::invalid("add a step before turning onboarding on"));
     }
-    Ok(pb::Onboarding { enabled: draft.enabled, steps })
+    Ok(pb::Onboarding { enabled: draft.enabled, steps, set_by: String::new() })
 }
 
 #[tonic::async_trait]
@@ -268,6 +268,7 @@ impl JoinService for Api {
                 let account = self.account(request.metadata()).await?;
                 let Seat { sdb, access, .. } = self.membership(&account, &request.get_ref().server_id).await?;
                 let mut onboarding = store::load_onboarding(&sdb.read()?).await?;
+                onboarding.set_by.clear();
                 if !access.has(Permission::ManageServer) {
                     if !onboarding.enabled {
                         onboarding = pb::Onboarding::default();
@@ -297,9 +298,11 @@ impl JoinService for Api {
                 let (onboarding, server) = sdb
                     .write(&account.id, async |conn, events| {
                         let before = store::load_onboarding(conn).await?;
-                        let onboarding = checked_onboarding(conn, &sdb.id, &access, draft.clone(), &before).await?;
+                        let mut onboarding = checked_onboarding(conn, &sdb.id, &access, draft.clone(), &before).await?;
+                        // Its roles are handed out only while they rank below whoever saved it.
+                        onboarding.set_by = account.id.clone();
                         store::save_onboarding(conn, &onboarding).await?;
-                        if before != onboarding {
+                        if (before.enabled, &before.steps) != (onboarding.enabled, &onboarding.steps) {
                             let options = |o: &pb::Onboarding| o.steps.iter().map(|s| s.options.len()).sum::<usize>();
                             let entry = Audit::new(pb::AuditAction::OnboardingUpdate, "")
                                 .change("enabled", before.enabled, onboarding.enabled)
@@ -313,6 +316,7 @@ impl JoinService for Api {
                     })
                     .await?;
                 self.app.server_changed(&server).await;
+                let onboarding = pb::Onboarding { set_by: String::new(), ..onboarding };
                 Ok(pb::SetOnboardingResponse { onboarding: Some(onboarding) })
             }
             .await,
@@ -335,6 +339,39 @@ impl JoinService for Api {
                     .write(&account.id, async |conn, events| {
                         let onboarding = store::load_onboarding(conn).await?;
                         let roles = permissions::roles(conn, &sdb.id).await?;
+                        // The steps as saved: one pick where only one is allowed,
+                        // and at least one where the step can't be skipped.
+                        if onboarding.enabled {
+                            for step in &onboarding.steps {
+                                if pb::OnboardingStepKind::try_from(step.kind) != Ok(pb::OnboardingStepKind::Pick) {
+                                    continue;
+                                }
+                                let picked = step.options.iter().filter(|o| req.option_ids.contains(&o.id)).count();
+                                if picked > 1 && !step.multiple {
+                                    return Err(Error::invalid(format!("pick one for “{}”", step.title)));
+                                }
+                                if picked == 0 && !step.skippable {
+                                    return Err(Error::invalid(format!("pick at least one for “{}”", step.title)));
+                                }
+                            }
+                        }
+                        // Roles go out only while the person who set them up could
+                        // still hand them out: a member, ranked above the role.
+                        let rules = permissions::load(conn, &sdb.id).await?;
+                        let setter = match onboarding.set_by.as_str() {
+                            "" => None,
+                            id if store::member(conn, &sdb.id, id).await?.is_some() => {
+                                let held: Vec<String> = crate::db::query_all(
+                                    conn,
+                                    "SELECT role_id FROM member_roles WHERE user_id = ?1",
+                                    [id],
+                                    |r| r.get::<String>(0),
+                                )
+                                .await?;
+                                Some(rules.access(id, &held))
+                            }
+                            _ => None,
+                        };
                         let mut give: Vec<&pb::Role> = Vec::new();
                         let mut take: Vec<&pb::Role> = Vec::new();
                         let options = onboarding.steps.iter().flat_map(|s| &s.options);
@@ -342,6 +379,9 @@ impl JoinService for Api {
                             let picked = onboarding.enabled && req.option_ids.contains(&option.id);
                             for role in option.role_ids.iter().filter_map(|id| roles.iter().find(|r| r.id == *id)) {
                                 if role.id == sdb.id || !harmless(role) {
+                                    continue;
+                                }
+                                if picked && !setter.as_ref().is_some_and(|s| s.above(role.position.into())) {
                                     continue;
                                 }
                                 if picked {

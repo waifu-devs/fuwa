@@ -393,6 +393,9 @@ message Onboarding {
   bool enabled = 1;
   // Up to 6, in order.
   repeated OnboardingStep steps = 2;
+  // Who last saved it. Kept by the server only, never sent: its roles are
+  // handed out only while they still rank below this person's.
+  string set_by = 3;
 }
 
 enum OnboardingStepKind {

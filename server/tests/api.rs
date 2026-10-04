@@ -5170,6 +5170,16 @@ async fn server_banners_and_onboarding() {
         c.servers.update_server(update(&owner, Some(""), None, Some(-1))).await.unwrap().into_inner().server.unwrap();
     assert_eq!((cleared.banner_url.as_str(), cleared.accent_color), ("", None));
     assert_eq!(fetch(&instance, &banner).await.0, reqwest::StatusCode::NOT_FOUND);
+    // Only pictures uploaded here: a link to another site would have this
+    // instance fetch it for everyone who sees the server.
+    assert_eq!(
+        c.servers
+            .update_server(update(&owner, Some("https://example.com/b.png"), None, None))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::InvalidArgument
+    );
 
     // Onboarding: interests that hand out roles, the rules, and a hello.
     let general = c
@@ -5194,6 +5204,7 @@ async fn server_banners_and_onboarding() {
     };
     let draft = |options: Vec<pb::OnboardingOption>| pb::Onboarding {
         enabled: true,
+        set_by: String::new(),
         steps: vec![
             pb::OnboardingStep {
                 kind: pb::OnboardingStepKind::Pick as i32,
@@ -5304,6 +5315,49 @@ async fn server_banners_and_onboarding() {
         .into_inner()
         .members;
     assert!(listed.iter().find(|m| m.user.as_ref().unwrap().id == me.id).unwrap().onboarded_at.is_none());
+    // Nobody sees who saved it.
+    assert!(got.set_by.is_empty() && saved.set_by.is_empty());
+
+    // The steps hold as saved: the interests step can't be skipped, and
+    // one that takes a single pick takes only one.
+    assert_eq!(c.join.finish_onboarding(finish(&[])).await.unwrap_err().code(), Code::InvalidArgument);
+    let mut single = draft(vec![option("Games", &[&games]), option("Nothing", &[])]);
+    single.steps[0].multiple = false;
+    let single = c.join.set_onboarding(set(&owner, single)).await.unwrap().into_inner().onboarding.unwrap();
+    let both: Vec<&str> = single.steps[0].options.iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(c.join.finish_onboarding(finish(&both)).await.unwrap_err().code(), Code::InvalidArgument);
+
+    // Roles go out only while whoever set them up still ranks above them.
+    let staff =
+        create_role(&mut c, &owner, &server.id, "Staff", &[pb::Permission::ManageServer, pb::Permission::ManageRoles])
+            .await
+            .unwrap();
+    // New roles start at the bottom, below Staff.
+    let calm = create_role(&mut c, &owner, &server.id, "Readers", &[]).await.unwrap();
+    let (admin, admin_user, _) = sign_up(&mut c, "admin").await;
+    join(&mut c, &admin, &server.id).await;
+    give_role(&mut c, &owner, &server.id, &admin_user.id, &staff.id).await.unwrap();
+    let by_admin = c
+        .join
+        .set_onboarding(set(&admin, draft(vec![option("Read", &[&calm])])))
+        .await
+        .unwrap()
+        .into_inner()
+        .onboarding
+        .unwrap();
+    let read_id = by_admin.steps[0].options[0].id.clone();
+    let done = c.join.finish_onboarding(finish(&[&read_id])).await.unwrap().into_inner().member.unwrap();
+    assert!(done.role_ids.contains(&calm.id));
+    let take = |user: &str, role: &str| {
+        authed(
+            &owner,
+            pb::RemoveMemberRoleRequest { server_id: server.id.clone(), user_id: user.into(), role_id: role.into() },
+        )
+    };
+    c.roles.remove_member_role(take(&admin_user.id, &staff.id)).await.unwrap();
+    c.roles.remove_member_role(take(&me.id, &calm.id)).await.unwrap();
+    let done = c.join.finish_onboarding(finish(&[&read_id])).await.unwrap().into_inner().member.unwrap();
+    assert!(!done.role_ids.contains(&calm.id), "the admin who set it up no longer ranks above it");
     instance.stop().await;
 }
 

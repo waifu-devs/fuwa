@@ -265,6 +265,12 @@ impl ServerService for Api {
                     Some(url) => self.check_picture(&account, pb::MediaPurpose::Banner, url, Some(&sdb.id)).await?,
                     None => None,
                 };
+                // A server's banner is a picture uploaded here, never a link to
+                // another site, which this instance would then fetch for every
+                // person who sees the server.
+                if banner_url.as_deref().is_some_and(|url| !url.is_empty() && url != old_banner) && new_banner.is_none() {
+                    return Err(Error::invalid("upload the banner here rather than linking to it"));
+                }
                 self.keep_picture(new_icon.as_deref(), Some(&sdb.id)).await;
                 self.keep_picture(new_banner.as_deref(), Some(&sdb.id)).await;
                 if let Some(level) = req.default_notifications
@@ -278,7 +284,7 @@ impl ServerService for Api {
                 if req.min_account_age_seconds.is_some_and(|age| !(0..=MAX_ACCOUNT_AGE).contains(&age)) {
                     return Err(Error::invalid("the minimum account age is up to a year"));
                 }
-                let server = sdb
+                let written = sdb
                     .write(&account.id, async |conn, events| {
                         let before = store::load_server(conn).await?;
                         if let Some(channel_id) = req.system_channel_id.as_deref().filter(|id| !id.is_empty()) {
@@ -308,7 +314,7 @@ impl ServerService for Api {
                             (
                                 name,
                                 description,
-                                icon_url,
+                                icon_url.as_deref(),
                                 req.discoverable,
                                 req.default_notifications,
                                 req.system_channel_id.as_deref(),
@@ -316,7 +322,7 @@ impl ServerService for Api {
                                 req.min_account_age_seconds,
                                 req.applications,
                                 req.linked_only,
-                                banner_url,
+                                banner_url.as_deref(),
                                 banner_focus_x,
                                 banner_focus_y,
                                 accent_color.is_some(),
@@ -350,12 +356,29 @@ impl ServerService for Api {
                             store::audit(conn, &account.id, entry).await?;
                         }
                         events.push(Payload::ServerUpdated(pb::ServerUpdated { server: Some(server.clone()) }));
-                        Ok(server)
+                        Ok((server, before))
                     })
-                    .await?;
+                    .await;
+                let (server, before) = match written {
+                    Ok(written) => written,
+                    Err(err) => {
+                        // Nothing was saved: the pictures just checked in go again.
+                        if new_icon.is_some() {
+                            let icon = icon_url.as_deref().unwrap_or_default();
+                            self.drop_picture(icon, &old_icon, PictureOwner::Server(&sdb.id)).await;
+                        }
+                        if new_banner.is_some() {
+                            let banner = banner_url.as_deref().unwrap_or_default();
+                            self.drop_picture(banner, &old_banner, PictureOwner::Server(&sdb.id)).await;
+                        }
+                        return Err(err);
+                    }
+                };
                 self.app.server_changed(&server).await;
-                self.drop_picture(&old_icon, &server.icon_url, PictureOwner::Server(&server.id)).await;
-                self.drop_picture(&old_banner, &server.banner_url, PictureOwner::Server(&server.id)).await;
+                // What the write replaced, read inside it, so a change racing
+                // this one can't leave a picture behind.
+                self.drop_picture(&before.icon_url, &server.icon_url, PictureOwner::Server(&server.id)).await;
+                self.drop_picture(&before.banner_url, &server.banner_url, PictureOwner::Server(&server.id)).await;
                 Ok(pb::UpdateServerResponse { server: Some(server) })
             }
             .await,

@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { accentVars, bannerColors, bannerPosition, hex, parseHex, type BannerServer } from "@/lib/banner";
+import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
 type Look = { bannerUrl: string; bannerFocusX: number; bannerFocusY: number; accentColor: number | undefined };
@@ -175,19 +176,22 @@ function Section({ id, title, hint, children }: { id: string; title: string; hin
 
 function BannerFields({ instanceKey, server, look, onChange }: { instanceKey: string; server: Server; look: Look; onChange: (look: Look) => void }) {
   const [colors, setColors] = useState<number[]>([]);
-  const shown = { ...server, ...look };
+  // Only pictures on a trusted instance are ever loaded here: a pasted link
+  // to another site shows nothing until it's saved (and refused, see check_picture).
+  const src = shownPicture(look.bannerUrl);
+  const shown = { ...server, ...look, bannerUrl: src };
   const custom = look.accentColor !== undefined && !colors.includes(look.accentColor);
   useEffect(() => {
     let cancelled = false;
-    if (!look.bannerUrl) {
+    if (!src) {
       setColors([]);
       return;
     }
-    void bannerColors(look.bannerUrl).then((c) => !cancelled && setColors(c));
+    void bannerColors(src).then((c) => !cancelled && setColors(c));
     return () => {
       cancelled = true;
     };
-  }, [look.bannerUrl]);
+  }, [src]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -202,7 +206,7 @@ function BannerFields({ instanceKey, server, look, onChange }: { instanceKey: st
         />
       </div>
       <AnimatePresence initial={false}>
-        {look.bannerUrl && (
+        {src && (
           <motion.div data-setting="banner-focus" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={SPRING}>
             <FocusPicker server={shown} onChange={(x, y) => onChange({ ...look, bannerFocusX: x, bannerFocusY: y })} />
           </motion.div>
@@ -329,7 +333,7 @@ function FocusPicker({ server, onChange }: { server: BannerServer; onChange: (x:
           }}
           className="relative aspect-[5/2] cursor-crosshair touch-none overflow-hidden rounded-2xl border outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
-          <img src={server.bannerUrl} alt="" draggable={false} className="size-full object-cover select-none" />
+          <img src={shownPicture(server.bannerUrl)} alt="" draggable={false} className="size-full object-cover select-none" />
           <span aria-hidden className="absolute inset-0 bg-black/10" />
           <span aria-hidden style={{ left: `${x}%`, top: `${y}%` }} className="absolute">
             <motion.span
@@ -356,7 +360,7 @@ function Crop({ label, ratio, server }: { label: string; ratio: string; server: 
     <div>
       <p className="mb-1 text-[0.65rem] font-bold tracking-wide text-muted-foreground uppercase">{label}</p>
       <div className={cn("overflow-hidden rounded-xl border", ratio)}>
-        <img src={server.bannerUrl} alt="" draggable={false} className="size-full object-cover transition-[object-position] duration-300" style={{ objectPosition: bannerPosition(server) }} />
+        <img src={shownPicture(server.bannerUrl)} alt="" draggable={false} className="size-full object-cover transition-[object-position] duration-300" style={{ objectPosition: bannerPosition(server) }} />
       </div>
     </div>
   );
