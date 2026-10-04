@@ -16,6 +16,7 @@ use crate::core::dms::{self, DmEngine, DmStatus};
 use crate::core::notifications;
 use crate::core::reports;
 use crate::core::store::{self, Connection, Outcome};
+use crate::core::threads;
 use crate::core::{Core, Notice};
 use crate::pb;
 use crate::rpc;
@@ -364,11 +365,20 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
     let prefs = core.prefs();
     let (outcome, name, notice) = core.shared.update(|store| {
         let focus = store.focus_channel(key).map(str::to_owned);
+        let focus_thread = store.focus_thread(key).map(str::to_owned);
         let Some(i) = store.instances.get_mut(key) else { return (Outcome::Nothing, None, None) };
         let name = i.server(&sid).map(|s| s.name.clone());
-        let outcome = store::apply_event(i, &event, focus.as_deref());
+        let outcome = store::apply_event(i, &event, focus.as_deref(), focus_thread.as_deref());
         let notice = match (&outcome, &event.payload) {
-            (Outcome::Unread { channel_id }, Some(Payload::MessageCreated(created))) => {
+            (
+                Outcome::Unread { channel_id } | Outcome::ThreadReply { channel_id, .. },
+                Some(Payload::MessageCreated(created)),
+            ) => {
+                // A thread reply reaches the people following the thread and the people it mentions.
+                let thread = match &outcome {
+                    Outcome::ThreadReply { thread_id, .. } => Some(thread_id.clone()),
+                    _ => None,
+                };
                 created.message.as_ref().and_then(|m| {
                     // Join messages and catching up after a reconnect stay quiet.
                     let fresh = event.created_at.as_ref().is_none_or(|t| dms::now_ms() - t.seconds * 1000 < FRESH_MS);
@@ -377,16 +387,21 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
                     }
                     let settings = i.effective_notifications(&sid, channel_id, dms::now_ms());
                     let mention = i.pings_me(&sid, m, settings.suppress_everyone);
-                    notifications::should_notify(settings, mention, &prefs).then(|| Notice::Message {
+                    let following = thread.as_ref().is_some_and(|t| threads::follows(i, &sid, t) == Some(true));
+                    if thread.is_some() && !mention && !following {
+                        return None;
+                    }
+                    notifications::should_notify(settings, mention || following, &prefs).then(|| Notice::Message {
                         instance: key.to_owned(),
                         server_id: Some(sid.clone()),
                         channel_id: channel_id.clone(),
                         title: format!(
-                            "{} in #{}",
+                            "{}{} in #{}",
                             match &m.webhook {
                                 Some(w) => w.name.clone(),
                                 None => i.display_name(Some(&sid), &m.author_id),
                             },
+                            if thread.is_some() { " replied in a thread" } else { "" },
                             i.channel(&sid, channel_id).map(|c| c.name.as_str()).unwrap_or("a channel")
                         ),
                         // An app may post only a card.
@@ -398,6 +413,7 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
                             .map(|t| t.chars().take(160).collect())
                             .unwrap_or_default(),
                         mention,
+                        thread: thread.clone(),
                     })
                 })
             }
@@ -464,13 +480,14 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
             follow_secure(&core, &key, &server_id, &channels.channels);
             core.shared.update(|s| {
                 let focus = s.focus_channel(&key).map(str::to_owned);
+                let focus_thread = s.focus_thread(&key).map(str::to_owned);
                 let Some(i) = s.instances.get_mut(&key) else { return };
                 let Some(server) = server.server else { return };
                 let sid = server.id.clone();
                 store::apply_snapshot(i, server, channels.channels, members.members, roles.roles, emojis);
                 i.voice.insert(sid, voice);
                 for event in &held {
-                    store::apply_event(i, event, focus.as_deref());
+                    store::apply_event(i, event, focus.as_deref(), focus_thread.as_deref());
                 }
             });
         }
@@ -549,13 +566,14 @@ async fn relist(core: Arc<Core>, key: String, api: Api, server_id: String, state
         follow_secure(&core, &key, &server_id, &listed.channels);
         core.shared.update(|s| {
             let focus = s.focus_channel(&key).map(str::to_owned);
+            let focus_thread = s.focus_thread(&key).map(str::to_owned);
             let Some(i) = s.instances.get_mut(&key) else { return };
             if !i.synced.contains(&server_id) {
                 return;
             }
             store::set_channels(i, &server_id, listed.channels);
             for event in &events {
-                store::apply_event(i, event, focus.as_deref());
+                store::apply_event(i, event, focus.as_deref(), focus_thread.as_deref());
             }
         });
     }

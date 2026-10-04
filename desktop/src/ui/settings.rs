@@ -227,6 +227,7 @@ impl SettingsView {
                                         instance: String::new(),
                                         server: None,
                                         channel: String::new(),
+                                        thread: None,
                                     },
                                 )
                             }),

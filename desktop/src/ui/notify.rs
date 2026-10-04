@@ -12,6 +12,8 @@ pub struct Clicked {
     pub instance: String,
     pub server: Option<String>,
     pub channel: String,
+    /// A thread reply's: the thread to open.
+    pub thread: Option<String>,
 }
 
 static CLICKS: Mutex<Option<mpsc::UnboundedSender<Clicked>>> = Mutex::new(None);

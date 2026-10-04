@@ -69,6 +69,7 @@ fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg 
         poll: None,
         voice: None,
         attachments: Vec::new(),
+        thread: ThreadBits::default(),
         sig: 0,
     }
 }
@@ -203,7 +204,34 @@ pub enum Row {
         icon: &'static str,
         text: String,
     },
+    /// Between a thread's message and its replies.
+    Divider {
+        text: String,
+    },
     Msg(Rc<Msg>),
+}
+
+/// Where a message stands with threads.
+#[derive(Clone, Default, PartialEq)]
+pub struct ThreadBits {
+    /// The replies under it, in the channel.
+    pub replies: Option<Rc<crate::ui::threads::Replies>>,
+    /// In the channel, a reply also sent there: the thread it's in.
+    pub also_in: Option<String>,
+    /// In its thread, a reply also sent to the channel.
+    pub also_sent: bool,
+    /// "Reply in thread" shows on hover.
+    pub can_thread: bool,
+}
+
+impl ThreadBits {
+    fn digest(&self, h: &mut DefaultHasher) {
+        (&self.also_in, self.also_sent, self.can_thread).hash(h);
+        if let Some(r) = &self.replies {
+            (r.count, r.new, r.locked, r.archived, r.last_at).hash(h);
+            r.faces.iter().map(|u| (&u.id, &u.avatar_url)).for_each(|f| f.hash(h));
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -246,6 +274,8 @@ pub struct Msg {
     pub voice: Option<Rc<crate::ui::voice_notes::VoiceCard>>,
     /// The files it came with.
     pub attachments: Vec<pb::Attachment>,
+    /// Its thread, or the thread it's in.
+    pub thread: ThreadBits,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
 }
@@ -260,6 +290,7 @@ impl Row {
             Row::Older { .. } => "older",
             Row::Start { .. } => "start",
             Row::Note { id, .. } => id,
+            Row::Divider { .. } => "divider",
             Row::Msg(m) => &m.id,
         }
     }
@@ -269,6 +300,7 @@ impl Row {
             Row::Older { loading } => ("older", loading).hash(h),
             Row::Start { title, shared, .. } => ("start", title, shared).hash(h),
             Row::Note { id, text, .. } => (id, text).hash(h),
+            Row::Divider { text } => ("divider", text).hash(h),
             Row::Msg(m) if m.sig != 0 => (m.sig, m.head).hash(h),
             Row::Msg(m) => {
                 (&m.id, &m.shown, m.edited, m.head, m.pending, &m.failed, &m.name, m.editing, m.mentions_me).hash(h);
@@ -283,202 +315,9 @@ impl FuwaApp {
     /// from the last time, so a new message doesn't redo the whole channel.
     fn rows(&self, built: &mut Built) -> Vec<Row> {
         match self.target() {
-            Some(Target::Channel { key, server, channel }) => self.core.shared.read(|s| {
-                let Some(i) = s.instance(&key) else { return Vec::new() };
-                let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
-                let mut rows = Vec::new();
-                let Some(loaded) = i.messages.get(&channel) else { return rows };
-                let here = i.channel(&server, &channel);
-                let name = here.map(|c| c.name.clone()).unwrap_or_default();
-                // In a shared channel each side moderates its own people: a guest's moderators can't
-                // delete the home's, and only the home keeps someone from another server out.
-                let shared = here.and_then(|c| c.shared.as_ref());
-                let guest_side = shared.is_some_and(|s| !s.home);
-                let keeps_out = shared.is_some_and(|s| s.home) && i.access(&server).has(pb::Permission::KickMembers);
-                let look = Look::of(i, &server);
-                let mut kept = Built::default();
-                // Each author as shown (name, colour, badge, picture), looked up once.
-                type Author = Rc<(String, Option<Hsla>, Option<&'static str>, Option<pb::User>)>;
-                let mut authors: HashMap<String, Author> = HashMap::new();
-                let mut author = |id: &str| -> Author {
-                    authors
-                        .entry(id.to_owned())
-                        .or_insert_with(|| {
-                            Rc::new((
-                                i.display_name(Some(&server), id),
-                                i.name_color(&server, id).map(|c| rgb(c).into()),
-                                is_agent(i.users.get(id)).then_some("AGENT"),
-                                i.users.get(id).cloned(),
-                            ))
-                        })
-                        .clone()
-                };
-                let manage = i.access(&server).has_in(&channel, pb::Permission::ManageMessages);
-                let can_vote = !guest_side && !i.access(&server).pending;
-                let now = crate::core::dms::now_ms();
-                let suppress = i.effective_notifications(&server, &channel, 0).suppress_everyone;
-                // My roles, which decide whether a role mention pings me.
-                let mine: Vec<String> = i.my_member(&server).map(|m| m.role_ids.clone()).unwrap_or_default();
-                if loaded.has_more {
-                    rows.push(Row::Older { loading: loaded.loading });
-                } else {
-                    let note = here.filter(|_| !self.prefs.shared_notes_closed.contains(&format!("{key}/{channel}")));
-                    rows.push(Row::Start {
-                        icon: "hash",
-                        title: format!("Welcome to #{name}"),
-                        body: format!("This is the start of #{name}."),
-                        shared: note.and_then(|c| {
-                            let label = shared::shared_label(c)?;
-                            let sh = c.shared.as_ref()?;
-                            let home = if sh.home {
-                                "this server".to_owned()
-                            } else {
-                                sh.home_server.as_ref().map_or("the other server".into(), |s| s.name.clone())
-                            };
-                            let others = if label.names.is_empty() { "another server".into() } else { label.names };
-                            Some((
-                                format!("{key}/{channel}"),
-                                if sh.home {
-                                    format!("You share this channel with {others}")
-                                } else {
-                                    format!("This channel comes from {others}")
-                                },
-                                format!(
-                                    "People from both servers read and write here. Messages are kept only on {home}, \
-                                     and each server looks after its own people."
-                                ),
-                            ))
-                        }),
-                    });
-                }
-                for m in &loaded.items {
-                    if m.kind == pb::MessageKind::MemberJoined as i32 {
-                        rows.push(Row::Note {
-                            id: m.id.clone(),
-                            icon: "sparkles",
-                            text: format!("{} joined the server. Say hi!", author(&m.author_id).0),
-                        });
-                        continue;
-                    }
-                    if m.kind == pb::MessageKind::AutoModAlert as i32 {
-                        if let Some(alert) = &m.auto_mod {
-                            rows.push(Row::Msg(Rc::new(auto_mod_row(i, &server, m, alert, manage))));
-                        }
-                        continue;
-                    }
-                    let hook = m.webhook.as_ref();
-                    let who: Author = match hook {
-                        Some(w) => Rc::new((w.name.clone(), None, Some("APP"), Some(webhook_author(w)))),
-                        None => author(&m.author_id),
-                    };
-                    let (author_name, color, badge, user) = &*who;
-                    let editing = self.editing.as_deref() == Some(m.id.as_str());
-                    let from = shared::foreign_server(m, &server).cloned();
-                    let keep_out = keeps_out && from.is_some() && hook.is_none();
-                    let keeping_out = keep_out && self.keeping_out.as_deref() == Some(m.id.as_str());
-                    let can_delete = m.author_id == me || (manage && !(guest_side && from.is_some()));
-                    let mut card = m.poll.as_ref().map(|poll| {
-                        crate::ui::polls::PollCard::of(
-                            poll,
-                            &m.id,
-                            m.author_id == me,
-                            can_vote,
-                            manage && !guest_side,
-                            &self.polls,
-                            &look,
-                            now,
-                        )
-                    });
-                    let mut h = DefaultHasher::new();
-                    if let Some(card) = &card {
-                        card.digest(&mut h);
-                    }
-                    (&m.content, m.edited_at.as_ref().map(|t| (t.seconds, t.nanos)), m.embeds.len()).hash(&mut h);
-                    m.emojis.iter().map(|e| (&e.id, &e.url)).for_each(|e| e.hash(&mut h));
-                    m.attachments.iter().map(|a| (&a.url, &a.filename)).for_each(|a| a.hash(&mut h));
-                    (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
-                    user.as_ref().map(|u| (&u.avatar_url, &u.username)).hash(&mut h);
-                    (look.digest, editing, manage, suppress, &me, &mine).hash(&mut h);
-                    (m.mentions_everyone, &m.mention_role_ids).hash(&mut h);
-                    (from.as_ref().map(|f| (&f.id, &f.name, &f.icon_url)), keep_out, keeping_out, can_delete).hash(&mut h);
-                    // Never 0, which means "not kept".
-                    let sig = h.finish() | 1;
-                    let (key, was) = match built.remove_entry(&m.id) {
-                        Some((key, was)) => (key, Some(was)),
-                        None => (m.id.clone(), None),
-                    };
-                    // A changed poll's bars grow from where they were.
-                    if let (Some(card), Some(old)) = (card.as_mut(), was.as_ref().and_then(|w| w.poll.as_ref())) {
-                        card.from = old.shares();
-                    }
-                    let card = card.map(Rc::new);
-                    let msg = match was {
-                        Some(was) if was.sig == sig => was,
-                        _ => Rc::new(Msg {
-                            id: m.id.clone(),
-                            user: user.clone(),
-                            name: author_name.clone(),
-                            color: *color,
-                            content: m.content.clone(),
-                            shown: mention_links(&timestamp_nodes(&images_as_links(&m.content)), &look.with(&m.emojis)),
-                            mentions_me: i.pings_me(&server, m, suppress),
-                            editing,
-                            can_delete,
-                            at: ms_of(m.created_at.as_ref()),
-                            edited: m.edited_at.is_some(),
-                            head: true,
-                            mine: m.author_id == me,
-                            pending: false,
-                            failed: None,
-                            nonce: 0,
-                            unreadable: false,
-                            badge: *badge,
-                            embeds: m.embeds.clone(),
-                            from: from.clone(),
-                            keep_out,
-                            keeping_out,
-                            poll: card.clone(),
-                            voice: None,
-                            attachments: m.attachments.clone(),
-                            sig,
-                        }),
-                    };
-                    kept.insert(key, msg.clone());
-                    rows.push(Row::Msg(msg));
-                }
-                for p in i.pending.get(&channel).into_iter().flatten() {
-                    rows.push(Row::Msg(Rc::new(Msg {
-                        id: format!("p{}", p.nonce),
-                        user: i.me.clone(),
-                        name: i.display_name(Some(&server), &me),
-                        color: i.name_color(&server, &me).map(|c| rgb(c).into()),
-                        content: p.content.clone(),
-                        shown: mention_links(&timestamp_nodes(&images_as_links(&p.content)), &look.with(&p.emojis)),
-                        mentions_me: false,
-                        editing: false,
-                        can_delete: false,
-                        at: p.created_at_ms,
-                        edited: false,
-                        head: true,
-                        mine: true,
-                        pending: true,
-                        failed: p.failed.clone(),
-                        nonce: p.nonce,
-                        unreadable: false,
-                        badge: None,
-                        embeds: Vec::new(),
-                        from: None,
-                        keep_out: false,
-                        keeping_out: false,
-                        poll: None,
-        voice: None,
-                        attachments: p.attachments.clone(),
-        sig: 0,
-                    })));
-                }
-                *built = kept;
-                group(&mut rows);
-                rows
+            Some(Target::Channel { key, server, channel }) => self.core.shared.read(|s| match s.instance(&key) {
+                Some(i) => self.server_rows(i, &key, &server, &channel, None, built),
+                None => Vec::new(),
             }),
             Some(Target::Dm { key, conversation }) => self.core.shared.read(|s| {
                 let Some(i) = s.instance(&key) else { return Vec::new() };
@@ -523,6 +362,271 @@ impl FuwaApp {
             }),
             None => Vec::new(),
         }
+    }
+
+    /// A server channel's rows, or with `thread` those of the thread under
+    /// that message: the message, then its replies.
+    pub(crate) fn server_rows(
+        &self,
+        i: &InstanceState,
+        key: &str,
+        server: &str,
+        channel: &str,
+        thread: Option<&str>,
+        built: &mut Built,
+    ) -> Vec<Row> {
+        let (key, server, channel) = (key.to_owned(), server.to_owned(), channel.to_owned());
+        let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
+        let mut rows = Vec::new();
+        let at = thread.map_or_else(|| channel.clone(), crate::core::threads::thread_key);
+        let Some(loaded) = i.messages.get(&at) else { return rows };
+        let here = i.channel(&server, &channel);
+        let name = here.map(|c| c.name.clone()).unwrap_or_default();
+        // In a shared channel each side moderates its own people: a guest's moderators can't
+        // delete the home's, and only the home keeps someone from another server out.
+        let shared = here.and_then(|c| c.shared.as_ref());
+        let guest_side = shared.is_some_and(|s| !s.home);
+        let keeps_out = shared.is_some_and(|s| s.home) && i.access(&server).has(pb::Permission::KickMembers);
+        let look = Look::of(i, &server);
+        let mut kept = Built::default();
+        // Each author as shown (name, colour, badge, picture), looked up once.
+        type Author = Rc<(String, Option<Hsla>, Option<&'static str>, Option<pb::User>)>;
+        let mut authors: HashMap<String, Author> = HashMap::new();
+        let mut author = |id: &str| -> Author {
+            authors
+                .entry(id.to_owned())
+                .or_insert_with(|| {
+                    Rc::new((
+                        i.display_name(Some(&server), id),
+                        i.name_color(&server, id).map(|c| rgb(c).into()),
+                        is_agent(i.users.get(id)).then_some("AGENT"),
+                        i.users.get(id).cloned(),
+                    ))
+                })
+                .clone()
+        };
+        let manage = i.access(&server).has_in(&channel, pb::Permission::ManageMessages);
+        let can_vote = !guest_side && !i.access(&server).pending;
+        let now = crate::core::dms::now_ms();
+        let suppress = i.effective_notifications(&server, &channel, 0).suppress_everyone;
+        // My roles, which decide whether a role mention pings me.
+        let mine: Vec<String> = i.my_member(&server).map(|m| m.role_ids.clone()).unwrap_or_default();
+        // Threads go under messages in the channel itself, not under replies, and not in shared channels yet.
+        let threads_here = thread.is_none() && shared.is_none();
+        let can_start = threads_here && i.access(&server).has_in(&channel, pb::Permission::CreateThreads);
+        let can_reply = threads_here && i.access(&server).has_in(&channel, pb::Permission::SendMessages);
+        // In a thread: the message it's under comes first, then its replies.
+        let parent = thread.and_then(|id| {
+            i.thread_parents.get(id).or_else(|| i.messages.get(&channel)?.items.iter().find(|m| m.id == id))
+        });
+        let divider = |rows: &mut Vec<Row>| {
+            let count = parent.and_then(|m| m.thread.as_ref()).map_or(0, |t| t.reply_count);
+            rows.push(Row::Divider {
+                text: match count {
+                    0 => "No replies yet. Start the thread!".to_owned(),
+                    1 => "1 reply".to_owned(),
+                    n => format!("{n} replies"),
+                },
+            });
+            if loaded.has_more {
+                rows.push(Row::Older { loading: loaded.loading });
+            }
+        };
+        if thread.is_some() {
+            if parent.is_none() {
+                divider(&mut rows);
+            }
+        } else if loaded.has_more {
+            rows.push(Row::Older { loading: loaded.loading });
+        } else {
+            let note = here.filter(|_| !self.prefs.shared_notes_closed.contains(&format!("{key}/{channel}")));
+            rows.push(Row::Start {
+                icon: "hash",
+                title: format!("Welcome to #{name}"),
+                body: format!("This is the start of #{name}."),
+                shared: note.and_then(|c| {
+                    let label = shared::shared_label(c)?;
+                    let sh = c.shared.as_ref()?;
+                    let home = if sh.home {
+                        "this server".to_owned()
+                    } else {
+                        sh.home_server.as_ref().map_or("the other server".into(), |s| s.name.clone())
+                    };
+                    let others = if label.names.is_empty() { "another server".into() } else { label.names };
+                    Some((
+                        format!("{key}/{channel}"),
+                        if sh.home {
+                            format!("You share this channel with {others}")
+                        } else {
+                            format!("This channel comes from {others}")
+                        },
+                        format!(
+                            "People from both servers read and write here. Messages are kept only on {home}, \
+                             and each server looks after its own people."
+                        ),
+                    ))
+                }),
+            });
+        }
+        for m in parent.into_iter().chain(&loaded.items) {
+            let is_parent = parent.is_some_and(|p| std::ptr::eq(p, m));
+            if m.kind == pb::MessageKind::MemberJoined as i32 {
+                rows.push(Row::Note {
+                    id: m.id.clone(),
+                    icon: "sparkles",
+                    text: format!("{} joined the server. Say hi!", author(&m.author_id).0),
+                });
+                continue;
+            }
+            if m.kind == pb::MessageKind::AutoModAlert as i32 {
+                if let Some(alert) = &m.auto_mod {
+                    rows.push(Row::Msg(Rc::new(auto_mod_row(i, &server, m, alert, manage))));
+                }
+                continue;
+            }
+            let hook = m.webhook.as_ref();
+            let who: Author = match hook {
+                Some(w) => Rc::new((w.name.clone(), None, Some("APP"), Some(webhook_author(w)))),
+                None => author(&m.author_id),
+            };
+            let (author_name, color, badge, user) = &*who;
+            let editing = self.editing.as_deref() == Some(m.id.as_str()) && thread.is_some() == self.edit_in_thread;
+            let from = shared::foreign_server(m, &server).cloned();
+            let keep_out = keeps_out && from.is_some() && hook.is_none();
+            let keeping_out = keep_out && self.keeping_out.as_deref() == Some(m.id.as_str());
+            let can_delete = m.author_id == me || (manage && !(guest_side && from.is_some()));
+            let mut card = m.poll.as_ref().map(|poll| {
+                crate::ui::polls::PollCard::of(
+                    poll,
+                    &m.id,
+                    m.author_id == me,
+                    can_vote,
+                    manage && !guest_side,
+                    &self.polls,
+                    &look,
+                    now,
+                )
+            });
+            let bits = ThreadBits {
+                replies: thread
+                    .is_none()
+                    .then(|| crate::ui::threads::Replies::of(i, &server, m, now))
+                    .flatten()
+                    .map(Rc::new),
+                also_in: (thread.is_none() && !m.thread_id.is_empty()).then(|| m.thread_id.clone()),
+                also_sent: thread.is_some() && !is_parent && m.also_in_channel,
+                can_thread: m.thread_id.is_empty() && if m.thread.is_some() { can_reply } else { can_start },
+            };
+            let mut h = DefaultHasher::new();
+            bits.digest(&mut h);
+            if let Some(card) = &card {
+                card.digest(&mut h);
+            }
+            (&m.content, m.edited_at.as_ref().map(|t| (t.seconds, t.nanos)), m.embeds.len()).hash(&mut h);
+            m.emojis.iter().map(|e| (&e.id, &e.url)).for_each(|e| e.hash(&mut h));
+            m.attachments.iter().map(|a| (&a.url, &a.filename)).for_each(|a| a.hash(&mut h));
+            (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
+            user.as_ref().map(|u| (&u.avatar_url, &u.username)).hash(&mut h);
+            (look.digest, editing, manage, suppress, &me, &mine).hash(&mut h);
+            (m.mentions_everyone, &m.mention_role_ids).hash(&mut h);
+            (from.as_ref().map(|f| (&f.id, &f.name, &f.icon_url)), keep_out, keeping_out, can_delete).hash(&mut h);
+            // Never 0, which means "not kept".
+            let sig = h.finish() | 1;
+            let (key, was) = match built.remove_entry(&m.id) {
+                Some((key, was)) => (key, Some(was)),
+                None => (m.id.clone(), None),
+            };
+            // A changed poll's bars grow from where they were.
+            if let (Some(card), Some(old)) = (card.as_mut(), was.as_ref().and_then(|w| w.poll.as_ref())) {
+                card.from = old.shares();
+            }
+            let card = card.map(Rc::new);
+            let msg = match was {
+                Some(was) if was.sig == sig => was,
+                _ => Rc::new(Msg {
+                    id: m.id.clone(),
+                    user: user.clone(),
+                    name: author_name.clone(),
+                    color: *color,
+                    content: m.content.clone(),
+                    shown: mention_links(&timestamp_nodes(&images_as_links(&m.content)), &look.with(&m.emojis)),
+                    mentions_me: i.pings_me(&server, m, suppress),
+                    editing,
+                    can_delete,
+                    at: ms_of(m.created_at.as_ref()),
+                    edited: m.edited_at.is_some(),
+                    head: true,
+                    mine: m.author_id == me,
+                    pending: false,
+                    failed: None,
+                    nonce: 0,
+                    unreadable: false,
+                    badge: *badge,
+                    embeds: m.embeds.clone(),
+                    from: from.clone(),
+                    keep_out,
+                    keeping_out,
+                    poll: card.clone(),
+                    voice: None,
+                    attachments: m.attachments.clone(),
+                    thread: bits.clone(),
+                    sig,
+                }),
+            };
+            kept.insert(key, msg.clone());
+            rows.push(Row::Msg(msg));
+            if is_parent {
+                divider(&mut rows);
+            }
+        }
+        for p in i.pending.get(&at).into_iter().flatten() {
+            rows.push(Row::Msg(Rc::new(Msg {
+                id: format!("p{}", p.nonce),
+                user: i.me.clone(),
+                name: i.display_name(Some(&server), &me),
+                color: i.name_color(&server, &me).map(|c| rgb(c).into()),
+                content: p.content.clone(),
+                shown: mention_links(&timestamp_nodes(&images_as_links(&p.content)), &look.with(&p.emojis)),
+                mentions_me: false,
+                editing: false,
+                can_delete: false,
+                at: p.created_at_ms,
+                edited: false,
+                head: true,
+                mine: true,
+                pending: true,
+                failed: p.failed.clone(),
+                nonce: p.nonce,
+                unreadable: false,
+                badge: None,
+                embeds: Vec::new(),
+                from: None,
+                keep_out: false,
+                keeping_out: false,
+                poll: None,
+                voice: None,
+                attachments: p.attachments.clone(),
+                thread: ThreadBits::default(),
+                sig: 0,
+            })));
+        }
+        *built = kept;
+        group(&mut rows);
+        rows
+    }
+
+    /// The open thread's rows, built again from the store.
+    pub(crate) fn sync_thread(&mut self, cx: &mut Context<Self>) {
+        let Some(open) = self.threads.open.clone() else { return };
+        let mut built = std::mem::take(&mut self.threads.built);
+        let rows = self.core.shared.read(|s| {
+            s.instance(&open.key)
+                .map(|i| self.server_rows(i, &open.key, &open.server, &open.channel, Some(&open.id), &mut built))
+                .unwrap_or_default()
+        });
+        self.threads.built = built;
+        self.threads.rows = Rc::new(rows);
+        cx.notify();
     }
 
     /// Keeps the message list in step: grows at the bottom (and lets new
@@ -667,7 +771,7 @@ impl FuwaApp {
                 .when(channel.topic.is_empty(), |el| el.child(div().flex_1()))
         }
         .when(!secure, |el| el.child(self.search_field(window, cx)))
-        .child(self.header_buttons(key, server, &channel.id, &p, cx));
+        .child(self.header_buttons(key, server, &channel, &p, cx));
 
         let blocked = self.channel_blocked(key, server, &channel.id);
         let blocked = if secure { self.secure_blocked(key, server, &channel.id, blocked) } else { blocked };
@@ -683,6 +787,10 @@ impl FuwaApp {
 
         let mut view = div().size_full().relative().flex().child(column);
         if let Some(panel) = self.search_panel(window, cx) {
+            view = view.child(panel);
+        } else if let Some(panel) = self.thread_panel(window, cx) {
+            view = view.child(panel);
+        } else if let Some(panel) = self.threads_list_panel(window, cx) {
             view = view.child(panel);
         } else if self.members_open {
             view = view.child(self.members_panel(key, server, window, cx));
@@ -721,11 +829,15 @@ impl FuwaApp {
         &mut self,
         key: &str,
         server: &str,
-        channel_id: &str,
+        channel: &pb::Channel,
         p: &Palette,
         cx: &mut Context<Self>,
     ) -> Div {
         let p = *p;
+        let channel_id = channel.id.as_str();
+        // Threads aren't in shared channels yet, nor in secure ones (theirs are their own).
+        let threads = channel.shared.is_none() && channel.r#type != pb::ChannelType::Secure as i32;
+        let side = self.threads.open.is_some() || self.threads.listing.is_some();
         div()
             .flex()
             .items_center()
@@ -745,35 +857,35 @@ impl FuwaApp {
                         cx.notify();
                     }))
             })
-            .child(
+            .when(threads, |el| {
+                let open = self.threads.listing.is_some();
+                el.child(
+                    icon_button("threads-toggle", "messages-square", &p)
+                        .when(open, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
+                        .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Threads").build(window, cx))
+                        .on_click(cx.listener(|this, _, window, cx| this.toggle_threads_list(window, cx))),
+                )
+            })
+            .child({
+                let shown = self.members_open && !side && self.search.panel.is_none();
                 icon_button("members-toggle", "users", &p)
-                    .when(self.members_open, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.members_open = !this.members_open;
+                    .when(shown, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.close_thread(cx);
+                        this.threads.listing = None;
+                        if this.search.panel.is_some() {
+                            this.close_search(window, cx);
+                        }
+                        this.members_open = !shown;
                         cx.notify();
-                    })),
-            )
+                    }))
+            })
     }
 
     fn message_list(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal(cx);
         let rows = self.rows.clone();
-        let ctx = Rc::new(RowCtx {
-            fresh: self.fresh.clone(),
-            this: cx.entity().downgrade(),
-            compact: self.prefs.density == Density::Compact,
-            edit_box: self.edit_box.clone(),
-            key: self.target().map(|t| t.key().to_owned()).unwrap_or_default(),
-            server: match self.target() {
-                Some(Target::Channel { server, .. }) => Some(server),
-                _ => None,
-            },
-            url: self
-                .target()
-                .and_then(|t| self.core.shared.read(|s| s.instance(t.key()).map(|i| i.url.clone())))
-                .unwrap_or_default(),
-            jumped: self.search.jumped.clone().filter(|(_, at)| at.elapsed() < JUMP_GLOW),
-        });
+        let ctx = self.row_ctx(None, cx);
         let target = self.list.target.clone().unwrap_or_default();
         let loading = rows.is_empty();
         div().flex_1().min_h_0().relative().child(if loading {
@@ -793,6 +905,27 @@ impl FuwaApp {
             .with_jump_button_label("Jump to the latest")
             .size_full()
             .into_any_element()
+        })
+    }
+
+    /// What every row of a list needs from the window; `thread` for the open thread's panel.
+    pub(crate) fn row_ctx(&self, thread: Option<String>, cx: &mut Context<Self>) -> Rc<RowCtx> {
+        Rc::new(RowCtx {
+            fresh: if thread.is_some() { HashMap::new() } else { self.fresh.clone() },
+            this: cx.entity().downgrade(),
+            compact: self.prefs.density == Density::Compact,
+            edit_box: self.edit_box.clone(),
+            key: self.target().map(|t| t.key().to_owned()).unwrap_or_default(),
+            server: match self.target() {
+                Some(Target::Channel { server, .. }) => Some(server),
+                _ => None,
+            },
+            url: self
+                .target()
+                .and_then(|t| self.core.shared.read(|s| s.instance(t.key()).map(|i| i.url.clone())))
+                .unwrap_or_default(),
+            jumped: self.search.jumped.clone().filter(|(_, at)| at.elapsed() < JUMP_GLOW),
+            thread,
         })
     }
 
@@ -1318,7 +1451,7 @@ fn group(rows: &mut [Row]) {
 }
 
 /// What every row of the open list needs from the window.
-struct RowCtx {
+pub(crate) struct RowCtx {
     fresh: std::collections::HashMap<String, Instant>,
     this: WeakEntity<FuwaApp>,
     compact: bool,
@@ -1329,71 +1462,91 @@ struct RowCtx {
     url: String,
     /// The message a search result opened, which glows a moment.
     jumped: Option<(String, Instant)>,
+    /// Drawing the open thread's panel: the id of the message it's under.
+    thread: Option<String>,
 }
 
-fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElement {
+pub(crate) fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElement {
     let p = pal(cx);
     let is_fresh = ctx.fresh.contains_key(&row.id());
-    let el: AnyElement = match row {
-        Row::Older { loading } => {
-            let this = ctx.this.clone();
-            div()
+    let el: AnyElement =
+        match row {
+            Row::Older { loading } => {
+                let (this, in_thread) = (ctx.this.clone(), ctx.thread.is_some());
+                div()
+                    .flex()
+                    .justify_center()
+                    .py(px(16.0))
+                    .child(
+                        soft_button("older", if *loading { "Loading…" } else { "Show older messages" }, &p).on_click(
+                            move |_, _, cx| {
+                                let _ = this.update(cx, |this, cx| {
+                                    if in_thread { this.load_older_replies(cx) } else { this.load_older(cx) }
+                                });
+                            },
+                        ),
+                    )
+                    .into_any_element()
+            }
+            // A secure channel's start says how it's kept private, in its own colour.
+            Row::Start { icon: glyph, title, body, .. } if *glyph == "shield-check" => {
+                crate::ui::secure::start(title.clone(), body.clone(), &p).into_any_element()
+            }
+            Row::Start { icon: glyph, title, body, shared } => div()
+                .px(px(20.0))
+                .pt(px(32.0))
+                .pb(px(16.0))
                 .flex()
-                .justify_center()
-                .py(px(16.0))
-                .child(soft_button("older", if *loading { "Loading…" } else { "Show older messages" }, &p).on_click(
-                    move |_, _, cx| {
-                        let _ = this.update(cx, |this, cx| this.load_older(cx));
-                    },
-                ))
-                .into_any_element()
-        }
-        // A secure channel's start says how it's kept private, in its own colour.
-        Row::Start { icon: glyph, title, body, .. } if *glyph == "shield-check" => {
-            crate::ui::secure::start(title.clone(), body.clone(), &p).into_any_element()
-        }
-        Row::Start { icon: glyph, title, body, shared } => div()
-            .px(px(20.0))
-            .pt(px(32.0))
-            .pb(px(16.0))
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .size(px(64.0))
-                    .rounded_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(alpha(p.primary, 0.14))
-                    .text_color(p.primary)
-                    .child(icon(glyph).size(px(30.0))),
-            )
-            .child(div().text_2xl().font_weight(FontWeight::EXTRA_BOLD).child(title.clone()))
-            .child(div().text_color(p.muted_foreground).child(body.clone()))
-            .when_some(shared.clone(), |el, (note, title, line)| el.child(shared_note(note, title, line, &p, ctx)))
-            .into_any_element(),
-        Row::Note { icon: glyph, text, .. } => div()
-            .px(px(20.0))
-            .py(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .text_sm()
-            .text_color(p.muted_foreground)
-            .child(
-                div()
-                    .w(px(40.0))
-                    .flex_none()
-                    .flex()
-                    .justify_center()
-                    .child(icon(glyph).size(px(16.0)).text_color(p.primary)),
-            )
-            .child(div().flex_1().min_w_0().child(text.clone()))
-            .into_any_element(),
-        Row::Msg(m) => message(m, &p, ctx, cx),
-    };
+                .flex_col()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .size(px(64.0))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(alpha(p.primary, 0.14))
+                        .text_color(p.primary)
+                        .child(icon(glyph).size(px(30.0))),
+                )
+                .child(div().text_2xl().font_weight(FontWeight::EXTRA_BOLD).child(title.clone()))
+                .child(div().text_color(p.muted_foreground).child(body.clone()))
+                .when_some(shared.clone(), |el, (note, title, line)| el.child(shared_note(note, title, line, &p, ctx)))
+                .into_any_element(),
+            Row::Note { icon: glyph, text, .. } => div()
+                .px(px(20.0))
+                .py(px(6.0))
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .text_sm()
+                .text_color(p.muted_foreground)
+                .child(
+                    div()
+                        .w(px(40.0))
+                        .flex_none()
+                        .flex()
+                        .justify_center()
+                        .child(icon(glyph).size(px(16.0)).text_color(p.primary)),
+                )
+                .child(div().flex_1().min_w_0().child(div().flex_none().child(text.clone())))
+                .into_any_element(),
+            Row::Divider { text } => div()
+                .px(px(20.0))
+                .py(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .text_color(p.muted_foreground)
+                .child(div().flex_1().h(px(1.0)).bg(p.border))
+                .child(text.clone())
+                .child(div().flex_1().h(px(1.0)).bg(p.border))
+                .into_any_element(),
+            Row::Msg(m) => message(m, &p, ctx, cx),
+        };
     let el = if is_fresh {
         motion::rise(div().child(el), SharedString::from(format!("rise|{}|{ix}", row.id())), Duration::ZERO, 14.0)
             .into_any_element()
@@ -1554,6 +1707,9 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
         .child(m.name.clone());
     let time = div().text_xs().text_color(p.muted_foreground).child(when(m.at));
     let mut body = div().flex_1().min_w_0().flex().flex_col();
+    if m.thread.also_in.is_some() || m.thread.also_sent {
+        body = body.child(crate::ui::threads::also_note(&m.id, m.thread.also_in.as_deref(), p, &ctx.this));
+    }
     if m.head {
         body = body.child(
             div()
@@ -1596,9 +1752,13 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
             &ctx.key,
         ));
     }
+    if let Some(replies) = &m.thread.replies {
+        body = body.child(crate::ui::threads::replies_row(&m.id, replies, p, &ctx.this));
+    }
     if let Some(reason) = &m.failed {
         let (retry, dismiss) = (ctx.this.clone(), ctx.this.clone());
         let nonce = m.nonce;
+        let (thread, thread_d) = (ctx.thread.clone(), ctx.thread.clone());
         body = body.child(
             div()
                 .flex()
@@ -1614,7 +1774,7 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
                         .cursor_pointer()
                         .hover(|s| s.underline())
                         .on_click(move |_, _, cx| {
-                            let _ = retry.update(cx, |this, cx| this.retry(nonce, cx));
+                            let _ = retry.update(cx, |this, cx| this.retry(nonce, thread.clone(), cx));
                         })
                         .child("Retry"),
                 )
@@ -1627,7 +1787,8 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
                         .on_click(move |_, _, cx| {
                             let _ = dismiss.update(cx, |this, _| {
                                 if let Some(Target::Channel { key, channel, .. }) = this.target() {
-                                    this.core.dismiss_pending(&key, &channel, nonce);
+                                    let at = thread_d.as_deref().map_or(channel, crate::core::threads::thread_key);
+                                    this.core.dismiss_pending(&key, &at, nonce);
                                 }
                             });
                         })
@@ -1667,7 +1828,8 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
     let can_edit = m.mine && !m.pending && !m.unreadable && !m.editing && m.poll.is_none() && m.voice.is_none();
     let can_delete = m.can_delete && !m.pending && !m.editing;
     let keep_out = m.keep_out && !m.editing;
-    let actions = (can_edit || can_delete || keep_out).then(|| {
+    let can_thread = m.thread.can_thread && !m.pending && !m.editing && !m.keeping_out;
+    let actions = (can_edit || can_delete || keep_out || can_thread).then(|| {
         let id = m.id.clone();
         div()
             .absolute()
@@ -1689,11 +1851,27 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
                 spread_radius: px(-4.0),
                 inset: false,
             }])
-            .when(can_edit, |el| {
+            .when(can_thread, |el| {
                 let (this, id) = (ctx.this.clone(), id.clone());
+                let label = if m.thread.replies.is_some() { "Open thread" } else { "Reply in thread" };
+                el.child(
+                    icon_button(SharedString::from(format!("thread|{id}")), "message-square-reply", p)
+                        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label).build(window, cx))
+                        .on_click(move |_, window, cx| {
+                            let _ = this.update(cx, |this, cx| this.open_thread(id.clone(), window, cx));
+                        }),
+                )
+            })
+            .when(can_edit, |el| {
+                let (this, id, in_thread) = (ctx.this.clone(), id.clone(), ctx.thread.is_some());
                 el.child(icon_button(SharedString::from(format!("edit|{id}")), "pencil", p).on_click(
                     move |_, window, cx| {
-                        let _ = this.update(cx, |this, cx| this.start_edit(id.clone(), window, cx));
+                        let _ = this.update(cx, |this, cx| {
+                            this.start_edit(id.clone(), window, cx);
+                            this.edit_in_thread = in_thread;
+                            this.sync_list(cx);
+                            this.sync_thread(cx);
+                        });
                     },
                 ))
             })
@@ -2104,6 +2282,7 @@ fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::Au
         poll: None,
         voice: None,
         attachments: Vec::new(),
+        thread: ThreadBits::default(),
         sig: 0,
     }
 }

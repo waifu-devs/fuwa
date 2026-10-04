@@ -37,6 +37,7 @@ pub mod sso;
 pub mod store;
 mod sync;
 pub mod themes;
+pub mod threads;
 pub mod timestamps;
 pub mod updates;
 pub mod vault;
@@ -68,6 +69,8 @@ pub enum Notice {
         title: String,
         body: String,
         mention: bool,
+        /// A reply in a thread: the id of the message it's under.
+        thread: Option<String>,
     },
     /// They were removed from a server, or it was deleted.
     Removed { server: String },
@@ -126,6 +129,7 @@ impl Shared {
             title,
             body: if item.voice.is_some() { "Voice message".into() } else { item.content.chars().take(160).collect() },
             mention: true,
+            thread: None,
         });
     }
 
@@ -157,6 +161,7 @@ impl Shared {
                 ),
                 body: item.content.chars().take(160).collect(),
                 mention,
+                thread: None,
             })
         });
         if let Some(notice) = notice {
@@ -648,15 +653,28 @@ impl Core {
         channel_id: &str,
         older: bool,
     ) -> Result<(), Problem> {
+        self.load_list(key, server_id, channel_id, "", older).await
+    }
+
+    /// A channel's messages, or with `thread_id` the replies in the thread under that message (and the message).
+    pub(crate) async fn load_list(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+        thread_id: &str,
+        older: bool,
+    ) -> Result<(), Problem> {
         let Some(api) = self.api(key) else { return Ok(()) };
-        let current = self.shared.read(|s| s.instance(key).and_then(|i| i.messages.get(channel_id).cloned()));
+        let at = if thread_id.is_empty() { channel_id.to_owned() } else { threads::thread_key(thread_id) };
+        let current = self.shared.read(|s| s.instance(key).and_then(|i| i.messages.get(&at).cloned()));
         if current.as_ref().is_some_and(|c| c.loading || !older)
             || (older && !current.as_ref().is_some_and(|c| c.has_more))
         {
             return Ok(());
         }
         let before_id = if older { current.as_ref().and_then(|c| c.items.first()).map(|m| m.id.clone()) } else { None };
-        self.shared.instance(key, |i| i.messages.entry(channel_id.to_owned()).or_default().loading = true);
+        self.shared.instance(key, |i| i.messages.entry(at.clone()).or_default().loading = true);
         let res = rpc!(
             api.messages(),
             list_messages(pb::ListMessagesRequest {
@@ -665,33 +683,18 @@ impl Core {
                 limit: PAGE,
                 before_id: before_id.unwrap_or_default(),
                 after_id: String::new(),
-                thread_id: String::new(),
+                thread_id: thread_id.into(),
             })
         )
         .await;
-        self.shared.instance(key, |i| {
-            let res = match res {
-                Ok(res) => res,
-                Err(_) => {
-                    match &current {
-                        Some(c) => {
-                            i.messages.insert(channel_id.to_owned(), ChannelMessages { loading: false, ..c.clone() })
-                        }
-                        None => i.messages.remove(channel_id),
-                    };
-                    return;
-                }
-            };
-            for user in res.authors {
-                i.users.insert(user.id.clone(), user);
+        self.shared.instance(key, |i| match res {
+            Ok(res) => threads::put_page(i, &at, res, current.is_none(), older),
+            Err(_) => {
+                match &current {
+                    Some(c) => i.messages.insert(at.clone(), ChannelMessages { loading: false, ..c.clone() }),
+                    None => i.messages.remove(&at),
+                };
             }
-            store::add_shared_authors(&mut i.users, &res.messages);
-            let entry = i.messages.entry(channel_id.to_owned()).or_default();
-            for m in res.messages {
-                upsert_message(&mut entry.items, m);
-            }
-            entry.has_more = if older || current.is_none() { res.has_more } else { entry.has_more };
-            entry.loading = false;
         });
         Ok(())
     }
@@ -716,7 +719,21 @@ impl Core {
         content: &str,
         attachments: Vec<pb::Attachment>,
     ) -> Result<(), Problem> {
+        self.send_to(key, server_id, channel_id, content, attachments, None).await
+    }
+
+    /// Sends a message, or with `thread` a reply in the thread under a message.
+    pub(crate) async fn send_to(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+        content: &str,
+        attachments: Vec<pb::Attachment>,
+        thread: Option<&threads::ThreadTarget>,
+    ) -> Result<(), Problem> {
         let Some(api) = self.api(key) else { return Ok(()) };
+        let at = thread.map_or_else(|| channel_id.to_owned(), |t| threads::thread_key(&t.thread_id));
         static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let nonce = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let emojis = self.shared.read(|s| s.instance(key).map(|i| emoji::outside(i, server_id, content)));
@@ -729,7 +746,7 @@ impl Core {
             created_at_ms: dms::now_ms(),
             failed: None,
         };
-        self.shared.instance(key, |i| i.pending.entry(channel_id.to_owned()).or_default().push(pending));
+        self.shared.instance(key, |i| i.pending.entry(at.clone()).or_default().push(pending));
         let res = rpc!(
             api.messages(),
             send_message(pb::SendMessageRequest {
@@ -738,27 +755,37 @@ impl Core {
                 content: content.into(),
                 emojis,
                 attachments,
+                thread_id: thread.map(|t| t.thread_id.clone()).unwrap_or_default(),
+                also_send_to_channel: thread.is_some_and(|t| t.also_to_channel),
                 ..Default::default()
             })
         )
         .await;
         self.shared.instance(key, |i| match &res {
             Ok(sent) => {
-                if let Some(list) = i.pending.get_mut(channel_id) {
+                if let Some(list) = i.pending.get_mut(&at) {
                     list.retain(|p| p.nonce != nonce);
                 }
-                if let (Some(loaded), Some(message)) = (i.messages.get_mut(channel_id), sent.message.clone()) {
-                    upsert_message(&mut loaded.items, message);
+                let Some(message) = &sent.message else { return };
+                store::add_shared_authors(&mut i.users, std::slice::from_ref(message));
+                if let Some(loaded) = i.messages.get_mut(&at) {
+                    upsert_message(&mut loaded.items, message.clone());
+                }
+                if thread.is_some()
+                    && message.also_in_channel
+                    && let Some(loaded) = i.messages.get_mut(channel_id)
+                {
+                    upsert_message(&mut loaded.items, message.clone());
                 }
             }
             Err(err) => {
-                if let Some(p) = i.pending.get_mut(channel_id).and_then(|l| l.iter_mut().find(|p| p.nonce == nonce)) {
+                if let Some(p) = i.pending.get_mut(&at).and_then(|l| l.iter_mut().find(|p| p.nonce == nonce)) {
                     p.failed = Some(err.message.clone());
                 }
             }
         });
         if res.is_ok() {
-            reports::used("message.send");
+            reports::used(if thread.is_some() { "thread.reply" } else { "message.send" });
         }
         res.map(|_| ())
     }
@@ -796,8 +823,17 @@ impl Core {
         reports::used("message.edit");
         if let Some(message) = res.message {
             self.shared.instance(key, |i| {
-                if let Some(loaded) = i.messages.get_mut(&message.channel_id) {
-                    upsert_message(&mut loaded.items, message);
+                let thread = (!message.thread_id.is_empty()).then(|| threads::thread_key(&message.thread_id));
+                for at in [Some(message.channel_id.clone()), thread].into_iter().flatten() {
+                    if let Some(loaded) = i.messages.get_mut(&at)
+                        && loaded.items.iter().any(|m| m.id == message.id)
+                    {
+                        upsert_message(&mut loaded.items, message.clone());
+                    }
+                }
+                if let Some(parent) = i.thread_parents.get_mut(&message.id) {
+                    let summary = message.thread.clone().or_else(|| parent.thread.take());
+                    *parent = pb::Message { thread: summary, ..message };
                 }
             });
         }
@@ -821,11 +857,8 @@ impl Core {
             })
         )
         .await?;
-        self.shared.instance(key, |i| {
-            if let Some(loaded) = i.messages.get_mut(channel_id) {
-                loaded.items.retain(|m| m.id != message_id);
-            }
-        });
+        // As the server's event will: off the channel, out of any thread, and a thread under it gone too.
+        self.shared.instance(key, |i| store::delete_message(i, channel_id, message_id));
         Ok(())
     }
 

@@ -43,6 +43,7 @@ mod shared_marks;
 mod sidebar;
 pub mod text;
 pub mod theme;
+pub(crate) mod threads;
 mod timestamps;
 mod update;
 mod voice_notes;
