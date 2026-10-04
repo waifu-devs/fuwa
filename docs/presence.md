@@ -99,10 +99,33 @@ artwork back without anyone contacting Discord.
 ## Discord compatibility (desktop app)
 
 Games and apps report what you're doing to Discord through its local RPC.
-The desktop app listens in the same places (the `discord-ipc-N` socket or
-pipe, taking the first free number so a running Discord keeps its own), so
-an unmodified game that uses discord-rpc, the Discord Game SDK or pypresence
-shows up in fuwa. The first time an app connects you're asked whether it may
-show what you're doing, naming its process. It answers with a placeholder
-user, never anything about you. Details are in the desktop app's
-`core/presence/` once it lands.
+The desktop app listens in the same places, so an unmodified game that uses
+discord-rpc, the Discord Game SDK or pypresence shows up in fuwa
+(`desktop/src/core/presence/`):
+
+- Where: the Unix socket `discord-ipc-0` to `-9` in `$XDG_RUNTIME_DIR` (else
+  `$TMPDIR`, `$TMP`, `$TEMP`, `/tmp`, as the libraries search), or the
+  Windows pipe `\\.\pipe\discord-ipc-N`, taking the first free number so a
+  running Discord keeps its own. A socket left behind by you is replaced;
+  anyone else's is left alone.
+- Who: only your own programs. The socket is made 0600 and each connection's
+  user is checked; Windows pipes refuse other computers, and their default
+  security lets other users read but not write.
+- What it speaks: the handshake, then `SET_ACTIVITY` (or null to clear it),
+  `SUBSCRIBE` and `UNSUBSCRIBE` (answered, nothing is ever sent), PING and
+  CLOSE. Anything else gets an error with a fixed message. READY carries a
+  placeholder user, never anything about you. Frames over 64 KiB end the
+  connection, 16 programs connect at once, and a program has 10 seconds to
+  say hello.
+- Asking: the first time a program connects you're asked whether it may
+  show what you're playing, naming its process (on Windows, which doesn't
+  say, the Discord id it gave). Allow and Don't allow are remembered; closing
+  the question asks again the next time the app starts. Privacy settings
+  list every answer with "Ask again", and "Show what you're playing" turns
+  the listening off.
+- What goes out: allowed programs' activities, newest first, one per game
+  and at most five, named after the program (Discord names them from its
+  own application pages). Text is cut to fit what instances take, links must
+  be https, and Discord's picture keys are left out. The desktop app updates
+  its presence on each instance every minute and two seconds after a game's
+  activity changes; your presence settings there decide who sees it.
