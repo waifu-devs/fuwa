@@ -21,8 +21,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::Router;
-use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::body::Body;
+use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -42,7 +42,7 @@ pub const PATH: &str = "/mcp";
 pub const SDK: &str = "@waifu-devs/fuwa";
 
 /// The largest request: a picture upload carries its bytes as base64.
-const MAX_BODY: usize = 12 * 1024 * 1024;
+pub(crate) const MAX_BODY: usize = 12 * 1024 * 1024;
 
 /// Requests one agent may make, per gateway (or single process): a burst of
 /// `BURST`, refilled at `PER_MINUTE` a minute.
@@ -62,7 +62,6 @@ pub fn routes(inner: Router, settings: Arc<dyn HasSettings>) -> Router {
     Router::new()
         .route(PATH, post(answer).get(no_stream).delete(no_stream))
         .route("/.well-known/mcp.json", get(card))
-        .layer(DefaultBodyLimit::max(MAX_BODY))
         .with_state(mcp)
 }
 
@@ -143,14 +142,14 @@ async fn card(State(mcp): State<Arc<Mcp>>) -> Response {
     response
 }
 
-async fn answer(State(mcp): State<Arc<Mcp>>, headers: HeaderMap, body: Bytes) -> Response {
+async fn answer(State(mcp): State<Arc<Mcp>>, headers: HeaderMap, body: Body) -> Response {
     let started = Instant::now();
-    let response = answer_inner(&mcp, &headers, &body).await;
+    let response = answer_inner(&mcp, &headers, body).await;
     crate::reports::server_timing("mcp.request", started.elapsed());
     response
 }
 
-async fn answer_inner(mcp: &Mcp, headers: &HeaderMap, body: &[u8]) -> Response {
+async fn answer_inner(mcp: &Mcp, headers: &HeaderMap, body: Body) -> Response {
     let settings = mcp.settings.settings();
     if !settings.mcp {
         return plain(StatusCode::NOT_FOUND, "MCP is off on this instance");
@@ -200,7 +199,11 @@ async fn answer_inner(mcp: &Mcp, headers: &HeaderMap, body: &[u8]) -> Response {
             .into_response();
     }
 
-    let message: Value = match serde_json::from_slice(body) {
+    // Read only once the token and the limit say yes.
+    let Ok(body) = axum::body::to_bytes(body, MAX_BODY).await else {
+        return plain(StatusCode::PAYLOAD_TOO_LARGE, "that request is too big");
+    };
+    let message: Value = match serde_json::from_slice(&body) {
         Ok(message) => message,
         Err(_) => return rpc(Value::Null, Err(RpcError { code: -32700, message: "that isn't JSON".into() })),
     };

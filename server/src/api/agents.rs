@@ -29,11 +29,13 @@ struct StoredMcpAccess {
 
 impl StoredMcpAccess {
     fn parse(json: &str) -> pb::McpAccess {
-        let stored: Self =
-            if json.is_empty() { Self::default() } else { serde_json::from_str(json).unwrap_or_default() };
-        let mode = match pb::McpAccessMode::try_from(stored.mode).unwrap_or_default() {
-            pb::McpAccessMode::Unspecified => pb::McpAccessMode::All,
-            mode => mode,
+        // Something that doesn't read keeps every agent out rather than letting all in.
+        let closed = Self { mode: pb::McpAccessMode::Off as i32, agents: vec![] };
+        let stored: Self = if json.is_empty() { Self::default() } else { serde_json::from_str(json).unwrap_or(closed) };
+        let mode = match pb::McpAccessMode::try_from(stored.mode) {
+            Ok(pb::McpAccessMode::Unspecified) => pb::McpAccessMode::All,
+            Ok(mode) => mode,
+            Err(_) => pb::McpAccessMode::Off,
         };
         let agent_ids = if mode == pb::McpAccessMode::Chosen { stored.agents } else { vec![] };
         pb::McpAccess { mode: mode as i32, agent_ids }
@@ -48,7 +50,8 @@ async fn load_mcp_access(conn: &turso::Connection) -> Result<pb::McpAccess> {
 }
 
 impl Api {
-    /// The caller, who must be a person: agents don't make or manage agents.
+    /// The caller, who must be a person: agents don't make or manage agents,
+    /// or choose which agents use MCP.
     async fn person(&self, metadata: &tonic::metadata::MetadataMap) -> Result<Account> {
         let account = self.account(metadata).await?;
         if account.kind == pb::AccountKind::Agent {
@@ -194,6 +197,20 @@ impl Api {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_access_fails_closed() {
+        assert_eq!(StoredMcpAccess::parse("").mode, pb::McpAccessMode::All as i32);
+        assert_eq!(StoredMcpAccess::parse("not json").mode, pb::McpAccessMode::Off as i32);
+        assert_eq!(StoredMcpAccess::parse(r#"{"mode":99}"#).mode, pb::McpAccessMode::Off as i32);
+        let chosen = StoredMcpAccess::parse(r#"{"mode":2,"agents":["a"]}"#);
+        assert_eq!((chosen.mode, chosen.agent_ids), (pb::McpAccessMode::Chosen as i32, vec!["a".to_string()]));
+    }
+}
+
 #[tonic::async_trait]
 impl AgentService for Api {
     async fn get_mcp_access(
@@ -217,7 +234,8 @@ impl AgentService for Api {
     ) -> Result<Response<pb::SetMcpAccessResponse>, Status> {
         respond(
             async {
-                let account = self.account(request.metadata()).await?;
+                // People decide which agents get in, never an agent, whatever its roles.
+                let account = self.person(request.metadata()).await?;
                 let access = Api::set_mcp_access(self, &account, request.into_inner()).await?;
                 Ok(pb::SetMcpAccessResponse { access: Some(access) })
             }

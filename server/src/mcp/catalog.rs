@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 use tonic::Status;
 
-use super::tools::{list_channels, list_messages, list_roles, may_use};
+use super::tools::{list_channels, list_messages, list_roles, may_use, usable_servers};
 use super::{Cx, RpcError, call, view};
 use crate::pb;
 
@@ -38,8 +38,8 @@ pub async fn list_resources(cx: &Cx) -> Result<Value, RpcError> {
         "description": "This instance and the agent's account on it.",
         "mimeType": "application/json"
     })];
-    if let Ok(r) = call!(cx, server_service_client::ServerServiceClient.list_servers(pb::ListServersRequest {})) {
-        resources.extend(r.servers.iter().map(|s| {
+    if let Ok(servers) = usable_servers(cx).await {
+        resources.extend(servers.iter().map(|s| {
             json!({
                 "uri": format!("fuwa://servers/{}", s.id),
                 "name": format!("server-{}", s.id),

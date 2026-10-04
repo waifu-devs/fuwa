@@ -448,8 +448,7 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
         "get_me" => call!(cx, auth_service_client::AuthServiceClient.get_me(pb::GetMeRequest {})).map(|me| {
             json!({ "user": me.user.as_ref().map(view::user), "instance": cx.instance, "version": crate::VERSION })
         }),
-        "list_servers" => call!(cx, server_service_client::ServerServiceClient.list_servers(pb::ListServersRequest {}))
-            .map(|r| json!({ "servers": r.servers.iter().map(view::server).collect::<Vec<_>>() })),
+        "list_servers" => usable_servers(cx).await.map(|servers| json!({ "servers": servers.iter().map(view::server).collect::<Vec<_>>() })),
         "get_server" => {
             let req = pb::GetServerRequest { server_id: sid()? };
             call!(cx, server_service_client::ServerServiceClient.get_server(req))
@@ -582,6 +581,14 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
     })
 }
 
+/// The agent's servers whose managers let it use them through MCP.
+pub(crate) async fn usable_servers(cx: &Cx) -> Result<Vec<pb::Server>, Status> {
+    let servers =
+        call!(cx, server_service_client::ServerServiceClient.list_servers(pb::ListServersRequest {}))?.servers;
+    let allowed = futures::future::join_all(servers.iter().map(|s| may_use(cx, &s.id))).await;
+    Ok(servers.into_iter().zip(allowed).filter(|(_, allowed)| allowed.is_ok()).map(|(s, _)| s).collect())
+}
+
 pub(crate) async fn list_channels(cx: &Cx, server_id: String) -> Result<Value, Status> {
     call!(cx, channel_service_client::ChannelServiceClient.list_channels(pb::ListChannelsRequest { server_id }))
         .map(|r| json!({ "channels": r.channels.iter().map(view::channel).collect::<Vec<_>>() }))
@@ -641,8 +648,15 @@ async fn upload_picture(cx: &Cx, args: &Args<'_>) -> Result<Result<Value, Status
         "server_icon" => pb::MediaPurpose::ServerIcon,
         _ => return Err(RpcError::invalid("purpose must be emoji or server_icon")),
     };
+    let encoded = match args.0.get("data_base64") {
+        Some(Value::String(s)) if !s.trim().is_empty() => s.trim(),
+        _ => return Err(RpcError::invalid("data_base64 is needed, as a string")),
+    };
+    if encoded.len() > super::MAX_BODY {
+        return Err(RpcError::invalid("that picture is too big"));
+    }
     let data = base64::engine::general_purpose::STANDARD
-        .decode(args.text("data_base64")?.trim())
+        .decode(encoded)
         .map_err(|_| RpcError::invalid("data_base64 isn't base64"))?;
     let req = pb::CreateUploadRequest {
         purpose: purpose as i32,

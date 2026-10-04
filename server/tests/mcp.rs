@@ -454,7 +454,40 @@ async fn managers_pick_which_agents_and_admins_turn_it_off() {
         "only managers"
     );
 
+    // Not even an agent that manages the server: people decide.
+    let mut roles = pb::role_service_client::RoleServiceClient::new(w.channel.clone());
+    let managers = roles
+        .create_role(authed(
+            &w.owner,
+            pb::CreateRoleRequest {
+                server_id: sid.into(),
+                name: "Managers".into(),
+                permissions: vec![pb::Permission::ManageServer as i32],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .role
+        .unwrap();
+    roles
+        .add_member_role(authed(
+            &w.owner,
+            pb::AddMemberRoleRequest { server_id: sid.into(), user_id: w.agent_id.clone(), role_id: managers.id },
+        ))
+        .await
+        .unwrap();
     agents.set_mcp_access(authed(&w.owner, set(pb::McpAccessMode::Off, vec![]))).await.unwrap();
+    assert_eq!(
+        agents.set_mcp_access(authed(&w.agent, set(pb::McpAccessMode::All, vec![]))).await.unwrap_err().code(),
+        tonic::Code::PermissionDenied,
+        "an agent can't let itself back in"
+    );
+    let listed = tool(&instance, &w.agent, "list_servers", json!({})).await.unwrap();
+    assert_eq!(listed["servers"], json!([]), "servers that keep the agent out aren't listed");
+    let resources = rpc(&instance, &w.agent, "resources/list", json!({})).await;
+    assert_eq!(resources["result"]["resources"].as_array().unwrap().len(), 1);
     let off = tool(&instance, &w.agent, "list_channels", json!({ "server_id": sid })).await.unwrap_err();
     assert!(off.contains("haven't let this agent"), "{off}");
     let read = rpc(&instance, &w.agent, "resources/read", json!({ "uri": format!("fuwa://servers/{sid}") })).await;
