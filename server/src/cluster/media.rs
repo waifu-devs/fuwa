@@ -140,8 +140,9 @@ pub async fn run(config: Config, address: SocketAddr) -> Result<(), String> {
     );
     crate::app::spawn_signal_handler(shutdown.clone());
     let stopping = shutdown.clone();
-    let served =
-        axum::serve(listener, router).with_graceful_shutdown(async move { stopping.cancelled().await }).into_future();
+    let served = axum::serve(crate::app::no_delay(listener), router)
+        .with_graceful_shutdown(async move { stopping.cancelled().await })
+        .into_future();
     let calls = async {
         shutdown.cancelled().await;
         calls_stop.cancel();

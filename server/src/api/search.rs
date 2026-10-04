@@ -321,7 +321,7 @@ impl Indexer {
             self.building.remove(id);
             return Ok(());
         };
-        let mut current = state(&sdb.read()?).await?;
+        let mut current = state(&*sdb.read()?).await?;
         if current.version != words::VERSION {
             self.building.remove(id);
             current = rebuild(&sdb).await?;
@@ -378,13 +378,13 @@ impl Indexer {
             self.building.remove(id);
             return Ok(());
         };
-        let current = state(&sdb.read()?).await?;
+        let current = state(&*sdb.read()?).await?;
         let Some(before) = current.backfill else {
             self.building.remove(id);
             return Ok(());
         };
         let started = Instant::now();
-        let batch = messages::older(&sdb.read()?, &sdb.id, &before, BACKFILL_BATCH).await?;
+        let batch = messages::older(&*sdb.read()?, &sdb.id, &before, BACKFILL_BATCH).await?;
         let next = batch.last().map(|m| m.id.clone());
         let Some(building) = self.building.get(id) else { return Ok(()) };
         let known = &building.known;
@@ -443,7 +443,7 @@ async fn rebuild(sdb: &ServerDb) -> Result<State> {
         Ok(())
     })
     .await?;
-    state(&sdb.read()?).await
+    state(&*sdb.read()?).await
 }
 
 // ── Finding ─────────────────────────────────────────────────────────────────

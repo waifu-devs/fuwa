@@ -246,9 +246,14 @@ fn recording_row(r: &Row) -> turso::Result<RecordingRow> {
 }
 
 impl ServerDb {
+    /// Writes let in since the file opened, and writes running or waiting now.
+    pub fn load(&self) -> (u64, usize) {
+        (self.db.writes(), self.db.queued())
+    }
+
     /// A connection for reading.
-    pub fn read(&self) -> Result<Connection> {
-        db::connect(&self.db)
+    pub fn read(&self) -> Result<db::Pooled> {
+        self.db.conn()
     }
 
     /// Runs a change in one concurrent transaction, alongside other writes to
@@ -266,13 +271,14 @@ impl ServerDb {
         f: impl AsyncFnOnce(&Connection, &mut Vec<Payload>) -> Result<T> + Clone,
     ) -> Result<T> {
         self.writable()?;
-        let shared = self.db.shared().await;
+        let writing = self.db.writing().await?;
         self.writable()?;
         let value = self.run(actor_id, f).await;
-        drop(shared);
+        drop(writing);
         if value.is_ok() {
             self.fold_now_and_then().await;
         }
+        self.db.fold_if_big();
         value
     }
 
@@ -285,9 +291,13 @@ impl ServerDb {
         f: impl AsyncFnOnce(&Connection, &mut Vec<Payload>) -> Result<T> + Clone,
     ) -> Result<T> {
         self.writable()?;
-        let _alone = self.db.alone().await;
-        self.writable()?;
-        self.run(actor_id, f).await
+        let value = {
+            let _alone = self.db.alone().await;
+            self.writable()?;
+            self.run(actor_id, f).await
+        };
+        self.db.fold_if_big();
+        value
     }
 
     /// Runs a change that sends no events, alongside other writes, in its own
@@ -316,7 +326,7 @@ impl ServerDb {
         actor_id: &str,
         f: impl AsyncFnOnce(&Connection, &mut Vec<Payload>) -> Result<T> + Clone,
     ) -> Result<T> {
-        let conn = db::connect(&self.db)?;
+        let conn = self.db.conn()?;
         let mut attempt = 0;
         loop {
             db::begin(&conn).await?;
@@ -1217,7 +1227,7 @@ impl Servers {
         {
             // Wait out any write in flight, then settle the logs into the main file.
             let _alone = sdb.db.alone().await;
-            let _ = db::pragma(&sdb.read()?, "PRAGMA wal_checkpoint(TRUNCATE)").await;
+            let _ = db::pragma(&*sdb.read()?, "PRAGMA wal_checkpoint(TRUNCATE)").await;
             std::fs::create_dir_all(&self.trash)?;
             let stamp = now_ms();
             for suffix in SIDECARS {
