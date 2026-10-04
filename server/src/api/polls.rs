@@ -8,9 +8,11 @@
 //! voter; ListPollVoters refuses them; exports leave their votes out; and
 //! their counts stay hidden until they close (a count going up by one right
 //! after someone was seen typing would say what they picked). When one
-//! closes, its votes and key are deleted and only the counts are kept. What
-//! remains: while it runs, the operator holds the key and the votes in the
-//! same file, so someone with the database could work out who voted for what.
+//! closes, its votes and key are deleted from the live tables and only the
+//! counts are kept. What remains: while it runs, the operator holds the key
+//! and the votes in the same file, so someone with the database could work
+//! out who voted for what, and the replica's history and the file's log can
+//! hold deleted rows for a while after.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -462,16 +464,22 @@ pub(crate) async fn forget_voter(conn: &turso::Connection, account_id: &str, eve
         |r| r.get::<String>(0),
     )
     .await?;
-    let keyed = query_all(conn, "SELECT message_id, voter_key FROM polls WHERE voter_key IS NOT NULL", (), |r| {
-        Ok((r.get::<String>(0)?, r.get::<Vec<u8>>(1)?))
-    })
+    // Anonymous polls past their time, not yet sealed, show their counts:
+    // taking a vote off one now would show what it was, so it stays.
+    let now = now_ms();
+    let keyed = query_all(
+        conn,
+        "SELECT message_id, voter_key FROM polls
+         WHERE voter_key IS NOT NULL AND ended_at IS NULL AND (ends_at IS NULL OR ends_at > ?1)",
+        [now],
+        |r| Ok((r.get::<String>(0)?, r.get::<Vec<u8>>(1)?)),
+    )
     .await?;
     for (message_id, key) in keyed {
         if !mine(conn, &message_id, &voter(Some(&key), account_id)).await?.is_empty() {
             polls.push(message_id);
         }
     }
-    let now = now_ms();
     for message_id in polls {
         let Some(Row { mut poll, channel_id, mut tally, voter_key, .. }) = load(conn, &message_id).await? else {
             continue;

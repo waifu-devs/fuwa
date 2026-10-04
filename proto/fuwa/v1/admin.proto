@@ -162,8 +162,8 @@ message InstanceSettings {
   repeated string federation_blocked_hosts = 35;
   // How many votes (picks, changes and take-backs) one account may make in
   // polls in a minute; unset for no cap. FUWA_LIMIT_POLL_VOTES_PER_MINUTE.
-  // (36 and 37 are voice messages'.)
-  optional int64 poll_votes_per_minute = 38;
+  // (36 to 38 are voice messages', 39 and 40 attachments'.)
+  optional int64 poll_votes_per_minute = 44;
 }
 
 // One moderation provider, as the instance's admins set it up: one fuwa

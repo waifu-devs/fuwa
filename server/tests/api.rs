@@ -6884,6 +6884,34 @@ async fn polls_count_votes_and_keep_anonymous_ones_secret() {
         .unwrap();
     assert!(stored.actor_id.is_empty());
 
+    // An export leaves the running anonymous poll's votes and key out,
+    // without any of it left in the file's free pages.
+    let mut pieces = c
+        .admin
+        .export_server(authed(&juan, pb::ExportServerRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    let mut bytes = Vec::new();
+    while let Some(piece) = pieces.next().await {
+        bytes.extend_from_slice(&piece.unwrap().chunk);
+    }
+    let keyed_voter = bytes.windows(64).any(|w| w.iter().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b)));
+    assert!(!keyed_voter, "an anonymous voter is in the export");
+    let copy = dir.path().join("export.db");
+    std::fs::write(&copy, &bytes).unwrap();
+    let exported = turso::Builder::new_local(copy.to_str().unwrap()).build().await.unwrap();
+    let conn = exported.connect().unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT count(*) FROM poll_votes v JOIN polls p ON p.message_id = v.message_id
+             WHERE p.anonymous = 1 OR p.voter_key IS NOT NULL",
+            (),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 0);
+
     // Only its creator or a moderator ends a poll; a moderator ending
     // someone else's is in the audit log, and then nobody can vote.
     let err = c
