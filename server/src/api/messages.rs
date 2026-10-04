@@ -266,6 +266,44 @@ pub(super) async fn load_message(
     .transpose()
 }
 
+/// Messages in any channel with ids below `before_id`, newest first: for
+/// building the search index.
+pub(super) async fn older(
+    conn: &turso::Connection,
+    server_id: &str,
+    before_id: &str,
+    limit: i64,
+) -> Result<Vec<pb::Message>> {
+    query_all(
+        conn,
+        &format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE id < ?1 ORDER BY id DESC LIMIT ?2"),
+        (before_id, limit),
+        message_row(server_id),
+    )
+    .await?
+    .into_iter()
+    .map(with_extras)
+    .collect()
+}
+
+/// The messages with these ids that are still there, in no order.
+pub(super) async fn by_ids(conn: &turso::Connection, server_id: &str, ids: &[&str]) -> Result<Vec<pb::Message>> {
+    if ids.is_empty() {
+        return Ok(vec![]);
+    }
+    let placeholders = (1..=ids.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+    query_all(
+        conn,
+        &format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE id IN ({placeholders})"),
+        ids.iter().map(|id| turso::Value::from(*id)).collect::<Vec<_>>(),
+        message_row(server_id),
+    )
+    .await?
+    .into_iter()
+    .map(with_extras)
+    .collect()
+}
+
 pub(super) fn check_content(content: &str, has_extras: bool) -> Result<()> {
     if content.trim().is_empty() && !has_extras {
         return Err(Error::invalid("a message needs text, an attachment, an embed or a GIF"));
