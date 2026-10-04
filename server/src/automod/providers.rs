@@ -922,6 +922,20 @@ fn read_answers(body: &Value) -> std::result::Result<Scores, Failure> {
         .collect()
 }
 
+/// The text a provider gets for a message: its own text clipped first, so
+/// what else its sender wrote (a poll, embeds' words, file names) still
+/// fits in [`MAX_TEXT`].
+pub fn fitted(text: super::Text) -> String {
+    let Some(rest) = text.all.strip_prefix(text.content) else { return text.all.to_string() };
+    let rest = rest.strip_prefix('\n').unwrap_or(rest);
+    if rest.is_empty() || text.content.is_empty() {
+        return text.all.to_string();
+    }
+    let room = MAX_TEXT.saturating_sub(rest.chars().count() + 1);
+    let content: String = text.content.chars().take(room).collect();
+    if content.is_empty() { rest.to_string() } else { format!("{content}\n{rest}") }
+}
+
 /// A message's text as it goes to a provider: people, roles, channels and
 /// custom emoji written by id or name become placeholders, so no ids or names
 /// leave the instance, and only the first [`MAX_TEXT`] characters go.
@@ -989,6 +1003,14 @@ mod tests {
         assert_eq!(outgoing("@everyone mail me at a@b.com. @mika."), "@everyone mail me at a@b.com. @someone.");
         assert_eq!(outgoing("1 < 2 > 0 <not a tag>"), "1 < 2 > 0 <not a tag>");
         assert_eq!(outgoing(&"é".repeat(5000)).chars().count(), MAX_TEXT);
+        // The message's own text is clipped first, so the rest fits.
+        let content = "a".repeat(MAX_TEXT);
+        let all = format!("{content}\nFree nitro\nsteam gift card.png");
+        let sent = fitted(super::super::Text { all: &all, content: &content });
+        assert_eq!(sent.chars().count(), MAX_TEXT);
+        assert!(sent.ends_with("\nFree nitro\nsteam gift card.png"));
+        assert_eq!(fitted(super::super::Text::plain("hi")), "hi");
+        assert_eq!(fitted(super::super::Text { all: "a.png", content: "" }), "a.png");
     }
 
     #[test]

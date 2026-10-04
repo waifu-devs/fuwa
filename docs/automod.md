@@ -26,8 +26,10 @@ that turns fuwa's questions into another provider's.
   channels or addresses. The text is what its sender wrote anywhere in it,
   each on its own line in one request: the message, a poll's question and
   answers, the title, description and fields of embeds the sender made, and
-  its files' names (as shown, nothing read from their shape). Keyword, link
-  and mention rules read the same text. Mentions become `@someone`, `@role` and `#channel`,
+  its files' names (as shown, nothing read from their shape). When that
+  passes 4,000 characters, the message's own text is cut first so the rest
+  still goes. Keyword and link rules read the same text; mention spam counts
+  only the message's own text, the only part that pings anyone. Mentions become `@someone`, `@role` and `#channel`,
   custom emoji become `:emoji:`, and only the first 4,000 characters go.
   Messages in DMs and secure channels are end-to-end encrypted and never go.
 - Pictures go only to providers that read them (Cloudflare Clef), and only

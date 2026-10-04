@@ -867,7 +867,16 @@ impl MessageService for Api {
                 // goes out at once, and its answer is acted on when it comes.
                 let (asked, later) = (
                     None,
-                    automod::ask_after(&self.app, &sdb, &member, &access, &req.channel_id, &reviewed, &pictures).await,
+                    automod::ask_after(
+                        &self.app,
+                        &sdb,
+                        &member,
+                        &access,
+                        &req.channel_id,
+                        automod::Text { all: &reviewed, content: &req.content },
+                        &pictures,
+                    )
+                    .await,
                 );
                 let message = sdb
                     .write(&account.id, async |conn, events| {
@@ -899,7 +908,7 @@ impl MessageService for Api {
                             &member,
                             &access,
                             &channel,
-                            &reviewed,
+                            automod::Text { all: &reviewed, content: &req.content },
                             asked.as_ref(),
                             events,
                         )
@@ -1115,8 +1124,16 @@ impl MessageService for Api {
                         let pictures = automod::picture_links(&[], &[], &added);
                         (
                             None,
-                            automod::ask_after(&self.app, &sdb, &member, &access, &m.channel_id, &reviewed, &pictures)
-                                .await,
+                            automod::ask_after(
+                                &self.app,
+                                &sdb,
+                                &member,
+                                &access,
+                                &m.channel_id,
+                                automod::Text { all: &reviewed, content: &req.content },
+                                &pictures,
+                            )
+                            .await,
                         )
                     }
                     _ => (None, None),
@@ -1150,7 +1167,7 @@ impl MessageService for Api {
                                 &member,
                                 &access,
                                 &channel,
-                                &reviewed,
+                                automod::Text { all: &reviewed, content: &req.content },
                                 asked.as_ref(),
                                 events,
                             )

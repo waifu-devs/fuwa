@@ -5,6 +5,7 @@ use prost::Message as _;
 use tonic::{Request, Response, Status};
 
 use super::{Api, respond, text};
+pub(super) use crate::automod::Text;
 use crate::automod::{self, providers};
 use crate::error::{Error, Result};
 use crate::id::{millis, new_id, now_ms, timestamp};
@@ -297,10 +298,10 @@ pub(super) async fn ask(
     member: &pb::Member,
     access: &Access,
     channel_id: &str,
-    content: &str,
+    text: Text<'_>,
     pictures: &[String],
 ) -> Option<Asked> {
-    start(app, sdb, member, access, channel_id, content, pictures).await?.wait().await
+    start(app, sdb, member, access, channel_id, text, pictures).await?.wait().await
 }
 
 /// Starts asking, as [`ask`] does, without waiting for the answer.
@@ -311,10 +312,10 @@ pub(super) async fn start(
     member: &pb::Member,
     access: &Access,
     channel_id: &str,
-    content: &str,
+    text: Text<'_>,
     pictures: &[String],
 ) -> Option<Checking> {
-    if access.has(Permission::ManageServer) || (content.trim().is_empty() && pictures.is_empty()) {
+    if access.has(Permission::ManageServer) || (text.all.trim().is_empty() && pictures.is_empty()) {
         return None;
     }
     let conn = sdb.read().ok()?;
@@ -333,10 +334,11 @@ pub(super) async fn start(
     let setup = app.settings().automod_provider(&rule.provider)?.clone();
     let provider = setup.name().to_string();
     let pictures: Vec<String> = if rule.pictures && setup.reads_pictures() { pictures.to_vec() } else { vec![] };
-    if content.trim().is_empty() && pictures.is_empty() {
+    if text.all.trim().is_empty() && pictures.is_empty() {
         return None;
     }
-    let key = (sdb.id.clone(), setup.id.clone(), content.to_string(), pictures.clone());
+    let content = providers::fitted(text);
+    let key = (sdb.id.clone(), setup.id.clone(), content.clone(), pictures.clone());
     let checking = |answer| Some(Checking { rule_id: rule.id.clone(), provider: provider.clone(), answer });
     if let Some(answer) = asking().get(&key).cloned() {
         return checking(answer);
@@ -355,7 +357,7 @@ pub(super) async fn start(
         Box::pin(async move { rx.await.ok().flatten() }) as futures::future::BoxFuture<'static, _>
     );
     asking().insert(key.clone(), answer.clone());
-    let (app, content) = (app.clone(), content.to_string());
+    let app = app.clone();
     tokio::spawn(async move {
         let pictures = read_pictures(&app, &pictures).await;
         let answer = providers::check(&setup, &content, &pictures).await.0.ok();
@@ -374,10 +376,10 @@ pub(super) async fn ask_after(
     member: &pb::Member,
     access: &Access,
     channel_id: &str,
-    content: &str,
+    text: Text<'_>,
     pictures: &[String],
 ) -> Option<Checking> {
-    start(app, sdb, member, access, channel_id, content, pictures).await
+    start(app, sdb, member, access, channel_id, text, pictures).await
 }
 
 impl Checking {
@@ -644,10 +646,11 @@ pub(super) async fn review(
     member: &pb::Member,
     access: &Access,
     channel: &pb::Channel,
-    content: &str,
+    text: automod::Text<'_>,
     asked: Option<&Asked>,
     events: &mut Vec<Payload>,
 ) -> Result<Verdict> {
+    let content = text.all;
     // Managers and administrators are trusted, as on Discord. A message
     // with no text (pictures only) is still up to its provider's answer.
     if access.has(Permission::ManageServer) || (content.trim().is_empty() && asked.is_none()) {
@@ -667,7 +670,7 @@ pub(super) async fn review(
             if let Some((level, hit)) = answer.and_then(|a| automod::provider_hit(&rule, &a.scores)) {
                 caught.push((effective(&rule, Some(level)), hit));
             }
-        } else if let Some(hit) = automod::check(&rule, content) {
+        } else if let Some(hit) = automod::check_text(&rule, text) {
             caught.push((rule, hit));
         }
     }

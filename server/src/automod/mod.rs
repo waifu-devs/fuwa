@@ -14,12 +14,35 @@ pub struct Hit {
     pub matched: Vec<String>,
 }
 
+/// What the rules read of a message: everything its sender wrote in it (its
+/// text, poll, embeds' words, file names), and its text alone, the only part
+/// that pings anyone.
+#[derive(Debug, Clone, Copy)]
+pub struct Text<'a> {
+    pub all: &'a str,
+    pub content: &'a str,
+}
+
+impl<'a> Text<'a> {
+    /// A message that's text and nothing else.
+    pub fn plain(content: &'a str) -> Self {
+        Self { all: content, content }
+    }
+}
+
 /// Whether `rule` catches `content`, ignoring whether it's on or who wrote it.
 pub fn check(rule: &pb::AutoModRule, content: &str) -> Option<Hit> {
+    check_text(rule, Text::plain(content))
+}
+
+/// Whether `rule` catches a message's `text`: mention spam counts the pings
+/// of its text alone, every other rule reads all of it.
+pub fn check_text(rule: &pb::AutoModRule, text: Text) -> Option<Hit> {
+    let content = text.all;
     let matched = match Trigger::try_from(rule.trigger).unwrap_or(Trigger::Unspecified) {
         Trigger::Keywords => keyword_hits(&rule.keywords, &rule.allowed, content),
         Trigger::MentionSpam => {
-            let pings = pings(content);
+            let pings = pings(text.content);
             if rule.mention_limit > 0 && pings > rule.mention_limit as usize {
                 vec![format!("{pings} pings")]
             } else {
@@ -209,6 +232,14 @@ mod tests {
 
     fn hits(rule: &pb::AutoModRule, content: &str) -> Vec<String> {
         check(rule, content).map(|h| h.matched).unwrap_or_default()
+    }
+
+    #[test]
+    fn mention_spam_counts_only_what_pings() {
+        let rule = pb::AutoModRule { trigger: Trigger::MentionSpam as i32, mention_limit: 1, ..Default::default() };
+        let all = "hi\n@a @b @c";
+        assert!(check_text(&rule, Text { all, content: "hi" }).is_none());
+        assert!(check_text(&rule, Text::plain(all)).is_some());
     }
 
     #[test]
