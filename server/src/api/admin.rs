@@ -461,7 +461,7 @@ impl AdminService for Api {
         &self,
         request: Request<pb::ExportServerRequest>,
     ) -> Result<Response<Self::ExportServerStream>, Status> {
-        let viewer = self.require_instance_admin(request.metadata()).await?;
+        self.require_instance_admin(request.metadata()).await?;
         let sdb = self.app.servers.get(&request.get_ref().server_id).await?;
         let server = sdb.server().await?;
         let dir = self.app.config.data_path.join("exports");
@@ -472,8 +472,8 @@ impl AdminService for Api {
             return Err(err.into());
         }
         let size = std::fs::metadata(&path).map_err(Error::from)?.len() as i64;
-        let by = viewer.account().map(|a| a.id.clone()).unwrap_or_else(|_| "operator".into());
-        tracing::info!(server = %sdb.id, bytes = size, by = %by, "server exported");
+        // No account id: these logs can be public.
+        tracing::info!(server = %sdb.id, bytes = size, "server exported");
 
         let filename = format!("{}.db", file_slug(&server.name));
         let (tx, rx) = mpsc::channel::<Result<pb::ExportServerResponse, Status>>(4);

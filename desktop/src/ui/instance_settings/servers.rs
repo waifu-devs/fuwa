@@ -1391,7 +1391,16 @@ impl InstanceSettingsView {
                     cx.notify();
                 })),
         );
-        let mut section = div().flex().flex_col().gap(px(12.0)).child(row);
+        let mut section = div().flex().flex_col().gap(px(12.0)).child(row).child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_xs()
+                .text_color(p.muted_foreground)
+                .child(icon("lock-open").size(px(13.0)))
+                .child("Its file isn't encrypted: it holds everything said in the server. Keep it somewhere safe."),
+        );
         if deleting {
             let typed = self.servers.confirm.read(cx).value().to_string();
             let armed = typed == s.name;

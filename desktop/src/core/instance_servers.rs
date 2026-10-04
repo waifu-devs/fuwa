@@ -211,7 +211,9 @@ impl Core {
     }
 
     /// Saves a server's whole file to `path` as it arrives, telling
-    /// `progress` how far along it is (0 to 1). A half-written file is removed.
+    /// `progress` how far along it is (0 to 1). It's written beside `path`
+    /// first and put in place only once it's whole, so a failed save leaves
+    /// whatever was at `path` as it was.
     pub async fn export_server(
         &self,
         key: &str,
@@ -229,7 +231,10 @@ impl Core {
         .map_err(Problem::from)?
         .into_inner();
         let fail = |e: std::io::Error| Problem::new(Code::Internal, format!("Couldn't save the file: {e}"));
-        let mut file = std::fs::File::create(path).map_err(fail)?;
+        let mut name = path.file_name().unwrap_or_default().to_os_string();
+        name.push(".part");
+        let part_path = path.with_file_name(name);
+        let mut file = std::fs::File::create(&part_path).map_err(fail)?;
         let (mut bytes, mut total) = (0u64, 0u64);
         let result = async {
             loop {
@@ -245,13 +250,14 @@ impl Core {
                 bytes += part.chunk.len() as u64;
                 progress(if total > 0 { (bytes as f32 / total as f32).min(1.0) } else { 0.5 });
             }
-            file.flush().map_err(fail)?;
+            file.sync_all().map_err(fail)?;
             Ok::<_, Problem>(bytes)
         }
         .await;
+        drop(file);
+        let result = result.and_then(|bytes| std::fs::rename(&part_path, path).map(|()| bytes).map_err(fail));
         if result.is_err() {
-            drop(file);
-            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(&part_path);
         }
         result
     }

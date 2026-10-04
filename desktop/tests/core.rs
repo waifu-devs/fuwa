@@ -360,11 +360,11 @@ fn instance_admins_manage_every_server() {
     assert!(bytes.starts_with(b"SQLite format 3\0"));
     assert_eq!(seen.lock().unwrap().last().copied(), Some(1.0));
 
-    // A server that isn't there can't be saved, and leaves no file behind.
-    let missing = home.path().join("nothing.db");
-    let (core, k, to) = (app.clone(), key.clone(), missing.clone());
+    // A save that fails leaves the file it would have replaced as it was, and nothing beside it.
+    let (core, k, to) = (app.clone(), key.clone(), path.clone());
     assert!(wait(&app, async move { core.export_server(&k, "01NOPE", &to, |_| {}).await }).is_err());
-    assert!(!missing.exists());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert!(!home.path().join("book-nook.db.part").exists());
 
     // Deleting it takes it off the list.
     let (core, k, id) = (app.clone(), key.clone(), server.id.clone());
