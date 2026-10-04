@@ -184,7 +184,12 @@ async fn a_secure_channel_follows_its_permissions() {
     let refused = secure
         .post_secure_message(authed(
             &juan.token,
-            pb::PostSecureMessageRequest { server_id: sid.clone(), channel_id: cid.clone(), message: early },
+            pb::PostSecureMessageRequest {
+                server_id: sid.clone(),
+                channel_id: cid.clone(),
+                message: early,
+                ..Default::default()
+            },
         ))
         .await
         .unwrap_err();
@@ -258,7 +263,12 @@ async fn a_secure_channel_follows_its_permissions() {
     let sent = secure
         .post_secure_message(authed(
             &juan.token,
-            pb::PostSecureMessageRequest { server_id: sid.clone(), channel_id: cid.clone(), message: sealed },
+            pb::PostSecureMessageRequest {
+                server_id: sid.clone(),
+                channel_id: cid.clone(),
+                message: sealed,
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -283,6 +293,130 @@ async fn a_secure_channel_follows_its_permissions() {
             other => panic!("{other:?}"),
         }
     }
+
+    // Files ride sealed: an attachment upload for the server, its bytes
+    // ciphertext the instance can't open, tied to the record that carries it.
+    let http = reqwest::Client::new();
+    let mut media = pb::media_service_client::MediaServiceClient::new(channel.clone());
+    let sealed_bytes: Vec<u8> = (0..4096u32).map(|n| (n.wrapping_mul(2_654_435_761) >> 24) as u8).collect();
+    let upload = async |media: &mut pb::media_service_client::MediaServiceClient<Channel>, token: &str| {
+        let reserved = media
+            .create_upload(authed(
+                token,
+                pb::CreateUploadRequest {
+                    purpose: pb::MediaPurpose::Attachment as i32,
+                    content_type: "application/octet-stream".into(),
+                    size: sealed_bytes.len() as i64,
+                    server_id: sid.clone(),
+                },
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+        let put = http
+            .put(format!("http://{}{}", instance.addr, reqwest::Url::parse(&reserved.upload_url).unwrap().path()))
+            .body(sealed_bytes.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put.status(), reqwest::StatusCode::NO_CONTENT);
+        reserved.media.unwrap()
+    };
+    let served = async |url: &str| {
+        let path = reqwest::Url::parse(url).unwrap().path().to_string();
+        http.get(format!("http://{}{path}", instance.addr)).send().await.unwrap()
+    };
+    let with_files = |token: &str, message: Vec<u8>, media_ids: Vec<String>| {
+        authed(
+            token,
+            pb::PostSecureMessageRequest { server_id: sid.clone(), channel_id: cid.clone(), message, media_ids },
+        )
+    };
+    let file = upload(&mut media, &juan.token).await;
+
+    // Only your own uploads.
+    let message = mika.device.encrypt(&cid, b"not mine").unwrap();
+    let theirs = secure.post_secure_message(with_files(&mika.token, message, vec![file.id.clone()])).await.unwrap_err();
+    assert_eq!(theirs.code(), Code::PermissionDenied);
+
+    // And only where you may attach files.
+    let mika_file = upload(&mut media, &mika.token).await;
+    let no_files = |deny: Vec<i32>| pb::SetChannelPermissionsRequest {
+        server_id: sid.clone(),
+        channel_id: cid.clone(),
+        overwrites: vec![pb::PermissionOverwrite {
+            target_id: mika.id.clone(),
+            target: pb::OverwriteTarget::Member as i32,
+            allow: vec![],
+            deny,
+        }],
+    };
+    channels
+        .set_channel_permissions(authed(&juan.token, no_files(vec![pb::Permission::AttachFiles as i32])))
+        .await
+        .unwrap();
+    let message = mika.device.encrypt(&cid, b"a file").unwrap();
+    let denied =
+        secure.post_secure_message(with_files(&mika.token, message, vec![mika_file.id.clone()])).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    channels.set_channel_permissions(authed(&juan.token, no_files(vec![]))).await.unwrap();
+
+    let message = juan.device.encrypt(&cid, b"the plans").unwrap();
+    let carried = secure
+        .post_secure_message(with_files(&juan.token, message, vec![file.id.clone()]))
+        .await
+        .unwrap()
+        .into_inner()
+        .record
+        .unwrap();
+    // Rin's stream has it too (taken here so the checks below start clean).
+    loop {
+        let event = rin_events.next().await.unwrap().unwrap();
+        if let Some(Payload::SecureRecordAdded(added)) = event.event.and_then(|e| e.payload)
+            && added.record.as_ref().is_some_and(|r| r.sequence == carried.sequence)
+        {
+            break;
+        }
+    }
+    for person in [&mika, &rin] {
+        let record = records(&mut secure, person, &sid, &cid, carried.sequence - 1).await.remove(0);
+        assert!(matches!(
+            person.device.process(&cid, &record.data, false, &everyone).unwrap(),
+            Processed::Message { plaintext, .. } if plaintext == b"the plans"
+        ));
+    }
+    let fetched = served(&file.url).await;
+    assert_eq!(fetched.status(), reqwest::StatusCode::OK);
+    assert_eq!(fetched.bytes().await.unwrap().to_vec(), sealed_bytes);
+
+    // One message carries a file.
+    let message = juan.device.encrypt(&cid, b"again").unwrap();
+    let twice = secure.post_secure_message(with_files(&juan.token, message, vec![file.id.clone()])).await.unwrap_err();
+    assert_eq!(twice.code(), Code::AlreadyExists);
+
+    // Kept past the sweep for unused uploads; deleting the message deletes it.
+    instance._app.sweep_media(i64::MAX / 2).await.unwrap();
+    assert_eq!(served(&file.url).await.status(), reqwest::StatusCode::OK);
+    secure
+        .delete_secure_record(authed(
+            &juan.token,
+            pb::DeleteSecureRecordRequest {
+                server_id: sid.clone(),
+                channel_id: cid.clone(),
+                sequence: carried.sequence,
+            },
+        ))
+        .await
+        .unwrap();
+    let mut gone = false;
+    for _ in 0..50 {
+        if served(&file.url).await.status() == reqwest::StatusCode::NOT_FOUND {
+            gone = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(gone, "a deleted secure message kept its file");
 
     // Rin loses access: the server stops showing the channel at once, and
     // the next device to write takes Rin's devices out of the group.
@@ -346,7 +480,12 @@ async fn a_secure_channel_follows_its_permissions() {
     let later = secure
         .post_secure_message(authed(
             &mika.token,
-            pb::PostSecureMessageRequest { server_id: sid.clone(), channel_id: cid.clone(), message: after },
+            pb::PostSecureMessageRequest {
+                server_id: sid.clone(),
+                channel_id: cid.clone(),
+                message: after,
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()

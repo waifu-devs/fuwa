@@ -51,7 +51,7 @@ const CANT = [
   { icon: ShieldOffIcon, text: "AutoMod can't check messages here" },
   { icon: SearchXIcon, text: "Search can't find them" },
   { icon: BotOffIcon, text: "Bots, agents and webhooks can't post or read" },
-  { icon: ImageOffIcon, text: "Links stay links: no previews or inline pictures" },
+  { icon: ImageOffIcon, text: "Links stay links: no previews or pictures from links" },
 ];
 
 const LATER = {
@@ -90,6 +90,7 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
   useEffect(() => () => setTitle("fuwa"), []);
 
   const canSend = hasIn(access, id, Permission.SEND_MESSAGES);
+  const canAttach = canSend && hasIn(access, id, Permission.ATTACH_FILES);
   const canReset = hasIn(access, id, Permission.MANAGE_CHANNELS);
   const broken = useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] === SECURE_BROKEN);
   const sharesHistory = useFuwa((s) => !!s.instances[instanceKey]?.dms.secureHistory[id]);
@@ -166,6 +167,7 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
           memberOf={memberOf}
           describe={describe}
           canSend={canSend}
+          canAttach={canAttach}
           canModerate={canModerate}
           onClose={closePanel}
         />
@@ -276,6 +278,8 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
               id={id}
               placeholder={`Message #${channel.name}`}
               promise="Only people in this channel can read this"
+              files={canAttach}
+              dropTo={channel.name}
               locked={canSend || broken ? "" : "You don't have permission to send messages in this channel."}
               action={broken ? canReset ? <ResetButton instanceKey={instanceKey} serverId={serverId} channelId={id} write={canSend} /> : null : undefined}
             />

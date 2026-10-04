@@ -13,6 +13,7 @@
     { "id": "agent-streams", "date": "2026-10-04", "title": "Agents following new servers" },
     { "id": "secure-threads", "date": "2026-10-04", "title": "Threads in secure channels" },
     { "id": "voice-messages-in-channels", "date": "2026-10-04", "title": "Voice messages in server channels" },
-    { "id": "video-recordings", "date": "2026-10-04", "title": "Video in server recordings" }
+    { "id": "video-recordings", "date": "2026-10-04", "title": "Video in server recordings" },
+    { "id": "secure-files", "date": "2026-10-04", "title": "Files in encrypted chats" }
   ]
 }

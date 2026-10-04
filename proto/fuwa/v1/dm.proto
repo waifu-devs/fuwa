@@ -290,9 +290,22 @@ message DeleteRecordResponse {}
 message CreateSealedUploadRequest {
   // The conversation the file is for.
   string conversation_id = 1;
-  // The sealed file's exact size in bytes. Sealed files are voice messages
-  // for now, so the instance's voice_message_bytes cap applies.
+  // The sealed file's exact size in bytes. Every sealed file counts toward
+  // the instance's attachment_upload_bytes_per_day; a voice message is also
+  // capped by voice_message_bytes and counted in voice_message_bytes_per_day,
+  // and any other file is capped by attachment_upload_bytes.
   int64 size = 2;
+  // What it is. The instance can't check (it can't open it), which is why
+  // every kind counts toward the attachment caps.
+  SealedKind kind = 3;
+}
+
+enum SealedKind {
+  // A voice message, as apps from before files sent them.
+  SEALED_KIND_UNSPECIFIED = 0;
+  SEALED_KIND_VOICE = 1;
+  // Any other file (DirectMessageText.files).
+  SEALED_KIND_FILE = 2;
 }
 
 message CreateSealedUploadResponse {
@@ -404,6 +417,9 @@ message DirectMessageText {
   int64 thread_sequence = 3;
   // A thread reply its author also sent to the channel.
   bool in_channel = 4;
+  // Files sent with it (up to 10), each sealed on the sender's device: their
+  // names, kinds and keys travel only in here. The text may be empty then.
+  repeated SealedFile files = 5;
 }
 
 // Locks or unlocks the thread under a secure channel's message. Devices take
@@ -446,8 +462,23 @@ message SealedFile {
   bytes sha256 = 4;
   // The stored bytes' size.
   int64 size = 5;
-  // What it is once opened, such as "audio/ogg; codecs=opus".
+  // What it is once opened, such as "audio/ogg; codecs=opus", as the sender
+  // said. Apps decide what to show inline from the opened bytes, never this.
   string content_type = 6;
+  // The file's name (no folders), at most 255 characters.
+  string name = 7;
+  // A picture's or video's size in pixels, so its place is kept while it
+  // opens; 0 when unknown or not one.
+  uint32 width = 8;
+  uint32 height = 9;
+  // 0: sealed in one piece (a 12-byte nonce, then the ciphertext and tag), as
+  // voice messages are. Otherwise the padded file is sealed in chunks of this
+  // many bytes (64 KiB to 8 MiB), each with its 16-byte tag, one after
+  // another; chunk i uses the nonce of 4 zero bytes then i as 8 big-endian
+  // bytes, with the top bit set on the last chunk.
+  uint32 chunk_bytes = 10;
+  // The file's own size before padding, to show before it's fetched.
+  int64 file_size = 11;
 }
 
 // ───────────────────────── Message backup ─────────────────────────
@@ -564,6 +595,9 @@ message BackupItem {
   // A voice message's file, key and waveform (BACKUP_ITEM_KIND_VOICE). The
   // file itself stays on the instance, until the message is deleted.
   DirectMessageVoice voice = 19;
+  // A text's files (DirectMessageText.files). The files themselves stay on
+  // the instance, until the message is deleted.
+  repeated SealedFile files = 20;
 }
 
 enum BackupItemKind {
