@@ -161,6 +161,11 @@ pub struct Prefs {
     pub closed_announcements: std::collections::BTreeMap<String, String>,
     /// Shared channels whose note at the start was closed, as `instance/channel`.
     pub shared_notes_closed: std::collections::BTreeSet<String>,
+    /// Games and apps that report to Discord show what you're doing here too
+    /// (`core::presence`), once you allow each one.
+    pub game_activity: bool,
+    /// Your answer for each game or app that asked, by `Program::key`.
+    pub game_answers: std::collections::BTreeMap<String, bool>,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -193,6 +198,8 @@ impl Default for Prefs {
             share_reports: true,
             closed_announcements: Default::default(),
             shared_notes_closed: Default::default(),
+            game_activity: true,
+            game_answers: Default::default(),
         }
     }
 }

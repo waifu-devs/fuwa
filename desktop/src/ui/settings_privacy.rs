@@ -1,13 +1,14 @@
 //! The Privacy page: the "Help fix bugs" switch for the anonymous reports
 //! (`core::reports`), what they hold in plain words, and a live look at
-//! what's waiting to go out and where it would go.
+//! what's waiting to go out and where it would go. Then games: whether
+//! they may show what you're playing (`core::presence`), and each one's answer.
 
 use std::time::Duration;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, Context, FontWeight, IntoElement, ParentElement as _, SharedString,
-    Styled as _, Window, div, px,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use crate::core::config::Prefs;
@@ -15,7 +16,7 @@ use crate::core::reports::{self, Pending};
 use crate::ui::motion;
 use crate::ui::settings::{SettingsView, section, toggle_row};
 use crate::ui::theme::{Palette, alpha, corner};
-use crate::ui::widgets::icon;
+use crate::ui::widgets::{icon, soft_button};
 
 /// What a report holds, and what it never does.
 const SENT: [(&str, &str); 4] = [
@@ -145,8 +146,62 @@ impl SettingsView {
             ))
             .child(section("What's sent", what, p))
             .child(section("Waiting to send", preview, p))
+            .child(toggle_row(
+                "game-activity",
+                "Show what you're playing",
+                "Games and apps that report to Discord on this computer can show what you're doing here too, once you allow each one. Who sees it follows your status settings on each instance.",
+                prefs.game_activity,
+                p,
+                cx,
+                |this, on, cx| this.set(cx, |pr| pr.game_activity = on),
+            ))
+            .when(!prefs.game_answers.is_empty(), |el| el.child(section("Games", games(prefs, p, cx), p)))
             .into_any_element()
     }
+}
+
+/// Each game or app that asked, its answer, and a way to be asked again.
+fn games(prefs: &Prefs, p: &Palette, cx: &mut Context<SettingsView>) -> impl IntoElement {
+    let mut list = div().flex().flex_col().gap(px(8.0));
+    for (n, (key, allowed)) in prefs.game_answers.iter().enumerate() {
+        let name = match key.split_once(':') {
+            Some(("program", name)) => name.to_owned(),
+            Some((_, id)) => format!("A game (Discord id {id})"),
+            None => key.clone(),
+        };
+        let key = key.clone();
+        list = list.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .p(px(12.0))
+                .rounded(corner(12.0))
+                .bg(p.card)
+                .border_1()
+                .border_color(p.border)
+                .child(icon("gamepad-2").size(px(16.0)).text_color(if *allowed {
+                    p.primary
+                } else {
+                    p.muted_foreground
+                }))
+                .child(div().flex_1().min_w_0().text_sm().text_ellipsis().whitespace_nowrap().child(name))
+                .child(div().text_sm().text_color(p.muted_foreground).child(if *allowed {
+                    "Allowed"
+                } else {
+                    "Not allowed"
+                }))
+                .child(soft_button(SharedString::from(format!("forget-game-{n}")), "Ask again", p).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        let key = key.clone();
+                        this.set(cx, move |pr| {
+                            pr.game_answers.remove(&key);
+                        })
+                    }),
+                )),
+        );
+    }
+    list
 }
 
 /// One count waiting to go out. A new number rises into place, and the chip

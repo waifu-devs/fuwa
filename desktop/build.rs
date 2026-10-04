@@ -4,7 +4,7 @@ use std::path::PathBuf;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = [
         "types", "node", "auth", "account", "server", "channel", "message", "event", "admin", "media", "role",
-        "invite", "join", "dm", "emoji", "webhook", "agent", "automod", "call", "sso",
+        "invite", "join", "dm", "emoji", "webhook", "agent", "automod", "call", "sso", "presence",
     ]
     .map(|name| PathBuf::from(format!("../proto/fuwa/v1/{name}.proto")));
     let mut config = tonic_prost_build::Config::new();

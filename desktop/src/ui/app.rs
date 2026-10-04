@@ -129,6 +129,12 @@ pub enum Dialog {
         user_id: String,
         action: crate::core::moderation::Action,
     },
+    /// A game or app reporting to Discord's local RPC asks, once, to show
+    /// what you're doing (`core::presence`).
+    AllowGame {
+        key: String,
+        name: String,
+    },
 }
 
 /// A small menu hanging under a bell.
@@ -430,6 +436,13 @@ impl FuwaApp {
             self.navigate(Nav::Home { dm: None }, window, cx);
         }
         self.maybe_welcome(cx);
+        // A game asking to show what you're doing, once nothing else is open.
+        if self.dialog.is_none()
+            && let Some(program) = self.core.games.asking()
+        {
+            self.dialog_error = None;
+            self.dialog = Some(Dialog::AllowGame { key: program.key, name: program.name });
+        }
         // A server's channels arrived after it was opened: open the first.
         if self.target().map(|t| t.id()) != self.draft_for {
             self.after_move(window, cx);
@@ -1105,7 +1118,18 @@ impl FuwaApp {
     }
 
     pub fn close_dialog(&mut self, cx: &mut Context<Self>) {
-        self.dialog = None;
+        // A game's question closed unanswered waits for the next start.
+        if let Some(Dialog::AllowGame { key, .. }) = self.dialog.take() {
+            self.core.answer_game(&key, None);
+        }
+        cx.notify();
+    }
+
+    /// "Don't allow" on a game's question: remembered, like "Allow".
+    pub fn refuse_game(&mut self, cx: &mut Context<Self>) {
+        if let Some(Dialog::AllowGame { key, .. }) = self.dialog.take() {
+            self.core.answer_game(&key, Some(false));
+        }
         cx.notify();
     }
 
@@ -1197,6 +1221,11 @@ impl FuwaApp {
                     }
                 });
                 self.after_dialog(rx, key, window, cx);
+            }
+            Dialog::AllowGame { key, .. } => {
+                self.dialog = None;
+                core.answer_game(&key, Some(true));
+                cx.notify();
             }
             Dialog::LeaveServer { key, server } => {
                 self.dialog_busy = true;
