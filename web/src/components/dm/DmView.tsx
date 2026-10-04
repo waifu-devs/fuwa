@@ -27,6 +27,8 @@ import { focusChannel } from "@/fuwa/actions";
 import { deleteDm, dismissDm, dmProblem, editDm, markDmRead, prepareConversation, retryDm, sendDm } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage } from "@/fuwa/store";
 import { sendsMessage } from "@/components/chat/Composer";
+import { TimestampPicker } from "@/components/chat/TimestampPicker";
+import { insertAtCaret } from "@/lib/caret";
 import { DayDivider, EditBox, MessageBody, MessageLine, ToolButton } from "@/components/chat/MessageList";
 import { EncryptionDialog } from "@/components/dm/EncryptionDialog";
 import { CallButton, DmCallStrip } from "@/components/calls/DmCall";
@@ -852,6 +854,7 @@ export function EncryptedComposer({
                 </motion.span>
               )}
             </AnimatePresence>
+            <TimestampPicker onPick={(token) => insertAtCaret(box, setText, token)} />
             <motion.button
               type="button"
               onClick={send}
