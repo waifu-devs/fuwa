@@ -44,7 +44,7 @@ const useArchiveHours = (instanceKey: string, serverId: string) =>
   useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.threadArchiveHours ?? 0);
 
 /** Up to three faces, overlapping, popping in as people join. */
-function Faces({ instanceKey, ids, size = "size-5" }: { instanceKey: string; ids: string[]; size?: string }) {
+export function Faces({ instanceKey, ids, size = "size-5" }: { instanceKey: string; ids: string[]; size?: string }) {
   const users = useFuwa((s) => s.instances[instanceKey]?.users);
   return (
     <span className="flex -space-x-1.5">
@@ -208,7 +208,7 @@ export function ThreadsButton({ open, active, onClick }: { open: boolean; active
   );
 }
 
-function PanelButton({
+export function PanelButton({
   label,
   onClick,
   active = false,
