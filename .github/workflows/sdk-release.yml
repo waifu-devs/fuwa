@@ -1,0 +1,72 @@
+name: Release SDK
+
+# Pushing a release tag like v0.2.0 (the same tag that makes the server
+# release, release.yml) publishes the TypeScript SDK, @waifu-devs/fuwa, to npm
+# at that version, with provenance: npm shows the commit and workflow that
+# built it. The SDK's version follows the server's, so an app can tell which
+# server release it was made against.
+#
+# It needs the NPM_TOKEN repository secret (an npm automation token that can
+# publish @waifu-devs/fuwa). Without it, the job says so and publishes nothing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and pack, but don't publish
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish @waifu-devs/fuwa
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # For npm provenance.
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: sdk/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: sdk/pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - name: Version from the tag
+        if: github.event_name == 'push'
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$GITHUB_REF_NAME isn't a version tag like v1.2.3"
+            exit 1
+          fi
+          npm pkg set version="$version"
+      - name: Generated protocol code matches proto/
+        run: |
+          pnpm run generate
+          git diff --exit-code -- src/gen
+      - run: pnpm run build
+      - run: pnpm test
+      - run: npm pack --dry-run
+      - name: Publish
+        if: github.event_name == 'push' || !inputs.dry_run
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::warning::NPM_TOKEN isn't set, so the SDK wasn't published. Add it under Settings > Secrets and variables > Actions, then run this workflow again."
+            exit 0
+          fi
+          npm publish --provenance --access public

@@ -17,6 +17,15 @@
 - `e2ee-wasm/`: `fuwa-e2ee` for the web app, as WebAssembly. `pnpm wasm` (in
   `web/`) builds it into `web/src/e2ee/pkg` (not committed); the wasm-bindgen
   crate and CLI versions must match.
+- `sdk/`: `@waifu-devs/fuwa`, the TypeScript SDK (its own pnpm package, like
+  `web/`; docs/sdk.md). `src/gen` is generated from `proto/fuwa/v1` with the
+  web app's buf setup plus `.js` import paths (`pnpm generate`, checked in
+  CI). `client.ts` makes the typed clients (`createFuwa`: auth, typed errors
+  from `errors.ts`, retries from `retry.ts`), `events.ts` the reconnecting
+  `EventFollower`, `agent.ts` the `Agent` (commands, mentions, typed event
+  handlers), `pages.ts`, `upload.ts` and `text.ts` the helpers. It never logs
+  tokens or addresses and reports nothing. `test/agent.test.ts` drives a real
+  instance (`FUWA_BIN`); new agent-facing calls get a helper and a test there.
 - `voice/`: `fuwa-voice`, the client crate programs use to hear and talk in
   voice channels (`ListenVoice` and `SpeakVoice`, no WebRTC), with the
   `parrot` example. The server's tests use it against a real instance.
