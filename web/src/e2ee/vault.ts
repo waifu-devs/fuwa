@@ -35,6 +35,10 @@ export type Note = {
   read: number;
   /** The safety number you checked with the other person, if you did. */
   verified: string;
+  /** Threads in a secure channel you followed (true) or unfollowed (false) by hand, by their message's record. */
+  follows?: Record<number, boolean>;
+  /** The last reply you saw in each thread, by the thread's message's record. */
+  threadRead?: Record<number, number>;
 };
 
 /** A device being added to or leaving a conversation, by whose it is. */
@@ -59,9 +63,11 @@ export type Item = {
    * couldn't open. reset: someone started a secure channel's encryption over.
    * setting: someone turned a secure channel's history sharing on ("on") or
    * off ("off"), in content. voice: a voice message (`voice`), with a
-   * line about it in content for previews and notifications.
+   * line about it in content for previews and notifications. thread: someone
+   * locked ("locked") or unlocked ("unlocked") the thread under the message
+   * `thread` names.
    */
-  kind: "text" | "devices" | "joined" | "unreadable" | "reset" | "setting" | "voice";
+  kind: "text" | "devices" | "joined" | "unreadable" | "reset" | "setting" | "voice" | "thread";
   content: string;
   replyTo: number;
   /** Unix ms of the last edit, or 0. */
@@ -75,6 +81,10 @@ export type Item = {
   editSigned?: Signed;
   /** Who passed it on to this device, when it came as shared history rather than as it was sent. */
   sharedBy?: string;
+  /** In a secure channel: the record of the message this replies under, as a thread (0 or absent: none). */
+  thread?: number;
+  /** A thread reply its author also sent to the channel. */
+  inChannel?: boolean;
   /** A voice message: what fetching, opening and showing it takes. */
   voice?: Voice;
 };
