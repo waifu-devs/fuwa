@@ -188,7 +188,8 @@ async fn cached(url: &str) -> Result<Picture, Missing> {
 
 /// The bytes and type of the picture a message links to, for the server
 /// itself to read (AutoMod providers that look at pictures): an upload on
-/// this instance from its files, a link it rewrote or any other link
+/// this instance from its files (only ever one of the message's own
+/// attachments, checked as its sender's: see `automod::picture_links`), a link it rewrote or any other link
 /// fetched like readers' pictures are (public addresses only, at most
 /// [`MAX_BYTES`], cached). `None` when it isn't a picture or can't be had.
 pub async fn picture(app: &App, url: &str) -> Option<(&'static str, Bytes)> {
@@ -197,9 +198,14 @@ pub async fn picture(app: &App, url: &str) -> Option<(&'static str, Bytes)> {
     let own = Url::parse(&public_url).is_ok_and(|own| own.origin() == parsed.origin());
     if own && let Some(id) = crate::media::id_in_url(url) {
         // Uploads are kept where node.db is; elsewhere they're left out.
-        let bytes = tokio::fs::read(app.media().ok()?.path(&id)).await.ok()?;
-        let kind = crate::media::sniff(&bytes[..bytes.len().min(16)])?;
-        return Some((kind, bytes.into()));
+        return own_file(app.media().ok()?.path(&id)).await;
+    }
+    if own && let Some((server_id, id)) = crate::media::server_file_in_url(url) {
+        // A server's files are kept on the shard holding it: read here, or not at all.
+        if !app.servers.holds(&server_id) {
+            return None;
+        }
+        return own_file(app.config.data_path.join(crate::cluster::pictures::name(&server_id, &id))).await;
     }
     let inner = match parsed.path().strip_prefix(PATH) {
         Some(signature) => {
@@ -214,6 +220,19 @@ pub async fn picture(app: &App, url: &str) -> Option<(&'static str, Bytes)> {
     cached(&inner).await.ok().map(|picture| (picture.content_type, picture.bytes))
 }
 
+/// A picture uploaded here, read from `path`: none when it isn't a picture,
+/// or is bigger than one fetched from elsewhere may be (an attachment can
+/// be any size).
+async fn own_file(path: std::path::PathBuf) -> Option<(&'static str, Bytes)> {
+    let size = tokio::fs::metadata(&path).await.ok()?.len();
+    if size > MAX_BYTES as u64 {
+        return None;
+    }
+    let bytes = tokio::fs::read(&path).await.ok()?;
+    let kind = crate::media::sniff(&bytes[..bytes.len().min(16)])?;
+    Some((kind, bytes.into()))
+}
+
 fn failed(status: StatusCode, message: &str) -> Response {
     let mut response = (status, format!("{message}\n")).into_response();
     // Try again later, not on every scroll. Browsers only, as with every picture.
@@ -223,9 +242,9 @@ fn failed(status: StatusCode, message: &str) -> Response {
 
 /// A fetched picture: its bytes and the type they turned out to be.
 #[derive(Clone)]
-struct Picture {
-    content_type: &'static str,
-    bytes: Bytes,
+pub(crate) struct Picture {
+    pub content_type: &'static str,
+    pub bytes: Bytes,
 }
 
 impl Picture {
@@ -268,6 +287,13 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 });
 
 async fn fetch(url: &str) -> Result<Picture, &'static str> {
+    fetch_up_to(url, MAX_BYTES).await
+}
+
+/// A picture at `url` of at most `max` bytes, fetched as readers' pictures
+/// are (public addresses only), without the cache: for the instance to keep
+/// (a GIF someone sends).
+pub(crate) async fn fetch_up_to(url: &str, max: usize) -> Result<Picture, &'static str> {
     let url = Url::parse(url).map_err(|_| "not a link")?;
     fetchable(&url)?;
     let response = CLIENT
@@ -279,14 +305,14 @@ async fn fetch(url: &str) -> Result<Picture, &'static str> {
     if !response.status().is_success() {
         return Err("the site said no");
     }
-    if response.content_length().is_some_and(|length| length > MAX_BYTES as u64) {
+    if response.content_length().is_some_and(|length| length > max as u64) {
         return Err("too big");
     }
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|_| "cut off")?;
-        if body.len() + chunk.len() > MAX_BYTES {
+        if body.len() + chunk.len() > max {
             return Err("too big");
         }
         body.extend_from_slice(&chunk);

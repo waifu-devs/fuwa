@@ -29,12 +29,15 @@ pub const FIELDS: &[&str] = &[
     "default_limits.recording_bytes",
     "picture_upload_bytes",
     "picture_upload_bytes_per_day",
+    "attachment_upload_bytes",
+    "attachment_upload_bytes_per_day",
     "automod_checks_per_day",
     "telemetry",
     "web",
     "calls",
     "call_recordings",
     "shared_channels",
+    "mcp",
     "profile_effects",
     "federation",
     "federation_blocked_hosts",
@@ -42,6 +45,7 @@ pub const FIELDS: &[&str] = &[
     "ice_urls",
     "turn_secret",
     "automod_providers",
+    "gifs",
 ];
 
 /// The settings in force.
@@ -65,6 +69,8 @@ pub struct Settings {
     pub calls: bool,
     pub call_recordings: bool,
     pub shared_channels: bool,
+    /// Agents may use the instance through MCP, at /mcp (docs/mcp.md).
+    pub mcp: bool,
     /// People may put an effect on their profile card.
     pub profile_effects: bool,
     /// Sharing channels with other fuwa instances (docs/federation.md).
@@ -77,6 +83,8 @@ pub struct Settings {
     /// Moderation providers servers' AutoMod can use, keys and all; only
     /// the ones admins have set up.
     pub automod_providers: Vec<crate::automod::providers::Setup>,
+    /// GIF search: the provider, its key and caps (`crate::gifs`).
+    pub gifs: crate::gifs::Setup,
 }
 
 impl Settings {
@@ -99,6 +107,7 @@ impl Settings {
             calls: config.calls,
             call_recordings: config.call_recordings,
             shared_channels: config.shared_channels,
+            mcp: config.mcp,
             profile_effects: config.profile_effects,
             federation: config.federation,
             federation_blocked_hosts: Vec::new(),
@@ -106,6 +115,7 @@ impl Settings {
             ice_urls: config.ice_urls.clone(),
             turn_secret: config.turn_secret.clone(),
             automod_providers: config.automod_providers.clone(),
+            gifs: config.gifs.clone(),
         }
     }
 
@@ -206,10 +216,13 @@ impl Settings {
             web: self.web,
             picture_upload_bytes: limits.picture_upload_bytes,
             picture_upload_bytes_per_day: limits.picture_upload_bytes_per_day,
+            attachment_upload_bytes: limits.attachment_upload_bytes,
+            attachment_upload_bytes_per_day: limits.attachment_upload_bytes_per_day,
             automod_checks_per_day: limits.automod_checks_per_day,
             calls: self.calls,
             call_recordings: self.call_recordings,
             shared_channels: self.shared_channels,
+            mcp: self.mcp,
             profile_effects: self.profile_effects,
             federation: self.federation,
             federation_blocked_hosts: self.federation_blocked_hosts.clone(),
@@ -222,6 +235,9 @@ impl Settings {
                 .iter()
                 .map(|setup| setup.to_pb(false))
                 .collect(),
+            // Only the directory asks the provider, and it reads the key from
+            // node.db, so the key never goes to gateways, shards or apps.
+            gifs: Some(self.gifs.to_pb(false)),
         }
     }
 
@@ -299,12 +315,15 @@ impl Settings {
             "default_limits.recording_bytes" => Value::from(limits.recording_bytes),
             "picture_upload_bytes" => Value::from(from.picture_upload_bytes),
             "picture_upload_bytes_per_day" => Value::from(from.picture_upload_bytes_per_day),
+            "attachment_upload_bytes" => Value::from(from.attachment_upload_bytes),
+            "attachment_upload_bytes_per_day" => Value::from(from.attachment_upload_bytes_per_day),
             "automod_checks_per_day" => Value::from(from.automod_checks_per_day),
             "telemetry" => Value::from(from.telemetry),
             "web" => Value::from(from.web),
             "calls" => Value::from(from.calls),
             "call_recordings" => Value::from(from.call_recordings),
             "shared_channels" => Value::from(from.shared_channels),
+            "mcp" => Value::from(from.mcp),
             "profile_effects" => Value::from(from.profile_effects),
             "federation" => Value::from(from.federation),
             "federation_blocked_hosts" => Value::from(from.federation_blocked_hosts.clone()),
@@ -331,6 +350,11 @@ impl Settings {
                 // Leave out the ones with nothing set up.
                 setups.retain(|s| *s != crate::automod::providers::Setup { id: s.id.clone(), ..Default::default() });
                 serde_json::to_value(setups).map_err(|err| Error::internal(err.to_string()))?
+            }
+            // The key is never sent out, so an empty one keeps the saved key.
+            "gifs" => {
+                let setup = crate::gifs::Setup::from_pb(&from.gifs.clone().unwrap_or_default(), &self.gifs)?;
+                serde_json::to_value(setup).map_err(|err| Error::internal(err.to_string()))?
             }
             other => return Err(unknown(other)),
         };
@@ -370,12 +394,15 @@ impl Settings {
             "default_limits.recording_bytes" => Value::from(limits.recording_bytes),
             "picture_upload_bytes" => Value::from(limits.picture_upload_bytes),
             "picture_upload_bytes_per_day" => Value::from(limits.picture_upload_bytes_per_day),
+            "attachment_upload_bytes" => Value::from(limits.attachment_upload_bytes),
+            "attachment_upload_bytes_per_day" => Value::from(limits.attachment_upload_bytes_per_day),
             "automod_checks_per_day" => Value::from(limits.automod_checks_per_day),
             "telemetry" => Value::from(self.telemetry),
             "web" => Value::from(self.web),
             "calls" => Value::from(self.calls),
             "call_recordings" => Value::from(self.call_recordings),
             "shared_channels" => Value::from(self.shared_channels),
+            "mcp" => Value::from(self.mcp),
             "profile_effects" => Value::from(self.profile_effects),
             "federation" => Value::from(self.federation),
             "federation_blocked_hosts" => Value::from(self.federation_blocked_hosts.clone()),
@@ -385,6 +412,7 @@ impl Settings {
             "automod_providers" => {
                 serde_json::to_value(&self.automod_providers).map_err(|err| Error::internal(err.to_string()))?
             }
+            "gifs" => serde_json::to_value(&self.gifs).map_err(|err| Error::internal(err.to_string()))?,
             other => return Err(unknown(other)),
         })
     }
@@ -436,12 +464,15 @@ impl Settings {
             "default_limits.recording_bytes" => self.limits.recording_bytes = cap(field, value)?,
             "picture_upload_bytes" => self.limits.picture_upload_bytes = cap(field, value)?,
             "picture_upload_bytes_per_day" => self.limits.picture_upload_bytes_per_day = cap(field, value)?,
+            "attachment_upload_bytes" => self.limits.attachment_upload_bytes = cap(field, value)?,
+            "attachment_upload_bytes_per_day" => self.limits.attachment_upload_bytes_per_day = cap(field, value)?,
             "automod_checks_per_day" => self.limits.automod_checks_per_day = cap(field, value)?,
             "telemetry" => self.telemetry = flag(field, value)?,
             "web" => self.web = flag(field, value)?,
             "calls" => self.calls = flag(field, value)?,
             "call_recordings" => self.call_recordings = flag(field, value)?,
             "shared_channels" => self.shared_channels = flag(field, value)?,
+            "mcp" => self.mcp = flag(field, value)?,
             "profile_effects" => self.profile_effects = flag(field, value)?,
             "federation" => self.federation = flag(field, value)?,
             "federation_blocked_hosts" => self.federation_blocked_hosts = blocked_hosts(value)?,
@@ -480,6 +511,12 @@ impl Settings {
                     return Err(Error::invalid(format!("fuwa doesn't know a moderation provider called {}", setup.id)));
                 }
                 self.automod_providers = setups;
+            }
+            "gifs" => {
+                let setup: crate::gifs::Setup = serde_json::from_value(value.clone())
+                    .map_err(|err| Error::invalid(format!("gifs doesn't read: {err}")))?;
+                setup.check()?;
+                self.gifs = setup;
             }
             other => return Err(unknown(other)),
         }
@@ -618,7 +655,7 @@ fn flag(field: &str, value: &Value) -> Result<bool> {
 
 /// The last four characters of a secret long enough that they give little
 /// away, so an admin can tell which one is saved; empty otherwise.
-fn hint(secret: &str) -> String {
+pub(crate) fn hint(secret: &str) -> String {
     let chars: Vec<char> = secret.chars().collect();
     if chars.len() >= 12 { chars[chars.len() - 4..].iter().collect() } else { String::new() }
 }
@@ -680,11 +717,27 @@ mod tests {
         let mut settings = Settings::defaults(&config());
         settings.limits.channels = Some(7);
         settings.allowed_origins = vec!["https://a.example".into(), "http://localhost:5173".into()];
+        settings.gifs = crate::gifs::Setup {
+            provider: crate::gifs::Kind::Klipy,
+            api_key: "klipy-key-0123".into(),
+            rating: "g".into(),
+            gif_bytes: Some(5_000_000),
+            searches_per_minute: Some(20),
+            provider_calls_per_day: None,
+        };
         for field in FIELDS {
             let mut copy = Settings::defaults(&config());
             copy.set_json(field, &settings.get_json(field).unwrap()).unwrap();
             assert_eq!(copy.get_json(field).unwrap(), settings.get_json(field).unwrap(), "{field}");
             let mut from_pb = Settings::defaults(&config());
+            if *field == "gifs" {
+                // The key never travels in settings; the receiver keeps its own.
+                from_pb.gifs = crate::gifs::Setup {
+                    provider: settings.gifs.provider,
+                    api_key: settings.gifs.api_key.clone(),
+                    ..Default::default()
+                };
+            }
             from_pb.set_from_pb(field, &settings.to_pb()).unwrap();
             assert_eq!(from_pb.get_json(field).unwrap(), settings.get_json(field).unwrap(), "{field} via pb");
         }
@@ -704,6 +757,32 @@ mod tests {
         assert!(settings.to_admin_pb().turn_secret_hint.is_empty());
         settings.turn_secret.clear();
         assert!(!settings.to_admin_pb().turn_secret_set);
+    }
+
+    #[test]
+    fn admins_never_get_the_gif_key() {
+        let mut settings = Settings::defaults(&config());
+        settings.gifs = crate::gifs::Setup {
+            provider: crate::gifs::Kind::Giphy,
+            api_key: "giphy-key-abcd".into(),
+            ..Default::default()
+        };
+        let shown = settings.to_admin_pb().gifs.unwrap();
+        assert!(shown.api_key.is_empty());
+        assert!(shown.api_key_set);
+        assert_eq!(shown.api_key_hint, "abcd");
+        // Saving the page as shown (no key) keeps the key.
+        let mut saved = settings.clone();
+        saved.set_from_pb("gifs", &settings.to_admin_pb()).unwrap();
+        assert_eq!(saved.gifs.api_key, "giphy-key-abcd");
+        // Nor does it go to gateways and shards.
+        assert!(settings.to_pb().gifs.unwrap().api_key.is_empty());
+        // Switching provider never carries the key over.
+        let mut switched = settings.to_admin_pb();
+        switched.gifs.as_mut().unwrap().provider = pb::GifProvider::Klipy as i32;
+        saved.set_from_pb("gifs", &switched).unwrap();
+        assert!(saved.gifs.api_key.is_empty());
+        assert!(saved.set_json("gifs", &serde_json::json!({"provider": "tenor"})).is_err());
     }
 
     #[test]

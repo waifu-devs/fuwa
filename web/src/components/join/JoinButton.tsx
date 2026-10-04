@@ -5,6 +5,7 @@ import { AccountKind, ApplicationStatus, type Server } from "@/gen/fuwa/v1/types
 import { joinServer, startServerSso, withdrawApplication } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { ProviderButton } from "@/components/Connect";
+import { ApplicationDialog } from "@/components/join/ApplicationStatus";
 import { ApplyDialog } from "@/components/join/ApplyDialog";
 import { signedInForServer } from "@/lib/sso";
 import { SPRING } from "@/components/motion";
@@ -48,6 +49,7 @@ export function JoinButton({
   const withdraw = useAction(withdrawApplication);
   const [joined, setJoined] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [looking, setLooking] = useState(false);
   const tall = size === "lg" ? "h-11" : "h-10";
 
   async function go() {
@@ -137,6 +139,10 @@ export function JoinButton({
     note = (
       <>
         You applied. Someone from the server will look it over.{" "}
+        <button type="button" onClick={() => setLooking(true)} className="font-bold text-foreground underline-offset-2 hover:underline">
+          See where it stands
+        </button>{" "}
+        or{" "}
         <button
           type="button"
           disabled={withdraw.pending}
@@ -145,7 +151,7 @@ export function JoinButton({
           }}
           className="font-bold text-foreground underline-offset-2 hover:underline"
         >
-          Take it back
+          take it back
         </button>
       </>
     );
@@ -214,6 +220,20 @@ export function JoinButton({
         )}
       </AnimatePresence>
       <ApplyDialog open={applying} onOpenChange={setApplying} instanceKey={instanceKey} server={server} inviteCode={inviteCode} />
+      <ApplicationDialog
+        open={looking}
+        onOpenChange={setLooking}
+        instanceKey={instanceKey}
+        server={server}
+        onOpen={() => {
+          setLooking(false);
+          onOpen(server);
+        }}
+        onApplyAgain={() => {
+          setLooking(false);
+          setApplying(true);
+        }}
+      />
     </div>
   );
 }

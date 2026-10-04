@@ -85,6 +85,7 @@ export * from "./gen/fuwa/v1/channel_pb.js";
 export * from "./gen/fuwa/v1/dm_pb.js";
 export * from "./gen/fuwa/v1/emoji_pb.js";
 export * from "./gen/fuwa/v1/event_pb.js";
+export * from "./gen/fuwa/v1/friend_pb.js";
 export * from "./gen/fuwa/v1/invite_pb.js";
 export * from "./gen/fuwa/v1/join_pb.js";
 export * from "./gen/fuwa/v1/media_pb.js";

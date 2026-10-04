@@ -45,6 +45,11 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0018_voice_video_off.sql"),
     include_str!("../migrations/server/0019_secure_history.sql"),
     include_str!("../migrations/server/0020_federation.sql"),
+    include_str!("../migrations/server/0021_mcp_access.sql"),
+    include_str!("../migrations/server/0022_threads.sql"),
+    include_str!("../migrations/server/0023_attachments.sql"),
+    include_str!("../migrations/server/0026_search.sql"),
+    include_str!("../migrations/server/0028_banner_onboarding.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -278,6 +283,16 @@ impl ServerDb {
         let _alone = self.db.alone().await;
         self.writable()?;
         self.run(actor_id, f).await
+    }
+
+    /// Runs a change that sends no events, alongside other writes, in its own
+    /// transaction: for what the server keeps about itself, like the search
+    /// index. Refused while the server is being moved, like any write.
+    pub async fn write_quiet<T>(&self, f: impl AsyncFnOnce(&Connection) -> Result<T> + Clone) -> Result<T> {
+        self.writable()?;
+        let _shared = self.db.shared().await;
+        self.writable()?;
+        db::transaction(&db::connect(&self.db)?, f).await
     }
 
     /// Refuses changes while the server is being moved to another shard: the
@@ -723,7 +738,8 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
         conn,
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
                 default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome,
-                sso, sso_required, sso_recheck_days, region
+                sso, sso_required, sso_recheck_days, region, thread_archive_hours,
+                banner_url, banner_focus_x, banner_focus_y, accent_color, onboarding
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -749,6 +765,12 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 sso_host: if r.get::<bool>(17)? { crate::sso::Provider::parse(&r.get::<String>(16)?).host() } else { String::new() },
                 sso_recheck_days: r.get(18)?,
                 region: r.get(19)?,
+                thread_archive_hours: r.get(20)?,
+                banner_url: r.get(21)?,
+                banner_focus_x: r.get(22)?,
+                banner_focus_y: r.get(23)?,
+                accent_color: r.get(24)?,
+                has_onboarding: decode_onboarding(&r.get::<Vec<u8>>(25)?).enabled,
             })
         },
     )
@@ -789,10 +811,12 @@ pub async fn load_sso(conn: &Connection) -> Result<ServerSso> {
 /// When someone last signed in through the server's single sign-on.
 /// Leaves out when a member last signed in through the server's provider,
 /// unless `viewer` is that member or a manager: it's nobody else's business
-/// when they're online with their organization.
+/// when they're online with their organization. When they went through the
+/// onboarding is left out the same way.
 pub fn scrub_sso(member: &mut pb::Member, viewer: &str, manager: bool) {
     if !manager && member.user.as_ref().is_none_or(|u| u.id != viewer) {
         member.sso_signed_in_at = None;
+        member.onboarded_at = None;
     }
 }
 
@@ -1206,6 +1230,7 @@ pub async fn add_member(
         role_ids: vec![],
         pending,
         sso_signed_in_at: sso_signed_in_at(conn, &user.id).await?.map(timestamp),
+        onboarded_at: None,
     })
 }
 
@@ -1416,7 +1441,7 @@ pub async fn user(conn: &Connection, user_id: &str) -> Result<Option<pb::User>> 
 }
 
 pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, members.nickname, members.joined_at, members.timed_out_until, members.pending,
-     (SELECT signed_in_at FROM sso_identities WHERE sso_identities.user_id = members.user_id)";
+     (SELECT signed_in_at FROM sso_identities WHERE sso_identities.user_id = members.user_id), members.onboarded_at";
 
 /// Reads a member row; their roles come from [`permissions::attach_roles`].
 pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member> + '_ {
@@ -1430,6 +1455,7 @@ pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member>
             role_ids: vec![],
             pending: r.get(10)?,
             sso_signed_in_at: r.get::<Option<i64>>(11)?.map(timestamp),
+            onboarded_at: r.get::<Option<i64>>(12)?.map(timestamp),
         })
     }
 }
@@ -1602,6 +1628,25 @@ pub async fn save_welcome(conn: &Connection, welcome: &pb::WelcomeScreen) -> Res
     Ok(())
 }
 
+/// An onboarding as the server's file keeps it; none if it can't be read.
+fn decode_onboarding(bytes: &[u8]) -> pb::Onboarding {
+    pb::Onboarding::decode(bytes).unwrap_or_default()
+}
+
+/// The server's onboarding, whole.
+pub async fn load_onboarding(conn: &Connection) -> Result<pb::Onboarding> {
+    let bytes = query_one(conn, "SELECT onboarding FROM server", (), |r| r.get::<Vec<u8>>(0))
+        .await?
+        .ok_or_else(|| Error::internal("server row missing"))?;
+    Ok(decode_onboarding(&bytes))
+}
+
+/// Replaces the onboarding, inside a write.
+pub async fn save_onboarding(conn: &Connection, onboarding: &pb::Onboarding) -> Result<()> {
+    conn.execute("UPDATE server SET onboarding = ?1, updated_at = ?2", (onboarding.encode_to_vec(), now_ms())).await?;
+    Ok(())
+}
+
 // ───────────────────────── Emoji and AutoMod ─────────────────────────
 
 const EMOJI_COLUMNS: &str = "id, name, url, animated, creator_id, size, created_at";
@@ -1625,6 +1670,18 @@ fn emoji_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Emoji> + '_ 
 pub async fn load_emojis(conn: &Connection, server_id: &str) -> Result<Vec<pb::Emoji>> {
     query_all(conn, &format!("SELECT {EMOJI_COLUMNS} FROM emojis ORDER BY created_at, id"), (), emoji_row(server_id))
         .await
+}
+
+/// The server's emoji with these ids, the ones that exist.
+pub async fn load_emojis_by_id(conn: &Connection, server_id: &str, ids: &[String]) -> Result<Vec<pb::Emoji>> {
+    let mut found = Vec::new();
+    for id in ids {
+        let sql = format!("SELECT {EMOJI_COLUMNS} FROM emojis WHERE id = ?1");
+        if let Some(emoji) = query_one(conn, &sql, [id.as_str()], emoji_row(server_id)).await? {
+            found.push(emoji);
+        }
+    }
+    Ok(found)
 }
 
 /// The server's AutoMod rules, oldest first.

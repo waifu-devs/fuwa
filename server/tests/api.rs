@@ -367,6 +367,7 @@ async fn a_community_end_to_end() {
                 server_id: sid.clone(),
                 message_id: sent[0].id.clone(),
                 content: "hijacked".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -381,6 +382,7 @@ async fn a_community_end_to_end() {
                 server_id: sid.clone(),
                 message_id: sent[0].id.clone(),
                 content: "message zero".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -1741,6 +1743,82 @@ async fn profiles_nicknames_and_notification_settings() {
 }
 
 #[tokio::test]
+async fn server_arrangements_follow_the_account() {
+    use pb::server_rail_item::Item;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let a = create_server(&mut c, &juan, "Alpha", true).await;
+    let b = create_server(&mut c, &juan, "Beta", true).await;
+    let other = create_server(&mut c, &mika, "Mika's", true).await;
+
+    let get = |token: &str| authed(token, pb::GetServerArrangementRequest {});
+    let empty = c.account.get_server_arrangement(get(&juan)).await.unwrap().into_inner();
+    assert!(empty.items.is_empty() && empty.updated_at.is_none());
+
+    let server = |id: &str| pb::ServerRailItem { item: Some(Item::ServerId(id.into())) };
+    let folder = |servers: Vec<String>| pb::ServerRailItem {
+        item: Some(Item::Folder(pb::ServerFolder {
+            id: "games".into(),
+            name: "Games".into(),
+            color: 0x66ccff,
+            server_ids: servers,
+        })),
+    };
+    // A server you aren't in is dropped, not refused.
+    let set = c
+        .account
+        .set_server_arrangement(authed(
+            &juan,
+            pb::SetServerArrangementRequest {
+                items: vec![folder(vec![b.id.clone(), a.id.clone()]), server(&other.id)],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(set.items, vec![folder(vec![b.id.clone(), a.id.clone()])]);
+    assert!(set.updated_at.is_some());
+    let got = c.account.get_server_arrangement(get(&juan)).await.unwrap().into_inner();
+    assert_eq!(got.items, set.items);
+    // Only yours.
+    assert!(c.account.get_server_arrangement(get(&mika)).await.unwrap().into_inner().items.is_empty());
+    let bad = c
+        .account
+        .set_server_arrangement(authed(
+            &juan,
+            pb::SetServerArrangementRequest { items: vec![folder(vec![a.id.clone()]), folder(vec![b.id.clone()])] },
+        ))
+        .await;
+    assert_eq!(bad.unwrap_err().code(), Code::InvalidArgument);
+
+    // A server you leave drops out.
+    c.servers
+        .join_server(authed(&mika, pb::JoinServerRequest { server_id: a.id.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    c.account
+        .set_server_arrangement(authed(
+            &mika,
+            pb::SetServerArrangementRequest { items: vec![server(&a.id), server(&other.id)] },
+        ))
+        .await
+        .unwrap();
+    c.servers.leave_server(authed(&mika, pb::LeaveServerRequest { server_id: a.id.clone() })).await.unwrap();
+    let left = c.account.get_server_arrangement(get(&mika)).await.unwrap().into_inner();
+    assert_eq!(left.items, vec![server(&other.id)]);
+
+    // Clearing it forgets it.
+    c.account.set_server_arrangement(authed(&mika, pb::SetServerArrangementRequest { items: vec![] })).await.unwrap();
+    let cleared = c.account.get_server_arrangement(get(&mika)).await.unwrap().into_inner();
+    assert!(cleared.items.is_empty() && cleared.updated_at.is_none());
+
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn data_export_and_account_deletion() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[]).await;
@@ -1976,6 +2054,7 @@ async fn server_settings_and_moderation() {
                 server_id: sid.clone(),
                 message_id: welcomed[0].id.clone(),
                 content: "hi".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -4511,6 +4590,7 @@ async fn automod_catches_messages() {
                 server_id: server.id.clone(),
                 message_id: sent.id.clone(),
                 content: "a scammer!".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -4695,7 +4775,7 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
     // A 16 by 16 PNG: its header is all the server looks at before sending it.
     let mut cat = png(300, 0);
     cat[16..24].copy_from_slice(&[0, 0, 0, 16, 0, 0, 0, 16]);
-    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, cat).await;
+    let picture = attach(&mut c, &instance, &member, &server.id, cat).await;
     let sent = c
         .messages
         .send_message(authed(
@@ -4908,6 +4988,134 @@ async fn smart_filter_checks_stop_at_the_daily_limit() {
 }
 
 #[tokio::test]
+async fn emoji_from_other_servers_go_with_the_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (friend, _, _) = sign_up(&mut c, "friend").await;
+    let emotes = create_server(&mut c, &owner, "Emotes", true).await;
+    let lounge = create_server(&mut c, &owner, "Lounge", true).await;
+    join(&mut c, &friend, &lounge.id).await;
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: lounge.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.r#type == pb::ChannelType::Text as i32)
+        .unwrap();
+
+    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, png(300, 1)).await;
+    let wave = c
+        .emojis
+        .create_emoji(authed(
+            &owner,
+            pb::CreateEmojiRequest { server_id: emotes.id.clone(), name: "wave".into(), url: picture.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .emoji
+        .unwrap();
+    let lounge_picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, png(200, 2)).await;
+    let local = c
+        .emojis
+        .create_emoji(authed(
+            &owner,
+            pb::CreateEmojiRequest { server_id: lounge.id.clone(), name: "home".into(), url: lounge_picture },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .emoji
+        .unwrap();
+    let token = format!("<:wave:{}>", wave.id);
+    let icon = upload(&mut c, &instance, &owner, pb::MediaPurpose::ServerIcon, png(100, 3)).await;
+    let client = c.messages.clone();
+    let sent = |who: &str, content: String, emojis: Vec<pb::Emoji>| {
+        let mut messages = client.clone();
+        let request = authed(
+            who,
+            pb::SendMessageRequest {
+                server_id: lounge.id.clone(),
+                channel_id: general.id.clone(),
+                content,
+                emojis,
+                ..Default::default()
+            },
+        );
+        async move { messages.send_message(request).await.unwrap().into_inner().message.unwrap() }
+    };
+
+    // Someone in both servers brings the emoji along; it's stored as the
+    // instance has it, without who made it or its size.
+    let message = sent(&owner, format!("hi {token} <:home:{}>", local.id), vec![wave.clone(), local.clone()]).await;
+    assert_eq!(message.emojis.len(), 1, "{:?}", message.emojis);
+    let carried = &message.emojis[0];
+    assert_eq!(
+        (carried.id.as_str(), carried.server_id.as_str(), carried.name.as_str(), carried.url.as_str()),
+        (wave.id.as_str(), emotes.id.as_str(), "wave", picture.as_str())
+    );
+    assert!(carried.creator_id.is_empty() && carried.size == 0 && !carried.animated);
+
+    // Someone who isn't in the emoji's server can't. Only the id sent counts:
+    // the name and picture come from the server, whatever was sent, and an
+    // id it has no emoji for is left out.
+    assert!(sent(&friend, format!("hi {token}"), vec![wave.clone()]).await.emojis.is_empty());
+    let forged = pb::Emoji { url: icon, name: "renamed".into(), ..wave.clone() };
+    let back = sent(&owner, format!("hi {token}"), vec![forged]).await.emojis;
+    assert_eq!((back[0].name.as_str(), back[0].url.as_str()), ("wave", picture.as_str()));
+    let made_up = pb::Emoji { id: "madeup0000000000".into(), ..wave.clone() };
+    assert!(sent(&owner, "hi <:wave:madeup0000000000>".into(), vec![made_up]).await.emojis.is_empty());
+    let elsewhere = pb::Emoji {
+        url: format!("https://evil.example{}", &picture[picture.find("/media/").unwrap()..]),
+        ..wave.clone()
+    };
+    assert_eq!(sent(&owner, format!("hi {token}"), vec![elsewhere]).await.emojis[0].url, picture);
+    // One the text doesn't use is left out.
+    assert!(sent(&owner, "no emoji here".into(), vec![wave.clone()]).await.emojis.is_empty());
+
+    // Others read it back with the emoji.
+    let listed = c
+        .messages
+        .list_messages(authed(
+            &friend,
+            pb::ListMessagesRequest {
+                server_id: lounge.id.clone(),
+                channel_id: general.id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .messages;
+    let first = listed.iter().find(|m| m.id == message.id).unwrap();
+    assert_eq!(first.emojis, message.emojis);
+
+    // Edits keep the ones the text still uses and drop the rest.
+    let edit = |content: String| pb::UpdateMessageRequest {
+        server_id: lounge.id.clone(),
+        message_id: message.id.clone(),
+        content,
+        ..Default::default()
+    };
+    let kept = c.messages.update_message(authed(&owner, edit(format!("still {token}")))).await.unwrap();
+    assert_eq!(kept.into_inner().message.unwrap().emojis.len(), 1);
+    let dropped = c.messages.update_message(authed(&owner, edit("gone".into()))).await.unwrap();
+    assert!(dropped.into_inner().message.unwrap().emojis.is_empty());
+    // Too long an edit is refused before anything reads it, even of a
+    // message that isn't there.
+    let long = pb::UpdateMessageRequest { message_id: "nothere000000000".into(), ..edit("<:a".repeat(5000)) };
+    let refused = c.messages.update_message(authed(&friend, long)).await.unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn custom_emoji_and_the_welcome_screen() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[("FUWA_LIMIT_EMOJIS", "2")]).await;
@@ -5071,6 +5279,303 @@ async fn custom_emoji_and_the_welcome_screen() {
     instance.stop().await;
 }
 
+#[tokio::test]
+async fn server_banners_and_onboarding() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (member, me, _) = sign_up(&mut c, "member").await;
+    let (other, _, _) = sign_up(&mut c, "other").await;
+    let server = create_server(&mut c, &owner, "Banners", true).await;
+    assert_eq!((server.banner_url.as_str(), server.banner_focus_x, server.banner_focus_y), ("", 50, 50));
+    assert_eq!(server.accent_color, None);
+
+    // A banner is uploaded for the server, by someone who can manage it.
+    let for_server = |purpose: pb::MediaPurpose, size: usize| pb::CreateUploadRequest {
+        purpose: purpose as i32,
+        content_type: "image/png".into(),
+        size: size as i64,
+        server_id: server.id.clone(),
+    };
+    let bytes = png(400, 7);
+    let reserved = c
+        .media
+        .create_upload(authed(&owner, for_server(pb::MediaPurpose::Banner, bytes.len())))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(put(&instance, &reserved.upload_url, bytes).await, reqwest::StatusCode::NO_CONTENT);
+    let banner = reserved.media.unwrap().url;
+    let update = |token: &str, banner: Option<&str>, focus: Option<(i32, i32)>, color: Option<i32>| {
+        authed(
+            token,
+            pb::UpdateServerRequest {
+                server_id: server.id.clone(),
+                banner_url: banner.map(str::to_string),
+                banner_focus_x: focus.map(|f| f.0),
+                banner_focus_y: focus.map(|f| f.1),
+                accent_color: color,
+                ..Default::default()
+            },
+        )
+    };
+    join(&mut c, &member, &server.id).await;
+    assert_eq!(
+        c.servers.update_server(update(&member, Some(&banner), None, None)).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    assert_eq!(
+        c.servers.update_server(update(&owner, None, Some((50, 101)), None)).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+    assert_eq!(
+        c.servers.update_server(update(&owner, None, None, Some(0x1_000_000))).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+    // Someone's own profile banner, in use, can't become the server's.
+    let profile = upload(&mut c, &instance, &owner, pb::MediaPurpose::Banner, png(300, 8)).await;
+    c.auth
+        .update_profile(authed(
+            &owner,
+            pb::UpdateProfileRequest { banner_url: Some(profile.clone()), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        c.servers.update_server(update(&owner, Some(&profile), None, None)).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    let updated = c
+        .servers
+        .update_server(update(&owner, Some(&banner), Some((30, 70)), Some(0xff88aa)))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert_eq!(
+        (updated.banner_url.as_str(), updated.banner_focus_x, updated.banner_focus_y, updated.accent_color),
+        (banner.as_str(), 30, 70, Some(0xff88aa))
+    );
+    // Browse cards show it to people who aren't members.
+    let found =
+        c.servers.discover_servers(authed(&other, pb::DiscoverServersRequest {})).await.unwrap().into_inner().servers;
+    assert_eq!(found.iter().find(|s| s.id == server.id).unwrap().banner_url, banner);
+    // The banner can't be used as anyone's profile banner, and replacing it deletes it.
+    assert_eq!(
+        c.auth
+            .update_profile(authed(
+                &owner,
+                pb::UpdateProfileRequest { banner_url: Some(banner.clone()), ..Default::default() }
+            ))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::PermissionDenied
+    );
+    let cleared =
+        c.servers.update_server(update(&owner, Some(""), None, Some(-1))).await.unwrap().into_inner().server.unwrap();
+    assert_eq!((cleared.banner_url.as_str(), cleared.accent_color), ("", None));
+    assert_eq!(fetch(&instance, &banner).await.0, reqwest::StatusCode::NOT_FOUND);
+    // Only pictures uploaded here: a link to another site would have this
+    // instance fetch it for everyone who sees the server.
+    assert_eq!(
+        c.servers
+            .update_server(update(&owner, Some("https://example.com/b.png"), None, None))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::InvalidArgument
+    );
+
+    // Onboarding: interests that hand out roles, the rules, and a hello.
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.r#type == pb::ChannelType::Text as i32)
+        .unwrap();
+    let art = create_role(&mut c, &owner, &server.id, "Artists", &[]).await.unwrap();
+    let games = create_role(&mut c, &owner, &server.id, "Gamers", &[]).await.unwrap();
+    let mods = create_role(&mut c, &owner, &server.id, "Mods", &[pb::Permission::KickMembers]).await.unwrap();
+    let option = |label: &str, roles: &[&pb::Role]| pb::OnboardingOption {
+        label: label.into(),
+        role_ids: roles.iter().map(|r| r.id.clone()).collect(),
+        channel_ids: vec![general.id.clone()],
+        emoji: "🎨".into(),
+        ..Default::default()
+    };
+    let draft = |options: Vec<pb::OnboardingOption>| pb::Onboarding {
+        enabled: true,
+        set_by: String::new(),
+        steps: vec![
+            pb::OnboardingStep {
+                kind: pb::OnboardingStepKind::Pick as i32,
+                title: "  What are you into?  ".into(),
+                multiple: true,
+                options,
+                ..Default::default()
+            },
+            pb::OnboardingStep {
+                kind: pb::OnboardingStepKind::Rules as i32,
+                title: "Rules".into(),
+                skippable: true,
+                ..Default::default()
+            },
+            pb::OnboardingStep {
+                kind: pb::OnboardingStepKind::Hello as i32,
+                title: "Say hi".into(),
+                channel_id: general.id.clone(),
+                hello: "Hi everyone!".into(),
+                skippable: true,
+                ..Default::default()
+            },
+        ],
+    };
+    let set = |token: &str, o: pb::Onboarding| {
+        authed(token, pb::SetOnboardingRequest { server_id: server.id.clone(), onboarding: Some(o) })
+    };
+    assert_eq!(
+        c.join.set_onboarding(set(&member, draft(vec![option("Art", &[&art])]))).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    // Nothing that moderates can be handed out to whoever picks it.
+    assert_eq!(
+        c.join.set_onboarding(set(&owner, draft(vec![option("Mod", &[&mods])]))).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+    let saved = c
+        .join
+        .set_onboarding(set(&owner, draft(vec![option("Art", &[&art]), option("Games", &[&games])])))
+        .await
+        .unwrap()
+        .into_inner()
+        .onboarding
+        .unwrap();
+    assert_eq!(saved.steps[0].title, "What are you into?");
+    assert!(!saved.steps[1].skippable, "the rules are never skippable");
+    assert!(saved.steps.iter().all(|s| !s.id.is_empty()));
+    let (art_id, games_id) = (saved.steps[0].options[0].id.clone(), saved.steps[0].options[1].id.clone());
+    // Saving again keeps the ids.
+    let again = c.join.set_onboarding(set(&owner, saved.clone())).await.unwrap().into_inner().onboarding.unwrap();
+    assert_eq!(again, saved);
+    let server_now = c
+        .servers
+        .get_server(authed(&member, pb::GetServerRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert!(server_now.has_onboarding);
+    let got = c
+        .join
+        .get_onboarding(authed(&member, pb::GetOnboardingRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .onboarding
+        .unwrap();
+    assert_eq!(got.steps.len(), 3);
+
+    let finish = |ids: &[&str]| {
+        authed(
+            &member,
+            pb::FinishOnboardingRequest {
+                server_id: server.id.clone(),
+                option_ids: ids.iter().map(|id| id.to_string()).collect(),
+            },
+        )
+    };
+    let done = c.join.finish_onboarding(finish(&[&art_id])).await.unwrap().into_inner().member.unwrap();
+    assert_eq!(done.role_ids, std::slice::from_ref(&art.id));
+    assert!(done.onboarded_at.is_some());
+    // Going through it again changes the picks: Art goes, Games comes.
+    let done = c.join.finish_onboarding(finish(&[&games_id, "made-up"])).await.unwrap().into_inner().member.unwrap();
+    assert_eq!(done.role_ids, std::slice::from_ref(&games.id));
+    // A role that gains powers later isn't handed out anymore.
+    c.roles
+        .update_role(authed(
+            &owner,
+            pb::UpdateRoleRequest {
+                server_id: server.id.clone(),
+                role_id: art.id.clone(),
+                permissions: Some(pb::PermissionSet { permissions: vec![pb::Permission::BanMembers as i32] }),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    let done = c.join.finish_onboarding(finish(&[&art_id, &games_id])).await.unwrap().into_inner().member.unwrap();
+    assert_eq!(done.role_ids, std::slice::from_ref(&games.id));
+    // Others don't see when someone went through it.
+    let onlooker = other_member(&mut c, &server.id).await;
+    let listed = c
+        .servers
+        .list_members(authed(&onlooker, pb::ListMembersRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .members;
+    assert!(listed.iter().find(|m| m.user.as_ref().unwrap().id == me.id).unwrap().onboarded_at.is_none());
+    // Nobody sees who saved it.
+    assert!(got.set_by.is_empty() && saved.set_by.is_empty());
+
+    // The steps hold as saved: the interests step can't be skipped, and
+    // one that takes a single pick takes only one.
+    assert_eq!(c.join.finish_onboarding(finish(&[])).await.unwrap_err().code(), Code::InvalidArgument);
+    let mut single = draft(vec![option("Games", &[&games]), option("Nothing", &[])]);
+    single.steps[0].multiple = false;
+    let single = c.join.set_onboarding(set(&owner, single)).await.unwrap().into_inner().onboarding.unwrap();
+    let both: Vec<&str> = single.steps[0].options.iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(c.join.finish_onboarding(finish(&both)).await.unwrap_err().code(), Code::InvalidArgument);
+
+    // Roles go out only while whoever set them up still ranks above them.
+    let staff =
+        create_role(&mut c, &owner, &server.id, "Staff", &[pb::Permission::ManageServer, pb::Permission::ManageRoles])
+            .await
+            .unwrap();
+    // New roles start at the bottom, below Staff.
+    let calm = create_role(&mut c, &owner, &server.id, "Readers", &[]).await.unwrap();
+    let (admin, admin_user, _) = sign_up(&mut c, "admin").await;
+    join(&mut c, &admin, &server.id).await;
+    give_role(&mut c, &owner, &server.id, &admin_user.id, &staff.id).await.unwrap();
+    let by_admin = c
+        .join
+        .set_onboarding(set(&admin, draft(vec![option("Read", &[&calm])])))
+        .await
+        .unwrap()
+        .into_inner()
+        .onboarding
+        .unwrap();
+    let read_id = by_admin.steps[0].options[0].id.clone();
+    let done = c.join.finish_onboarding(finish(&[&read_id])).await.unwrap().into_inner().member.unwrap();
+    assert!(done.role_ids.contains(&calm.id));
+    let take = |user: &str, role: &str| {
+        authed(
+            &owner,
+            pb::RemoveMemberRoleRequest { server_id: server.id.clone(), user_id: user.into(), role_id: role.into() },
+        )
+    };
+    c.roles.remove_member_role(take(&admin_user.id, &staff.id)).await.unwrap();
+    c.roles.remove_member_role(take(&me.id, &calm.id)).await.unwrap();
+    let done = c.join.finish_onboarding(finish(&[&read_id])).await.unwrap().into_inner().member.unwrap();
+    assert!(!done.role_ids.contains(&calm.id), "the admin who set it up no longer ranks above it");
+    instance.stop().await;
+}
+
+/// Someone new who joins the server, to look at it as an ordinary member.
+async fn other_member(c: &mut Clients, server_id: &str) -> String {
+    let (token, _, _) = sign_up(c, "onlooker").await;
+    join(c, &token, server_id).await;
+    token
+}
+
 /// Posts to a webhook's address the way other apps do.
 async fn post_webhook(instance: &Instance, webhook: &pb::Webhook, body: &str, wait: bool) -> reqwest::Response {
     let url = format!(
@@ -5221,7 +5726,8 @@ async fn webhooks_post_into_channels() {
                     channel_id: String::new(),
                     server_id: server.id.clone(),
                     message_id: message.id.clone(),
-                    content: "mine now".into()
+                    content: "mine now".into(),
+                    emojis: vec![],
                 }
             ))
             .await
@@ -5358,6 +5864,9 @@ async fn agents_are_made_by_people_and_added_by_managers() {
     let me_agent = me(&mut c, &token).await.unwrap();
     assert_eq!(me_agent.username, "helper");
     assert_eq!(sign_in(&mut c, "helper", "whatever123").await.unwrap_err().code(), Code::Unauthenticated);
+    // Agents have no rail to arrange.
+    let arranged = c.account.get_server_arrangement(authed(&token, pb::GetServerArrangementRequest {})).await;
+    assert_eq!(arranged.unwrap_err().code(), Code::PermissionDenied);
     let listed = c.agents.list_agents(authed(&owner, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents;
     assert_eq!(listed.len(), 1);
     assert!(listed[0].last_active_at.is_some(), "using the token shows");
@@ -6221,6 +6730,7 @@ async fn channels_shared_between_servers() {
                 message_id: hi.id.clone(),
                 content: "hi from guest".into(),
                 channel_id: String::new(),
+                emojis: vec![],
             },
         ))
         .await
@@ -6741,6 +7251,402 @@ async fn federation_refuses_internal_addresses() {
     instance.stop().await;
 }
 
+async fn reply(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    thread_id: &str,
+    content: &str,
+    also: bool,
+) -> Result<pb::Message, tonic::Status> {
+    c.messages
+        .send_message(authed(
+            token,
+            pb::SendMessageRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                content: content.into(),
+                thread_id: thread_id.into(),
+                also_send_to_channel: also,
+                ..Default::default()
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().message.unwrap())
+}
+
+async fn thread_page(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    thread_id: &str,
+) -> pb::ListMessagesResponse {
+    c.messages
+        .list_messages(authed(
+            token,
+            pb::ListMessagesRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                thread_id: thread_id.into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+}
+
+async fn list_threads(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    query: &str,
+) -> pb::ListThreadsResponse {
+    c.messages
+        .list_threads(authed(
+            token,
+            pb::ListThreadsRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                query: query.into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+}
+
+async fn followed(c: &mut Clients, token: &str, server_id: &str) -> Vec<String> {
+    c.messages
+        .list_followed_threads(authed(token, pb::ListFollowedThreadsRequest { server_id: server_id.into() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .thread_ids
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn replies_start_threads_under_messages() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let server = create_server(&mut c, &juan, "Threads", true).await;
+    let sid = server.id.clone();
+    assert_eq!(server.thread_archive_hours, 168, "a week by default");
+    for token in [&mika, &rin] {
+        c.servers
+            .join_server(authed(token, pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() }))
+            .await
+            .unwrap();
+    }
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels[0]
+        .id
+        .clone();
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let parent = send(&mut c, &juan, &sid, &general, "what should we name the cat?").await.unwrap();
+    let first = reply(&mut c, &mika, &sid, &general, &parent.id, "Mochi", false).await.unwrap();
+    assert_eq!(first.thread_id, parent.id);
+    reply(&mut c, &rin, &sid, &general, &parent.id, "Tofu, and I mean it", true).await.unwrap();
+    reply(&mut c, &mika, &sid, &general, &parent.id, "Mochi again", false).await.unwrap();
+
+    // The channel shows the parent with its summary, and only the reply also sent to it.
+    let mut channel = messages(&mut c, &juan, &sid, &general).await;
+    channel.retain(|m| m.kind == pb::MessageKind::Unspecified as i32);
+    let contents = channel.iter().map(|m| m.content.as_str()).collect::<Vec<_>>();
+    assert_eq!(contents, ["what should we name the cat?", "Tofu, and I mean it"]);
+    let summary = channel[0].thread.clone().unwrap();
+    assert_eq!(summary.reply_count, 3);
+    assert_eq!(summary.participant_ids, [mika_user.id.clone(), rin_user.id.clone()], "latest first");
+    assert!(channel[1].also_in_channel);
+
+    // The thread's own page has every reply, oldest first, and the parent.
+    let page = thread_page(&mut c, &rin, &sid, &general, &parent.id).await;
+    assert_eq!(page.messages.len(), 3);
+    assert_eq!(page.messages[0].content, "Mochi");
+    assert_eq!(page.parent.unwrap().id, parent.id);
+
+    // Live: the reply, then the thread's new summary.
+    let mut saw_summary = false;
+    while let Ok(Some(item)) =
+        tokio::time::timeout(std::time::Duration::from_secs(5), stream.message()).await.map(Result::unwrap)
+    {
+        if let Some(pb::Event { payload: Some(pb::event::Payload::ThreadUpdated(t)), .. }) = item.event
+            && t.thread.as_ref().is_some_and(|t| t.reply_count == 3)
+        {
+            assert_eq!(t.thread_id, parent.id);
+            saw_summary = true;
+            break;
+        }
+    }
+    assert!(saw_summary);
+
+    // No threads under replies, and none under messages in another channel.
+    let nested = reply(&mut c, &rin, &sid, &general, &first.id, "deeper", false).await.unwrap_err();
+    assert_eq!(nested.code(), Code::InvalidArgument);
+    let random = new_channel(&mut c, &juan, &sid, "random", pb::ChannelType::Text).await;
+    let elsewhere = reply(&mut c, &rin, &sid, &random.id, &parent.id, "hi", false).await.unwrap_err();
+    assert_eq!(elsewhere.code(), Code::NotFound);
+    let stray = send(&mut c, &rin, &sid, &general, "x").await.unwrap();
+    let alone = c
+        .messages
+        .send_message(authed(
+            &rin,
+            pb::SendMessageRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                content: "also?".into(),
+                also_send_to_channel: true,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(alone.code(), Code::InvalidArgument);
+
+    // Following: the parent's author and everyone who replied, until they unfollow.
+    assert_eq!(followed(&mut c, &juan, &sid).await, std::slice::from_ref(&parent.id));
+    assert_eq!(followed(&mut c, &mika, &sid).await, std::slice::from_ref(&parent.id));
+    c.messages
+        .follow_thread(authed(
+            &mika,
+            pb::FollowThreadRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                follow: false,
+            },
+        ))
+        .await
+        .unwrap();
+    reply(&mut c, &mika, &sid, &general, &parent.id, "ok Tofu", false).await.unwrap();
+    assert!(followed(&mut c, &mika, &sid).await.is_empty(), "replying again doesn't follow it again");
+
+    // Search finds threads by their parent or their replies.
+    assert_eq!(list_threads(&mut c, &rin, &sid, &general, "").await.threads.len(), 1);
+    assert_eq!(list_threads(&mut c, &rin, &sid, &general, "TOFU").await.threads[0].id, parent.id);
+    assert_eq!(list_threads(&mut c, &rin, &sid, &general, "cat").await.threads.len(), 1);
+    assert!(list_threads(&mut c, &rin, &sid, &general, "dog").await.threads.is_empty());
+
+    // Moderators lock a thread: only they reply then.
+    let denied = c
+        .messages
+        .update_thread(authed(
+            &rin,
+            pb::UpdateThreadRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                locked: Some(true),
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let locked = c
+        .messages
+        .update_thread(authed(
+            &juan,
+            pb::UpdateThreadRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                locked: Some(true),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .thread
+        .unwrap();
+    assert!(locked.locked);
+    let shut = reply(&mut c, &rin, &sid, &general, &parent.id, "but", false).await.unwrap_err();
+    assert_eq!(shut.code(), Code::PermissionDenied);
+    reply(&mut c, &juan, &sid, &general, &parent.id, "Tofu it is.", false).await.unwrap();
+    let log = audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    assert!(log.entries.iter().any(|e| e.action == pb::AuditAction::ThreadLock as i32));
+
+    // Starting threads takes its own permission; replying in one takes Send Messages.
+    let everyone = c
+        .roles
+        .list_roles(authed(&juan, pb::ListRolesRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .roles
+        .into_iter()
+        .find(|r| r.id == sid)
+        .unwrap();
+    assert!(everyone.permissions.contains(&(pb::Permission::CreateThreads as i32)));
+    let without = everyone.permissions.iter().copied().filter(|&p| p != pb::Permission::CreateThreads as i32).collect();
+    c.roles
+        .update_role(authed(
+            &juan,
+            pb::UpdateRoleRequest {
+                server_id: sid.clone(),
+                role_id: sid.clone(),
+                permissions: Some(pb::PermissionSet { permissions: without }),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    let cannot = reply(&mut c, &rin, &sid, &general, &stray.id, "new thread", false).await.unwrap_err();
+    assert_eq!(cannot.code(), Code::PermissionDenied);
+    let other = send(&mut c, &mika, &sid, &general, "another topic").await.unwrap();
+    let owner_reply = reply(&mut c, &juan, &sid, &general, &other.id, "started by the owner", false).await.unwrap();
+    reply(&mut c, &rin, &sid, &general, &other.id, "and I can reply", false).await.unwrap();
+
+    // The parent's author can't delete a thread others replied in; a moderator can, replies and all.
+    let refused = c
+        .messages
+        .delete_message(authed(
+            &mika,
+            pb::DeleteMessageRequest { server_id: sid.clone(), message_id: other.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    let before = usage(&mut c, &juan, &sid).await;
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest { server_id: sid.clone(), message_id: other.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    let after = usage(&mut c, &juan, &sid).await;
+    assert_eq!(before.messages - after.messages, 3, "the parent and both replies");
+    let gone = c
+        .messages
+        .get_message(authed(
+            &juan,
+            pb::GetMessageRequest { server_id: sid.clone(), message_id: owner_reply.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(gone.code(), Code::NotFound);
+    let log = audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    assert!(log.entries.iter().any(|e| e.action == pb::AuditAction::ThreadDelete as i32));
+
+    // Deleting a reply sums the thread up again.
+    let page = thread_page(&mut c, &juan, &sid, &general, &parent.id).await;
+    let count = page.parent.as_ref().unwrap().thread.as_ref().unwrap().reply_count;
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest {
+                server_id: sid.clone(),
+                message_id: page.messages[0].id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    let page = thread_page(&mut c, &juan, &sid, &general, &parent.id).await;
+    assert_eq!(page.parent.unwrap().thread.unwrap().reply_count, count - 1);
+
+    // Quiet threads are archived after the server's setting; zero never archives them.
+    let updated = c
+        .servers
+        .update_server(authed(
+            &juan,
+            pb::UpdateServerRequest { server_id: sid.clone(), thread_archive_hours: Some(0), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert_eq!(updated.thread_archive_hours, 0);
+    let archived = c
+        .messages
+        .list_threads(authed(
+            &rin,
+            pb::ListThreadsRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                archived: true,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(archived.threads.is_empty());
+    let too_long = c
+        .servers
+        .update_server(authed(
+            &juan,
+            pb::UpdateServerRequest { server_id: sid.clone(), thread_archive_hours: Some(9000), ..Default::default() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(too_long.code(), Code::InvalidArgument);
+    instance.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn threads_stay_home_when_a_channel_is_shared() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (sora, _, _) = sign_up(&mut c, "sora").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    join(&mut c, &sora, &home).await;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let parent = send(&mut c, &juan, &home, &dev.id, "movie night?").await.unwrap();
+    let kept = reply(&mut c, &sora, &home, &dev.id, &parent.id, "only in the thread", false).await.unwrap();
+    let also = reply(&mut c, &sora, &home, &dev.id, &parent.id, "in both", true).await.unwrap();
+
+    // Shared after the thread started: guests see the channel, not who replied in its threads.
+    let shared = share(&mut c, &juan, &home, &dev.id, &mika, &guest).await;
+    let seen = messages(&mut c, &mika, &guest, &shared.id).await;
+    assert!(seen.iter().all(|m| m.id != kept.id), "{seen:?}");
+    let first = seen.iter().find(|m| m.id == parent.id).unwrap();
+    assert!(first.thread.is_none());
+    let both = seen.iter().find(|m| m.id == also.id).unwrap();
+    assert!(both.thread_id.is_empty() && !both.also_in_channel);
+    let hidden = c
+        .messages
+        .get_message(authed(
+            &mika,
+            pb::GetMessageRequest {
+                server_id: guest.clone(),
+                channel_id: shared.id.clone(),
+                message_id: kept.id.clone(),
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(hidden.code(), Code::NotFound);
+    instance.stop().await;
+}
+
 /// A channel shared with a server on another instance: a code made for
 /// other instances, a preview naming the home instance and its key, the ask
 /// (which pins each instance's key at the other), approval and ending.
@@ -6924,4 +7830,341 @@ async fn channels_shared_across_instances() {
 
     a.stop().await;
     b.stop().await;
+}
+
+#[tokio::test]
+async fn channels_are_created_with_their_permissions() {
+    use pb::OverwriteTarget as T;
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let sid = create_server(&mut c, &juan, "Copies", true).await.id;
+    join(&mut c, &mika, &sid).await;
+    join(&mut c, &rin, &sid).await;
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels[0]
+        .id
+        .clone();
+    // A new role goes in at the bottom: Admins above Mods above Builders.
+    let admins = create_role(&mut c, &juan, &sid, "Admins", &[]).await.unwrap();
+    let mods =
+        create_role(&mut c, &juan, &sid, "Mods", &[P::ManageChannels, P::ManageRoles, P::ViewChannels]).await.unwrap();
+    let builders = create_role(&mut c, &juan, &sid, "Builders", &[P::ManageChannels]).await.unwrap();
+    give_role(&mut c, &juan, &sid, &mika_user.id, &mods.id).await.unwrap();
+    give_role(&mut c, &juan, &sid, &rin_user.id, &builders.id).await.unwrap();
+    let create = |token: &str, name: &str, overwrites: Vec<pb::PermissionOverwrite>| {
+        authed(
+            token,
+            pb::CreateChannelRequest {
+                server_id: sid.clone(),
+                name: name.into(),
+                topic: "only staff".into(),
+                slowmode_seconds: 30,
+                permission_overwrites: overwrites,
+                ..Default::default()
+            },
+        )
+    };
+    let hidden = || overwrite(&sid, T::Role, &[], &[P::ViewChannels]);
+    let mika_sees = overwrite(&mika_user.id, T::Member, &[P::ViewChannels], &[]);
+
+    // Made private in one step: Rin never hears of it, and it keeps its topic and slow mode.
+    let mut rin_stream = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let made = c.channels.create_channel(create(&mika, "staff", vec![hidden(), mika_sees])).await.unwrap();
+    let made = made.into_inner().channel.unwrap();
+    assert_eq!(made.permission_overwrites.len(), 2);
+    assert_eq!((made.topic.as_str(), made.slowmode_seconds), ("only staff", 30));
+    let public = send(&mut c, &juan, &sid, &general, "hello").await.unwrap();
+    let next = next_event(&mut rin_stream).await;
+    assert!(matches!(&next.payload, Some(Payload::MessageCreated(e)) if e.message.as_ref().unwrap().id == public.id));
+    drop(rin_stream);
+    assert!(!channel_names(&mut c, &rin, &sid).await.contains(&"staff".to_string()));
+
+    // An overwrite for a role at or above Mika's is refused, and no channel is left behind.
+    let admin_sees = overwrite(&admins.id, T::Role, &[P::ViewChannels], &[]);
+    let refused = c.channels.create_channel(create(&mika, "over", vec![hidden(), admin_sees])).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    assert!(!channel_names(&mut c, &juan, &sid).await.contains(&"over".to_string()));
+
+    // Without Manage Roles, a channel can be made, but not with permissions.
+    let denied = c.channels.create_channel(create(&rin, "nope", vec![hidden()])).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    c.channels.create_channel(create(&rin, "fine", vec![])).await.unwrap();
+}
+
+/// Uploads a file to attach in `server_id`, and says where it's served.
+async fn attach(c: &mut Clients, instance: &Instance, token: &str, server_id: &str, bytes: Vec<u8>) -> String {
+    let reserved = c
+        .media
+        .create_upload(authed(
+            token,
+            pb::CreateUploadRequest {
+                purpose: pb::MediaPurpose::Attachment as i32,
+                content_type: "application/x-whatever".into(),
+                size: bytes.len() as i64,
+                server_id: server_id.into(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(put(instance, &reserved.upload_url, bytes).await, reqwest::StatusCode::NO_CONTENT);
+    reserved.media.unwrap().url
+}
+
+async fn send_files(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    files: &[(&str, &str)],
+) -> Result<pb::Message, tonic::Status> {
+    let attachments = files.iter().map(|(url, name)| pb::Attachment {
+        url: (*url).into(),
+        filename: (*name).into(),
+        ..Default::default()
+    });
+    c.messages
+        .send_message(authed(
+            token,
+            pb::SendMessageRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                attachments: attachments.collect(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().message.unwrap())
+}
+
+#[tokio::test]
+async fn attachments_upload_send_serve_and_go_with_their_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(
+        dir.path(),
+        &[
+            ("FUWA_LIMIT_ATTACHMENT_UPLOAD", "64KB"),
+            ("FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY", "150KB"),
+            ("FUWA_LIMIT_ATTACHMENT_STORAGE", "100KB"),
+            ("FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY", "4KB"),
+        ],
+    )
+    .await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (stranger, _, _) = sign_up(&mut c, "stranger").await;
+    let server = create_server(&mut c, &juan, "Files", true).await;
+    c.servers
+        .join_server(authed(&mika, pb::JoinServerRequest { server_id: server.id.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    let channels = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels;
+    let general = channels.iter().find(|ch| ch.name == "general").unwrap().id.clone();
+    let reserve = |token: &str, server_id: &str, size: i64| {
+        authed(
+            token,
+            pb::CreateUploadRequest {
+                purpose: pb::MediaPurpose::Attachment as i32,
+                content_type: String::new(),
+                size,
+                server_id: server_id.into(),
+            },
+        )
+    };
+
+    // An attachment is uploaded for a server you're in, up to the cap.
+    let nowhere = c.media.create_upload(reserve(&juan, "", 10)).await.unwrap_err();
+    assert_eq!(nowhere.code(), Code::InvalidArgument);
+    let outside = c.media.create_upload(reserve(&stranger, &server.id, 10)).await.unwrap_err();
+    assert_eq!(outside.code(), Code::NotFound);
+    let too_big = c.media.create_upload(reserve(&juan, &server.id, 64_001)).await.unwrap_err();
+    assert_eq!(too_big.code(), Code::ResourceExhausted);
+    assert!(too_big.message().contains("64 KB"), "{}", too_big.message());
+
+    // Any kind of file: what it's kept as comes from its bytes.
+    let mut zip = b"PK\x03\x04".to_vec();
+    zip.extend((0..2000u32).map(|n| (n % 251) as u8));
+    let page = b"<html><script>alert(1)</script></html>".to_vec();
+    let zip_url = attach(&mut c, &instance, &juan, &server.id, zip.clone()).await;
+    let page_url = attach(&mut c, &instance, &juan, &server.id, page.clone()).await;
+    let picture_url = attach(&mut c, &instance, &juan, &server.id, png(300, 3)).await;
+    assert_eq!(fetch(&instance, &zip_url).await.0, reqwest::StatusCode::NOT_FOUND, "served only once sent");
+
+    // Only files uploaded here, by the sender, for this server.
+    let elsewhere = send_files(&mut c, &juan, &server.id, &general, &[("https://example.com/x.zip", "x.zip")]).await;
+    assert_eq!(elsewhere.unwrap_err().code(), Code::InvalidArgument);
+    let stolen = send_files(&mut c, &mika, &server.id, &general, &[(&zip_url, "x.zip")]).await;
+    assert_eq!(stolen.unwrap_err().code(), Code::PermissionDenied);
+    let twice = send_files(&mut c, &juan, &server.id, &general, &[(&zip_url, "a"), (&zip_url, "b")]).await;
+    assert_eq!(twice.unwrap_err().code(), Code::InvalidArgument);
+
+    let sent = send_files(
+        &mut c,
+        &juan,
+        &server.id,
+        &general,
+        &[(&zip_url, "../notes\u{202e}piz.zip"), (&page_url, "page.html"), (&picture_url, "cat.png")],
+    )
+    .await
+    .unwrap();
+    let [zipped, html, cat] = &sent.attachments[..] else { panic!("{:?}", sent.attachments) };
+    assert_eq!(
+        (zipped.filename.as_str(), zipped.content_type.as_str(), zipped.size),
+        ("notespiz.zip", "application/zip", 2004)
+    );
+    assert_eq!(html.content_type, "application/octet-stream");
+    assert_eq!(cat.content_type, "image/png");
+    assert!(zip_url.ends_with(&zipped.id) && zipped.url.ends_with(&zipped.id));
+    let again = send_files(&mut c, &juan, &server.id, &general, &[(&zip_url, "again.zip")]).await;
+    assert_eq!(again.unwrap_err().code(), Code::AlreadyExists, "a file is in one message");
+    let listed = messages(&mut c, &mika, &server.id, &general).await;
+    assert_eq!(listed.iter().find(|m| m.id == sent.id).unwrap().attachments, sent.attachments);
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 2004 + page.len() as i64 + 300);
+
+    // Served from here only, never run as a page: downloads unless a picture.
+    let (status, headers, body) = fetch(&instance, &zipped.url).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(body, zip);
+    assert_eq!(headers["content-type"], "application/octet-stream");
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    assert_eq!(headers["content-security-policy"], "default-src 'none'; sandbox");
+    assert_eq!(headers["content-disposition"], "attachment; filename=\"notespiz.zip\"; filename*=UTF-8''notespiz.zip");
+    let (_, headers, body) = fetch(&instance, &html.url).await;
+    assert_eq!((headers["content-type"].to_str().unwrap(), body), ("application/octet-stream", page));
+    assert!(headers["content-disposition"].to_str().unwrap().starts_with("attachment;"));
+    let (_, headers, _) = fetch(&instance, &cat.url).await;
+    assert_eq!(headers["content-type"], "image/png");
+    assert!(headers["content-disposition"].to_str().unwrap().starts_with("inline;"));
+
+    // Players seek with ranges.
+    let part =
+        |range: &str| reqwest::Client::new().get(on(&instance, &zipped.url)).header("range", range.to_string()).send();
+    let some = part("bytes=10-19").await.unwrap();
+    assert_eq!(some.status(), reqwest::StatusCode::PARTIAL_CONTENT);
+    assert_eq!(some.headers()["content-range"], "bytes 10-19/2004");
+    assert_eq!(some.bytes().await.unwrap().to_vec(), zip[10..20].to_vec());
+    let tail = part("bytes=-4").await.unwrap();
+    assert_eq!(tail.bytes().await.unwrap().to_vec(), zip[2000..].to_vec());
+    assert_eq!(part("bytes=5000-").await.unwrap().status(), reqwest::StatusCode::RANGE_NOT_SATISFIABLE);
+
+    // The server's cap on files counts what's attached.
+    let big = attach(&mut c, &instance, &mika, &server.id, vec![7; 60_000]).await;
+    send_files(&mut c, &mika, &server.id, &general, &[(&big, "big.bin")]).await.unwrap();
+    let more = attach(&mut c, &instance, &mika, &server.id, vec![8; 50_000]).await;
+    let full = send_files(&mut c, &mika, &server.id, &general, &[(&more, "more.bin")]).await.unwrap_err();
+    assert_eq!(full.code(), Code::ResourceExhausted, "{full:?}");
+
+    // Files have their own daily cap, apart from pictures'.
+    let day = c.media.create_upload(reserve(&mika, &server.id, 60_000)).await.unwrap_err();
+    assert_eq!(day.code(), Code::ResourceExhausted);
+    assert!(day.message().contains("of files a day"), "{}", day.message());
+    let avatar = create_upload(&mut c, &mika, pb::MediaPurpose::Avatar, "image/png", 300).await;
+    assert!(avatar.is_ok(), "pictures are counted apart");
+
+    // A file goes with its message: no longer served, and gone from disk.
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest {
+                server_id: server.id.clone(),
+                message_id: sent.id.clone(),
+                channel_id: general.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    let gone = |id: &str| !dir.path().join("media").join(id).exists();
+    for _ in 0..50 {
+        if gone(&zipped.id) && gone(&html.id) && gone(&cat.id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(gone(&zipped.id) && gone(&html.id) && gone(&cat.id));
+    assert_eq!(fetch(&instance, &zipped.url).await.0, reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 60_000);
+
+    // A reply's file goes with the thread when the message it's under goes.
+    let parent = send(&mut c, &juan, &server.id, &general, "a thread for files").await.unwrap();
+    let note = attach(&mut c, &instance, &juan, &server.id, b"in a thread".to_vec()).await;
+    c.messages
+        .send_message(authed(
+            &juan,
+            pb::SendMessageRequest {
+                server_id: server.id.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                attachments: vec![pb::Attachment {
+                    url: note.clone(),
+                    filename: "note.txt".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 60_011);
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest {
+                server_id: server.id.clone(),
+                message_id: parent.id.clone(),
+                channel_id: general.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    let note_id = note.rsplit('/').next().unwrap().to_string();
+    for _ in 0..50 {
+        if gone(&note_id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(gone(&note_id));
+    assert_eq!(fetch(&instance, &note).await.0, reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 60_000);
+
+    // And with its channel.
+    let big_id = big.rsplit('/').next().unwrap().to_string();
+    c.channels
+        .delete_channel(authed(&juan, pb::DeleteChannelRequest { server_id: server.id.clone(), channel_id: general }))
+        .await
+        .unwrap();
+    for _ in 0..50 {
+        if gone(&big_id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(gone(&big_id));
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 0);
+    instance.stop().await;
 }

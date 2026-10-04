@@ -35,7 +35,10 @@
   - `api/`: one file per gRPC service, all implemented on `Api`.
   - `node.rs`: the instance database (`node.db`): accounts and profiles,
     sessions (devices), two-step sign-in (TOTP secrets, backup codes, sign-in
-    tickets), notification settings, meta (the install id, the announcement).
+    tickets), notification settings, server arrangements (each person's rail
+    order and folders, `AccountService.Get/SetServerArrangement`; the web side
+    is `lib/rail.ts`, `components/RailFolder.tsx` and `hooks/use-rail-arrange.ts`),
+    meta (the install id, the announcement).
     Admins can turn an account off (`disabled_at`): it loses its sessions and
     can't sign in until it's turned back on. What belongs to a person but not to
     one server lives here; a server file keeps only a copy of what its members
@@ -61,6 +64,15 @@
     (`DirectMessageService`) checks what the server can see (who sends, the
     group id, epoch and content type in the MLS header, that key packages
     name the account and device they claim) and never decrypts anything.
+  - `friends.rs`: friends, requests and blocks (`docs/friends.md`), in
+    node.db's `friend_links` (each person's own row about the other, so a
+    block or a declined request stays on one side) and `friend_settings`,
+    plus who's online (an open `WatchFriends` stream) and the per-account
+    request limit, in memory. `api/friends.rs` is `FriendService`, answered
+    where accounts are; its `Api::may_message` decides who may open, write in
+    or call a direct-message conversation. A friend list is its owner's
+    alone: never in a server's events or audit log, never shown to other
+    members, servers or agents, and a block is told to nobody.
   - `twofactor.rs`: TOTP codes (RFC 6238) and backup codes for two-step sign-in.
   - `linked.rs`: signing in with waifu.dev (linked accounts): the instance is an
     OpenAuth client whose client ID is its public URL. `AuthService`'s
@@ -126,7 +138,19 @@
     the server file (`emojis`, `api/emoji.rs`); their pictures are uploads
     (`MEDIA_PURPOSE_EMOJI`) counted in the server's attachments, and every
     change sends the whole list (`EmojisUpdated`). Messages write them
-    `<:name:id>` (`<a:name:id>` when they move).
+    `<:name:id>` (`<a:name:id>` when they move). A message may also use
+    emoji from its author's other servers on the instance: the app sends
+    them along (`SendMessageRequest.emojis`), `App::check_emojis` keeps those
+    from a server the author is in that still has them (`ServerEmojis` on its
+    shard), with their stored name and picture (the link rebuilt at the
+    public address, never the one sent), and they
+    ride in the message's extras as `Message.emojis`, so everyone can draw
+    them. No new permission: being in the server is what lets you use them.
+    Threads (`api/threads.rs`, docs/threads.md): a reply is a message with
+    `thread_id` (its parent) and `in_channel`; `threads` sums each one up
+    and every send or delete of a reply calls `threads::refresh` in the
+    same write (`ThreadUpdated`). Paths that delete messages call
+    `threads::after_delete`; shared channels strip threads for guests.
     Shared channels (`api/shared.rs`, docs/shared-channels.md): a channel's
     home keeps it and every message (`channel_guests`, `share_codes`,
     `channel_blocks`); a guest server shows it as a channel of its own
@@ -146,6 +170,29 @@
     the message (`execute_webhook`): its `author_id` is the webhook's id and
     `Message.webhook` carries the name and picture it posted under. Webhook
     messages never ping @everyone, @here or roles, and nobody can edit them.
+  - GIFs (`docs/gifs.md` is the design): `gifs/` asks the instance's provider
+    (`giphy.rs`, `klipy.rs` behind `Kind`; the `gifs` setting holds the key,
+    never sent to apps, gateways or shards; another provider never gets it) with no forwarding headers, caches answers by a
+    SHA-256 key, and hands results back as signed tokens with previews
+    through the picture proxy. `gifs/store.rs` stores a picked GIF once
+    (`gif_files`, media owner "gifs", metadata stripped) and keeps saved GIFs;
+    `api/gifs.rs` is `GifService` (directory). `MessageGif.seal` is an HMAC
+    the server checks in `send_message` and clears. `media/still.rs` draws a
+    GIF's first frame (for AutoMod). Web: `fuwa/gifs.ts`,
+    `components/chat/GifPicker.tsx` (button) and `GifPanel.tsx` (the picker,
+    a lazy file).
+  - `mcp/`: the instance as an MCP server for agents (`docs/mcp.md`), at
+    `/mcp` and `/.well-known/mcp.json`: stateless Streamable HTTP, one
+    JSON-RPC message per POST, plain JSON back, no sessions. Agent tokens
+    only, a token bucket per agent account (`Limits`). Every tool
+    (`tools.rs`) is a public gRPC call made in process through the same
+    router clients reach (`call!` over `Mcp::inner`: the gateway's when
+    split), so routing, permission checks and limits are the call's own;
+    it never touches a database. `view.rs` turns messages into compact
+    JSON, `catalog.rs` holds the resources and prompts. Before any tool on
+    a server it asks `AgentService.GetMcpAccess` (the server file's
+    `mcp_access`) whether that server's managers let the agent in. A new
+    API call agents should have gets a tool here, wrapping that call.
   - `automod/`: what an AutoMod rule catches (words with `*` wildcards,
     pings, links to sites not allowed); `api/automod.rs` keeps the rules
     (`automod_rules`, one protobuf blob each) and `review` runs them inside
@@ -163,6 +210,22 @@
     message through that rule and is counted in the anonymous report by
     kind and provider id. The web pages are `settings/instance/Moderation.tsx`
     and the Smart filter in `settings/server/AutoMod.tsx`.
+  - `search.rs` and `api/search.rs`: searching a server's messages
+    (`SearchService`). Turso's own full-text search needs a new dependency
+    and doesn't run in MVCC, so the index is plain tables in the server's file
+    (`search_words`, `search_docs`, `search_postings`, `search_state`).
+    `search.rs` cuts text into words (folded case, accents and full-width
+    forms; CJK as pairs of characters; `@name` mentions; attachment names and
+    embeds) and is pure; `VERSION` going up rebuilds every index. One
+    indexer per shard (`spawn_search_indexer`) follows each server's events
+    through `Hub::search_tap` and builds servers that had messages before
+    search, newest first, in small `write_quiet` batches between other
+    writes. A search ANDs the words (the last one as a prefix), filters by
+    author, channel, mention, what a message has and dates, only in channels
+    the searcher can see, and re-reads each hit from `messages`. Searches are
+    never logged, stored or shown to AutoMod; a token bucket per account
+    limits them. Secure channels and other instances' shared messages aren't
+    indexed.
   - `permissions.rs`: roles and permissions. `Rules::access` works out what a
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's
@@ -233,6 +296,20 @@
     reserved with `MediaService.CreateUpload` (`api/media.rs`) and checks its
     bytes really are the picture type it claims; `GET /media/<id>` serves it.
     Pictures nothing uses are swept hourly and at startup.
+  - `attachments.rs`: files sent with messages (`MEDIA_PURPOSE_ATTACHMENT`,
+    any kind). Uploaded for one server and stored with its pictures (on its
+    shard when split); a message may only link this instance's uploads, and
+    its server file keeps an `attachments` row per file, written and deleted
+    with the message (or its channel, a ban's purge, an AutoMod takedown),
+    counted in the server's attachment bytes. The row is what serves the
+    file: the kind found in its bytes (`media::kind_of`, never the client's),
+    `Content-Disposition: attachment` for anything but pictures, audio and
+    video, nosniff and a sandbox CSP always, single ranges for players.
+    Caps: FUWA_LIMIT_ATTACHMENT_UPLOAD and _UPLOADS_PER_DAY (node.db
+    `attachment_days`), the server's `attachment_bytes`. Not in secure
+    channels (they'd upload ciphertext) or channels shared from another
+    server yet. The web app's side is `components/chat/Attachments.tsx`,
+    `ComposerFiles.tsx` and `staged.ts`.
   - `outside.rs`: pictures from other sites. No client ever loads a picture
     from anywhere but a fuwa instance, since that site would learn the
     reader's IP address: any picture link that isn't an upload (embed images,
@@ -475,6 +552,21 @@
     `src/fuwa/dms.ts` are the actions; the screens are in `components/dm/`
     (`DmList`, `DmView`, `EncryptionDialog` with the safety number), routed at
     `/<instance>/dm/<conversation>`.
+  - `src/fuwa/search.ts`, `src/lib/search-query.ts`, `components/search/`:
+    the search bar (Mod+F) and results panel. `search-query.ts` reads
+    `from:`, `in:`, `has:`, `mentions:`, `before:`, `after:` and `during:`
+    and keeps recent searches on the device only; members and channels are
+    turned into ids before asking the instance. Results mark matches with
+    private-use characters that `components/search/highlight.ts` turns into
+    `<mark>` inside the one Markdown component. Jumping to a result goes
+    through `requestJump`, which `MessageList` takes by loading older pages
+    until the message is there.
+  - Right-click menus (`docs/context-menus.md` lists them for every app): one
+    menu at a time, `components/ContextMenu.tsx` (`useContextMenu` on the
+    element, `ContextMenuHost` draws it with the animated dropdown menu);
+    what's in each is data built in `components/menus/`, from the same
+    actions and permission checks as the buttons. Later features add items
+    with `extendMenu` (`lib/context-menu.ts`) instead of editing the menus.
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
     an instance or a server live on that instance instead.
@@ -493,6 +585,14 @@
     `settings/app/ShaderEditor.tsx`. Theme files never make the app load
     anything: pictures travel inside them and are uploaded on import. Settings
     pages: `settings/app/Themes.tsx` and `Backgrounds.tsx`.
+  - Friends (`docs/friends.md`): `src/fuwa/friends.ts` follows
+    `WatchFriends` beside the event stream (which is also what shows you
+    online) and holds the actions; `pages/FriendsPage.tsx` is
+    `/<instance>/friends` (online, all, pending, blocked; only the lines in
+    view drawn), `components/friends/FriendActions.tsx` the buttons on
+    profile cards, `settings/account/FriendPrivacy.tsx` the settings, and
+    `lib/friends.ts` the pure parts. Conversations with people you blocked
+    stay out of `DmList`.
   - `src/lib/notifications.ts`: how a message reaches you: your settings for
     its channel, then its server (both stored on the instance, so they follow
     you across devices), then this device's Notifications settings. Muted means
@@ -522,7 +622,14 @@
     only), `ApplyDialog.tsx` the application, `Rules.tsx` the rules sheet a
     new member agrees to (the composer shows it until they do), and
     `Applied.tsx` the applications waiting in the rail. `Welcome.tsx` greets
-    new members once with the welcome screen (remembered in this browser). Those are kept in
+    new members once with the welcome screen (remembered in this browser), or
+    with `Onboarding.tsx` when the server has onboarding steps (picks that
+    give harmless roles and channels, the rules, a hello; `JoinService`'s
+    Get/Set/FinishOnboarding, `server.onboarding` as protobuf, a member's
+    `onboarded_at`). All of them, `ApplicationStatus.tsx` and invite pages
+    sit under the server's banner (`join/Banner.tsx`, `lib/banner.ts`: a
+    focal point and an optional accent color); admins set it all on one page
+    with a live preview, `settings/server/WelcomeAndOnboarding.tsx`. Those are kept in
     this browser (`src/lib/applied.ts`) and `AppliedWatcher` asks the
     instance how they went. Reviewers use `settings/server/Applications.tsx`;
     owners write rules and questions in `settings/server/JoinFormEditor.tsx`.
@@ -537,6 +644,16 @@
     plugin for `Markdown`), and `ServerLook`, the roles and members a server's
     messages need to color names. `MentionPicker.tsx` is the @ list in the
     composer; roles go in as `@Name` and are sent as `<@&id>`.
+  - Emoji: `components/EmojiPicker.tsx` is the picker (recently used, this
+    server's, your other servers' on the same instance, then the standard
+    set with skin tones; a hand-laid virtual grid that draws only the rows in
+    sight, driven by arrows from its search box). What it and the `:name:`
+    list offer is `lib/emoji-catalog.ts` (hooks and storage) over
+    `lib/emoji-search.ts` (names, `~2` for clashes, search, what a message
+    sends along). The standard set is `lib/emoji-data.json`, made from
+    `emojibase-data` by `scripts/emoji-data.mjs` and loaded only when needed;
+    nothing about emoji is ever fetched from outside. `EmojiImage.tsx` draws a
+    server emoji, holding moving ones still under reduced motion until hovered.
   - `src/components/settings/instance/`: the instance admin pages beyond
     settings (accounts, servers, announcement), shown by
     `settings/InstanceSettingsDialog.tsx`. The announcement itself is drawn by
@@ -682,6 +799,13 @@
   a `DirectMessageContent`. Who belongs in a channel's group is
   `secure_members` (who can see it, people only); keep it in step with any
   change to how channel access is worked out.
+- Friends are private (`docs/friends.md`): only the two people a change is
+  about are told, a block is never shown to the person blocked (their
+  requests look sent, their messages are taken and kept from the blocker,
+  their calls never ring; no refusal a block alone would cause), and nothing
+  about friends reaches a server, its logs or an agent. A new path that
+  starts or carries a direct message asks `Api::may_message`, and a new way
+  of reading one hides what the reader's blocked people sent.
 - Direct messages are end-to-end encrypted, always: no off switch, no
   server-side copy of keys or plaintext, nothing about their content in logs,
   events, exports or the usage signal. The server checks only what it can

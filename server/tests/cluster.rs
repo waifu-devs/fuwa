@@ -689,6 +689,26 @@ async fn a_split_instance_works_like_one() {
     let mine = c.agents.list_agents(authed(&juan, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents;
     assert_eq!(mine[0].servers, 1);
 
+    // MCP through the gateway: its tools reach the shard holding the server.
+    let mcp = |name: &str, arguments: serde_json::Value| {
+        http.post(format!("{}/mcp", cluster.gateway.url()))
+            .bearer_auth(&made.token)
+            .json(&serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": name, "arguments": arguments } }))
+            .send()
+    };
+    let read: serde_json::Value =
+        mcp("list_messages", serde_json::json!({ "server_id": on_b.id, "channel_id": channel.id }))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+    let messages = &read["result"]["structuredContent"]["messages"];
+    assert!(messages.as_array().unwrap().iter().any(|m| m["content"] == "relayed"), "{read}");
+    let head: serde_json::Value =
+        mcp("list_events", serde_json::json!({ "server_id": on_b.id })).await.unwrap().json().await.unwrap();
+    assert!(head["result"]["structuredContent"]["cursor"].as_i64().unwrap() > 0, "{head}");
+
     // A moderation provider set up on the directory reaches the shards, key
     // and all (they check messages), while clients only learn a key is set.
     let jev = pb::AutoModProviderSettings {
@@ -1501,7 +1521,13 @@ async fn servers_live_in_their_region_and_move() {
     };
     assert_eq!(c.servers.update_server(authed(&juan, request)).await.unwrap_err().code(), Code::PermissionDenied);
     assert_eq!(reserve(pb::MediaPurpose::Emoji, &server.id, &mika).await.unwrap_err().code(), Code::NotFound);
-    assert_eq!(reserve(pb::MediaPurpose::Banner, &server.id, &juan).await.unwrap_err().code(), Code::InvalidArgument);
+    assert_eq!(
+        reserve(pb::MediaPurpose::Background, &server.id, &juan).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+    // A server's banner goes to its region too.
+    let banner = reserve(pb::MediaPurpose::Banner, &server.id, &juan).await.unwrap();
+    assert!(banner.upload_url.contains(&format!("/media/servers/{}/upload/", server.id)));
     let request = pb::UpdateServerRequest {
         server_id: server.id.clone(),
         icon_url: Some(direct.url.clone()),
@@ -1531,6 +1557,68 @@ async fn servers_live_in_their_region_and_move() {
     assert!(!picture_at(&shard_b, &unused.id).exists() && !picture_at(&bucket_eu, &unused.id).exists());
     assert!(picture_at(&shard_b, &direct.id).exists(), "the icon it uses stays");
     assert!(cluster.directory.app().node().unwrap().moves().await.unwrap().is_empty(), "the move is over");
+    // A file attached to a message goes straight to the server's region too,
+    // is served there (as a download) while the message has it, and goes
+    // with the message.
+    let node = cluster.directory.app().node().unwrap();
+    let mut zip = b"PK\x03\x04".to_vec();
+    zip.resize(5000, 9);
+    let request = pb::CreateUploadRequest {
+        purpose: pb::MediaPurpose::Attachment as i32,
+        content_type: "application/zip".into(),
+        size: zip.len() as i64,
+        server_id: server.id.clone(),
+    };
+    let reserved = c.media.create_upload(authed(&juan, request)).await.unwrap().into_inner();
+    assert!(reserved.upload_url.contains(&format!("/media/servers/{}/upload/", server.id)));
+    assert_eq!(http.put(&reserved.upload_url).body(zip.clone()).send().await.unwrap().status(), 204);
+    let file = reserved.media.unwrap();
+    assert!(picture_at(&shard_b, &file.id).exists() && picture_at(&bucket_eu, &file.id).exists());
+    assert!(!directory_media.join(&file.id).exists());
+    // A picture uploaded as a file isn't served as a picture while no
+    // message has it.
+    let request = pb::CreateUploadRequest {
+        purpose: pb::MediaPurpose::Attachment as i32,
+        content_type: "image/png".into(),
+        size: png.len() as i64,
+        server_id: server.id.clone(),
+    };
+    let loose = c.media.create_upload(authed(&juan, request)).await.unwrap().into_inner();
+    assert_eq!(http.put(&loose.upload_url).body(png.clone()).send().await.unwrap().status(), 204);
+    let loose = loose.media.unwrap();
+    assert!(picture_at(&shard_b, &loose.id).exists());
+    assert_eq!(http.get(&loose.url).send().await.unwrap().status(), 404);
+    let channel = general(&mut c, &juan, &server.id).await;
+    let request = pb::SendMessageRequest {
+        server_id: server.id.clone(),
+        channel_id: channel.id.clone(),
+        attachments: vec![pb::Attachment { url: file.url.clone(), filename: "notes.zip".into(), ..Default::default() }],
+        ..Default::default()
+    };
+    let sent = c.messages.send_message(authed(&juan, request)).await.unwrap().into_inner().message.unwrap();
+    let attached = sent.attachments[0].clone();
+    assert!(attached.url.ends_with(&format!("/media/servers/{}/{}", server.id, file.id)), "{}", attached.url);
+    assert_eq!((attached.content_type.as_str(), attached.size), ("application/zip", 5000));
+    assert!(node.media(&file.id).await.unwrap().unwrap().used, "kept at the directory");
+    let served = http.get(&attached.url).send().await.unwrap();
+    assert_eq!(served.headers()["content-type"], "application/octet-stream");
+    assert!(served.headers()["content-disposition"].to_str().unwrap().starts_with("attachment;"));
+    assert_eq!(served.bytes().await.unwrap().to_vec(), zip);
+    let part = http.get(&attached.url).header("range", "bytes=4990-").send().await.unwrap();
+    assert_eq!(part.status(), 206);
+    assert_eq!(part.bytes().await.unwrap().to_vec(), zip[4990..].to_vec());
+    // Its upload's link leads there too.
+    assert_eq!(http.get(&file.url).send().await.unwrap().bytes().await.unwrap().to_vec(), zip);
+    let request = pb::DeleteMessageRequest {
+        server_id: server.id.clone(),
+        message_id: sent.id.clone(),
+        channel_id: channel.id.clone(),
+    };
+    c.messages.delete_message(authed(&juan, request)).await.unwrap();
+    wait_for(|| !picture_at(&shard_b, &file.id).exists() && !picture_at(&bucket_eu, &file.id).exists()).await;
+    assert!(node.media(&file.id).await.unwrap().is_none());
+    assert_eq!(http.get(&attached.url).send().await.unwrap().status(), 404);
+
     // Deleting the server deletes its pictures in its region and their rows.
     let request = pb::DeleteServerRequest { server_id: server.id.clone() };
     c.servers.delete_server(authed(&juan, request)).await.unwrap();

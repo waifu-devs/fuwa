@@ -904,7 +904,7 @@ pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::S
         Call::List(list) => home_list(&sdb, list).await,
         Call::Get(get) => home_get(&sdb, get).await,
         Call::Edit(edit) => home_edit(app, &sdb, edit).await,
-        Call::Delete(delete) => home_delete(&sdb, delete).await,
+        Call::Delete(delete) => home_delete(app, &sdb, delete).await,
         Call::Left(left) => home_left(&sdb, left).await,
         Call::Approved(approved) => guest_approved(app, &sdb, approved).await,
         Call::Ended(ended) => guest_ended(app, &sdb, ended).await,
@@ -1112,7 +1112,9 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
             let access = Access::guest(&channel.id, row.allowed);
             access.require_in(&channel.id, Permission::SendMessages)?;
             if !send.attachments.is_empty() {
-                access.require_in(&channel.id, Permission::AttachFiles)?;
+                // Files stay with the server they were uploaded for; the
+                // shared channels' design doesn't carry them across yet.
+                return Err(Error::invalid(super::messages::NO_SHARED_FILES));
             }
             if !send.embeds.is_empty() {
                 access.require_in(&channel.id, Permission::EmbedLinks)?;
@@ -1163,11 +1165,15 @@ async fn home_list(sdb: &ServerDb, list: cpb::GuestList) -> Result<cpb::SharedRe
         return Err(Error::denied(KEPT_OUT));
     }
     let (mut messages, has_more) =
-        messages::page(&conn, &sdb.id, &row.channel_id, list.limit, &list.before_id, &list.after_id, true).await?;
+        messages::page(&conn, &sdb.id, &row.channel_id, "", list.limit, &list.before_id, &list.after_id, true).await?;
+    messages.iter_mut().for_each(no_threads);
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), &mut messages).await?;
     let authors = users(&conn, &messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>()).await?;
-    Ok(cpb::SharedReply { page: Some(pb::ListMessagesResponse { messages, authors, has_more }), ..Default::default() })
+    Ok(cpb::SharedReply {
+        page: Some(pb::ListMessagesResponse { messages, authors, has_more, parent: None }),
+        ..Default::default()
+    })
 }
 
 async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply> {
@@ -1179,8 +1185,9 @@ async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply
     }
     let mut message = load_message(&conn, &sdb.id, &get.message_id)
         .await?
-        .filter(|m| m.channel_id == row.channel_id && m.kind == pb::MessageKind::Unspecified as i32)
+        .filter(|m| m.channel_id == row.channel_id && m.kind == pb::MessageKind::Unspecified as i32 && in_channel(m))
         .ok_or(Error::NotFound("message"))?;
+    no_threads(&mut message);
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), std::slice::from_mut(&mut message)).await?;
     let author = store::user(&conn, &message.author_id).await?;
@@ -1282,39 +1289,46 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
     Ok(cpb::SharedReply { message: Some(message), ..Default::default() })
 }
 
-async fn home_delete(sdb: &ServerDb, delete: cpb::GuestDelete) -> Result<cpb::SharedReply> {
+async fn home_delete(app: &Arc<App>, sdb: &ServerDb, delete: cpb::GuestDelete) -> Result<cpb::SharedReply> {
     let guest = delete.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
     let actor_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
-    sdb.write(&actor_id, async |conn, events| {
-        let (row, user, server) = connection(conn, &guest).await?;
-        let message = load_message(conn, &sdb.id, &delete.message_id)
-            .await?
-            .filter(|m| m.channel_id == row.channel_id)
-            .ok_or(Error::NotFound("message"))?;
-        if message.author_id != user.id {
-            // A guest's moderators delete their own server's people's messages.
-            let theirs = guest.moderator
-                && guests_among(conn, &[message.author_id.as_str()]).await?.get(&message.author_id) == Some(&server.id);
-            if !theirs {
-                return Err(Error::denied("you can only delete your own messages here, or your server's people's"));
+    let files = sdb
+        .write(&actor_id, async |conn, events| {
+            let (row, user, server) = connection(conn, &guest).await?;
+            let message = load_message(conn, &sdb.id, &delete.message_id)
+                .await?
+                .filter(|m| m.channel_id == row.channel_id)
+                .ok_or(Error::NotFound("message"))?;
+            if message.author_id != user.id {
+                // A guest's moderators delete their own server's people's messages.
+                let theirs = guest.moderator
+                    && guests_among(conn, &[message.author_id.as_str()]).await?.get(&message.author_id)
+                        == Some(&server.id);
+                if !theirs {
+                    return Err(Error::denied("you can only delete your own messages here, or your server's people's"));
+                }
+                remember(conn, &user, &server).await?;
+                let channel = load_channel(conn, &sdb.id, &row.channel_id).await?.map(|c| c.name).unwrap_or_default();
+                store::audit(
+                    conn,
+                    &user.id,
+                    Audit::new(pb::AuditAction::MessageDelete, &message.author_id).channel(channel),
+                )
+                .await?;
             }
-            remember(conn, &user, &server).await?;
-            let channel = load_channel(conn, &sdb.id, &row.channel_id).await?.map(|c| c.name).unwrap_or_default();
-            store::audit(
-                conn,
-                &user.id,
-                Audit::new(pb::AuditAction::MessageDelete, &message.author_id).channel(channel),
-            )
-            .await?;
-        }
-        messages::remove_message(conn, &message).await?;
-        events.push(Payload::MessageDeleted(pb::MessageDeleted {
-            channel_id: message.channel_id.clone(),
-            message_id: message.id.clone(),
-        }));
-        Ok(())
-    })
-    .await?;
+            let mut files = messages::remove_message(conn, &message).await?;
+            events.push(Payload::MessageDeleted(pb::MessageDeleted {
+                channel_id: message.channel_id.clone(),
+                message_id: message.id.clone(),
+            }));
+            files.extend(
+                super::threads::after_delete(conn, &message.channel_id, &message.id, &message.thread_id, events)
+                    .await?,
+            );
+            Ok(files)
+        })
+        .await?;
+    crate::attachments::drop_soon(app, &sdb.id, files);
     Ok(cpb::SharedReply::default())
 }
 
@@ -1671,13 +1685,27 @@ async fn targets(app: &App, server_id: &str) -> HashMap<String, Vec<Target>> {
     targets
 }
 
+/// Whether a message shows in its channel: not a thread reply kept to its thread.
+fn in_channel(m: &pb::Message) -> bool {
+    m.thread_id.is_empty() || m.also_in_channel
+}
+
+/// A message without its thread: threads stay with the home server, so a
+/// channel shared after threads were started doesn't hand guests who
+/// replied in them, and a reply also sent to the channel reads as a message.
+fn no_threads(m: &mut pb::Message) {
+    m.thread = None;
+    m.thread_id.clear();
+    m.also_in_channel = false;
+}
+
 /// The channel a message event is about, for the messages guests are shown:
 /// ones people wrote, not join messages or AutoMod alerts.
 fn message_channel(payload: &Payload) -> Option<&str> {
     match payload {
         Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) })
-            if m.kind == pb::MessageKind::Unspecified as i32 =>
+            if m.kind == pb::MessageKind::Unspecified as i32 && in_channel(m) =>
         {
             Some(&m.channel_id)
         }
@@ -1696,6 +1724,7 @@ async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
     ) = event.payload.as_mut()
     {
         no_pings(m);
+        no_threads(m);
     }
     if let Some(
         Payload::MessageCreated(pb::MessageCreated { message: Some(m) })

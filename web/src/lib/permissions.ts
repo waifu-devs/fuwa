@@ -45,6 +45,7 @@ export const KNOWN: P[] = [
   P.MOVE_MEMBERS,
   P.VIDEO,
   P.RECORD,
+  P.CREATE_THREADS,
 ];
 
 export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), 0);
@@ -55,6 +56,7 @@ export const CHANNEL: Bits = [
   P.MANAGE_ROLES,
   P.VIEW_CHANNELS,
   P.SEND_MESSAGES,
+  P.CREATE_THREADS,
   P.EMBED_LINKS,
   P.ATTACH_FILES,
   P.MENTION_EVERYONE,
@@ -71,6 +73,7 @@ export const CHANNEL: Bits = [
 /** What a member who hasn't agreed to the server's rules yet can't do, as on the server. */
 export const TALK: Bits = [
   P.SEND_MESSAGES,
+  P.CREATE_THREADS,
   P.EMBED_LINKS,
   P.ATTACH_FILES,
   P.MENTION_EVERYONE,
@@ -120,7 +123,12 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     about: "See channels and read their messages, unless a channel says otherwise.",
     channel: "See this channel and read its messages.",
   },
-  [P.SEND_MESSAGES]: { label: "Send messages", about: "Write in channels." },
+  [P.SEND_MESSAGES]: { label: "Send messages", about: "Write in channels, and reply in threads." },
+  [P.CREATE_THREADS]: {
+    label: "Start threads",
+    about: "Start a thread of replies under a message. Replying in a thread that's there needs Send messages.",
+    channel: "Start a thread of replies under a message in this channel.",
+  },
   [P.EMBED_LINKS]: { label: "Embed links", about: "Post links." },
   [P.ATTACH_FILES]: { label: "Attach files", about: "Upload files and pictures with their messages." },
   [P.MENTION_EVERYONE]: {
@@ -183,7 +191,7 @@ export const PERMISSION_GROUPS: { title: string; permissions: P[] }[] = [
   },
   {
     title: "Text channels",
-    permissions: [P.SEND_MESSAGES, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
+    permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
   { title: "Voice channels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
   { title: "Advanced", permissions: [P.ADMINISTRATOR] },
@@ -194,7 +202,7 @@ export const CHANNEL_GROUPS: { title: string; permissions: P[] }[] = [
   { title: "General", permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.CREATE_INVITE] },
   {
     title: "Text",
-    permissions: [P.SEND_MESSAGES, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
+    permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
   { title: "Voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
 ];
@@ -337,3 +345,19 @@ export const isPrivate = (channel: Channel, everyoneId: string) =>
 
 /** Whether a message says @everyone or @here. */
 export const saysEveryone = (content: string) => /(^|[^\w@])@(everyone|here)\b/i.test(content);
+
+/** What a moderator can do to someone: time out, kick, ban, rename. */
+export type ModAction = "timeout" | "kick" | "ban" | "nickname";
+
+/** What you may do to someone, from access already worked out: only to people ranked below you, never yourself. */
+export function moderationFor(access: Access, ownerId: string, roles: readonly Role[], meId: string | undefined, target: Member | undefined) {
+  const below = !!target?.user && target.user.id !== meId && outranks(access, standing(ownerId, roles, target));
+  const can = (p: P) => below && has(access, p);
+  const allowed: Record<ModAction, boolean> = {
+    timeout: can(P.TIME_OUT_MEMBERS),
+    kick: can(P.KICK_MEMBERS),
+    ban: can(P.BAN_MEMBERS),
+    nickname: can(P.MANAGE_NICKNAMES),
+  };
+  return { ...allowed, any: Object.values(allowed).some(Boolean) };
+}

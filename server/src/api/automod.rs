@@ -394,6 +394,7 @@ impl Checking {
     /// is checked again).
     pub(super) fn later(
         self,
+        app: std::sync::Arc<crate::app::App>,
         sdb: std::sync::Arc<store::ServerDb>,
         member: pb::Member,
         message_id: String,
@@ -406,8 +407,9 @@ impl Checking {
                     review_sent(conn, &sdb.id, &member, &message_id, &content, &asked, events).await
                 })
                 .await;
-            if reviewed.is_err() {
-                crate::reports::server_error("automod_late_review_failed", None);
+            match reviewed {
+                Ok(files) => crate::attachments::drop_soon(&app, &sdb.id, files),
+                Err(_) => crate::reports::server_error("automod_late_review_failed", None),
             }
         });
     }
@@ -587,7 +589,14 @@ pub(super) fn picture_links(attachments: &[pb::Attachment], embeds: &[pb::Embed]
         .iter()
         .filter(|a| readable(a))
         .map(|a| a.url.clone())
-        .chain(embeds.iter().flat_map(|e| [e.image_url.clone(), e.thumbnail_url.clone()]))
+        // An embed's picture is read only from elsewhere: a link to an upload
+        // here could be someone else's file no message has yet, which only
+        // its uploader's own message may have read.
+        .chain(
+            embeds.iter().flat_map(|e| [e.image_url.clone(), e.thumbnail_url.clone()]).filter(|link| {
+                crate::media::id_in_url(link).is_none() && crate::media::server_file_in_url(link).is_none()
+            }),
+        )
         .filter(|link| !link.is_empty())
         .collect()
 }
@@ -750,41 +759,37 @@ async fn review_sent(
     content: &str,
     asked: &Asked,
     events: &mut Vec<Payload>,
-) -> Result<()> {
-    let Some(message) = super::messages::load_message(conn, server_id, message_id).await? else { return Ok(()) };
+) -> Result<Vec<String>> {
+    let Some(message) = super::messages::load_message(conn, server_id, message_id).await? else { return Ok(vec![]) };
     if message.content != content {
-        return Ok(());
+        return Ok(vec![]);
     }
-    let Some(channel) = load_channel(conn, server_id, &message.channel_id).await? else { return Ok(()) };
+    let Some(channel) = load_channel(conn, server_id, &message.channel_id).await? else { return Ok(vec![]) };
     let rules = store::load_automod(conn).await?;
-    let Some(rule) = rules.into_iter().find(|r| r.id == asked.rule_id && r.enabled) else { return Ok(()) };
+    let Some(rule) = rules.into_iter().find(|r| r.id == asked.rule_id && r.enabled) else { return Ok(vec![]) };
     let exempt = rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id)
         || rule.exempt_role_ids.iter().any(|id| member.role_ids.contains(id));
-    let Some((level, hit)) = automod::provider_hit(&rule, &asked.scores).filter(|_| !exempt) else { return Ok(()) };
+    let Some((level, hit)) = automod::provider_hit(&rule, &asked.scores).filter(|_| !exempt) else {
+        return Ok(vec![]);
+    };
     let caught = [(effective(&rule, Some(level)), hit)];
-    if act(conn, server_id, member, &channel, content, Some(asked), &caught, events).await?.is_some() {
-        conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
-        let author_id = member.user.as_ref().map(|u| u.id.as_str()).unwrap_or_default();
-        let entry = Audit::new(pb::AuditAction::AutoModMessageDelete, author_id)
-            .channel(channel.name.clone())
-            .reason(rule.name.clone());
-        store::audit(conn, author_id, entry).await?;
-        store::add_usage(
-            conn,
-            UsageChange {
-                messages: -1,
-                message_bytes: -(message.content.len() as i64),
-                attachments: -(message.attachments.len() as i64),
-                ..Default::default()
-            },
-        )
-        .await?;
-        events.push(Payload::MessageDeleted(pb::MessageDeleted {
-            channel_id: message.channel_id.clone(),
-            message_id: message.id.clone(),
-        }));
+    if act(conn, server_id, member, &channel, content, Some(asked), &caught, events).await?.is_none() {
+        return Ok(vec![]);
     }
-    Ok(())
+    let author_id = member.user.as_ref().map(|u| u.id.as_str()).unwrap_or_default();
+    let entry = Audit::new(pb::AuditAction::AutoModMessageDelete, author_id)
+        .channel(channel.name.clone())
+        .reason(rule.name.clone());
+    store::audit(conn, author_id, entry).await?;
+    let mut files = super::messages::remove_message(conn, &message).await?;
+    events.push(Payload::MessageDeleted(pb::MessageDeleted {
+        channel_id: message.channel_id.clone(),
+        message_id: message.id.clone(),
+    }));
+    files.extend(
+        super::threads::after_delete(conn, &message.channel_id, &message.id, &message.thread_id, events).await?,
+    );
+    Ok(files)
 }
 
 #[tonic::async_trait]
@@ -972,6 +977,26 @@ impl AutoModService for Api {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embeds_never_lead_to_uploads_here() {
+        let file = pb::Attachment {
+            url: "https://fuwa.chat/media/0mqmvkbz3xq9wr61vcvvxwrg8q".into(),
+            content_type: "image/png".into(),
+            ..Default::default()
+        };
+        let embed = pb::Embed {
+            image_url: "https://fuwa.chat/media/2ftp7a3xyqbvr3dbhc1gkhwzn9".into(),
+            thumbnail_url: "https://fuwa.chat/media/servers/01M42CP6J090F6S8910RTR1417/2ftp7a3xyqbvr3dbhc1gkhwzn9"
+                .into(),
+            ..Default::default()
+        };
+        let outside = pb::Embed { image_url: "https://fuwa.chat/media/outside/abc?url=x".into(), ..Default::default() };
+        assert_eq!(
+            picture_links(std::slice::from_ref(&file), &[embed, outside.clone()]),
+            vec![file.url, outside.image_url]
+        );
+    }
 
     /// A provider answer that comes after the message went out still blocks
     /// it: down it comes, with an alert and a time out, as before sending.

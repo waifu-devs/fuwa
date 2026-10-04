@@ -1,21 +1,32 @@
 import { Link } from "@tanstack/react-router";
 import { LockKeyholeIcon, PhoneCallIcon, ShieldAlertIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { Ref } from "react";
+import { useMemo, type Ref } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Item } from "@/e2ee/vault";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
 import { useLayout } from "@/components/Shell";
 import { Count, SPRING } from "@/components/motion";
+import { useContextMenu } from "@/components/ContextMenu";
+import { dmMenu } from "@/components/menus/dm";
 import { displayName } from "@/lib/format";
+import { blockedIds } from "@/lib/friends";
 import { cn } from "@/lib/utils";
 
 const NONE: Conversation[] = [];
 
 /** Your encrypted conversations on an instance, in the instance's sidebar: the latest first. */
 export function DmList({ instanceKey }: { instanceKey: string }) {
-  const conversations = useFuwa((s) => s.instances[instanceKey]?.dms.conversations ?? NONE);
+  const all = useFuwa((s) => s.instances[instanceKey]?.dms.conversations ?? NONE);
+  const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id);
+  // Conversations with people you blocked stay out of sight until you unblock them.
+  const friends = useFuwa((s) => s.instances[instanceKey]?.friends.list);
+  const conversations = useMemo(() => {
+    const blocked = blockedIds(friends ?? []);
+    if (blocked.size === 0) return all;
+    return all.filter((c) => !c.users.some((u) => u.id !== meId && blocked.has(u.id)));
+  }, [all, friends, meId]);
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
   const problem = useFuwa((s) => s.instances[instanceKey]?.dms.problem ?? null);
   if (status === "off") return null;
@@ -105,6 +116,7 @@ function DmLink({
   const calling = useFuwa((s) => !!s.instances[instanceKey]?.dms.calls[conversation.id]?.participants.length);
   const other = conversation.users.find((u) => u.id !== meId) ?? conversation.users[0];
   const line = preview(items, meId);
+  const menu = useContextMenu("dm", () => dmMenu({ instanceKey, conversation, other }));
   return (
     <motion.div
       ref={ref}
@@ -118,7 +130,8 @@ function DmLink({
         to="/$instance/dm/$conversation"
         params={{ instance: instanceKey, conversation: conversation.id }}
         onClick={() => compact && setNavOpen(false)}
-        className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm transition hover:bg-muted data-[status=active]:bg-primary/15"
+        {...menu}
+        className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm transition hover:bg-muted data-[menu-open]:bg-muted data-[status=active]:bg-primary/15"
       >
         <span className="relative shrink-0">
           <UserAvatar user={other} className="size-8 text-xs transition-transform duration-300 group-hover:scale-105 group-hover:-rotate-3" />

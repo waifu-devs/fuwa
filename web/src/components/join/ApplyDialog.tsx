@@ -1,16 +1,17 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { HourglassIcon, LoaderCircleIcon, SendIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
-import { useEffect, useState, type FormEvent } from "react";
+import { ClipboardPenIcon, LoaderCircleIcon, SendIcon } from "lucide-react";
+import { AnimatePresence, motion, useAnimationControls, useScroll } from "motion/react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { JoinForm, Server } from "@/gen/fuwa/v1/types_pb";
 import { applyToJoin, getJoinForm, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction } from "@/fuwa/hooks";
-import { ServerIcon } from "@/components/Icons";
+import { ApplicationCard } from "@/components/join/ApplicationStatus";
+import { BannerHero } from "@/components/join/Banner";
 import { AgreeCheck, RulesList } from "@/components/join/Rules";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -38,7 +39,7 @@ export function ApplyDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="overflow-x-hidden">
         <ApplyBody instanceKey={instanceKey} server={server} inviteCode={inviteCode} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
@@ -55,6 +56,8 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
   const [reload, setReload] = useState(0);
   const apply = useAction(applyToJoin);
   const nudge = useAnimationControls();
+  const scroller = useRef<HTMLFormElement>(null);
+  const { scrollY } = useScroll({ container: scroller });
 
   useEffect(() => {
     let cancelled = false;
@@ -95,18 +98,21 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
     if (apply.error && /questions just changed/.test(apply.error)) setReload((n) => n + 1);
   }, [apply.error]);
 
-  if (sent) return <Sent server={server} onDone={onDone} />;
+  if (sent)
+    return (
+      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={SPRING}>
+        <ApplicationCard instanceKey={instanceKey} server={server} onDone={onDone} />
+      </motion.div>
+    );
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4">
-      <div className="-mx-6 -mt-6 flex items-center gap-3 rounded-t-3xl bg-gradient-to-b from-primary/15 to-transparent px-6 pt-6 pb-1">
-        <motion.span initial={{ scale: 0.5, rotate: -14 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 380, damping: 13 }} className="shrink-0">
-          <ServerIcon server={server} active className="size-12 text-base" />
-        </motion.span>
-        <div className="min-w-0 flex-1 pt-1">
-          <DialogHeader title={`Apply to join ${server.name}`} description="Someone from the server reads this and lets you in. It waits in your server list until then." />
-        </div>
-      </div>
+    <form ref={scroller} onSubmit={submit} className="scroll-thin -m-6 flex max-h-[92svh] flex-col gap-4 overflow-y-auto p-6">
+      <BannerHero server={server} bleed eyebrow="Apply to join" badge={<ClipboardPenIcon className="size-3.5" />} scrollY={scrollY}>
+        <DialogPrimitive.Title className="sr-only">Apply to join {server.name}</DialogPrimitive.Title>
+        <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+          Someone from the server reads this and lets you in. It waits in your server list until then.
+        </DialogPrimitive.Description>
+      </BannerHero>
 
       {problem ? (
         <p className="text-sm text-muted-foreground first-letter:uppercase">{problem}</p>
@@ -190,31 +196,5 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
         </>
       )}
     </form>
-  );
-}
-
-/** Sent: an hourglass turning over while it waits. */
-function Sent({ server, onDone }: { server: Server; onDone: () => void }) {
-  return (
-    <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={SPRING} className="flex flex-col items-center gap-3 py-2 text-center">
-      <motion.span
-        initial={{ scale: 0, rotate: -90 }}
-        animate={{ scale: 1, rotate: 0 }}
-        transition={{ type: "spring", stiffness: 380, damping: 12 }}
-        className="relative grid size-20 place-items-center rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400"
-      >
-        <motion.span aria-hidden animate={{ scale: [1, 1.5], opacity: [0.5, 0] }} transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }} className="absolute inset-0 rounded-full bg-amber-500/25" />
-        <HourglassIcon className="size-9 animate-[flip_3s_ease-in-out_infinite]" />
-      </motion.span>
-      <div>
-        <DialogPrimitive.Title className="text-xl font-extrabold tracking-tight">Application sent</DialogPrimitive.Title>
-        <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
-          {server.name} waits in your server list with an hourglass. When someone lets you in, it opens up.
-        </DialogPrimitive.Description>
-      </div>
-      <Button onClick={onDone} className="btn mt-1 h-10 w-full rounded-xl font-bold">
-        Got it
-      </Button>
-    </motion.div>
   );
 }
