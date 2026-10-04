@@ -275,7 +275,14 @@
     `BEGIN CONCURRENT` transactions that run side by side and are retried
     when two touch the same row. An open file is a `Db`, whose gate
     (`shared` for writes, `alone` for folding the log in) lets the replica
-    hold writes for a moment.
+    hold writes for a moment. A `Db` keeps used connections (`Db::conn`,
+    statements cached per connection) and lets 4 writes run at once
+    (`WRITE_LANES`) with up to 512 waiting (`WRITE_QUEUE`), past which a
+    write is told the server is busy. Turso's own checkpoint is off for
+    every file (it deadlocked busy servers): `Db::fold_if_big` folds the log
+    in under `alone` after a write once it passes 4 MB, unless the replica
+    does it. Numbers in `docs/capacity.md`; `server/examples/load.rs` is the
+    load generator that measured them.
   - `replica/`: a split instance's continuous backup to a bucket or a folder
     (`FUWA_S3_*`, `FUWA_REPLICA_PATH`) and restoring from it (`FUWA_RESTORE`,
     `fuwa restore`): the directory's node.db, dms.db and pictures, each shard's
@@ -783,11 +790,21 @@
 - Never write outside a transaction or with `BEGIN`/`BEGIN IMMEDIATE`: those
   lock out concurrent commits. Schema changes go in migrations, which run
   before anything else touches the file.
-- Every write to an open file holds its gate: `db::write`, `ServerDb::write`
-  and `write_alone` do. With a replica on, only the replica folds a tracked
-  file's log in (Turso's own checkpoint is off for it), so anything else that
-  checkpoints takes `Db::alone`, and a new database file gets
+- Every write to an open file takes its turn with `Db::writing` (queue,
+  lane, gate): `db::write`, `ServerDb::write` and `write_alone` do. Turso's
+  own checkpoint is off for every file; `Db::fold_if_big` folds the log in,
+  or with a replica on only the replica does for a tracked file, so anything
+  else that checkpoints takes `Db::alone`, and a new database file gets
   `replica.track` (servers go through `Servers::replicate`).
+- Caps default to unlimited, except the protective limits Juan agreed to
+  (2026-10-04): streams per account (32, `FUWA_STREAMS_PER_ACCOUNT` and the
+  `streams_per_account` instance setting), waiting writes per file (512,
+  `FUWA_WRITE_QUEUE`) and waiting password checks (256,
+  `FUWA_SIGN_IN_QUEUE`). Each stops a crash, and each can be set to
+  `unlimited`. Anything new that is a cap on use defaults to unlimited.
+- Live event streams take a `streams::Ticket` (per account, and in all)
+  held for as long as the stream is open; a gateway gives followers' streams
+  connections to shards apart from its calls'.
 - Permissions, not ranks, decide what someone may do: a handler takes a `Seat`
   from `Api::with(account, server_id, Permission)` (or `membership` plus
   `access.require_in(channel, ...)` for channel ones). Rank only decides who

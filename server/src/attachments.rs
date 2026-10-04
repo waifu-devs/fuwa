@@ -64,7 +64,7 @@ pub fn clean_name(name: &str) -> String {
 /// The file a server's message has under `media_id`, if one does.
 pub async fn find(app: &App, server_id: &str, media_id: &str) -> Result<Option<Attached>> {
     let sdb = app.servers.get(server_id).await?;
-    lookup(&sdb.read()?, media_id).await
+    lookup(&*sdb.read()?, media_id).await
 }
 
 /// [`find`], on a server file already open.

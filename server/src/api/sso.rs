@@ -232,7 +232,7 @@ impl SsoService for Api {
                 let req = request.into_inner();
                 let sdb = self.app.servers.get(&req.server_id).await?;
                 self.may_start(&account, &sdb, &req.invite_code).await?;
-                let provider = store::load_sso(&sdb.read()?).await?.provider;
+                let provider = store::load_sso(&*sdb.read()?).await?.provider;
                 if !provider.is_set() {
                     return Err(Error::FailedPrecondition("this server doesn't use single sign-on".into()));
                 }
@@ -285,7 +285,7 @@ impl SsoService for Api {
                 let req = request.into_inner();
                 let sdb = self.app.servers.get(&req.server_id).await?;
                 let ran_out = || Error::FailedPrecondition("this sign-in ran out; start again".into());
-                let sign_in = sso::load(&sdb.read()?, req.state.trim()).await?.ok_or_else(ran_out)?;
+                let sign_in = sso::load(&*sdb.read()?, req.state.trim()).await?.ok_or_else(ran_out)?;
                 if sign_in.account_id != account.id {
                     return Err(Error::denied("another account started this sign-in"));
                 }

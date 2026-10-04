@@ -204,6 +204,10 @@ message InstanceSettings {
   // GIF search in the apps' composers (GifService). Off until a provider
   // and its key are set. FUWA_GIF_PROVIDER and FUWA_GIF_API_KEY.
   GifSettings gifs = 43;
+  // Live streams (apps and tabs) one account may hold open at once; unset
+  // for no limit. A protective default against a runaway client, 32 unless
+  // FUWA_STREAMS_PER_ACCOUNT says otherwise (docs/capacity.md).
+  optional int64 streams_per_account = 48;
 }
 
 // The GIF search provider and its caps. Every call to the provider is made
