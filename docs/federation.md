@@ -4,7 +4,9 @@ Federation is how one fuwa instance talks to another, so servers on
 different instances can share channels (phase 2 of
 [shared channels](shared-channels.md)). This first part is the link itself:
 each instance's key, signed calls both ways, and the settings to turn it on
-and keep instances out. Sharing a channel over it comes in the next updates.
+and keep instances out. On top of it, a server can ask for, and be granted,
+a channel from a server on another instance ([below](#sharing-a-channel-with-another-instance));
+messages across instances come in the next update.
 
 It's **off by default** (`FUWA_FEDERATION`, or "Other instances" in Instance
 settings). Off, the instance answers other instances with nothing but "off".
@@ -32,8 +34,8 @@ settings). Off, the instance answers other instances with nothing but "off".
   URL (`https://chat.example.com`), so federation needs `FUWA_PUBLIC_URL`
   (or the Public address setting) to be https.
 - An instance **pins** another's key only when one of its own admins checks
-  that instance (and, from the next update, when a guest server asks with a
-  share code), never because another instance said Hello. A different key
+  that instance, or when a share is asked with a code (both instances pin
+  the other's then), never because another instance said Hello. A different key
   for an instance already pinned is refused (rotation comes in a later
   update), and an instance keeps at most 1000 pinned keys.
 
@@ -52,8 +54,11 @@ in reflection: apps never use it.
   instances are capped at 60 a minute in all and 5 a minute under one
   domain, so a wildcard domain's endless names can't make an instance fetch
   without end or crowd out other instances.
-- `Call`: everything else, from an instance whose key is pinned. Today its
-  only call is a ping.
+- `Call`: everything else, from an instance whose key is pinned: a ping, or
+  a shared channel's call (`fuwa.cluster.v1.SharedCall`, the same calls the
+  parts of one instance make). A share code's lookup or ask may come from an
+  instance not pinned yet: its key is fetched as for `Hello`, under the same
+  caps, and pinned only when it asks.
 
 Each signed `Envelope` is `{from, to, sent_at_ms, nonce, reply_to, payload,
 signature}`. The signature covers `"fuwa-federation-v1"` and every other
@@ -96,6 +101,36 @@ On "Other instances" in Instance settings (`GetFederation`,
 - **Blocked instances** (`federation_blocked_hosts`, field 35): host names
   this instance never calls and whose calls it turns away.
 
+## Sharing a channel with another instance
+
+- A home server's admin makes a code **for a server on another instance**
+  (a switch on the channel's Share tab, shown while this instance shares
+  with others). It reads `<code>@<this instance's host>`; a code made
+  without the switch keeps working only on this instance.
+- The guest's admin pastes it as any code. Their instance looks the code up
+  at the home's instance (signed, with the home's key fetched now, pinning
+  nothing) and shows the preview with **the home instance's host and key
+  fingerprint**, to compare with the home's admins somewhere they trust.
+- Asking pins the home's key at the guest's instance and the guest's at the
+  home's, each only once the ask went through (the guest's instance once
+  the home's signed answer checks out), and no more than 3 instances under
+  one registered domain this way. Each server makes and takes at most 20
+  lookups and asks a minute, and keeps at most 20 requests waiting from one
+  other instance. The home's admins see the request with the guest instance's host
+  and fingerprint before approving. Approving, turning down, ending and
+  withdrawing work as on one instance.
+- Each instance reads every id another instance sends as that instance's
+  own: a server there is kept here as `<id>@<its host>`, and so is anyone
+  acting there, so another instance can't speak for this one's servers and
+  people, or a third instance's. Only the calls above cross instances so
+  far, and a call to a guest is taken only from its home's instance.
+- Nothing from the other instance is fetched by apps: its servers' icons
+  aren't kept (pictures come through each instance's own proxy later), and
+  files can't be let across instances yet.
+- Stored in server migration 0020: `instance` and `instance_fingerprint` on
+  `channel_guests` and `channel_links`, and `other_instances` on
+  `share_codes`.
+
 ## Anonymous reports
 
 Counts only, like every report: refused envelopes by reason (bad signature,
@@ -105,7 +140,6 @@ who talks to whom.
 
 ## Next
 
-Cross-instance share codes and previews (with the home's host and
-fingerprint), then messages and live events across instances, pictures
-through each reader's own instance, blocking that ends shares, key rotation,
-and attachments. The plan is in the shared channels phase 2 design.
+Messages and live events across instances (and "Can't reach" when the
+other instance is away), then pictures through each reader's own instance,
+blocking that ends shares, key rotation, and attachments. The plan is in the shared channels phase 2 design.
