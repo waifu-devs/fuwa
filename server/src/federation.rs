@@ -21,7 +21,7 @@ use tonic::{Request, Response, Status};
 
 use crate::app::App;
 use crate::error::{Error, Result};
-use crate::fpb;
+use crate::{cpb, fpb};
 
 /// What every signature starts with, so a federation signature can't be
 /// taken for anything else signed with the same key.
@@ -44,6 +44,13 @@ const HELLOS_PER_MINUTE: usize = 60;
 const HELLOS_PER_DOMAIN_PER_MINUTE: usize = 5;
 /// The most instances this one pins a key for.
 pub const MAX_PEERS: i64 = 1000;
+/// Keys a share request pins under one registered domain, at most, so a
+/// domain's endless names can't fill the pinned keys (an admin's check
+/// isn't held to it).
+const SHARE_PINS_PER_DOMAIN: usize = 3;
+/// Share code lookups and asks a minute, at most, from one server here and
+/// to one server here.
+const SHARES_PER_SERVER_PER_MINUTE: usize = 20;
 /// How often the time an instance was last heard from is written down.
 const HEARD_EVERY_MS: i64 = 60 * 1000;
 
@@ -142,6 +149,8 @@ pub struct Federation {
     heard: Mutex<HashMap<String, i64>>,
     /// Instances this process said Hello to, and that answered.
     introduced: Mutex<HashSet<String>>,
+    /// When the last share code lookups and asks were, by server, for the cap.
+    shares: Mutex<HashMap<String, Vec<Instant>>>,
 }
 
 impl Federation {
@@ -165,6 +174,7 @@ impl Federation {
             hellos: Mutex::default(),
             heard: Mutex::default(),
             introduced: Mutex::default(),
+            shares: Mutex::default(),
         }
     }
 
@@ -216,6 +226,26 @@ impl Federation {
         }
         all.push(now);
         by_domain.entry(domain).or_default().push(now);
+        true
+    }
+
+    /// Whether another share code lookup or ask for `key` (a server, coming
+    /// or going) may go now.
+    fn take_share(&self, key: &str) -> bool {
+        let mut shares = self.shares.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let now = Instant::now();
+        shares.retain(|_, times| {
+            times.retain(|at| now.duration_since(*at) < Duration::from_secs(60));
+            !times.is_empty()
+        });
+        if shares.len() >= 10_000 && !shares.contains_key(key) {
+            return false;
+        }
+        let times = shares.entry(key.to_string()).or_default();
+        if times.len() >= SHARES_PER_SERVER_PER_MINUTE {
+            return false;
+        }
+        times.push(now);
         true
     }
 
@@ -349,6 +379,13 @@ pub fn display(origin: &str) -> &str {
     origin.split_once("://").map_or(origin, |(_, rest)| rest)
 }
 
+/// An origin as share codes and other instances' ids carry it: the host
+/// (and port) for https, the whole origin otherwise (only ever with
+/// FUWA_FEDERATION_ALLOW_PRIVATE), so [`origin`] reads it back the same.
+pub fn address(origin: &str) -> &str {
+    origin.strip_prefix("https://").unwrap_or(origin)
+}
+
 /// The bytes an envelope's signature covers.
 fn signed_bytes(envelope: &fpb::Envelope) -> Vec<u8> {
     let mut out = Vec::with_capacity(CONTEXT.len() + envelope.payload.len() + 128);
@@ -419,6 +456,14 @@ pub fn own_origin(app: &App) -> Result<String> {
     origin(&public_url, app.federation.allows_private()).map_err(|why| {
         Error::FailedPrecondition(format!("this instance's public URL can't be used with other instances: {why}"))
     })
+}
+
+/// This instance's origin as its public URL names it, for naming it (in
+/// share codes, say), not for calling: any part can say it, whether or not
+/// it has FUWA_FEDERATION_ALLOW_PRIVATE, since the part that keeps the key
+/// checks again before anything is sent.
+pub fn named_origin(app: &App) -> Option<String> {
+    origin(&app.settings().public_url, true).ok()
 }
 
 /// Whether an instance is on the block list.
@@ -602,6 +647,16 @@ fn percent_decode(text: &str) -> String {
 fn remote_error(shown: &str, (code, message): (i32, String)) -> Error {
     crate::reports::server_error("federation_refused", Some("federation"));
     let message: String = message.chars().filter(|c| !c.is_control()).take(200).collect::<String>().trim().to_string();
+    // What a shared channel's other end says when the share is gone, so
+    // this end lets go of it too.
+    if tonic::Code::from(code) == tonic::Code::NotFound {
+        match message.as_str() {
+            "shared channel not found" => return Error::NotFound("shared channel"),
+            "share code not found" => return Error::NotFound("share code"),
+            "server not found" => return Error::NotFound("server"),
+            _ => {}
+        }
+    }
     let message = if message.is_empty() { format!("error {code}") } else { message };
     let text = format!("{shown} said: {message}");
     match tonic::Code::from(code) {
@@ -610,9 +665,9 @@ fn remote_error(shown: &str, (code, message): (i32, String)) -> Error {
     }
 }
 
-/// Another instance's key, fetched from it, checked to be for the address
-/// asked, and pinned (or checked against the one already pinned).
-async fn pin(app: &App, origin: &str) -> Result<crate::node::FederationPeer> {
+/// Another instance's key, fetched from it and checked to be for the
+/// address asked.
+async fn fetch_key(app: &App, origin: &str) -> Result<Vec<u8>> {
     let shown = display(origin);
     let key: fpb::GetKeyResponse = unary(app, origin, "GetKey", &fpb::GetKeyRequest {}).await?;
     if key.origin != origin {
@@ -624,7 +679,36 @@ async fn pin(app: &App, origin: &str) -> Result<crate::node::FederationPeer> {
     if key.public_key.len() != 32 {
         return Err(Error::FailedPrecondition(format!("{shown}'s key doesn't read")));
     }
-    app.node()?.pin_federation_peer(origin, &key.public_key).await
+    Ok(key.public_key)
+}
+
+/// Another instance's key, fetched from it and pinned (or checked against
+/// the one already pinned).
+async fn pin(app: &App, origin: &str) -> Result<crate::node::FederationPeer> {
+    let public_key = fetch_key(app, origin).await?;
+    app.node()?.pin_federation_peer(origin, &public_key).await
+}
+
+/// Pins another instance's key for a share request: as [`pin`] does, but
+/// no more than a few under one registered domain.
+async fn pin_for_share(app: &App, origin: &str, public_key: &[u8]) -> Result<crate::node::FederationPeer> {
+    let node = app.node()?;
+    if node.federation_peer(origin).await?.is_none() {
+        let domain = domain_of(origin);
+        let under = node.federation_peers().await?.iter().filter(|peer| domain_of(&peer.origin) == domain).count();
+        if under >= SHARE_PINS_PER_DOMAIN {
+            crate::reports::server_error("federation_domain_pins", Some("federation"));
+            return Err(Error::ResourceExhausted(format!(
+                "this instance already knows {SHARE_PINS_PER_DOMAIN} instances under {domain}; an admin here can check another one"
+            )));
+        }
+    }
+    node.pin_federation_peer(origin, public_key).await
+}
+
+fn shares_capped() -> Error {
+    crate::reports::server_error("federation_shares_capped", Some("federation"));
+    Error::ResourceExhausted("too many share codes looked up at once; try again in a minute".into())
 }
 
 /// Sends a signed envelope to another instance and checks its signed answer.
@@ -668,6 +752,22 @@ async fn exchange(
 /// `pin_new`: an admin's check, never on another instance's say-so). Says
 /// Hello once per process, or again when `hello`.
 async fn reach(app: &App, address: &str, pin_new: bool, hello: bool) -> Result<(String, crate::node::FederationPeer)> {
+    let (own, origin) = allowed(app, address)?;
+    let peer = match app.node()?.federation_peer(&origin).await? {
+        Some(peer) => peer,
+        None if pin_new => pin(app, &origin).await?,
+        None => return Err(unknown(&origin)),
+    };
+    if hello || !app.federation.introduced(&origin) {
+        exchange(app, &own, &peer, Method::Hello, fpb::Hello {}.encode_to_vec()).await?;
+        app.federation.set_introduced(&origin, true);
+    }
+    Ok((own, peer))
+}
+
+/// This instance's origin and another's, if this one may talk to it:
+/// federation is on, and it's someone else, not on the block list.
+fn allowed(app: &App, address: &str) -> Result<(String, String)> {
     if !app.settings().federation {
         return Err(Error::FailedPrecondition("federation is off on this instance".into()));
     }
@@ -679,21 +779,74 @@ async fn reach(app: &App, address: &str, pin_new: bool, hello: bool) -> Result<(
     if blocked(app, &origin) {
         return Err(Error::FailedPrecondition(format!("{} is on this instance's block list", display(&origin))));
     }
-    let peer = match app.node()?.federation_peer(&origin).await? {
-        Some(peer) => peer,
-        None if pin_new => pin(app, &origin).await?,
-        None => {
-            return Err(Error::FailedPrecondition(format!(
-                "this instance doesn't know {} yet: an admin here has to check it first",
-                display(&origin)
-            )));
-        }
+    Ok((own, origin))
+}
+
+fn unknown(origin: &str) -> Error {
+    Error::FailedPrecondition(format!(
+        "this instance doesn't know {} yet: an admin here has to check it first",
+        display(origin)
+    ))
+}
+
+/// A call to the other end of a channel shared with another instance: a
+/// server there, known here as "<id>@<instance>". A share code's lookup
+/// may go to an instance whose key isn't pinned (checked with its key as
+/// fetched now); asking for the share pins it; everything after needs it.
+pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedReply> {
+    let (server_id, address) = call
+        .server_id
+        .split_once('@')
+        .ok_or(Error::NotFound("server"))
+        .map(|(id, at)| (id.to_string(), at.to_string()))?;
+    let (own, origin) = allowed(app, &address)?;
+    let asker = match &call.call {
+        Some(cpb::shared_call::Call::Lookup(lookup)) => Some(lookup.guest_server_id.as_str()),
+        Some(cpb::shared_call::Call::Ask(ask)) => ask.guest.as_ref().map(|guest| guest.id.as_str()),
+        _ => None,
     };
-    if hello || !app.federation.introduced(&origin) {
-        exchange(app, &own, &peer, Method::Hello, fpb::Hello {}.encode_to_vec()).await?;
-        app.federation.set_introduced(&origin, true);
+    if let Some(asker) = asker
+        && !app.federation.take_share(&format!("out:{asker}"))
+    {
+        return Err(shares_capped());
     }
-    Ok((own, peer))
+    let pinned = app.node()?.federation_peer(&origin).await?;
+    let known = pinned.is_some();
+    let peer = match pinned {
+        Some(peer) => peer,
+        // Checked with its key as fetched now; an ask pins it once the
+        // home's signed answer checks out.
+        None if asker.is_some() => crate::node::FederationPeer {
+            public_key: fetch_key(app, &origin).await?,
+            origin: origin.clone(),
+            first_seen: 0,
+            last_heard: 0,
+        },
+        None => return Err(unknown(&origin)),
+    };
+    call.server_id = server_id;
+    call.from_instance.clear();
+    call.from_fingerprint.clear();
+    let started = Instant::now();
+    let request = fpb::Request { call: Some(fpb::request::Call::Shared(Box::new(call.clone()))) };
+    let answer = call_peer(app, &own, &peer, request).await?;
+    crate::reports::server_timing("federation:shared", started.elapsed());
+    let reply = match answer.answer {
+        Some(fpb::response::Answer::Shared(reply)) => {
+            crate::api::shared_returned(&call, *reply, &origin, &fingerprint(&peer.public_key))?
+        }
+        _ => return Err(Error::Unavailable(format!("{}'s answer didn't read", display(&origin)))),
+    };
+    if !known
+        && let Some(undo) = crate::api::shared_undo(&call)
+        && let Err(err) = pin_for_share(app, &origin, &peer.public_key).await
+    {
+        // Take the request back: what comes after couldn't be checked.
+        let request = fpb::Request { call: Some(fpb::request::Call::Shared(Box::new(undo))) };
+        let _ = call_peer(app, &own, &peer, request).await;
+        return Err(err);
+    }
+    Ok(reply)
 }
 
 /// A signed call to another instance, and its answer.
@@ -800,6 +953,26 @@ impl Service {
     fn node(&self) -> std::result::Result<&crate::node::NodeDb, Status> {
         self.0.node().map_err(|_| Status::internal("this part keeps no data"))
     }
+
+    /// The key of an instance this one hasn't pinned, fetched from its own
+    /// address, which only whoever runs that address can answer, to check
+    /// what it signed. Not pinned here. No more often than the caps, so
+    /// strangers can't make this instance fetch endlessly.
+    async fn stranger_key(&self, from: &str) -> std::result::Result<Vec<u8>, Status> {
+        if !self.0.federation.take_hello(from) {
+            crate::reports::server_error("federation_hellos_capped", Some("federation"));
+            return Err(Status::resource_exhausted(
+                "this instance is meeting too many instances; try again in a minute",
+            ));
+        }
+        let key: fpb::GetKeyResponse = unary(&self.0, from, "GetKey", &fpb::GetKeyRequest {})
+            .await
+            .map_err(|_| Status::failed_precondition("this instance couldn't fetch your key from your address"))?;
+        if key.origin != from || key.public_key.len() != 32 {
+            return Err(Status::failed_precondition("the key at your address isn't for that address"));
+        }
+        Ok(key.public_key)
+    }
 }
 
 #[tonic::async_trait]
@@ -825,29 +998,11 @@ impl fpb::federation_service_server::FederationService for Service {
         let pinned =
             self.node()?.federation_peer(&from).await.map_err(|_| Status::internal("couldn't read the pinned keys"))?;
         let known = pinned.is_some();
+        // Someone new isn't pinned: only an admin's check here, or a share
+        // request, does that.
         let public_key = match pinned {
             Some(peer) => peer.public_key,
-            None => {
-                // Someone new: fetch its key from its own address, which only
-                // whoever runs that address can answer, to check the greeting.
-                // It isn't pinned: only an admin's check here (or, later, a
-                // share request) does that. No more often than the caps, so
-                // greetings can't make this instance fetch endlessly.
-                if !self.0.federation.take_hello(&from) {
-                    crate::reports::server_error("federation_hellos_capped", Some("federation"));
-                    return Err(Status::resource_exhausted(
-                        "this instance is meeting too many instances; try again in a minute",
-                    ));
-                }
-                let key: fpb::GetKeyResponse =
-                    unary(&self.0, &from, "GetKey", &fpb::GetKeyRequest {}).await.map_err(|_| {
-                        Status::failed_precondition("this instance couldn't fetch your key from your address")
-                    })?;
-                if key.origin != from || key.public_key.len() != 32 {
-                    return Err(Status::failed_precondition("the key at your address isn't for that address"));
-                }
-                key.public_key
-            }
+            None => self.stranger_key(&from).await?,
         };
         check(&self.0.federation, &own, &envelope, &public_key, None).map_err(Refusal::status)?;
         fpb::Hello::decode(envelope.payload.as_slice()).map_err(|_| Refusal::Malformed.status())?;
@@ -865,19 +1020,51 @@ impl fpb::federation_service_server::FederationService for Service {
         let own = self.ready()?;
         let envelope = request.into_inner().envelope.ok_or_else(|| Refusal::Malformed.status())?;
         let from = self.sender(&envelope)?;
-        let peer = self
-            .node()?
-            .federation_peer(&from)
-            .await
-            .map_err(|_| Status::internal("couldn't read the pinned keys"))?
-            .ok_or_else(|| Status::unauthenticated("this instance doesn't know your key yet: say Hello first"))?;
-        check(&self.0.federation, &own, &envelope, &peer.public_key, None).map_err(Refusal::status)?;
+        let pinned =
+            self.node()?.federation_peer(&from).await.map_err(|_| Status::internal("couldn't read the pinned keys"))?;
+        let known = pinned.is_some();
+        // A share code's lookup or ask may come from an instance this one
+        // doesn't know yet, checked with its key as fetched now.
+        let public_key = match pinned {
+            Some(peer) => peer.public_key,
+            None => self.stranger_key(&from).await?,
+        };
+        check(&self.0.federation, &own, &envelope, &public_key, None).map_err(Refusal::status)?;
         let call = fpb::Request::decode(envelope.payload.as_slice()).map_err(|_| Refusal::Malformed.status())?;
-        heard(&self.0, &from).await;
+        let first_contact = match &call.call {
+            Some(fpb::request::Call::Shared(shared)) => {
+                matches!(shared.call, Some(cpb::shared_call::Call::Lookup(_) | cpb::shared_call::Call::Ask(_)))
+            }
+            _ => false,
+        };
+        if !known && !first_contact {
+            return Err(Status::unauthenticated("this instance doesn't know your key yet: say Hello first"));
+        }
+        if known {
+            heard(&self.0, &from).await;
+        }
         let started = Instant::now();
         let answer = match call.call {
             Some(fpb::request::Call::Ping(_)) => {
                 fpb::Response { answer: Some(fpb::response::Answer::Pong(fpb::Pong {})) }
+            }
+            Some(fpb::request::Call::Shared(call)) => {
+                let call = crate::api::shared_arrived(*call, &from, &fingerprint(&public_key)).map_err(Status::from)?;
+                if first_contact && !self.0.federation.take_share(&format!("in:{}", call.server_id)) {
+                    return Err(Status::from(shares_capped()));
+                }
+                // A share asked with a working code pins the asking
+                // instance's key, so what comes after can be checked; one
+                // this instance can't keep takes the request back.
+                let undo = if known { None } else { crate::api::shared_undo(&call) };
+                let reply = self.0.shared(call).await.map_err(Status::from)?;
+                if let Some(undo) = undo
+                    && let Err(err) = pin_for_share(&self.0, &from, &public_key).await
+                {
+                    let _ = self.0.shared(undo).await;
+                    return Err(Status::from(err));
+                }
+                fpb::Response { answer: Some(fpb::response::Answer::Shared(Box::new(reply))) }
             }
             None => {
                 return Err(Status::unimplemented("this instance doesn't know that call; it may run an older fuwa"));
@@ -940,6 +1127,16 @@ mod tests {
         }
         assert!(!federation.take_hello("https://another.wild.example"), "one domain's names share a cap");
         assert!(federation.take_hello("https://chat.example.org"), "other domains still get through");
+    }
+
+    #[test]
+    fn share_lookups_are_capped_per_server() {
+        let federation = Federation::new(false);
+        for _ in 0..SHARES_PER_SERVER_PER_MINUTE {
+            assert!(federation.take_share("in:a"));
+        }
+        assert!(!federation.take_share("in:a"));
+        assert!(federation.take_share("in:b"), "other servers aren't held up");
     }
 
     #[test]

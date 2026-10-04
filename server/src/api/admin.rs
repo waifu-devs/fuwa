@@ -370,7 +370,11 @@ impl AdminService for Api {
                 let call = crate::cpb::shared_call::Call::AdminList(crate::cpb::AdminShares {});
                 let reply = self
                     .app
-                    .shared(crate::cpb::SharedCall { server_id: request.into_inner().server_id, call: Some(call) })
+                    .shared(crate::cpb::SharedCall {
+                        server_id: request.into_inner().server_id,
+                        call: Some(call),
+                        ..Default::default()
+                    })
                     .await?;
                 Ok(pb::ListServerSharesResponse { connections: reply.connections })
             }
@@ -391,7 +395,9 @@ impl AdminService for Api {
                     actor_id: viewer.account().map(|a| a.id.clone()).unwrap_or_default(),
                 };
                 let call = crate::cpb::shared_call::Call::AdminEnd(end);
-                self.app.shared(crate::cpb::SharedCall { server_id: req.server_id, call: Some(call) }).await?;
+                self.app
+                    .shared(crate::cpb::SharedCall { server_id: req.server_id, call: Some(call), ..Default::default() })
+                    .await?;
                 Ok(pb::EndServerShareResponse {})
             }
             .await,
