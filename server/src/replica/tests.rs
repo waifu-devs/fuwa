@@ -585,7 +585,11 @@ async fn a_server_coming_back_waits_out_a_release_and_is_never_deleted() {
     std::fs::write(replica.release_path(&name), b"").unwrap();
 
     // While a release deletes, the server coming back waits for it.
-    let deleting = replica.releasing.lock().await;
+    let deleting = replica.release_lock(&name).lock_owned().await;
+    // Another server isn't held up by it.
+    let other = open(&data.join("b.db")).await;
+    let other_name = format!("servers/{}", new_id());
+    tokio::time::timeout(Duration::from_secs(1), replica.track(&other_name, other)).await.unwrap().unwrap();
     let back = tokio::spawn({
         let (replica, name, db) = (replica.clone(), name.clone(), db.clone());
         async move { replica.track(&name, db).await.unwrap() }

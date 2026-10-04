@@ -176,9 +176,10 @@ pub struct Replica {
     fence_every_ms: std::sync::atomic::AtomicU64,
     stop: CancellationToken,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    /// Held while a release deletes, and by [`track`](Self::track), so a
-    /// server coming back here never has its replica deleted under it.
-    releasing: tokio::sync::Mutex<()>,
+    /// One lock per file, held while a release deletes and by
+    /// [`track`](Self::track), so a server coming back here never has its
+    /// replica deleted under it, and a slow bucket holds up no other file.
+    releasing: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl Replica {
@@ -215,7 +216,7 @@ impl Replica {
             files: Mutex::new(BTreeMap::new()),
             media: Mutex::new(None),
             media_copied: tokio::sync::Mutex::new(None),
-            releasing: tokio::sync::Mutex::new(()),
+            releasing: Mutex::new(BTreeMap::new()),
             checkpoint_bytes,
             rebase_bytes,
             fence_every_ms: (FENCE_EVERY.as_millis() as u64).into(),
@@ -233,7 +234,7 @@ impl Replica {
     pub async fn track(&self, name: &str, db: Arc<Db>) -> Result<()> {
         db::pragma(&db::connect(&db)?, "PRAGMA mvcc_checkpoint_threshold = -1").await?;
         // Waits out a release of it that's under way.
-        let _released = self.releasing.lock().await;
+        let _released = self.release_lock(name).lock_owned().await;
         let position = self.load_position(name);
         let tracked = Arc::new(Tracked {
             name: name.to_string(),
@@ -302,7 +303,7 @@ impl Replica {
     /// Deletes what's in the replica of a file this process let go of, and
     /// clears the note that it's owed. On failure the note stays.
     async fn try_release(&self, name: &str) -> bool {
-        let _alone = self.releasing.lock().await;
+        let _alone = self.release_lock(name).lock_owned().await;
         if self.lock_files().contains_key(name) {
             // It came back here: what's in the replica is its own again.
             let _ = std::fs::remove_file(self.release_path(name));
@@ -351,6 +352,12 @@ impl Replica {
             done += usize::from(self.try_release(&name).await);
         }
         done
+    }
+
+    /// The lock a file's release and tracking take.
+    fn release_lock(&self, name: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.releasing.lock().unwrap_or_else(|p| p.into_inner());
+        locks.entry(name.to_string()).or_default().clone()
     }
 
     /// Where the note that a file's release is owed is kept.
