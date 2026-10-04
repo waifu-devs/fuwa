@@ -221,6 +221,14 @@ pub struct Limits {
     /// FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY: how many times a day (UTC) one
     /// server's Smart filter may ask its provider.
     pub automod_checks_per_day: Option<i64>,
+    /// FUWA_LIMIT_VOICE_MESSAGE_SECONDS: the longest voice message in direct
+    /// messages, which apps stop recording at.
+    pub voice_message_seconds: Option<i64>,
+    /// FUWA_LIMIT_VOICE_MESSAGE_BYTES: the biggest voice message, sealed.
+    pub voice_message_bytes: Option<i64>,
+    /// FUWA_LIMIT_VOICE_MESSAGES_PER_DAY: how many bytes of voice messages
+    /// one account may upload a day (UTC), apart from pictures.
+    pub voice_message_bytes_per_day: Option<i64>,
     /// FUWA_LIMIT_POLL_VOTES_PER_MINUTE: how many votes one account may make
     /// in polls in a minute.
     pub poll_votes_per_minute: Option<i64>,
@@ -378,6 +386,9 @@ impl Config {
             attachment_upload_bytes: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOAD")?,
             attachment_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY")?,
             automod_checks_per_day: count("FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY")?,
+            voice_message_seconds: count("FUWA_LIMIT_VOICE_MESSAGE_SECONDS")?,
+            voice_message_bytes: bytes("FUWA_LIMIT_VOICE_MESSAGE_BYTES")?,
+            voice_message_bytes_per_day: upload_bytes("FUWA_LIMIT_VOICE_MESSAGES_PER_DAY")?,
             poll_votes_per_minute: count("FUWA_LIMIT_POLL_VOTES_PER_MINUTE")?,
             shared_remote_sends_per_minute: count("FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE")?,
             shared_remote_people: count("FUWA_LIMIT_SHARED_REMOTE_PEOPLE")?,
