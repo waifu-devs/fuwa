@@ -151,6 +151,8 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_EMOJIS` | unlimited | Custom emoji per server |
 | `FUWA_LIMIT_PICTURE_UPLOAD` | unlimited | Largest avatar, banner, server icon or emoji one upload may be, like `8MB` |
 | `FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY` | unlimited | Pictures one account may upload in a day (UTC), like `256MiB` |
+| `FUWA_LIMIT_ATTACHMENT_UPLOAD` | unlimited | Largest file one message may carry, like `100MB` |
+| `FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY` | unlimited | Files one account may send in a day (UTC), apart from pictures, like `2GiB` |
 | `FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY` | unlimited | Times a day (UTC) one server's Smart filter may ask its moderation provider; past it, messages go through the Smart filter unchecked (also set from the app: Instance settings, Moderation) |
 | `FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE` | unlimited | Messages a minute all the people of one server on another instance may send together to channels shared from here (also set from the app: Instance settings, Other instances) |
 | `FUWA_LIMIT_SHARED_REMOTE_PEOPLE` | unlimited | People one server on another instance may bring to a server's shared channels; past it, no one new from that server joins in (also set from the app: Instance settings, Other instances) |
