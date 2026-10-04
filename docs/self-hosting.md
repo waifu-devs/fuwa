@@ -414,11 +414,11 @@ supported, so restore the backup instead. Each release's notes say what's new.
 
 The web app comes inside the server, so it updates with it. Tabs that were
 open during the update notice the new version, show a small "fuwa was updated"
-note with a Reload button, and reload by themselves once they're in the
-background or nobody has touched them for ten minutes, never with a message
-half typed, in a call, or with a dialog open.
+note with a Reload button. Nothing is forced: a tab never reloads by
+itself, and "Later" hides the note until the next update.
 
-The desktop app updates itself. A little after it starts and then every six
+The desktop app gets updates ready, and installs them only when the person
+says so. A little after it starts and then every six
 hours it asks the first instance it can reach (yours, if it's first) for
 `/updates/latest.json`, and fetches a newer build through
 `/updates/files/<name>`, which your instance passes through from GitHub
@@ -426,8 +426,11 @@ hours it asks the first instance it can reach (yours, if it's first) for
 change what it hands over: the app installs a build only when the release's
 `SHA256SUMS` carries a valid signature from a key the app was built with (see
 [Release signing](#release-signing)) and the file's SHA-256 matches it, and
-only when it's newer than the app. People can turn "Update automatically" off
-in the app's settings (Updates); it then only says a new version is out.
+only when it's newer than the app. The checked download waits beside the
+app until the person presses "Restart to update"; quitting without pressing
+it starts the same version again. People can turn "Download updates in the
+background" off in the app's settings (Updates); it then only says a new
+version is out.
 
 ### Release signing
 

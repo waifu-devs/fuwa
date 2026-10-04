@@ -1,17 +1,13 @@
 import { RefreshCwIcon, SparklesIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { getCalls } from "@/calls/state";
 import { SPRING } from "@/components/motion";
-import { FRESH, entryOf, look, mayReload, type Freshness } from "@/lib/fresh";
+import { FRESH, entryOf, look, type Freshness } from "@/lib/fresh";
 import { reduceMotion } from "@/lib/prefs";
 import { reportError, reportUsage } from "@/lib/reports";
 
 /** How often the page looks for a newer app. */
 const EVERY_MS = 5 * 60 * 1000;
-/** How often a page that's behind sees whether it may reload by itself. */
-const TRY_EVERY_MS = 30 * 1000;
-
 /** This page's own entry script, as a path. */
 function ownEntry(): string | null {
   const src = document.querySelector<HTMLScriptElement>('script[type="module"][src]')?.getAttribute("src");
@@ -33,27 +29,19 @@ async function servedEntry(): Promise<string | null> {
   }
 }
 
-/** Text typed and not sent anywhere on the page. */
-function hasDraft(): boolean {
-  for (const el of document.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>("textarea, input[type=text], input:not([type])")) {
-    if (el.value.trim()) return true;
-  }
-  return [...document.querySelectorAll<HTMLElement>("[contenteditable=true]")].some((el) => el.textContent?.trim());
-}
-
 /**
  * When the instance serving this page deploys a newer web app (fuwa.chat
- * does on every merge), a small pill says so with a Reload button. The page
- * also reloads by itself once it's in the background or nobody has touched
- * it for a while, but never with a message half typed, in a call, or with a
- * dialog open. Only the page's own instance is asked, the same index.html
- * it loaded from (`lib/fresh.ts` decides).
+ * does on every merge), a small pill says so with a Reload button. Nothing
+ * is forced: the page never reloads by itself, and "Later" hides the pill
+ * until the next deploy. Only the page's own instance is asked, the same
+ * index.html it loaded from (`lib/fresh.ts` decides).
  */
 export function UpdateReady() {
-  const [stale, setStale] = useState(false);
-  const [later, setLater] = useState(false);
+  /** The newer build this page is behind, once it's sure. */
+  const [behind, setBehind] = useState<string | null>(null);
+  /** The build "Later" was pressed for; a newer deploy asks again. */
+  const [later, setLater] = useState<string | null>(null);
   const fresh = useRef<Freshness>(FRESH);
-  const lastInput = useRef(Date.now());
 
   useEffect(() => {
     // The dev server swaps code in place; only a built app looks.
@@ -65,7 +53,9 @@ export function UpdateReady() {
       const found = await servedEntry();
       if (stopped) return;
       fresh.current = look(fresh.current, ours!, found);
-      setStale(fresh.current.stale);
+      const now = fresh.current;
+      // A build counts once it's been seen twice in a row, a later deploy too.
+      setBehind((prev) => (!now.stale ? null : now.streak >= 2 ? now.seen : prev));
     }
     const timer = setInterval(check, EVERY_MS);
     const onVisible = () => document.visibilityState === "visible" && void check();
@@ -79,31 +69,6 @@ export function UpdateReady() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!stale) return;
-    const touched = () => (lastInput.current = Date.now());
-    const tryReload = () => {
-      const moment = {
-        hidden: document.visibilityState === "hidden",
-        idleMs: Date.now() - lastInput.current,
-        draft: hasDraft(),
-        inCall: !!getCalls().call,
-        dialog: !!document.querySelector('[role="dialog"], [role="alertdialog"]'),
-      };
-      if (mayReload(moment)) location.reload();
-    };
-    window.addEventListener("pointerdown", touched, { passive: true });
-    window.addEventListener("keydown", touched, { passive: true });
-    document.addEventListener("visibilitychange", tryReload);
-    const timer = setInterval(tryReload, TRY_EVERY_MS);
-    return () => {
-      window.removeEventListener("pointerdown", touched);
-      window.removeEventListener("keydown", touched);
-      document.removeEventListener("visibilitychange", tryReload);
-      clearInterval(timer);
-    };
-  }, [stale]);
-
   function reload() {
     reportUsage("web.update_reload");
     location.reload();
@@ -113,7 +78,7 @@ export function UpdateReady() {
   return (
     <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex justify-center px-4">
       <AnimatePresence>
-      {stale && !later && (
+      {behind && behind !== later && (
         <motion.div
           key="update-ready"
           role="status"
@@ -146,9 +111,9 @@ export function UpdateReady() {
           </button>
           <button
             type="button"
-            onClick={() => setLater(true)}
+            onClick={() => setLater(behind)}
             aria-label="Later"
-            title="Later: it reloads by itself when you're away"
+            title="Later: keep using this version until you reload"
             className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <XIcon className="size-4" />

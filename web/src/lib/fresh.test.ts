@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FRESH, IDLE_MS, entryOf, look, mayReload } from "./fresh.ts";
+import { FRESH, entryOf, look } from "./fresh.ts";
 
 const INDEX = (name: string) =>
   `<!doctype html><html><head><script>window.x=1</script><script type="module" crossorigin src="/assets/${name}.js"></script>` +
@@ -34,14 +34,4 @@ test("a rolling deploy doesn't flap", () => {
   s = look(s, ours, "/assets/index-newer.js");
   assert.equal(s.stale, false);
   assert.equal(look(s, ours, "/assets/index-newer.js").stale, true);
-});
-
-test("it reloads only while nothing would be lost", () => {
-  const quiet = { hidden: true, idleMs: 0, draft: false, inCall: false, dialog: false };
-  assert.equal(mayReload(quiet), true);
-  assert.equal(mayReload({ ...quiet, hidden: false }), false);
-  assert.equal(mayReload({ ...quiet, hidden: false, idleMs: IDLE_MS }), true);
-  assert.equal(mayReload({ ...quiet, draft: true }), false);
-  assert.equal(mayReload({ ...quiet, inCall: true }), false);
-  assert.equal(mayReload({ ...quiet, dialog: true }), false);
 });

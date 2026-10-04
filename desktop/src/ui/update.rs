@@ -2,7 +2,8 @@
 //! floating over the bottom of the sidebar so it covers nothing you're
 //! using: "Restart to update", "What's new" (the Updates page in settings),
 //! or, where the app can't put it in place itself, the way to get it.
-//! Closing it hides it until the next start; a ready update still runs then.
+//! Closing it hides it until the next start. Nothing installs unless the
+//! person presses Restart.
 
 use std::time::Duration;
 
@@ -76,9 +77,9 @@ impl crate::ui::app::FuwaApp {
             ));
 
         let (title, line) = if ready {
-            (format!("fuwa {version} is ready"), "Restart now, or it starts next time.")
+            (format!("fuwa {version} is ready"), "Restart to update when it suits you.")
         } else if why == Some(Manual::Off) {
-            (format!("fuwa {version} is out"), "Install it when you like.")
+            (format!("fuwa {version} is out"), "Download it when you like.")
         } else {
             (format!("fuwa {version} is out"), "See how to get it.")
         };
@@ -127,15 +128,14 @@ impl crate::ui::app::FuwaApp {
         };
         let main = if ready {
             small("update-restart", "Restart", true)
-                .on_click(|_, _, cx| {
-                    if updates::restart().is_ok() {
-                        cx.quit();
-                    }
+                .on_click(|_, window, cx| match updates::restart() {
+                    Ok(()) => cx.quit(),
+                    Err(_) => window.refresh(),
                 })
                 .into_any_element()
         } else if why == Some(Manual::Off) {
             let core = self.core.clone();
-            small("update-install", "Install", true)
+            small("update-install", "Download", true)
                 .on_click(move |_, _, _| {
                     let core = core.clone();
                     drop(std::sync::Arc::clone(&core).spawn(async move { core.check_for_update(true).await }));

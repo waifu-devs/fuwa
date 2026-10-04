@@ -1,12 +1,9 @@
 /**
  * Noticing that the instance serving this page now has a newer web app
- * (fuwa.chat redeploys on every merge), and when reloading for it won't
- * take anything from anyone. `components/UpdateReady.tsx` does the asking
- * and the reloading; these are the decisions, kept plain so they're tested.
+ * (fuwa.chat redeploys on every merge). `components/UpdateReady.tsx` does
+ * the asking and offers a reload; the page never reloads by itself. These
+ * are the decisions, kept plain so they're tested.
  */
-
-/** How long nobody's touched the page before it may reload by itself. */
-export const IDLE_MS = 10 * 60 * 1000;
 
 /** The app's entry script in an index.html, such as /assets/index-abc123.js. Its name changes with every build. */
 export function entryOf(html: string): string | null {
@@ -41,24 +38,4 @@ export function look(state: Freshness, ours: string, found: string | null): Fres
   if (found === ours) return FRESH;
   const streak = found === state.seen ? state.streak + 1 : 1;
   return { seen: found, streak, stale: state.stale || streak >= 2 };
-}
-
-/** What could be lost by reloading now. */
-export type Moment = {
-  /** The tab isn't showing. */
-  hidden: boolean;
-  /** Since the last key or pointer. */
-  idleMs: number;
-  /** Text typed and not sent, anywhere. */
-  draft: boolean;
-  /** In a voice channel or a call. */
-  inCall: boolean;
-  /** A dialog or settings page is open (maybe with unsaved changes). */
-  dialog: boolean;
-};
-
-/** Whether the page may reload by itself: only while nobody's using it and nothing would be lost. */
-export function mayReload(m: Moment): boolean {
-  if (m.draft || m.inCall || m.dialog) return false;
-  return m.hidden || m.idleMs >= IDLE_MS;
 }

@@ -159,8 +159,8 @@ pub struct Prefs {
     pub share_reports: bool,
     /// The announcement closed on each instance, by its id, so it stays closed until a new one.
     pub closed_announcements: std::collections::BTreeMap<String, String>,
-    /// Fetches and puts in place new versions of the app by itself (see
-    /// `updates.rs`); off, it only says when one is out.
+    /// Fetches and checks new versions of the app in the background, for
+    /// "Restart to update" (see `updates.rs`); off, it only says when one is out.
     pub auto_update: bool,
 }
 

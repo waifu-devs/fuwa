@@ -17,12 +17,15 @@
 //! that isn't newer than this app is never installed, so nobody can hand an
 //! older, signed build back.
 //!
-//! The new program replaces the old one on disk (the bare program, or the
-//! AppImage); it runs at the next start, or now with "Restart to update".
-//! Where the app can't replace itself (installed by a package manager, a
-//! folder it can't write, a computer there's no build for, or a release
-//! that isn't signed) it says a new version is out and where to get it.
-//! "Update automatically" off only stops it fetching by itself.
+//! Nothing is ever forced: a checked download only waits beside the program
+//! (the bare program, or the AppImage). It replaces it when you press
+//! "Restart to update", which checks it once more first; quit without
+//! pressing it and the same version starts next time, with the download
+//! still waiting for you. Where the app can't replace itself (installed by
+//! a package manager, a folder it can't write, a computer there's no build
+//! for, or a release that isn't signed) it says a new version is out and
+//! where to get it. "Download updates in the background" off only stops it
+//! fetching by itself.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -63,7 +66,7 @@ pub struct Release {
 /// Why a newer version has to be installed by hand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Manual {
-    /// "Update automatically" is off: one click fetches it.
+    /// "Download updates in the background" is off: one click fetches it.
     Off,
     /// The release isn't signed by a key this app knows (or no key is built in yet).
     Unsigned,
@@ -80,7 +83,9 @@ pub enum Manual {
 impl Manual {
     pub fn explain(self) -> &'static str {
         match self {
-            Manual::Off => "Automatic updates are off. Install it now, or turn them back on.",
+            Manual::Off => {
+                "Background downloads are off. Download it now; it installs only when you restart to update."
+            }
             Manual::Unsigned => {
                 "This release isn't signed with a key this app trusts, so it won't install it. Download it from the release page."
             }
@@ -114,7 +119,7 @@ pub enum Status {
         done: u64,
         total: u64,
     },
-    /// In place: the next start runs it.
+    /// Downloaded and checked, waiting for "Restart to update".
     Ready {
         release: Release,
     },
@@ -140,6 +145,14 @@ static STATUS: Mutex<Status> = Mutex::new(Status::Idle);
 static BUSY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// The program this app started as, before an update replaced it.
 static PROGRAM: OnceLock<Option<PathBuf>> = OnceLock::new();
+/// The checked download waiting for "Restart to update".
+static STAGED: Mutex<Option<Staged>> = Mutex::new(None);
+
+struct Staged {
+    file: PathBuf,
+    target: PathBuf,
+    sha256: [u8; 32],
+}
 
 pub fn status() -> Status {
     STATUS.lock().clone()
@@ -364,10 +377,36 @@ pub fn put_in_place(new: &Path, target: &Path) -> std::io::Result<()> {
     std::fs::rename(new, target)
 }
 
-/// Starts the program again, which waits for this one to let go of the app
-/// lock. The window quits right after.
+/// The SHA-256 of a file, or None when it can't be read.
+fn sha256_of(path: &Path) -> Option<[u8; 32]> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hash = Sha256::new();
+    std::io::copy(&mut file, &mut hash).ok()?;
+    Some(hash.finalize().into())
+}
+
+/// What the person chose with "Restart to update": the waiting download,
+/// checked once more, takes the program's place, and the program starts
+/// again, waiting for this one to let go of the app lock. The window quits
+/// right after.
 pub fn restart() -> std::io::Result<()> {
     let program = program().ok_or_else(|| std::io::Error::other("no program"))?;
+    if let Some(staged) = STAGED.lock().take() {
+        let failed = if sha256_of(&staged.file) != Some(staged.sha256) {
+            let _ = std::fs::remove_file(&staged.file);
+            Some(("update_hash_bad", "The download changed after it was checked, so it was thrown away."))
+        } else if put_in_place(&staged.file, &staged.target).is_err() {
+            Some(("update_apply_failed", "The new version couldn't be put in place; it'll try again later."))
+        } else {
+            None
+        };
+        if let Some((kind, what)) = failed {
+            tracing::warn!("{what}");
+            reports::error(kind, "core/updates.rs");
+            *STATUS.lock() = Status::Failed { what };
+            return Err(std::io::Error::other("not updated"));
+        }
+    }
     std::process::Command::new(program).args(std::env::args_os().skip(1)).env(AFTER_UPDATE, "1").spawn().map(|_| ())
 }
 
@@ -392,7 +431,8 @@ impl Core {
     }
 
     /// Asks the instances you added, in order, until one knows the latest
-    /// release; then fetches and puts it in place when `install`.
+    /// release; then fetches and checks it when `install`, for the person
+    /// to put in place with "Restart to update".
     pub async fn check_for_update(self: &Arc<Self>, install: bool) {
         let Ok(_busy) = BUSY.try_lock() else { return };
         if matches!(status(), Status::Ready { .. }) {
@@ -443,6 +483,13 @@ impl Core {
             Ok(target) => target,
             Err(why) => return set(self, Status::Available { release, why }),
         };
+        let part = partial(&target.file);
+        let staged = Staged { file: part.clone(), target: target.file.clone(), sha256: plan.sha256 };
+        // Fetched and checked on an earlier run, and still waiting.
+        if sha256_of(&part) == Some(plan.sha256) {
+            *STAGED.lock() = Some(staged);
+            return set(self, Status::Ready { release });
+        }
         if !install {
             return set(self, Status::Available { release, why: Manual::Off });
         }
@@ -450,16 +497,10 @@ impl Core {
         let total = plan.size.unwrap_or(0);
         set(self, Status::Downloading { release: release.clone(), done: 0, total });
         let started = std::time::Instant::now();
-        let part = partial(&target.file);
         let fetched = download(self, &url, &plan, &part, &release).await;
         reports::timing("updates.download", started.elapsed());
         let failed = match fetched {
-            Ok(()) => match put_in_place(&part, &target.file) {
-                Ok(()) => None,
-                Err(_) => {
-                    Some(("update_apply_failed", "The new version couldn't be put in place; it'll try again later."))
-                }
-            },
+            Ok(()) => None,
             Err(Fetch::Mismatch) => {
                 Some(("update_hash_bad", "The download didn't match the signed checksum, so it was thrown away."))
             }
@@ -467,13 +508,14 @@ impl Core {
                 Some(("update_download_failed", "The download didn't finish; it'll try again later."))
             }
         };
-        let _ = std::fs::remove_file(&part);
         match failed {
             None => {
-                tracing::info!(version = %release.version, "a new version of fuwa is ready for the next start");
+                tracing::info!(version = %release.version, "a new version of fuwa is downloaded, waiting for Restart to update");
+                *STAGED.lock() = Some(staged);
                 set(self, Status::Ready { release })
             }
             Some((kind, what)) => {
+                let _ = std::fs::remove_file(&part);
                 tracing::warn!("{what}");
                 reports::error(kind, "core/updates.rs");
                 set(self, Status::Failed { what })
@@ -694,6 +736,18 @@ mod tests {
         assert!(!newer("0.1.0", "0.1.0"));
         assert!(!newer("0.2.0-rc.1", "0.1.0"));
         assert!(!newer("1.0", "0.1.0"));
+    }
+
+    #[test]
+    fn a_waiting_download_is_known_by_its_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir.path().join("fuwa-desktop"));
+        assert_eq!(sha256_of(&part), None, "nothing waiting");
+        std::fs::write(&part, b"abc").unwrap();
+        let abc = hex32("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad").unwrap();
+        assert_eq!(sha256_of(&part), Some(abc));
+        std::fs::write(&part, b"abd").unwrap();
+        assert_ne!(sha256_of(&part), Some(abc), "a changed download isn't the checked one");
     }
 
     #[test]

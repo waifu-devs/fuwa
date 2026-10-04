@@ -1,5 +1,5 @@
 //! The Updates page: which version this is, whether a newer one is out, the
-//! "Update automatically" switch, a look at what's new, and how updates reach
+//! "Download updates in the background" switch, a look at what's new, and how updates reach
 //! this computer (`core::updates`).
 
 use std::sync::Arc;
@@ -42,7 +42,7 @@ impl SettingsView {
                 ("download", p.primary, format!("Downloading fuwa {}…", release.version))
             }
             Status::Ready { release } => {
-                ("sparkles", p.primary, format!("fuwa {} is ready. Restart to start using it.", release.version))
+                ("sparkles", p.primary, format!("fuwa {} is downloaded and checked.", release.version))
             }
             Status::Failed { .. } => ("circle-alert", p.destructive, "Couldn't update just now.".to_owned()),
         };
@@ -85,17 +85,17 @@ impl SettingsView {
         let action: Option<AnyElement> = match &status {
             Status::Ready { .. } => Some(
                 primary_button("updates-restart", "Restart to update", p)
-                    .on_click(|_, _, cx| {
-                        if updates::restart().is_ok() {
-                            cx.quit();
-                        }
+                    .on_click(|_, window, cx| match updates::restart() {
+                        Ok(()) => cx.quit(),
+                        // Why it didn't is on the page now.
+                        Err(_) => window.refresh(),
                     })
                     .into_any_element(),
             ),
             Status::Available { why: Manual::Off, .. } => {
                 let core = self.core.clone();
                 Some(
-                    primary_button("updates-install", "Install it", p)
+                    primary_button("updates-install", "Download it", p)
                         .on_click(move |_, _, _| {
                             let core = core.clone();
                             drop(Arc::clone(&core).spawn(async move { core.check_for_update(true).await }));
@@ -167,6 +167,11 @@ impl SettingsView {
                         })),
                 );
         }
+        if let Status::Ready { .. } = &status {
+            head = head.child(div().text_sm().text_color(p.muted_foreground).child(
+                "It only installs when you choose to. Until then this version keeps running, start after start.",
+            ));
+        }
         if let Status::Available { why, .. } = &status {
             head = head.child(div().text_sm().text_color(p.muted_foreground).child(why.explain()));
         }
@@ -187,7 +192,7 @@ impl SettingsView {
             .text_sm()
             .child(icon("shield-check").size(px(16.0)).mt(px(2.0)).text_color(p.primary))
             .child(div().flex_1().min_w_0().child(format!(
-                "fuwa asks {courier} about new versions and downloads them through it, so GitHub, where releases live, never sees your address, and nothing about you goes with the request. Before an update runs, fuwa checks it against Waifu Devs' release signature and its SHA-256; one that doesn't match is thrown away."
+                "fuwa asks {courier} about new versions and downloads them through it, so GitHub, where releases live, never sees your address, and nothing about you goes with the request. Before an update runs, fuwa checks it against Waifu Devs' release signature and its SHA-256; one that doesn't match is thrown away. An update never installs or restarts the app by itself."
             )));
 
         let mut page = div()
@@ -197,8 +202,8 @@ impl SettingsView {
             .child(motion::rise(head, "updates-head", Duration::ZERO, 8.0))
             .child(toggle_row(
                 "auto-update",
-                "Update automatically",
-                "Downloads new versions and puts them in place for the next start. Off, fuwa only tells you when one is out.",
+                "Download updates in the background",
+                "New versions are fetched and checked so they're ready when you are; nothing installs until you press Restart to update. Off, fuwa only tells you when one is out.",
                 prefs.auto_update,
                 p,
                 cx,

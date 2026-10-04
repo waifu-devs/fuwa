@@ -332,8 +332,9 @@
     setting, which counts nothing), `updates.rs` (the app updating itself:
     the latest release through an instance, installed only when newer, its
     `SHA256SUMS` signed by a key in `desktop/release-keys.txt` and the file
-    matching it; it replaces the program or AppImage on disk for the next
-    start, and says how to get it where it can't). It runs on its own
+    matching it; the checked download waits beside the program or AppImage
+    and replaces it only when the person presses "Restart to update", never
+    by itself, and it says how to get it where it can't). It runs on its own
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
@@ -353,7 +354,7 @@
     (themes, light and dark picks, theme files) and Background pages,
     `settings_privacy.rs` the Privacy page ("Help fix bugs", what a report
     holds, and what's waiting to go out), `settings_updates.rs` the Updates
-    page (status, "Update automatically", what's new) and `update.rs` the
+    page (status, "Download updates in the background", what's new) and `update.rs` the
     card over the sidebar's foot when a new version is ready,
     `backdrop.rs` what's drawn behind the app (picture, blurred once off the
     main thread when asked, dimming, a texture made here as a PNG or SVG
@@ -478,7 +479,7 @@
     `/<instance>/dm/<conversation>`.
   - `components/UpdateReady.tsx` notices the instance serving the page has a
     newer web app (its index.html names another entry script, twice in a
-    row) and reloads gently; `lib/fresh.ts` is when. Admins see a newer fuwa
+    row) and offers a reload, never forcing one; `lib/fresh.ts` is when. Admins see a newer fuwa
     release in instance settings (`settings/instance/NewerRelease.tsx`).
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
