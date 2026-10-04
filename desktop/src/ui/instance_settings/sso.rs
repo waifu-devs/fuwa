@@ -238,6 +238,11 @@ impl InstanceSettingsView {
     /// Reads pasted metadata into the SAML fields.
     fn fill_metadata(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let xml = self.sso.metadata.read(cx).value().to_string();
+        if xml.len() > sso::MAX_METADATA {
+            self.sso.problem = Some("That's too big to be metadata. Paste the provider's metadata file.".into());
+            cx.notify();
+            return;
+        }
         let Some(found) = sso::read_saml_metadata(&xml).filter(|f| !f.entity_id.is_empty() || !f.sso_url.is_empty())
         else {
             self.sso.problem = Some("That doesn't look like identity provider metadata.".into());

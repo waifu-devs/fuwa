@@ -224,7 +224,8 @@ pub fn add_domains(domains: &mut Vec<String>, text: &str) {
 
 /// What an identity provider's SAML metadata says: its entity ID, where
 /// people sign in (HTTP-Redirect), and its signing certificates as PEM (up
-/// to four). None when it isn't provider metadata. The web's `readSamlMetadata`.
+/// to four). None when it isn't provider metadata, or is over [`MAX_METADATA`].
+/// The web's `readSamlMetadata`.
 #[derive(Debug, Default, PartialEq)]
 pub struct SamlMetadata {
     pub entity_id: String,
@@ -232,7 +233,15 @@ pub struct SamlMetadata {
     pub certificates: String,
 }
 
+/// The most pasted metadata read: real metadata is a few kilobytes.
+pub const MAX_METADATA: usize = 1_000_000;
+/// The most signing certificates kept from metadata.
+const MAX_CERTIFICATES: usize = 4;
+
 pub fn read_saml_metadata(xml: &str) -> Option<SamlMetadata> {
+    if xml.len() > MAX_METADATA {
+        return None;
+    }
     let mut found = SamlMetadata::default();
     let (mut seen_entity, mut in_idp, mut seen_idp) = (false, false, false);
     // Inside a signing KeyDescriptor, and inside its X509Certificate.
@@ -243,7 +252,7 @@ pub fn read_saml_metadata(xml: &str) -> Option<SamlMetadata> {
         let text = &rest[..open];
         if in_cert {
             let b64: String = text.chars().filter(|c| !c.is_whitespace()).collect();
-            if !b64.is_empty() && !certs.contains(&b64) {
+            if !b64.is_empty() && certs.len() < MAX_CERTIFICATES && !certs.contains(&b64) {
                 certs.push(b64);
             }
         }
@@ -298,7 +307,6 @@ pub fn read_saml_metadata(xml: &str) -> Option<SamlMetadata> {
     }
     found.certificates = certs
         .iter()
-        .take(4)
         .map(|b64| {
             let lines: Vec<&str> =
                 b64.as_bytes().chunks(64).map(|c| std::str::from_utf8(c).unwrap_or_default()).collect();
@@ -394,6 +402,14 @@ mod tests {
         assert!(found.certificates.contains(&format!("{}\n{}", &cert[..64], &cert[64..])));
         assert_eq!(read_saml_metadata("<html><body>nope</body></html>"), None);
         assert_eq!(read_saml_metadata("not xml at all"), None);
+        let huge = format!("{xml}{}", " ".repeat(MAX_METADATA));
+        assert_eq!(read_saml_metadata(&huge), None, "too big to read");
+        let many: String = (0..50)
+            .map(|n| format!("<md:KeyDescriptor><ds:X509Certificate>C{n}</ds:X509Certificate></md:KeyDescriptor>"))
+            .collect();
+        let many = xml.replace("</md:IDPSSODescriptor>", &format!("{many}</md:IDPSSODescriptor>"));
+        let found = read_saml_metadata(&many).unwrap();
+        assert_eq!(found.certificates.matches("BEGIN CERTIFICATE").count(), 4, "four at most");
     }
 
     #[test]
