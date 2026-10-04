@@ -188,7 +188,10 @@ async fn cached(url: &str) -> Result<Picture, Missing> {
 
 /// The bytes and type of the picture a message links to, for the server
 /// itself to read (AutoMod providers that look at pictures): an upload on
-/// this instance from its files, a link it rewrote or any other link
+/// this instance from its files (only ever one of the message's own
+/// attachments, checked as its sender's, or an emoji from another of their
+/// servers, checked as that server's: see `automod::picture_links`), a link
+/// it rewrote or any other link
 /// fetched like readers' pictures are (public addresses only, at most
 /// [`MAX_BYTES`], cached). `None` when it isn't a picture or can't be had.
 pub async fn picture(app: &App, url: &str) -> Option<(&'static str, Bytes)> {
@@ -197,9 +200,14 @@ pub async fn picture(app: &App, url: &str) -> Option<(&'static str, Bytes)> {
     let own = Url::parse(&public_url).is_ok_and(|own| own.origin() == parsed.origin());
     if own && let Some(id) = crate::media::id_in_url(url) {
         // Uploads are kept where node.db is; elsewhere they're left out.
-        let bytes = tokio::fs::read(app.media().ok()?.path(&id)).await.ok()?;
-        let kind = crate::media::sniff(&bytes[..bytes.len().min(16)])?;
-        return Some((kind, bytes.into()));
+        return own_file(app.media().ok()?.path(&id)).await;
+    }
+    if own && let Some((server_id, id)) = crate::media::server_file_in_url(url) {
+        // A server's files are kept on the shard holding it: read here, or not at all.
+        if !app.servers.holds(&server_id) {
+            return None;
+        }
+        return own_file(app.config.data_path.join(crate::cluster::pictures::name(&server_id, &id))).await;
     }
     let inner = match parsed.path().strip_prefix(PATH) {
         Some(signature) => {
@@ -212,6 +220,19 @@ pub async fn picture(app: &App, url: &str) -> Option<(&'static str, Bytes)> {
         None => url.to_string(),
     };
     cached(&inner).await.ok().map(|picture| (picture.content_type, picture.bytes))
+}
+
+/// A picture uploaded here, read from `path`: none when it isn't a picture,
+/// or is bigger than one fetched from elsewhere may be (an attachment can
+/// be any size).
+async fn own_file(path: std::path::PathBuf) -> Option<(&'static str, Bytes)> {
+    let size = tokio::fs::metadata(&path).await.ok()?.len();
+    if size > MAX_BYTES as u64 {
+        return None;
+    }
+    let bytes = tokio::fs::read(&path).await.ok()?;
+    let kind = crate::media::sniff(&bytes[..bytes.len().min(16)])?;
+    Some((kind, bytes.into()))
 }
 
 fn failed(status: StatusCode, message: &str) -> Response {

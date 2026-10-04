@@ -26,32 +26,45 @@ impl MediaService for Api {
                         | pb::MediaPurpose::ServerIcon
                         | pb::MediaPurpose::Emoji
                         | pb::MediaPurpose::Background
+                        | pb::MediaPurpose::Attachment
                         | pb::MediaPurpose::Gif),
                     ) => purpose,
                     _ => {
                         return Err(Error::invalid(
-                            "an upload is an avatar, a banner, a server icon, an emoji, a background or a GIF",
+                            "an upload is an avatar, a banner, a server icon, an emoji, a background, a GIF or an attachment",
                         ));
                     }
                 };
-                if !media::PICTURE_TYPES.contains(&req.content_type.as_str()) {
+                let attachment = purpose == pb::MediaPurpose::Attachment;
+                // An attachment may be anything: what it's kept as comes from its bytes.
+                let content_type = if attachment {
+                    media::OCTET_STREAM.to_string()
+                } else if media::PICTURE_TYPES.contains(&req.content_type.as_str()) {
+                    req.content_type
+                } else {
                     return Err(Error::invalid("pictures can be PNG, JPEG, GIF, WebP or AVIF"));
-                }
-                if purpose == pb::MediaPurpose::Gif && req.content_type != "image/gif" {
+                };
+                if purpose == pb::MediaPurpose::Gif && content_type != "image/gif" {
                     return Err(Error::invalid("a GIF upload is a GIF"));
                 }
                 if req.size <= 0 {
                     return Err(Error::invalid("that file is empty"));
+                }
+                if attachment && req.server_id.trim().is_empty() {
+                    return Err(Error::invalid("attachments are uploaded for the server they're sent in"));
                 }
                 let server_id = match req.server_id.trim() {
                     "" => None,
                     id => {
                         if !matches!(
                             purpose,
-                            pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji | pb::MediaPurpose::Avatar
+                            pb::MediaPurpose::ServerIcon
+                                | pb::MediaPurpose::Emoji
+                                | pb::MediaPurpose::Avatar
+                                | pb::MediaPurpose::Attachment
                         ) {
                             return Err(Error::invalid(
-                                "only icons, emoji and webhook pictures are uploaded for a server",
+                                "only icons, emoji, webhook pictures and attachments are uploaded for a server",
                             ));
                         }
                         let id = crate::id::parse_id("server_id", id)?;
@@ -62,11 +75,16 @@ impl MediaService for Api {
                     }
                 };
                 let settings = self.app.settings();
-                if let Some(cap) = settings.limits.picture_upload_bytes
+                let limits = &settings.limits;
+                let (cap, per_day, what) = match attachment {
+                    true => (limits.attachment_upload_bytes, limits.attachment_upload_bytes_per_day, "files"),
+                    false => (limits.picture_upload_bytes, limits.picture_upload_bytes_per_day, "pictures"),
+                };
+                if let Some(cap) = cap
                     && req.size > cap
                 {
                     return Err(Error::ResourceExhausted(format!(
-                        "pictures can be at most {} here",
+                        "{what} can be at most {} here",
                         media::size_label(cap)
                     )));
                 }
@@ -74,7 +92,7 @@ impl MediaService for Api {
                     id: media::new_id(),
                     account_id: account.id.clone(),
                     purpose,
-                    content_type: req.content_type,
+                    content_type,
                     size: req.size,
                     stored: false,
                     used: false,
@@ -82,18 +100,10 @@ impl MediaService for Api {
                 };
                 let token = auth::new_token();
                 let expires_at = now_ms() + media::UPLOAD_TTL_MS;
-                self.app
-                    .node()?
-                    .reserve_media(
-                        &row,
-                        &auth::hash_token(&token),
-                        expires_at,
-                        settings.limits.picture_upload_bytes_per_day,
-                    )
-                    .await?;
+                self.app.node()?.reserve_media(&row, &auth::hash_token(&token), expires_at, per_day).await?;
                 let base = &settings.public_url;
-                // A server's picture on a split instance goes straight to the
-                // shard holding the server (docs/regions.md).
+                // A server's picture or attachment on a split instance goes
+                // straight to the shard holding the server (docs/regions.md).
                 let upload_url = match (&server_id, &self.app.link) {
                     (Some(server_id), Link::Directory(_)) => format!("{base}/media/servers/{server_id}/upload/{token}"),
                     _ => format!("{base}/media/upload/{token}"),

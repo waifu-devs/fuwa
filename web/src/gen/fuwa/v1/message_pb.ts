@@ -34,6 +34,11 @@ export type SendMessageRequest = Message<"fuwa.v1.SendMessageRequest"> & {
   content: string;
 
   /**
+   * Up to 10 files uploaded for this server (MEDIA_PURPOSE_ATTACHMENT), each
+   * by its `url` and `filename` (and `width` and `height` for pictures and
+   * videos). Needs ATTACH_FILES. Not yet in channels shared from another
+   * server.
+   *
    * @generated from field: repeated fuwa.v1.Attachment attachments = 4;
    */
   attachments: Attachment[];
