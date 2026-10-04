@@ -606,7 +606,7 @@ impl DmDb {
         .await
     }
 
-    /// Whether a message already carries this sealed file.
+    /// Whether a message carries this sealed file.
     pub async fn carries(&self, media_id: &str) -> Result<bool> {
         let conn = self.read()?;
         Ok(query_one(&conn, "SELECT 1 FROM record_media WHERE media_id = ?1", [media_id], |r| r.get::<i64>(0))

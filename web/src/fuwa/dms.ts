@@ -209,6 +209,32 @@ function keepOpened(mediaId: string, ogg: Uint8Array<ArrayBuffer>) {
 }
 
 /**
+ * The biggest sealed voice message this app fetches: fifteen minutes at
+ * 64 kbps, padded, which is twice what this app records at.
+ */
+const MAX_VOICE_BYTES = 8 * 1024 * 1024;
+
+/** Reads exactly `size` bytes, stopping as soon as there are more. */
+async function readExactly(body: ReadableStream<Uint8Array>, size: number): Promise<Uint8Array<ArrayBuffer>> {
+  const out = new Uint8Array(size);
+  const reader = body.getReader();
+  let at = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (at + value.length > size) throw new Error("this voice message isn't the one that was sent");
+      out.set(value, at);
+      at += value.length;
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  if (at !== size) throw new Error("this voice message isn't the one that was sent");
+  return out;
+}
+
+/**
  * Fetches a voice message's sealed bytes from this instance (by id, never a
  * link from the message) and opens them on this device.
  */
@@ -216,15 +242,16 @@ export function voiceLoader(key: string, voice: VoiceFile): Loader {
   return async () => {
     const mine = opened.get(voice.mediaId);
     if (mine) return mine;
+    // The size is the sender's word: never fetch more than a long voice message can be.
+    if (voice.size > MAX_VOICE_BYTES) throw new Error("this voice message is too big to play here");
     const started = performance.now();
     const res = await fetch(`${engine(key).url.replace(/\/+$/, "")}/media/${voice.mediaId}`, {
       credentials: "omit",
       referrerPolicy: "no-referrer",
     });
     if (res.status === 404) throw new Error("this voice message was deleted");
-    if (!res.ok) throw new Error("this voice message couldn't be fetched");
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.length !== voice.size) throw new Error("this voice message isn't the one that was sent");
+    if (!res.ok || !res.body) throw new Error("this voice message couldn't be fetched");
+    const bytes = await readExactly(res.body, voice.size);
     const ogg = await open(bytes, voice.key, voice.sha256);
     reportTiming("dm.voice_open", performance.now() - started);
     return ogg;

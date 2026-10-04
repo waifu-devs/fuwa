@@ -173,8 +173,9 @@ services included, ever gets it.
 `PostMessage` names the file in `media_ids`, which ties it to that record
 (dms.db's `record_media`): one file, one message, and deleting the message
 deletes the file. A file never sent is swept after a day like any unused
-upload. Devices fetch it from their own instance by id (never from a link
-in the message), check its size and hash, then open it; the player keeps
+upload; one a message carries never is. Devices fetch it from their own instance by id (never from a link
+in the message), check its size and hash (refusing any over 8 MiB before fetching, and
+reading no more than the size the message gave), then open it; the player keeps
 the opened sound in memory only. Admins can cap how long
 (`voice_message_seconds`, which apps honour, since the instance can't check)
 and how big (`voice_message_bytes`, checked on the sealed size) one may be,
