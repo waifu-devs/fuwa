@@ -165,6 +165,10 @@ message SharedConnection {
   // to, as "Name (host)", the guest's people's included. Asked of the home
   // each time the list is read; empty when none, or when it couldn't be.
   repeated string checked_by = 9;
+  // The other server's instance, when it's another one: its host (and
+  // port, if any), and its key's fingerprint as admins compare it.
+  string instance = 10;
+  string fingerprint = 11;
 }
 
 enum SharedConnectionState {
@@ -176,7 +180,8 @@ enum SharedConnectionState {
 }
 
 // A code to share a channel. It names the home server, so any server on the
-// instance can look it up.
+// instance can look it up, and ends with "@" and the instance's host when
+// servers on other instances may use it.
 message ShareCode {
   string code = 1;
   string channel_id = 2;
@@ -198,6 +203,9 @@ message ChannelBlock {
 message CreateShareCodeRequest {
   string server_id = 1;
   string channel_id = 2;
+  // A code a server on another instance can use too (it ends with
+  // "@" and this instance's host). Only while Node.federation.
+  bool other_instances = 3;
 }
 
 message CreateShareCodeResponse {
@@ -234,6 +242,11 @@ message PreviewShareResponse {
   google.protobuf.Timestamp expires_at = 7;
   // How many servers it's shown in already, besides its home.
   int32 guest_count = 8;
+  // The home's instance, when it's another one: its host (and port, if
+  // any), and its key's fingerprint, for admins to compare with the other
+  // instance's admins over a channel they trust.
+  string instance = 9;
+  string fingerprint = 10;
 }
 
 message AcceptShareRequest {
