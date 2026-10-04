@@ -34,6 +34,14 @@ service AgentService {
   // Adds an agent to a server. Needs MANAGE_SERVER there, and the agent must
   // be public or the caller's own.
   rpc AddAgent(AddAgentRequest) returns (AddAgentResponse);
+  // Which of a server's agents may use the instance's MCP endpoint
+  // (docs/mcp.md). Any member may read it. What an agent can do there is
+  // still up to its roles: this only closes the MCP door, and the agent's
+  // token keeps working with this API.
+  rpc GetMcpAccess(GetMcpAccessRequest) returns (GetMcpAccessResponse);
+  // Needs MANAGE_SERVER. Kept in the audit log as a server update of
+  // "mcp_access".
+  rpc SetMcpAccess(SetMcpAccessRequest) returns (SetMcpAccessResponse);
 }
 
 message Agent {
@@ -106,4 +114,37 @@ message AddAgentRequest {
 
 message AddAgentResponse {
   Member member = 1;
+}
+
+enum McpAccessMode {
+  // Every agent in the server, as MCP_ACCESS_MODE_ALL.
+  MCP_ACCESS_MODE_UNSPECIFIED = 0;
+  MCP_ACCESS_MODE_ALL = 1;
+  // Only the agents in McpAccess.agent_ids.
+  MCP_ACCESS_MODE_CHOSEN = 2;
+  // No agent: the server can't be used through MCP.
+  MCP_ACCESS_MODE_OFF = 3;
+}
+
+message McpAccess {
+  McpAccessMode mode = 1;
+  // For MCP_ACCESS_MODE_CHOSEN: the agents' account ids, at most 100.
+  repeated string agent_ids = 2;
+}
+
+message GetMcpAccessRequest {
+  string server_id = 1;
+}
+
+message GetMcpAccessResponse {
+  McpAccess access = 1;
+}
+
+message SetMcpAccessRequest {
+  string server_id = 1;
+  McpAccess access = 2;
+}
+
+message SetMcpAccessResponse {
+  McpAccess access = 1;
 }
