@@ -405,9 +405,15 @@ impl Api {
     /// knows of each (its id, kind and size, its link where it's served, a
     /// safe name) and says how many bytes they come to.
     async fn check_attachments(&self, account_id: &str, server_id: &str, files: &mut [pb::Attachment]) -> Result<i64> {
+        let files_len = files.len();
         let mut total = 0;
         let mut seen = Vec::with_capacity(files.len());
+        let voice_caps = &self.app.settings().limits;
         for file in files.iter_mut() {
+            let voice = file.voice.take();
+            if voice.is_some() && files_len > 1 {
+                return Err(Error::invalid("a voice message is sent on its own"));
+            }
             let Some(id) = media::id_in_url(file.url.trim()) else {
                 return Err(Error::invalid("attach files by uploading them here first"));
             };
@@ -419,6 +425,9 @@ impl Api {
                 .check_upload(account_id, pb::MediaPurpose::Attachment, file.url.trim(), Some(server_id))
                 .await?
                 .ok_or(Error::NotFound("uploaded file; upload it again"))?;
+            if let Some(voice) = &voice {
+                check_voice(voice, &upload.content_type, upload.size, voice_caps)?;
+            }
             let sized = upload.content_type.starts_with("image/") || upload.content_type.starts_with("video/");
             let pixels = |n: i32| if sized { n.clamp(0, 65_535) } else { 0 };
             *file = pb::Attachment {
@@ -429,12 +438,36 @@ impl Api {
                 width: pixels(file.width),
                 height: pixels(file.height),
                 id: id.clone(),
+                voice,
             };
             total += upload.size;
             seen.push(id);
         }
         Ok(total)
     }
+}
+
+/// Checks a voice message's file against what the sending app said of it
+/// and the instance's caps on voice messages. Its length is the app's word,
+/// bounded by its size (Opus at 32 kbps is about 4 KB a second).
+fn check_voice(voice: &pb::VoiceNote, content_type: &str, size: i64, limits: &crate::config::Limits) -> Result<()> {
+    if content_type != media::OGG_OPUS {
+        return Err(Error::invalid("a voice message is an Ogg Opus recording"));
+    }
+    if voice.duration_ms == 0 || voice.waveform.len() > 128 {
+        return Err(Error::invalid("that voice message's length or waveform is off"));
+    }
+    if let Some(cap) = limits.voice_message_seconds
+        && i64::from(voice.duration_ms) > cap.saturating_mul(1000)
+    {
+        return Err(Error::ResourceExhausted(format!("voice messages can be at most {cap} seconds here")));
+    }
+    if let Some(cap) = limits.voice_message_bytes
+        && size > cap
+    {
+        return Err(Error::ResourceExhausted(format!("voice messages can be at most {} here", media::size_label(cap))));
+    }
+    Ok(())
 }
 
 /// Refuses members who are timed out.

@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import { clock } from "@/voice/player";
 import { ArrowRightIcon, HashIcon, HourglassIcon, PaperclipIcon, SearchXIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -353,7 +354,7 @@ const ResultRow = memo(function ResultRow({
               {message.attachments.map((a) => (
                 <span key={a.id} className="inline-flex max-w-full items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                   <PaperclipIcon className="size-3 shrink-0" />
-                  <span className="truncate">{a.filename}</span>
+                  <span className="truncate">{a.voice ? `Voice message (${clock(a.voice.durationMs)})` : a.filename}</span>
                 </span>
               ))}
             </span>

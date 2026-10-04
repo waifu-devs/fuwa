@@ -10,6 +10,7 @@ import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
   ApplicationStatus,
+  AttachmentSchema,
   ChannelType,
   EventSchema,
   JoinFormSchema,
@@ -47,6 +48,7 @@ import { wipeDms } from "@/e2ee/engine";
 import { outsideEmojis } from "@/lib/emoji-catalog";
 import { forgetRecentSearches } from "@/lib/search-query";
 import { reportUsage } from "@/lib/reports";
+import type { Clip } from "@/voice/recorder";
 import { addInstance, engine, follow, removeInstance } from "./sync";
 import {
   addServer,
@@ -1243,7 +1245,7 @@ export const sendMessage = (
     const setPending = (fn: (list: PendingMessage[]) => PendingMessage[]) =>
       updateInstance(key, (i) => ({ ...i, pending: { ...i.pending, [at]: fn(i.pending[at] ?? []) } }));
     setPending((list) => [...list, pending]);
-    const attachments = files.map((f) => ({ url: f.url, filename: f.filename, width: f.width, height: f.height }));
+    const attachments = files.map((f) => ({ url: f.url, filename: f.filename, width: f.width, height: f.height, voice: f.voice }));
     // Other servers' emoji go along so the instance can check them and keep their pictures with the message.
     const emojis = outsideEmojis(store.get().instances[key]?.emojis, serverId, content);
     const res = yield* call((signal) =>
@@ -1286,6 +1288,26 @@ export const sendMessage = (
       yield* loadFollowed(key, serverId);
     }
   });
+
+/**
+ * Uploads a voice message recorded here and resolves to the attachment to
+ * send it as, alone: with how long it plays and its waveform, both worked
+ * out on this device from the sound.
+ */
+export const uploadVoice = (key: string, serverId: string, clip: Clip) =>
+  Effect.gen(function* () {
+    reportUsage("message.send_voice");
+    const url = yield* uploadAttachment(key, serverId, new Blob([clip.ogg], { type: "audio/ogg" }));
+    return create(AttachmentSchema, {
+      url,
+      filename: VOICE_FILENAME,
+      size: BigInt(clip.ogg.length),
+      voice: { durationMs: clip.durationMs, waveform: clip.waveform },
+    });
+  });
+
+/** What a voice message's file is called. */
+export const VOICE_FILENAME = "voice-message.ogg";
 
 /** What the poll editor makes: a question, its answers and how it runs. */
 export type PollDraft = {

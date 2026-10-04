@@ -8629,6 +8629,71 @@ async fn attachments_upload_send_serve_and_go_with_their_message() {
     instance.stop().await;
 }
 
+#[tokio::test]
+async fn voice_messages_go_in_channels_as_their_only_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_LIMIT_VOICE_MESSAGE_SECONDS", "60")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let server = create_server(&mut c, &juan, "Voices", true).await;
+    let channels = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels;
+    let general = channels.iter().find(|ch| ch.name == "general").unwrap().id.clone();
+    // An Ogg page whose first packet is Opus's header, at byte 28.
+    let mut ogg = b"OggS".to_vec();
+    ogg.resize(28, 0);
+    ogg.extend_from_slice(b"OpusHead\x01\x01");
+    ogg.extend((0..4000u32).map(|n| (n % 241) as u8));
+    let mut vorbis = b"OggS".to_vec();
+    vorbis.extend((0..4000u32).map(|n| (n % 241) as u8));
+    let note = |ms: u32| pb::VoiceNote { duration_ms: ms, waveform: vec![10, 200, 90] };
+    let send_voice = |files: Vec<pb::Attachment>| {
+        authed(
+            &juan,
+            pb::SendMessageRequest {
+                server_id: server.id.clone(),
+                channel_id: general.clone(),
+                attachments: files,
+                ..Default::default()
+            },
+        )
+    };
+    let voice_file = |url: &str, ms: u32| pb::Attachment {
+        url: url.into(),
+        filename: "voice-message.ogg".into(),
+        voice: Some(note(ms)),
+        ..Default::default()
+    };
+
+    // Only an Ogg recording, alone, within the instance's cap.
+    let zip = attach(&mut c, &instance, &juan, &server.id, b"PK\x03\x04zip".to_vec()).await;
+    let not_ogg = c.messages.send_message(send_voice(vec![voice_file(&zip, 3000)])).await.unwrap_err();
+    assert_eq!(not_ogg.code(), Code::InvalidArgument);
+    let other = attach(&mut c, &instance, &juan, &server.id, vorbis).await;
+    let not_opus = c.messages.send_message(send_voice(vec![voice_file(&other, 3000)])).await.unwrap_err();
+    assert_eq!(not_opus.code(), Code::InvalidArgument);
+    let url = attach(&mut c, &instance, &juan, &server.id, ogg.clone()).await;
+    let with_more = pb::Attachment { url: zip.clone(), filename: "x.zip".into(), ..Default::default() };
+    let crowded = c.messages.send_message(send_voice(vec![voice_file(&url, 3000), with_more])).await.unwrap_err();
+    assert_eq!(crowded.code(), Code::InvalidArgument);
+    let long = c.messages.send_message(send_voice(vec![voice_file(&url, 61_000)])).await.unwrap_err();
+    assert_eq!(long.code(), Code::ResourceExhausted);
+
+    let sent =
+        c.messages.send_message(send_voice(vec![voice_file(&url, 3000)])).await.unwrap().into_inner().message.unwrap();
+    let [file] = &sent.attachments[..] else { panic!("{:?}", sent.attachments) };
+    assert_eq!(file.content_type, "audio/ogg; codecs=opus");
+    assert_eq!(file.voice, Some(note(3000)));
+    let listed = messages(&mut c, &juan, &server.id, &general).await;
+    assert_eq!(listed.iter().find(|m| m.id == sent.id).unwrap().attachments[0].voice, Some(note(3000)));
+    assert_eq!(fetch(&instance, &file.url).await.2, ogg);
+}
+
 fn new_poll(question: &str, answers: &[&str], anonymous: bool) -> pb::NewPoll {
     pb::NewPoll {
         question: question.into(),
