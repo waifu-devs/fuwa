@@ -96,8 +96,7 @@ export function TimeChip({ ms, children }: { ms: number; children: ReactNode }) 
 
   return (
     <>
-      <time
-        dateTime={iso}
+      <span
         className={pill}
         role="button"
         tabIndex={0}
@@ -131,8 +130,8 @@ export function TimeChip({ ms, children }: { ms: number; children: ReactNode }) 
         }}
         onContextMenu={(e) => touched.current && e.preventDefault()}
       >
-        {children}
-      </time>
+        <time dateTime={iso}>{children}</time>
+      </span>
       <AnimatePresence>{anchor && <FullDate key="full" anchor={anchor} ms={ms} onClose={() => setAnchor(null)} />}</AnimatePresence>
     </>
   );
