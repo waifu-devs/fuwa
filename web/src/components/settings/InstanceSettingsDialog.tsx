@@ -45,6 +45,7 @@ import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { Accounts } from "./instance/Accounts";
 import { Announcement } from "./instance/Announcement";
 import { CALL_FIELDS, CALL_SECTION, CallSettings } from "./instance/Calls";
+import { GIF_FIELDS, GIF_SECTION, GifSettings } from "./instance/Gifs";
 import { FEDERATION_FIELDS, FEDERATION_SECTION, FederationSettings } from "./instance/Federation";
 import { MODERATION_FIELDS, MODERATION_SECTION, ModerationSettings } from "./instance/Moderation";
 import { Servers } from "./instance/Servers";
@@ -74,11 +75,14 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "default_limits.recording_bytes", get: (s) => s.defaultLimits?.recordingBytes },
   { path: "picture_upload_bytes", get: (s) => s.pictureUploadBytes },
   { path: "picture_upload_bytes_per_day", get: (s) => s.pictureUploadBytesPerDay },
+  { path: "attachment_upload_bytes", get: (s) => s.attachmentUploadBytes },
+  { path: "attachment_upload_bytes_per_day", get: (s) => s.attachmentUploadBytesPerDay },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
   ...MODERATION_FIELDS,
   ...FEDERATION_FIELDS,
+  ...GIF_FIELDS,
 ];
 
 const changedPaths = (draft: InstanceSettings, saved: InstanceSettings) =>
@@ -243,6 +247,7 @@ export function InstanceSettingsDialog({
             CALL_SECTION,
             MODERATION_SECTION,
             FEDERATION_SECTION,
+            GIF_SECTION,
           ],
         },
         {
@@ -639,6 +644,31 @@ export function InstanceSettingsDialog({
                   onChange={(v) => patch((d) => (d.pictureUploadBytesPerDay = v))}
                 />
               </Setting>
+              <Setting
+                id="attachment-uploads"
+                title="Largest file in a message"
+                hint="Any file people send with a message: documents, archives, audio, video. Leave it empty for no limit."
+                defaultLabel={size(defaults.attachmentUploadBytes)}
+                delay={0.12}
+                {...resetter("attachment_upload_bytes")}
+              >
+                <Cap label="Up to" bytes value={draft.attachmentUploadBytes} onChange={(v) => patch((d) => (d.attachmentUploadBytes = v))} />
+              </Setting>
+              <Setting
+                id="attachment-uploads-per-day"
+                title="Files per day"
+                hint="How much one account may send in files in a day (UTC), apart from pictures."
+                defaultLabel={size(defaults.attachmentUploadBytesPerDay)}
+                delay={0.16}
+                {...resetter("attachment_upload_bytes_per_day")}
+              >
+                <Cap
+                  label="Up to"
+                  bytes
+                  value={draft.attachmentUploadBytesPerDay}
+                  onChange={(v) => patch((d) => (d.attachmentUploadBytesPerDay = v))}
+                />
+              </Setting>
             </>
           )}
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
@@ -647,6 +677,9 @@ export function InstanceSettingsDialog({
           )}
           {tab === "federation" && saved && (
             <FederationSettings instanceKey={instanceKey} draft={draft} saved={saved} defaults={defaults} patch={patch} resetter={resetter} />
+          )}
+          {tab === "gifs" && saved && (
+            <GifSettings instanceKey={instanceKey} draft={draft} saved={saved} defaults={defaults} patch={patch} resetter={resetter} />
           )}
           {tab === "privacy" && (
             <>
@@ -747,6 +780,7 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
     COPIED.find((f) => f.path === path)?.copy(into, from);
     MODERATION_FIELDS.find((f) => f.path === path)?.copy(into, from);
     FEDERATION_FIELDS.find((f) => f.path === path)?.copy(into, from);
+    GIF_FIELDS.find((f) => f.path === path)?.copy(into, from);
     switch (path) {
       case "name":
         into.name = from.name;
@@ -792,6 +826,12 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "picture_upload_bytes_per_day":
         into.pictureUploadBytesPerDay = from.pictureUploadBytesPerDay;
+        break;
+      case "attachment_upload_bytes":
+        into.attachmentUploadBytes = from.attachmentUploadBytes;
+        break;
+      case "attachment_upload_bytes_per_day":
+        into.attachmentUploadBytesPerDay = from.attachmentUploadBytesPerDay;
         break;
       default: {
         // Settings copied above by their own pages' functions.

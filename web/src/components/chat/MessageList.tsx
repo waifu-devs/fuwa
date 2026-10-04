@@ -30,6 +30,7 @@ import {
   useState,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   AutoModTrigger,
@@ -45,7 +46,8 @@ import {
 } from "@/gen/fuwa/v1/types_pb";
 import { blockFromChannel, deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
 import { useAccess, useRoles } from "@/fuwa/hooks";
-import { threadKey, useFuwa, type PendingMessage } from "@/fuwa/store";
+import { store, threadKey, useFuwa, type PendingMessage } from "@/fuwa/store";
+import { doneJumping, useJump } from "@/fuwa/search";
 import { AlsoSentNote, RepliesRow } from "@/components/chat/Threads";
 import { useThreadOpener } from "@/lib/threads";
 import { sendsMessage } from "@/components/chat/Composer";
@@ -62,6 +64,8 @@ import { copyIdItem } from "@/components/menus/common";
 import { messageMenu } from "@/components/menus/message";
 import { items } from "@/lib/context-menu";
 import { Embeds } from "@/components/chat/Embeds";
+import { Attachments, PendingFiles } from "@/components/chat/Attachments";
+import { GifMessage } from "@/components/chat/GifMessage";
 import { AppBadge } from "@/components/AppBadge";
 import { ServerTag, SharedNote } from "@/components/chat/Shared";
 import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
@@ -94,6 +98,8 @@ export type MessageListHandle = {
 const FIRST_ROWS = 80;
 /** How many more rows each scroll to the top reveals before asking the server for older messages. */
 const MORE_ROWS = 80;
+/** How many pages back opening a search result goes looking for its message. */
+const JUMP_PAGES = 100;
 
 /*
  * Rows keep the same props while their message is unchanged, so memoized
@@ -238,7 +244,7 @@ export const MessageList = forwardRef<
       wave: (username) => run(sendMessage(instanceKey, serverId, channel.id, `👋 @${username}`)),
       retry: (p) => {
         dismissPending(instanceKey, at, p.nonce);
-        run(sendMessage(instanceKey, serverId, channel.id, p.content, threadId ? { threadId } : undefined)).catch(() => {});
+        run(sendMessage(instanceKey, serverId, channel.id, p.content, p.files, threadId ? { threadId } : undefined)).catch(() => {});
       },
       dismiss: (nonce) => dismissPending(instanceKey, at, nonce),
       keepOut: async (userId, name) => {
@@ -355,6 +361,8 @@ export const MessageList = forwardRef<
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     setMissed(0);
   };
+
+  useSearchJump({ instanceKey, serverId, channelId: channel.id, rows, skipped, setHidden, scroller, atBottom });
 
   const beginning = state && !state.loading && !state.hasMore && skipped === 0;
   const meId = me?.id;
@@ -674,6 +682,71 @@ export function MessageBody({
 /** A row's `clock` is only there so a new clock setting redraws its times. */
 type Redraw = { clock: Clock };
 
+/** Opening a search result: loads back to its message, brings it into view and lets it glow a moment. */
+function useSearchJump({
+  instanceKey,
+  serverId,
+  channelId,
+  rows,
+  skipped,
+  setHidden,
+  scroller,
+  atBottom,
+}: {
+  instanceKey: string;
+  serverId: string;
+  channelId: string;
+  rows: { key: string }[];
+  skipped: number;
+  setHidden: (n: number) => void;
+  scroller: RefObject<HTMLDivElement | null>;
+  atBottom: RefObject<boolean>;
+}) {
+  const jumpTo = useJump(instanceKey, channelId);
+  const [jumped, setJumped] = useState<{ id: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!jumpTo) return;
+    let cancelled = false;
+    const current = () => store.get().instances[instanceKey]?.messages[channelId];
+    const found = () => !!current()?.items.some((m) => m.id === jumpTo.messageId);
+    void (async () => {
+      const deadline = Date.now() + 20_000;
+      for (let pages = 0; pages < JUMP_PAGES && !cancelled && !found() && Date.now() < deadline; ) {
+        const s = current();
+        if (!s || s.loading) {
+          await new Promise((r) => setTimeout(r, 40));
+          continue;
+        }
+        if (!s.hasMore) break;
+        await run(loadMessages(instanceKey, serverId, channelId, true)).catch(() => {});
+        pages++;
+      }
+      if (cancelled) return;
+      doneJumping(jumpTo);
+      if (found()) setJumped({ id: jumpTo.messageId, at: jumpTo.at });
+      else toast("That message is too far back to open here yet; scroll up to find it");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jumpTo, instanceKey, serverId, channelId]);
+  // Its row has to be drawn first.
+  const jumpRow = jumped ? rows.findIndex((r) => r.key === jumped.id) : -1;
+  if (jumpRow !== -1 && jumpRow < skipped) setHidden(Math.max(0, jumpRow - 20));
+  useLayoutEffect(() => {
+    if (!jumped || jumpRow === -1 || jumpRow < skipped) return;
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-message-id="${jumped.id}"]`);
+    if (!el) return;
+    atBottom.current = false;
+    el.scrollIntoView({ block: "center" });
+    // The glow fades out by itself (its animation ends at no opacity); taking the class off first plays it again.
+    el.classList.remove("jumped");
+    void el.offsetWidth;
+    el.classList.add("jumped");
+    setJumped(null);
+  }, [jumped, jumpRow, skipped, scroller, atBottom]);
+}
+
 const MessageRow = memo(function MessageRow({
   message,
   from,
@@ -757,7 +830,9 @@ const MessageRow = memo(function MessageRow({
                 (edited)
               </span>
             )}
+            <Attachments files={message.attachments} animate={animate} />
             <Embeds embeds={message.embeds} animate={animate} />
+            <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
             {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
           </>
         )}
@@ -1253,7 +1328,10 @@ const PendingRow = memo(function PendingRow({
       className={cn("message-row flex gap-3 px-4", first && "first", display === "compact" && "compact")}
     >
       <MessageLine display={display} first={first} author={me} member={member} status="sending…">
-        <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive", blocked && "line-through decoration-destructive/50")} />
+        {pending.content && (
+          <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive", blocked && "line-through decoration-destructive/50")} />
+        )}
+        <PendingFiles files={pending.files ?? EMPTY} />
         {blocked ? (
           <motion.div
             initial={{ opacity: 0, y: -4, scale: 0.97 }}

@@ -1,23 +1,26 @@
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
-import type { AccountFilter, AutoModProviderSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
+import type { AccountFilter, AutoModProviderSettings, GifSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { McpAccessMode } from "@/gen/fuwa/v1/agent_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
 import type { ChannelPlacement, CreateChannelRequest, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
-import type { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
+import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
   ApplicationStatus,
   ChannelType,
   EventSchema,
   JoinFormSchema,
+  OnboardingSchema,
   WelcomeScreenSchema,
   type AnnouncementTone,
+  type Attachment,
   type AutoModRule,
   type Emoji,
   type WelcomeScreen,
+  type Onboarding,
   type Application,
   type Channel,
   type Member,
@@ -42,6 +45,7 @@ import { call, FuwaError, toFuwaError } from "./errors";
 import { instanceKey, normalizeUrl } from "./saved";
 import { wipeDms } from "@/e2ee/engine";
 import { outsideEmojis } from "@/lib/emoji-catalog";
+import { forgetRecentSearches } from "@/lib/search-query";
 import { reportUsage } from "@/lib/reports";
 import { addInstance, engine, follow, removeInstance } from "./sync";
 import {
@@ -76,6 +80,16 @@ export function run<A>(effect: Effect.Effect<A, FuwaError>): Promise<A> {
     if (result._tag === "Left") throw result.left;
     return result.right;
   });
+}
+
+/** [`run`], with a way to stop it partway (an upload's bytes stop going). */
+export function runCancelable<A>(effect: Effect.Effect<A, FuwaError>): { done: Promise<A>; cancel: () => void } {
+  const fiber = Effect.runFork(effect.pipe(Effect.mapError(toFuwaError), Effect.either));
+  const done = Effect.runPromise(Fiber.join(fiber)).then((result) => {
+    if (result._tag === "Left") throw result.left;
+    return result.right;
+  });
+  return { done, cancel: () => void Effect.runFork(Fiber.interrupt(fiber)) };
 }
 
 const api = (key: string) => engine(key).api;
@@ -272,6 +286,7 @@ export const signOut = (key: string) =>
   Effect.gen(function* () {
     yield* call((signal) => api(key).auth.signOut({}, { signal })).pipe(Effect.ignore);
     addInstance(engine(key).url, null);
+    forgetRecentSearches(key);
     // The session's device is gone; what it kept here goes too.
     yield* Effect.promise(() => wipeDms(key));
   });
@@ -280,6 +295,7 @@ export const forget = (key: string) =>
   Effect.gen(function* () {
     if (engine(key).token) yield* call((signal) => api(key).auth.signOut({}, { signal })).pipe(Effect.ignore);
     removeInstance(key);
+    forgetRecentSearches(key);
     yield* Effect.promise(() => wipeDms(key));
   });
 
@@ -321,6 +337,22 @@ const PUT_FAILURES: Record<number, Code> = {
 export const uploadPicture = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent: number) => void, serverId = "") =>
   Effect.gen(function* () {
     reportUsage("upload.picture");
+    return yield* upload(key, purpose, file, progress, serverId);
+  });
+
+/**
+ * Uploads a file to attach to a message in `serverId` and resolves to its
+ * link, ready to send. Any kind of file; the server tells what it is from
+ * its bytes.
+ */
+export const uploadAttachment = (key: string, serverId: string, file: Blob, progress?: (sent: number) => void) =>
+  Effect.gen(function* () {
+    reportUsage("upload.attachment");
+    return yield* upload(key, MediaPurpose.ATTACHMENT, file, progress, serverId);
+  });
+
+const upload = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent: number) => void, serverId = "") =>
+  Effect.gen(function* () {
     const { uploadUrl, media } = yield* call((signal) =>
       api(key).media.createUpload({ purpose, contentType: file.type, size: BigInt(file.size), serverId }, { signal }),
     );
@@ -511,6 +543,7 @@ export const deleteAccount = (key: string, confirm: { password?: string; code?: 
   Effect.gen(function* () {
     yield* call((signal) => api(key).account.deleteAccount(confirm, { signal }));
     removeInstance(key);
+    forgetRecentSearches(key);
     yield* Effect.promise(() => wipeDms(key));
     return true;
   });
@@ -911,6 +944,12 @@ export const updateServer = (
     minAccountAgeSeconds?: number;
     applications?: boolean;
     linkedOnly?: boolean;
+    /** Empty for no banner. */
+    bannerUrl?: string;
+    bannerFocusX?: number;
+    bannerFocusY?: number;
+    /** 0xRRGGBB, or -1 for none. */
+    accentColor?: number;
   },
 ) =>
   Effect.gen(function* () {
@@ -967,6 +1006,10 @@ export const endServerShare = (key: string, serverId: string, connectionId: stri
 /** Runs some text through a moderation provider as the form has it (an empty key uses the saved one). */
 export const testAutoModProvider = (key: string, provider: AutoModProviderSettings, content: string) =>
   call((signal) => api(key).admin.testAutoModProvider({ provider, content }, { signal }));
+
+/** Asks a GIF provider for a few trending GIFs with settings not saved yet. */
+export const testGifProvider = (key: string, settings: GifSettings) =>
+  call((signal) => api(key).gifs.testGifProvider({ settings }, { signal }));
 
 /** This instance as other instances see it, and the instances it knows. */
 export const getFederation = (key: string) => call((signal) => api(key).admin.getFederation({}, { signal }));
@@ -1176,20 +1219,40 @@ let nonce = 0;
 /** Where a reply goes: the thread under a message, and whether the channel shows it too. */
 export type ThreadTarget = { threadId: string; alsoToChannel?: boolean };
 
-/** Sends a message, or a reply in a thread. It shows up right away, dimmed until the server confirms it. */
-export const sendMessage = (key: string, serverId: string, channelId: string, content: string, thread?: ThreadTarget) =>
+/**
+ * Sends a message, or a reply in a thread, with any files already uploaded
+ * for it. It shows up right away, dimmed until the server confirms it.
+ */
+export const sendMessage = (
+  key: string,
+  serverId: string,
+  channelId: string,
+  content: string,
+  files: Attachment[] = [],
+  thread?: ThreadTarget,
+) =>
   Effect.gen(function* () {
     reportUsage(thread ? "thread.reply" : "message.send");
+    if (files.length) reportUsage("message.send_files");
     const at = thread ? threadKey(thread.threadId) : channelId;
-    const pending: PendingMessage = { nonce: `n${++nonce}`, content, createdAt: Date.now(), failed: null };
+    const pending: PendingMessage = { nonce: `n${++nonce}`, content, files, createdAt: Date.now(), failed: null };
     const setPending = (fn: (list: PendingMessage[]) => PendingMessage[]) =>
       updateInstance(key, (i) => ({ ...i, pending: { ...i.pending, [at]: fn(i.pending[at] ?? []) } }));
     setPending((list) => [...list, pending]);
+    const attachments = files.map((f) => ({ url: f.url, filename: f.filename, width: f.width, height: f.height }));
     // Other servers' emoji go along so the instance can check them and keep their pictures with the message.
     const emojis = outsideEmojis(store.get().instances[key]?.emojis, serverId, content);
     const res = yield* call((signal) =>
       api(key).messages.sendMessage(
-        { serverId, channelId, content, emojis, threadId: thread?.threadId ?? "", alsoSendToChannel: !!thread?.alsoToChannel },
+        {
+          serverId,
+          channelId,
+          content,
+          attachments,
+          emojis,
+          threadId: thread?.threadId ?? "",
+          alsoSendToChannel: !!thread?.alsoToChannel,
+        },
         { signal },
       ),
     ).pipe(
@@ -1413,6 +1476,31 @@ export const setWelcomeScreen = (key: string, serverId: string, welcomeScreen: W
       return server ? addServer(i, { ...server, hasWelcomeScreen: saved.enabled }) : i;
     });
     return saved;
+  });
+
+// ───────────────────────── Onboarding ─────────────────────────
+
+export const getOnboarding = (key: string, serverId: string) =>
+  call((signal) => api(key).join.getOnboarding({ serverId }, { signal })).pipe(Effect.map((r) => r.onboarding ?? create(OnboardingSchema)));
+
+export const setOnboarding = (key: string, serverId: string, onboarding: Onboarding) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) => api(key).join.setOnboarding({ serverId, onboarding }, { signal }));
+    const saved = res.onboarding ?? create(OnboardingSchema);
+    updateInstance(key, (i) => {
+      const server = i.servers.find((s) => s.id === serverId);
+      return server ? addServer(i, { ...server, hasOnboarding: saved.enabled }) : i;
+    });
+    return saved;
+  });
+
+/** You went through a server's onboarding, picking these options (none to skip it). */
+export const finishOnboarding = (key: string, serverId: string, optionIds: string[]) =>
+  Effect.gen(function* () {
+    reportUsage(optionIds.length ? "onboarding.finish" : "onboarding.skip");
+    const { member } = yield* call((signal) => api(key).join.finishOnboarding({ serverId, optionIds }, { signal }));
+    storeMember(key, serverId, member);
+    return true;
   });
 
 // ───────────────────────── Agents ─────────────────────────

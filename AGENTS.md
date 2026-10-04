@@ -64,6 +64,15 @@
     (`DirectMessageService`) checks what the server can see (who sends, the
     group id, epoch and content type in the MLS header, that key packages
     name the account and device they claim) and never decrypts anything.
+  - `friends.rs`: friends, requests and blocks (`docs/friends.md`), in
+    node.db's `friend_links` (each person's own row about the other, so a
+    block or a declined request stays on one side) and `friend_settings`,
+    plus who's online (an open `WatchFriends` stream) and the per-account
+    request limit, in memory. `api/friends.rs` is `FriendService`, answered
+    where accounts are; its `Api::may_message` decides who may open, write in
+    or call a direct-message conversation. A friend list is its owner's
+    alone: never in a server's events or audit log, never shown to other
+    members, servers or agents, and a block is told to nobody.
   - `twofactor.rs`: TOTP codes (RFC 6238) and backup codes for two-step sign-in.
   - `linked.rs`: signing in with waifu.dev (linked accounts): the instance is an
     OpenAuth client whose client ID is its public URL. `AuthService`'s
@@ -161,6 +170,17 @@
     the message (`execute_webhook`): its `author_id` is the webhook's id and
     `Message.webhook` carries the name and picture it posted under. Webhook
     messages never ping @everyone, @here or roles, and nobody can edit them.
+  - GIFs (`docs/gifs.md` is the design): `gifs/` asks the instance's provider
+    (`giphy.rs`, `klipy.rs` behind `Kind`; the `gifs` setting holds the key,
+    never sent to apps, gateways or shards; another provider never gets it) with no forwarding headers, caches answers by a
+    SHA-256 key, and hands results back as signed tokens with previews
+    through the picture proxy. `gifs/store.rs` stores a picked GIF once
+    (`gif_files`, media owner "gifs", metadata stripped) and keeps saved GIFs;
+    `api/gifs.rs` is `GifService` (directory). `MessageGif.seal` is an HMAC
+    the server checks in `send_message` and clears. `media/still.rs` draws a
+    GIF's first frame (for AutoMod). Web: `fuwa/gifs.ts`,
+    `components/chat/GifPicker.tsx` (button) and `GifPanel.tsx` (the picker,
+    a lazy file).
   - `mcp/`: the instance as an MCP server for agents (`docs/mcp.md`), at
     `/mcp` and `/.well-known/mcp.json`: stateless Streamable HTTP, one
     JSON-RPC message per POST, plain JSON back, no sessions. Agent tokens
@@ -190,6 +210,22 @@
     message through that rule and is counted in the anonymous report by
     kind and provider id. The web pages are `settings/instance/Moderation.tsx`
     and the Smart filter in `settings/server/AutoMod.tsx`.
+  - `search.rs` and `api/search.rs`: searching a server's messages
+    (`SearchService`). Turso's own full-text search needs a new dependency
+    and doesn't run in MVCC, so the index is plain tables in the server's file
+    (`search_words`, `search_docs`, `search_postings`, `search_state`).
+    `search.rs` cuts text into words (folded case, accents and full-width
+    forms; CJK as pairs of characters; `@name` mentions; attachment names and
+    embeds) and is pure; `VERSION` going up rebuilds every index. One
+    indexer per shard (`spawn_search_indexer`) follows each server's events
+    through `Hub::search_tap` and builds servers that had messages before
+    search, newest first, in small `write_quiet` batches between other
+    writes. A search ANDs the words (the last one as a prefix), filters by
+    author, channel, mention, what a message has and dates, only in channels
+    the searcher can see, and re-reads each hit from `messages`. Searches are
+    never logged, stored or shown to AutoMod; a token bucket per account
+    limits them. Secure channels and other instances' shared messages aren't
+    indexed.
   - `permissions.rs`: roles and permissions. `Rules::access` works out what a
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's
@@ -260,6 +296,20 @@
     reserved with `MediaService.CreateUpload` (`api/media.rs`) and checks its
     bytes really are the picture type it claims; `GET /media/<id>` serves it.
     Pictures nothing uses are swept hourly and at startup.
+  - `attachments.rs`: files sent with messages (`MEDIA_PURPOSE_ATTACHMENT`,
+    any kind). Uploaded for one server and stored with its pictures (on its
+    shard when split); a message may only link this instance's uploads, and
+    its server file keeps an `attachments` row per file, written and deleted
+    with the message (or its channel, a ban's purge, an AutoMod takedown),
+    counted in the server's attachment bytes. The row is what serves the
+    file: the kind found in its bytes (`media::kind_of`, never the client's),
+    `Content-Disposition: attachment` for anything but pictures, audio and
+    video, nosniff and a sandbox CSP always, single ranges for players.
+    Caps: FUWA_LIMIT_ATTACHMENT_UPLOAD and _UPLOADS_PER_DAY (node.db
+    `attachment_days`), the server's `attachment_bytes`. Not in secure
+    channels (they'd upload ciphertext) or channels shared from another
+    server yet. The web app's side is `components/chat/Attachments.tsx`,
+    `ComposerFiles.tsx` and `staged.ts`.
   - `outside.rs`: pictures from other sites. No client ever loads a picture
     from anywhere but a fuwa instance, since that site would learn the
     reader's IP address: any picture link that isn't an upload (embed images,
@@ -519,6 +569,15 @@
     `src/fuwa/dms.ts` are the actions; the screens are in `components/dm/`
     (`DmList`, `DmView`, `EncryptionDialog` with the safety number), routed at
     `/<instance>/dm/<conversation>`.
+  - `src/fuwa/search.ts`, `src/lib/search-query.ts`, `components/search/`:
+    the search bar (Mod+F) and results panel. `search-query.ts` reads
+    `from:`, `in:`, `has:`, `mentions:`, `before:`, `after:` and `during:`
+    and keeps recent searches on the device only; members and channels are
+    turned into ids before asking the instance. Results mark matches with
+    private-use characters that `components/search/highlight.ts` turns into
+    `<mark>` inside the one Markdown component. Jumping to a result goes
+    through `requestJump`, which `MessageList` takes by loading older pages
+    until the message is there.
   - Right-click menus (`docs/context-menus.md` lists them for every app): one
     menu at a time, `components/ContextMenu.tsx` (`useContextMenu` on the
     element, `ContextMenuHost` draws it with the animated dropdown menu);
@@ -543,6 +602,14 @@
     `settings/app/ShaderEditor.tsx`. Theme files never make the app load
     anything: pictures travel inside them and are uploaded on import. Settings
     pages: `settings/app/Themes.tsx` and `Backgrounds.tsx`.
+  - Friends (`docs/friends.md`): `src/fuwa/friends.ts` follows
+    `WatchFriends` beside the event stream (which is also what shows you
+    online) and holds the actions; `pages/FriendsPage.tsx` is
+    `/<instance>/friends` (online, all, pending, blocked; only the lines in
+    view drawn), `components/friends/FriendActions.tsx` the buttons on
+    profile cards, `settings/account/FriendPrivacy.tsx` the settings, and
+    `lib/friends.ts` the pure parts. Conversations with people you blocked
+    stay out of `DmList`.
   - `src/lib/notifications.ts`: how a message reaches you: your settings for
     its channel, then its server (both stored on the instance, so they follow
     you across devices), then this device's Notifications settings. Muted means
@@ -572,7 +639,14 @@
     only), `ApplyDialog.tsx` the application, `Rules.tsx` the rules sheet a
     new member agrees to (the composer shows it until they do), and
     `Applied.tsx` the applications waiting in the rail. `Welcome.tsx` greets
-    new members once with the welcome screen (remembered in this browser). Those are kept in
+    new members once with the welcome screen (remembered in this browser), or
+    with `Onboarding.tsx` when the server has onboarding steps (picks that
+    give harmless roles and channels, the rules, a hello; `JoinService`'s
+    Get/Set/FinishOnboarding, `server.onboarding` as protobuf, a member's
+    `onboarded_at`). All of them, `ApplicationStatus.tsx` and invite pages
+    sit under the server's banner (`join/Banner.tsx`, `lib/banner.ts`: a
+    focal point and an optional accent color); admins set it all on one page
+    with a live preview, `settings/server/WelcomeAndOnboarding.tsx`. Those are kept in
     this browser (`src/lib/applied.ts`) and `AppliedWatcher` asks the
     instance how they went. Reviewers use `settings/server/Applications.tsx`;
     owners write rules and questions in `settings/server/JoinFormEditor.tsx`.
@@ -742,6 +816,13 @@
   a `DirectMessageContent`. Who belongs in a channel's group is
   `secure_members` (who can see it, people only); keep it in step with any
   change to how channel access is worked out.
+- Friends are private (`docs/friends.md`): only the two people a change is
+  about are told, a block is never shown to the person blocked (their
+  requests look sent, their messages are taken and kept from the blocker,
+  their calls never ring; no refusal a block alone would cause), and nothing
+  about friends reaches a server, its logs or an agent. A new path that
+  starts or carries a direct message asks `Api::may_message`, and a new way
+  of reading one hides what the reader's blocked people sent.
 - Direct messages are end-to-end encrypted, always: no off switch, no
   server-side copy of keys or plaintext, nothing about their content in logs,
   events, exports or the usage signal. The server checks only what it can

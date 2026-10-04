@@ -287,7 +287,7 @@ impl ChannelService for Api {
             let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
             access.require_in(&req.channel_id, Permission::ManageChannels)?;
             // Alone, so no message lands in the channel while it goes.
-            let (server, pictures, ended) = sdb.write_alone(&account.id, async |conn, events| {
+            let (server, pictures, ended, files) = sdb.write_alone(&account.id, async |conn, events| {
                 let channel = load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
                 // Its messages go with it; take them off the usage totals first.
                 let (messages, bytes, attachments) = query_one(
@@ -299,6 +299,7 @@ impl ChannelService for Api {
                 .await?
                 .unwrap_or_default();
                 conn.execute("DELETE FROM messages WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
+                let files = crate::attachments::forget_channel(conn, &req.channel_id).await?;
                 conn.execute(
                     "DELETE FROM thread_follows WHERE thread_id IN (SELECT id FROM threads WHERE channel_id = ?1)",
                     [req.channel_id.as_str()],
@@ -341,9 +342,9 @@ impl ChannelService for Api {
                 if conn.execute("UPDATE server SET system_channel_id = NULL, updated_at = ?2 WHERE system_channel_id = ?1", (req.channel_id.as_str(), now_ms())).await? > 0 {
                     let server = store::load_server(conn).await?;
                     events.push(Payload::ServerUpdated(pb::ServerUpdated { server: Some(server.clone()) }));
-                    return Ok((Some(server), pictures, ended));
+                    return Ok((Some(server), pictures, ended, files));
                 }
-                Ok((None, pictures, ended))
+                Ok((None, pictures, ended, files))
             })
             .await?;
             if let Some(server) = server {
@@ -352,6 +353,7 @@ impl ChannelService for Api {
             for picture in pictures {
                 self.drop_picture(&picture, "", PictureOwner::Server(&sdb.id)).await;
             }
+            crate::attachments::drop_soon(&self.app, &sdb.id, files);
             self.forget_notifications(&sdb.id, Some(&req.channel_id), None).await;
             shared::tell_ended(&self.app, &sdb.id, &account.id, ended).await;
             Ok(pb::DeleteChannelResponse {})

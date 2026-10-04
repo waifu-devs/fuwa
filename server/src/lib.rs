@@ -7,6 +7,7 @@
 
 pub mod api;
 pub mod app;
+pub mod attachments;
 pub mod auth;
 pub mod automod;
 pub mod cluster;
@@ -15,6 +16,8 @@ pub mod db;
 pub mod dms;
 pub mod error;
 pub mod federation;
+pub mod friends;
+pub mod gifs;
 pub mod hub;
 pub mod id;
 pub mod linked;
@@ -28,6 +31,7 @@ pub mod recordings;
 pub mod replica;
 pub mod reports;
 pub mod rtc;
+pub mod search;
 pub mod servers;
 pub mod settings;
 pub mod sso;

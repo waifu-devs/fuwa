@@ -44,8 +44,35 @@ export { messagePages, messages, type MessagePagesOptions, type MessageWithAutho
 export { DEFAULT_RETRY, type RetryOptions } from "./retry.js";
 export { emoji, mentions, parseCommand, roleMention, type ParsedCommand } from "./text.js";
 export { uploadPicture, type UploadOptions } from "./upload.js";
-export { VoiceConnection, joinVoice, type JoinVoiceOptions, type VoiceEvents, type VoiceFrame } from "./voice.js";
-export { OggOpusWriter, opusPacketDuration, readOggOpus, type OpusHead } from "./ogg.js";
+export {
+  Utterance,
+  VoiceConnection,
+  joinVoice,
+  type JoinVoiceOptions,
+  type OggSource,
+  type SpeakOptions,
+  type SpeakResult,
+  type VoiceEvents,
+  type VoiceFrame,
+} from "./voice.js";
+export {
+  OggOpusReader,
+  OggOpusWriter,
+  oggOpusPackets,
+  opusPacketDuration,
+  readOggOpus,
+  splitOpusPacket,
+  type OpusHead,
+} from "./ogg.js";
+export {
+  pcmFrames,
+  pcmFromBytes,
+  pcmToBytes,
+  type OpusDecoder,
+  type OpusEncoder,
+  type OpusSampleRate,
+  type PcmFormat,
+} from "./pcm.js";
 export { SDK_VERSION } from "./version.js";
 
 export * from "./gen/fuwa/v1/account_pb.js";
@@ -58,6 +85,7 @@ export * from "./gen/fuwa/v1/channel_pb.js";
 export * from "./gen/fuwa/v1/dm_pb.js";
 export * from "./gen/fuwa/v1/emoji_pb.js";
 export * from "./gen/fuwa/v1/event_pb.js";
+export * from "./gen/fuwa/v1/friend_pb.js";
 export * from "./gen/fuwa/v1/invite_pb.js";
 export * from "./gen/fuwa/v1/join_pb.js";
 export * from "./gen/fuwa/v1/media_pb.js";

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type {
   Application,
+  Attachment,
   Channel,
   Emoji,
   Event,
@@ -21,6 +22,7 @@ import type { ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Item } from "@/e2ee/vault";
 import { loadApplied, type Applied } from "@/lib/applied";
+import { emptyFriends, type FriendsState } from "@/lib/friends";
 import type { RailLayout } from "@/lib/rail";
 import { sortRoles } from "@/lib/permissions";
 
@@ -41,7 +43,14 @@ export type ChannelMessages = {
 };
 
 /** A message this browser sent that the server hasn't confirmed yet. */
-export type PendingMessage = { nonce: string; content: string; createdAt: number; failed: string | null };
+export type PendingMessage = {
+  nonce: string;
+  content: string;
+  /** Files sent with it, already uploaded. */
+  files?: Attachment[];
+  createdAt: number;
+  failed: string | null;
+};
 
 /** A device in an encrypted conversation, as its group says. */
 export type DmMember = { userId: string; deviceId: string; signatureKey: Uint8Array };
@@ -178,6 +187,8 @@ export type InstanceState = {
    */
   shared: Record<string, ListConnectionsResponse>;
   dms: DmState;
+  /** Your friends, requests and blocks here. */
+  friends: FriendsState;
 };
 
 /** Where a server's (channel "") or a channel's notification settings are kept. */
@@ -243,6 +254,7 @@ export function emptyInstance(key: string, url: string): InstanceState {
     voice: {},
     shared: {},
     dms: emptyDms(),
+    friends: emptyFriends(),
   };
 }
 

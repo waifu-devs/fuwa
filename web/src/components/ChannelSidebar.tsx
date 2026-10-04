@@ -218,9 +218,9 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
               <ScrollTextIcon /> Server rules
             </DropdownMenuItem>
           )}
-          {server?.hasWelcomeScreen && (
+          {(server?.hasWelcomeScreen || server?.hasOnboarding) && (
             <DropdownMenuItem onSelect={() => setWelcoming(true)}>
-              <PartyPopperIcon /> Welcome screen
+              <PartyPopperIcon /> {server.hasOnboarding ? "Channels & roles" : "Welcome screen"}
             </DropdownMenuItem>
           )}
           <ServerNotificationItems instanceKey={instanceKey} serverId={serverId} />

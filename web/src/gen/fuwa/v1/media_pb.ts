@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/media.proto.
  */
 export const file_fuwa_v1_media: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL21lZGlhLnByb3RvEgdmdXdhLnYxIkQKBU1lZGlhEgoKAmlkGAEgASgJEgsKA3VybBgCIAEoCRIUCgxjb250ZW50X3R5cGUYAyABKAkSDAoEc2l6ZRgEIAEoAyJ0ChNDcmVhdGVVcGxvYWRSZXF1ZXN0EiYKB3B1cnBvc2UYASABKA4yFS5mdXdhLnYxLk1lZGlhUHVycG9zZRIUCgxjb250ZW50X3R5cGUYAiABKAkSDAoEc2l6ZRgDIAEoAxIRCglzZXJ2ZXJfaWQYBCABKAkieQoUQ3JlYXRlVXBsb2FkUmVzcG9uc2USEgoKdXBsb2FkX3VybBgBIAEoCRIuCgpleHBpcmVzX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIdCgVtZWRpYRgDIAEoCzIOLmZ1d2EudjEuTWVkaWEiJAoVS2VlcEJhY2tncm91bmRSZXF1ZXN0EgsKA3VybBgBIAEoCSI3ChZLZWVwQmFja2dyb3VuZFJlc3BvbnNlEh0KBW1lZGlhGAEgASgLMg4uZnV3YS52MS5NZWRpYSIYChZMaXN0QmFja2dyb3VuZHNSZXF1ZXN0Ij4KF0xpc3RCYWNrZ3JvdW5kc1Jlc3BvbnNlEiMKC2JhY2tncm91bmRzGAEgAygLMg4uZnV3YS52MS5NZWRpYSImChdEZWxldGVCYWNrZ3JvdW5kUmVxdWVzdBILCgN1cmwYASABKAkiGgoYRGVsZXRlQmFja2dyb3VuZFJlc3BvbnNlKrcBCgxNZWRpYVB1cnBvc2USHQoZTUVESUFfUFVSUE9TRV9VTlNQRUNJRklFRBAAEhgKFE1FRElBX1BVUlBPU0VfQVZBVEFSEAESGAoUTUVESUFfUFVSUE9TRV9CQU5ORVIQAhIdChlNRURJQV9QVVJQT1NFX1NFUlZFUl9JQ09OEAMSFwoTTUVESUFfUFVSUE9TRV9FTU9KSRAEEhwKGE1FRElBX1BVUlBPU0VfQkFDS0dST1VORBAFMt0CCgxNZWRpYVNlcnZpY2USSwoMQ3JlYXRlVXBsb2FkEhwuZnV3YS52MS5DcmVhdGVVcGxvYWRSZXF1ZXN0Gh0uZnV3YS52MS5DcmVhdGVVcGxvYWRSZXNwb25zZRJRCg5LZWVwQmFja2dyb3VuZBIeLmZ1d2EudjEuS2VlcEJhY2tncm91bmRSZXF1ZXN0Gh8uZnV3YS52MS5LZWVwQmFja2dyb3VuZFJlc3BvbnNlElQKD0xpc3RCYWNrZ3JvdW5kcxIfLmZ1d2EudjEuTGlzdEJhY2tncm91bmRzUmVxdWVzdBogLmZ1d2EudjEuTGlzdEJhY2tncm91bmRzUmVzcG9uc2USVwoQRGVsZXRlQmFja2dyb3VuZBIgLmZ1d2EudjEuRGVsZXRlQmFja2dyb3VuZFJlcXVlc3QaIS5mdXdhLnYxLkRlbGV0ZUJhY2tncm91bmRSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("ChNmdXdhL3YxL21lZGlhLnByb3RvEgdmdXdhLnYxIkQKBU1lZGlhEgoKAmlkGAEgASgJEgsKA3VybBgCIAEoCRIUCgxjb250ZW50X3R5cGUYAyABKAkSDAoEc2l6ZRgEIAEoAyJ0ChNDcmVhdGVVcGxvYWRSZXF1ZXN0EiYKB3B1cnBvc2UYASABKA4yFS5mdXdhLnYxLk1lZGlhUHVycG9zZRIUCgxjb250ZW50X3R5cGUYAiABKAkSDAoEc2l6ZRgDIAEoAxIRCglzZXJ2ZXJfaWQYBCABKAkieQoUQ3JlYXRlVXBsb2FkUmVzcG9uc2USEgoKdXBsb2FkX3VybBgBIAEoCRIuCgpleHBpcmVzX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIdCgVtZWRpYRgDIAEoCzIOLmZ1d2EudjEuTWVkaWEiJAoVS2VlcEJhY2tncm91bmRSZXF1ZXN0EgsKA3VybBgBIAEoCSI3ChZLZWVwQmFja2dyb3VuZFJlc3BvbnNlEh0KBW1lZGlhGAEgASgLMg4uZnV3YS52MS5NZWRpYSIYChZMaXN0QmFja2dyb3VuZHNSZXF1ZXN0Ij4KF0xpc3RCYWNrZ3JvdW5kc1Jlc3BvbnNlEiMKC2JhY2tncm91bmRzGAEgAygLMg4uZnV3YS52MS5NZWRpYSImChdEZWxldGVCYWNrZ3JvdW5kUmVxdWVzdBILCgN1cmwYASABKAkiGgoYRGVsZXRlQmFja2dyb3VuZFJlc3BvbnNlKuwBCgxNZWRpYVB1cnBvc2USHQoZTUVESUFfUFVSUE9TRV9VTlNQRUNJRklFRBAAEhgKFE1FRElBX1BVUlBPU0VfQVZBVEFSEAESGAoUTUVESUFfUFVSUE9TRV9CQU5ORVIQAhIdChlNRURJQV9QVVJQT1NFX1NFUlZFUl9JQ09OEAMSFwoTTUVESUFfUFVSUE9TRV9FTU9KSRAEEhwKGE1FRElBX1BVUlBPU0VfQkFDS0dST1VORBAFEhwKGE1FRElBX1BVUlBPU0VfQVRUQUNITUVOVBAHEhUKEU1FRElBX1BVUlBPU0VfR0lGEAgy3QIKDE1lZGlhU2VydmljZRJLCgxDcmVhdGVVcGxvYWQSHC5mdXdhLnYxLkNyZWF0ZVVwbG9hZFJlcXVlc3QaHS5mdXdhLnYxLkNyZWF0ZVVwbG9hZFJlc3BvbnNlElEKDktlZXBCYWNrZ3JvdW5kEh4uZnV3YS52MS5LZWVwQmFja2dyb3VuZFJlcXVlc3QaHy5mdXdhLnYxLktlZXBCYWNrZ3JvdW5kUmVzcG9uc2USVAoPTGlzdEJhY2tncm91bmRzEh8uZnV3YS52MS5MaXN0QmFja2dyb3VuZHNSZXF1ZXN0GiAuZnV3YS52MS5MaXN0QmFja2dyb3VuZHNSZXNwb25zZRJXChBEZWxldGVCYWNrZ3JvdW5kEiAuZnV3YS52MS5EZWxldGVCYWNrZ3JvdW5kUmVxdWVzdBohLmZ1d2EudjEuRGVsZXRlQmFja2dyb3VuZFJlc3BvbnNlYgZwcm90bzM", [file_google_protobuf_timestamp]);
 
 /**
  * A stored file.
@@ -61,7 +61,8 @@ export type CreateUploadRequest = Message<"fuwa.v1.CreateUploadRequest"> & {
 
   /**
    * image/png, image/jpeg, image/gif, image/webp or image/avif. The bytes are
-   * checked when they arrive.
+   * checked when they arrive. For an attachment, whatever the file says it
+   * is (or empty): what it's kept as comes from its bytes.
    *
    * @generated from field: string content_type = 2;
    */
@@ -69,17 +70,19 @@ export type CreateUploadRequest = Message<"fuwa.v1.CreateUploadRequest"> & {
 
   /**
    * The file's exact size in bytes, at most the instance's
-   * `picture_upload_bytes` when that's set.
+   * `picture_upload_bytes` (or for an attachment `attachment_upload_bytes`)
+   * when that's set.
    *
    * @generated from field: int64 size = 3;
    */
   size: bigint;
 
   /**
-   * For a server's icon, an emoji or a webhook's picture: the server it's
-   * for (you must be in it). The picture can then only be used there, and on
-   * an instance split across regions its bytes go straight to the server's
-   * region rather than the home one.
+   * For a server's icon or banner, an emoji, a webhook's picture or an
+   * attachment (required for an attachment and a server's banner): the
+   * server it's for (you must be in it). The file can then only be used
+   * there, and on an instance split across regions its bytes go straight to
+   * the server's region rather than the home one.
    *
    * @generated from field: string server_id = 4;
    */
@@ -238,6 +241,8 @@ export enum MediaPurpose {
   AVATAR = 1,
 
   /**
+   * A profile banner, or with a server_id, a server's banner.
+   *
    * @generated from enum value: MEDIA_PURPOSE_BANNER = 2;
    */
   BANNER = 2,
@@ -260,6 +265,21 @@ export enum MediaPurpose {
    * @generated from enum value: MEDIA_PURPOSE_BACKGROUND = 5;
    */
   BACKGROUND = 5,
+
+  /**
+   * A file attached to a message: any kind, uploaded for the server it's
+   * sent in.
+   *
+   * @generated from enum value: MEDIA_PURPOSE_ATTACHMENT = 7;
+   */
+  ATTACHMENT = 7,
+
+  /**
+   * A GIF of your own to send (GifService.SaveGif keeps it). Only image/gif.
+   *
+   * @generated from enum value: MEDIA_PURPOSE_GIF = 8;
+   */
+  GIF = 8,
 }
 
 /**
@@ -269,8 +289,8 @@ export const MediaPurposeSchema: GenEnum<MediaPurpose> = /*@__PURE__*/
   enumDesc(file_fuwa_v1_media, 0);
 
 /**
- * Pictures people upload to this instance: profile pictures, profile banners,
- * server icons, custom emoji and app backgrounds.
+ * Files people upload to this instance: profile pictures, profile banners,
+ * server icons, custom emoji, app backgrounds, and files attached to messages.
  *
  * An upload takes two steps. CreateUpload checks the file and reserves a
  * place for it; then an HTTP PUT of the file's bytes to `upload_url` stores
@@ -283,6 +303,12 @@ export const MediaPurposeSchema: GenEnum<MediaPurpose> = /*@__PURE__*/
  * settings that use them live on the device, so the instance keeps a small
  * list of each account's backgrounds instead: KeepBackground adds an upload
  * to it, and DeleteBackground removes one and its file.
+ *
+ * Attachments are any kind of file, uploaded for one server and then sent
+ * with a message there (SendMessageRequest.attachments, by `media.url`).
+ * They're served only while a message has them: pictures as they are (their
+ * metadata taken out), audio and video as their type so apps can play them,
+ * and everything else as a download (application/octet-stream).
  *
  * @generated from service fuwa.v1.MediaService
  */

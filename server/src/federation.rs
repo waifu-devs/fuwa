@@ -54,6 +54,26 @@ const SHARES_PER_SERVER_PER_MINUTE: usize = 20;
 /// How often the time an instance was last heard from is written down.
 const HEARD_EVERY_MS: i64 = 60 * 1000;
 
+/// Counts one more for `key` in the last minute, unless it already had
+/// `per_minute` (or too many keys are counted at once).
+fn take(counts: &Mutex<HashMap<String, Vec<Instant>>>, key: &str, per_minute: usize) -> bool {
+    let mut counts = counts.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let now = Instant::now();
+    counts.retain(|_, times| {
+        times.retain(|at| now.duration_since(*at) < Duration::from_secs(60));
+        !times.is_empty()
+    });
+    if counts.len() >= 10_000 && !counts.contains_key(key) {
+        return false;
+    }
+    let times = counts.entry(key.to_string()).or_default();
+    if times.len() >= per_minute {
+        return false;
+    }
+    times.push(now);
+    true
+}
+
 /// A new Ed25519 key, as PKCS#8.
 pub fn new_key() -> Result<Vec<u8>> {
     let document = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
@@ -151,6 +171,7 @@ pub struct Federation {
     introduced: Mutex<HashSet<String>>,
     /// When the last share code lookups and asks were, by server, for the cap.
     shares: Mutex<HashMap<String, Vec<Instant>>>,
+    sends: Mutex<HashMap<String, Vec<Instant>>>,
 }
 
 impl Federation {
@@ -175,6 +196,7 @@ impl Federation {
             heard: Mutex::default(),
             introduced: Mutex::default(),
             shares: Mutex::default(),
+            sends: Mutex::default(),
         }
     }
 
@@ -232,21 +254,17 @@ impl Federation {
     /// Whether another share code lookup or ask for `key` (a server, coming
     /// or going) may go now.
     fn take_share(&self, key: &str) -> bool {
-        let mut shares = self.shares.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let now = Instant::now();
-        shares.retain(|_, times| {
-            times.retain(|at| now.duration_since(*at) < Duration::from_secs(60));
-            !times.is_empty()
-        });
-        if shares.len() >= 10_000 && !shares.contains_key(key) {
-            return false;
+        take(&self.shares, key, SHARES_PER_SERVER_PER_MINUTE)
+    }
+
+    /// Whether another message from a server on another instance (`server_id`
+    /// under its address) may be taken now, with `per_minute` at most
+    /// (FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE; `None` for no cap).
+    pub fn take_send(&self, server_id: &str, per_minute: Option<i64>) -> bool {
+        match per_minute {
+            Some(per_minute) => take(&self.sends, server_id, usize::try_from(per_minute).unwrap_or(0)),
+            None => true,
         }
-        let times = shares.entry(key.to_string()).or_default();
-        if times.len() >= SHARES_PER_SERVER_PER_MINUTE {
-            return false;
-        }
-        times.push(now);
-        true
     }
 
     fn introduced(&self, origin: &str) -> bool {
@@ -661,6 +679,10 @@ fn remote_error(shown: &str, (code, message): (i32, String)) -> Error {
     let text = format!("{shown} said: {message}");
     match tonic::Code::from(code) {
         tonic::Code::Unavailable | tonic::Code::DeadlineExceeded => Error::Unavailable(text),
+        // What someone there may or may not do, as their own instance says.
+        tonic::Code::PermissionDenied => Error::denied(text),
+        tonic::Code::InvalidArgument => Error::invalid(text),
+        tonic::Code::ResourceExhausted => Error::ResourceExhausted(text),
         _ => Error::FailedPrecondition(text),
     }
 }
@@ -833,7 +855,7 @@ pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedR
     crate::reports::server_timing("federation:shared", started.elapsed());
     let reply = match answer.answer {
         Some(fpb::response::Answer::Shared(reply)) => {
-            crate::api::shared_returned(&call, *reply, &origin, &fingerprint(&peer.public_key))?
+            crate::api::shared_returned(&call, *reply, &origin, &own, &fingerprint(&peer.public_key))?
         }
         _ => return Err(Error::Unavailable(format!("{}'s answer didn't read", display(&origin)))),
     };
@@ -1049,7 +1071,8 @@ impl fpb::federation_service_server::FederationService for Service {
                 fpb::Response { answer: Some(fpb::response::Answer::Pong(fpb::Pong {})) }
             }
             Some(fpb::request::Call::Shared(call)) => {
-                let call = crate::api::shared_arrived(*call, &from, &fingerprint(&public_key)).map_err(Status::from)?;
+                let call =
+                    crate::api::shared_arrived(*call, &from, &own, &fingerprint(&public_key)).map_err(Status::from)?;
                 if first_contact && !self.0.federation.take_share(&format!("in:{}", call.server_id)) {
                     return Err(Status::from(shares_capped()));
                 }
@@ -1137,6 +1160,12 @@ mod tests {
         }
         assert!(!federation.take_share("in:a"));
         assert!(federation.take_share("in:b"), "other servers aren't held up");
+        for _ in 0..3 {
+            assert!(federation.take_send("a@night-owls.example", Some(3)));
+        }
+        assert!(!federation.take_send("a@night-owls.example", Some(3)));
+        assert!(federation.take_send("b@night-owls.example", Some(3)));
+        assert!(federation.take_send("a@night-owls.example", None), "no cap unless set");
     }
 
     #[test]

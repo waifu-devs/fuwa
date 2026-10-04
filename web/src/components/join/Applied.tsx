@@ -1,4 +1,4 @@
-import { ClipboardPenIcon, HourglassIcon, Undo2Icon, XIcon } from "lucide-react";
+import { ClipboardPenIcon, EyeIcon, HourglassIcon, Undo2Icon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { ApplicationStatus } from "@/gen/fuwa/v1/types_pb";
@@ -7,6 +7,7 @@ import type { FuwaError } from "@/fuwa/errors";
 import { useInstances } from "@/fuwa/hooks";
 import type { InstanceState } from "@/fuwa/store";
 import { ServerIcon } from "@/components/Icons";
+import { ApplicationDialog } from "@/components/join/ApplicationStatus";
 import { ApplyDialog } from "@/components/join/ApplyDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -65,6 +66,7 @@ export function AppliedButton({ inst, applied }: { inst: Pick<InstanceState, "ke
   const { server } = applied;
   const waiting = applied.status === ApplicationStatus.PENDING;
   const [applying, setApplying] = useState(false);
+  const [looking, setLooking] = useState(false);
   const label = waiting ? `${server.name} · waiting to be let in` : `${server.name} · turned down`;
 
   function withdraw() {
@@ -119,6 +121,9 @@ export function AppliedButton({ inst, applied }: { inst: Pick<InstanceState, "ke
             </span>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => setLooking(true)}>
+            <EyeIcon /> See where it stands
+          </DropdownMenuItem>
           {waiting ? (
             <DropdownMenuItem variant="destructive" onSelect={withdraw}>
               <Undo2Icon /> Take back your application
@@ -136,6 +141,16 @@ export function AppliedButton({ inst, applied }: { inst: Pick<InstanceState, "ke
         </DropdownMenuContent>
       </DropdownMenu>
       <ApplyDialog open={applying} onOpenChange={setApplying} instanceKey={inst.key} server={server} inviteCode={applied.inviteCode} />
+      <ApplicationDialog
+        open={looking}
+        onOpenChange={setLooking}
+        instanceKey={inst.key}
+        server={server}
+        onApplyAgain={() => {
+          setLooking(false);
+          setApplying(true);
+        }}
+      />
     </div>
   );
 }

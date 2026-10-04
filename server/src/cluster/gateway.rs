@@ -72,7 +72,9 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.AuthService"
         | "fuwa.v1.AccountService"
         | "fuwa.v1.MediaService"
-        | "fuwa.v1.DirectMessageService" => Target::Directory,
+        | "fuwa.v1.GifService"
+        | "fuwa.v1.DirectMessageService"
+        | "fuwa.v1.FriendService" => Target::Directory,
         "fuwa.v1.AdminService" if matches!(method, "SetServerLimits" | "ExportServer") => Target::Shard,
         "fuwa.v1.AdminService" => Target::Directory,
         // Other instances' calls go where the instance's key is.
@@ -102,7 +104,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.CallService"
         | "fuwa.v1.SsoService"
         | "fuwa.v1.SecureChannelService"
-        | "fuwa.v1.SharedChannelService" => Target::Shard,
+        | "fuwa.v1.SharedChannelService"
+        | "fuwa.v1.SearchService" => Target::Shard,
         _ => Target::Unknown,
     }
 }

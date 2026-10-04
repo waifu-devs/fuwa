@@ -11,6 +11,7 @@ import {
   FuwaError,
   NotFoundError,
   OggOpusWriter,
+  readOggOpus,
   RateLimitedError,
   UnauthenticatedError,
   createFuwa,
@@ -18,6 +19,7 @@ import {
   listEvents,
   type Fuwa,
   type Message,
+  type Utterance,
   type VoiceFrame,
 } from "@waifu-devs/fuwa";
 import { startInstance, until, type Instance } from "./instance.ts";
@@ -300,6 +302,53 @@ test("agents hear and talk in voice channels", async () => {
   );
   await listener.stop();
   await talker.stop();
+});
+
+test("agents hold a conversation: utterances in, streamed speech out, barge-in", async () => {
+  const { channel: room } = await person.channels.createChannel({ serverId, name: "Chat", type: ChannelType.VOICE });
+  const otherToken = (await person.agents.createAgent({ username: "caller", displayName: "Caller" })).token;
+  await person.agents.addAgent({ serverId, username: "caller" });
+  const bot = newAgent();
+  const caller = new Agent({ url: instance.url, token: otherToken, onError: (e) => assert.fail(e as Error) });
+  agents.push(caller);
+  await bot.start();
+  await caller.start();
+  const ear = await bot.joinVoice(serverId, room!.id, { utteranceGapMs: 300 });
+  const mouth = await caller.joinVoice(serverId, room!.id);
+
+  // The caller says something, streamed as it's made; the bot hears it as one utterance.
+  const next = ear.utterances()[Symbol.asyncIterator]().next();
+  const said = await mouth.speak(
+    (async function* () {
+      for (let i = 0; i < 15; i++) {
+        yield Uint8Array.of(0xfc, i, 1, 2, 3);
+        if (i % 5 === 4) await new Promise((r) => setTimeout(r, 40));
+      }
+    })(),
+  );
+  assert.equal(said.sentMs, 300);
+  const utterance = (await next).value as Utterance;
+  assert.equal(utterance.userId, caller.me.id);
+  await utterance.ended;
+  const { packets } = readOggOpus(await utterance.toOgg());
+  assert.deepEqual(packets.map((p) => p[1]), Array.from({ length: 15 }, (_, i) => i));
+
+  // The bot answers at length; the caller talks over it and it stops.
+  const answer = new OggOpusWriter();
+  for (let i = 0; i < 250; i++) answer.add(Uint8Array.of(0xfc, i & 0xff, 1, 2, 3)); // five seconds
+  const started = Date.now();
+  const answering = ear.play(new Blob([answer.finish()]).stream(), { interruptible: true });
+  await new Promise((r) => setTimeout(r, 400));
+  await mouth.speak([Uint8Array.of(0xfc, 1, 1, 2, 3), Uint8Array.of(0xfc, 2, 1, 2, 3)]);
+  const result = await answering;
+  assert.equal(result.interrupted, true);
+  assert.equal(result.by, caller.me.id);
+  assert.ok(Date.now() - started < 2500, "it stopped well before the end");
+
+  await mouth.leave();
+  await ear.leave();
+  await caller.stop();
+  await bot.stop();
 });
 
 test("a voice connection rejoins after the instance restarts", async () => {

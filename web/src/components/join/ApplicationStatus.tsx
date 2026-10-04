@@ -1,0 +1,206 @@
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { CheckIcon, ClipboardPenIcon, EyeIcon, HourglassIcon, PartyPopperIcon, SendIcon, Undo2Icon, XIcon } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import type { ReactNode } from "react";
+import { ApplicationStatus, type Server } from "@/gen/fuwa/v1/types_pb";
+import { withdrawApplication } from "@/fuwa/actions";
+import { useAction, useInstance } from "@/fuwa/hooks";
+import { BannerHero } from "@/components/join/Banner";
+import { SPRING } from "@/components/motion";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { accentVars } from "@/lib/banner";
+import { ago } from "@/lib/format";
+import { toast } from "@/lib/ui";
+import { cn } from "@/lib/utils";
+
+/** Where an application stands, as the card shows it. */
+export type Standing = "waiting" | "accepted" | "declined";
+
+/** Where your application to a server stands, from what this browser knows: let in, turned down or waiting. */
+export function useStanding(instanceKey: string, serverId: string): { standing: Standing; appliedAt: number | null; reason: string } {
+  const inst = useInstance(instanceKey);
+  const applied = inst?.applied[serverId];
+  if (inst?.servers.some((s) => s.id === serverId)) return { standing: "accepted", appliedAt: applied?.appliedAt ?? null, reason: "" };
+  if (applied?.status === ApplicationStatus.REJECTED) return { standing: "declined", appliedAt: applied.appliedAt, reason: applied.reason };
+  return { standing: "waiting", appliedAt: applied?.appliedAt ?? null, reason: "" };
+}
+
+/**
+ * Where an application stands, as three stops on a line: sent, being read,
+ * and the answer. The line fills as it moves on, the stop it's at pulses
+ * while it waits, and the answer pops in with the reason when there is one.
+ */
+export function ApplicationTimeline({ standing, appliedAt, reason }: { standing: Standing; appliedAt: number | null; reason: string }) {
+  const done = standing !== "waiting";
+  const stops: { id: string; icon: ReactNode; title: string; note: string; state: "done" | "now" | "later" | "no" }[] = [
+    { id: "sent", icon: <SendIcon className="size-3.5" />, title: "Sent", note: appliedAt ? `You applied ${ago(new Date(appliedAt))}.` : "You applied.", state: "done" },
+    {
+      id: "read",
+      icon: done ? <EyeIcon className="size-3.5" /> : <HourglassIcon className="size-3.5 animate-[flip_3s_ease-in-out_infinite]" />,
+      title: done ? "Read" : "Being read",
+      note: done ? "Someone from the server looked it over." : "Someone who can let people in reads it. This page updates by itself.",
+      state: done ? "done" : "now",
+    },
+    standing === "declined"
+      ? { id: "answer", icon: <XIcon className="size-3.5" strokeWidth={3} />, title: "Turned down", note: reason ? "" : "They didn't say why. You can apply again.", state: "no" }
+      : {
+          id: "answer",
+          icon: standing === "accepted" ? <PartyPopperIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />,
+          title: standing === "accepted" ? "You're in!" : "Let in",
+          note: standing === "accepted" ? "It's in your server list now." : "When they say yes, the server opens up for you.",
+          state: standing === "accepted" ? "done" : "later",
+        },
+  ];
+  const filled = standing === "waiting" ? 0.5 : 1;
+  return (
+    <ol className="relative flex flex-col gap-4">
+      <span aria-hidden className="absolute top-3 bottom-3 left-3 w-0.5 -translate-x-1/2 rounded-full bg-muted" />
+      <motion.span
+        aria-hidden
+        initial={{ scaleY: 0 }}
+        animate={{ scaleY: filled }}
+        transition={{ ...SPRING, delay: 0.15 }}
+        className={cn("absolute top-3 bottom-3 left-3 w-0.5 origin-top -translate-x-1/2 rounded-full", standing === "declined" ? "bg-destructive/60" : "bg-[var(--accent-server)]")}
+      />
+      {stops.map((s, n) => (
+        <motion.li
+          key={`${s.id}:${s.state}`}
+          initial={{ opacity: 0, x: -10 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ ...SPRING, delay: 0.1 + n * 0.08 }}
+          className="relative flex items-start gap-3"
+        >
+          <span
+            className={cn(
+              "relative z-10 grid size-6 shrink-0 place-items-center rounded-full ring-4 ring-card",
+              s.state === "done" && "bg-[var(--accent-server)] text-white",
+              s.state === "now" && "bg-amber-500 text-white",
+              s.state === "later" && "bg-muted text-muted-foreground",
+              s.state === "no" && "bg-destructive text-white",
+            )}
+          >
+            {s.state === "now" && <span className="absolute inset-0 animate-ping rounded-full bg-amber-500/50 motion-reduce:hidden" />}
+            <AnimatePresence mode="popLayout" initial={false}>
+              <motion.span key={s.state} initial={{ scale: 0, rotate: -60 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 16 }} className="relative grid">
+                {s.icon}
+              </motion.span>
+            </AnimatePresence>
+          </span>
+          <div className="min-w-0 pt-0.5">
+            <p className={cn("text-sm font-extrabold", s.state === "later" && "text-muted-foreground")}>{s.title}</p>
+            {s.note && <p className="text-xs text-muted-foreground">{s.note}</p>}
+            {s.state === "no" && reason && (
+              <motion.blockquote
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ ...SPRING, delay: 0.35 }}
+                className="mt-1.5 rounded-xl border-l-4 border-destructive/60 bg-destructive/5 px-3 py-2 text-sm break-words"
+              >
+                “{reason}”
+              </motion.blockquote>
+            )}
+          </div>
+        </motion.li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * Your application to a server under its banner: where it stands, and what
+ * you can do about it (take it back, apply again, open the server).
+ */
+export function ApplicationCard({
+  instanceKey,
+  server,
+  onApplyAgain,
+  onOpen,
+  onDone,
+}: {
+  instanceKey: string;
+  server: Server;
+  onApplyAgain?: () => void;
+  onOpen?: () => void;
+  onDone: () => void;
+}) {
+  const { standing, appliedAt, reason } = useStanding(instanceKey, server.id);
+  const withdraw = useAction(withdrawApplication);
+  return (
+    <div style={accentVars(server)} className="flex flex-col gap-5">
+      <BannerHero
+        server={server}
+        bleed
+        eyebrow={standing === "accepted" ? "You're in" : standing === "declined" ? "Your application to" : "Waiting to join"}
+        badge={standing === "waiting" ? <HourglassIcon className="size-3.5 animate-[flip_3s_ease-in-out_infinite]" /> : standing === "accepted" ? <CheckIcon className="size-3.5" strokeWidth={3} /> : <XIcon className="size-3.5" strokeWidth={3} />}
+      />
+      <DialogPrimitive.Title className="sr-only">Your application to {server.name}</DialogPrimitive.Title>
+      <DialogPrimitive.Description className="sr-only">Where your application stands.</DialogPrimitive.Description>
+      <ApplicationTimeline standing={standing} appliedAt={appliedAt} reason={reason} />
+      {withdraw.error && <p className="text-sm text-destructive first-letter:uppercase">{withdraw.error}</p>}
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.div key={standing} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={SPRING} className="flex flex-col gap-2 sm:flex-row-reverse">
+          {standing === "accepted" ? (
+            <Button onClick={onOpen ?? onDone} style={{ background: "var(--accent-server)" }} className="h-10 flex-1 rounded-xl font-bold text-white hover:brightness-110" data-burst="">
+              <PartyPopperIcon /> Open {server.name}
+            </Button>
+          ) : standing === "declined" ? (
+            <>
+              {onApplyAgain && (
+                <Button onClick={onApplyAgain} className="btn h-10 flex-1 rounded-xl font-bold">
+                  <ClipboardPenIcon /> Apply again
+                </Button>
+              )}
+              <Button variant="outline" onClick={onDone} className="h-10 flex-1 rounded-xl font-bold">
+                Close
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={onDone} className="btn h-10 flex-1 rounded-xl font-bold">
+                Got it
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={withdraw.pending}
+                onClick={async () => {
+                  if ((await withdraw.go(instanceKey, server.id)) === undefined) return;
+                  toast(`Took back your application to ${server.name}`);
+                  onDone();
+                }}
+                className="h-10 flex-1 rounded-xl font-bold text-muted-foreground hover:text-destructive"
+              >
+                <Undo2Icon /> Take it back
+              </Button>
+            </>
+          )}
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/** Your application to a server, in a dialog of its own: opened from the rail. */
+export function ApplicationDialog({
+  open,
+  onOpenChange,
+  instanceKey,
+  server,
+  onApplyAgain,
+  onOpen,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  instanceKey: string;
+  server: Server;
+  onApplyAgain?: () => void;
+  onOpen?: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="overflow-x-hidden">
+        <ApplicationCard instanceKey={instanceKey} server={server} onApplyAgain={onApplyAgain} onOpen={onOpen} onDone={() => onOpenChange(false)} />
+      </DialogContent>
+    </Dialog>
+  );
+}

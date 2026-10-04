@@ -201,6 +201,11 @@ impl App {
         if row.server_id.is_some() && row.server_id.as_deref() != server_id {
             return Err(Error::denied("that picture belongs to another server; upload it here"));
         }
+        // Someone's profile banner in use can't become a server's too:
+        // changing either would delete it from under the other.
+        if purpose == pb::MediaPurpose::Banner && server_id.is_some() && row.server_id.is_none() && row.used {
+            return Err(Error::denied("that picture is in use already; upload it here"));
+        }
         if !row.stored {
             return Err(Error::FailedPrecondition("that picture hasn't finished uploading".into()));
         }
@@ -228,7 +233,7 @@ impl App {
 
     /// Deletes the picture a change replaced, if it was one of this
     /// instance's uploads and belonged to what changed: the account's own
-    /// avatar or banner, or the server's icon, emoji or webhook pictures.
+    /// avatar or banner, or the server's icon, banner, emoji or webhook pictures.
     pub async fn drop_picture(&self, old_url: &str, new_url: &str, owner: PictureOwner<'_>) {
         if old_url == new_url {
             return;
@@ -240,8 +245,13 @@ impl App {
                 new_url: new_url.to_string(),
                 server_id: server_id.to_string(),
             };
-            if let Err(err) = link.directory().drop_picture(request).await {
-                tracing::warn!(media = %id, error = %err.message(), "couldn't delete a replaced picture");
+            if link.directory().drop_picture(request).await.is_err() {
+                tracing::warn!(media = %id, "couldn't delete a replaced picture");
+                // Its copy here goes anyway unless the server still uses it;
+                // the directory's row is left to the sweeps.
+                if !matches!(crate::cluster::pictures::uses(self, server_id, &id).await, Ok(true)) {
+                    crate::cluster::pictures::drop(self, server_id, &id).await;
+                }
                 return;
             }
             // The directory deletes it only if it was the server's, and only
@@ -260,8 +270,14 @@ impl App {
         let belongs = match owner {
             PictureOwner::Account(account_id, purpose) => row.account_id == account_id && row.purpose == purpose,
             PictureOwner::Server(server_id) => {
-                matches!(row.purpose, pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji | pb::MediaPurpose::Avatar)
-                    && row.server_id.as_deref() == Some(server_id)
+                matches!(
+                    row.purpose,
+                    pb::MediaPurpose::ServerIcon
+                        | pb::MediaPurpose::Banner
+                        | pb::MediaPurpose::Emoji
+                        | pb::MediaPurpose::Avatar
+                        | pb::MediaPurpose::Attachment
+                ) && row.server_id.as_deref() == Some(server_id)
             }
         };
         if belongs && let Err(err) = self.delete_media(&[id]).await {
