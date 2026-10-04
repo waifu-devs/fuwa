@@ -7,8 +7,9 @@ use super::messages::post_join;
 use super::servers::{at_the_door, let_in, use_invite};
 use super::{Api, Seat, respond, text};
 use crate::error::{Error, Result};
-use crate::id::{now_ms, timestamp};
+use crate::id::{new_id, now_ms, timestamp};
 use crate::pb::{self, Permission, join_service_server::JoinService};
+use crate::permissions::{self, Access, Bits, bit};
 use crate::servers::{self as store, Audit, Payload};
 
 /// As many rules as Discord's rules screening takes.
@@ -22,6 +23,38 @@ const MAX_PARAGRAPH_ANSWER: usize = 1000;
 const MAX_WELCOME_CHANNELS: usize = 5;
 const MAX_WELCOME: usize = 300;
 const MAX_WELCOME_CHANNEL: usize = 60;
+const MAX_STEPS: usize = 6;
+const MAX_STEP_TITLE: usize = 80;
+const MAX_STEP_DESCRIPTION: usize = 200;
+const MAX_OPTIONS: usize = 12;
+const MAX_OPTION_LABEL: usize = 50;
+const MAX_OPTION_DESCRIPTION: usize = 100;
+const MAX_OPTION_ROLES: usize = 5;
+const MAX_OPTION_CHANNELS: usize = 5;
+const MAX_HELLO: usize = 200;
+
+/// What a role handed out by onboarding may never carry: anyone could pick
+/// it, so nothing that moderates or manages the server.
+const POWERS: Bits = permissions::ADMIN | bit(Permission::Administrator) | bit(Permission::ManageRoles);
+
+/// Whether anyone may get the role by picking it in onboarding.
+fn harmless(role: &pb::Role) -> bool {
+    permissions::from_list(&role.permissions).is_ok_and(|bits| bits & POWERS == 0)
+}
+
+/// A welcome or onboarding emoji: Unicode, or one of the server's own.
+fn checked_emoji(emojis: &[pb::Emoji], emoji: &str, what: &str) -> Result<String> {
+    let emoji = emoji.trim().to_string();
+    let custom = emoji.strip_prefix("<:").and_then(|rest| rest.strip_suffix('>')).and_then(|r| r.rsplit_once(':'));
+    let fine = match custom {
+        Some((_, id)) => emojis.iter().any(|e| e.id == id),
+        None => emoji.chars().count() <= 16 && !emoji.chars().any(|c| c.is_ascii_alphanumeric() || c == '<'),
+    };
+    if !fine {
+        return Err(Error::invalid(format!("{what} emoji are a Unicode emoji or one of the server's own")));
+    }
+    Ok(emoji)
+}
 
 /// A form as it may be saved: trimmed, within its limits, nothing blank.
 fn checked_form(form: pb::JoinForm) -> Result<pb::JoinForm> {
@@ -93,15 +126,7 @@ async fn checked_welcome(
         if channels.iter().any(|c| c.channel_id == channel.id) {
             return Err(Error::invalid(format!("#{} is on the welcome screen twice", channel.name)));
         }
-        let emoji = item.emoji.trim().to_string();
-        let custom = emoji.strip_prefix("<:").and_then(|rest| rest.strip_suffix('>')).and_then(|r| r.rsplit_once(':'));
-        let fine = match custom {
-            Some((_, id)) => emojis.iter().any(|e| e.id == id),
-            None => emoji.chars().count() <= 16 && !emoji.chars().any(|c| c.is_ascii_alphanumeric() || c == '<'),
-        };
-        if !fine {
-            return Err(Error::invalid("welcome emoji are a Unicode emoji or one of the server's own"));
-        }
+        let emoji = checked_emoji(&emojis, &item.emoji, "welcome")?;
         channels.push(pb::WelcomeChannel {
             channel_id: channel.id,
             description: text("a channel's note", &item.description, 0, MAX_WELCOME_CHANNEL)?,
@@ -114,8 +139,304 @@ async fn checked_welcome(
     Ok(pb::WelcomeScreen { enabled: welcome.enabled, description, channels })
 }
 
+/// An onboarding as it may be saved: within its limits, its roles ones the
+/// caller ranks above and that hand out no powers, its channels real. Steps
+/// and options keep the ids they had in `before` and new ones get theirs.
+async fn checked_onboarding(
+    conn: &turso::Connection,
+    server_id: &str,
+    access: &Access,
+    draft: pb::Onboarding,
+    before: &pb::Onboarding,
+) -> Result<pb::Onboarding> {
+    if draft.steps.len() > MAX_STEPS {
+        return Err(Error::invalid(format!("onboarding has up to {MAX_STEPS} steps")));
+    }
+    let emojis = store::load_emojis(conn, server_id).await?;
+    let roles = permissions::roles(conn, server_id).await?;
+    let known_step = |id: &str| before.steps.iter().any(|s| s.id == id);
+    let known_option = |id: &str| before.steps.iter().flat_map(|s| &s.options).any(|o| o.id == id);
+    let mut steps = Vec::with_capacity(draft.steps.len());
+    for step in draft.steps {
+        let kind = pb::OnboardingStepKind::try_from(step.kind).unwrap_or(pb::OnboardingStepKind::Unspecified);
+        let title = text("a step's title", &step.title, 1, MAX_STEP_TITLE)?;
+        let description = text("a step's words", &step.description, 0, MAX_STEP_DESCRIPTION)?;
+        let id = if !step.id.is_empty() && known_step(&step.id) { step.id } else { new_id() };
+        let mut checked = pb::OnboardingStep {
+            id,
+            kind: kind as i32,
+            title,
+            description,
+            skippable: step.skippable,
+            ..Default::default()
+        };
+        match kind {
+            pb::OnboardingStepKind::Pick => {
+                if step.options.is_empty() || step.options.len() > MAX_OPTIONS {
+                    return Err(Error::invalid(format!("\"{}\" needs 1 to {MAX_OPTIONS} choices", checked.title)));
+                }
+                checked.multiple = step.multiple;
+                for option in step.options {
+                    if option.role_ids.len() > MAX_OPTION_ROLES || option.channel_ids.len() > MAX_OPTION_CHANNELS {
+                        return Err(Error::invalid(format!(
+                            "a choice hands out up to {MAX_OPTION_ROLES} roles and suggests up to {MAX_OPTION_CHANNELS} channels"
+                        )));
+                    }
+                    let mut role_ids: Vec<String> = Vec::new();
+                    for role_id in option.role_ids {
+                        let role = roles.iter().find(|r| r.id == role_id).ok_or(Error::NotFound("role"))?;
+                        if role.id == server_id {
+                            return Err(Error::invalid("everyone has @everyone"));
+                        }
+                        if !access.above(role.position.into()) {
+                            return Err(Error::denied(
+                                "onboarding can only hand out roles ranked below your highest role",
+                            ));
+                        }
+                        if !harmless(role) {
+                            return Err(Error::invalid(format!(
+                                "@{} can moderate or manage the server, so onboarding can't hand it out",
+                                role.name
+                            )));
+                        }
+                        if !role_ids.contains(&role.id) {
+                            role_ids.push(role.id.clone());
+                        }
+                    }
+                    let mut channel_ids: Vec<String> = Vec::new();
+                    for channel_id in option.channel_ids {
+                        let channel = store::load_channel(conn, server_id, &channel_id)
+                            .await?
+                            .ok_or(Error::NotFound("channel"))?;
+                        if channel.r#type == pb::ChannelType::Category as i32 {
+                            return Err(Error::invalid("suggest channels, not categories"));
+                        }
+                        if !channel_ids.contains(&channel.id) {
+                            channel_ids.push(channel.id);
+                        }
+                    }
+                    let id = if !option.id.is_empty() && known_option(&option.id) { option.id } else { new_id() };
+                    checked.options.push(pb::OnboardingOption {
+                        id,
+                        label: text("a choice", &option.label, 1, MAX_OPTION_LABEL)?,
+                        description: text("a choice's words", &option.description, 0, MAX_OPTION_DESCRIPTION)?,
+                        emoji: checked_emoji(&emojis, &option.emoji, "onboarding")?,
+                        role_ids,
+                        channel_ids,
+                    });
+                }
+            }
+            pb::OnboardingStepKind::Rules => {
+                if steps.iter().any(|s: &pb::OnboardingStep| s.kind == pb::OnboardingStepKind::Rules as i32) {
+                    return Err(Error::invalid("onboarding shows the rules once"));
+                }
+                // Agreeing is never optional.
+                checked.skippable = false;
+            }
+            pb::OnboardingStepKind::Hello => {
+                let channel =
+                    store::load_channel(conn, server_id, &step.channel_id).await?.ok_or(Error::NotFound("channel"))?;
+                if !matches!(
+                    pb::ChannelType::try_from(channel.r#type),
+                    Ok(pb::ChannelType::Text | pb::ChannelType::Announcement)
+                ) {
+                    return Err(Error::invalid("people say hello in a text channel"));
+                }
+                checked.channel_id = channel.id;
+                checked.hello = text("the hello", &step.hello, 0, MAX_HELLO)?;
+            }
+            pb::OnboardingStepKind::Unspecified => {
+                return Err(Error::invalid("a step picks, shows the rules or says hello"));
+            }
+        }
+        steps.push(checked);
+    }
+    if draft.enabled && steps.is_empty() {
+        return Err(Error::invalid("add a step before turning onboarding on"));
+    }
+    Ok(pb::Onboarding { enabled: draft.enabled, steps, set_by: String::new() })
+}
+
 #[tonic::async_trait]
 impl JoinService for Api {
+    async fn get_onboarding(
+        &self,
+        request: Request<pb::GetOnboardingRequest>,
+    ) -> Result<Response<pb::GetOnboardingResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let Seat { sdb, access, .. } = self.membership(&account, &request.get_ref().server_id).await?;
+                let mut onboarding = store::load_onboarding(&sdb.read()?).await?;
+                onboarding.set_by.clear();
+                if !access.has(Permission::ManageServer) {
+                    if !onboarding.enabled {
+                        onboarding = pb::Onboarding::default();
+                    }
+                    for step in &mut onboarding.steps {
+                        for option in &mut step.options {
+                            option.channel_ids.retain(|id| access.can_see(id));
+                        }
+                    }
+                }
+                Ok(pb::GetOnboardingResponse { onboarding: Some(onboarding) })
+            }
+            .await,
+        )
+    }
+
+    async fn set_onboarding(
+        &self,
+        request: Request<pb::SetOnboardingRequest>,
+    ) -> Result<Response<pb::SetOnboardingResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let req = request.into_inner();
+                let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageServer).await?;
+                let draft = req.onboarding.unwrap_or_default();
+                let (onboarding, server) = sdb
+                    .write(&account.id, async |conn, events| {
+                        let before = store::load_onboarding(conn).await?;
+                        let mut onboarding = checked_onboarding(conn, &sdb.id, &access, draft.clone(), &before).await?;
+                        // Its roles are handed out only while they rank below whoever saved it.
+                        onboarding.set_by = account.id.clone();
+                        store::save_onboarding(conn, &onboarding).await?;
+                        if (before.enabled, &before.steps) != (onboarding.enabled, &onboarding.steps) {
+                            let options = |o: &pb::Onboarding| o.steps.iter().map(|s| s.options.len()).sum::<usize>();
+                            let entry = Audit::new(pb::AuditAction::OnboardingUpdate, "")
+                                .change("enabled", before.enabled, onboarding.enabled)
+                                .change("steps", before.steps.len(), onboarding.steps.len())
+                                .change("options", options(&before), options(&onboarding));
+                            store::audit(conn, &account.id, entry).await?;
+                        }
+                        let server = store::load_server(conn).await?;
+                        events.push(Payload::ServerUpdated(pb::ServerUpdated { server: Some(server.clone()) }));
+                        Ok((onboarding, server))
+                    })
+                    .await?;
+                self.app.server_changed(&server).await;
+                let onboarding = pb::Onboarding { set_by: String::new(), ..onboarding };
+                Ok(pb::SetOnboardingResponse { onboarding: Some(onboarding) })
+            }
+            .await,
+        )
+    }
+
+    async fn finish_onboarding(
+        &self,
+        request: Request<pb::FinishOnboardingRequest>,
+    ) -> Result<Response<pb::FinishOnboardingResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let req = request.into_inner();
+                if req.option_ids.len() > MAX_STEPS * MAX_OPTIONS {
+                    return Err(Error::invalid("that's more choices than onboarding has"));
+                }
+                let Seat { sdb, .. } = self.membership(&account, &req.server_id).await?;
+                let member = sdb
+                    .write(&account.id, async |conn, events| {
+                        let onboarding = store::load_onboarding(conn).await?;
+                        let roles = permissions::roles(conn, &sdb.id).await?;
+                        // The steps as saved: one pick where only one is allowed,
+                        // and at least one where the step can't be skipped.
+                        if onboarding.enabled {
+                            for step in &onboarding.steps {
+                                if pb::OnboardingStepKind::try_from(step.kind) != Ok(pb::OnboardingStepKind::Pick) {
+                                    continue;
+                                }
+                                let picked = step.options.iter().filter(|o| req.option_ids.contains(&o.id)).count();
+                                if picked > 1 && !step.multiple {
+                                    return Err(Error::invalid(format!("pick one for “{}”", step.title)));
+                                }
+                                if picked == 0 && !step.skippable {
+                                    return Err(Error::invalid(format!("pick at least one for “{}”", step.title)));
+                                }
+                            }
+                        }
+                        // Roles go out only while the person who set them up could
+                        // still set them up: a member who manages the server, ranked
+                        // above the role.
+                        let rules = permissions::load(conn, &sdb.id).await?;
+                        let setter = match onboarding.set_by.as_str() {
+                            "" => None,
+                            id if store::member(conn, &sdb.id, id).await?.is_some() => {
+                                let held: Vec<String> = crate::db::query_all(
+                                    conn,
+                                    "SELECT role_id FROM member_roles WHERE user_id = ?1",
+                                    [id],
+                                    |r| r.get::<String>(0),
+                                )
+                                .await?;
+                                Some(rules.access(id, &held)).filter(|a| a.has(Permission::ManageServer))
+                            }
+                            _ => None,
+                        };
+                        let mut give: Vec<&pb::Role> = Vec::new();
+                        let mut take: Vec<&pb::Role> = Vec::new();
+                        let options = onboarding.steps.iter().flat_map(|s| &s.options);
+                        for option in options {
+                            let picked = onboarding.enabled && req.option_ids.contains(&option.id);
+                            for role in option.role_ids.iter().filter_map(|id| roles.iter().find(|r| r.id == *id)) {
+                                if role.id == sdb.id || !harmless(role) {
+                                    continue;
+                                }
+                                if picked && !setter.as_ref().is_some_and(|s| s.above(role.position.into())) {
+                                    continue;
+                                }
+                                if picked {
+                                    give.push(role);
+                                } else {
+                                    take.push(role);
+                                }
+                            }
+                        }
+                        // A role two options hand out stays when either is picked.
+                        take.retain(|role| !give.iter().any(|g| g.id == role.id));
+                        let mut changed = 0;
+                        for role in &give {
+                            changed += conn
+                                .execute(
+                                    "INSERT INTO member_roles (user_id, role_id) VALUES (?1, ?2) ON CONFLICT DO NOTHING",
+                                    (account.id.as_str(), role.id.as_str()),
+                                )
+                                .await?;
+                        }
+                        for role in &take {
+                            changed += conn
+                                .execute(
+                                    "DELETE FROM member_roles WHERE user_id = ?1 AND role_id = ?2",
+                                    (account.id.as_str(), role.id.as_str()),
+                                )
+                                .await?;
+                        }
+                        conn.execute("UPDATE members SET onboarded_at = ?2 WHERE user_id = ?1", (account.id.as_str(), now_ms()))
+                            .await?;
+                        let member =
+                            store::member(conn, &sdb.id, &account.id).await?.ok_or(Error::NotFound("membership"))?;
+                        if changed > 0 {
+                            let names = |list: &[&pb::Role]| {
+                                let mut names: Vec<&str> = list.iter().map(|r| r.name.as_str()).collect();
+                                names.sort_unstable();
+                                names.dedup();
+                                names.join(", ")
+                            };
+                            let entry = Audit::new(pb::AuditAction::MemberRolesUpdate, &account.id)
+                                .reason("onboarding")
+                                .change("roles", names(&take), names(&give));
+                            store::audit(conn, &account.id, entry).await?;
+                        }
+                        events.push(Payload::MemberUpdated(pb::MemberUpdated { member: Some(member.clone()) }));
+                        Ok(member)
+                    })
+                    .await?;
+                Ok(pb::FinishOnboardingResponse { member: Some(member) })
+            }
+            .await,
+        )
+    }
+
     async fn get_welcome_screen(
         &self,
         request: Request<pb::GetWelcomeScreenRequest>,
