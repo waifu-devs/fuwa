@@ -761,7 +761,7 @@ async fn review_sent(
     events: &mut Vec<Payload>,
 ) -> Result<Vec<String>> {
     let Some(message) = super::messages::load_message(conn, server_id, message_id).await? else { return Ok(vec![]) };
-    if message.content != content {
+    if super::messages::reviewed_text(&message) != content {
         return Ok(vec![]);
     }
     let Some(channel) = load_channel(conn, server_id, &message.channel_id).await? else { return Ok(vec![]) };

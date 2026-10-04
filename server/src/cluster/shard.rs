@@ -428,6 +428,7 @@ pub async fn forget_account(servers: &Servers, account_id: &str, placeholder: &p
                     }));
                 }
                 store::drop_application(conn, &sdb.id, account_id, account_id, events).await?;
+                crate::api::forget_poll_voter(conn, account_id, events).await?;
                 store::upsert_user(conn, placeholder).await?;
                 events.push(Payload::UserUpdated(pb::UserUpdated { user: Some(placeholder.clone()) }));
                 Ok(left)

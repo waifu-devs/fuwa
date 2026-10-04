@@ -35,6 +35,7 @@ fn channel_of(payload: &Payload) -> Option<&str> {
         Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) }) => Some(&m.channel_id),
         Payload::MessageDeleted(d) => Some(&d.channel_id),
+        Payload::PollUpdated(p) => Some(&p.channel_id),
         Payload::ChannelCreated(pb::ChannelCreated { channel: Some(c) })
         | Payload::ChannelUpdated(pb::ChannelUpdated { channel: Some(c) }) => Some(&c.id),
         Payload::ChannelDeleted(d) => Some(&d.channel_id),

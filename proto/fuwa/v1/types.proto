@@ -278,6 +278,9 @@ enum Permission {
   // Start a thread under a message. Replying in a thread that's already
   // there needs SEND_MESSAGES.
   PERMISSION_CREATE_THREADS = 26;
+  // Send polls (SendMessageRequest.poll). Voting needs only to see the
+  // channel.
+  PERMISSION_CREATE_POLLS = 27;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -814,12 +817,43 @@ message Message {
   ThreadSummary thread = 19;
   // A thread reply its author also sent to the channel.
   bool also_in_channel = 20;
+  // The message is a poll. (17 is the emoji picker's, 18 to 20 are threads'.)
+  Poll poll = 21;
   // A GIF sent with it (GifService), kept on this instance.
   MessageGif gif = 22;
   // The members it names as <@id> (or <@!id>), once each, in order: the
   // people a client highlights it for. Up to 50; ids of anyone not in the
   // server are left out.
   repeated string mention_user_ids = 23;
+}
+
+// A poll and how it stands. Counts are everyone's (for an anonymous poll
+// that's still running, only `voters`: each answer's votes are 0 until it
+// closes); my_answer_ids is the reader's own vote, filled only in answers
+// to them (never in events), and lost once an anonymous poll closes.
+message Poll {
+  string question = 1;
+  repeated PollAnswer answers = 2;
+  bool multiple = 3;
+  // Votes are secret: ListPollVoters refuses, events never say who, and
+  // the counts per answer show only once it closes.
+  bool anonymous = 4;
+  // When it closes by itself. Unset: it runs until it's ended.
+  google.protobuf.Timestamp ends_at = 5;
+  // Set when someone ended it early.
+  google.protobuf.Timestamp ended_at = 6;
+  string ended_by_id = 7;
+  // How many people have voted.
+  int64 voters = 8;
+  repeated uint32 my_answer_ids = 9;
+}
+
+message PollAnswer {
+  // Stable within the poll: 1, 2, 3...
+  uint32 id = 1;
+  string text = 2;
+  string emoji = 3;
+  int64 votes = 4;
 }
 
 // A thread under a message, as the channel shows it.
@@ -1024,6 +1058,7 @@ message Event {
     SecureRecordDeleted secure_record_deleted = 28;
     SharedChannelsUpdated shared_channels_updated = 29;
     ThreadUpdated thread_updated = 30;
+    PollUpdated poll_updated = 31;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).
@@ -1110,6 +1145,21 @@ message MessageCreated {
 
 message MessageUpdated {
   Message message = 1;
+}
+
+// Someone voted in a poll, took a vote back, or the poll was ended (or,
+// for an anonymous poll, its time ran out, when its counts show). The
+// event's actor is the voter only when the poll's votes are public; for an
+// anonymous poll it's empty.
+message PollUpdated {
+  string channel_id = 1;
+  string message_id = 2;
+  // The counts now; my_answer_ids is empty.
+  Poll poll = 3;
+  // Public polls only: who voted and what they picked now (empty when they
+  // took it back). Empty for an end, and always for anonymous polls.
+  string voter_id = 4;
+  repeated uint32 voter_answer_ids = 5;
 }
 
 message MessageDeleted {
