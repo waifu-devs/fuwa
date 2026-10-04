@@ -42,7 +42,8 @@ import {
 } from "@/gen/fuwa/v1/types_pb";
 import { blockFromChannel, deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
 import { useAccess, useRoles } from "@/fuwa/hooks";
-import { useFuwa, type PendingMessage } from "@/fuwa/store";
+import { store, useFuwa, type PendingMessage } from "@/fuwa/store";
+import { doneJumping, useJump } from "@/fuwa/search";
 import { sendsMessage } from "@/components/chat/Composer";
 import { Mention, remarkMentions, ServerLookProvider, useRoleColor, useServerLook, type ServerLook } from "@/components/chat/mentions";
 import { Markdown, type MarkdownExtension } from "@/components/Markdown";
@@ -80,6 +81,8 @@ export type MessageListHandle = { editLast: () => void };
 const FIRST_ROWS = 80;
 /** How many more rows each scroll to the top reveals before asking the server for older messages. */
 const MORE_ROWS = 80;
+/** How many pages back opening a search result goes looking for its message. */
+const JUMP_PAGES = 100;
 
 /*
  * Rows keep the same props while their message is unchanged, so memoized
@@ -287,6 +290,51 @@ export const MessageList = forwardRef<
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     setMissed(0);
   };
+
+  // ── Opening a search result: load back to its message, bring it into view and let it glow a moment.
+  const jumpTo = useJump(instanceKey, channel.id);
+  const [jumped, setJumped] = useState<{ id: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!jumpTo) return;
+    let cancelled = false;
+    const current = () => store.get().instances[instanceKey]?.messages[channel.id];
+    const found = () => !!current()?.items.some((m) => m.id === jumpTo.messageId);
+    void (async () => {
+      const deadline = Date.now() + 20_000;
+      for (let pages = 0; pages < JUMP_PAGES && !cancelled && !found() && Date.now() < deadline; ) {
+        const s = current();
+        if (!s || s.loading) {
+          await new Promise((r) => setTimeout(r, 40));
+          continue;
+        }
+        if (!s.hasMore) break;
+        await run(loadMessages(instanceKey, serverId, channel.id, true)).catch(() => {});
+        pages++;
+      }
+      if (cancelled) return;
+      doneJumping(jumpTo);
+      if (found()) setJumped({ id: jumpTo.messageId, at: jumpTo.at });
+      else toast("That message is too far back to open here yet; scroll up to find it");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jumpTo, instanceKey, serverId, channel.id]);
+  // Its row has to be drawn first.
+  const jumpRow = jumped ? rows.findIndex((r) => r.key === jumped.id) : -1;
+  if (jumpRow !== -1 && jumpRow < skipped) setHidden(Math.max(0, jumpRow - 20));
+  useLayoutEffect(() => {
+    if (!jumped || jumpRow === -1 || jumpRow < skipped) return;
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-message-id="${jumped.id}"]`);
+    if (!el) return;
+    atBottom.current = false;
+    el.scrollIntoView({ block: "center" });
+    // The glow fades out by itself (its animation ends at no opacity); taking the class off first plays it again.
+    el.classList.remove("jumped");
+    void el.offsetWidth;
+    el.classList.add("jumped");
+    setJumped(null);
+  }, [jumped, jumpRow, skipped]);
 
   const beginning = state && !state.loading && !state.hasMore && skipped === 0;
   const meId = me?.id;
@@ -633,6 +681,7 @@ const MessageRow = memo(function MessageRow({
       {...(animate ? enter : {})}
       exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
+      data-message-id={message.id}
       className={cn(
         "message-row group relative flex gap-3 px-4",
         first && "first",

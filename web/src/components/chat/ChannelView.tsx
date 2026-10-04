@@ -11,6 +11,9 @@ import { MemberList } from "@/components/chat/MemberList";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
 import { NotificationBell } from "@/components/chat/NotificationBell";
 import { SharedPill } from "@/components/chat/Shared";
+import { SearchBar } from "@/components/search/SearchBar";
+import { SearchPanel } from "@/components/search/SearchPanel";
+import { useSearch } from "@/fuwa/search";
 import { CopyId } from "@/components/CopyId";
 import { ConnDot, connectionLabel } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
@@ -28,6 +31,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
   const list = useRef<MessageListHandle>(null);
   const { compact, setNavOpen, membersOpen, setMembersOpen } = useLayout();
   const docked = useMediaQuery("(min-width: 1024px)");
+  const wide = useMediaQuery("(min-width: 640px)");
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
 
   useEffect(() => {
@@ -42,6 +46,8 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
   useEffect(() => () => setTitle("fuwa"), []);
 
   const connection = useFuwa((s) => s.instances[instanceKey]?.connection ?? "connecting");
+  // Search results take the members' place while they're open.
+  const searching = useSearch((s) => s.open && s.instanceKey === instanceKey && s.serverId === serverId);
 
   return (
     <div className="flex h-full min-h-0">
@@ -109,6 +115,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
               </motion.span>
             )}
           </AnimatePresence>
+          <SearchBar instanceKey={instanceKey} serverId={serverId} />
           <NotificationBell instanceKey={instanceKey} serverId={serverId} channel={channel} />
           <motion.button
             type="button"
@@ -136,7 +143,35 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
         />
       </div>
       <AnimatePresence initial={false}>
+        {searching &&
+          (docked ? (
+            <motion.aside
+              key="search"
+              initial={{ x: 32, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 32, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 400, damping: 40 }}
+              className="surface-side h-full w-[24rem] shrink-0 overflow-hidden border-l"
+            >
+              <SearchPanel instanceKey={instanceKey} serverId={serverId} />
+            </motion.aside>
+          ) : (
+            <motion.aside
+              key="search-sheet"
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", stiffness: 420, damping: 40 }}
+              className={cn(
+                "surface-side absolute inset-y-0 right-0 z-30 h-full",
+                wide ? "w-[24rem] max-w-[85vw] border-l shadow-2xl" : "inset-x-0",
+              )}
+            >
+              <SearchPanel instanceKey={instanceKey} serverId={serverId} sheet={!wide} />
+            </motion.aside>
+          ))}
         {membersOpen &&
+          !searching &&
           (docked ? (
             // The panel takes its width at once and slides in on the compositor: growing its width every frame would
             // lay the whole message list out again each frame.

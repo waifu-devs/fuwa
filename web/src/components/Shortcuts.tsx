@@ -143,6 +143,9 @@ export function AppOverlays() {
 
     const run: Record<string, () => void> = {
       quickSwitcher: () => setSwitcher(!getUi().switcher),
+      searchServer: () => {
+        if (!runCommand("focusSearch")) toast("Open a server's channel to search it");
+      },
       previousServer: () => stepServer(-1),
       nextServer: () => stepServer(1),
       previousChannel: () => stepChannel(-1),

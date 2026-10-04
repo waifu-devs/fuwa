@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// Finding messages in a server. Each server keeps a word index of its
+// messages in its own file, built and kept up to date by the instance as it
+// follows the server's event log. Searches are never stored or logged, and
+// only channels the searcher can see are searched: others don't show up in
+// results or totals. Secure channels aren't searched (the instance can't
+// read them), nor messages a shared channel keeps on another instance.
+service SearchService {
+  // Messages in one server that match, newest first. Each account can search
+  // a few times a second; past that it answers RESOURCE_EXHAUSTED.
+  rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);
+}
+
+message SearchMessagesRequest {
+  string server_id = 1;
+  // Words, all of which a message has (in its text, its attachments' names
+  // or its embeds), in any order and any case, accents or not. The last
+  // word, if 3 characters or more, also matches longer words it starts. At
+  // most 200 characters; a search needs words or at least one filter.
+  string query = 2;
+  // Written by any of these people (or webhooks).
+  repeated string author_ids = 3;
+  // In any of these channels. Channels the searcher can't see match nothing.
+  repeated string channel_ids = 4;
+  // Mentioning all of these people.
+  repeated string mention_ids = 5;
+  // Having all of these.
+  repeated SearchHas has = 6;
+  // Sent at or after this time.
+  google.protobuf.Timestamp after = 7;
+  // Sent before this time.
+  google.protobuf.Timestamp before = 8;
+  // The next page: the last page's next_cursor.
+  string cursor = 9;
+  // 1 to 50; defaults to 25.
+  int32 limit = 10;
+}
+
+// Something a message has, for SearchMessagesRequest.has.
+enum SearchHas {
+  SEARCH_HAS_UNSPECIFIED = 0;
+  // A link in its text, or an embed linking somewhere.
+  SEARCH_HAS_LINK = 1;
+  SEARCH_HAS_EMBED = 2;
+  // Any attachment.
+  SEARCH_HAS_FILE = 3;
+  // A picture attached, or in an embed.
+  SEARCH_HAS_PICTURE = 4;
+  SEARCH_HAS_VIDEO = 5;
+  SEARCH_HAS_SOUND = 6;
+  // Pings @everyone or @here.
+  SEARCH_HAS_EVERYONE_MENTION = 7;
+}
+
+message SearchMessagesResponse {
+  // Newest first.
+  repeated SearchResult results = 1;
+  // Profiles of everyone who wrote a result on this page.
+  repeated User authors = 2;
+  // How many messages match in all, on the first page only (0 on later ones).
+  int64 total = 3;
+  // Set while more results remain: pass it as the next request's cursor.
+  string next_cursor = 4;
+  // The server's older messages are still being added to its index, so some
+  // of them may be missing from the results. Recent ones are always there.
+  bool indexing = 5;
+  // While indexing, about how far along it is, 0 to 100.
+  int32 indexed_percent = 6;
+}
+
+message SearchResult {
+  Message message = 1;
+  // Where the words searched for are in the message's content, in order.
+  repeated TextRange highlights = 2;
+}
+
+// A stretch of text: UTF-16 code units from start up to (not including) end,
+// as JavaScript strings count them.
+message TextRange {
+  int32 start = 1;
+  int32 end = 2;
+}

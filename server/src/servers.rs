@@ -44,6 +44,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0017_shared_channels.sql"),
     include_str!("../migrations/server/0018_voice_video_off.sql"),
     include_str!("../migrations/server/0019_secure_history.sql"),
+    include_str!("../migrations/server/0021_search.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -277,6 +278,16 @@ impl ServerDb {
         let _alone = self.db.alone().await;
         self.writable()?;
         self.run(actor_id, f).await
+    }
+
+    /// Runs a change that sends no events, alongside other writes, in its own
+    /// transaction: for what the server keeps about itself, like the search
+    /// index. Refused while the server is being moved, like any write.
+    pub async fn write_quiet<T>(&self, f: impl AsyncFnOnce(&Connection) -> Result<T> + Clone) -> Result<T> {
+        self.writable()?;
+        let _shared = self.db.shared().await;
+        self.writable()?;
+        db::transaction(&db::connect(&self.db)?, f).await
     }
 
     /// Refuses changes while the server is being moved to another shard: the

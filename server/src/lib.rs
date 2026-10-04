@@ -27,6 +27,7 @@ pub mod recordings;
 pub mod replica;
 pub mod reports;
 pub mod rtc;
+pub mod search;
 pub mod servers;
 pub mod settings;
 pub mod sso;
