@@ -64,6 +64,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "agent_creation", get: (s) => s.agentCreation },
   { path: "shared_channels", get: (s) => s.sharedChannels },
   { path: "mcp", get: (s) => s.mcp },
+  { path: "profile_effects", get: (s) => s.profileEffects },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
   { path: "default_limits.channels", get: (s) => s.defaultLimits?.channels },
@@ -206,6 +207,7 @@ export function InstanceSettingsDialog({
                 { id: "agent-creation", label: "Who can make agents", keywords: "bots integrations" },
                 { id: "mcp", label: "Agents through MCP", keywords: "mcp claude ai model context protocol" },
                 { id: "shared-channels", label: "Shared channels", keywords: "share connect servers slack connect" },
+                { id: "profile-effects", label: "Profile effects", keywords: "sparkles petals animation card decoration" },
               ],
             },
             {
@@ -503,6 +505,20 @@ export function InstanceSettingsDialog({
                   hint="Admins of two servers here can show one channel in both. Turned off, nobody can start a new one; channels already shared stay until either side ends them."
                 />
               </Setting>
+              <Setting
+                id="profile-effects"
+                title="Profile effects"
+                defaultLabel={defaults.profileEffects ? "on" : "off"}
+                delay={0.28}
+                {...resetter("profile_effects")}
+              >
+                <Toggle
+                  checked={draft.profileEffects}
+                  onChange={(on) => patch((d) => (d.profileEffects = on))}
+                  label="People can put an effect on their profile card"
+                  hint="Petals, stars and the like, drawn by the app from your theme's colors. Turned off, nobody's shows, and everyone's pick comes back when it's on again."
+                />
+              </Setting>
             </>
           )}
           {tab === "sso" && (
@@ -722,6 +738,7 @@ const COPIED = [
   ...CALL_FIELDS,
   { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) },
   { path: "mcp", copy: (into: InstanceSettings, from: InstanceSettings) => (into.mcp = from.mcp) },
+  { path: "profile_effects", copy: (into: InstanceSettings, from: InstanceSettings) => (into.profileEffects = from.profileEffects) },
 ];
 
 /** Copies the named settings from one draft into another. */

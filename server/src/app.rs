@@ -459,6 +459,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         shared_channels: settings.shared_channels,
         federation: settings.shared_channels && settings.federation && !settings.public_url.is_empty(),
         mcp: settings.mcp,
+        profile_effects: settings.profile_effects,
         announcement,
         build: Some(pb::Build {
             version: crate::VERSION.into(),

@@ -113,6 +113,20 @@ fn text(field: &str, value: &str, min: usize, max: usize) -> Result<String> {
     Ok(value.to_string())
 }
 
+/// A profile effect's id: lowercase letters, digits and dashes, up to 32, or
+/// empty for none. Ids are the apps' to name (docs/profile-effects.md), so the
+/// server checks only the shape and apps show nothing for one they don't know.
+fn effect_id(value: &str) -> Result<String> {
+    let value = value.trim();
+    let shaped = value.len() <= 32
+        && value.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !value.starts_with('-');
+    if !shaped {
+        return Err(Error::invalid("effect is an id of lowercase letters, digits and dashes, up to 32"));
+    }
+    Ok(value.to_string())
+}
+
 /// An optional http(s) URL, such as an icon or avatar.
 fn url(field: &str, value: &str) -> Result<String> {
     let value = value.trim();
