@@ -64,6 +64,8 @@ import { copyIdItem } from "@/components/menus/common";
 import { messageMenu } from "@/components/menus/message";
 import { items } from "@/lib/context-menu";
 import { Embeds } from "@/components/chat/Embeds";
+import { PollCard } from "@/components/chat/Poll";
+import { PollPlace, type PollPlaceValue } from "@/components/chat/pollPlace";
 import { Attachments, PendingFiles } from "@/components/chat/Attachments";
 import { GifMessage } from "@/components/chat/GifMessage";
 import { AppBadge } from "@/components/AppBadge";
@@ -217,6 +219,17 @@ export const MessageList = forwardRef<
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
   const myRoleIds = memberById.get(me?.id ?? "")?.roleIds;
+  const pollPlace = useMemo<PollPlaceValue>(
+    () => ({
+      instanceKey,
+      serverId,
+      channelId: channel.id,
+      canVote: !guestSide && !access.pending,
+      moderator: manager && !guestSide,
+      emojis,
+    }),
+    [instanceKey, serverId, channel.id, guestSide, access.pending, manager, emojis],
+  );
   const look = useMemo<ServerLook>(
     () => ({
       instanceKey,
@@ -370,6 +383,7 @@ export const MessageList = forwardRef<
 
   return (
     <ServerLookProvider value={look}>
+    <PollPlace.Provider value={pollPlace}>
     <div className="relative min-h-0 flex-1">
       <div ref={scroller} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">
         <motion.div
@@ -480,6 +494,7 @@ export const MessageList = forwardRef<
         )}
       </AnimatePresence>
     </div>
+    </PollPlace.Provider>
     </ServerLookProvider>
   );
 });
@@ -834,6 +849,7 @@ const MessageRow = memo(function MessageRow({
             <Embeds embeds={message.embeds} animate={animate} />
             <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
             {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
+            {message.poll && <PollCard message={message} mine={mine} animate={animate} />}
           </>
         )}
       </MessageLine>

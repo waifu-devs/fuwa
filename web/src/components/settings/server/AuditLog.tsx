@@ -1,5 +1,6 @@
 import {
   ArrowDownUpIcon,
+  BarChart3Icon,
   BotIcon,
   FrownIcon,
   PartyPopperIcon,
@@ -115,6 +116,7 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.THREAD_LOCK]: { label: "Locked threads", icon: LockIcon, tint: "bg-amber-500/15 text-amber-500" },
   [AuditAction.THREAD_UNLOCK]: { label: "Unlocked threads", icon: LockOpenIcon, tint: "bg-emerald-500/15 text-emerald-500" },
   [AuditAction.THREAD_DELETE]: { label: "Deleted threads", icon: MessagesSquareIcon, tint: "bg-destructive/15 text-destructive" },
+  [AuditAction.POLL_END]: { label: "Ended polls", icon: BarChart3Icon, tint: "bg-amber-500/15 text-amber-500" },
   [AuditAction.ONBOARDING_UPDATE]: { label: "Onboarding", icon: PartyPopperIcon, tint: "bg-pink-500/15 text-pink-500" },
 };
 
@@ -710,6 +712,18 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
       return (
         <>
           {actor} let {target} back into <b>#{entry.channelName}</b>
+        </>
+      );
+    case AuditAction.POLL_END:
+      return (
+        <>
+          {actor} ended {target}'s poll
+          {entry.channelName && (
+            <>
+              {" "}
+              in <b>#{entry.channelName}</b>
+            </>
+          )}
         </>
       );
     case AuditAction.THREAD_LOCK:
