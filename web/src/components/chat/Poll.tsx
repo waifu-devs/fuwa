@@ -45,9 +45,10 @@ function useNow(endsAt: number): number {
 /**
  * A poll under its message. Answers are buttons: pick one (or several) and
  * the bars grow to everyone's results, your picks marked with a check that
- * pops in. Whether votes are anonymous shows before you vote. The creator
- * and moderators can end it early; an ended poll keeps its results, the
- * winning answer crowned.
+ * pops in. Whether votes are anonymous shows before you vote; an anonymous
+ * poll keeps its counts hidden until it ends, so nobody can tell a pick from
+ * a count going up. The creator and moderators can end it early; an ended
+ * poll keeps its results, the winning answer crowned.
  */
 export function PollCard({ message, mine, animate }: { message: Message; mine: boolean; animate: boolean }) {
   const place = useContext(PollPlace);
@@ -60,7 +61,9 @@ export function PollCard({ message, mine, animate }: { message: Message; mine: b
   const chosen = picking ?? poll.myAnswerIds;
   const picked = new Set(chosen);
   const voted = poll.myAnswerIds.length > 0;
-  const results = voted || closed || peek;
+  // Anonymous polls show counts only once they're over (the server sends none before).
+  const hidden = poll.anonymous && !closed;
+  const results = !hidden && (voted || closed || peek);
   const canVote = !!place?.canVote && !closed;
   const total = poll.answers.reduce((n, a) => n + Number(a.votes), 0);
   const top = Math.max(0, ...poll.answers.map((a) => Number(a.votes)));
@@ -93,13 +96,14 @@ export function PollCard({ message, mine, animate }: { message: Message; mine: b
     else vote(chosen.length === 1 && chosen[0] === answer.id ? [] : [answer.id]);
   }
 
-  const status = poll.endedAt
-    ? `Ended ${formatFull(toDate(poll.endedAt))}`
-    : closed
-      ? `Ended ${formatFull(new Date(endsAt))}`
-      : endsAt
-        ? left(endsAt - now)
-        : "Runs until it's ended";
+  const counting = closed && poll.anonymous && total === 0 && poll.voters > 0n;
+  const status = counting
+    ? "Counting the votes…"
+    : poll.endedAt
+      ? `Ended ${formatFull(toDate(poll.endedAt))}`
+      : closed
+        ? `Ended ${formatFull(new Date(endsAt))}`
+        : `${endsAt ? left(endsAt - now) : "Runs until it's ended"}${hidden ? " · results show at the end" : ""}`;
 
   return (
     <motion.section
@@ -137,7 +141,7 @@ export function PollCard({ message, mine, animate }: { message: Message; mine: b
         messageId={message.id}
         status={status}
         busy={!!picking}
-        canPeek={!results && !closed}
+        canPeek={!results && !closed && !hidden}
         onPeek={() => setPeek(true)}
         canTakeBack={voted && canVote}
         onTakeBack={() => vote([])}
@@ -160,7 +164,11 @@ function PollHeader({ poll, closed }: { poll: Poll; closed: boolean }) {
         <span className="rounded-full bg-muted px-2 py-0.5">{poll.multiple ? "Pick any" : "Pick one"}</span>
         <span
           className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5"
-          title={poll.anonymous ? "Nobody can see who voted for what, not even admins" : "Everyone here can see who voted for what"}
+          title={
+            poll.anonymous
+              ? "Nobody here, moderators and admins included, can see who voted for what. Results show when it ends."
+              : "Everyone here can see who voted for what"
+          }
         >
           {poll.anonymous ? <EyeOffIcon className="size-3" /> : <EyeIcon className="size-3" />}
           {poll.anonymous ? "Anonymous" : "Public votes"}

@@ -558,6 +558,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     }
     if matches!(app.link, Link::Alone | Link::Shard(_)) {
         spawn_sso_rechecks(app.clone());
+        spawn_poll_closings(app.clone());
     }
     spawn_signal_handler(app.shutdown.clone());
     crate::api::spawn_voice_sweeper(app.clone());
@@ -608,6 +609,27 @@ fn spawn_sso_rechecks(app: Arc<App>) {
                         }
                     }
                     since = now;
+                }
+            }
+        }
+    });
+}
+
+/// Every minute: anonymous polls whose time ran out lose their votes (only
+/// the counts stay) and show everyone the counts.
+fn spawn_poll_closings(app: Arc<App>) {
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            tokio::select! {
+                _ = app.shutdown.cancelled() => return,
+                _ = every.tick() => {
+                    let now = crate::id::now_ms();
+                    for sdb in app.servers.all() {
+                        if crate::api::close_due_polls(&sdb, now).await.is_err() {
+                            tracing::warn!(server = %sdb.id, "couldn't close the anonymous polls whose time ran out");
+                        }
+                    }
                 }
             }
         }

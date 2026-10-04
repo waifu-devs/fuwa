@@ -1027,6 +1027,9 @@ async fn home_ask(sdb: &ServerDb, ask: cpb::ShareAsk, from: &Instance) -> Result
             if !shareable(&channel) || link_of(conn, &channel.id).await?.is_some() {
                 return Err(Error::FailedPrecondition("that channel can't be shared".into()));
             }
+            if super::polls::running_in(conn, &channel.id).await? {
+                return Err(Error::FailedPrecondition("that channel has polls running; try again once they end".into()));
+            }
             let guests = guests_of(conn, &channel.id).await?;
             if guests.iter().any(|g| g.server.id == guest.id) {
                 return Err(Error::AlreadyExists("this server already shows that channel, or has asked to".into()));
@@ -1869,6 +1872,11 @@ impl SharedChannelService for Api {
                         if !shareable(&channel) || link_of(conn, &channel.id).await?.is_some() {
                             return Err(Error::invalid(
                                 "only text and announcement channels of this server's own can be shared",
+                            ));
+                        }
+                        if super::polls::running_in(conn, &channel.id).await? {
+                            return Err(Error::FailedPrecondition(
+                                "end this channel's polls before sharing it: other servers can't vote".into(),
                             ));
                         }
                         if guests_of(conn, &channel.id).await?.len() >= MAX_GUESTS {

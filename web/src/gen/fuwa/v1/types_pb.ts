@@ -1732,8 +1732,10 @@ export const MessageSchema: GenMessage<Message> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_types, 28);
 
 /**
- * A poll and how it stands. Counts are everyone's; my_answer_ids is the
- * reader's own vote, filled only in answers to them (never in events).
+ * A poll and how it stands. Counts are everyone's (for an anonymous poll
+ * that's still running, only `voters`: each answer's votes are 0 until it
+ * closes); my_answer_ids is the reader's own vote, filled only in answers
+ * to them (never in events), and lost once an anonymous poll closes.
  *
  * @generated from message fuwa.v1.Poll
  */
@@ -1754,7 +1756,8 @@ export type Poll = Message$1<"fuwa.v1.Poll"> & {
   multiple: boolean;
 
   /**
-   * Votes are secret: ListPollVoters refuses, and events never say who.
+   * Votes are secret: ListPollVoters refuses, events never say who, and
+   * the counts per answer show only once it closes.
    *
    * @generated from field: bool anonymous = 4;
    */
@@ -2658,7 +2661,8 @@ export const MessageUpdatedSchema: GenMessage<MessageUpdated> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_types, 48);
 
 /**
- * Someone voted in a poll, took a vote back, or the poll was ended. The
+ * Someone voted in a poll, took a vote back, or the poll was ended (or,
+ * for an anonymous poll, its time ran out, when its counts show). The
  * event's actor is the voter only when the poll's votes are public; for an
  * anonymous poll it's empty.
  *

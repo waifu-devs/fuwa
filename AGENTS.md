@@ -130,11 +130,18 @@
     kept in the server file's `polls` (question, answers and the tally, which
     every vote rewrites, so votes at once clash and run again and the counts
     in `PollUpdated` events follow each other) and `poll_votes` (one row per
-    account and answer). Anonymous polls never say who voted: their events
-    have no actor, `ListPollVoters` refuses them, and votes are read back only
-    for the voter (`my_answer_ids`, never in events). Not in shared or secure
-    channels, nor direct messages. Deleting a message, a channel or a banned
-    member's messages takes their polls and votes along (`polls::forget`).
+    voter and answer, no time). Anonymous polls never say who voted: votes
+    are stored under an HMAC of the account id keyed by the poll's own
+    `voter_key`, their events have no actor, `ListPollVoters` refuses them,
+    exports leave their votes out, and counts per answer stay hidden until
+    they close (`shown`); closing (ending, or `close_due` every minute for
+    those whose time ran out) deletes their votes and key and keeps the
+    counts. Votes are read back only for the voter (`my_answer_ids`, never
+    in events). Not in shared or secure channels, nor direct messages (a
+    channel with polls running can't be shared). Deleting a message, a
+    channel, a banned member's messages or an account takes their polls or
+    votes along (`polls::forget`, `forget_voter`). Votes per account a minute
+    are capped by `poll_votes_per_minute`, unlimited unless set.
   - `webhooks.rs`: posting through a webhook over plain HTTP
     (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
     body), with each webhook's 30-a-minute limit (counted only for posts

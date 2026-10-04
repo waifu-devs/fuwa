@@ -6843,9 +6843,11 @@ async fn polls_count_votes_and_keep_anonymous_ones_secret() {
     let taken = vote(&mut c, &mika, &sid, &message.id, &[]).await.unwrap();
     assert_eq!((taken.voters, taken.answers[2].votes), (0, 0));
 
-    // Anonymous: nobody learns who, not even the owner.
+    // Anonymous: nobody learns who, not even the owner, nor the counts per
+    // answer until it ends; the voter sees their own pick.
     let secret = send_poll(&mut c, &juan, &sid, &general, new_poll("Secret?", &["Yes", "No"], true)).await.unwrap();
-    vote(&mut c, &mika, &sid, &secret.id, &[1]).await.unwrap();
+    let mine = vote(&mut c, &mika, &sid, &secret.id, &[1]).await.unwrap();
+    assert_eq!((mine.my_answer_ids.as_slice(), mine.voters, mine.answers[0].votes), (&[1][..], 1, 0));
     let (actor, update) = loop {
         let (actor, update) = next_poll_update(&mut stream).await;
         if update.message_id == secret.id {
@@ -6853,7 +6855,8 @@ async fn polls_count_votes_and_keep_anonymous_ones_secret() {
         }
     };
     assert!(actor.is_empty() && update.voter_id.is_empty() && update.voter_answer_ids.is_empty());
-    assert_eq!(update.poll.unwrap().answers[0].votes, 1);
+    let shown = update.poll.unwrap();
+    assert_eq!((shown.voters, shown.answers[0].votes), (1, 0));
     let err = c
         .messages
         .list_poll_voters(authed(
@@ -6913,6 +6916,33 @@ async fn polls_count_votes_and_keep_anonymous_ones_secret() {
     assert_eq!(log.entries[0].target_id, mika_user.id);
     assert_eq!(log.entries[0].channel_name, "general");
 
+    // Ending the anonymous one shows its counts and forgets who voted: the
+    // voter's own pick is gone too.
+    let ended = c
+        .messages
+        .end_poll(authed(&juan, pb::EndPollRequest { server_id: sid.clone(), message_id: secret.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .poll
+        .unwrap();
+    assert_eq!((ended.voters, ended.answers[0].votes), (1, 1));
+    let seen = c
+        .messages
+        .get_message(authed(
+            &mika,
+            pb::GetMessageRequest { server_id: sid.clone(), message_id: secret.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .message
+        .unwrap()
+        .poll
+        .unwrap();
+    assert_eq!(seen.answers[0].votes, 1);
+    assert!(seen.my_answer_ids.is_empty());
+
     // Text can still be edited; the poll stays.
     let edited = c
         .messages
@@ -6962,6 +6992,40 @@ async fn polls_count_votes_and_keep_anonymous_ones_secret() {
         .unwrap();
     assert_eq!(vote(&mut c, &mika, &sid, &secret.id, &[2]).await.unwrap_err().code(), Code::NotFound);
 
+    // A deleted account's votes come off the polls still running.
+    let (ren, _, _) = sign_up(&mut c, "ren").await;
+    c.servers
+        .join_server(authed(&ren, pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    let open = send_poll(&mut c, &juan, &sid, &general, new_poll("Still here?", &["Yes", "No"], false)).await.unwrap();
+    let hidden = send_poll(&mut c, &juan, &sid, &general, new_poll("Quietly?", &["Yes", "No"], true)).await.unwrap();
+    assert_eq!(vote(&mut c, &ren, &sid, &open.id, &[1]).await.unwrap().answers[0].votes, 1);
+    assert_eq!(vote(&mut c, &ren, &sid, &hidden.id, &[2]).await.unwrap().voters, 1);
+    c.account
+        .delete_account(authed(
+            &ren,
+            pb::DeleteAccountRequest { password: "correct horse battery".into(), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    for id in [&open.id, &hidden.id] {
+        let poll = c
+            .messages
+            .get_message(authed(
+                &juan,
+                pb::GetMessageRequest { server_id: sid.clone(), message_id: id.clone(), ..Default::default() },
+            ))
+            .await
+            .unwrap()
+            .into_inner()
+            .message
+            .unwrap()
+            .poll
+            .unwrap();
+        assert_eq!((poll.voters, poll.answers[0].votes, poll.answers[1].votes), (0, 0, 0));
+    }
+
     drop(stream);
     instance.stop().await;
 }
@@ -6984,7 +7048,7 @@ async fn votes_at_once_are_all_counted_in_order() {
         .channels[0]
         .id
         .clone();
-    let poll = send_poll(&mut c, &owner, &sid, &general, new_poll("Best?", &["A", "B"], true)).await.unwrap();
+    let poll = send_poll(&mut c, &owner, &sid, &general, new_poll("Best?", &["A", "B"], false)).await.unwrap();
     let mut voters = Vec::new();
     for n in 0..12 {
         let (token, _, _) = sign_up(&mut c, &format!("voter{n}")).await;

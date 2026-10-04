@@ -72,6 +72,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "default_limits.recording_bytes", get: (s) => s.defaultLimits?.recordingBytes },
   { path: "picture_upload_bytes", get: (s) => s.pictureUploadBytes },
   { path: "picture_upload_bytes_per_day", get: (s) => s.pictureUploadBytesPerDay },
+  { path: "poll_votes_per_minute", get: (s) => s.pollVotesPerMinute },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
@@ -607,6 +608,16 @@ export function InstanceSettingsDialog({
                   onChange={(v) => patch((d) => (d.pictureUploadBytesPerDay = v))}
                 />
               </Setting>
+              <Setting
+                id="poll-votes-per-minute"
+                title="Poll votes per minute"
+                hint="How many times one account may vote, change or take back a vote in polls in a minute. Every vote is a live update to everyone in the channel."
+                defaultLabel={defaults.pollVotesPerMinute === undefined ? "no limit" : `${defaults.pollVotesPerMinute.toLocaleString()} a minute`}
+                delay={0.12}
+                {...resetter("poll_votes_per_minute")}
+              >
+                <Cap label="Up to" placeholder="30" value={draft.pollVotesPerMinute} onChange={(v) => patch((d) => (d.pollVotesPerMinute = v))} />
+              </Setting>
             </>
           )}
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
@@ -755,6 +766,9 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "picture_upload_bytes_per_day":
         into.pictureUploadBytesPerDay = from.pictureUploadBytesPerDay;
+        break;
+      case "poll_votes_per_minute":
+        into.pollVotesPerMinute = from.pollVotesPerMinute;
         break;
       default: {
         // Settings copied above by their own pages' functions.

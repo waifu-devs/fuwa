@@ -460,6 +460,14 @@ impl ServerDb {
                 conn.execute("UPDATE server SET sso = ?1", [sso.stored()]).await?;
             }
             conn.execute("DELETE FROM sso_sign_ins", ()).await?;
+            // Who voted in anonymous polls stays here too: their votes and
+            // keys are left out (their counts are in `polls.tally`).
+            conn.execute(
+                "DELETE FROM poll_votes WHERE message_id IN (SELECT message_id FROM polls WHERE anonymous = 1)",
+                (),
+            )
+            .await?;
+            conn.execute("UPDATE polls SET voter_key = NULL", ()).await?;
             db::pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").await?;
         }
         for suffix in ["-wal", "-log"] {

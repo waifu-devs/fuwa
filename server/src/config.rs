@@ -200,6 +200,9 @@ pub struct Limits {
     /// FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY: how many times a day (UTC) one
     /// server's Smart filter may ask its provider.
     pub automod_checks_per_day: Option<i64>,
+    /// FUWA_LIMIT_POLL_VOTES_PER_MINUTE: how many votes one account may make
+    /// in polls in a minute.
+    pub poll_votes_per_minute: Option<i64>,
 }
 
 impl Limits {
@@ -346,6 +349,7 @@ impl Config {
             picture_upload_bytes: upload_bytes("FUWA_LIMIT_PICTURE_UPLOAD")?,
             picture_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY")?,
             automod_checks_per_day: count("FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY")?,
+            poll_votes_per_minute: count("FUWA_LIMIT_POLL_VOTES_PER_MINUTE")?,
         };
 
         let do_not_track = get("DO_NOT_TRACK").is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"));

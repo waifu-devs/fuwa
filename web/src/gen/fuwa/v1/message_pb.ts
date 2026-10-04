@@ -94,7 +94,10 @@ export type NewPoll = Message<"fuwa.v1.NewPoll"> & {
   multiple: boolean;
 
   /**
-   * Nobody can see who voted for what, not even admins.
+   * Other members, moderators and admins never see who voted for what, and
+   * the counts per answer show only once it ends. The instance's operator
+   * could still work out votes from its database while the poll runs; when
+   * it ends they're deleted and only the counts stay.
    *
    * @generated from field: bool anonymous = 4;
    */

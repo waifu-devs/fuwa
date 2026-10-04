@@ -267,7 +267,7 @@ function PollForm({ instanceKey, serverId, channelId, onDone }: { instanceKey: s
           title="Anonymous votes"
           about={
             anonymous
-              ? "Nobody can see who voted for what, not even admins. Voters see this before they vote."
+              ? "Nobody here, moderators and admins included, sees who voted for what, and results show when the poll ends. Voters see this before they vote."
               : "Everyone in the channel can see who voted for what. Voters see this before they vote."
           }
           checked={anonymous}

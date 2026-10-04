@@ -16,22 +16,27 @@ CREATE TABLE polls (
     ends_at INTEGER,
     ended_at INTEGER,
     ended_by_id TEXT,
-    tally BLOB
+    tally BLOB,
+    -- Anonymous polls only, while they run: 32 random bytes that key the
+    -- voters in poll_votes. Dropped, with the votes, when the poll closes.
+    voter_key BLOB
 );
 
 CREATE INDEX polls_by_channel ON polls (channel_id);
+CREATE INDEX polls_running_anonymously ON polls (ends_at) WHERE voter_key IS NOT NULL;
 
--- Who picked what: one row per account and answer. Only ever read back for
--- the voter themselves, or for public polls.
+-- Who picked what: one row per voter and answer, and nothing more (no time).
+-- `voter` is the account id in public polls; in anonymous ones it's an
+-- HMAC-SHA256 of the account id under the poll's voter_key, so the file
+-- names nobody, and once the poll closes the rows and key are gone.
 CREATE TABLE poll_votes (
     message_id TEXT NOT NULL,
-    account_id TEXT NOT NULL,
+    voter TEXT NOT NULL,
     answer_id INTEGER NOT NULL,
-    created_at INTEGER NOT NULL,
-    PRIMARY KEY (message_id, account_id, answer_id)
+    PRIMARY KEY (message_id, voter, answer_id)
 );
 
-CREATE INDEX poll_votes_by_answer ON poll_votes (message_id, answer_id, account_id);
+CREATE INDEX poll_votes_by_answer ON poll_votes (message_id, answer_id, voter);
 
 -- CREATE_POLLS (bit 27) goes to whoever could send messages (bit 12), and a
 -- channel that allowed or kept someone from sending does the same for polls.
