@@ -20,6 +20,8 @@ pub(super) const NO_SHARED_FILES: &str = "files can't be sent in a channel share
 const MAX_EMBEDS: usize = 10;
 /// Most roles one message pings.
 const MAX_ROLE_MENTIONS: usize = 50;
+/// Most members one message names that it says it mentions.
+const MAX_USER_MENTIONS: usize = 50;
 
 /// What's stored in a message's `extras` column.
 #[derive(Clone, PartialEq, prost::Message)]
@@ -43,6 +45,8 @@ struct Extras {
     emojis: Vec<pb::Emoji>,
     #[prost(message, optional, tag = "9")]
     gif: Option<pb::MessageGif>,
+    #[prost(string, repeated, tag = "10")]
+    mention_user_ids: Vec<String>,
 }
 
 impl Extras {
@@ -57,6 +61,7 @@ impl Extras {
             poll: message.poll.is_some(),
             emojis: message.emojis.clone(),
             gif: message.gif.clone(),
+            mention_user_ids: message.mention_user_ids.clone(),
         };
         (extras != Extras::default()).then(|| extras.encode_to_vec())
     }
@@ -170,6 +175,44 @@ fn kept_emojis(had: Vec<pb::Emoji>, checked: Vec<pb::Emoji>, content: &str) -> V
     kept
 }
 
+/// The ids written as `<@id>` or `<@!id>` in `content`, once each, in order.
+fn user_tokens(content: &str) -> Vec<&str> {
+    let mut ids = Vec::new();
+    for (start, _) in content.match_indices("<@") {
+        let rest = &content[start + 2..];
+        let rest = rest.strip_prefix('!').unwrap_or(rest);
+        if let Some(end) = rest.find('>')
+            && end > 0
+            && end <= 32
+            && rest[..end].bytes().all(|b| b.is_ascii_alphanumeric())
+            && !ids.contains(&&rest[..end])
+        {
+            ids.push(&rest[..end]);
+        }
+    }
+    ids
+}
+
+/// The members `content` names, for [`pb::Message::mention_user_ids`]: ids
+/// of anyone not in the server are left out, so a client can trust them.
+async fn mentioned_users(conn: &turso::Connection, content: &str) -> Result<Vec<String>> {
+    let mut ids = Vec::new();
+    // Looked up one by one, so only so many names are looked at.
+    for id in user_tokens(content).into_iter().take(2 * MAX_USER_MENTIONS) {
+        if ids.len() >= MAX_USER_MENTIONS {
+            break;
+        }
+        let member =
+            query_one(conn, "SELECT user_id FROM members WHERE user_id = ?1", [id], |r| r.get::<String>(0)).await?;
+        if let Some(id) = member
+            && !ids.contains(&id)
+        {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
 /// Who a message pings, given what its author can do in its channel: everyone
 /// if they may, and the roles it names that are mentionable or that they may
 /// mention anyway.
@@ -228,6 +271,7 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 also_in_channel: r.get(10)?,
                 poll: None,
                 gif: None,
+                mention_user_ids: vec![],
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -253,6 +297,7 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
         message.poll = extras.poll.then(pb::Poll::default);
         message.emojis = extras.emojis;
         message.gif = extras.gif;
+        message.mention_user_ids = extras.mention_user_ids;
     }
     Ok(message)
 }
@@ -462,7 +507,8 @@ pub(super) async fn check_slowmode(
     }
     let period = i64::from(channel.slowmode_seconds) * 1000;
     let slowed = |sent_at: i64| {
-        Error::ResourceExhausted(format!("slow mode is on; you can send again in {}", wait(sent_at + period - now)))
+        let left = sent_at + period - now;
+        Error::Limited(format!("slow mode is on; you can send again in {}", wait(left)), left)
     };
     let last = query_one(
         conn,
@@ -821,9 +867,11 @@ impl MessageService for Api {
                         media::size_label(limit)
                     )));
                 }
-                let mut pictures = automod::picture_links(&req.attachments, &req.embeds);
-                // The GIF too: providers read its first frame.
+                let mut pictures = automod::picture_links(&req.attachments, &req.embeds, &[]);
+                // The GIF too: providers read its first frame. Then emoji
+                // from other servers, the smallest.
                 pictures.extend(gif.iter().map(|gif| gif.url.clone()));
+                pictures.extend(automod::picture_links(&[], &[], &emojis));
                 // The Smart filter's provider is asked alongside: the message
                 // goes out at once, and its answer is acted on when it comes.
                 let (asked, later) = (
@@ -876,6 +924,7 @@ impl MessageService for Api {
                         }
                         let (mentions_everyone, mention_role_ids) =
                             mentions(conn, &sdb.id, &access, &channel.id, &req.content).await?;
+                        let mention_user_ids = mentioned_users(conn, &req.content).await?;
                         let message = pb::Message {
                             id: new_id(),
                             server_id: sdb.id.clone(),
@@ -899,6 +948,7 @@ impl MessageService for Api {
                             also_in_channel: parent.is_some() && req.also_send_to_channel,
                             poll: poll.clone(),
                             gif: gif.clone(),
+                            mention_user_ids,
                         };
                         // Checked again here, where no other message can take the room meanwhile.
                         if file_bytes > 0
@@ -1063,10 +1113,19 @@ impl MessageService for Api {
                     _ => vec![],
                 };
                 let (asked, later) = match before {
-                    Some(m) if m.author_id == account.id && m.content != req.content => (
-                        None,
-                        automod::ask_after(&self.app, &sdb, &member, &access, &m.channel_id, &reviewed, &[]).await,
-                    ),
+                    Some(m) if m.author_id == account.id && m.content != req.content => {
+                        // The text is asked about with the emoji from other
+                        // servers it newly carries; the message's other
+                        // pictures can't change.
+                        let added: Vec<pb::Emoji> =
+                            checked.iter().filter(|e| !m.emojis.iter().any(|had| had.id == e.id)).cloned().collect();
+                        let pictures = automod::picture_links(&[], &[], &added);
+                        (
+                            None,
+                            automod::ask_after(&self.app, &sdb, &member, &access, &m.channel_id, &reviewed, &pictures)
+                                .await,
+                        )
+                    }
                     _ => (None, None),
                 };
                 let message = sdb
@@ -1111,6 +1170,7 @@ impl MessageService for Api {
                         let old_size = stored_size(&message);
                         (message.mentions_everyone, message.mention_role_ids) =
                             mentions(conn, &sdb.id, &access, &message.channel_id, &req.content).await?;
+                        message.mention_user_ids = mentioned_users(conn, &req.content).await?;
                         message.emojis =
                             kept_emojis(std::mem::take(&mut message.emojis), checked.clone(), &req.content);
                         message.content = req.content.clone();
@@ -1302,5 +1362,6 @@ mod tests {
         assert!(!says_everyone("@everyoneelse"));
         assert!(!says_everyone("@@here"));
         assert_eq!(role_tokens("<@&ABC> and <@&ABC>, <@&> <@&D-E> <@&FG>"), ["ABC", "FG"]);
+        assert_eq!(user_tokens("<@AB> <@!AB> <@!CD> <@&EF> <@> <@G-H> <@IJ"), ["AB", "CD"]);
     }
 }

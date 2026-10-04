@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/event.proto.
  */
 export const file_fuwa_v1_event: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL2V2ZW50LnByb3RvEgdmdXdhLnYxIlEKDFNlcnZlckN1cnNvchIRCglzZXJ2ZXJfaWQYASABKAkSGwoOYWZ0ZXJfc2VxdWVuY2UYAiABKANIAIgBAUIRCg9fYWZ0ZXJfc2VxdWVuY2UiOgoQU3Vic2NyaWJlUmVxdWVzdBImCgdzZXJ2ZXJzGAEgAygLMhUuZnV3YS52MS5TZXJ2ZXJDdXJzb3IiWgoRU3Vic2NyaWJlUmVzcG9uc2USHQoFZXZlbnQYASABKAsyDi5mdXdhLnYxLkV2ZW50EiYKBXJlYWR5GAIgASgLMhcuZnV3YS52MS5TdWJzY3JpYmVSZWFkeSI2Cg5TdWJzY3JpYmVSZWFkeRIkCgdzZXJ2ZXJzGAEgAygLMhMuZnV3YS52MS5TZXJ2ZXJIZWFkIjEKClNlcnZlckhlYWQSEQoJc2VydmVyX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgDIk0KEUxpc3RFdmVudHNSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIWCg5hZnRlcl9zZXF1ZW5jZRgCIAEoAxINCgVsaW1pdBgDIAEoBSJGChJMaXN0RXZlbnRzUmVzcG9uc2USHgoGZXZlbnRzGAEgAygLMg4uZnV3YS52MS5FdmVudBIQCghoYXNfbW9yZRgCIAEoCDKbAQoMRXZlbnRTZXJ2aWNlEkQKCVN1YnNjcmliZRIZLmZ1d2EudjEuU3Vic2NyaWJlUmVxdWVzdBoaLmZ1d2EudjEuU3Vic2NyaWJlUmVzcG9uc2UwARJFCgpMaXN0RXZlbnRzEhouZnV3YS52MS5MaXN0RXZlbnRzUmVxdWVzdBobLmZ1d2EudjEuTGlzdEV2ZW50c1Jlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types]);
+  fileDesc("ChNmdXdhL3YxL2V2ZW50LnByb3RvEgdmdXdhLnYxIlEKDFNlcnZlckN1cnNvchIRCglzZXJ2ZXJfaWQYASABKAkSGwoOYWZ0ZXJfc2VxdWVuY2UYAiABKANIAIgBAUIRCg9fYWZ0ZXJfc2VxdWVuY2UiVgoQU3Vic2NyaWJlUmVxdWVzdBImCgdzZXJ2ZXJzGAEgAygLMhUuZnV3YS52MS5TZXJ2ZXJDdXJzb3ISGgoSZm9sbG93X25ld19zZXJ2ZXJzGAIgASgIIoEBChFTdWJzY3JpYmVSZXNwb25zZRIdCgVldmVudBgBIAEoCzIOLmZ1d2EudjEuRXZlbnQSJgoFcmVhZHkYAiABKAsyFy5mdXdhLnYxLlN1YnNjcmliZVJlYWR5EiUKCGZvbGxvd2VkGAMgASgLMhMuZnV3YS52MS5TZXJ2ZXJIZWFkIjYKDlN1YnNjcmliZVJlYWR5EiQKB3NlcnZlcnMYASADKAsyEy5mdXdhLnYxLlNlcnZlckhlYWQiMQoKU2VydmVySGVhZBIRCglzZXJ2ZXJfaWQYASABKAkSEAoIc2VxdWVuY2UYAiABKAMiTQoRTGlzdEV2ZW50c1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhYKDmFmdGVyX3NlcXVlbmNlGAIgASgDEg0KBWxpbWl0GAMgASgFIkYKEkxpc3RFdmVudHNSZXNwb25zZRIeCgZldmVudHMYASADKAsyDi5mdXdhLnYxLkV2ZW50EhAKCGhhc19tb3JlGAIgASgIMpsBCgxFdmVudFNlcnZpY2USRAoJU3Vic2NyaWJlEhkuZnV3YS52MS5TdWJzY3JpYmVSZXF1ZXN0GhouZnV3YS52MS5TdWJzY3JpYmVSZXNwb25zZTABEkUKCkxpc3RFdmVudHMSGi5mdXdhLnYxLkxpc3RFdmVudHNSZXF1ZXN0GhsuZnV3YS52MS5MaXN0RXZlbnRzUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
 
 /**
  * @generated from message fuwa.v1.ServerCursor
@@ -43,9 +43,20 @@ export const ServerCursorSchema: GenMessage<ServerCursor> = /*@__PURE__*/
  */
 export type SubscribeRequest = Message<"fuwa.v1.SubscribeRequest"> & {
   /**
+   * Up to 200. May be empty with `follow_new_servers`, for a stream that only
+   * waits to be added somewhere (an agent with no servers yet, say).
+   *
    * @generated from field: repeated fuwa.v1.ServerCursor servers = 1;
    */
   servers: ServerCursor[];
+
+  /**
+   * Also follow servers the caller joins, or is added to, while the stream is
+   * open (up to 200 in all).
+   *
+   * @generated from field: bool follow_new_servers = 2;
+   */
+  followNewServers: boolean;
 };
 
 /**
@@ -68,6 +79,14 @@ export type SubscribeResponse = Message<"fuwa.v1.SubscribeResponse"> & {
    * @generated from field: fuwa.v1.SubscribeReady ready = 2;
    */
   ready?: SubscribeReady | undefined;
+
+  /**
+   * A server the caller joined, or was added to, now followed: its events
+   * after this sequence come next. Only with `follow_new_servers`.
+   *
+   * @generated from field: fuwa.v1.ServerHead followed = 3;
+   */
+  followed?: ServerHead | undefined;
 };
 
 /**
@@ -193,6 +212,10 @@ export const EventService: GenService<{
    * ones they no longer can as ChannelDeleted, both with sequence 0. A replay
    * goes by what the caller can see now, so after one a client lists the
    * server's channels again to pick up access that changed while it was away.
+   * With `follow_new_servers`, a server the caller joins or is added to while
+   * the stream is open is followed from then on, announced by `followed`. A
+   * session that's signed out, or an agent token that's reset, ends its
+   * streams at once with UNAUTHENTICATED.
    *
    * @generated from rpc fuwa.v1.EventService.Subscribe
    */
