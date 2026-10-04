@@ -10,6 +10,7 @@ use fuwa_desktop::core::dms::{Content, DmStatus, now_ms};
 use fuwa_desktop::core::moderation::{Action, timed_out_until};
 use fuwa_desktop::core::reports;
 use fuwa_desktop::core::store::{Connection, Focus, Store};
+use fuwa_desktop::core::updates;
 use fuwa_desktop::core::vault::ItemKind;
 use fuwa_desktop::core::{Core, Notice};
 use fuwa_server::app::App;
@@ -28,6 +29,7 @@ fn start_instance(dir: &std::path::Path) -> Instance {
         let config = Config::from_lookup(|key| match key {
             "FUWA_DATA_PATH" => Some(dir.clone()),
             "FUWA_TELEMETRY" => Some("off".into()),
+            "FUWA_UPDATE_CHECK" => Some("off".into()),
             _ => None,
         })
         .unwrap();
@@ -306,6 +308,52 @@ fn anonymous_reports_reach_the_instance() {
     };
     assert_eq!(again.unwrap_err().code, tonic::Code::ResourceExhausted);
     assert!(reports::pending().usage >= 1, "kept for the next report");
+
+    instance.app.shutdown.cancel();
+    drop(instance.runtime);
+}
+
+#[test]
+fn updates_are_found_through_the_instance_but_need_a_signature() {
+    // SAFETY: set before anything reads it.
+    unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
+    let data = tempfile::tempdir().unwrap();
+    let instance = start_instance(data.path());
+    let home = tempfile::tempdir().unwrap();
+    let app = Core::start(Paths::under(home.path())).unwrap();
+    app.add_instance(&instance.url, None);
+
+    // The instance knows of no release yet: nothing to show.
+    {
+        let core = app.clone();
+        wait(&app, async move { core.check_for_update(true).await });
+    }
+    assert!(matches!(updates::status(), updates::Status::Failed { .. }), "{:?}", updates::status());
+
+    // A newer release whose signature is from no key this app trusts is shown, never installed.
+    instance.app.releases.set(fuwa_server::releases::Latest {
+        version: "999.0.0".into(),
+        published_at: "2026-10-04T01:00:00Z".into(),
+        notes: "## New\n* shiny".into(),
+        page: "https://github.com/waifu-devs/fuwa/releases/tag/v999.0.0".into(),
+        sums: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  fuwa-desktop-999.0.0-x86_64-linux\n"
+            .into(),
+        signature: "JSwu6VQxqqCDKaTZYOnvyj4afvUkkLyz6FKWw8ykTUwEU39vLaUv9UT4eMqP41oL+zvvr1YWMls1pYGmlFDjDg==".into(),
+        files: vec![fuwa_server::releases::File { name: "fuwa-desktop-999.0.0-x86_64-linux".into(), size: 3 }],
+    });
+    {
+        let core = app.clone();
+        wait(&app, async move { core.check_for_update(true).await });
+    }
+    match updates::status() {
+        // No key is built in yet, or the release's signature isn't from one.
+        updates::Status::Available { release, why: updates::Manual::Unsigned } => {
+            assert_eq!(release.version, "999.0.0");
+            assert_eq!(release.notes, "## New\n* shiny");
+        }
+        updates::Status::Failed { what } => assert!(what.contains("signature"), "{what}"),
+        other => panic!("{other:?}"),
+    }
 
     instance.app.shutdown.cancel();
     drop(instance.runtime);

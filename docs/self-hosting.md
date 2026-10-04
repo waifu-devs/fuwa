@@ -365,16 +365,88 @@ provider only.
 
 ## Updating
 
+fuwa never updates itself. At startup and then once a day it asks GitHub
+whether a newer release is out (`api.github.com`, a fixed address, with nothing
+about your instance or anyone on it), and when there is one it tells you:
+
+- the instance settings (General) show "fuwa 0.4.2 is out" to admins, with
+  links to the release's notes and to this section;
+- `/healthz` still answers `ok`, with a second line naming the new version,
+  so a monitor that reads the body can tell you;
+- the log says `a newer fuwa is out` once a day.
+
+`FUWA_UPDATE_CHECK=off` turns the check off. Desktop apps signed in to your
+instance then look for their own updates through another instance they use,
+or not at all.
+
 Back up first (see below). Then, with Docker Compose:
 
 ```sh
 docker compose pull && docker compose up -d
 ```
 
+The `0.1` tag in `compose.yaml` follows every 0.1.x release, so that's all a
+patch release needs; a new minor version (0.2) means changing the tag. To have
+patch releases go on by themselves, a container updater such as
+[Watchtower](https://containrrr.dev/watchtower/) can pull and restart fuwa when
+its tag moves:
+
+```yaml
+  watchtower:
+    image: containrrr/watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Only fuwa, checked once a day at 04:00.
+    command: --schedule "0 0 4 * * *" --cleanup fuwa
+```
+
+It restarts fuwa without a backup first, and each restart drops connections
+for a few seconds, which the apps ride out. On Railway, the image's automatic
+updates do the same (see [On Railway](#on-railway)).
+
 With the binary, replace `/usr/local/bin/fuwa` and run
 `sudo systemctl restart fuwa`. Changes to the data happen by themselves when the
 new version starts. Going back to an older version afterwards isn't
 supported, so restore the backup instead. Each release's notes say what's new.
+
+### The web app and the desktop app
+
+The web app comes inside the server, so it updates with it. Tabs that were
+open during the update notice the new version, show a small "fuwa was updated"
+note with a Reload button, and reload by themselves once they're in the
+background or nobody has touched them for ten minutes, never with a message
+half typed, in a call, or with a dialog open.
+
+The desktop app updates itself. A little after it starts and then every six
+hours it asks the first instance it can reach (yours, if it's first) for
+`/updates/latest.json`, and fetches a newer build through
+`/updates/files/<name>`, which your instance passes through from GitHub
+(at most 16 at a time) so GitHub never sees who's updating. Your instance can't
+change what it hands over: the app installs a build only when the release's
+`SHA256SUMS` carries a valid signature from a key the app was built with (see
+[Release signing](#release-signing)) and the file's SHA-256 matches it, and
+only when it's newer than the app. People can turn "Update automatically" off
+in the app's settings (Updates); it then only says a new version is out.
+
+### Release signing
+
+Each release's `SHA256SUMS` is signed with Waifu Devs' release key (Ed25519),
+as `SHA256SUMS.sig` (the signature in base64). The public keys are in
+[desktop/release-keys.txt](../desktop/release-keys.txt), one base64 line each.
+To check a release by hand with OpenSSL 3:
+
+```sh
+key=$(grep -v '^#' release-keys.txt | head -1)
+{ printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo "$key" | base64 -d; } > release-key.der
+openssl pkey -pubin -inform DER -in release-key.der -out release-key.pem
+base64 -d SHA256SUMS.sig > SHA256SUMS.bin
+openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.bin
+```
+
+The private key is only ever in the repository's `FUWA_RELEASE_SIGNING_KEY`
+secret, which the Release workflow signs with. A release made without it
+isn't signed, so desktop apps say it's out but won't install it.
 
 ## Backups
 

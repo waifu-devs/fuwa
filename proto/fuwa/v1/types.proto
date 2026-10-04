@@ -33,6 +33,19 @@ message Node {
   // Empty, or one region, when there's no choice to make (an instance run
   // as one process, or one whose parts are all in one place).
   repeated Region regions = 10;
+  // A newer fuwa than this instance runs, when its check found one
+  // (docs/self-hosting.md, "Updating"). Apps show it to instance admins;
+  // nothing is ever updated by itself.
+  Release newer_release = 13;
+}
+
+// A fuwa release, as GitHub lists it.
+message Release {
+  // Such as "0.4.2".
+  string version = 1;
+  google.protobuf.Timestamp published_at = 2;
+  // The release's page, on github.com.
+  string url = 3;
 }
 
 // A part of the world a split instance keeps servers in (docs/regions.md).

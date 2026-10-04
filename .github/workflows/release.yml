@@ -2,8 +2,9 @@ name: Release
 
 # Pushing a tag like v0.2.0 makes a GitHub release with the fuwa binary for
 # Linux (x86 and ARM), macOS (Apple silicon) and Windows, the desktop app for
-# Windows, macOS and Linux, a SHA256SUMS file, and a signed record of the
-# commit and workflow that built each binary. The images for the tag come from
+# Windows, macOS and Linux, a SHA256SUMS file signed with the release key
+# (SHA256SUMS.sig, what desktop apps check before updating themselves), and a
+# signed record of the commit and workflow that built each binary. The images for the tag come from
 # the Publish image workflow.
 #
 # To cut one: set the version in server/Cargo.toml, merge it, then
@@ -154,6 +155,41 @@ jobs:
           merge-multiple: true
       - working-directory: dist
         run: sha256sum fuwa-* > SHA256SUMS && cat SHA256SUMS
+      # The keys the desktop app trusts, to check the signature below against.
+      - uses: actions/checkout@v4
+        with:
+          path: repo
+          sparse-checkout: desktop/release-keys.txt
+          sparse-checkout-cone-mode: false
+      # Signs SHA256SUMS with the release key, so the desktop app can trust an
+      # update it fetches through any instance (desktop/src/core/updates.rs).
+      # The private key exists only in this secret; the app ships the public
+      # half (desktop/release-keys.txt), and a key that isn't there fails the
+      # release rather than shipping updates no app would install.
+      - name: Sign SHA256SUMS
+        working-directory: dist
+        env:
+          SIGNING_KEY: ${{ secrets.FUWA_RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::warning::FUWA_RELEASE_SIGNING_KEY isn't set: this release isn't signed, so desktop apps will say it's out but won't install it."
+            exit 0
+          fi
+          umask 077
+          key="$RUNNER_TEMP/release-key.pem"
+          trap 'rm -f "$key" "$RUNNER_TEMP/release-key.pub.pem" "$RUNNER_TEMP/SHA256SUMS.bin"' EXIT
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+          openssl pkeyutl -sign -inkey "$key" -rawin -in SHA256SUMS -out "$RUNNER_TEMP/SHA256SUMS.bin"
+          openssl pkey -in "$key" -pubout -out "$RUNNER_TEMP/release-key.pub.pem"
+          openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/release-key.pub.pem" -rawin -in SHA256SUMS \
+            -sigfile "$RUNNER_TEMP/SHA256SUMS.bin"
+          public=$(openssl pkey -pubin -in "$RUNNER_TEMP/release-key.pub.pem" -outform DER | tail -c 32 | base64 -w0)
+          if ! grep -qxF "$public" ../repo/desktop/release-keys.txt; then
+            echo "::error::The signing key's public half ($public) isn't in desktop/release-keys.txt, so no app would trust it."
+            exit 1
+          fi
+          base64 -w0 "$RUNNER_TEMP/SHA256SUMS.bin" > SHA256SUMS.sig
+          echo "Signed with $public"
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/fuwa-*
@@ -174,6 +210,8 @@ jobs:
           sha256sum --check --ignore-missing SHA256SUMS
           gh attestation verify fuwa-$VERSION-x86_64-linux --repo $REPO
           \`\`\`
+
+          \`SHA256SUMS.sig\` is the release key's Ed25519 signature over \`SHA256SUMS\`, which the desktop app checks before it installs an update. The keys are in [desktop/release-keys.txt](https://github.com/$REPO/blob/$GITHUB_REF_NAME/desktop/release-keys.txt); [Release signing](https://github.com/$REPO/blob/$GITHUB_REF_NAME/docs/self-hosting.md#release-signing) shows how to check it by hand.
           EOF
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$REPO" --verify-tag \
             --title "fuwa $VERSION" --notes-file notes.md --generate-notes

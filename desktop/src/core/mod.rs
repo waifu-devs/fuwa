@@ -27,6 +27,7 @@ pub mod sso;
 pub mod store;
 mod sync;
 pub mod themes;
+pub mod updates;
 pub mod vault;
 
 use std::collections::HashMap;
@@ -196,6 +197,7 @@ impl Core {
                 tokio::time::sleep(reports::SEND_EVERY).await;
             }
         });
+        core.watch_updates();
         Ok(core)
     }
 

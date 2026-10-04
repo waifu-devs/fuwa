@@ -28,6 +28,7 @@ async fn start(dir: &Path) -> Instance {
     let config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         _ => None,
     })
     .unwrap();

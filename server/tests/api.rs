@@ -30,6 +30,7 @@ async fn start(dir: &Path, vars: &[(&str, &str)]) -> Instance {
     let config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         "FUWA_ADMIN_TOKEN" => Some(ADMIN_TOKEN.into()),
         _ => vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()),
     })
@@ -909,6 +910,37 @@ async fn browsers_can_call_over_grpc_web() {
         // With the web client built in, unknown paths open the app instead (see tests/web.rs).
         assert_eq!(http.get(format!("{base}/nope")).send().await.unwrap().status(), 404);
     }
+    // Desktop apps' updates: nothing to hand out until the release check finds a release.
+    assert_eq!(http.get(format!("{base}/updates/latest.json")).send().await.unwrap().status(), 404);
+    let newer = fuwa_server::releases::Latest {
+        version: "999.0.0".into(),
+        published_at: "2026-10-04T01:00:00Z".into(),
+        notes: "## New\n* shiny".into(),
+        page: "https://github.com/waifu-devs/fuwa/releases/tag/v999.0.0".into(),
+        sums: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  fuwa-desktop-999.0.0-x86_64-linux\n"
+            .into(),
+        signature: "c2lnbmF0dXJl".into(),
+        files: vec![fuwa_server::releases::File { name: "fuwa-desktop-999.0.0-x86_64-linux".into(), size: 3 }],
+    };
+    instance.app.releases.set(newer.clone());
+    let manifest = http.get(format!("{base}/updates/latest.json")).send().await.unwrap();
+    assert_eq!(manifest.status(), 200);
+    assert_eq!(manifest.headers()["content-type"], "application/json");
+    let manifest: fuwa_server::releases::Latest = manifest.json().await.unwrap();
+    assert_eq!(manifest, newer);
+    // Admins learn of it from /healthz and GetNode; nothing updates by itself.
+    let health = http.get(format!("{base}/healthz")).send().await.unwrap().text().await.unwrap();
+    assert!(health.starts_with("ok\nfuwa 999.0.0 is out; this is "), "{health}");
+    let mut node = pb::node_service_client::NodeServiceClient::new(instance.channel().await);
+    let told = node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap().newer_release.unwrap();
+    assert_eq!((told.version.as_str(), told.url.as_str()), ("999.0.0", newer.page.as_str()));
+    // Only the release's listed desktop builds pass through; anything else is never fetched.
+    for name in ["fuwa-999.0.0-x86_64-linux", "SHA256SUMS", "..%2F..%2Fetc%2Fpasswd", "fuwa-desktop-0.1.0-x86_64-linux"]
+    {
+        let response = http.get(format!("{base}/updates/files/{name}")).send().await.unwrap();
+        assert_eq!(response.status(), 404, "{name}");
+    }
+
     // Scanners' paths are turned away before the API or the web app sees them.
     for probe in ["/.env", "/wp-login.php", "/.git/config", "/actuator/env", "/wp-admin/"] {
         let response = http.get(format!("{base}{probe}")).send().await.unwrap();
@@ -1312,6 +1344,7 @@ async fn open_error(dir: &Path, vars: &[(&str, &str)]) -> String {
     let config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         _ => vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.to_string()),
     })
     .unwrap();

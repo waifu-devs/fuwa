@@ -175,6 +175,8 @@ pub struct Gateway {
     followed: AtomicBool,
     /// The directory's last answer to /healthz/parts.
     parts: super::status::Cached,
+    /// Whether a newer fuwa is out, and desktop apps' updates (`releases.rs`).
+    releases: Arc<crate::releases::Releases>,
     shutdown: CancellationToken,
 }
 
@@ -213,6 +215,7 @@ impl Gateway {
             directory_channel.clone(),
             WithKey(key.clone()),
         );
+        let config_update_check = config.update_check;
         let gateway = Arc::new(Self {
             settings: watch::Sender::new(Arc::new(Settings::defaults(&config))),
             config,
@@ -224,8 +227,10 @@ impl Gateway {
             shards: RwLock::new(HashMap::new()),
             followed: AtomicBool::new(false),
             parts: Default::default(),
+            releases: crate::releases::Releases::new(config_update_check),
             shutdown: CancellationToken::new(),
         });
+        gateway.releases.spawn(gateway.shutdown.clone());
         tokio::spawn(follow_settings(gateway.clone()));
         Ok(gateway)
     }
@@ -265,10 +270,11 @@ impl Gateway {
                 "/healthz",
                 get(move || {
                     let followed = health.followed.load(Ordering::Relaxed);
+                    let said = health.releases.health();
                     async move {
                         match followed {
-                            true => (StatusCode::OK, "ok"),
-                            false => (StatusCode::SERVICE_UNAVAILABLE, "waiting for the directory"),
+                            true => (StatusCode::OK, said),
+                            false => (StatusCode::SERVICE_UNAVAILABLE, "waiting for the directory".to_string()),
                         }
                     }
                 }),
@@ -327,6 +333,7 @@ impl Gateway {
                     async move { gateway.pass(gateway.directory_channel.clone(), request).await }
                 }),
             )
+            .merge(self.releases.routes())
             .fallback(crate::web::handler(self.clone()));
 
         Router::new()

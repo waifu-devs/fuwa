@@ -50,6 +50,10 @@ pub struct Config {
     /// picture uploads. Unlimited by default, but for picture uploads.
     pub limits: Limits,
     pub telemetry: Telemetry,
+    /// FUWA_UPDATE_CHECK: on (default) | off. Asks GitHub daily whether a
+    /// newer fuwa is out, to tell admins and pass desktop apps their updates
+    /// (`releases.rs`). Nothing about the instance goes with it.
+    pub update_check: bool,
     /// FUWA_WEB: on (default) | off. Serves the web client on / when the binary
     /// was built with it (the Docker image and release builds are).
     pub web: bool,
@@ -114,6 +118,7 @@ impl std::fmt::Debug for Config {
             .field("admin_token", &Secret(&self.admin_token))
             .field("limits", &self.limits)
             .field("telemetry", &self.telemetry)
+            .field("update_check", &self.update_check)
             .field("web", &self.web)
             .field("cluster", &self.cluster)
             .field("replica", &self.replica)
@@ -355,6 +360,12 @@ impl Config {
             Some(other) => return Err(format!("FUWA_TELEMETRY must be on or off, got {other:?}")),
         };
 
+        let update_check = match get("FUWA_UPDATE_CHECK").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_UPDATE_CHECK must be on or off, got {other:?}")),
+        };
+
         let hosted = match get("FUWA_HOSTING").as_deref().map(str::trim) {
             None | Some("self_hosted") => false,
             Some("hosted") => true,
@@ -484,6 +495,7 @@ impl Config {
                 url: get("FUWA_TELEMETRY_URL").unwrap_or_else(|| DEFAULT_TELEMETRY_URL.into()),
                 hosted,
             },
+            update_check,
             web,
             cluster,
             calls,

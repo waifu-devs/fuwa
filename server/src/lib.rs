@@ -24,6 +24,7 @@ pub mod outside;
 pub mod permissions;
 pub mod probes;
 pub mod recordings;
+pub mod releases;
 pub mod replica;
 pub mod reports;
 pub mod rtc;

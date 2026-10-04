@@ -73,6 +73,9 @@ pub struct App {
     picture_key: crate::outside::Key,
     /// How this instance talks to other fuwa instances (docs/federation.md).
     pub federation: crate::federation::Federation,
+    /// Whether a newer fuwa is out (`releases.rs`); checked by a single
+    /// process and a split instance's directory, which answers GetNode.
+    pub releases: Arc<crate::releases::Releases>,
 }
 
 /// Where the parts this process doesn't run are.
@@ -187,6 +190,7 @@ impl App {
         }
 
         let federation = crate::federation::Federation::new(config.federation_allow_private);
+        let update_check = config.update_check;
         let shutdown = CancellationToken::new();
         let media_link = media_link(&config, &shutdown).await;
 
@@ -210,7 +214,11 @@ impl App {
             media_link,
             picture_key,
             federation,
+            releases: crate::releases::Releases::new(update_check),
         });
+        if app.node.is_some() {
+            app.releases.spawn(app.shutdown.clone());
+        }
         if app.node.is_some() {
             app.sweep_media(crate::id::now_ms()).await?;
         }
@@ -308,7 +316,11 @@ impl App {
     }
 
     pub fn node_info(&self) -> pb::Node {
-        pb::Node { regions: self.regions(), ..node_info(&self.settings(), self.announcement()) }
+        pb::Node {
+            regions: self.regions(),
+            newer_release: self.releases.newer(),
+            ..node_info(&self.settings(), self.announcement())
+        }
     }
 
     /// Every route: the gRPC services (also reachable as gRPC-Web from
@@ -317,6 +329,7 @@ impl App {
     /// carrying the cluster key.
     pub fn router(self: &Arc<Self>) -> Router {
         let api = Api::new(self.clone());
+        let releases = self.releases.clone();
         let (_, health) = tonic_health::server::health_reporter();
         let reflection = tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(crate::proto::FILE_DESCRIPTOR_SET)
@@ -363,7 +376,8 @@ impl App {
             .into_axum_router()
             .layer(axum::middleware::from_fn(crate::reports::time_calls))
             .layer(tonic_web::GrpcWebLayer::new())
-            .route("/healthz", get(|| async { "ok" }));
+            // "ok", and whether a newer fuwa is out (docs/self-hosting.md, "Updating").
+            .route("/healthz", get(move || async move { releases.health() }));
         if matches!(self.link, Link::Alone | Link::Directory(_)) {
             // Which parts are up, for a status page. A directory's is behind the cluster key
             // (only gateways ask it); a single process answers anyone.
@@ -390,6 +404,8 @@ impl App {
             router = router.merge(crate::sso::http::server_routes(self.clone()));
         }
         if !self.config.cluster.is_split() {
+            // Desktop apps' updates; behind gateways, they answer these.
+            router = router.merge(self.releases.routes());
             // The web app (when it's on) answers every other GET, so its own addresses work on reload.
             return router
                 .fallback(crate::web::handler(self.clone()))
@@ -461,6 +477,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
             source: crate::SOURCE.into(),
         }),
         regions: vec![],
+        newer_release: None,
     }
 }
 
