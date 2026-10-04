@@ -128,7 +128,7 @@ impl Core {
                 name: name.into(),
                 r#type: kind as i32,
                 parent_id: parent_id.into(),
-                topic: String::new(),
+                ..Default::default()
             })
         )
         .await?
