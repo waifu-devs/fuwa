@@ -1,4 +1,4 @@
-import { CopyIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, LinkIcon, PencilIcon, TextSelectIcon, Trash2Icon, UserXIcon } from "lucide-react";
+import { CopyIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, LinkIcon, MessageSquareReplyIcon, PencilIcon, TextSelectIcon, Trash2Icon, UserXIcon } from "lucide-react";
 import type { MenuTrigger } from "@/components/ContextMenu";
 import { copyIdItem } from "@/components/menus/common";
 import { items, withExtensions, type MenuContexts, type MenuSection } from "@/lib/context-menu";
@@ -73,6 +73,8 @@ export function targetSection(trigger: MenuTrigger): MenuSection {
 
 /** What a message's own buttons can do, as menu items; each is there only when its button is. */
 export type MessageMenuActions = {
+  /** Its thread: start one, or open the one it has. */
+  thread?: { open: boolean; go: () => void };
   edit?: () => void;
   copyText?: () => void;
   keepOut?: { name: string; ask: () => void };
@@ -92,6 +94,7 @@ export function messageMenu(ctx: MenuContexts["message"], trigger: MenuTrigger, 
       {
         id: "primary",
         items: items(
+          actions.thread && { id: "thread", label: actions.thread.open ? "Open thread" : "Reply in thread", icon: MessageSquareReplyIcon, onSelect: actions.thread.go },
           actions.edit && { id: "edit", label: "Edit message", icon: PencilIcon, onSelect: actions.edit },
           actions.copyText && { id: "copy-text", label: "Copy text", icon: CopyIcon, onSelect: actions.copyText },
         ),

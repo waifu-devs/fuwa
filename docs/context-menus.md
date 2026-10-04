@@ -45,7 +45,7 @@ Sections are drawn with a line between them; an empty one isn't drawn.
 | --- | --- |
 | target | Copy (selected text) · Open link (shows its host) · Copy link · Open picture · Save picture · Copy picture link (pictures from instances the app talks to only): only for what was right clicked |
 | react | (reactions, once they exist) |
-| primary | Edit message (yours) · Copy text |
+| primary | Reply in thread / Open thread (where the message's own button shows) · Edit message (yours) · Copy text |
 | manage | Keep *name* out (at a shared channel's home, with Kick Members, for someone from another server) |
 | developer | Copy message ID |
 | danger | Delete message (yours, or with Manage Messages): asks in the message's toolbar |
@@ -105,7 +105,7 @@ phone's own menu.
 Features add their items without touching the menus: `extendMenu(kind, {
 section, at, build })` from `web/src/lib/context-menu.ts`, with the sections
 named above. A section a menu doesn't have yet is added before `danger`.
-Planned: reactions (a row of recent emoji in `react`), Reply and Reply in
-thread at the start of `primary`, Pin and Mark unread in `primary`, Report in
+Planned: reactions (a row of recent emoji in `react`), Reply at the start of
+`primary`, Pin and Mark unread in `primary`, Report in
 `danger`, Add friend in `social`, attachments and polls in the composer's
 `insert`.
