@@ -8,6 +8,7 @@
     { "id": "regions", "date": "2026-10-04", "title": "Servers kept in a region" },
     { "id": "compatibility-dates", "date": "2026-10-04", "title": "Compatibility dates" },
     { "id": "polls", "date": "2026-10-04", "title": "Polls" },
-    { "id": "rich-presence", "date": "2026-10-04", "title": "Showing what people are playing" }
+    { "id": "rich-presence", "date": "2026-10-04", "title": "Showing what people are playing" },
+    { "id": "voice-messages", "date": "2026-10-04", "title": "Voice messages" }
   ]
 }
