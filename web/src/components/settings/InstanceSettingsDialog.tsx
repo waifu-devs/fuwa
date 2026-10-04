@@ -204,6 +204,7 @@ export function InstanceSettingsDialog({
                 { id: "server-creation", label: "Who can create servers" },
                 { id: "servers-per-account", label: "Servers per account" },
                 { id: "agent-creation", label: "Who can make agents", keywords: "bots integrations" },
+                { id: "mcp", label: "Agents through MCP", keywords: "mcp claude ai model context protocol" },
                 { id: "shared-channels", label: "Shared channels", keywords: "share connect servers slack connect" },
               ],
             },
