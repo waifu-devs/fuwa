@@ -1,0 +1,208 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// Friends, friend requests and blocks, between people on this instance.
+//
+// Everything here is the caller's own: nobody else, no server and no agent
+// ever sees someone's friends, requests or blocks. The two people a change is
+// about are the only ones told, and a block is never told to the person
+// blocked: their requests look sent but never arrive, and their direct
+// messages get the same answer a privacy setting gives. See docs/friends.md.
+service FriendService {
+  // Your friends, the requests you sent and got, and who you blocked.
+  // Requests that ran out are left out.
+  rpc ListFriends(ListFriendsRequest) returns (ListFriendsResponse);
+  // Asks someone, by id or username, to be friends. If they already asked
+  // you, you're friends at once. Refused when their settings don't take
+  // requests from you; an account can send a limited number an hour, and
+  // have a limited number waiting.
+  rpc SendFriendRequest(SendFriendRequestRequest) returns (SendFriendRequestResponse);
+  // Takes a request someone sent you.
+  rpc AcceptFriendRequest(AcceptFriendRequestRequest) returns (AcceptFriendRequestResponse);
+  // Ends whatever is between you and someone: unfriends them, declines their
+  // request or cancels yours. A declined request isn't told to its sender;
+  // it stays waiting on their side until it runs out.
+  rpc RemoveFriend(RemoveFriendRequest) returns (RemoveFriendResponse);
+  // Blocks someone: ends a friendship or a request you sent them, and from
+  // then on nothing they send reaches you. They aren't told.
+  rpc BlockUser(BlockUserRequest) returns (BlockUserResponse);
+  rpc UnblockUser(UnblockUserRequest) returns (UnblockUserResponse);
+  // Where you stand with someone, for their profile: friends, a request
+  // either way, blocked by you, or nothing. Never says whether they
+  // blocked you.
+  rpc GetRelationship(GetRelationshipRequest) returns (GetRelationshipResponse);
+  rpc GetFriendSettings(GetFriendSettingsRequest) returns (GetFriendSettingsResponse);
+  rpc UpdateFriendSettings(UpdateFriendSettingsRequest) returns (UpdateFriendSettingsResponse);
+  // Live changes to your friends: requests coming and going, friends
+  // coming online. Having this stream open is what makes you online to your
+  // friends (unless you hide it). The stream says `ready` once it's
+  // listening; anything from before then, read with ListFriends. A response
+  // with nothing set is a heartbeat.
+  rpc WatchFriends(WatchFriendsRequest) returns (stream WatchFriendsResponse);
+}
+
+enum FriendState {
+  // Nothing between you.
+  FRIEND_STATE_UNSPECIFIED = 0;
+  FRIEND_STATE_FRIEND = 1;
+  // You asked them, and they haven't answered.
+  FRIEND_STATE_OUTGOING = 2;
+  // They asked you.
+  FRIEND_STATE_INCOMING = 3;
+  // You blocked them.
+  FRIEND_STATE_BLOCKED = 4;
+}
+
+// Someone, and where you stand with them.
+message Friend {
+  User user = 1;
+  FriendState state = 2;
+  // When the friendship, the request or the block started.
+  google.protobuf.Timestamp since = 3;
+  // When a request runs out, if nobody answers it.
+  google.protobuf.Timestamp expires_at = 4;
+  // Friends only: they have a fuwa app open now. Always false for someone
+  // who hides it.
+  bool online = 5;
+}
+
+message ListFriendsRequest {}
+
+message ListFriendsResponse {
+  repeated Friend friends = 1;
+}
+
+message SendFriendRequestRequest {
+  // One of these: an account's id, or its username.
+  string user_id = 1;
+  string username = 2;
+}
+
+message SendFriendRequestResponse {
+  // OUTGOING, or FRIEND when they had asked you first.
+  Friend friend = 1;
+}
+
+message AcceptFriendRequestRequest {
+  string user_id = 1;
+}
+
+message AcceptFriendRequestResponse {
+  Friend friend = 1;
+}
+
+message RemoveFriendRequest {
+  string user_id = 1;
+}
+
+message RemoveFriendResponse {}
+
+message BlockUserRequest {
+  string user_id = 1;
+}
+
+message BlockUserResponse {
+  Friend friend = 1;
+}
+
+message UnblockUserRequest {
+  string user_id = 1;
+}
+
+message UnblockUserResponse {}
+
+message GetRelationshipRequest {
+  string user_id = 1;
+}
+
+message GetRelationshipResponse {
+  FriendState state = 1;
+  // When a request either way runs out.
+  google.protobuf.Timestamp expires_at = 2;
+  // Friends you have in common, up to 50, only when you, they and each of
+  // those friends all show mutual friends.
+  repeated User mutual_friends = 3;
+  // Whether their settings take a friend request from you.
+  bool may_request = 4;
+  // Whether you could open a conversation with them.
+  bool may_message = 5;
+}
+
+// Who may send you friend requests.
+enum FriendRequestsFrom {
+  // Anyone on the instance.
+  FRIEND_REQUESTS_FROM_UNSPECIFIED = 0;
+  // People in a server with you.
+  FRIEND_REQUESTS_FROM_SHARED_SERVERS = 1;
+  FRIEND_REQUESTS_FROM_NOBODY = 2;
+}
+
+// Who may start a conversation with you. Conversations you already have
+// keep working whatever this says; blocking someone is what stops them.
+enum DirectMessagesFrom {
+  // Friends and people in a server with you.
+  DIRECT_MESSAGES_FROM_UNSPECIFIED = 0;
+  DIRECT_MESSAGES_FROM_FRIENDS = 1;
+  // Nobody new.
+  DIRECT_MESSAGES_FROM_NOBODY = 2;
+}
+
+// Your privacy around friends and direct messages. Every default is the
+// most open choice, as before friends existed.
+message FriendSettings {
+  FriendRequestsFrom requests_from = 1;
+  DirectMessagesFrom direct_messages_from = 2;
+  // Friends never see you online.
+  bool hide_online = 3;
+  // Nobody sees which friends you have in common with them, and you don't
+  // see theirs.
+  bool hide_mutual_friends = 4;
+}
+
+message GetFriendSettingsRequest {}
+
+message GetFriendSettingsResponse {
+  FriendSettings settings = 1;
+}
+
+message UpdateFriendSettingsRequest {
+  // Replaces them all.
+  FriendSettings settings = 1;
+}
+
+message UpdateFriendSettingsResponse {
+  FriendSettings settings = 1;
+}
+
+message WatchFriendsRequest {}
+
+message WatchFriendsResponse {
+  // The stream is listening: everything from now on comes through it.
+  bool ready = 1;
+  FriendEvent event = 2;
+}
+
+// Something that changed between you and someone.
+message FriendEvent {
+  oneof payload {
+    // Someone's place in your list is new or changed: a request came, one
+    // was taken, you blocked someone.
+    Friend changed = 1;
+    // Someone left your list: unfriended, a request cancelled or declined
+    // (from your own side), unblocked. Their id.
+    string removed = 2;
+    // A friend came online or went offline.
+    FriendPresence presence = 3;
+    // Your settings changed, on another device perhaps.
+    FriendSettings settings = 4;
+  }
+}
+
+message FriendPresence {
+  string user_id = 1;
+  bool online = 2;
+}

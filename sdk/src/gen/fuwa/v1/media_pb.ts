@@ -78,10 +78,11 @@ export type CreateUploadRequest = Message<"fuwa.v1.CreateUploadRequest"> & {
   size: bigint;
 
   /**
-   * For a server's icon, an emoji, a webhook's picture or an attachment
-   * (where it's required): the server it's for (you must be in it). The file
-   * can then only be used there, and on an instance split across regions its
-   * bytes go straight to the server's region rather than the home one.
+   * For a server's icon or banner, an emoji, a webhook's picture or an
+   * attachment (required for an attachment and a server's banner): the
+   * server it's for (you must be in it). The file can then only be used
+   * there, and on an instance split across regions its bytes go straight to
+   * the server's region rather than the home one.
    *
    * @generated from field: string server_id = 4;
    */
@@ -240,6 +241,8 @@ export enum MediaPurpose {
   AVATAR = 1,
 
   /**
+   * A profile banner, or with a server_id, a server's banner.
+   *
    * @generated from enum value: MEDIA_PURPOSE_BANNER = 2;
    */
   BANNER = 2,

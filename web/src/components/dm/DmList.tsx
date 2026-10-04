@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { LockKeyholeIcon, PhoneCallIcon, ShieldAlertIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { Ref } from "react";
+import { useMemo, type Ref } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import { isMessage, type Item } from "@/e2ee/vault";
 import { useFuwa } from "@/fuwa/store";
@@ -11,13 +11,22 @@ import { Count, SPRING } from "@/components/motion";
 import { useContextMenu } from "@/components/ContextMenu";
 import { dmMenu } from "@/components/menus/dm";
 import { displayName } from "@/lib/format";
+import { blockedIds } from "@/lib/friends";
 import { cn } from "@/lib/utils";
 
 const NONE: Conversation[] = [];
 
 /** Your encrypted conversations on an instance, in the instance's sidebar: the latest first. */
 export function DmList({ instanceKey }: { instanceKey: string }) {
-  const conversations = useFuwa((s) => s.instances[instanceKey]?.dms.conversations ?? NONE);
+  const all = useFuwa((s) => s.instances[instanceKey]?.dms.conversations ?? NONE);
+  const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id);
+  // Conversations with people you blocked stay out of sight until you unblock them.
+  const friends = useFuwa((s) => s.instances[instanceKey]?.friends.list);
+  const conversations = useMemo(() => {
+    const blocked = blockedIds(friends ?? []);
+    if (blocked.size === 0) return all;
+    return all.filter((c) => !c.users.some((u) => u.id !== meId && blocked.has(u.id)));
+  }, [all, friends, meId]);
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
   const problem = useFuwa((s) => s.instances[instanceKey]?.dms.problem ?? null);
   if (status === "off") return null;

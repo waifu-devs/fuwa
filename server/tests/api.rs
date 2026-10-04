@@ -5279,6 +5279,303 @@ async fn custom_emoji_and_the_welcome_screen() {
     instance.stop().await;
 }
 
+#[tokio::test]
+async fn server_banners_and_onboarding() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (member, me, _) = sign_up(&mut c, "member").await;
+    let (other, _, _) = sign_up(&mut c, "other").await;
+    let server = create_server(&mut c, &owner, "Banners", true).await;
+    assert_eq!((server.banner_url.as_str(), server.banner_focus_x, server.banner_focus_y), ("", 50, 50));
+    assert_eq!(server.accent_color, None);
+
+    // A banner is uploaded for the server, by someone who can manage it.
+    let for_server = |purpose: pb::MediaPurpose, size: usize| pb::CreateUploadRequest {
+        purpose: purpose as i32,
+        content_type: "image/png".into(),
+        size: size as i64,
+        server_id: server.id.clone(),
+    };
+    let bytes = png(400, 7);
+    let reserved = c
+        .media
+        .create_upload(authed(&owner, for_server(pb::MediaPurpose::Banner, bytes.len())))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(put(&instance, &reserved.upload_url, bytes).await, reqwest::StatusCode::NO_CONTENT);
+    let banner = reserved.media.unwrap().url;
+    let update = |token: &str, banner: Option<&str>, focus: Option<(i32, i32)>, color: Option<i32>| {
+        authed(
+            token,
+            pb::UpdateServerRequest {
+                server_id: server.id.clone(),
+                banner_url: banner.map(str::to_string),
+                banner_focus_x: focus.map(|f| f.0),
+                banner_focus_y: focus.map(|f| f.1),
+                accent_color: color,
+                ..Default::default()
+            },
+        )
+    };
+    join(&mut c, &member, &server.id).await;
+    assert_eq!(
+        c.servers.update_server(update(&member, Some(&banner), None, None)).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    assert_eq!(
+        c.servers.update_server(update(&owner, None, Some((50, 101)), None)).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+    assert_eq!(
+        c.servers.update_server(update(&owner, None, None, Some(0x1_000_000))).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+    // Someone's own profile banner, in use, can't become the server's.
+    let profile = upload(&mut c, &instance, &owner, pb::MediaPurpose::Banner, png(300, 8)).await;
+    c.auth
+        .update_profile(authed(
+            &owner,
+            pb::UpdateProfileRequest { banner_url: Some(profile.clone()), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        c.servers.update_server(update(&owner, Some(&profile), None, None)).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    let updated = c
+        .servers
+        .update_server(update(&owner, Some(&banner), Some((30, 70)), Some(0xff88aa)))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert_eq!(
+        (updated.banner_url.as_str(), updated.banner_focus_x, updated.banner_focus_y, updated.accent_color),
+        (banner.as_str(), 30, 70, Some(0xff88aa))
+    );
+    // Browse cards show it to people who aren't members.
+    let found =
+        c.servers.discover_servers(authed(&other, pb::DiscoverServersRequest {})).await.unwrap().into_inner().servers;
+    assert_eq!(found.iter().find(|s| s.id == server.id).unwrap().banner_url, banner);
+    // The banner can't be used as anyone's profile banner, and replacing it deletes it.
+    assert_eq!(
+        c.auth
+            .update_profile(authed(
+                &owner,
+                pb::UpdateProfileRequest { banner_url: Some(banner.clone()), ..Default::default() }
+            ))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::PermissionDenied
+    );
+    let cleared =
+        c.servers.update_server(update(&owner, Some(""), None, Some(-1))).await.unwrap().into_inner().server.unwrap();
+    assert_eq!((cleared.banner_url.as_str(), cleared.accent_color), ("", None));
+    assert_eq!(fetch(&instance, &banner).await.0, reqwest::StatusCode::NOT_FOUND);
+    // Only pictures uploaded here: a link to another site would have this
+    // instance fetch it for everyone who sees the server.
+    assert_eq!(
+        c.servers
+            .update_server(update(&owner, Some("https://example.com/b.png"), None, None))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::InvalidArgument
+    );
+
+    // Onboarding: interests that hand out roles, the rules, and a hello.
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.r#type == pb::ChannelType::Text as i32)
+        .unwrap();
+    let art = create_role(&mut c, &owner, &server.id, "Artists", &[]).await.unwrap();
+    let games = create_role(&mut c, &owner, &server.id, "Gamers", &[]).await.unwrap();
+    let mods = create_role(&mut c, &owner, &server.id, "Mods", &[pb::Permission::KickMembers]).await.unwrap();
+    let option = |label: &str, roles: &[&pb::Role]| pb::OnboardingOption {
+        label: label.into(),
+        role_ids: roles.iter().map(|r| r.id.clone()).collect(),
+        channel_ids: vec![general.id.clone()],
+        emoji: "🎨".into(),
+        ..Default::default()
+    };
+    let draft = |options: Vec<pb::OnboardingOption>| pb::Onboarding {
+        enabled: true,
+        set_by: String::new(),
+        steps: vec![
+            pb::OnboardingStep {
+                kind: pb::OnboardingStepKind::Pick as i32,
+                title: "  What are you into?  ".into(),
+                multiple: true,
+                options,
+                ..Default::default()
+            },
+            pb::OnboardingStep {
+                kind: pb::OnboardingStepKind::Rules as i32,
+                title: "Rules".into(),
+                skippable: true,
+                ..Default::default()
+            },
+            pb::OnboardingStep {
+                kind: pb::OnboardingStepKind::Hello as i32,
+                title: "Say hi".into(),
+                channel_id: general.id.clone(),
+                hello: "Hi everyone!".into(),
+                skippable: true,
+                ..Default::default()
+            },
+        ],
+    };
+    let set = |token: &str, o: pb::Onboarding| {
+        authed(token, pb::SetOnboardingRequest { server_id: server.id.clone(), onboarding: Some(o) })
+    };
+    assert_eq!(
+        c.join.set_onboarding(set(&member, draft(vec![option("Art", &[&art])]))).await.unwrap_err().code(),
+        Code::PermissionDenied
+    );
+    // Nothing that moderates can be handed out to whoever picks it.
+    assert_eq!(
+        c.join.set_onboarding(set(&owner, draft(vec![option("Mod", &[&mods])]))).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+    let saved = c
+        .join
+        .set_onboarding(set(&owner, draft(vec![option("Art", &[&art]), option("Games", &[&games])])))
+        .await
+        .unwrap()
+        .into_inner()
+        .onboarding
+        .unwrap();
+    assert_eq!(saved.steps[0].title, "What are you into?");
+    assert!(!saved.steps[1].skippable, "the rules are never skippable");
+    assert!(saved.steps.iter().all(|s| !s.id.is_empty()));
+    let (art_id, games_id) = (saved.steps[0].options[0].id.clone(), saved.steps[0].options[1].id.clone());
+    // Saving again keeps the ids.
+    let again = c.join.set_onboarding(set(&owner, saved.clone())).await.unwrap().into_inner().onboarding.unwrap();
+    assert_eq!(again, saved);
+    let server_now = c
+        .servers
+        .get_server(authed(&member, pb::GetServerRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert!(server_now.has_onboarding);
+    let got = c
+        .join
+        .get_onboarding(authed(&member, pb::GetOnboardingRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .onboarding
+        .unwrap();
+    assert_eq!(got.steps.len(), 3);
+
+    let finish = |ids: &[&str]| {
+        authed(
+            &member,
+            pb::FinishOnboardingRequest {
+                server_id: server.id.clone(),
+                option_ids: ids.iter().map(|id| id.to_string()).collect(),
+            },
+        )
+    };
+    let done = c.join.finish_onboarding(finish(&[&art_id])).await.unwrap().into_inner().member.unwrap();
+    assert_eq!(done.role_ids, std::slice::from_ref(&art.id));
+    assert!(done.onboarded_at.is_some());
+    // Going through it again changes the picks: Art goes, Games comes.
+    let done = c.join.finish_onboarding(finish(&[&games_id, "made-up"])).await.unwrap().into_inner().member.unwrap();
+    assert_eq!(done.role_ids, std::slice::from_ref(&games.id));
+    // A role that gains powers later isn't handed out anymore.
+    c.roles
+        .update_role(authed(
+            &owner,
+            pb::UpdateRoleRequest {
+                server_id: server.id.clone(),
+                role_id: art.id.clone(),
+                permissions: Some(pb::PermissionSet { permissions: vec![pb::Permission::BanMembers as i32] }),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    let done = c.join.finish_onboarding(finish(&[&art_id, &games_id])).await.unwrap().into_inner().member.unwrap();
+    assert_eq!(done.role_ids, std::slice::from_ref(&games.id));
+    // Others don't see when someone went through it.
+    let onlooker = other_member(&mut c, &server.id).await;
+    let listed = c
+        .servers
+        .list_members(authed(&onlooker, pb::ListMembersRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .members;
+    assert!(listed.iter().find(|m| m.user.as_ref().unwrap().id == me.id).unwrap().onboarded_at.is_none());
+    // Nobody sees who saved it.
+    assert!(got.set_by.is_empty() && saved.set_by.is_empty());
+
+    // The steps hold as saved: the interests step can't be skipped, and
+    // one that takes a single pick takes only one.
+    assert_eq!(c.join.finish_onboarding(finish(&[])).await.unwrap_err().code(), Code::InvalidArgument);
+    let mut single = draft(vec![option("Games", &[&games]), option("Nothing", &[])]);
+    single.steps[0].multiple = false;
+    let single = c.join.set_onboarding(set(&owner, single)).await.unwrap().into_inner().onboarding.unwrap();
+    let both: Vec<&str> = single.steps[0].options.iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(c.join.finish_onboarding(finish(&both)).await.unwrap_err().code(), Code::InvalidArgument);
+
+    // Roles go out only while whoever set them up still ranks above them.
+    let staff =
+        create_role(&mut c, &owner, &server.id, "Staff", &[pb::Permission::ManageServer, pb::Permission::ManageRoles])
+            .await
+            .unwrap();
+    // New roles start at the bottom, below Staff.
+    let calm = create_role(&mut c, &owner, &server.id, "Readers", &[]).await.unwrap();
+    let (admin, admin_user, _) = sign_up(&mut c, "admin").await;
+    join(&mut c, &admin, &server.id).await;
+    give_role(&mut c, &owner, &server.id, &admin_user.id, &staff.id).await.unwrap();
+    let by_admin = c
+        .join
+        .set_onboarding(set(&admin, draft(vec![option("Read", &[&calm])])))
+        .await
+        .unwrap()
+        .into_inner()
+        .onboarding
+        .unwrap();
+    let read_id = by_admin.steps[0].options[0].id.clone();
+    let done = c.join.finish_onboarding(finish(&[&read_id])).await.unwrap().into_inner().member.unwrap();
+    assert!(done.role_ids.contains(&calm.id));
+    let take = |user: &str, role: &str| {
+        authed(
+            &owner,
+            pb::RemoveMemberRoleRequest { server_id: server.id.clone(), user_id: user.into(), role_id: role.into() },
+        )
+    };
+    c.roles.remove_member_role(take(&admin_user.id, &staff.id)).await.unwrap();
+    c.roles.remove_member_role(take(&me.id, &calm.id)).await.unwrap();
+    let done = c.join.finish_onboarding(finish(&[&read_id])).await.unwrap().into_inner().member.unwrap();
+    assert!(!done.role_ids.contains(&calm.id), "the admin who set it up no longer ranks above it");
+    instance.stop().await;
+}
+
+/// Someone new who joins the server, to look at it as an ordinary member.
+async fn other_member(c: &mut Clients, server_id: &str) -> String {
+    let (token, _, _) = sign_up(c, "onlooker").await;
+    join(c, &token, server_id).await;
+    token
+}
+
 /// Posts to a webhook's address the way other apps do.
 async fn post_webhook(instance: &Instance, webhook: &pb::Webhook, body: &str, wait: bool) -> reqwest::Response {
     let url = format!(

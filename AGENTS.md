@@ -64,6 +64,15 @@
     (`DirectMessageService`) checks what the server can see (who sends, the
     group id, epoch and content type in the MLS header, that key packages
     name the account and device they claim) and never decrypts anything.
+  - `friends.rs`: friends, requests and blocks (`docs/friends.md`), in
+    node.db's `friend_links` (each person's own row about the other, so a
+    block or a declined request stays on one side) and `friend_settings`,
+    plus who's online (an open `WatchFriends` stream) and the per-account
+    request limit, in memory. `api/friends.rs` is `FriendService`, answered
+    where accounts are; its `Api::may_message` decides who may open, write in
+    or call a direct-message conversation. A friend list is its owner's
+    alone: never in a server's events or audit log, never shown to other
+    members, servers or agents, and a block is told to nobody.
   - `sealed.rs`: sealed files, what a direct message carries that's too big
     to go in it (voice messages): ciphertext the device uploads like a
     picture (`MEDIA_PURPOSE_SEALED`, reserved with
@@ -593,6 +602,14 @@
     `settings/app/ShaderEditor.tsx`. Theme files never make the app load
     anything: pictures travel inside them and are uploaded on import. Settings
     pages: `settings/app/Themes.tsx` and `Backgrounds.tsx`.
+  - Friends (`docs/friends.md`): `src/fuwa/friends.ts` follows
+    `WatchFriends` beside the event stream (which is also what shows you
+    online) and holds the actions; `pages/FriendsPage.tsx` is
+    `/<instance>/friends` (online, all, pending, blocked; only the lines in
+    view drawn), `components/friends/FriendActions.tsx` the buttons on
+    profile cards, `settings/account/FriendPrivacy.tsx` the settings, and
+    `lib/friends.ts` the pure parts. Conversations with people you blocked
+    stay out of `DmList`.
   - `src/lib/notifications.ts`: how a message reaches you: your settings for
     its channel, then its server (both stored on the instance, so they follow
     you across devices), then this device's Notifications settings. Muted means
@@ -622,7 +639,14 @@
     only), `ApplyDialog.tsx` the application, `Rules.tsx` the rules sheet a
     new member agrees to (the composer shows it until they do), and
     `Applied.tsx` the applications waiting in the rail. `Welcome.tsx` greets
-    new members once with the welcome screen (remembered in this browser). Those are kept in
+    new members once with the welcome screen (remembered in this browser), or
+    with `Onboarding.tsx` when the server has onboarding steps (picks that
+    give harmless roles and channels, the rules, a hello; `JoinService`'s
+    Get/Set/FinishOnboarding, `server.onboarding` as protobuf, a member's
+    `onboarded_at`). All of them, `ApplicationStatus.tsx` and invite pages
+    sit under the server's banner (`join/Banner.tsx`, `lib/banner.ts`: a
+    focal point and an optional accent color); admins set it all on one page
+    with a live preview, `settings/server/WelcomeAndOnboarding.tsx`. Those are kept in
     this browser (`src/lib/applied.ts`) and `AppliedWatcher` asks the
     instance how they went. Reviewers use `settings/server/Applications.tsx`;
     owners write rules and questions in `settings/server/JoinFormEditor.tsx`.
@@ -792,6 +816,13 @@
   a `DirectMessageContent`. Who belongs in a channel's group is
   `secure_members` (who can see it, people only); keep it in step with any
   change to how channel access is worked out.
+- Friends are private (`docs/friends.md`): only the two people a change is
+  about are told, a block is never shown to the person blocked (their
+  requests look sent, their messages are taken and kept from the blocker,
+  their calls never ring; no refusal a block alone would cause), and nothing
+  about friends reaches a server, its logs or an agent. A new path that
+  starts or carries a direct message asks `Api::may_message`, and a new way
+  of reading one hides what the reader's blocked people sent.
 - Direct messages are end-to-end encrypted, always: no off switch, no
   server-side copy of keys or plaintext, nothing about their content in logs,
   events, exports or the usage signal. The server checks only what it can

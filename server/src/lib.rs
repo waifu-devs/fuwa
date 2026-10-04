@@ -16,6 +16,7 @@ pub mod db;
 pub mod dms;
 pub mod error;
 pub mod federation;
+pub mod friends;
 pub mod gifs;
 pub mod hub;
 pub mod id;
