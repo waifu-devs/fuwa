@@ -290,10 +290,19 @@ async fn friends_end_to_end() {
     };
     assert_eq!(ended, Payload::Removed(mika.id.clone()));
     assert!(list(&mut friends, &juan).await.is_empty());
-    // Juan's messages stop, with the words any privacy refusal has.
-    let refused = dms.post_message(authed(&juan.token, post(&juan, b"hello?"))).await.unwrap_err();
-    assert_eq!(refused.code(), Code::PermissionDenied);
-    assert_eq!(refused.message(), "they aren't taking direct messages from you");
+    // Juan's messages go through as ever, and Mika never reads them: to Mika
+    // they're gone before read, to Juan they're there.
+    let hidden =
+        dms.post_message(authed(&juan.token, post(&juan, b"hello?"))).await.unwrap().into_inner().record.unwrap();
+    let records =
+        || pb::ListRecordsRequest { conversation_id: cid.clone(), after_sequence: hidden.sequence - 1, limit: 1 };
+    let to_mika = dms.list_records(authed(&mika.token, records())).await.unwrap().into_inner().records;
+    assert!(to_mika[0].data.is_empty());
+    let to_juan = dms.list_records(authed(&juan.token, records())).await.unwrap().into_inner().records;
+    assert_eq!(to_juan[0].data, hidden.data);
+    // The conversation still opens for Juan, and calling it never rings for Mika.
+    dms.open_conversation(authed(&juan.token, pb::OpenConversationRequest { user_id: mika.id.clone() })).await.unwrap();
+    // Mika has to unblock to write.
     let own = dms.post_message(authed(&mika.token, post(&mika, b"bye"))).await.unwrap_err();
     assert_eq!(own.code(), Code::FailedPrecondition);
     // Juan's new request looks sent, but Mika never sees it.
@@ -304,7 +313,7 @@ async fn friends_end_to_end() {
     let seen = relationship(&mut friends, &juan, &mika).await;
     assert_eq!(seen.state(), FriendState::Outgoing);
     assert!(seen.may_request);
-    assert!(!seen.may_message);
+    assert!(seen.may_message);
     // Mika can't send Juan a request while blocking him.
     assert_eq!(ask(&mut friends, &mika, &juan).await.unwrap_err().code(), Code::FailedPrecondition);
     // Unblocking: Juan's waiting request is there to take.
@@ -320,7 +329,13 @@ async fn friends_end_to_end() {
     .await;
     assert!(matches!(next(&mut rin_live).await, Payload::Settings(s) if s.requests_from == 2));
     assert_eq!(ask(&mut friends, &juan, &rin).await.unwrap_err().code(), Code::FailedPrecondition);
-    assert!(!relationship(&mut friends, &juan, &rin).await.may_request);
+    // Strangers (no server, conversation or request between them) learn
+    // nothing about each other.
+    let unknown = friends
+        .get_relationship(authed(&juan.token, pb::GetRelationshipRequest { user_id: rin.id.clone() }))
+        .await
+        .unwrap_err();
+    assert_eq!(unknown.code(), Code::NotFound);
     settings(
         &mut friends,
         &rin,
@@ -346,6 +361,7 @@ async fn friends_end_to_end() {
             .await
             .unwrap();
     }
+    assert!(relationship(&mut friends, &juan, &rin).await.may_request);
     ask(&mut friends, &juan, &rin).await.unwrap();
     ask(&mut friends, &rin, &juan).await.unwrap();
     // Friends only: Mika, in the same server but no friend, can't start one with Rin.

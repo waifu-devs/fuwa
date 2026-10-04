@@ -291,6 +291,14 @@ impl Friends {
                 }
                 _ => {}
             }
+            // Every request from `from` writes this row, so two at once clash
+            // and the one run again counts the other's.
+            conn.execute(
+                "INSERT INTO friend_senders (account_id, last_request_at) VALUES (?1, ?2)
+                 ON CONFLICT (account_id) DO UPDATE SET last_request_at = excluded.last_request_at",
+                (from, now),
+            )
+            .await?;
             if Self::waiting(conn, from, now).await? >= MAX_WAITING {
                 return Err(Error::ResourceExhausted(format!(
                     "you have {MAX_WAITING} friend requests waiting; cancel some first"
@@ -407,31 +415,40 @@ impl Friends {
                 .await?;
             conn.execute("DELETE FROM friend_links WHERE account_id = ?1 OR other_id = ?1", [account_id]).await?;
             conn.execute("DELETE FROM friend_settings WHERE account_id = ?1", [account_id]).await?;
+            conn.execute("DELETE FROM friend_senders WHERE account_id = ?1", [account_id]).await?;
             Ok(told)
         })
         .await
     }
 
-    /// Deletes requests that ran out.
+    /// Deletes requests that ran out, a batch at a time so no one write is long.
     pub async fn sweep(&self, now: i64) -> Result<u64> {
-        db::write(&self.db, async |conn| {
-            Ok(conn
-                .execute("DELETE FROM friend_links WHERE expires_at IS NOT NULL AND expires_at <= ?1", [now])
-                .await?)
-        })
-        .await
+        const BATCH: i64 = 500;
+        let mut total = 0;
+        loop {
+            let gone = db::write(&self.db, async |conn| {
+                Ok(conn
+                    .execute(
+                        "DELETE FROM friend_links WHERE rowid IN (SELECT rowid FROM friend_links
+                         WHERE expires_at IS NOT NULL AND expires_at <= ?1 LIMIT ?2)",
+                        (now, BATCH),
+                    )
+                    .await?)
+            })
+            .await?;
+            total += gone;
+            if gone < BATCH as u64 {
+                return Ok(total);
+            }
+        }
     }
 
     // ───────────────────────── Limits ─────────────────────────
 
-    /// Whether `account_id` may send another new request this hour.
-    pub fn may_send(&self, account_id: &str, now: i64) -> bool {
-        let sent = lock(&self.sent);
-        sent.get(account_id).is_none_or(|(start, count)| now - start >= HOUR_MS || *count < REQUESTS_PER_HOUR)
-    }
-
-    /// Counts a new request `account_id` sent.
-    pub fn note_sent(&self, account_id: &str, now: i64) {
+    /// Takes one of `account_id`'s new requests for this hour, if any are
+    /// left, in one step so requests at once can't both take the last. Give
+    /// it back with [`Friends::refund`] when no new request came of it.
+    pub fn reserve(&self, account_id: &str, now: i64) -> bool {
         let mut sent = lock(&self.sent);
         if sent.len() > 65_536 {
             sent.retain(|_, (start, _)| now - *start < HOUR_MS);
@@ -440,7 +457,18 @@ impl Friends {
         if now - *start >= HOUR_MS {
             (*start, *count) = (now, 0);
         }
+        if *count >= REQUESTS_PER_HOUR {
+            return false;
+        }
         *count += 1;
+        true
+    }
+
+    /// Gives back a request [`Friends::reserve`] took.
+    pub fn refund(&self, account_id: &str) {
+        if let Some((_, count)) = lock(&self.sent).get_mut(account_id) {
+            *count = count.saturating_sub(1);
+        }
     }
 
     // ───────────────────────── Live ─────────────────────────
@@ -590,12 +618,26 @@ mod tests {
     async fn sending_is_limited_per_account() {
         let (_dir, friends) = open().await;
         for _ in 0..REQUESTS_PER_HOUR {
-            assert!(friends.may_send("a", 0));
-            friends.note_sent("a", 0);
+            assert!(friends.reserve("a", 0));
         }
-        assert!(!friends.may_send("a", 0));
-        assert!(friends.may_send("b", 0));
-        assert!(friends.may_send("a", HOUR_MS));
+        assert!(!friends.reserve("a", 0));
+        friends.refund("a");
+        assert!(friends.reserve("a", 0));
+        assert!(!friends.reserve("a", 0));
+        assert!(friends.reserve("b", 0));
+        assert!(friends.reserve("a", HOUR_MS));
+    }
+
+    #[tokio::test]
+    async fn sweep_deletes_what_ran_out_in_batches() {
+        let (_dir, friends) = open().await;
+        for n in 0..600 {
+            friends.request("a", &format!("p{n}"), 0).await.ok();
+            friends.request(&format!("q{n}"), "a", 0).await.unwrap();
+        }
+        friends.request("a", "late", REQUEST_LIFETIME_MS).await.unwrap();
+        assert_eq!(friends.sweep(REQUEST_LIFETIME_MS).await.unwrap(), 2 * (MAX_WAITING as u64 + 600));
+        assert_eq!(friends.links("a", REQUEST_LIFETIME_MS).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

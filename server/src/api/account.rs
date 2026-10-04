@@ -174,10 +174,13 @@ impl Api {
         self.app.dms()?.forget_account(&account.id).await?;
         // Nobody keeps them as a friend, a request or a block.
         super::friends::forget_account(&self.app, &account.id).await?;
-        if let Err(err) = self.app.delete_media(&uploads).await {
-            tracing::warn!(account = %account.id, error = %err, "couldn't delete a deleted account's pictures");
+        // Fixed messages: the cause can carry storage hostnames, and whose
+        // account it was stays out of the logs.
+        if self.app.delete_media(&uploads).await.is_err() {
+            crate::reports::server_error("account_pictures_cleanup_failed", None);
+            tracing::warn!("couldn't delete a deleted account's pictures");
         }
-        tracing::info!(account = %account.id, "account deleted");
+        tracing::info!("account deleted");
         Ok(())
     }
 }

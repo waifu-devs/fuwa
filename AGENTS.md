@@ -685,9 +685,11 @@
   change to how channel access is worked out.
 - Friends are private (`docs/friends.md`): only the two people a change is
   about are told, a block is never shown to the person blocked (their
-  requests look sent, their messages get the same refusal a setting gives),
-  and nothing about friends reaches a server, its logs or an agent. A new
-  path that starts or carries a direct message asks `Api::may_message`.
+  requests look sent, their messages are taken and kept from the blocker,
+  their calls never ring; no refusal a block alone would cause), and nothing
+  about friends reaches a server, its logs or an agent. A new path that
+  starts or carries a direct message asks `Api::may_message`, and a new way
+  of reading one hides what the reader's blocked people sent.
 - Direct messages are end-to-end encrypted, always: no off switch, no
   server-side copy of keys or plaintext, nothing about their content in logs,
   events, exports or the usage signal. The server checks only what it can

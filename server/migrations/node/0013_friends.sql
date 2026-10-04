@@ -13,6 +13,16 @@ CREATE TABLE friend_links (
 );
 
 CREATE INDEX friend_links_by_other ON friend_links (other_id);
+-- Requests that run out, for the hourly sweep.
+CREATE INDEX friend_links_by_expiry ON friend_links (expires_at) WHERE expires_at IS NOT NULL;
+
+-- One row per person who has sent a request, written with every new one, so
+-- two requests from the same person at once clash and the second recounts
+-- what's waiting.
+CREATE TABLE friend_senders (
+  account_id TEXT NOT NULL PRIMARY KEY,
+  last_request_at INTEGER NOT NULL
+);
 
 -- Who may ask or message someone, and what their friends see. No row is
 -- every default.

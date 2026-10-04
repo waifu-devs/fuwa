@@ -14,12 +14,19 @@ they blocked. Nothing about friends goes in a server's event log or audit log;
 the only people told about a change are the two it's between, and a block is
 told to nobody.
 
-- **A block never shows.** The blocked person's requests look sent to them but
-  never arrive; their direct messages, in a new conversation or an old one,
-  get the same answer as a privacy setting ("they aren't taking direct
-  messages from you"), and a call won't ring. Blocking a friend reads to them
-  as being unfriended; blocking someone you asked withdraws your request. A
-  block stops messages both ways: the blocker has to unblock to write.
+- **A block never shows.** Nothing the blocked person can do gets an answer
+  a block would explain. Their requests look sent but never arrive. Their
+  direct messages are taken as usual and kept from the blocker, who reads
+  them as deleted before read (the ciphertext is left out for them only); a
+  new conversation opens for them without the blocker hearing of it, though
+  the blocker's settings still refuse it as they would anyone. Their calls
+  never ring: the blocker isn't told of the call and can't join it. Blocking
+  a friend reads to them as being unfriended; blocking someone you asked
+  withdraws your request. The blocker has to unblock to write or call, and
+  a blocker in a call with them is taken out of it.
+- Profiles only answer for people you'd see anyway: friends, requests either
+  way, people in a server with you and people you've talked with. Anyone
+  else is "not found".
 - **Declining is silent.** The sender's request stays waiting on their side
   until it runs out, as if it were never answered. If the person who declined
   later asks them, it's a friendship at once (they did ask).
@@ -46,9 +53,14 @@ setting says; blocking is what stops one. The settings follow the account
 
 ## Limits
 
-- 30 new requests an hour per account (in memory, reset on restart), and 100
-  waiting at once.
-- A request runs out after 30 days; the hourly housekeeping deletes it.
+- 30 new requests an hour per account (in memory, reset on restart; taken
+  before sending and given back if no request came of it), and 100 waiting
+  at once (each request writes the sender's `friend_senders` row, so two at
+  once clash and the second counts again).
+- A request runs out after 30 days; the hourly housekeeping deletes them,
+  500 at a time.
+- A partner who blocked you gives up key packages to you as a stranger's
+  devices do (a few an hour), so you can't use theirs up.
 - Agents have no friends and can't be asked.
 
 ## How it's kept
@@ -74,9 +86,13 @@ settings.
 ## Direct messages
 
 `DirectMessageService` asks `Api::may_message` before opening a conversation,
-sending a message, or joining a conversation's call: never once either person
+sending a message, or joining a conversation's call: never once the sender
 blocked the other; always in a conversation they already have; otherwise as
-the recipient's setting says. Friends may also list and claim each other's
+the recipient's setting says. When the recipient blocked the sender it says
+so to the server only (`Reach::Hidden`): `ListRecords` and `Watch` leave the
+blocked person's messages' ciphertext out for the blocker (their commits
+still arrive, so the group keeps working after an unblock), and call updates
+skip the blocker. Friends may also list and claim each other's
 devices' key packages, as people in a server together may. None of this
 touches encryption: what the server checks is still only who is talking to
 whom (see docs/e2ee.md).

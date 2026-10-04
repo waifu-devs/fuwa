@@ -112,6 +112,26 @@ fn announce(app: Arc<App>, account_id: String) {
     });
 }
 
+/// Whether `account_id` blocked anyone else among `participants`: messages
+/// and calls in their conversation are kept from them.
+pub(super) async fn blocks_any(app: &App, account_id: &str, participants: &[String]) -> Result<bool> {
+    let friends = app.friends()?;
+    for other in participants.iter().filter(|id| *id != account_id) {
+        if friends.blocked(account_id, other).await? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether the recipient of a direct message sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Reach {
+    Seen,
+    /// They blocked the sender, who isn't told.
+    Hidden,
+}
+
 impl Api {
     /// The caller, who must be a person.
     async fn befriender(&self, metadata: &MetadataMap) -> Result<Account> {
@@ -174,28 +194,28 @@ impl Api {
         self.friends_pb(std::slice::from_ref(link)).await?.pop().ok_or(Error::NotFound("user"))
     }
 
-    /// Whether `from` may send `to` a direct message: never once either
-    /// blocked the other; in a conversation they already have, always
-    /// otherwise; and a new one as `to`'s settings say. Refusals read alike
-    /// whatever the reason, so `from` can't tell a block from a setting.
-    pub(super) async fn may_message(&self, from: &str, to: &str, existing: bool) -> Result<()> {
+    /// Whether `from` may send `to` a direct message, and whether `to` sees
+    /// it. `from`'s own block stops them (they unblock to write); otherwise
+    /// an existing conversation always goes on and a new one is as `to`'s
+    /// settings say. Someone `to` blocked is never told: what they send is
+    /// taken as usual and kept from `to` (see [`blocks_any`]), so the
+    /// only refusals anyone gets are the settings' own.
+    pub(super) async fn may_message(&self, from: &str, to: &str, existing: bool) -> Result<Reach> {
         let friends = self.app.friends()?;
-        if friends.blocked(from, to).await? {
-            return Err(Error::FailedPrecondition("you blocked them; unblock them first".into()));
-        }
-        if friends.blocked(to, from).await? {
-            return Err(Error::denied(NOT_TAKING_MESSAGES));
-        }
-        if existing {
-            return Ok(());
-        }
+        // Everything is read whatever the answer, so a block takes no
+        // longer to answer than a setting.
         let settings = friends.settings(to).await?;
         let are_friends = friends.are_friends(from, to).await?;
-        if takes_conversations(&settings, are_friends, self.app.index.share_a_server(from, to)) {
-            Ok(())
-        } else {
-            Err(Error::denied(NOT_TAKING_MESSAGES))
+        let takes = existing || takes_conversations(&settings, are_friends, self.app.index.share_a_server(from, to));
+        let mine = friends.blocked(from, to).await?;
+        let theirs = friends.blocked(to, from).await?;
+        if mine {
+            return Err(Error::FailedPrecondition("you blocked them; unblock them first".into()));
         }
+        if !takes {
+            return Err(Error::denied(NOT_TAKING_MESSAGES));
+        }
+        Ok(if theirs { Reach::Hidden } else { Reach::Seen })
     }
 
     async fn list_friends(&self, metadata: &MetadataMap) -> Result<pb::ListFriendsResponse> {
@@ -222,14 +242,19 @@ impl Api {
         if !answering && !takes_requests(&theirs, self.app.index.share_a_server(&me.id, &other.id)) {
             return Err(Error::FailedPrecondition("they aren't taking friend requests from you".into()));
         }
-        if pending.is_none() && !friends.may_send(&me.id, now) {
+        // A new request takes one of the hour's, given back if none came of it.
+        let reserved = pending.is_none();
+        if reserved && !friends.reserve(&me.id, now) {
             crate::reports::server_used("friends.request_limited", 1);
             return Err(Error::ResourceExhausted("you've sent a lot of friend requests; try again in a while".into()));
         }
-        let mine = match friends.request(&me.id, &other.id, now).await? {
+        let sent = friends.request(&me.id, &other.id, now).await;
+        if reserved && !matches!(sent, Ok(Sent::Asked { .. })) {
+            friends.refund(&me.id);
+        }
+        let mine = match sent? {
             Sent::Already(mine) => mine,
             Sent::Asked { mine, delivered } => {
-                friends.note_sent(&me.id, now);
                 crate::reports::server_used("friends.request", 1);
                 if delivered {
                     let theirs = Link {
@@ -324,10 +349,16 @@ impl Api {
         let friends = self.app.friends()?;
         let now = now_ms();
         let link = friends.link(&me.id, &other.id, now).await?;
+        let shared = self.app.index.share_a_server(&me.id, &other.id);
+        let existing = self.app.dms()?.partners(&me.id).await?.contains(&other.id);
+        // Only about people you'd see anyway: friends and requests either
+        // way, people in a server with you, and people you've talked with.
+        if link.is_none() && !shared && !existing && friends.link(&other.id, &me.id, now).await?.is_none() {
+            return Err(Error::NotFound("user"));
+        }
         let settings = friends.settings_of(&[me.id.as_str(), other.id.as_str()]).await?;
         let (mine, theirs) =
             (settings.get(&me.id).copied().unwrap_or_default(), settings.get(&other.id).copied().unwrap_or_default());
-        let shared = self.app.index.share_a_server(&me.id, &other.id);
         let mut mutual_friends = Vec::new();
         if !mine.hide_mutual_friends && !theirs.hide_mutual_friends {
             let ids = friends.mutual(&me.id, &other.id).await?;
@@ -341,7 +372,6 @@ impl Api {
             mutual_friends = self.app.node()?.accounts(&showing).await?.into_iter().map(|a| a.user()).collect();
         }
         let state = link.as_ref().map_or(FriendState::Unspecified, |l| l.state);
-        let existing = self.app.dms()?.partners(&me.id).await?.contains(&other.id);
         let may_message = self.may_message(&me.id, &other.id, existing).await.is_ok();
         Ok(pb::GetRelationshipResponse {
             state: state as i32,

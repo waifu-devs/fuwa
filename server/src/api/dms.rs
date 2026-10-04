@@ -14,6 +14,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataMap;
 use tonic::{Request, Response, Status};
 
+use super::friends::Reach;
 use super::{Api, respond};
 use crate::dms::{ConversationRow, DeviceRow, KeyPackage, MAX_KEY_PACKAGES, NewRecord};
 use crate::error::{Error, Result};
@@ -46,6 +47,25 @@ struct OnDevice {
 /// Direct messages are end-to-end encrypted between people's devices; an
 /// agent has none.
 const AGENTS_HAVE_NO_DMS: &str = "agents can't use direct messages";
+
+/// Keeps a message from someone `viewer` blocked out of what they read: its
+/// ciphertext goes, as if deleted before they read it. Only messages; the
+/// group's commits still reach them, so the conversation works again once
+/// they unblock.
+async fn hide_blocked(
+    friends: &crate::friends::Friends,
+    viewer: &str,
+    record: &mut pb::ConversationRecord,
+) -> Result<()> {
+    if record.kind == pb::ConversationRecordKind::Message as i32
+        && record.sender_id != viewer
+        && !record.data.is_empty()
+        && friends.blocked(viewer, &record.sender_id).await?
+    {
+        record.data.clear();
+    }
+    Ok(())
+}
 
 fn malformed(err: wire::Malformed) -> Error {
     Error::invalid(err.to_string())
@@ -274,11 +294,21 @@ impl Api {
             .collect();
         // Strangers' devices (people you share only a server with) give up a
         // limited number of single-use key packages an hour.
+        // So do the devices of a partner who blocked you, so you can't use theirs up.
+        let mut blocked_by = HashSet::new();
+        for owner in &owners {
+            if *owner != account.id
+                && partners.contains(*owner)
+                && self.app.friends()?.blocked(owner, &account.id).await?
+            {
+                blocked_by.insert(*owner);
+            }
+        }
         let strangers: Vec<&str> = devices
             .iter()
             .filter(|device| {
                 device.account_id != account.id
-                    && !partners.contains(&device.account_id)
+                    && (!partners.contains(&device.account_id) || blocked_by.contains(device.account_id.as_str()))
                     && claimable.contains(&device.id.as_str())
             })
             .map(|device| device.id.as_str())
@@ -307,8 +337,9 @@ impl Api {
         let dms = self.app.dms()?;
         let existing = dms.partners(&account.id).await?.contains(with);
         // Who may start one is theirs to say (friends, people in a server
-        // with them, nobody new), and a block stops even an old one.
-        self.may_message(&account.id, with, existing).await?;
+        // with them, nobody new). Someone they blocked gets one as usual,
+        // but they aren't told of it.
+        let reach = self.may_message(&account.id, with, existing).await?;
         let other = self.app.node()?.account(with).await?.ok_or(Error::NotFound("user"))?;
         if account.kind == pb::AccountKind::Agent || other.kind == pb::AccountKind::Agent {
             return Err(Error::FailedPrecondition(AGENTS_HAVE_NO_DMS.into()));
@@ -319,7 +350,8 @@ impl Api {
             let event = pb::DirectMessageEvent {
                 payload: Some(pb::direct_message_event::Payload::ConversationOpened(conversation.clone())),
             };
-            dms.publish(&row.participants, event);
+            let told = if reach == Reach::Hidden { vec![account.id.clone()] } else { row.participants.clone() };
+            dms.publish(&told, event);
         }
         Ok(pb::OpenConversationResponse { conversation: Some(conversation), created })
     }
@@ -407,6 +439,8 @@ impl Api {
         if conversation.epoch == 0 {
             return Err(Error::FailedPrecondition("add the conversation's devices before sending".into()));
         }
+        // Taken even from someone the other blocked; it's kept from them
+        // when they read (`hide_blocked`).
         for other in conversation.participants.iter().filter(|id| **id != account.id) {
             self.may_message(&account.id, other, true).await?;
         }
@@ -513,7 +547,13 @@ impl DirectMessageService for Api {
                     limit @ 1..=500 => i64::from(limit),
                     _ => return Err(Error::invalid("limit must be 1 to 500")),
                 };
-                let (records, has_more) = dms.records(&conversation.id, req.after_sequence.max(0), limit).await?;
+                let (mut records, has_more) = dms.records(&conversation.id, req.after_sequence.max(0), limit).await?;
+                if super::friends::blocks_any(&self.app, &account.id, &conversation.participants).await? {
+                    let friends = self.app.friends()?;
+                    for record in &mut records {
+                        hide_blocked(friends, &account.id, record).await?;
+                    }
+                }
                 Ok(pb::ListRecordsResponse { records, has_more })
             }
             .await,
@@ -601,7 +641,17 @@ impl DirectMessageService for Api {
                     }
                     event = events.recv() => match event {
                         Ok(event) => {
-                            let response = pb::WatchResponse { ready: false, event: Some((*event).clone()) };
+                            let mut event = (*event).clone();
+                            if let Some(pb::direct_message_event::Payload::RecordAdded(record)) = &mut event.payload {
+                                let hidden = async { hide_blocked(app.friends()?, &caller.account.id, record).await };
+                                if hidden.await.is_err() {
+                                    // Can't tell whether it's from someone they blocked: they
+                                    // watch again and catch up by listing.
+                                    let _ = tx.send(Err(Status::unavailable("watch again"))).await;
+                                    return;
+                                }
+                            }
+                            let response = pb::WatchResponse { ready: false, event: Some(event) };
                             if !send(Ok(response)).await {
                                 return;
                             }
