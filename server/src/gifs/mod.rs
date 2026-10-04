@@ -445,10 +445,12 @@ pub fn take_turn(account_id: &str, per_minute: Option<i64>) -> Result<()> {
     Ok(())
 }
 
+/// Categories asked lately, by provider and rating, with when they were asked.
+type KeptCategories = HashMap<String, (Instant, Vec<pb::GifCategory>)>;
+
 /// The categories, each with the first GIF its search finds; kept a while.
 pub async fn categories(app: &App, setup: &Setup) -> Result<Vec<pb::GifCategory>> {
-    static KEPT: LazyLock<Mutex<HashMap<String, (Instant, Vec<pb::GifCategory>)>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
+    static KEPT: LazyLock<Mutex<KeptCategories>> = LazyLock::new(|| Mutex::new(HashMap::new()));
     let key = format!("{}:{}", setup.provider.report_id(), setup.rating());
     if let Some((at, kept)) = KEPT.lock().unwrap_or_else(|p| p.into_inner()).get(&key)
         && at.elapsed() < CATEGORIES_TTL

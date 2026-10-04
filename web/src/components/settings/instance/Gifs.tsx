@@ -95,7 +95,7 @@ export function GifSettings({
           options={[
             { value: GifProvider.UNSPECIFIED, label: "Off", hint: "No GIF button. GIFs already sent still show.", icon: <PowerOffIcon className="size-4" /> },
             { value: GifProvider.GIPHY, label: "GIPHY", hint: "Recommended: the biggest library. Free key at developers.giphy.com.", icon: <SparklesIcon className="size-4" /> },
-            { value: GifProvider.KLIPY, label: "Klipy", hint: "A Tenor-style library. Free key at partner.klipy.com.", icon: <FilmIcon className="size-4" /> },
+            { value: GifProvider.KLIPY, label: "Klipy", hint: "A Tenor-style library. Free key from klipy.com.", icon: <FilmIcon className="size-4" /> },
           ]}
         />
       </Setting>

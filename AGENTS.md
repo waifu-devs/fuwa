@@ -136,6 +136,17 @@
     the message (`execute_webhook`): its `author_id` is the webhook's id and
     `Message.webhook` carries the name and picture it posted under. Webhook
     messages never ping @everyone, @here or roles, and nobody can edit them.
+  - GIFs (`docs/gifs.md` is the design): `gifs/` asks the instance's provider
+    (`giphy.rs`, `klipy.rs` behind `Kind`; the `gifs` setting holds the key,
+    never sent to apps) with no forwarding headers, caches answers by a
+    SHA-256 key, and hands results back as signed tokens with previews
+    through the picture proxy. `gifs/store.rs` stores a picked GIF once
+    (`gif_files`, media owner "gifs", metadata stripped) and keeps saved GIFs;
+    `api/gifs.rs` is `GifService` (directory). `MessageGif.seal` is an HMAC
+    the server checks in `send_message` and clears. `media/still.rs` draws a
+    GIF's first frame (for AutoMod). Web: `fuwa/gifs.ts`,
+    `components/chat/GifPicker.tsx` (button) and `GifPanel.tsx` (the picker,
+    a lazy file).
   - `automod/`: what an AutoMod rule catches (words with `*` wildcards,
     pings, links to sites not allowed); `api/automod.rs` keeps the rules
     (`automod_rules`, one protobuf blob each) and `review` runs them inside

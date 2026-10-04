@@ -76,7 +76,7 @@ async fn fake_giphy() -> (SocketAddr, Shared) {
         tiny_gif()
     };
     let router = Router::new()
-        .route("/v1/gifs/search", get(answer.clone()))
+        .route("/v1/gifs/search", get(answer))
         .route("/v1/gifs/trending", get(answer))
         .route("/files/{name}", get(files))
         .with_state(seen.clone());

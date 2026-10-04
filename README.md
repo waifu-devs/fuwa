@@ -31,6 +31,9 @@ like, hosted or self-hosted, over the same protocol.
   channel, like Slack Connect: both admins agree, the messages live only on
   the server that shared it, and each side keeps its own roles and
   moderators. See [docs/shared-channels.md](docs/shared-channels.md).
+- **GIFs, privately.** GIF search (GIPHY or Klipy) goes through the instance,
+  so the library never sees who's searching, and a sent GIF is stored on the
+  instance. See [docs/gifs.md](docs/gifs.md).
 - **Usage tracked, limits optional.** Every server counts its members, channels,
   messages and storage. Limits are off unless the operator sets them.
 - **Live by design.** Every change is an event in the server's log; clients
@@ -129,6 +132,8 @@ the log filter are read only from the environment.
 | `FUWA_SHARED_CHANNELS` | `on` | Servers sharing a text channel with another server on this instance ([docs/shared-channels.md](docs/shared-channels.md)); `off` stops new shares |
 | `FUWA_FEDERATION` | `off` | Talking to other fuwa instances with signed calls, for sharing channels across instances ([docs/federation.md](docs/federation.md)); needs an https `FUWA_PUBLIC_URL` |
 | `FUWA_FEDERATION_ALLOW_PRIVATE` | `off` | Lets federation reach private, loopback and internal addresses and plain http, for tests and private deployments |
+| `FUWA_GIF_PROVIDER` | `off` | GIF search: `giphy`, `klipy` or `off` ([docs/gifs.md](docs/gifs.md)); instance settings can change it later |
+| `FUWA_GIF_API_KEY` | unset | The GIF provider's key; GIFs stay off without one |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |
 | `FUWA_ENCRYPTION_KEY` | unset | 64 hex characters (`openssl rand -hex 32`); encrypts every database at rest |
 | `FUWA_LIMIT_SERVERS_PER_ACCOUNT` | unlimited | Servers one account may own |
