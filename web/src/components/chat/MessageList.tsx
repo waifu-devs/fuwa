@@ -64,6 +64,7 @@ import { copyIdItem } from "@/components/menus/common";
 import { messageMenu } from "@/components/menus/message";
 import { items } from "@/lib/context-menu";
 import { Embeds } from "@/components/chat/Embeds";
+import { GifMessage } from "@/components/chat/GifMessage";
 import { AppBadge } from "@/components/AppBadge";
 import { ServerTag, SharedNote } from "@/components/chat/Shared";
 import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
@@ -829,6 +830,7 @@ const MessageRow = memo(function MessageRow({
               </span>
             )}
             <Embeds embeds={message.embeds} animate={animate} />
+            <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
             {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
           </>
         )}
