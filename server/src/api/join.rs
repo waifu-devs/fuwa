@@ -356,7 +356,8 @@ impl JoinService for Api {
                             }
                         }
                         // Roles go out only while the person who set them up could
-                        // still hand them out: a member, ranked above the role.
+                        // still set them up: a member who manages the server, ranked
+                        // above the role.
                         let rules = permissions::load(conn, &sdb.id).await?;
                         let setter = match onboarding.set_by.as_str() {
                             "" => None,
@@ -368,7 +369,7 @@ impl JoinService for Api {
                                     |r| r.get::<String>(0),
                                 )
                                 .await?;
-                                Some(rules.access(id, &held))
+                                Some(rules.access(id, &held)).filter(|a| a.has(Permission::ManageServer))
                             }
                             _ => None,
                         };

@@ -362,14 +362,21 @@ impl ServerService for Api {
                 let (server, before) = match written {
                     Ok(written) => written,
                     Err(err) => {
-                        // Nothing was saved: the pictures just checked in go again.
+                        // Nothing was saved: the pictures just checked in go again,
+                        // unless another save of the same picture made it live.
+                        let live = sdb.server().await.ok();
+                        let in_use = |url: &str| live.as_ref().is_none_or(|s| s.icon_url == url || s.banner_url == url);
                         if new_icon.is_some() {
                             let icon = icon_url.as_deref().unwrap_or_default();
-                            self.drop_picture(icon, &old_icon, PictureOwner::Server(&sdb.id)).await;
+                            if !in_use(icon) {
+                                self.drop_picture(icon, &old_icon, PictureOwner::Server(&sdb.id)).await;
+                            }
                         }
                         if new_banner.is_some() {
                             let banner = banner_url.as_deref().unwrap_or_default();
-                            self.drop_picture(banner, &old_banner, PictureOwner::Server(&sdb.id)).await;
+                            if !in_use(banner) {
+                                self.drop_picture(banner, &old_banner, PictureOwner::Server(&sdb.id)).await;
+                            }
                         }
                         return Err(err);
                     }
