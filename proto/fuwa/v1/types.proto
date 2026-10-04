@@ -31,6 +31,9 @@ message Node {
   bool shared_channels = 12;
   // And with servers on other instances (docs/federation.md).
   bool federation = 13;
+  // Agents may use this instance through MCP: its endpoint is /mcp on this
+  // address, described at /.well-known/mcp.json (docs/mcp.md).
+  bool mcp = 14;
   // People may put an effect on their profile card (Profile.effect). While
   // it's off, profiles come back without one and apps hide the picker.
   bool profile_effects = 18;
