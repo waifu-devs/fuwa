@@ -15,7 +15,7 @@ import {
   type BackupItem,
   type SignedForm,
 } from "@/gen/fuwa/v1/dm_pb";
-import { deriveKeys, formatRecoveryKey, newer, newRecoveryKey, open, PAD_TO, parseRecoveryKey, sameBytes, seal, type BackupKeys } from "./backupkey";
+import { deriveKeys, formatRecoveryKey, newer, newRecoveryKey, open, paddingFor, parseRecoveryKey, sameBytes, seal, type BackupKeys } from "./backupkey";
 import * as vault from "./vault";
 
 /**
@@ -99,19 +99,18 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
   };
 }
 
-/** A part's plaintext, padded up to a multiple of PAD_TO. */
+/** A part's plaintext, padded to an exact multiple of PAD_TO. */
 function encodePart(items: BackupItem[]): Uint8Array {
   const bare = toBinary(BackupPartSchema, create(BackupPartSchema, { items }));
-  // Field 15's tag and a length of up to 3 bytes come on top of the zeros.
-  const want = Math.ceil((bare.length + 4) / PAD_TO) * PAD_TO;
-  const zeros = Math.max(0, want - bare.length - 4);
-  return toBinary(BackupPartSchema, create(BackupPartSchema, { items, padding: new Uint8Array(zeros) }));
+  return toBinary(BackupPartSchema, create(BackupPartSchema, { items, padding: new Uint8Array(paddingFor(bare.length)) }));
 }
 
 export class BackupError extends Error {}
 
 export class BackupSync {
   private keys: BackupKeys | null = null;
+  /** The place the next part takes, as last heard. */
+  private next = 1n;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private flushing: Promise<void> | null = null;
   private stopped = false;
@@ -132,6 +131,7 @@ export class BackupSync {
   }
 
   private showBackup(b: Backup | undefined, status: BackupState["status"], problem: string | null = null) {
+    if (b) this.next = b.nextSequence;
     this.show({
       status,
       problem,
@@ -224,9 +224,22 @@ export class BackupSync {
       }
       try {
         if (items.length) {
-          const data = await seal(keys, this.accountId, encodePart(items));
-          const { backup } = await this.api.dms.addBackupPart({ keyCheck: keys.check, data }, CALL);
-          this.showBackup(backup, "on");
+          const plaintext = encodePart(items);
+          for (let attempt = 0; ; attempt++) {
+            const sequence = this.next;
+            const data = await seal(keys, this.accountId, sequence, plaintext);
+            try {
+              const { backup } = await this.api.dms.addBackupPart({ keyCheck: keys.check, data, sequence }, CALL);
+              this.showBackup(backup, "on");
+              break;
+            } catch (err) {
+              // Another device took that place: seal it again for the next one.
+              if (attempt >= 3 || toFuwaError(err).code !== Code.AlreadyExists) throw err;
+              const { backup } = await this.api.dms.getBackup({}, CALL);
+              if (!backup) throw err;
+              this.next = backup.nextSequence;
+            }
+          }
         }
         await vault.markBacked(taken);
       } catch (err) {
@@ -286,14 +299,17 @@ export class BackupSync {
     let after = 0n;
     let done = 0;
     let unreadable = 0;
+    let missing = 0;
     try {
       await vault.keepBackup({ vault: this.vaultKey, key, check: keys.check }, true);
       for (;;) {
         const { parts, hasMore } = await this.api.dms.listBackupParts({ afterSequence: after, limit: 50 }, CALL);
         for (const part of parts) {
+          // Parts are numbered one after another: a gap is a part the instance didn't give back.
+          if (part.sequence > after + 1n) missing += Number(part.sequence - after - 1n);
           after = part.sequence;
           done++;
-          const plaintext = await open(keys, this.accountId, part.data);
+          const plaintext = await open(keys, this.accountId, part.sequence, part.data);
           if (!plaintext) {
             unreadable++;
             continue;
@@ -312,6 +328,8 @@ export class BackupSync {
         this.show({ restored: done });
         if (!hasMore || !parts.length) break;
       }
+      // And any after the last one it gave, by its own count.
+      if (backup.nextSequence > after + 1n) missing += Number(backup.nextSequence - after - 1n);
     } catch (err) {
       // Left as it was: the key is asked for again.
       await vault.dropBackup(this.vaultKey).catch(() => {});
@@ -320,9 +338,17 @@ export class BackupSync {
     }
     reportTiming("e2ee.backup_restore", performance.now() - began);
     if (unreadable) reportError("e2ee.backup_unreadable", "backup");
+    if (missing) reportError("e2ee.backup_missing", "backup");
     this.keys = keys;
     this.enable();
-    this.showBackup(backup, "on", unreadable ? `${unreadable} part${unreadable === 1 ? "" : "s"} of the backup couldn't be read.` : null);
+    const lost = unreadable + missing;
+    this.showBackup(
+      backup,
+      "on",
+      lost
+        ? `${lost} part${lost === 1 ? "" : "s"} of the backup ${missing ? "didn't come back from the instance or " : ""}couldn't be read, so some messages, edits or deletions may be missing here.`
+        : null,
+    );
     await this.refresh([...touched]);
     void this.flush();
   }

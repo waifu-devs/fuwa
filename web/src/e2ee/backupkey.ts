@@ -88,13 +88,14 @@ export async function deriveKeys(key: Uint8Array): Promise<BackupKeys> {
   return { check, seal };
 }
 
-const associated = (accountId: string) => new TextEncoder().encode(`fuwa backup v1|${accountId}`);
+/** Binds a part to its account and its place in the backup, so it can't be moved to another of either. */
+const associated = (accountId: string, sequence: bigint) => new TextEncoder().encode(`fuwa backup v1|${accountId}|${sequence}`);
 
 /** A nonce, then the sealed bytes. */
-export async function seal(keys: BackupKeys, accountId: string, plaintext: Uint8Array): Promise<Uint8Array> {
+export async function seal(keys: BackupKeys, accountId: string, sequence: bigint, plaintext: Uint8Array): Promise<Uint8Array> {
   const nonce = crypto.getRandomValues(new Uint8Array(NONCE_BYTES));
   const sealed = new Uint8Array(
-    await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: associated(accountId) }, keys.seal, plain(plaintext)),
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: associated(accountId, sequence) }, keys.seal, plain(plaintext)),
   );
   const out = new Uint8Array(NONCE_BYTES + sealed.length);
   out.set(nonce);
@@ -102,19 +103,38 @@ export async function seal(keys: BackupKeys, accountId: string, plaintext: Uint8
   return out;
 }
 
-/** What a part said, or null if it wasn't sealed with these keys for this account. */
-export async function open(keys: BackupKeys, accountId: string, data: Uint8Array): Promise<Uint8Array | null> {
+/** What a part said, or null if it wasn't sealed with these keys for this account and place. */
+export async function open(keys: BackupKeys, accountId: string, sequence: bigint, data: Uint8Array): Promise<Uint8Array | null> {
   if (data.length <= NONCE_BYTES) return null;
   try {
     return new Uint8Array(
       await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: plain(data.subarray(0, NONCE_BYTES)), additionalData: associated(accountId) },
+        { name: "AES-GCM", iv: plain(data.subarray(0, NONCE_BYTES)), additionalData: associated(accountId, sequence) },
         keys.seal,
         plain(data.subarray(NONCE_BYTES)),
       ),
     );
   } catch {
     return null;
+  }
+}
+
+/** How many bytes a protobuf varint of `n` takes. */
+const varintBytes = (n: number) => (n < 0x80 ? 1 : n < 0x4000 ? 2 : n < 0x200000 ? 3 : 4);
+
+/**
+ * How many zeros to put in a part's padding field (one tag byte, a varint
+ * length, then the zeros) so a `bare`-byte part comes out at an exact multiple
+ * of PAD_TO.
+ */
+export function paddingFor(bare: number): number {
+  let total = Math.ceil((bare + 2) / PAD_TO) * PAD_TO;
+  for (;;) {
+    for (let len = 1; len <= 4; len++) {
+      const zeros = total - bare - 1 - len;
+      if (zeros >= 0 && varintBytes(zeros) === len) return zeros;
+    }
+    total += PAD_TO;
   }
 }
 

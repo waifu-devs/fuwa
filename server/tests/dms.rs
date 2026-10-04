@@ -391,13 +391,31 @@ async fn message_backups_keep_parts_in_order_for_their_owner() {
         .await;
     assert_eq!(again.unwrap_err().code(), Code::AlreadyExists);
 
+    let add_at = async |dms: &mut Dms, p: &Person, key_check: &[u8], sequence: i64, data: Vec<u8>| {
+        dms.add_backup_part(authed(
+            &p.token,
+            pb::AddBackupPartRequest { key_check: key_check.to_vec(), data, sequence },
+        ))
+        .await
+    };
+    // Parts go at the backup's next place, one after another.
     let add = async |dms: &mut Dms, p: &Person, key_check: &[u8], data: Vec<u8>| {
-        dms.add_backup_part(authed(&p.token, pb::AddBackupPartRequest { key_check: key_check.to_vec(), data })).await
+        let next = dms
+            .get_backup(authed(&p.token, pb::GetBackupRequest {}))
+            .await
+            .unwrap()
+            .into_inner()
+            .backup
+            .map_or(1, |b| b.next_sequence);
+        add_at(dms, p, key_check, next, data).await
     };
     for n in 1..=3u8 {
         let added = add(&mut dms, &juan, &check, vec![n; 1000]).await.unwrap().into_inner();
-        assert_eq!(added.sequence, i64::from(n));
+        assert_eq!((added.sequence, added.backup.unwrap().next_sequence), (i64::from(n), i64::from(n) + 1));
     }
+    // A place already taken, or one further on, is refused.
+    assert_eq!(add_at(&mut dms, &juan, &check, 3, vec![1]).await.unwrap_err().code(), Code::AlreadyExists);
+    assert_eq!(add_at(&mut dms, &juan, &check, 9, vec![1]).await.unwrap_err().code(), Code::AlreadyExists);
     assert_eq!(add(&mut dms, &juan, &check, vec![]).await.unwrap_err().code(), Code::InvalidArgument);
     assert_eq!(add(&mut dms, &juan, &check, vec![0; 256 * 1024 + 1]).await.unwrap_err().code(), Code::InvalidArgument);
     // Someone else's backup isn't reachable, and they have none.
@@ -444,6 +462,16 @@ async fn message_backups_keep_parts_in_order_for_their_owner() {
 
     dms.delete_backup(authed(&juan.token, pb::DeleteBackupRequest {})).await.unwrap();
     assert!(get(&mut dms, &juan).await.is_none());
+
+    // Starting over is limited to 6 times an hour (Juan has used 2).
+    for n in 0..4u8 {
+        dms.start_backup(authed(&juan.token, pb::StartBackupRequest { key_check: vec![n; 32], replace: true }))
+            .await
+            .unwrap();
+    }
+    let limited =
+        dms.start_backup(authed(&juan.token, pb::StartBackupRequest { key_check: check.clone(), replace: true })).await;
+    assert_eq!(limited.unwrap_err().code(), Code::ResourceExhausted);
 
     // Deleting an account takes its backup too.
     dms.start_backup(authed(&mika.token, pb::StartBackupRequest { key_check: check.clone(), replace: false }))

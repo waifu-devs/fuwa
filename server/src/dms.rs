@@ -42,6 +42,9 @@ const HOUR_MS: i64 = 60 * 60 * 1000;
 /// catch up from the records.
 const BUFFER: usize = 256;
 
+/// Times one account may start (or start over) its message backup in an hour.
+pub const BACKUP_STARTS_PER_HOUR: u32 = 6;
+
 /// What a device hears when it adds to a backup another device started over.
 pub const STALE_BACKUP_KEY: &str = "your message backup was started over with another recovery key";
 
@@ -62,6 +65,7 @@ impl BackupRow {
             key_check: self.key_check.clone(),
             size: self.size,
             parts: self.parts,
+            next_sequence: self.next_seq,
             max_size,
             created_at: Some(timestamp(self.created_at)),
             updated_at: Some(timestamp(self.updated_at)),
@@ -270,6 +274,8 @@ pub struct DmDb {
     /// Single-use key packages each account took from strangers' devices this
     /// hour: when the hour started, and how many.
     stranger_claims: SyncMutex<HashMap<String, (i64, u32)>>,
+    /// Backups each account started this hour, from when the hour began.
+    backup_starts: SyncMutex<HashMap<String, (i64, u32)>>,
 }
 
 impl DmDb {
@@ -280,6 +286,7 @@ impl DmDb {
             publishing: Mutex::new(()),
             watchers: SyncMutex::default(),
             stranger_claims: SyncMutex::default(),
+            backup_starts: SyncMutex::default(),
         })
     }
 
@@ -519,9 +526,23 @@ impl DmDb {
     }
 
     /// Starts the account's backup with a new key check. One it already has
-    /// goes, parts and all, only if `replace`.
+    /// goes, parts and all, only if `replace`. At most [`BACKUP_STARTS_PER_HOUR`]
+    /// an hour, so nobody rewrites a full backup over and over.
     pub async fn start_backup(&self, account_id: &str, key_check: &[u8], replace: bool) -> Result<BackupRow> {
-        db::write(&self.db, async |conn| {
+        let started = |more: u32| {
+            let now = now_ms();
+            let mut starts = self.backup_starts.lock().unwrap_or_else(|p| p.into_inner());
+            starts.retain(|_, (since, _)| now - *since < HOUR_MS);
+            let (_, count) = starts.entry(account_id.to_string()).or_insert((now, 0));
+            *count += more;
+            *count
+        };
+        if started(0) >= BACKUP_STARTS_PER_HOUR {
+            return Err(Error::ResourceExhausted(
+                "you've started your message backup too many times this hour; try again later".into(),
+            ));
+        }
+        let row = db::write(&self.db, async |conn| {
             if backup_of(conn, account_id).await?.is_some() {
                 if !replace {
                     return Err(Error::AlreadyExists("you already have a message backup".into()));
@@ -537,18 +558,22 @@ impl DmDb {
             .await?;
             backup_of(conn, account_id).await?.ok_or(Error::NotFound("backup"))
         })
-        .await
+        .await?;
+        started(1);
+        Ok(row)
     }
 
-    /// Adds a part to the account's backup, if `key_check` is its current one
-    /// and it stays within `max_size` bytes. Its sequence, and the backup now.
+    /// Adds a part to the account's backup at `seq`, if `key_check` is its
+    /// current one, `seq` is its next place (the device sealed the part for
+    /// that place) and it stays within `max_size` bytes. The backup now.
     pub async fn add_backup_part(
         &self,
         account_id: &str,
         key_check: &[u8],
+        seq: i64,
         data: &[u8],
         max_size: i64,
-    ) -> Result<(i64, BackupRow)> {
+    ) -> Result<BackupRow> {
         db::write(&self.db, async |conn| {
             let backup = backup_of(conn, account_id)
                 .await?
@@ -563,7 +588,12 @@ impl DmDb {
                     max_size / (1024 * 1024)
                 )));
             }
-            let seq = backup.next_seq;
+            if seq != backup.next_seq {
+                return Err(Error::AlreadyExists(format!(
+                    "that place in your message backup is taken; the next one is {}",
+                    backup.next_seq
+                )));
+            }
             let now = now_ms();
             conn.execute(
                 "INSERT INTO backup_parts (account_id, seq, data, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -576,8 +606,7 @@ impl DmDb {
                 (account_id, size, seq + 1, now),
             )
             .await?;
-            let backup = backup_of(conn, account_id).await?.ok_or(Error::NotFound("backup"))?;
-            Ok((seq, backup))
+            backup_of(conn, account_id).await?.ok_or(Error::NotFound("backup"))
         })
         .await
     }

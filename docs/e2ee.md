@@ -158,17 +158,25 @@ in Settings, under Devices.
   channel message's signed form so it can still be passed on as shared
   history. Not lines a device couldn't read, nor its own "joined" marker.
 - **Parts.** A few seconds after a device writes lines, it seals them in a
-  part: a `BackupPart` (padded with zeros to a multiple of 4 KiB) encrypted
-  with AES-256-GCM under HKDF-SHA256 of the key (info `encrypt`), a random
-  12-byte nonce, and `fuwa backup v1|<account id>` as associated data, so a
-  part can't be passed off as another account's. The instance keeps the parts
-  in order in `dms.db` (`backups`, `backup_parts`), up to 64 MiB per account,
-  and refuses a part whose key check isn't the backup's current one, so a
-  device still on an old key stops adding once someone starts over elsewhere.
+  part: a `BackupPart` (padded with zeros to an exact multiple of 4 KiB)
+  encrypted with AES-256-GCM under HKDF-SHA256 of the key (info `encrypt`), a
+  random 12-byte nonce, and `fuwa backup v1|<account id>|<sequence>` as
+  associated data. Parts are numbered 1, 2, 3… with no gaps; a device seals
+  each one for the next number and the instance takes it only at that place
+  (if another device got there first, it seals the part again for the next
+  one). So a part can't be moved to another place or passed off as another
+  account's. The instance keeps the parts in order in `dms.db` (`backups`,
+  `backup_parts`), up to 64 MiB per account, and refuses a part whose key
+  check isn't the backup's current one, so a device still on an old key stops
+  adding once someone starts over elsewhere. An account can start (or start
+  over) a backup 6 times an hour.
 - **Restoring** on a new device: the person types the key; the device checks it
   against the key check, reads every part, and keeps each line unless it has
-  a newer copy (one deleted, or edited later, wins, whatever order the parts
-  come in). What came back counts as read. From then on that device adds to
+  a newer copy (one deleted, or edited later, wins). What came back counts as
+  read. A gap in the numbers, or fewer parts than the instance says the
+  backup has, means a part didn't come back: the device says some messages,
+  edits or deletions may be missing (a held-back part that recorded a
+  deletion would bring that message back). From then on that device adds to
   the backup too.
 - **What the instance sees**: that the account has a backup, when each part
   was added, and its size, in 4 KiB steps. Not what's in it, or which
@@ -177,8 +185,10 @@ in Settings, under Devices.
   (readable only with the recovery key) until the backup starts over. Lines
   from a secure channel someone has since lost access to come back on restore
   too. A device that loses its key (signing out wipes it) has to be given it
-  again. The instance could drop or reorder parts, which loses lines or
-  shows an older version, but it can't change or add any.
+  again. The instance can't change, add, reorder or move parts, and a part it
+  holds back from the middle shows. One it holds back from the end, while
+  also under-reporting how many there are, doesn't: nothing the restoring
+  device has says how many there should be.
 
 ## Where it lives
 

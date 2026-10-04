@@ -71,8 +71,10 @@ service DirectMessageService {
   // Starts a backup with a new recovery key. One the account already has is
   // only replaced (its parts deleted) when the request says so.
   rpc StartBackup(StartBackupRequest) returns (StartBackupResponse);
-  // Adds a part. Refused (FAILED_PRECONDITION) if the key check isn't the
-  // backup's current one, say because another device started it over.
+  // Adds a part at the backup's next place. Refused with FAILED_PRECONDITION
+  // if the key check isn't the backup's current one (another device started
+  // it over), ALREADY_EXISTS if that place was taken (get the backup and seal
+  // the part again for the next one), RESOURCE_EXHAUSTED if it's full.
   rpc AddBackupPart(AddBackupPartRequest) returns (AddBackupPartResponse);
   // Parts after a sequence, oldest first.
   rpc ListBackupParts(ListBackupPartsRequest) returns (ListBackupPartsResponse);
@@ -371,6 +373,9 @@ message Backup {
   int64 max_size = 4;
   google.protobuf.Timestamp created_at = 5;
   google.protobuf.Timestamp updated_at = 6;
+  // The place the next part takes: parts are numbered from 1, one after
+  // another, and each is sealed for its place.
+  int64 next_sequence = 7;
 }
 
 message GetBackupRequest {}
@@ -383,7 +388,8 @@ message GetBackupResponse {
 message StartBackupRequest {
   // 32 bytes.
   bytes key_check = 1;
-  // Delete a backup the account already has and start over.
+  // Delete a backup the account already has and start over. An account can
+  // start a backup at most 6 times an hour.
   bool replace = 2;
 }
 
@@ -396,6 +402,8 @@ message AddBackupPartRequest {
   bytes key_check = 1;
   // At most 256 KiB: a 12-byte nonce, then AES-256-GCM of a BackupPart.
   bytes data = 2;
+  // Its place: the backup's next_sequence.
+  int64 sequence = 3;
 }
 
 message AddBackupPartResponse {
@@ -425,8 +433,9 @@ message DeleteBackupResponse {}
 
 // What a backup part holds once a device opens it; never sent unencrypted.
 // Encrypted with AES-256-GCM under HKDF-SHA256 of the recovery key (salt
-// "fuwa backup v1", info "encrypt"), with "fuwa backup v1|<account id>" as
-// associated data.
+// "fuwa backup v1", info "encrypt"), with "fuwa backup v1|<account id>|<its
+// sequence>" as associated data, so the instance can't move a part to
+// another place or account without it failing to open.
 message BackupPart {
   repeated BackupItem items = 1;
   // Zeros, so parts come in a few sizes and say little about what's in them.

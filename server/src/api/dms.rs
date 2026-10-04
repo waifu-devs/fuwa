@@ -608,9 +608,12 @@ impl DirectMessageService for Api {
                 if req.data.is_empty() || req.data.len() > MAX_BACKUP_PART_BYTES {
                     return Err(Error::invalid(format!("a backup part is 1 to {} KiB", MAX_BACKUP_PART_BYTES / 1024)));
                 }
-                let (sequence, backup) =
-                    self.app.dms()?.add_backup_part(&account.id, &req.key_check, &req.data, MAX_BACKUP_BYTES).await?;
-                Ok(pb::AddBackupPartResponse { sequence, backup: Some(backup.to_pb(MAX_BACKUP_BYTES)) })
+                let backup = self
+                    .app
+                    .dms()?
+                    .add_backup_part(&account.id, &req.key_check, req.sequence, &req.data, MAX_BACKUP_BYTES)
+                    .await?;
+                Ok(pb::AddBackupPartResponse { sequence: req.sequence, backup: Some(backup.to_pb(MAX_BACKUP_BYTES)) })
             }
             .await,
         )
