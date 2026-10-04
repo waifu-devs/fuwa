@@ -102,6 +102,8 @@ async fn listen(app: Arc<App>, server_id: String, mut place: Place, mut events: 
                         last_sent = Instant::now();
                     }
                 }
+                // Programs never watch.
+                Some(Bridged::Picture(_)) => {}
                 Some(Bridged::Ended(Ending::Replaced)) => {
                     break Status::failed_precondition("you joined this call from somewhere else");
                 }
@@ -129,7 +131,7 @@ async fn rebridge(app: &App, server_id: &str, place: &Place, tx: &Listener) -> O
         }
         let current = app.voice.get(server_id, &place.state.user_id);
         let place = current.filter(|p| p.session_id == place.session_id)?;
-        match app.media_link.bridge(&place).await {
+        match app.media_link.bridge(&place, false).await {
             Ok(events) => return Some(events),
             Err(err) if Instant::now() < until => {
                 tracing::debug!(error = %err, "a voice bridge couldn't open again yet");
@@ -445,6 +447,15 @@ impl Api {
         };
         let same_channel = before.as_ref().is_some_and(|p| p.state.channel_id == channel.id);
         let moderation = seat.sdb.voice_moderation(&account.id).await?;
+        // An ask a change to what recordings keep ended stays off until
+        // KeepVoice tells them; not asking any more, there's nothing to tell.
+        let server_record = match server_record {
+            true => !self.app.recordings.is_ended(&server_id, &account.id),
+            false => {
+                self.app.recordings.was_ended(&server_id, &account.id);
+                false
+            }
+        };
         let (server_record, full) = self.server_record(&seat.sdb, server_record).await?;
         let mut state = pb::VoiceState {
             user_id: account.id.clone(),
@@ -515,7 +526,7 @@ impl Api {
         let selves = Selves { self_mute: req.self_mute, self_deaf: req.self_deaf, ..Default::default() };
         let (server_id, place, _) =
             self.voice_place(&account, &req.server_id, &req.channel_id, selves, &req.session_id).await?;
-        let events = self.app.media_link.bridge(&place).await?;
+        let events = self.app.media_link.bridge(&place, false).await?;
         self.take_voice_place(&server_id, &place).await;
         let (tx, rx) = tokio::sync::mpsc::channel(LISTEN_BUFFER);
         let joined = pb::VoiceJoined { session_id: place.session_id.clone(), state: Some(place.state.clone()) };
@@ -592,7 +603,10 @@ impl Api {
             self.disconnect(&server_id, &account.id).await;
             return Err(moved_away());
         };
-        let (server_record, full) = self.server_record(&sdb, req.server_record).await?;
+        // Still asking to record on the server, as before a change to what
+        // recordings keep ended it: they're told, and press Record again.
+        let recording_ended = self.app.recordings.was_ended(&server_id, &account.id) && req.server_record;
+        let (server_record, full) = self.server_record(&sdb, req.server_record && !recording_ended).await?;
         let place = match before {
             Some(mut place) => {
                 let may_before = place.may();
@@ -662,7 +676,7 @@ impl Api {
             }
         };
         let recordings_full = full && !place.state.record_suppress;
-        Ok(pb::KeepVoiceResponse { state: Some(place.state), recordings_full })
+        Ok(pb::KeepVoiceResponse { state: Some(place.state), recordings_full, recording_ended })
     }
 
     async fn list_voice_states(
@@ -760,7 +774,7 @@ impl Api {
         seat.access.require_in(&row.channel_id, pb::Permission::Record)?;
         let row = crate::recordings::finished(&self.app, &seat.sdb, row).await?;
         let user_id = crate::id::parse_id("account", &req.user_id)?;
-        let pieces = crate::recordings::download(&self.app, &seat.sdb, &row, &user_id).await?;
+        let pieces = crate::recordings::download(&self.app, &seat.sdb, &row, &user_id, req.part).await?;
         let stream = tokio_stream::wrappers::ReceiverStream::new(pieces)
             .map(|piece| piece.map(|data| pb::DownloadRecordingResponse { data }).map_err(Status::from));
         Ok(Box::pin(stream))
@@ -935,6 +949,7 @@ impl CallService for Api {
                     ice_servers,
                     recordings: enabled && settings.call_recordings,
                     screen_sound: enabled,
+                    recording_video: enabled && settings.call_recordings && settings.call_recording_video,
                 })
             }
             .await,

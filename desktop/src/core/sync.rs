@@ -151,8 +151,11 @@ async fn follow_instance(
             }
         })
     };
+    // What games report goes out with this app's presence.
+    let presence = tokio::spawn(crate::core::presence::keep(api.clone(), core.games.clone()));
     let result = follow_events(core, key, api, followed).await;
     refresh.abort();
+    presence.abort();
     result
 }
 

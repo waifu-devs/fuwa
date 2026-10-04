@@ -21,7 +21,7 @@ use crate::cpb;
 use crate::error::{Error, Result};
 use crate::id::{now_ms, timestamp};
 use crate::pb;
-use crate::rtc::{Bridged, Ending, Heard, May, Sfu};
+use crate::rtc::{Bridged, Ending, Heard, May, Sfu, Watched};
 
 /// What a bridge hears, wherever its media part is.
 pub type BridgeEvents = std::pin::Pin<Box<dyn futures::Stream<Item = Bridged> + Send>>;
@@ -317,16 +317,17 @@ impl MediaLink {
         }
     }
 
-    /// Puts a program in a place's call without WebRTC (see [`Sfu::bridge`]).
-    /// The stream ends with [`Bridged::Ended`], or just ends when the media
-    /// part went away, which is worth opening again.
-    pub async fn bridge(&self, place: &Place) -> Result<BridgeEvents> {
+    /// Puts a program in a place's call without WebRTC (see [`Sfu::bridge`]),
+    /// getting cameras and screens too when it `watch`es. The stream ends
+    /// with [`Bridged::Ended`], or just ends when the media part went away,
+    /// which is worth opening again.
+    pub async fn bridge(&self, place: &Place, watch: bool) -> Result<BridgeEvents> {
         use tokio_stream::StreamExt;
         let user_id = &place.state.user_id;
         match self {
             Self::Off(_) => Err(self.off()),
             Self::Local(sfu) => {
-                let heard = sfu.bridge(&place.room, user_id, &place.session_id, place.may()).await?;
+                let heard = sfu.bridge(&place.room, user_id, &place.session_id, place.may(), watch).await?;
                 Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(heard)))
             }
             Self::Remote(_) => {
@@ -337,6 +338,7 @@ impl MediaLink {
                     session_id: place.session_id.clone(),
                     may_speak: place.may_speak(),
                     may_hear: place.may_hear(),
+                    watch,
                 };
                 let stream = crate::cluster::ride_out(crate::cluster::RIDE_OUT, || {
                     let (mut client, request) = (client.clone(), request.clone());
@@ -349,6 +351,13 @@ impl MediaLink {
                         participant: f.participant,
                         frame: f.frame,
                         timestamp: f.timestamp,
+                    })),
+                    cpb::bridge_response::Event::Picture(p) => Some(Bridged::Picture(Watched {
+                        participant: p.participant,
+                        frame: p.frame,
+                        keyframe: p.keyframe,
+                        screen: p.screen,
+                        time: p.time,
                     })),
                     cpb::bridge_response::Event::Ended(why) => Some(Bridged::Ended(Ending::parse(&why))),
                 });

@@ -292,7 +292,10 @@ hour of one person talking is about 15 to 30 MB. `FUWA_CALL_RECORDINGS=off`
 someone deletes them. To bound the disk they take, cap each server's
 recordings (`FUWA_LIMIT_RECORDING_STORAGE=20GB`, or per server in Settings >
 Servers) and have old ones delete themselves
-(`FUWA_CALL_RECORDINGS_KEEP_DAYS=30`).
+(`FUWA_CALL_RECORDINGS_KEEP_DAYS=30`). Recording cameras and shared screens too is
+off unless you set `FUWA_CALL_RECORDING_VIDEO=on` (or Video in recordings on
+the Calls page); each server then chooses, and an hour of one person's
+camera is around 100 MB, so set a cap first.
 
 On Railway, which has no public UDP, add a TCP proxy for port 50000 and set
 `FUWA_MEDIA_ADDRESSES=tcp/<proxy host>:<proxy port>`. Calls then go over

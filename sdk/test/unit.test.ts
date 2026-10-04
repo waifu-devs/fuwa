@@ -197,6 +197,40 @@ test("the follower picks up new servers at once", async () => {
   assert.deepEqual(asked, [["a"], ["a", "b"]]);
 });
 
+test("the follower can follow servers joined while it runs, from none", async () => {
+  const asked: { servers: string[]; follow: boolean }[] = [];
+  let calls = 0;
+  const fuwa = fakeEvents({
+    async *subscribe(req: { servers: { serverId: string; afterSequence?: bigint }[]; followNewServers: boolean }) {
+      asked.push({ servers: req.servers.map((s) => `${s.serverId}@${s.afterSequence}`), follow: req.followNewServers });
+      calls++;
+      if (calls === 1) {
+        yield { ready: { servers: [] } };
+        yield { followed: { serverId: "n", sequence: 3n } };
+        yield event("n", 4n, "hi");
+        throw new ConnectError("restarting", Code.Unavailable);
+      }
+      yield { ready: { servers: [{ serverId: "n", sequence: 4n }] } };
+    },
+  });
+  const stop = new AbortController();
+  const follower = new EventFollower(fuwa, { servers: [], followNewServers: true, signal: stop.signal, baseDelayMs: 1, maxDelayMs: 2 });
+  const seen: string[] = [];
+  for await (const u of follower) {
+    if (u.type === "followed") seen.push(`followed:${u.head.serverId}`);
+    else if (u.type === "event") seen.push(String(u.event.sequence));
+    else seen.push(u.type);
+    if (seen.length === 5) stop.abort();
+  }
+  assert.deepEqual(seen, ["ready", "followed:n", "4", "disconnected", "ready"]);
+  // Followed without a restart, and resumed with the rest after one.
+  assert.deepEqual(asked, [
+    { servers: [], follow: true },
+    { servers: ["n@4"], follow: true },
+  ]);
+  assert.deepEqual([...follower.servers], ["n"]);
+});
+
 test("unary calls retry what's worth retrying, and only that", async () => {
   let tries = 0;
   const fuwa = createFuwa({
@@ -358,17 +392,23 @@ test("PCM is cut into 20 ms frames", async () => {
 
 /** A voice channel to test against: the test says what's heard, and sees what's said. */
 function fakeVoice() {
-  const heard: { userId: string; opus: Uint8Array; timestamp: number }[] = [];
+  const heard: ({ userId: string; opus: Uint8Array; timestamp: number } | "keepalive")[] = [];
   let wakeListen: (() => void) | undefined;
-  const said: { frames: Uint8Array[]; at: number }[] = [];
+  const said: { frames: Uint8Array[]; at: number; interrupt: boolean }[] = [];
+  let joins = 0;
   let queued = 0;
   let at = Date.now();
   const transport = createRouterTransport(({ service }) =>
     service(CallService, {
       async *listenVoice(_req: unknown, ctx: { signal: AbortSignal }) {
+        joins++;
         yield { event: { case: "joined", value: { sessionId: "place" } } };
         for (;;) {
           const next = heard.shift();
+          if (next === "keepalive") {
+            yield { event: { case: "keepalive", value: {} } };
+            continue;
+          }
           if (next) {
             yield { event: { case: "frame", value: next } };
             continue;
@@ -380,11 +420,11 @@ function fakeVoice() {
           });
         }
       },
-      async speakVoice(req: { frames: Uint8Array[] }) {
+      async speakVoice(req: { frames: Uint8Array[]; interrupt: boolean }) {
         const now = Date.now();
-        queued = Math.max(0, queued - (now - at) / 20) + req.frames.length;
+        queued = req.interrupt ? 0 : Math.max(0, queued - (now - at) / 20) + req.frames.length;
         at = now;
-        said.push({ frames: req.frames, at: now });
+        said.push({ frames: req.frames, at: now, interrupt: req.interrupt });
         return { queued: Math.ceil(queued) };
       },
       async leaveVoice() {
@@ -397,6 +437,13 @@ function fakeVoice() {
   return {
     fuwa,
     said,
+    get joins() {
+      return joins;
+    },
+    keepalive() {
+      heard.push("keepalive");
+      wakeListen?.();
+    },
     hear(userId: string, opus: Uint8Array) {
       heard.push({ userId, opus, timestamp: (ts += 960) });
       wakeListen?.();
@@ -476,6 +523,9 @@ test("speaking sends each frame as soon as it comes, and can be talked over", as
   assert.equal(cut.by, "person");
   assert.ok(cut.sentMs < 1000, `stopped early (${cut.sentMs} ms sent)`);
   assert.ok(fake.said.length > 1 && fake.said.length < 20);
+  // Cut short, it tells the instance to drop what's still queued.
+  assert.deepEqual(fake.said.at(-1), { ...fake.said.at(-1)!, frames: [], interrupt: true });
+  assert.equal(fake.said.filter((s) => s.interrupt).length, 1);
 
   // Things said together wait their turn; stopSpeaking stops them all.
   fake.said.length = 0;
@@ -483,19 +533,48 @@ test("speaking sends each frame as soon as it comes, and can be talked over", as
   const second = voice.speak([loud(3), loud(4)]);
   assert.deepEqual((await Promise.all([first, second])).map((r) => r.interrupted), [false, false]);
   assert.deepEqual(fake.said.flatMap((s) => s.frames.map((f) => f[1])), [1, 2, 3, 4]);
+  assert.equal(fake.said.some((s) => s.interrupt), false, "speech that ends by itself plays out");
   const long = voice.speak(many);
   const queuedUp = voice.speak(many);
   await wait(30);
   voice.stopSpeaking();
   assert.deepEqual((await Promise.all([long, queuedUp])).map((r) => r.interrupted), [true, true]);
   assert.equal(voice.talking, false);
+  // Only the one that had started sent anything, so only it drops its queue.
+  assert.equal(fake.said.filter((s) => s.interrupt).length, 1);
 
+  fake.said.length = 0;
   const aborted = new AbortController();
   const stopped = voice.speak(many, { signal: aborted.signal });
+  await wait(30);
   aborted.abort();
   await assert.rejects(stopped, CanceledError);
+  assert.equal(fake.said.at(-1)!.interrupt, true, "aborting drops the queue too");
   await voice.leave();
   await assert.rejects(voice.speak([loud(1)]), FuwaError);
+});
+
+test("a voice stream that goes quiet after keepalives is joined again", async () => {
+  const fake = fakeVoice();
+  const voice = await joinVoice(fake.fuwa, { serverId: "s", channelId: "c", keepaliveTimeoutMs: 150 });
+  const reasons: string[] = [];
+  voice.on("reconnecting", ({ error }) => void reasons.push(error.message));
+  // Without keepalives (an older instance) quiet is just quiet.
+  await wait(250);
+  assert.equal(fake.joins, 1);
+  // Keepalives coming keep it up.
+  for (let i = 0; i < 4; i++) {
+    fake.keepalive();
+    await wait(60);
+  }
+  assert.equal(fake.joins, 1);
+  // Then nothing at all: the stream is gone without saying so.
+  const rejoined = new Promise((resolve) => voice.on("rejoined", resolve));
+  await rejoined;
+  assert.equal(fake.joins, 2);
+  assert.equal(reasons.length, 1);
+  assert.match(reasons[0]!, /went quiet/);
+  await voice.leave();
 });
 
 test("a stream of Ogg Opus plays as it arrives", async () => {

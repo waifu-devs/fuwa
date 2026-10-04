@@ -364,6 +364,13 @@ impl FuwaApp {
                 )
             }
             Dialog::Moderate { key, server, user_id, action } => self.moderate_parts(key, server, user_id, *action, cx),
+            Dialog::AllowGame { name, .. } => (
+                "gamepad-2",
+                format!("{name} wants to show what you're playing"),
+                "It reports to Discord's apps on this computer, and fuwa can show it to people you share a server with, if you turned that on. You can change your mind in Privacy settings.".into(),
+                div().into_any_element(),
+                Some("Allow"),
+            ),
             Dialog::Profile { .. } | Dialog::Welcome { .. } | Dialog::Secure { .. } => unreachable!("drawn on its own"),
         };
         let danger = matches!(
@@ -419,10 +426,13 @@ impl FuwaApp {
                     .flex()
                     .justify_end()
                     .gap(px(10.0))
-                    .child(
+                    .child(if matches!(dialog, Dialog::AllowGame { .. }) {
+                        soft_button("dialog-cancel", "Don't allow", &p)
+                            .on_click(cx.listener(|this, _, _, cx| this.refuse_game(cx)))
+                    } else {
                         soft_button("dialog-cancel", "Cancel", &p)
-                            .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))),
-                    )
+                            .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
+                    })
                     .when_some(action, |el, label| {
                         let button = if danger {
                             danger_button("dialog-ok", label, &p)
@@ -447,6 +457,7 @@ impl FuwaApp {
             Dialog::Secure { .. } => "secure",
             Dialog::Moderate { .. } => "moderate",
             Dialog::SsoJoin { .. } => "sso",
+            Dialog::AllowGame { .. } => "game",
         };
         Some(
             motion::fade_in(

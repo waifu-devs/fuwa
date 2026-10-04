@@ -594,6 +594,7 @@ class Session {
         if (serverRecord && getCalls().serverRecord && !kept.state?.serverRecord) {
           if (this.recordSuppressed) toast("You can't record in this channel any more.");
           else if (kept.recordingsFull) toast(FULL);
+          else if (kept.recordingEnded) toast("Recording stopped: what the server's recordings keep changed. Press Record to start a new one.");
           else toast("This instance stopped recording voice channels on the server.");
           setCalls(() => ({ serverRecord: false }));
         }

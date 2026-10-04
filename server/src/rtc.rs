@@ -30,9 +30,11 @@
 //! a bridge ([`Sfu::bridge`]): it hears each person's frames of Opus as they
 //! arrive, labelled with whose they are, and what the program says
 //! ([`Sfu::speak`]) goes out to everyone as its own track, paced one 20 ms
-//! frame at a time.
+//! frame at a time. A bridge that watches (a recording with video) gets
+//! each camera and shared screen too, whole VP8 frames starting on a
+//! keyframe, cameras at half their full size.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Once, Weak};
 use std::time::{Duration, Instant};
@@ -231,10 +233,32 @@ pub enum Bridged {
     /// A frame of someone's sound, as they sent it (Opus; sealed, in
     /// direct-message calls, but bridges are only for voice channels).
     Frame(Heard),
+    /// A frame of someone's camera or shared screen, for a bridge that
+    /// watches.
+    Picture(Watched),
     /// The bridge is over, and why: the same account joined from somewhere
     /// else, the media part is restarting (open it again), or it was hung up.
     Ended(Ending),
 }
+
+#[derive(Debug, Clone)]
+pub struct Watched {
+    /// Whose picture: their account.
+    pub participant: String,
+    /// A whole VP8 frame. Each picture's first is a keyframe, and so is the
+    /// first after any that were left out.
+    pub frame: Vec<u8>,
+    pub keyframe: bool,
+    /// Their shared screen, not their camera.
+    pub screen: bool,
+    /// When it was filmed, in 90 kHz ticks of the camera's own clock,
+    /// carried on across its sizes: only the gaps count.
+    pub time: u64,
+}
+
+/// The size a watching bridge keeps of a camera: half the full one, which
+/// shows who's talking without the full picture's storage.
+const WATCHED_LAYER: Layer = Layer::Medium;
 
 #[derive(Debug, Clone)]
 pub struct Heard {
@@ -284,6 +308,7 @@ enum Command {
         participant: String,
         session_id: String,
         may: May,
+        watch: bool,
         events: mpsc::Sender<Bridged>,
         reply: oneshot::Sender<Result<()>>,
     },
@@ -408,6 +433,7 @@ impl Sfu {
         participant: &str,
         session_id: &str,
         may: May,
+        watch: bool,
     ) -> Result<mpsc::Receiver<Bridged>> {
         let (events, heard) = mpsc::channel(BRIDGE_BUFFER);
         let (reply, answer) = oneshot::channel();
@@ -416,6 +442,7 @@ impl Sfu {
             participant: participant.into(),
             session_id: session_id.into(),
             may,
+            watch,
             events,
             reply,
         })
@@ -747,6 +774,12 @@ fn offer_allowed(sdp: &str) -> bool {
 }
 
 /// A camera frame's time in 90 kHz ticks.
+/// What a track of `origin`'s carries.
+fn from_source(clients: &[Client], origin: ClientId, mid: Mid) -> Option<Source> {
+    let client = clients.iter().find(|c| c.id == origin)?;
+    client.tracks_in.iter().find(|t| t.track.mid == mid).map(|t| t.track.source)
+}
+
 fn ticks(time: MediaTime) -> i64 {
     (u128::from(time.numer()) * 90_000 / u128::from(time.denom().max(1))) as i64
 }
@@ -1112,6 +1145,21 @@ struct Bridge {
     next: Instant,
     /// Sound it said this second: (since, bytes).
     said: (Instant, usize),
+    /// Each camera and screen it gets, by where it comes from; None when it
+    /// gets none.
+    watching: Option<HashMap<(ClientId, Mid), Watching>>,
+}
+
+/// Where a watching bridge is in one camera or screen.
+#[derive(Default)]
+struct Watching {
+    /// Getting it: the last frame passed on was whole, from a keyframe on.
+    on: bool,
+    /// The camera size it's getting (None for a screen, which comes in one).
+    layer: Option<Layer>,
+    /// Added to a size's clock, so the time carries on across sizes.
+    shift: i64,
+    last: Option<i64>,
 }
 
 impl Bridge {
@@ -1126,6 +1174,72 @@ impl Bridge {
         let heard = Heard { participant: participant.to_string(), frame: frame.to_vec(), timestamp };
         // A program that doesn't keep up misses sound rather than holding up the call.
         let _ = self.events.try_send(Bridged::Frame(heard));
+    }
+
+    /// Passes on a frame of `participant`'s camera or screen if this bridge
+    /// watches, giving back the size to ask a keyframe of when it's waiting
+    /// for one (`Some(None)` for a screen).
+    fn watch(
+        &mut self,
+        origin: ClientId,
+        participant: &str,
+        screen: bool,
+        data: &MediaData,
+        fresh: u8,
+    ) -> Option<Option<Rid>> {
+        let watching = self.watching.as_mut()?;
+        if !self.may.hear {
+            return None;
+        }
+        let w = watching.entry((origin, data.mid)).or_default();
+        let keyframe = data.is_keyframe();
+        let mut ask = None;
+        match data.rid.as_deref() {
+            Some(rid) => {
+                let layer = Layer::of(rid)?;
+                let target = Layer::pick(WATCHED_LAYER, fresh)?;
+                let flowing = w.on && w.layer.is_some_and(|l| fresh & l.bit() != 0);
+                let switch = keyframe && (!w.on || w.layer != Some(layer)) && (layer == target || !flowing);
+                if switch {
+                    // Sizes may each keep their own clock: carry on from the
+                    // last frame passed on, a frame's time later.
+                    let at = ticks(data.time);
+                    if let Some(last) = w.last
+                        && (at + w.shift - last).abs() > 90_000
+                    {
+                        w.shift = last + 3_000 - at;
+                    }
+                    w.layer = Some(layer);
+                    w.on = true;
+                }
+                if w.layer != Some(target) || !w.on {
+                    ask = Some(target.rid());
+                }
+                if !w.on || w.layer != Some(layer) {
+                    return ask;
+                }
+            }
+            None if !w.on && !keyframe => return Some(None),
+            None => w.on = true,
+        }
+        let at = ticks(data.time) + w.shift;
+        w.last = Some(at);
+        let picture = Watched {
+            participant: participant.to_string(),
+            frame: data.data.to_vec(),
+            keyframe,
+            screen,
+            time: at.max(0) as u64,
+        };
+        // Pictures may fill half the queue at most, so sound and the end
+        // always have room.
+        if self.events.capacity() <= BRIDGE_BUFFER / 2 || self.events.try_send(Bridged::Picture(picture)).is_err() {
+            // Behind: what follows can't be decoded without what was left
+            // out, so it waits for the next keyframe.
+            w.on = false;
+            return Some(w.layer.and_then(Layer::rid));
+        }
+        ask
     }
 
     /// The next frame to say, if one is due, and its time on the bridge's clock.
@@ -1270,8 +1384,8 @@ impl Engine {
 
     fn on_command(&mut self, command: Command, now: Instant) {
         match command {
-            Command::Bridge { room, participant, session_id, may, events, reply } => {
-                let _ = reply.send(self.bridge(room, participant, session_id, may, events, now));
+            Command::Bridge { room, participant, session_id, may, watch, events, reply } => {
+                let _ = reply.send(self.bridge(room, participant, session_id, may, watch, events, now));
             }
             Command::Speak { room, participant, session_id, frames, interrupt, reply } => {
                 let _ = reply.send(self.speak(&room, &participant, &session_id, frames, interrupt));
@@ -1451,6 +1565,7 @@ impl Engine {
         participant: String,
         session_id: String,
         may: May,
+        watch: bool,
         events: mpsc::Sender<Bridged>,
         now: Instant,
     ) -> Result<()> {
@@ -1487,6 +1602,7 @@ impl Engine {
             started: now,
             next: now,
             said: (now, 0),
+            watching: watch.then(HashMap::new),
         });
         Ok(())
     }
@@ -1547,6 +1663,11 @@ impl Engine {
         self.clients.retain(|c| c.rtc.is_alive());
         if self.clients.len() != before {
             tracing::debug!(people = self.clients.len(), "someone hung up");
+            // Bridges forget the pictures of whoever hung up.
+            let alive: HashSet<ClientId> = self.clients.iter().map(|c| c.id).collect();
+            for watching in self.bridges.iter_mut().filter_map(|b| b.watching.as_mut()) {
+                watching.retain(|(origin, _), _| alive.contains(origin));
+            }
         }
 
         self.bridges.retain(|b| !b.events.is_closed());
@@ -1616,12 +1737,30 @@ impl Engine {
                         from.ask_keyframe(data.mid, Some(rid), KeyframeRequestKind::Fir);
                     }
                 }
-                // Programs (and recordings) get voices only: never a camera's
-                // frames, nor a screen's sound, which would talk over its
-                // sharer's voice on the same name.
+                // Programs (and recordings) hear voices only: never a
+                // screen's sound, which would talk over its sharer's voice
+                // on the same name.
                 let ticks = data.time.numer().saturating_mul(48_000) / u64::from(data.time.denom().max(1));
                 for bridge in self.bridges.iter().filter(|b| voice && b.room == room && b.participant != participant) {
                     bridge.hear(&participant, &data.data, ticks as u32);
+                }
+                // Recordings with video get cameras and screens.
+                let picture = from_source(&self.clients, origin, data.mid)
+                    .filter(|s| matches!(s, Source::Camera | Source::Screen));
+                if let Some(source) = picture {
+                    let mut asks = Vec::new();
+                    for bridge in self.bridges.iter_mut().filter(|b| b.room == room && b.participant != participant) {
+                        if let Some(rid) = bridge.watch(origin, &participant, source == Source::Screen, &data, fresh)
+                            && !asks.contains(&rid)
+                        {
+                            asks.push(rid);
+                        }
+                    }
+                    if let Some(from) = self.clients.iter_mut().find(|c| c.id == origin) {
+                        for rid in asks {
+                            from.ask_keyframe(data.mid, rid, KeyframeRequestKind::Fir);
+                        }
+                    }
                 }
             }
             Propagated::Keyframe(request, origin, mid, rid) => {
@@ -1683,8 +1822,8 @@ mod tests {
         let config = MediaConfig { port: 0, addresses: vec![Advertised::parse("127.0.0.1").unwrap()] };
         let sfu = Sfu::start(config, CancellationToken::new()).await.unwrap();
         let may = May { speak: true, hear: true, video: true, screen: true };
-        assert!(sfu.bridge("d/conversation", "bot", "s1", may).await.is_err());
-        assert!(sfu.bridge("s/server/channel", "bot", "s1", may).await.is_ok());
+        assert!(sfu.bridge("d/conversation", "bot", "s1", may, false).await.is_err());
+        assert!(sfu.bridge("s/server/channel", "bot", "s1", may, false).await.is_ok());
     }
 
     #[tokio::test]
@@ -1692,7 +1831,7 @@ mod tests {
         let config = MediaConfig { port: 0, addresses: vec![Advertised::parse("127.0.0.1").unwrap()] };
         let sfu = Sfu::start(config, CancellationToken::new()).await.unwrap();
         let may = May { speak: true, hear: true, video: true, screen: true };
-        let _events = sfu.bridge("s/server/channel", "bot", "s1", may).await.unwrap();
+        let _events = sfu.bridge("s/server/channel", "bot", "s1", may, false).await.unwrap();
         let frames = |n: usize| vec![vec![0xf8, 0xff, 0xfe]; n];
         let speak = |frames, interrupt| sfu.speak("s/server/channel", "bot", "s1", frames, interrupt);
         assert!(speak(frames(40), false).await.unwrap() > 30);

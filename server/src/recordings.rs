@@ -25,10 +25,21 @@
 //! are deleted. And finished ones may delete themselves after a number of
 //! days (FUWA_CALL_RECORDINGS_KEEP_DAYS). Neither is set by default.
 //!
+//! With the server's `record_video` on (only where the instance's
+//! `call_recording_video` lets it), the bridge watches too, and each
+//! person's camera and shared screen go to files of their own next to
+//! their sound (`<account>.camera.webm`, `<account>.screen.webm`): WebM
+//! with the VP8 frames as they were sent (cameras at half their full size),
+//! never decoded or put together, each starting at its first keyframe and
+//! timed from the recording's start like the sound. Changing the setting
+//! ends the recording going on and everyone's ask to record ([`end_asks`]):
+//! the next starts when someone presses Record, so nobody starts being
+//! filmed without everyone hearing a recording start.
+//!
 //! Direct-message calls are never recorded here: their sound is end-to-end
 //! encrypted, so all a bridge could keep is ciphertext.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -45,8 +56,15 @@ use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::pb;
 use crate::rtc::Bridged;
-use crate::servers::{RecordingRow, ServerDb};
+use crate::servers::{Payload, RecordingRow, ServerDb};
 use crate::voice::{self, Place};
+
+/// A WebM cluster closes after this long, so a crash loses at most this
+/// much of a picture.
+const CLUSTER_MS: u64 = 2_000;
+/// A picture's clock is followed while it's within this of when its frames
+/// arrive, in ms; past that (it started again) arrival time wins.
+const PICTURE_RESYNC: i64 = 2_000;
 
 /// Opus's clock: 48 kHz, whatever the sound's own rate.
 const RATE: u64 = 48_000;
@@ -80,6 +98,10 @@ const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 pub struct Recordings {
     live: Mutex<HashMap<String, Live>>,
     nudged: Notify,
+    /// (server, user) whose RECORD on the server a change to what
+    /// recordings keep turned off: they press Record again to start a new
+    /// one, so nobody is filmed without everyone hearing it start.
+    ended: Mutex<HashSet<(String, String)>>,
 }
 
 /// A recording going on (or finishing its files).
@@ -88,6 +110,8 @@ struct Live {
     channel_id: String,
     started_by: String,
     started_at: i64,
+    /// It keeps cameras and screens too.
+    video: bool,
     stop: CancellationToken,
     tracks: Tracks,
     task: Option<tokio::task::JoinHandle<()>>,
@@ -100,13 +124,80 @@ type Tracks = Arc<Mutex<BTreeMap<String, Stored>>>;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Stored {
     pub user_id: String,
+    /// The sound's file; zero when there's none (they never spoke).
     pub size_bytes: i64,
     pub duration_ms: i64,
+    #[serde(default)]
+    pub camera_bytes: i64,
+    #[serde(default)]
+    pub screen_bytes: i64,
+}
+
+/// One of a person's files in a recording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Part {
+    Sound,
+    Camera,
+    Screen,
+}
+
+impl Part {
+    const ALL: [Part; 3] = [Part::Sound, Part::Camera, Part::Screen];
+
+    fn suffix(self) -> &'static str {
+        match self {
+            Self::Sound => ".opus",
+            Self::Camera => ".camera.webm",
+            Self::Screen => ".screen.webm",
+        }
+    }
+
+    /// What tells its sealing key apart from the person's other files'.
+    fn key_name(self, user_id: &str) -> String {
+        match self {
+            // As it always was, so sealed sound from before video opens.
+            Self::Sound => user_id.to_string(),
+            Self::Camera => format!("{user_id}/camera"),
+            Self::Screen => format!("{user_id}/screen"),
+        }
+    }
+
+    pub fn of(part: i32) -> Result<Self> {
+        match pb::RecordingPart::try_from(part) {
+            Ok(pb::RecordingPart::Unspecified) => Ok(Self::Sound),
+            Ok(pb::RecordingPart::Camera) => Ok(Self::Camera),
+            Ok(pb::RecordingPart::Screen) => Ok(Self::Screen),
+            Err(_) => Err(Error::invalid("unknown part of a recording")),
+        }
+    }
 }
 
 impl Recordings {
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Live>> {
         self.live.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// What recordings keep changed: those who were recording on the
+    /// server stop, and must ask again.
+    pub fn end_for(&self, server_id: &str, users: impl IntoIterator<Item = String>) {
+        let mut ended = self.ended.lock().unwrap_or_else(|p| p.into_inner());
+        ended.extend(users.into_iter().map(|u| (server_id.to_string(), u)));
+        drop(ended);
+        self.nudge();
+    }
+
+    /// Whether `user` asking to record on the server is still the ask a
+    /// change ended (and forgets it: the next ask is a new one).
+    pub fn was_ended(&self, server_id: &str, user_id: &str) -> bool {
+        let mut ended = self.ended.lock().unwrap_or_else(|p| p.into_inner());
+        ended.remove(&(server_id.to_string(), user_id.to_string()))
+    }
+
+    /// Whether a change ended `user`'s ask to record on the server, and
+    /// they haven't been told yet.
+    pub fn is_ended(&self, server_id: &str, user_id: &str) -> bool {
+        let ended = self.ended.lock().unwrap_or_else(|p| p.into_inner());
+        ended.contains(&(server_id.to_string(), user_id.to_string()))
     }
 
     /// Someone's place changed: check whether a recording starts or stops.
@@ -130,8 +221,9 @@ impl Recordings {
             started_by: rec.started_by.clone(),
             started_at: Some(timestamp(rec.started_at)),
             ended_at: None,
-            size_bytes: tracks.iter().map(|t| t.size_bytes).sum(),
+            size_bytes: tracks.iter().map(|t| t.size_bytes + t.camera_bytes + t.screen_bytes).sum(),
             tracks,
+            video: rec.video,
         })
     }
 
@@ -169,12 +261,18 @@ impl Recordings {
         tokio::spawn(async move {
             let mut every = tokio::time::interval(CHECK_EVERY);
             let mut swept: Option<Instant> = None;
+            let mut filming = None;
             loop {
                 tokio::select! {
                     _ = app.shutdown.cancelled() => return,
                     _ = every.tick() => {}
                     _ = app.recordings.nudged.notified() => {}
                 }
+                let allowed = app.settings().call_recording_video;
+                if !allowed && filming != Some(false) {
+                    stop_filming(&app).await;
+                }
+                filming = Some(allowed);
                 reconcile(&app).await;
                 if swept.is_none_or(|at| at.elapsed() >= SWEEP_EVERY) {
                     swept = Some(Instant::now());
@@ -191,7 +289,38 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 impl Stored {
     fn to_pb(&self) -> pb::RecordingTrack {
-        pb::RecordingTrack { user_id: self.user_id.clone(), size_bytes: self.size_bytes, duration_ms: self.duration_ms }
+        pb::RecordingTrack {
+            user_id: self.user_id.clone(),
+            size_bytes: self.size_bytes,
+            duration_ms: self.duration_ms,
+            camera_bytes: self.camera_bytes,
+            screen_bytes: self.screen_bytes,
+        }
+    }
+
+    fn total(&self) -> i64 {
+        self.size_bytes + self.camera_bytes + self.screen_bytes
+    }
+
+    fn bytes(&self, part: Part) -> i64 {
+        match part {
+            Part::Sound => self.size_bytes,
+            Part::Camera => self.camera_bytes,
+            Part::Screen => self.screen_bytes,
+        }
+    }
+
+    fn bytes_mut(&mut self, part: Part) -> &mut i64 {
+        match part {
+            Part::Sound => &mut self.size_bytes,
+            Part::Camera => &mut self.camera_bytes,
+            Part::Screen => &mut self.screen_bytes,
+        }
+    }
+
+    /// The parts it has files for.
+    fn parts(&self) -> impl Iterator<Item = Part> + '_ {
+        Part::ALL.into_iter().filter(|p| self.bytes(*p) > 0)
     }
 }
 
@@ -204,7 +333,7 @@ pub async fn usage(app: &App, sdb: &ServerDb) -> Result<(i64, Option<i64>)> {
         .lock()
         .values()
         .filter(|rec| rec.server_id == sdb.id)
-        .map(|rec| lock(&rec.tracks).values().map(|t| t.size_bytes).sum::<i64>())
+        .map(|rec| lock(&rec.tracks).values().map(Stored::total).sum::<i64>())
         .sum();
     Ok((sdb.recording_bytes().await? + live, cap))
 }
@@ -213,6 +342,61 @@ pub async fn usage(app: &App, sdb: &ServerDb) -> Result<(i64, Option<i64>)> {
 pub async fn full(app: &App, sdb: &ServerDb) -> Result<bool> {
     let (used, cap) = usage(app, sdb).await?;
     Ok(cap.is_some_and(|cap| used >= cap))
+}
+
+/// What a server's recordings keep changed: a recording going on ends, and
+/// everyone recording on the server stops until they press Record again, so
+/// a new one starts the way any recording does, for everyone to see and hear.
+pub fn end_asks(app: &App, server_id: &str) {
+    let asking: Vec<String> =
+        app.voice.list(server_id).into_iter().filter(|p| p.state.server_record).map(|p| p.state.user_id).collect();
+    // Ended before their Record turns off, so a KeepVoice landing in between
+    // can't count as a new ask.
+    app.recordings.end_for(server_id, asking.iter().cloned());
+    for user_id in asking {
+        if let Some(place) = app.voice.update(server_id, &user_id, |p| p.state.server_record = false) {
+            app.hub.publish([pb::Event {
+                id: new_id(),
+                server_id: server_id.to_string(),
+                sequence: 0,
+                actor_id: user_id,
+                created_at: Some(timestamp(now_ms())),
+                payload: Some(Payload::VoiceStateUpdated(pb::VoiceStateUpdated { state: Some(place.state) })),
+            }]);
+        }
+    }
+}
+
+/// The instance stopped letting servers record video: turns it off in every
+/// server this part holds that had it on, and tells everyone.
+async fn stop_filming(app: &Arc<App>) {
+    for sdb in app.servers.all() {
+        if !sdb.server().await.is_ok_and(|s| s.record_video) {
+            continue;
+        }
+        let written = sdb
+            .write("", async |conn, events| {
+                let now = now_ms();
+                let turned = conn
+                    .execute("UPDATE server SET record_video = 0, updated_at = ?1 WHERE record_video = 1", [now])
+                    .await?;
+                if turned == 0 {
+                    return Ok(None);
+                }
+                let server = crate::servers::load_server(conn).await?;
+                events.push(Payload::ServerUpdated(pb::ServerUpdated { server: Some(server.clone()) }));
+                Ok(Some(server))
+            })
+            .await;
+        match written {
+            Ok(Some(server)) => {
+                app.server_changed(&server).await;
+                end_asks(app, &sdb.id);
+            }
+            Ok(None) => {}
+            Err(_) => tracing::warn!("couldn't stop a server recording video"),
+        }
+    }
 }
 
 /// Brings the recordings going on in line with who wants one, and the caps.
@@ -226,25 +410,37 @@ async fn reconcile(app: &Arc<App>) {
     servers.sort();
     servers.dedup();
     let mut over = Vec::new();
+    let mut filmed = Vec::new();
     for server_id in servers {
         let Ok(sdb) = app.servers.get(&server_id).await else { continue };
         if full(app, &sdb).await.unwrap_or(false) {
             over.push(server_id);
+        } else if settings.call_recording_video && sdb.server().await.is_ok_and(|s| s.record_video) {
+            filmed.push(server_id);
         }
     }
     if !over.is_empty() {
         tracing::debug!(servers = over.len(), "recordings stop at their servers' caps");
         wanted.retain(|(s, _, _)| !over.contains(s));
     }
+    // A recording keeping more or less than its server now says ends, and
+    // so does everyone's ask: a new one only starts when someone presses
+    // Record again, so nobody is filmed without hearing it start.
+    let mut changed: Vec<String> = Vec::new();
     let starting: Vec<(String, String, String)> = {
         let mut live = app.recordings.lock();
         for rec in live.values_mut() {
-            let still = wanted.iter().any(|(s, c, _)| *s == rec.server_id && *c == rec.channel_id);
-            if !still && !rec.stop.is_cancelled() {
+            let asked = wanted.iter().any(|(s, c, _)| *s == rec.server_id && *c == rec.channel_id);
+            let as_it_says = filmed.contains(&rec.server_id) == rec.video;
+            if asked && !as_it_says && !rec.stop.is_cancelled() {
+                changed.push(rec.server_id.clone());
+            }
+            if !(asked && as_it_says) && !rec.stop.is_cancelled() {
                 tracing::debug!(server = %rec.server_id, channel = %rec.channel_id, "a recording stops");
                 rec.stop.cancel();
             }
         }
+        wanted.retain(|(s, _, _)| !changed.contains(s));
         wanted
             .into_iter()
             .filter(|(s, c, _)| {
@@ -252,8 +448,14 @@ async fn reconcile(app: &Arc<App>) {
             })
             .collect()
     };
+    changed.sort();
+    changed.dedup();
+    for server_id in &changed {
+        end_asks(app, server_id);
+    }
     for (server_id, channel_id, by) in starting {
-        if let Err(err) = start(app, &server_id, &channel_id, &by).await {
+        let video = filmed.contains(&server_id);
+        if let Err(err) = start(app, &server_id, &channel_id, &by, video).await {
             tracing::warn!(server = %server_id, channel = %channel_id, error = %err, "couldn't start a recording");
         }
     }
@@ -289,8 +491,15 @@ fn server_dir(app: &App, server_id: &str) -> PathBuf {
 }
 
 /// A track's file name.
-fn file_name(user_id: &str, sealed: bool) -> String {
-    if sealed { format!("{user_id}.opus.sealed") } else { format!("{user_id}.opus") }
+fn file_name(user_id: &str, part: Part, sealed: bool) -> String {
+    let suffix = part.suffix();
+    if sealed { format!("{user_id}{suffix}.sealed") } else { format!("{user_id}{suffix}") }
+}
+
+/// Whose file and which, from its name.
+fn parse_file_name(name: &str, sealed: bool) -> Option<(&str, Part)> {
+    let name = if sealed { name.strip_suffix(".sealed")? } else { name };
+    Part::ALL.into_iter().find_map(|part| Some((name.strip_suffix(part.suffix())?, part)))
 }
 
 /// A track's key in the replica.
@@ -298,7 +507,7 @@ fn replica_key(server_id: &str, recording_id: &str, file: &str) -> String {
     format!("recordings/{server_id}/{recording_id}/{file}")
 }
 
-async fn start(app: &Arc<App>, server_id: &str, channel_id: &str, by: &str) -> Result<()> {
+async fn start(app: &Arc<App>, server_id: &str, channel_id: &str, by: &str, video: bool) -> Result<()> {
     let sdb = app.servers.get(server_id).await?;
     let row = RecordingRow {
         id: new_id(),
@@ -309,6 +518,7 @@ async fn start(app: &Arc<App>, server_id: &str, channel_id: &str, by: &str) -> R
         sealed: app.config.encryption_key.is_some(),
         tracks: "[]".into(),
         size_bytes: 0,
+        video,
     };
     let dir = server_dir(app, &sdb.id).join(&row.id);
     std::fs::create_dir_all(&dir)?;
@@ -323,6 +533,7 @@ async fn start(app: &Arc<App>, server_id: &str, channel_id: &str, by: &str) -> R
             channel_id: row.channel_id.clone(),
             started_by: row.started_by.clone(),
             started_at: row.started_at,
+            video,
             stop: stop.clone(),
             tracks: tracks.clone(),
             task: None,
@@ -370,6 +581,7 @@ async fn record(
     };
     let started = Instant::now();
     let mut writing: HashMap<String, Track> = HashMap::new();
+    let mut filming: HashMap<(String, Part), Film> = HashMap::new();
     let mut events: Option<voice::BridgeEvents> = None;
     let mut wait = Duration::ZERO;
     loop {
@@ -378,7 +590,7 @@ async fn record(
                 _ = stop.cancelled() => break,
                 _ = tokio::time::sleep(wait) => {}
             }
-            match app.media_link.bridge(&place).await {
+            match app.media_link.bridge(&place, row.video).await {
                 Ok(opened) => events = Some(opened),
                 Err(err) => tracing::debug!(error = %err, "a recording's bridge couldn't open yet"),
             }
@@ -397,7 +609,7 @@ async fn record(
                     let track = match writing.entry(user_id) {
                         std::collections::hash_map::Entry::Occupied(t) => t.into_mut(),
                         std::collections::hash_map::Entry::Vacant(v) => {
-                            let file = dir.join(file_name(v.key(), row.sealed));
+                            let file = dir.join(file_name(v.key(), Part::Sound, row.sealed));
                             match Track::create(&file, key.as_ref(), &row.id, v.key()) {
                                 Ok(track) => v.insert(track),
                                 Err(err) => {
@@ -408,8 +620,46 @@ async fn record(
                         }
                     };
                     track.frame(now, frame.timestamp, &frame.frame);
-                    let shown = Stored { user_id: frame.participant, size_bytes: track.size as i64, duration_ms: track.ms() };
-                    lock(&tracks).insert(shown.user_id.clone(), shown);
+                    let (size, ms) = (track.size as i64, track.ms());
+                    let mut tracks = lock(&tracks);
+                    let shown = tracks.entry(frame.participant.clone()).or_default();
+                    shown.user_id = frame.participant;
+                    (shown.size_bytes, shown.duration_ms) = (size, ms);
+                }
+                Some(Bridged::Picture(picture)) => {
+                    if !row.video {
+                        continue;
+                    }
+                    let Some(user_id) = crate::id::parse_id("account", &picture.participant).ok() else { continue };
+                    if user_id != picture.participant {
+                        continue;
+                    }
+                    let part = if picture.screen { Part::Screen } else { Part::Camera };
+                    let ms = started.elapsed().as_millis() as u64;
+                    let film = match filming.entry((user_id, part)) {
+                        std::collections::hash_map::Entry::Occupied(f) => f.into_mut(),
+                        std::collections::hash_map::Entry::Vacant(v) => {
+                            // Nothing before a keyframe can be shown.
+                            if !picture.keyframe {
+                                continue;
+                            }
+                            let user_id = &v.key().0;
+                            let file = dir.join(file_name(user_id, part, row.sealed));
+                            match Film::create(&file, key.as_ref(), &row.id, &part.key_name(user_id)) {
+                                Ok(film) => v.insert(film),
+                                Err(_) => {
+                                    tracing::warn!("couldn't start a picture");
+                                    continue;
+                                }
+                            }
+                        }
+                    };
+                    film.picture(ms, picture.time, &picture.frame, picture.keyframe);
+                    let size = film.size as i64;
+                    let mut tracks = lock(&tracks);
+                    let shown = tracks.entry(picture.participant.clone()).or_default();
+                    shown.user_id = picture.participant;
+                    *shown.bytes_mut(part) = size;
                 }
                 // Hung up from under it (calls going off, the media part
                 // restarting): it opens again for as long as it's wanted.
@@ -424,15 +674,18 @@ async fn record(
 
     // Every track ends when the recording does, so they're all as long.
     let end = (started.elapsed().as_micros() as u64) * RATE / 1_000_000;
-    let mut stored: Vec<Stored> = writing
-        .iter_mut()
-        .map(|(user_id, track)| {
-            track.finish(end);
-            Stored { user_id: user_id.clone(), size_bytes: track.size as i64, duration_ms: track.ms() }
-        })
-        .collect();
-    stored.sort_by(|a, b| a.user_id.cmp(&b.user_id));
-    drop(writing);
+    let mut by_user: BTreeMap<String, Stored> = BTreeMap::new();
+    for (user_id, track) in &mut writing {
+        track.finish(end);
+        let stored = by_user.entry(user_id.clone()).or_default();
+        (stored.size_bytes, stored.duration_ms) = (track.size as i64, track.ms());
+    }
+    for ((user_id, part), film) in &mut filming {
+        film.finish();
+        *by_user.entry(user_id.clone()).or_default().bytes_mut(*part) = film.size as i64;
+    }
+    let stored: Vec<Stored> = by_user.into_iter().map(|(user_id, stored)| Stored { user_id, ..stored }).collect();
+    drop((writing, filming));
     if let Err(err) = end_row(&app, &sdb, &row, &stored, now_ms()).await {
         tracing::warn!(recording = %row.id, error = %err, "couldn't finish a recording");
     }
@@ -442,15 +695,19 @@ async fn record(
 
 /// Writes down how a recording ended, and copies its files to the replica.
 async fn end_row(app: &App, sdb: &ServerDb, row: &RecordingRow, stored: &[Stored], ended_at: i64) -> Result<()> {
-    let size: i64 = stored.iter().map(|t| t.size_bytes).sum();
+    let size: i64 = stored.iter().map(Stored::total).sum();
     let json = serde_json::to_string(stored).map_err(|err| Error::internal(err.to_string()))?;
     sdb.end_recording(&row.id, ended_at, &json, size).await?;
     if let Some(replica) = &app.replica {
         let dir = server_dir(app, &sdb.id).join(&row.id);
         for track in stored {
-            let file = file_name(&track.user_id, row.sealed);
-            if let Err(err) = replica.store().put_file(&replica_key(&sdb.id, &row.id, &file), &dir.join(&file)).await {
-                tracing::warn!(recording = %row.id, error = %err, "couldn't copy a recording to the replica");
+            for part in track.parts() {
+                let file = file_name(&track.user_id, part, row.sealed);
+                if let Err(err) =
+                    replica.store().put_file(&replica_key(&sdb.id, &row.id, &file), &dir.join(&file)).await
+                {
+                    tracing::warn!(recording = %row.id, error = %err, "couldn't copy a recording to the replica");
+                }
             }
         }
     }
@@ -466,30 +723,34 @@ async fn settle(app: &App, sdb: &ServerDb, mut row: RecordingRow) -> Result<Reco
     }
     let dir = server_dir(app, &sdb.id).join(&row.id);
     let key = app.config.encryption_key.as_ref().map(|k| k.bytes());
-    let mut stored = Vec::new();
+    let mut by_user: BTreeMap<String, Stored> = BTreeMap::new();
     let mut ended_at = row.started_at;
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let Some(user_id) = name.strip_suffix(if row.sealed { ".opus.sealed" } else { ".opus" }) else { continue };
+            let Some((user_id, part)) = parse_file_name(&name, row.sealed) else { continue };
             let Ok(meta) = entry.metadata() else { continue };
+            if meta.len() == 0 {
+                continue;
+            }
             if let Ok(modified) = meta.modified()
                 && let Ok(since) = modified.duration_since(std::time::UNIX_EPOCH)
             {
                 ended_at = ended_at.max(since.as_millis() as i64);
             }
-            let plain = read_plain(&entry.path(), key.as_ref(), &row.id, user_id, row.sealed).unwrap_or_default();
-            stored.push(Stored {
-                user_id: user_id.to_string(),
-                size_bytes: meta.len() as i64,
-                duration_ms: (last_granule(&plain) * 1000 / RATE) as i64,
-            });
+            let stored = by_user.entry(user_id.to_string()).or_default();
+            *stored.bytes_mut(part) = meta.len() as i64;
+            if part == Part::Sound {
+                let key_name = part.key_name(user_id);
+                let plain = read_plain(&entry.path(), key.as_ref(), &row.id, &key_name, row.sealed).unwrap_or_default();
+                stored.duration_ms = (last_granule(&plain) * 1000 / RATE) as i64;
+            }
         }
     }
-    stored.sort_by(|a, b| a.user_id.cmp(&b.user_id));
+    let stored: Vec<Stored> = by_user.into_iter().map(|(user_id, stored)| Stored { user_id, ..stored }).collect();
     end_row(app, sdb, &row, &stored, ended_at).await?;
     row.ended_at = Some(ended_at);
-    row.size_bytes = stored.iter().map(|t| t.size_bytes).sum();
+    row.size_bytes = stored.iter().map(Stored::total).sum();
     row.tracks = serde_json::to_string(&stored).unwrap_or_default();
     Ok(row)
 }
@@ -504,6 +765,7 @@ fn shown(row: &RecordingRow) -> pb::Recording {
         ended_at: row.ended_at.map(timestamp),
         tracks: tracks.iter().map(Stored::to_pb).collect(),
         size_bytes: row.size_bytes,
+        video: row.video,
     }
 }
 
@@ -533,16 +795,19 @@ pub async fn finished(app: &App, sdb: &ServerDb, row: RecordingRow) -> Result<Re
     settle(app, sdb, row).await
 }
 
-/// One person's track of a finished recording, as plain Ogg Opus in pieces.
+/// One person's file of a finished recording, plain (Ogg Opus or WebM), in
+/// pieces.
 pub async fn download(
     app: &App,
     sdb: &ServerDb,
     row: &RecordingRow,
     user_id: &str,
+    part: i32,
 ) -> Result<tokio::sync::mpsc::Receiver<std::result::Result<Vec<u8>, Error>>> {
+    let part = Part::of(part)?;
     let tracks: Vec<Stored> = serde_json::from_str(&row.tracks).unwrap_or_default();
-    let track = tracks.iter().find(|t| t.user_id == user_id).ok_or(Error::NotFound("track"))?;
-    let file = file_name(&track.user_id, row.sealed);
+    let track = tracks.iter().find(|t| t.user_id == user_id && t.bytes(part) > 0).ok_or(Error::NotFound("track"))?;
+    let file = file_name(&track.user_id, part, row.sealed);
     let dir = server_dir(app, &sdb.id).join(&row.id);
     let path = dir.join(&file);
     if !path.exists() {
@@ -559,7 +824,7 @@ pub async fn download(
         ));
     }
     let (tx, rx) = tokio::sync::mpsc::channel(4);
-    let (id, user, sealed) = (row.id.clone(), track.user_id.clone(), row.sealed);
+    let (id, user, sealed) = (row.id.clone(), part.key_name(&track.user_id), row.sealed);
     tokio::task::spawn_blocking(move || {
         let sent = pieces(&path, key.as_ref(), &id, &user, sealed, &mut |piece| tx.blocking_send(Ok(piece)).is_ok());
         if let Err(err) = sent {
@@ -575,12 +840,14 @@ pub async fn download(
 pub async fn delete(app: &App, sdb: &ServerDb, row: &RecordingRow) -> Result<()> {
     if let Some(replica) = &app.replica {
         let tracks: Vec<Stored> = serde_json::from_str(&row.tracks).unwrap_or_default();
-        for track in tracks {
-            let key = replica_key(&sdb.id, &row.id, &file_name(&track.user_id, row.sealed));
-            replica.store().delete(&key).await.map_err(|err| {
-                tracing::warn!(recording = %row.id, error = %err, "couldn't delete a recording from the replica");
-                Error::Unavailable("couldn't delete the recording's copy; try again".into())
-            })?;
+        for track in &tracks {
+            for part in track.parts() {
+                let key = replica_key(&sdb.id, &row.id, &file_name(&track.user_id, part, row.sealed));
+                replica.store().delete(&key).await.map_err(|err| {
+                    tracing::warn!(recording = %row.id, error = %err, "couldn't delete a recording from the replica");
+                    Error::Unavailable("couldn't delete the recording's copy; try again".into())
+                })?;
+            }
         }
     }
     let dir = server_dir(app, &sdb.id).join(&row.id);
@@ -836,12 +1103,186 @@ fn last_granule(ogg: &[u8]) -> u64 {
     last
 }
 
+// ───────────────────────────── Pictures ─────────────────────────────
+
+/// One person's camera or screen, being written as WebM: a VP8 track, the
+/// frames as they came, in clusters of up to [`CLUSTER_MS`]. The segment's
+/// size is left unknown (as a live stream's is), so nothing needs going
+/// back to; what's written is playable even if the part stops mid-way.
+struct Film {
+    /// None once writing failed: the rest of the picture is lost, not the
+    /// recording.
+    file: Option<std::fs::File>,
+    sealer: Option<Sealer>,
+    /// Where the camera's clock lines up with the recording's: a frame
+    /// filmed at `.1` (90 kHz) goes at `.0` ms.
+    anchor: Option<(u64, u64)>,
+    /// The last frame's time, in ms from the recording's start.
+    last: u64,
+    /// The cluster being filled: its time and blocks.
+    cluster: Option<(u64, Vec<u8>)>,
+    /// Whether the header is written (it waits for a keyframe, which says
+    /// how big the picture is).
+    started: bool,
+    size: u64,
+}
+
+impl Film {
+    fn create(path: &Path, key: Option<&[u8; 32]>, recording_id: &str, key_name: &str) -> std::io::Result<Self> {
+        let file = std::fs::OpenOptions::new().create_new(true).write(true).open(path)?;
+        Ok(Self {
+            file: Some(file),
+            sealer: key.map(|k| Sealer::new(file_key(k, recording_id, key_name))),
+            anchor: None,
+            last: 0,
+            cluster: None,
+            started: false,
+            size: 0,
+        })
+    }
+
+    /// Adds a frame filmed at `time` (90 kHz) that arrived `now` ms into
+    /// the recording.
+    fn picture(&mut self, now: u64, time: u64, frame: &[u8], keyframe: bool) {
+        if !self.started {
+            let Some((width, height)) = keyframe.then(|| vp8_size(frame)).flatten() else { return };
+            let header = webm_header(width, height);
+            self.write(header);
+            self.started = true;
+        }
+        let by_clock = self.anchor.and_then(|(at, anchor)| {
+            let since = time.checked_sub(anchor)? / 90;
+            let place = at + since;
+            ((place as i64 - now as i64).abs() <= PICTURE_RESYNC).then_some(place)
+        });
+        let at = match by_clock {
+            Some(at) => at,
+            None => {
+                let at = now.max(self.last);
+                self.anchor = Some((at, time));
+                at
+            }
+        }
+        .max(self.last);
+        self.last = at;
+        let full = self.cluster.as_ref().is_some_and(|(start, blocks)| {
+            (keyframe || at - start >= CLUSTER_MS || blocks.len() > 8 << 20) && !blocks.is_empty()
+        });
+        if full {
+            self.close_cluster();
+        }
+        let (start, blocks) = self.cluster.get_or_insert_with(|| (at, Vec::new()));
+        let mut block = vec![0x81];
+        block.extend_from_slice(&((at - *start) as i16).to_be_bytes());
+        block.push(if keyframe { 0x80 } else { 0 });
+        block.extend_from_slice(frame);
+        blocks.extend(element(0xA3, &block));
+    }
+
+    fn close_cluster(&mut self) {
+        let Some((start, blocks)) = self.cluster.take() else { return };
+        let mut body = uint(0xE7, start);
+        body.extend(blocks);
+        self.write(element(0x1F43_B675, &body));
+    }
+
+    fn write(&mut self, bytes: Vec<u8>) {
+        let Some(file) = &mut self.file else { return };
+        let bytes = match &mut self.sealer {
+            Some(sealer) => sealer.seal(bytes),
+            None => bytes,
+        };
+        match file.write_all(&bytes) {
+            Ok(()) => self.size += bytes.len() as u64,
+            Err(_) => {
+                tracing::warn!("a recording's picture stopped: couldn't write");
+                self.file = None;
+            }
+        }
+    }
+
+    fn finish(&mut self) {
+        self.close_cluster();
+        if let Some(file) = &self.file {
+            let _ = file.sync_all();
+        }
+    }
+}
+
+/// A VP8 keyframe's width and height (RFC 6386 section 9.1). None for
+/// anything else.
+fn vp8_size(frame: &[u8]) -> Option<(u16, u16)> {
+    if frame.len() < 10 || frame[0] & 1 != 0 || frame[3..6] != [0x9D, 0x01, 0x2A] {
+        return None;
+    }
+    let width = u16::from_le_bytes([frame[6], frame[7]]) & 0x3FFF;
+    let height = u16::from_le_bytes([frame[8], frame[9]]) & 0x3FFF;
+    (width > 0 && height > 0).then_some((width, height))
+}
+
+/// The start of a WebM file with one VP8 track: the EBML header, the
+/// segment (of unknown size), its info (times in ms) and the track.
+fn webm_header(width: u16, height: u16) -> Vec<u8> {
+    let mut ebml = uint(0x4286, 1); // EBMLVersion
+    ebml.extend(uint(0x42F7, 1)); // EBMLReadVersion
+    ebml.extend(uint(0x42F2, 4)); // EBMLMaxIDLength
+    ebml.extend(uint(0x42F3, 8)); // EBMLMaxSizeLength
+    ebml.extend(element(0x4282, b"webm")); // DocType
+    ebml.extend(uint(0x4287, 2)); // DocTypeVersion
+    ebml.extend(uint(0x4285, 2)); // DocTypeReadVersion
+    let mut out = element(0x1A45_DFA3, &ebml);
+    // Segment, its size unknown.
+    out.extend_from_slice(&[0x18, 0x53, 0x80, 0x67, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+    let mut info = uint(0x2A_D7B1, 1_000_000); // TimestampScale: ms
+    info.extend(element(0x4D80, b"fuwa")); // MuxingApp
+    info.extend(element(0x5741, b"fuwa")); // WritingApp
+    out.extend(element(0x1549_A966, &info));
+    let mut video = uint(0xB0, u64::from(width)); // PixelWidth
+    video.extend(uint(0xBA, u64::from(height))); // PixelHeight
+    let mut track = uint(0xD7, 1); // TrackNumber
+    track.extend(uint(0x73C5, 1)); // TrackUID
+    track.extend(uint(0x83, 1)); // TrackType: video
+    track.extend(uint(0x9C, 0)); // FlagLacing
+    track.extend(element(0x86, b"V_VP8")); // CodecID
+    track.extend(element(0xE0, &video));
+    out.extend(element(0x1654_AE6B, &element(0xAE, &track)));
+    out
+}
+
+/// An EBML element: its ID (with its length marker, as the spec writes
+/// them), its size, then `body`.
+fn element(id: u32, body: &[u8]) -> Vec<u8> {
+    let id_bytes = id.to_be_bytes();
+    let skip = id_bytes.iter().take_while(|b| **b == 0).count().min(3);
+    let mut out = id_bytes[skip..].to_vec();
+    out.extend(size_vint(body.len() as u64));
+    out.extend_from_slice(body);
+    out
+}
+
+/// An unsigned integer element, in as few bytes as it fits.
+fn uint(id: u32, value: u64) -> Vec<u8> {
+    let bytes = value.to_be_bytes();
+    let skip = bytes.iter().take_while(|b| **b == 0).count().min(7);
+    element(id, &bytes[skip..])
+}
+
+/// An element's size as EBML writes it: the fewest bytes that hold it, the
+/// length marked by the first byte's leading zeros (all ones is reserved).
+fn size_vint(size: u64) -> Vec<u8> {
+    let len = (1..=8u32).find(|len| size < (1u64 << (7 * len)) - 1).unwrap_or(8);
+    let mut out = size.to_be_bytes()[8 - len as usize..].to_vec();
+    out[0] |= 0x80 >> (len - 1);
+    out
+}
+
 // ───────────────────────────── Sealing ─────────────────────────────
 
-/// The key one track's file is sealed with, from the instance's key.
-fn file_key(master: &[u8; 32], recording_id: &str, user_id: &str) -> LessSafeKey {
+/// The key one file is sealed with, from the instance's key: `name` is
+/// [`Part::key_name`], so every file has its own.
+fn file_key(master: &[u8; 32], recording_id: &str, name: &str) -> LessSafeKey {
     let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, b"fuwa call recordings");
-    let info = [recording_id.as_bytes(), b"/", user_id.as_bytes()];
+    let info = [recording_id.as_bytes(), b"/", name.as_bytes()];
     let prk = salt.extract(master);
     let okm = prk.expand(&info, &aead::CHACHA20_POLY1305).expect("one key's length is in range");
     LessSafeKey::new(UnboundKey::from(okm))
@@ -878,14 +1319,14 @@ impl Sealer {
     }
 }
 
-/// Reads a track's file as plain Ogg, handing it on in pieces of about
+/// Reads a file as plain Ogg or WebM, handing it on in pieces of about
 /// [`PIECE`] until `send` says stop. A sealed file's last chunk, cut short
 /// by a crash, is left out.
 fn pieces(
     path: &Path,
     key: Option<&[u8; 32]>,
     recording_id: &str,
-    user_id: &str,
+    key_name: &str,
     sealed: bool,
     send: &mut dyn FnMut(Vec<u8>) -> bool,
 ) -> Result<()> {
@@ -903,7 +1344,8 @@ fn pieces(
             }
         }
     }
-    let key = file_key(key.ok_or_else(|| Error::internal("no key to unseal a recording with"))?, recording_id, user_id);
+    let key =
+        file_key(key.ok_or_else(|| Error::internal("no key to unseal a recording with"))?, recording_id, key_name);
     let mut counter = 0u64;
     let mut piece = Vec::with_capacity(PIECE);
     loop {
@@ -943,9 +1385,15 @@ fn read_up_to(file: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
 }
 
 /// A whole track as plain Ogg.
-fn read_plain(path: &Path, key: Option<&[u8; 32]>, recording_id: &str, user_id: &str, sealed: bool) -> Result<Vec<u8>> {
+fn read_plain(
+    path: &Path,
+    key: Option<&[u8; 32]>,
+    recording_id: &str,
+    key_name: &str,
+    sealed: bool,
+) -> Result<Vec<u8>> {
     let mut out = Vec::new();
-    pieces(path, key, recording_id, user_id, sealed, &mut |piece| {
+    pieces(path, key, recording_id, key_name, sealed, &mut |piece| {
         out.extend(piece);
         true
     })?;
@@ -980,7 +1428,7 @@ mod tests {
     }
 
     fn track(dir: &Path, key: Option<&[u8; 32]>) -> (Track, PathBuf) {
-        let path = dir.join(file_name("01J00000000000000000000000", key.is_some()));
+        let path = dir.join(file_name("01J00000000000000000000000", Part::Sound, key.is_some()));
         (Track::create(&path, key, "01J00000000000000000000001", "01J00000000000000000000000").unwrap(), path)
     }
 
@@ -1027,6 +1475,146 @@ mod tests {
             assert_eq!(ogg_crc(&page), crc);
             at += size;
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A VP8 keyframe's first bytes for a picture `width` by `height`.
+    fn keyframe(width: u16, height: u16, rest: &[u8]) -> Vec<u8> {
+        let mut frame = vec![0x10, 0x02, 0x00, 0x9D, 0x01, 0x2A];
+        frame.extend_from_slice(&width.to_le_bytes());
+        frame.extend_from_slice(&height.to_le_bytes());
+        frame.extend_from_slice(rest);
+        frame
+    }
+
+    /// Reads one EBML element at `at`: its ID, its body's range (to the end
+    /// for an unknown size).
+    fn read_element(bytes: &[u8], at: usize) -> (u32, std::ops::Range<usize>) {
+        let id_len = bytes[at].leading_zeros() as usize + 1;
+        let id = bytes[at..at + id_len].iter().fold(0u32, |id, b| (id << 8) | u32::from(*b));
+        let at = at + id_len;
+        let len = bytes[at].leading_zeros() as usize + 1;
+        let mut size = u64::from(bytes[at]) & (0xFF >> len);
+        for b in &bytes[at + 1..at + len] {
+            size = (size << 8) | u64::from(*b);
+        }
+        let start = at + len;
+        let unknown = size == (1u64 << (7 * len)) - 1;
+        (id, start..if unknown { bytes.len() } else { start + size as usize })
+    }
+
+    #[test]
+    fn ebml_sizes_take_the_fewest_bytes() {
+        assert_eq!(size_vint(0), vec![0x80]);
+        assert_eq!(size_vint(126), vec![0xFE]);
+        // 127 is all ones in one byte: reserved for "unknown".
+        assert_eq!(size_vint(127), vec![0x40, 0x7F]);
+        assert_eq!(size_vint(300), vec![0x41, 0x2C]);
+        assert_eq!(uint(0xD7, 1), vec![0xD7, 0x81, 0x01]);
+        assert_eq!(uint(0x2A_D7B1, 1_000_000), vec![0x2A, 0xD7, 0xB1, 0x83, 0x0F, 0x42, 0x40]);
+        assert_eq!(&element(0x1A45_DFA3, b"")[..], &[0x1A, 0x45, 0xDF, 0xA3, 0x80]);
+        assert_eq!(vp8_size(&keyframe(640, 360, &[])), Some((640, 360)));
+        assert_eq!(vp8_size(&[0x11, 0, 0, 0x9D, 0x01, 0x2A, 0, 0, 0, 0]), None, "not a keyframe");
+    }
+
+    #[test]
+    fn pictures_are_webm_lined_up_with_the_recording() {
+        let dir = temp();
+        let path = dir.join(file_name("01J00000000000000000000000", Part::Camera, false));
+        let mut film = Film::create(&path, None, "01J00000000000000000000001", "x").unwrap();
+        // Nothing until a keyframe.
+        film.picture(100, 9_000, &[0x31, 0, 0], false);
+        assert_eq!(film.size, 0);
+        // The camera turned on 1.5 s in; 30 frames a second on its clock.
+        film.picture(1_500, 90_000, &keyframe(640, 360, &[1]), true);
+        for n in 1..90u64 {
+            film.picture(1_500 + n * 33 + n % 7, 90_000 + n * 3_000, &[0x31, n as u8], false);
+        }
+        // It went off and on again: its clock starts over, arrival time wins.
+        film.picture(10_000, 5, &keyframe(320, 180, &[2]), true);
+        film.finish();
+        let webm = std::fs::read(&path).unwrap();
+        assert_eq!(film.size, webm.len() as u64);
+        let (id, header) = read_element(&webm, 0);
+        assert_eq!(id, 0x1A45_DFA3);
+        assert!(webm[header.clone()].windows(4).any(|w| w == b"webm"));
+        let (id, segment) = read_element(&webm, header.end);
+        assert_eq!((id, segment.end), (0x1853_8067, webm.len()), "a segment to the end");
+        let mut at = segment.start;
+        let mut clusters = Vec::new();
+        let mut size = None;
+        while at < segment.end {
+            let (id, body) = read_element(&webm, at);
+            match id {
+                0x1654_AE6B => {
+                    let (_, entry) = read_element(&webm, body.start);
+                    let mut inner = entry.start;
+                    while inner < entry.end {
+                        let (id, field) = read_element(&webm, inner);
+                        if id == 0xE0 {
+                            let (_, w) = read_element(&webm, field.start);
+                            let (_, h) = read_element(&webm, w.end);
+                            let n =
+                                |r: std::ops::Range<usize>| webm[r].iter().fold(0u64, |n, b| (n << 8) | u64::from(*b));
+                            size = Some((n(w), n(h)));
+                        }
+                        if id == 0x86 {
+                            assert_eq!(&webm[field.clone()], b"V_VP8");
+                        }
+                        inner = field.end;
+                    }
+                }
+                0x1F43_B675 => {
+                    let (id, time) = read_element(&webm, body.start);
+                    assert_eq!(id, 0xE7);
+                    let time = webm[time.clone()].iter().fold(0u64, |n, b| (n << 8) | u64::from(*b));
+                    let mut blocks = Vec::new();
+                    let mut inner = read_element(&webm, body.start).1.end;
+                    while inner < body.end {
+                        let (id, block) = read_element(&webm, inner);
+                        assert_eq!((id, webm[block.start]), (0xA3, 0x81));
+                        let rel = i16::from_be_bytes([webm[block.start + 1], webm[block.start + 2]]);
+                        blocks.push((time + rel as u64, webm[block.start + 3] & 0x80 != 0));
+                        inner = block.end;
+                    }
+                    clusters.push(blocks);
+                }
+                _ => {}
+            }
+            at = body.end;
+        }
+        assert_eq!(size, Some((640, 360)));
+        let frames: Vec<(u64, bool)> = clusters.iter().flatten().copied().collect();
+        assert_eq!(frames.len(), 91);
+        assert_eq!(frames[0], (1_500, true), "starts when it did, on a keyframe");
+        // Its own clock: a frame every 33 ms, whatever the arrival jitter.
+        assert_eq!(frames[89].0, 1_500 + 89 * 3_000 / 90);
+        assert!(frames.windows(2).all(|w| w[0].0 <= w[1].0), "in order");
+        assert_eq!(frames[90], (10_000, true));
+        // Clusters of about two seconds, a new one at each keyframe.
+        assert!(clusters.len() >= 3 && clusters.iter().all(|c| c.last().unwrap().0 - c[0].0 < CLUSTER_MS));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sealed_pictures_read_back_with_their_own_key() {
+        let dir = temp();
+        let key = [7u8; 32];
+        let (rec, user) = ("01J00000000000000000000001", "01J00000000000000000000000");
+        let path = dir.join(file_name(user, Part::Screen, true));
+        let mut film = Film::create(&path, Some(&key), rec, &Part::Screen.key_name(user)).unwrap();
+        film.picture(0, 0, &keyframe(1280, 720, b"secret pixels"), true);
+        film.finish();
+        let sealed = std::fs::read(&path).unwrap();
+        assert!(!sealed.windows(13).any(|w| w == b"secret pixels"));
+        let plain = read_plain(&path, Some(&key), rec, &Part::Screen.key_name(user), true).unwrap();
+        assert!(plain.windows(13).any(|w| w == b"secret pixels"));
+        // Not with the key of the same person's sound, or camera.
+        assert!(read_plain(&path, Some(&key), rec, &Part::Sound.key_name(user), true).is_err());
+        assert!(read_plain(&path, Some(&key), rec, &Part::Camera.key_name(user), true).is_err());
+        assert_eq!(parse_file_name(&format!("{user}.screen.webm.sealed"), true), Some((user, Part::Screen)));
+        assert_eq!(parse_file_name(&format!("{user}.opus"), false), Some((user, Part::Sound)));
+        assert_eq!(parse_file_name(&format!("{user}.camera.webm"), true), None);
         let _ = std::fs::remove_dir_all(dir);
     }
 

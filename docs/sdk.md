@@ -79,8 +79,9 @@ the network unencrypted.
 Text or a full request works for `reply` and `send`:
 `ctx.reply({ content: "Look", embeds: [{ title: "A card" }] })`.
 
-`agent.on("mention", ...)` runs for messages that say `@username` (a whole
-word, in any case, as the apps decide it), and `agent.on("message", ...)` for
+`agent.on("mention", ...)` runs for messages that mention the agent: by id
+(`<@id>`, which the instance checks and lists in `message.mentionUserIds`)
+or as `@username` (a whole word, in any case, as the apps decide it), and `agent.on("message", ...)` for
 every message from someone else. `agent.commands` lists what's registered,
 for a help command, and `unknownCommand` catches the rest.
 
@@ -118,12 +119,14 @@ To catch up on what happened while the program was stopped, save
 strings) and pass them back as `cursors`. Servers without one start with new
 events only. The example saves them to a file every few seconds.
 
-The agent lists its servers every `serverRefreshMs` (30 seconds) and starts
-following new ones (`serverAdded`). Being removed or the server being deleted
-arrives as an event straight away (`serverRemoved`). Instances can also add a
-server to a stream the moment the agent is added to it (`follow_new_servers`
-on `EventService.Subscribe`, announced as `followed`, on instances listing
-the `agent-streams` feature); the SDK doesn't use that yet.
+A server the agent is added to is followed the moment it's added
+(`serverAdded`), on instances listing the `agent-streams` feature: the
+stream asks for `follow_new_servers` and the instance announces each one
+as `followed`. On older instances the agent lists its servers every
+`serverRefreshMs` (30 seconds) instead. Being removed or the server being
+deleted arrives as an event straight away (`serverRemoved`).
+`EventFollower` takes `followNewServers` too, and yields a `followed`
+update for each new server.
 
 ### When things go wrong
 
@@ -205,7 +208,10 @@ await voice.leave();
   TypeScript.
 - **Staying in**: when the connection drops or the instance restarts, it
   joins again with the same place (`reconnecting`, then `rejoined`), and
-  `speak` waits for it. Being taken out by a moderator, kicked, losing
+  `speak` waits for it. A stream that goes silent without closing counts
+  as dropped too: instances send a keepalive every 15 s while nobody talks,
+  and once one has come, `keepaliveTimeoutMs` (45 s) with nothing at all
+  joins again. Being taken out by a moderator, kicked, losing
   CONNECT or joining from somewhere else ends it: `voice.closed` rejects with
   that error (FailedPrecondition). Stopping the agent leaves its channels.
 
@@ -239,8 +245,9 @@ voice.on("utterance", async (utterance) => {
   `maxUtteranceMs` (60 s) at the latest, and the next one begins.
 - **Barge-in**: `interruptible: true` on `speak`, `play` or `speakPcm`
   stops as soon as someone starts talking over it (or pass a test of who may
-  cut in), resolving with `interrupted: true` and who it was. What the
-  instance already has queued still plays out, at most about 300 ms.
+  cut in), resolving with `interrupted: true` and who it was. Anything
+  cut short tells the instance to drop what it still has queued, so the
+  sound stops at once (older instances play it out, at most about 300 ms).
   `voice.stopSpeaking()` stops what's being said and everything waiting its
   turn; `voice.talking` says whether anything is.
 - **Raw sound**: services that take or make 16-bit PCM instead of Opus need
