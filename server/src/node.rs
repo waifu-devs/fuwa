@@ -26,7 +26,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0010_sso.sql"),
     include_str!("../migrations/node/0011_regions.sql"),
     include_str!("../migrations/node/0012_federation.sql"),
-    include_str!("../migrations/node/0015_friends.sql"),
+    include_str!("../migrations/node/0016_friends.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
