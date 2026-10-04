@@ -364,3 +364,101 @@ async fn an_encrypted_conversation_end_to_end() {
         }
     }
 }
+
+#[tokio::test]
+async fn message_backups_keep_parts_in_order_for_their_owner() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let channel = Channel::from_shared(format!("http://{}", instance.addr)).unwrap().connect().await.unwrap();
+    let mut dms = Dms::new(channel.clone());
+    let juan = sign_up(&channel, "juan").await;
+    let mika = sign_up(&channel, "mika").await;
+    let get = async |dms: &mut Dms, p: &Person| {
+        dms.get_backup(authed(&p.token, pb::GetBackupRequest {})).await.unwrap().into_inner().backup
+    };
+    assert!(get(&mut dms, &juan).await.is_none());
+
+    // The key check has to be 32 bytes; a backup only starts over when asked.
+    let short =
+        dms.start_backup(authed(&juan.token, pb::StartBackupRequest { key_check: vec![1; 8], replace: false })).await;
+    assert_eq!(short.unwrap_err().code(), Code::InvalidArgument);
+    let check = vec![7u8; 32];
+    dms.start_backup(authed(&juan.token, pb::StartBackupRequest { key_check: check.clone(), replace: false }))
+        .await
+        .unwrap();
+    let again = dms
+        .start_backup(authed(&juan.token, pb::StartBackupRequest { key_check: check.clone(), replace: false }))
+        .await;
+    assert_eq!(again.unwrap_err().code(), Code::AlreadyExists);
+
+    let add = async |dms: &mut Dms, p: &Person, key_check: &[u8], data: Vec<u8>| {
+        dms.add_backup_part(authed(&p.token, pb::AddBackupPartRequest { key_check: key_check.to_vec(), data })).await
+    };
+    for n in 1..=3u8 {
+        let added = add(&mut dms, &juan, &check, vec![n; 1000]).await.unwrap().into_inner();
+        assert_eq!(added.sequence, i64::from(n));
+    }
+    assert_eq!(add(&mut dms, &juan, &check, vec![]).await.unwrap_err().code(), Code::InvalidArgument);
+    assert_eq!(add(&mut dms, &juan, &check, vec![0; 256 * 1024 + 1]).await.unwrap_err().code(), Code::InvalidArgument);
+    // Someone else's backup isn't reachable, and they have none.
+    assert_eq!(add(&mut dms, &mika, &check, vec![1]).await.unwrap_err().code(), Code::FailedPrecondition);
+    assert!(get(&mut dms, &mika).await.is_none());
+
+    let backup = get(&mut dms, &juan).await.unwrap();
+    assert_eq!((backup.key_check.as_slice(), backup.size, backup.parts), (check.as_slice(), 3000, 3));
+    let list = async |dms: &mut Dms, p: &Person, after: i64, limit: i32| {
+        dms.list_backup_parts(authed(&p.token, pb::ListBackupPartsRequest { after_sequence: after, limit }))
+            .await
+            .unwrap()
+            .into_inner()
+    };
+    let first = list(&mut dms, &juan, 0, 2).await;
+    assert_eq!((first.parts.iter().map(|p| p.sequence).collect::<Vec<_>>(), first.has_more), (vec![1, 2], true));
+    assert_eq!(first.parts[1].data, vec![2; 1000]);
+    let rest = list(&mut dms, &juan, 2, 0).await;
+    assert_eq!((rest.parts.len(), rest.parts[0].sequence, rest.has_more), (1, 3, false));
+    assert!(list(&mut dms, &mika, 0, 0).await.parts.is_empty());
+
+    // Started over with another key: the old parts go, and a device still on
+    // the old key is told so instead of adding to the new backup.
+    let other = vec![9u8; 32];
+    dms.start_backup(authed(&juan.token, pb::StartBackupRequest { key_check: other.clone(), replace: true }))
+        .await
+        .unwrap();
+    assert!(list(&mut dms, &juan, 0, 0).await.parts.is_empty());
+    let stale = add(&mut dms, &juan, &check, vec![1]).await.unwrap_err();
+    assert_eq!(stale.code(), Code::FailedPrecondition);
+    assert_eq!(add(&mut dms, &juan, &other, vec![1]).await.unwrap().into_inner().sequence, 1);
+
+    // It fills up at 64 MiB.
+    let big = vec![0u8; 256 * 1024];
+    let mut full = None;
+    for _ in 0..300 {
+        if let Err(err) = add(&mut dms, &juan, &other, big.clone()).await {
+            full = Some(err);
+            break;
+        }
+    }
+    assert_eq!(full.expect("never filled up").code(), Code::ResourceExhausted);
+    assert!(get(&mut dms, &juan).await.unwrap().size <= 64 * 1024 * 1024);
+
+    dms.delete_backup(authed(&juan.token, pb::DeleteBackupRequest {})).await.unwrap();
+    assert!(get(&mut dms, &juan).await.is_none());
+
+    // Deleting an account takes its backup too.
+    dms.start_backup(authed(&mika.token, pb::StartBackupRequest { key_check: check.clone(), replace: false }))
+        .await
+        .unwrap();
+    add(&mut dms, &mika, &check, vec![5; 10]).await.unwrap();
+    pb::account_service_client::AccountServiceClient::new(channel.clone())
+        .delete_account(authed(
+            &mika.token,
+            pb::DeleteAccountRequest { password: "correct horse battery".into(), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    assert!(instance.app.dms().unwrap().backup(&mika.id).await.unwrap().is_none());
+
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
+}

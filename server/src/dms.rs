@@ -22,7 +22,8 @@ use crate::id::{new_id, now_ms, timestamp};
 use crate::pb;
 use crate::pb::direct_message_event::Payload;
 
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/dms/0001_init.sql")];
+const MIGRATIONS: &[&str] =
+    &[include_str!("../migrations/dms/0001_init.sql"), include_str!("../migrations/dms/0002_backups.sql")];
 
 /// The most single-use key packages kept for one device.
 pub const MAX_KEY_PACKAGES: i64 = 100;
@@ -40,6 +41,52 @@ const HOUR_MS: i64 = 60 * 60 * 1000;
 /// How many events a watcher may fall behind before it's cut off and has to
 /// catch up from the records.
 const BUFFER: usize = 256;
+
+/// What a device hears when it adds to a backup another device started over.
+pub const STALE_BACKUP_KEY: &str = "your message backup was started over with another recovery key";
+
+/// An account's message backup, as stored.
+#[derive(Debug, Clone)]
+pub struct BackupRow {
+    pub key_check: Vec<u8>,
+    pub size: i64,
+    pub parts: i64,
+    pub next_seq: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl BackupRow {
+    pub fn to_pb(&self, max_size: i64) -> pb::Backup {
+        pb::Backup {
+            key_check: self.key_check.clone(),
+            size: self.size,
+            parts: self.parts,
+            max_size,
+            created_at: Some(timestamp(self.created_at)),
+            updated_at: Some(timestamp(self.updated_at)),
+        }
+    }
+}
+
+async fn backup_of(conn: &Connection, account_id: &str) -> Result<Option<BackupRow>> {
+    query_one(
+        conn,
+        "SELECT key_check, size, parts, next_seq, created_at, updated_at FROM backups WHERE account_id = ?1",
+        [account_id],
+        |r| {
+            Ok(BackupRow {
+                key_check: r.get(0)?,
+                size: r.get(1)?,
+                parts: r.get(2)?,
+                next_seq: r.get(3)?,
+                created_at: r.get(4)?,
+                updated_at: r.get(5)?,
+            })
+        },
+    )
+    .await
+}
 
 /// A device as stored.
 #[derive(Debug, Clone)]
@@ -449,13 +496,130 @@ impl DmDb {
         Ok(gone.len())
     }
 
-    /// Forgets a deleted account's devices. Its conversations stay, for the
-    /// other person in each.
+    /// Forgets a deleted account's devices and message backup. Its
+    /// conversations stay, for the other person in each.
     pub async fn forget_account(&self, account_id: &str) -> Result<()> {
         db::write(&self.db, async |conn| {
             let ids =
                 query_all(conn, "SELECT id FROM devices WHERE account_id = ?1", [account_id], |r| r.get(0)).await?;
-            delete_devices(conn, &ids).await
+            delete_devices(conn, &ids).await?;
+            conn.execute("DELETE FROM backup_parts WHERE account_id = ?1", [account_id]).await?;
+            conn.execute("DELETE FROM backups WHERE account_id = ?1", [account_id]).await?;
+            Ok(())
+        })
+        .await
+    }
+
+    // ───────────────────────── Backups ─────────────────────────
+
+    /// The account's message backup, if it has one.
+    pub async fn backup(&self, account_id: &str) -> Result<Option<BackupRow>> {
+        let conn = self.read()?;
+        backup_of(&conn, account_id).await
+    }
+
+    /// Starts the account's backup with a new key check. One it already has
+    /// goes, parts and all, only if `replace`.
+    pub async fn start_backup(&self, account_id: &str, key_check: &[u8], replace: bool) -> Result<BackupRow> {
+        db::write(&self.db, async |conn| {
+            if backup_of(conn, account_id).await?.is_some() {
+                if !replace {
+                    return Err(Error::AlreadyExists("you already have a message backup".into()));
+                }
+                conn.execute("DELETE FROM backup_parts WHERE account_id = ?1", [account_id]).await?;
+                conn.execute("DELETE FROM backups WHERE account_id = ?1", [account_id]).await?;
+            }
+            let now = now_ms();
+            conn.execute(
+                "INSERT INTO backups (account_id, key_check, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+                (account_id, key_check.to_vec(), now),
+            )
+            .await?;
+            backup_of(conn, account_id).await?.ok_or(Error::NotFound("backup"))
+        })
+        .await
+    }
+
+    /// Adds a part to the account's backup, if `key_check` is its current one
+    /// and it stays within `max_size` bytes. Its sequence, and the backup now.
+    pub async fn add_backup_part(
+        &self,
+        account_id: &str,
+        key_check: &[u8],
+        data: &[u8],
+        max_size: i64,
+    ) -> Result<(i64, BackupRow)> {
+        db::write(&self.db, async |conn| {
+            let backup = backup_of(conn, account_id)
+                .await?
+                .ok_or_else(|| Error::FailedPrecondition("you have no message backup".into()))?;
+            if backup.key_check != key_check {
+                return Err(Error::FailedPrecondition(STALE_BACKUP_KEY.into()));
+            }
+            let size = data.len() as i64;
+            if backup.size + size > max_size {
+                return Err(Error::ResourceExhausted(format!(
+                    "your message backup is full ({} MiB); start it over to make room",
+                    max_size / (1024 * 1024)
+                )));
+            }
+            let seq = backup.next_seq;
+            let now = now_ms();
+            conn.execute(
+                "INSERT INTO backup_parts (account_id, seq, data, created_at) VALUES (?1, ?2, ?3, ?4)",
+                (account_id, seq, data.to_vec(), now),
+            )
+            .await?;
+            conn.execute(
+                "UPDATE backups SET size = size + ?2, parts = parts + 1, next_seq = ?3, updated_at = ?4
+                 WHERE account_id = ?1",
+                (account_id, size, seq + 1, now),
+            )
+            .await?;
+            let backup = backup_of(conn, account_id).await?.ok_or(Error::NotFound("backup"))?;
+            Ok((seq, backup))
+        })
+        .await
+    }
+
+    /// The account's backup parts after `after`, oldest first: at most
+    /// `limit`, and fewer if they'd pass `max_bytes` (always at least one).
+    /// Whether there are more.
+    pub async fn backup_parts(
+        &self,
+        account_id: &str,
+        after: i64,
+        limit: i64,
+        max_bytes: usize,
+    ) -> Result<(Vec<pb::BackupPartData>, bool)> {
+        let conn = self.read()?;
+        let rows = query_all(
+            &conn,
+            "SELECT seq, data FROM backup_parts WHERE account_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
+            (account_id, after, limit + 1),
+            |r| Ok(pb::BackupPartData { sequence: r.get(0)?, data: r.get(1)? }),
+        )
+        .await?;
+        let mut more = rows.len() as i64 > limit;
+        let mut parts = Vec::new();
+        let mut bytes = 0;
+        for part in rows.into_iter().take(limit as usize) {
+            if !parts.is_empty() && bytes + part.data.len() > max_bytes {
+                more = true;
+                break;
+            }
+            bytes += part.data.len();
+            parts.push(part);
+        }
+        Ok((parts, more))
+    }
+
+    /// Deletes the account's backup and its parts. Deleting none does nothing.
+    pub async fn delete_backup(&self, account_id: &str) -> Result<()> {
+        db::write(&self.db, async |conn| {
+            conn.execute("DELETE FROM backup_parts WHERE account_id = ?1", [account_id]).await?;
+            conn.execute("DELETE FROM backups WHERE account_id = ?1", [account_id]).await?;
+            Ok(())
         })
         .await
     }
