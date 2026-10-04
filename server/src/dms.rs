@@ -22,7 +22,8 @@ use crate::id::{new_id, now_ms, timestamp};
 use crate::pb;
 use crate::pb::direct_message_event::Payload;
 
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/dms/0001_init.sql")];
+const MIGRATIONS: &[&str] =
+    &[include_str!("../migrations/dms/0001_init.sql"), include_str!("../migrations/dms/0003_sealed_files.sql")];
 
 /// The most single-use key packages kept for one device.
 pub const MAX_KEY_PACKAGES: i64 = 100;
@@ -572,6 +573,14 @@ impl DmDb {
         .unwrap_or((0, None)))
     }
 
+    /// Whether a message already carries this sealed file.
+    pub async fn carries(&self, media_id: &str) -> Result<bool> {
+        let conn = self.read()?;
+        Ok(query_one(&conn, "SELECT 1 FROM record_media WHERE media_id = ?1", [media_id], |r| r.get::<i64>(0))
+            .await?
+            .is_some())
+    }
+
     /// Up to `limit` records after `after`, oldest first, and whether there are more.
     pub async fn records(
         &self,
@@ -609,6 +618,16 @@ impl DmDb {
     /// Adds a record, if it's for the conversation's current epoch; a commit
     /// moves the conversation to the next one. Both people's watchers get it.
     pub async fn append(&self, record: &NewRecord<'_>) -> Result<pb::ConversationRecord> {
+        self.append_carrying(record, &[]).await
+    }
+
+    /// Like `append`, for a message carrying sealed files (uploads, by id),
+    /// which then belong to the record and go when it's deleted.
+    pub async fn append_carrying(
+        &self,
+        record: &NewRecord<'_>,
+        media_ids: &[String],
+    ) -> Result<pb::ConversationRecord> {
         let commit = record.kind == pb::ConversationRecordKind::Commit;
         self.write(async |conn, outbox| {
             let now = now_ms();
@@ -664,6 +683,13 @@ impl DmDb {
                 ),
             )
             .await?;
+            for media_id in media_ids {
+                conn.execute(
+                    "INSERT INTO record_media (media_id, conversation_id, seq) VALUES (?1, ?2, ?3)",
+                    (media_id.as_str(), record.conversation_id, stored.sequence),
+                )
+                .await?;
+            }
             // The sender is in: whatever welcome it had here is used up.
             conn.execute(
                 "DELETE FROM welcomes WHERE conversation_id = ?1 AND device_id = ?2",
@@ -690,8 +716,9 @@ impl DmDb {
     }
 
     /// Deletes a message its sender sent: the ciphertext goes, the record stays
-    /// as a gap. Deleting one already deleted does nothing.
-    pub async fn delete_record(&self, account_id: &str, conversation_id: &str, sequence: i64) -> Result<()> {
+    /// as a gap. Deleting one already deleted does nothing. Answers the sealed
+    /// files it carried, for the caller to delete.
+    pub async fn delete_record(&self, account_id: &str, conversation_id: &str, sequence: i64) -> Result<Vec<String>> {
         self.write(async |conn, outbox| {
             let record = query_one(
                 conn,
@@ -708,9 +735,21 @@ impl DmDb {
                 return Err(Error::invalid("only messages can be deleted"));
             }
             if record.deleted_at.is_some() {
-                return Ok(());
+                return Ok(Vec::new());
             }
             let now = now_ms();
+            let media_ids = query_all(
+                conn,
+                "SELECT media_id FROM record_media WHERE conversation_id = ?1 AND seq = ?2",
+                (conversation_id, sequence),
+                |r| r.get::<String>(0),
+            )
+            .await?;
+            conn.execute(
+                "DELETE FROM record_media WHERE conversation_id = ?1 AND seq = ?2",
+                (conversation_id, sequence),
+            )
+            .await?;
             conn.execute(
                 "UPDATE records SET data = NULL, deleted_at = ?3 WHERE conversation_id = ?1 AND seq = ?2",
                 (conversation_id, sequence, now),
@@ -726,7 +765,7 @@ impl DmDb {
             let deleted =
                 pb::ConversationRecord { data: Vec::new(), deleted_at: Some(timestamp(now)), ..record.clone() };
             outbox.push((participants, pb::DirectMessageEvent { payload: Some(Payload::RecordDeleted(deleted)) }));
-            Ok(())
+            Ok(media_ids)
         })
         .await
     }

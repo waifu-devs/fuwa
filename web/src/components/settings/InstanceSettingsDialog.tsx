@@ -72,6 +72,8 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "default_limits.recording_bytes", get: (s) => s.defaultLimits?.recordingBytes },
   { path: "picture_upload_bytes", get: (s) => s.pictureUploadBytes },
   { path: "picture_upload_bytes_per_day", get: (s) => s.pictureUploadBytesPerDay },
+  { path: "voice_message_seconds", get: (s) => s.voiceMessageSeconds },
+  { path: "voice_message_bytes", get: (s) => s.voiceMessageBytes },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
@@ -607,6 +609,26 @@ export function InstanceSettingsDialog({
                   onChange={(v) => patch((d) => (d.pictureUploadBytesPerDay = v))}
                 />
               </Setting>
+              <Setting
+                id="voice-message-seconds"
+                title="Longest voice message"
+                hint="In direct messages. Apps stop recording here; voice messages are end-to-end encrypted, so this instance can't check their length itself."
+                defaultLabel={defaults.voiceMessageSeconds === undefined ? "no limit" : `${count(defaults.voiceMessageSeconds)} seconds`}
+                delay={0.12}
+                {...resetter("voice_message_seconds")}
+              >
+                <Cap label="Seconds" value={draft.voiceMessageSeconds} onChange={(v) => patch((d) => (d.voiceMessageSeconds = v))} />
+              </Setting>
+              <Setting
+                id="voice-message-bytes"
+                title="Biggest voice message"
+                hint="Its encrypted file, which this instance does see. A minute of voice is about 240 KB."
+                defaultLabel={size(defaults.voiceMessageBytes)}
+                delay={0.16}
+                {...resetter("voice_message_bytes")}
+              >
+                <Cap label="Up to" bytes value={draft.voiceMessageBytes} onChange={(v) => patch((d) => (d.voiceMessageBytes = v))} />
+              </Setting>
             </>
           )}
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
@@ -755,6 +777,12 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "picture_upload_bytes_per_day":
         into.pictureUploadBytesPerDay = from.pictureUploadBytesPerDay;
+        break;
+      case "voice_message_seconds":
+        into.voiceMessageSeconds = from.voiceMessageSeconds;
+        break;
+      case "voice_message_bytes":
+        into.voiceMessageBytes = from.voiceMessageBytes;
         break;
       default: {
         // Settings copied above by their own pages' functions.

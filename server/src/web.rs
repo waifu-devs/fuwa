@@ -25,9 +25,11 @@ mod embedded {
     /// The client talks to any fuwa server and shows avatars from anywhere, but
     /// runs only its own scripts. 'wasm-unsafe-eval' lets it compile its own
     /// WebAssembly (the encryption direct messages use), and nothing else.
-    /// Forms only ever submit here.
+    /// Forms only ever submit here. Sound plays from here or from blobs the
+    /// app made itself (voice messages, opened on the device).
     const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; \
-        style-src 'self' 'unsafe-inline'; img-src * data: blob:; connect-src *; font-src 'self' data:; \
+        style-src 'self' 'unsafe-inline'; img-src * data: blob:; media-src 'self' blob:; connect-src *; \
+        font-src 'self' data:; \
         object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 
     pub async fn serve(uri: Uri, headers: HeaderMap) -> Response {

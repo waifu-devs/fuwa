@@ -230,7 +230,10 @@ async fn an_encrypted_conversation_end_to_end() {
     let secret = b"a secret only they can read";
     let sealed = juan.device.encrypt(&cid, secret).unwrap();
     let sent = dms
-        .post_message(authed(&juan.token, pb::PostMessageRequest { conversation_id: cid.clone(), message: sealed }))
+        .post_message(authed(
+            &juan.token,
+            pb::PostMessageRequest { conversation_id: cid.clone(), message: sealed, ..Default::default() },
+        ))
         .await
         .unwrap()
         .into_inner()
@@ -250,7 +253,7 @@ async fn an_encrypted_conversation_end_to_end() {
     let plain = dms
         .post_message(authed(
             &juan.token,
-            pb::PostMessageRequest { conversation_id: cid.clone(), message: secret.to_vec() },
+            pb::PostMessageRequest { conversation_id: cid.clone(), message: secret.to_vec(), ..Default::default() },
         ))
         .await
         .unwrap_err();
@@ -297,7 +300,7 @@ async fn an_encrypted_conversation_end_to_end() {
     let from_phone = dms
         .post_message(authed(
             &mika_phone.token,
-            pb::PostMessageRequest { conversation_id: cid.clone(), message: hello },
+            pb::PostMessageRequest { conversation_id: cid.clone(), message: hello, ..Default::default() },
         ))
         .await
         .unwrap()
@@ -363,4 +366,142 @@ async fn an_encrypted_conversation_end_to_end() {
             assert!(!bytes.windows(secret.len()).any(|w| w == secret), "{} holds the plaintext", path.display());
         }
     }
+}
+
+/// The same path on the test instance (links are made with the public URL).
+fn on(instance: &Instance, url: &str) -> String {
+    format!("http://{}{}", instance.addr, reqwest::Url::parse(url).unwrap().path())
+}
+
+#[tokio::test]
+async fn voice_messages_carry_sealed_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let channel = Channel::from_shared(format!("http://{}", instance.addr)).unwrap().connect().await.unwrap();
+    let mut dms = Dms::new(channel.clone());
+    let mut servers = pb::server_service_client::ServerServiceClient::new(channel.clone());
+    let http = reqwest::Client::new();
+
+    let juan = sign_up(&channel, "juan").await;
+    let mika = sign_up(&channel, "mika").await;
+    let sid = servers
+        .create_server(authed(
+            &juan.token,
+            pb::CreateServerRequest { name: "Waifu Devs".into(), discoverable: true, ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap()
+        .id;
+    servers
+        .join_server(authed(&mika.token, pb::JoinServerRequest { server_id: sid, ..Default::default() }))
+        .await
+        .unwrap();
+    let allowed = vec![juan.id.clone(), mika.id.clone()];
+    register(&mut dms, &juan).await;
+    register(&mut dms, &mika).await;
+    let cid = dms
+        .open_conversation(authed(&juan.token, pb::OpenConversationRequest { user_id: mika.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .conversation
+        .unwrap()
+        .id;
+    juan.device.create_group(&cid).unwrap();
+    let mika_device = mika.device.device_id();
+    let claimed = dms
+        .claim_key_packages(authed(&juan.token, pb::ClaimKeyPackagesRequest { device_ids: vec![mika_device.clone()] }))
+        .await
+        .unwrap()
+        .into_inner()
+        .key_packages;
+    let adds: Vec<(String, Vec<u8>)> = claimed.into_iter().map(|k| (k.device_id, k.key_package)).collect();
+    let commit = juan.device.commit(&cid, &adds, &[], &allowed).unwrap();
+    let record = dms
+        .post_commit(authed(
+            &juan.token,
+            pb::PostCommitRequest {
+                conversation_id: cid.clone(),
+                commit: commit.commit.clone(),
+                group_info: commit.group_info.clone(),
+                welcome: commit.welcome.clone().unwrap(),
+                welcome_device_ids: vec![mika_device],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .record
+        .unwrap();
+    juan.device.process(&cid, &record.data, true, &allowed).unwrap();
+
+    // The caps say there are none until an admin sets them.
+    let limits = dms.get_voice_limits(authed(&mika.token, pb::GetVoiceLimitsRequest {})).await.unwrap().into_inner();
+    assert_eq!((limits.max_seconds, limits.max_bytes), (None, None));
+
+    // A sealed file is any bytes: the instance can't tell what's in it.
+    let sealed: Vec<u8> = (0..4096u32).map(|n| (n.wrapping_mul(2_654_435_761) >> 24) as u8).collect();
+    let reserve = |token: &str, size: usize| {
+        authed(token, pb::CreateSealedUploadRequest { conversation_id: cid.clone(), size: size as i64 })
+    };
+    let reserved = dms.create_sealed_upload(reserve(&juan.token, sealed.len())).await.unwrap().into_inner();
+    let put = http.put(on(&instance, &reserved.upload_url)).body(sealed.clone()).send().await.unwrap();
+    assert_eq!(put.status(), reqwest::StatusCode::NO_CONTENT);
+    let fetched = http.get(on(&instance, &reserved.url)).send().await.unwrap();
+    assert_eq!(fetched.headers()["content-type"], "application/octet-stream");
+    assert_eq!(fetched.bytes().await.unwrap().to_vec(), sealed);
+
+    // Only for conversations you're in, and only yours to send.
+    let rin = sign_up(&channel, "rin").await;
+    register(&mut dms, &rin).await;
+    let outside = dms.create_sealed_upload(reserve(&rin.token, sealed.len())).await.unwrap_err();
+    assert_eq!(outside.code(), Code::NotFound);
+    let message = |device: &Device| device.encrypt(&cid, b"a voice message").unwrap();
+    let post = |token: &str, message: Vec<u8>, media_ids: Vec<String>| {
+        authed(token, pb::PostMessageRequest { conversation_id: cid.clone(), message, media_ids })
+    };
+    let mika_welcomes =
+        dms.list_welcomes(authed(&mika.token, pb::ListWelcomesRequest {})).await.unwrap().into_inner().welcomes;
+    mika.device.join_from_welcome(&cid, &mika_welcomes[0].data, &allowed).unwrap();
+    let theirs =
+        dms.post_message(post(&mika.token, message(&mika.device), vec![reserved.media_id.clone()])).await.unwrap_err();
+    assert_eq!(theirs.code(), Code::NotFound);
+
+    let sent = dms
+        .post_message(post(&juan.token, message(&juan.device), vec![reserved.media_id.clone()]))
+        .await
+        .unwrap()
+        .into_inner()
+        .record
+        .unwrap();
+    // One message carries a file.
+    let twice =
+        dms.post_message(post(&juan.token, message(&juan.device), vec![reserved.media_id.clone()])).await.unwrap_err();
+    assert_eq!(twice.code(), Code::InvalidArgument);
+
+    // Kept past the sweep for unused uploads.
+    instance.app.sweep_media(i64::MAX / 2).await.unwrap();
+    assert_eq!(http.get(on(&instance, &reserved.url)).send().await.unwrap().status(), reqwest::StatusCode::OK);
+
+    // A cap admins set is checked on the sealed size.
+    let mut settings = (*instance.app.settings()).clone();
+    settings.limits.voice_message_bytes = Some(1000);
+    instance.app.replace_settings(settings);
+    let big = dms.create_sealed_upload(reserve(&juan.token, sealed.len())).await.unwrap_err();
+    assert_eq!(big.code(), Code::ResourceExhausted);
+
+    // Deleting the message deletes its file.
+    dms.delete_record(authed(
+        &juan.token,
+        pb::DeleteRecordRequest { conversation_id: cid.clone(), sequence: sent.sequence },
+    ))
+    .await
+    .unwrap();
+    assert_eq!(http.get(on(&instance, &reserved.url)).send().await.unwrap().status(), reqwest::StatusCode::NOT_FOUND);
+
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
 }

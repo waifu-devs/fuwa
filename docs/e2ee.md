@@ -116,7 +116,8 @@ private keys are. It does see, and has to, to deliver:
   it was (padded);
 - which devices each account has (a label from the browser, like "Chrome on
   Windows", and their public keys);
-- which records are commits and which are messages, and when one is deleted.
+- which records are commits and which are messages, and when one is deleted;
+- which messages carry a sealed file (a voice message), and that file's size.
 
 Deleting a message removes its ciphertext from the instance and leaves a gap;
 copies already on devices are removed from the screen when they see the
@@ -151,6 +152,33 @@ browser starts from when it signs in.
 - `web/src/e2ee/`, `web/src/fuwa/dms.ts`, `web/src/components/dm/`: the web
   app's device, vault and screens.
 
+## Voice messages
+
+A voice message is recorded on the device (the browser's Opus encoder,
+written as an Ogg Opus file by the app itself) and **sealed** there: a new
+random AES-256-GCM key for that file alone, the sealed bytes being the
+12-byte nonce, then the ciphertext and its tag. The device uploads the
+sealed bytes (`DirectMessageService.CreateSealedUpload`, then a PUT like a
+picture's), and sends an ordinary encrypted message whose content
+(`DirectMessageVoice`) holds the file's id, its key, the SHA-256 of the
+sealed bytes, how long it plays and its waveform (worked out on the sender's
+device). So the instance keeps bytes it can't open and never learns the
+key, the length or the shape of the sound; nobody else, transcription
+services included, ever gets it.
+
+`PostMessage` names the file in `media_ids`, which ties it to that record
+(dms.db's `record_media`): one file, one message, and deleting the message
+deletes the file. A file never sent is swept after a day like any unused
+upload. Devices fetch it from their own instance by id (never from a link
+in the message), check its size and hash, then open it; the player keeps
+the opened sound in memory only. Admins can cap how long
+(`voice_message_seconds`, which apps honour, since the instance can't check)
+and how big (`voice_message_bytes`, checked on the sealed size) one may be;
+neither is capped unless they set it. The server side is
+`server/src/sealed.rs`; the web app's is `web/src/voice/` and
+`web/src/components/voice/`, written so a server channel's composer and
+messages can use the same recorder and player.
+
 ## Calls
 
 Calls in direct messages are end-to-end encrypted with the same groups: each
@@ -174,4 +202,4 @@ devices of everyone the channel's permissions let see it. See
 - **History on new devices.** A backup of message keys, encrypted with a key
   only you hold, would let a new device read what came before it.
 - **Group DMs**, search (it can only ever happen on the device), and
-  attachments.
+  attachments other than voice messages (sealed files are the way in).

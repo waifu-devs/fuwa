@@ -40,7 +40,14 @@ export type ChannelMessages = {
 };
 
 /** A message this browser sent that the server hasn't confirmed yet. */
-export type PendingMessage = { nonce: string; content: string; createdAt: number; failed: string | null };
+export type PendingMessage = {
+  nonce: string;
+  content: string;
+  createdAt: number;
+  failed: string | null;
+  /** A voice message on its way: how it looks until it's sent. */
+  voice?: { durationMs: number; waveform: Uint8Array };
+};
 
 /** A device in an encrypted conversation, as its group says. */
 export type DmMember = { userId: string; deviceId: string; signatureKey: Uint8Array };

@@ -38,6 +38,10 @@ enum MediaPurpose {
   MEDIA_PURPOSE_EMOJI = 4;
   // A picture behind the app, kept with KeepBackground.
   MEDIA_PURPOSE_BACKGROUND = 5;
+  // A file sealed on the device for a direct message (DirectMessageService
+  // .CreateSealedUpload): ciphertext the instance keeps but can't open.
+  // Not reserved through CreateUpload.
+  MEDIA_PURPOSE_SEALED = 6;
 }
 
 // A stored file.

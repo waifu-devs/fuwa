@@ -315,7 +315,11 @@ async fn upload(app: Arc<App>, token: String, body: Body) -> Response {
 
 /// Writes the body to a file beside the store, checks it, then moves it in.
 async fn receive(app: &App, row: &MediaRow, temp: &Path, body: Body) -> std::result::Result<(), (StatusCode, String)> {
-    let (content_type, size) = receive_file(&row.id, row.size, temp, body).await?;
+    let (content_type, size) = if row.purpose == pb::MediaPurpose::Sealed {
+        (crate::sealed::CONTENT_TYPE, crate::sealed::receive_file(&row.id, row.size, temp, body).await?)
+    } else {
+        receive_file(&row.id, row.size, temp, body).await?
+    };
     let (node, media) = kept(app);
     tokio::fs::rename(temp, media.path(&row.id)).await.map_err(|err| broken(&row.id, err))?;
     node.finish_upload(&row.id, content_type, size, now_ms()).await.map_err(|err| {

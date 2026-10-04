@@ -21,10 +21,22 @@ import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Member, User } from "@/gen/fuwa/v1/types_pb";
-import type { Item } from "@/e2ee/vault";
+import { isMessage, type Item } from "@/e2ee/vault";
 import { MAX_DM } from "@/e2ee/engine";
 import { focusChannel } from "@/fuwa/actions";
-import { deleteDm, dismissDm, dmProblem, editDm, markDmRead, prepareConversation, retryDm, sendDm } from "@/fuwa/dms";
+import {
+  deleteDm,
+  dismissPending,
+  dmProblem,
+  editDm,
+  markDmRead,
+  prepareConversation,
+  retryPending,
+  sendDm,
+  sendVoiceDm,
+  voiceLimits,
+  voiceLoader,
+} from "@/fuwa/dms";
 import { useFuwa, type PendingMessage } from "@/fuwa/store";
 import { sendsMessage } from "@/components/chat/Composer";
 import { DayDivider, EditBox, MessageBody, MessageLine, ToolButton } from "@/components/chat/MessageList";
@@ -38,6 +50,8 @@ import { comboLabel } from "@/lib/keybinds";
 import { setTitle } from "@/lib/notify";
 import { usePrefs, type MessageDisplay } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
+import { VoiceMessage, VoiceProblem } from "@/components/voice/VoiceMessage";
+import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
 
 /** Messages from one person closer together than this share a header. */
 const GROUP_GAP_MS = 7 * 60 * 1000;
@@ -116,6 +130,7 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
             id={conversation.id}
             placeholder={`Message @${partner?.username ?? "them"}`}
             promise="Only you two can read this"
+            voice
           />
           <EncryptionDialog open={sheet} onOpenChange={setSheet} instanceKey={instanceKey} conversation={conversation} />
         </>
@@ -284,7 +299,7 @@ export function EncryptedMessages({
         out.push({ kind: "day", key: `day-${date.toDateString()}`, date });
         prev = null;
       }
-      if (item.kind !== "text") {
+      if (!isMessage(item)) {
         out.push({ kind: "item", key: `s${item.seq}`, item, first: true, date });
         prev = { author: "", at: date };
         continue;
@@ -372,13 +387,13 @@ export function EncryptedMessages({
                     pending={row.pending}
                     first={row.first}
                     me={me}
-                    onRetry={() => void retryDm(instanceKey, id, row.pending)}
-                    onDismiss={() => dismissDm(instanceKey, id, row.pending.nonce)}
+                    onRetry={() => void retryPending(instanceKey, id, row.pending)}
+                    onDismiss={() => dismissPending(instanceKey, id, row.pending.nonce)}
                   />
                 );
               const item = row.item;
               const animate = !initial.current?.has(item.seq);
-              if (item.kind !== "text") return <SystemLine key={row.key} item={item} text={describe(item)} animate={animate} />;
+              if (!isMessage(item)) return <SystemLine key={row.key} item={item} text={describe(item)} animate={animate} />;
               const mine = item.senderId === me.id;
               return (
                 <DmRow
@@ -533,6 +548,8 @@ const DmRow = memo(function DmRow({
       <MessageLine display={display} first={first} author={author} member={member} date={date} instanceKey={instanceKey}>
         {item.deleted ? (
           <p className="text-sm text-muted-foreground italic">Message deleted</p>
+        ) : item.kind === "voice" && item.voice ? (
+          <DmVoice instanceKey={instanceKey} item={item} />
         ) : editing ? (
           <EditBox initial={item.content} onCancel={actions.cancelEdit} onSave={(text) => actions.save(item.seq, text)} />
         ) : (
@@ -575,28 +592,30 @@ const DmRow = memo(function DmRow({
             </motion.span>
           ) : (
             <>
-              <ToolButton
-                label={copied ? "Copied" : "Copy text"}
-                onClick={() => {
-                  void navigator.clipboard?.writeText(item.content);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1200);
-                }}
-              >
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span
-                    key={copied ? "copied" : "copy"}
-                    initial={{ scale: 0.3, rotate: copied ? -45 : 0, opacity: 0 }}
-                    animate={{ scale: 1, rotate: 0, opacity: 1 }}
-                    exit={{ scale: 0.3, opacity: 0 }}
-                    transition={{ type: "spring", stiffness: 700, damping: 22 }}
-                    className="grid place-items-center"
-                  >
-                    {copied ? <CheckIcon className="text-primary" /> : <CopyIcon />}
-                  </motion.span>
-                </AnimatePresence>
-              </ToolButton>
-              {mine && (
+              {item.kind === "text" && (
+                <ToolButton
+                  label={copied ? "Copied" : "Copy text"}
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(item.content);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1200);
+                  }}
+                >
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.span
+                      key={copied ? "copied" : "copy"}
+                      initial={{ scale: 0.3, rotate: copied ? -45 : 0, opacity: 0 }}
+                      animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                      exit={{ scale: 0.3, opacity: 0 }}
+                      transition={{ type: "spring", stiffness: 700, damping: 22 }}
+                      className="grid place-items-center"
+                    >
+                      {copied ? <CheckIcon className="text-primary" /> : <CopyIcon />}
+                    </motion.span>
+                  </AnimatePresence>
+                </ToolButton>
+              )}
+              {mine && item.kind === "text" && (
                 <ToolButton label="Edit" onClick={() => actions.edit(item.seq)}>
                   <PencilIcon />
                 </ToolButton>
@@ -613,6 +632,19 @@ const DmRow = memo(function DmRow({
     </motion.div>
   );
 });
+
+/** A voice message in a conversation: played from this instance, opened on this device. */
+function DmVoice({ instanceKey, item }: { instanceKey: string; item: Item }) {
+  const voice = item.voice!;
+  const load = useMemo(() => voiceLoader(instanceKey, voice), [instanceKey, voice]);
+  const id = `${instanceKey}:${item.conversation}:${item.seq}`;
+  return (
+    <>
+      <VoiceMessage id={id} durationMs={voice.durationMs} waveform={voice.waveform} load={load} />
+      <VoiceProblem id={id} />
+    </>
+  );
+}
 
 /** What changed about the conversation's devices, in words. */
 function deviceLine(item: Item, users: Map<string, User>, me: User): string {
@@ -686,7 +718,11 @@ function PendingDm({
       className={cn("message-row flex gap-3 px-4", first && "first", display === "compact" && "compact")}
     >
       <MessageLine display={display} first={first} author={me} member={undefined} status="encrypting…">
-        <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive")} />
+        {pending.voice ? (
+          <VoiceMessage id={`pending:${pending.nonce}`} durationMs={pending.voice.durationMs} waveform={pending.voice.waveform} load={null} pending />
+        ) : (
+          <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive")} />
+        )}
         {pending.failed && (
           <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
             <span className="text-destructive first-letter:uppercase">{pending.failed.replace(/\.$/, "")}.</span>
@@ -715,12 +751,15 @@ export function EncryptedComposer({
   promise,
   locked = "",
   action,
+  voice = false,
 }: {
   instanceKey: string;
   id: string;
   placeholder: string;
   promise: string;
   locked?: string;
+  /** Offers voice messages (direct messages): the mic takes the send button's place while there's no text. */
+  voice?: boolean;
   /** Shown where "Try again" is when you can't write; null for nothing. */
   action?: ReactNode;
 }) {
@@ -852,28 +891,39 @@ export function EncryptedComposer({
                 </motion.span>
               )}
             </AnimatePresence>
-            <motion.button
-              type="button"
-              onClick={send}
-              disabled={!ready}
-              aria-label="Send"
-              whileTap={{ scale: 0.85 }}
-              initial={false}
-              animate={{ scale: ready ? 1 : 0.9 }}
-              transition={{ type: "spring", stiffness: 600, damping: 20 }}
-              className={cn(
-                "relative mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl transition-colors",
-                ready ? "bg-primary text-primary-foreground shadow-[0_6px_18px_-8px_var(--primary)]" : "text-muted-foreground",
-              )}
-            >
-              <motion.span animate={plane} className="block">
-                <SendHorizontalIcon className="size-[18px]" />
-              </motion.span>
-            </motion.button>
+            {voice && !content ? (
+              <VoiceRecorder
+                maxMs={() => voiceLimits(instanceKey).then((l) => l.maxMs)}
+                onSend={(clip) => void sendVoiceDm(instanceKey, id, clip)}
+                onProblem={setError}
+                disabled={status !== "ready"}
+              />
+            ) : (
+              <motion.button
+                type="button"
+                onClick={send}
+                disabled={!ready}
+                aria-label="Send"
+                whileTap={{ scale: 0.85 }}
+                initial={false}
+                animate={{ scale: ready ? 1 : 0.9 }}
+                transition={{ type: "spring", stiffness: 600, damping: 20 }}
+                className={cn(
+                  "relative mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl transition-colors",
+                  ready ? "bg-primary text-primary-foreground shadow-[0_6px_18px_-8px_var(--primary)]" : "text-muted-foreground",
+                )}
+              >
+                <motion.span animate={plane} className="block">
+                  <SendHorizontalIcon className="size-[18px]" />
+                </motion.span>
+              </motion.button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
-      <div className={cn("mt-1 flex items-center gap-3 px-1 text-[0.7rem] text-muted-foreground transition-opacity", blocked && "invisible opacity-0")}>
+      <div
+        className={cn("mt-1 flex items-center gap-3 px-1 text-[0.7rem] text-muted-foreground transition-opacity", blocked && "invisible opacity-0")}
+      >
         <p className="hidden min-w-0 flex-1 truncate sm:block">
           <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
           <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works

@@ -51,6 +51,13 @@
     (`DirectMessageService`) checks what the server can see (who sends, the
     group id, epoch and content type in the MLS header, that key packages
     name the account and device they claim) and never decrypts anything.
+  - `sealed.rs`: sealed files, what a direct message carries that's too big
+    to go in it (voice messages): ciphertext the device uploads like a
+    picture (`MEDIA_PURPOSE_SEALED`, reserved with
+    `DirectMessageService.CreateSealedUpload`, taken as any bytes by
+    `media.rs`'s upload), kept with the record that names it in
+    `PostMessage.media_ids` (dms.db's `record_media`) and deleted with it.
+    The key lives only inside the encrypted message (docs/e2ee.md).
   - `twofactor.rs`: TOTP codes (RFC 6238) and backup codes for two-step sign-in.
   - `linked.rs`: signing in with waifu.dev (linked accounts): the instance is an
     OpenAuth client whose client ID is its public URL. `AuthService`'s
@@ -459,6 +466,16 @@
     `src/fuwa/dms.ts` are the actions; the screens are in `components/dm/`
     (`DmList`, `DmView`, `EncryptionDialog` with the safety number), routed at
     `/<instance>/dm/<conversation>`.
+  - `src/voice/`: voice messages on the device. `recorder.ts` records the
+    microphone through an AudioWorklet (`capture.worklet.ts`) into the
+    browser's Opus encoder (WebCodecs) and writes the Ogg file itself
+    (`ogg.ts`), with the waveform (`waveform.ts`); `seal.ts` seals and opens
+    the file (AES-256-GCM, WebCrypto); `player.ts` is the page's one audio
+    element, so playback outlives a message row scrolling away, with
+    `wav.ts` for browsers whose audio element can't play Ogg Opus. The
+    composer's mic and recording bar (`VoiceRecorder`) and the message
+    (`VoiceMessage`) are in `components/voice/` and know nothing about
+    where the sound comes from or goes, so other composers can use them.
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
     an instance or a server live on that instance instead.

@@ -797,7 +797,11 @@ impl DmEngine {
                 inner.save(Change { sent: vec![(hash.clone(), plaintext.clone())], ..Change::default() })?;
                 let posted = rpc!(
                     self.api.dms(),
-                    post_message(pb::PostMessageRequest { conversation_id: id.to_owned(), message: ciphertext }),
+                    post_message(pb::PostMessageRequest {
+                        conversation_id: id.to_owned(),
+                        message: ciphertext,
+                        ..Default::default()
+                    }),
                 )
                 .await;
                 match posted {
