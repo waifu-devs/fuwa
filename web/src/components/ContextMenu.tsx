@@ -134,7 +134,8 @@ function startPress(e: PointerEvent<HTMLElement>, open: (t: MenuTrigger) => bool
     element,
     target,
     timer: 0,
-    onRelease: !!target.closest("[data-arrange]"),
+    // Rows that pick up and move on a hold (channels, servers in the rail) open their menu when let go without moving.
+    onRelease: !!target.closest("[data-arrange], [data-rail]"),
     opened: false,
     squeeze,
     open,

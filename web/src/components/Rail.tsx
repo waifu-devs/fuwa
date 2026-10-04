@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { CompassIcon, GlobeIcon, PlusIcon } from "lucide-react";
+import { CompassIcon, FolderMinusIcon, FolderPlusIcon, GlobeIcon, PlusIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useState, type ReactNode, type Ref } from "react";
+import { useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";
 import { useRailInstances, type RailInstance } from "@/fuwa/hooks";
@@ -14,6 +14,7 @@ import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { useContextMenu } from "@/components/ContextMenu";
 import { serverMenu } from "@/components/menus/server";
+import type { MenuIcon } from "@/lib/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +26,14 @@ import { initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { effectiveNotifications, useNow } from "@/lib/notifications";
 import { hostedByUs } from "@/lib/hosted";
+import { arrangeServers, run } from "@/fuwa/actions";
+import type { FuwaError } from "@/fuwa/errors";
+import { FolderBlock, FolderDialog, RailMenu, type RailMenuFor, type RailMenuTarget } from "@/components/RailFolder";
+import { landingId, useRailArrange, useRailGlide } from "@/hooks/use-rail-arrange";
+import { editFolder, folderLabel, folderOf, keyOf, moveRail, railLayout, stepRail, type RailFolder, type RailLayout } from "@/lib/rail";
+import { isFolderOpen, setFolderOpen, useFoldersVersion } from "@/lib/rail-open";
+import { reportUsage } from "@/lib/reports";
+import { toast } from "@/lib/ui";
 
 /**
  * The far-left column: every server you're in, grouped by the fuwa instance
@@ -37,6 +46,9 @@ export function Rail() {
   const [connecting, setConnecting] = useState(false);
   const navigate = useNavigate();
   const signedIn = instances.filter((i) => i.me);
+  // Instances below one whose servers were rearranged or a folder opened glide to their new place.
+  useFoldersVersion();
+  useFuwa((s) => s.order.map((k) => s.instances[k]?.rail?.length ?? -1).join());
 
   return (
     <nav
@@ -104,20 +116,53 @@ function Divider() {
 }
 
 /** Rail entries pop in when you join or add something, and shrink away when you leave. */
-function Pop({ children, className, ref }: { children: ReactNode; className?: string; ref?: Ref<HTMLDivElement> }) {
+function Pop({
+  children,
+  className,
+  ref,
+  still = false,
+  delay = 0,
+  glide = true,
+}: {
+  children: ReactNode;
+  className?: string;
+  ref?: Ref<HTMLDivElement>;
+  /** Shows up in place, without popping in: a server just dragged here. */
+  still?: boolean;
+  delay?: number;
+  /** Moves to new places by itself; off where `useRailGlide` moves things. */
+  glide?: boolean;
+}) {
   return (
     <motion.div
       ref={ref}
-      layout="position"
-      initial={{ opacity: 0, scale: 0.3 }}
+      layout={glide ? "position" : false}
+      initial={still ? false : { opacity: 0, scale: 0.3 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.3 }}
-      transition={SPRING}
+      transition={{ ...SPRING, delay }}
       className={cn("flex w-full flex-col items-center gap-2", className)}
     >
       {children}
     </motion.div>
   );
+}
+
+/** Unread messages in some of an instance's servers, skipping muted channels and the server on screen. */
+function useUnread(key: string, serverIds: string[], skip?: string) {
+  const now = useNow();
+  return useFuwa((s) => {
+    const i = s.instances[key];
+    if (!i) return 0;
+    let n = 0;
+    for (const id of serverIds) {
+      if (id === skip) continue;
+      for (const c of i.channels[id] ?? []) {
+        if (i.unread[c.id] && !effectiveNotifications(i, id, c.id, now).muted) n += i.unread[c.id]!;
+      }
+    }
+    return n;
+  });
 }
 
 function InstanceGroup({ inst, params }: { inst: RailInstance; params: { instance?: string; server?: string } }) {
@@ -163,36 +208,223 @@ function InstanceGroup({ inst, params }: { inst: RailInstance; params: { instanc
           </AnimatePresence>
         </span>
       </RailItem>
-      <AnimatePresence initial={false} mode="popLayout">
-        {inst.servers.map((server) => (
-          <Pop key={server.id}>
-            <ServerButton inst={inst} server={server} active={here && params.server === server.id} />
-          </Pop>
-        ))}
-        {Object.values(inst.applied)
-          .filter((a) => !inst.servers.some((s) => s.id === a.server.id))
-          .map((a) => (
-            <Pop key={`applied-${a.server.id}`}>
-              <AppliedButton inst={inst} applied={a} />
-            </Pop>
-          ))}
-      </AnimatePresence>
+      <ArrangedServers inst={inst} active={here ? params.server : undefined} />
     </>
   );
 }
 
-function ServerButton({ inst, server, active }: { inst: RailInstance; server: Server; active: boolean }) {
-  const now = useNow();
-  const unread = useFuwa((s) => {
-    const i = s.instances[inst.key];
-    if (!i) return 0;
-    let n = 0;
-    for (const c of i.channels[server.id] ?? []) {
-      if (i.unread[c.id] && !effectiveNotifications(i, server.id, c.id, now).muted) n += i.unread[c.id]!;
-    }
-    return n;
+/**
+ * An instance's servers in the order you arranged them, folders and all:
+ * drag them around, drop one on another to make a folder, or move the one
+ * in focus with Alt+↑ and Alt+↓.
+ */
+function ArrangedServers({ inst, active }: { inst: RailInstance; active?: string }) {
+  const saved = useFuwa((s) => s.instances[inst.key]?.rail ?? null);
+  const ids = useMemo(() => inst.servers.map((s) => s.id), [inst.servers]);
+  const layout = useMemo(() => railLayout(saved, ids), [saved, ids]);
+  const byId = useMemo(() => new Map(inst.servers.map((s) => [s.id, s])), [inst.servers]);
+  const container = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<RailMenuTarget | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [said, setSaid] = useState("");
+  const isOpen = (folder: string) => isFolderOpen(inst.key, folder);
+
+  const arrange = (next: RailLayout, what: string) => {
+    reportUsage(what);
+    run(arrangeServers(inst.key, next)).catch((err: FuwaError) => toast(err.message));
+  };
+  useRailGlide(container);
+  useRailArrange({
+    container,
+    enabled: !!inst.me && inst.connection === "live",
+    layout,
+    onArrange: (next, drop) => arrange(next, drop.kind === "combine" ? "rail.folder_create" : "rail.arrange"),
   });
-  const menu = useContextMenu("server", () => serverMenu({ instanceKey: inst.key, server }));
+
+  const nameOf = (id: string) => {
+    const entry = layout.find((e) => e.kind === "folder" && e.folder.id === id);
+    return entry?.kind === "folder" ? folderLabel(entry.folder, byId) : (byId.get(id)?.name ?? "");
+  };
+  /** Says where something went, for screen readers. */
+  const announce = (next: RailLayout, id: string) => {
+    const top = next.findIndex((e) => keyOf(e) === id);
+    const folder = next.find((e) => e.kind === "folder" && e.folder.servers.includes(id));
+    if (folder?.kind === "folder") {
+      setSaid(`${nameOf(id)}: ${folder.folder.servers.indexOf(id) + 1} of ${folder.folder.servers.length} in ${folderLabel(folder.folder, byId)}`);
+    } else {
+      setSaid(`${nameOf(id)}: ${top + 1} of ${next.length}`);
+    }
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown") || !inst.me) return;
+    const row = (e.target as Element).closest<HTMLElement>("[data-rail]");
+    if (!row) return;
+    e.preventDefault();
+    const id = row.dataset.id!;
+    const next = stepRail(layout, id, e.key === "ArrowUp" ? -1 : 1, isOpen);
+    if (!next) return;
+    arrange(next, "rail.arrange_keys");
+    announce(next, id);
+    // Keeps focus on it, wherever it went.
+    requestAnimationFrame(() => {
+      const there = container.current?.querySelector<HTMLElement>(`[data-rail][data-id="${CSS.escape(id)}"]`);
+      there?.querySelector<HTMLElement>("a, button")?.focus();
+    });
+  };
+
+  const openMenu = (e: React.MouseEvent, target: RailMenuFor) => {
+    if (!inst.me) return;
+    e.preventDefault();
+    // From the keyboard there's no pointer: the menu opens by the element.
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = e.clientX || r.right;
+    const y = e.clientY || r.top;
+    setMenu({ ...target, x, y });
+    setMenuOpen(true);
+  };
+
+  const newFolder = (id: string) => {
+    const next = folderOf(layout, id);
+    arrange(next, "rail.folder_create");
+    const made = next.find((e) => e.kind === "folder" && e.folder.servers[0] === id && e.folder.servers.length === 1);
+    if (made?.kind === "folder") setFolderOpen(inst.key, made.folder.id, true);
+  };
+  const leaveFolder = (id: string) => {
+    const at = layout.findIndex((e) => e.kind === "folder" && e.folder.servers.includes(id));
+    const after = layout[at + 1];
+    arrange(moveRail(layout, { kind: "server", id, folder: "", before: after ? keyOf(after) : null }), "rail.arrange");
+  };
+
+  const server = (id: string, folder: string, n = 0) => {
+    const s = byId.get(id);
+    if (!s) return null;
+    return (
+      <Pop key={id} still={landingId() === id} glide={false} delay={folder ? n * 0.03 : 0}>
+        <div
+          data-rail="server"
+          data-rail-unit={folder ? undefined : ""}
+          data-id={id}
+          data-folder={folder}
+          data-rail-lifted={landingId() === id ? "" : undefined}
+          className="w-full"
+        >
+          <ServerButton
+            inst={inst}
+            server={s}
+            active={active === id}
+            folder={
+              inst.me
+                ? folder
+                  ? { label: "Take out of folder", icon: FolderMinusIcon, onSelect: () => leaveFolder(id) }
+                  : { label: "Put in a new folder", icon: FolderPlusIcon, onSelect: () => newFolder(id) }
+                : undefined
+            }
+          />
+        </div>
+      </Pop>
+    );
+  };
+  const editingFolder = layout.find((e) => e.kind === "folder" && e.folder.id === editing);
+
+  return (
+    <div ref={container} onKeyDown={onKeyDown} className="relative flex w-full flex-col items-center gap-2">
+      <AnimatePresence initial={false} mode="popLayout">
+        {layout.map((e) =>
+          e.kind === "server" ? (
+            server(e.id, "")
+          ) : (
+            <Pop key={e.folder.id} still={landingId() === e.folder.id} glide={false}>
+              <Folder
+                inst={inst}
+                folder={e.folder}
+                servers={byId}
+                active={active}
+                onMenu={(ev) => openMenu(ev, { kind: "folder", id: e.folder.id })}
+              >
+                {e.folder.servers.map((id, n) => server(id, e.folder.id, n))}
+              </Folder>
+            </Pop>
+          ),
+        )}
+        {Object.values(inst.applied)
+          .filter((a) => !inst.servers.some((s) => s.id === a.server.id))
+          .map((a) => (
+            <Pop key={`applied-${a.server.id}`} glide={false}>
+              <AppliedButton inst={inst} applied={a} />
+            </Pop>
+          ))}
+      </AnimatePresence>
+      <span aria-live="polite" className="sr-only">
+        {said}
+      </span>
+      <RailMenu
+        target={menu}
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onToggle={(id) => setFolderOpen(inst.key, id, !isOpen(id))}
+        onEdit={setEditing}
+        onDissolve={(id) => arrange(editFolder(layout, id, null), "rail.folder_dissolve")}
+        onNewFolder={newFolder}
+        onLeaveFolder={leaveFolder}
+      />
+      <FolderDialog
+        folder={editingFolder?.kind === "folder" ? editingFolder.folder : null}
+        servers={byId}
+        onOpenChange={(o) => !o && setEditing(null)}
+        onSave={(name, color) => {
+          if (editing) arrange(editFolder(layout, editing, { name, color }), "rail.folder_edit");
+          setEditing(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function Folder({
+  inst,
+  folder,
+  servers,
+  active,
+  onMenu,
+  children,
+}: {
+  inst: RailInstance;
+  folder: RailFolder;
+  servers: Map<string, Server>;
+  active?: string;
+  onMenu: (e: React.MouseEvent) => void;
+  children: ReactNode;
+}) {
+  const unread = useUnread(inst.key, folder.servers, active);
+  return (
+    <FolderBlock
+      instance={inst.key}
+      folder={folder}
+      servers={servers}
+      unread={unread}
+      activeInside={!!active && folder.servers.includes(active)}
+      onMenu={onMenu}
+    >
+      {children}
+    </FolderBlock>
+  );
+}
+
+/** What a server's menu offers for your folders: put it in one, or take it out. */
+type FolderItem = { label: string; icon: MenuIcon; onSelect: () => void };
+
+function ServerButton({ inst, server, active, folder }: { inst: RailInstance; server: Server; active: boolean; folder?: FolderItem }) {
+  const unread = useUnread(inst.key, [server.id]);
+  const menu = useContextMenu("server", () => {
+    const sections = serverMenu({ instanceKey: inst.key, server });
+    if (!folder) return sections;
+    // Your folders sit with the server's own settings, before its ID and Leave.
+    const at = sections.findIndex((s) => s.id === "developer" || s.id === "danger");
+    const entry = { id: "folder", items: [{ id: "folder", ...folder }] };
+    return at === -1 ? [...sections, entry] : [...sections.slice(0, at), entry, ...sections.slice(at)];
+  });
   return (
     <RailItem label={server.name} active={active} unread={unread > 0} to="/$instance/$server" params={{ instance: inst.key, server: server.id }} menu={menu}>
       <span className="relative">
@@ -243,9 +475,9 @@ function RailItem({
     <div className="relative flex w-full justify-center" onPointerEnter={(e) => e.pointerType === "mouse" && setHover(true)} onPointerLeave={() => setHover(false)}>
       <motion.span
         aria-hidden
-        className="absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r-full bg-foreground"
+        className="absolute top-1/2 left-0 -mt-5 h-10 w-1 rounded-r-full bg-foreground"
         initial={false}
-        animate={{ height, opacity: height ? 1 : 0 }}
+        animate={{ scaleY: height / 40, opacity: height ? 1 : 0 }}
         transition={{ type: "spring", stiffness: 500, damping: 30 }}
       />
       <Tooltip>

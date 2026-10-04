@@ -8,7 +8,7 @@ web app (`web/src/components/menus/`) and for the desktop app to mirror.
 - Right click, a finger held still on a touch screen (about half a second), or
   Shift+F10 / the Menu key while something inside has focus.
 - Rows that drag into order on a hold (channels and categories, for people
-  who can arrange them) open their menu when the finger lets go without
+  who can arrange them, and servers in the rail) open their menu when the finger lets go without
   having moved, so holding and moving still drags.
 - Shift + right click keeps the system's own menu (spelling, saving a link).
   So does right clicking inside a text box that isn't the message box, such as
@@ -86,6 +86,7 @@ Permissions | Copy category ID | Delete category (asks first; its channels stay)
 | primary | Mark as read · Invite people |
 | notifications | Mute server ▸ / Unmute server · Notification settings |
 | manage | Server settings · Edit server profile |
+| folder | Put in a new folder, or Take out of folder (your own rail folders) |
 | developer | Copy server ID |
 | danger | Leave server (not the owner; asks first) |
 
