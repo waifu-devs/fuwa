@@ -1148,11 +1148,14 @@ async fn shown_one(
 
 /// @everyone, @here and role pings belong to the server they were said in:
 /// the home's roles mean nothing here, and its @everyone isn't this
-/// server's people.
+/// server's people. Nor are an agent's buttons and interactions relayed
+/// between servers yet.
 fn no_pings(message: &mut pb::Message) {
     message.mentions_everyone = false;
     message.mention_role_ids.clear();
     message.mention_user_ids.clear();
+    message.components.clear();
+    message.interaction = None;
 }
 
 /// Runs this server's own AutoMod over what one of its people writes in a

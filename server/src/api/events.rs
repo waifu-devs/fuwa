@@ -44,15 +44,18 @@ fn channel_of(payload: &Payload) -> Option<&str> {
         Payload::SecureRecordAdded(pb::SecureRecordAdded { record: Some(r) }) => Some(&r.channel_id),
         Payload::SecureRecordDeleted(d) => Some(&d.channel_id),
         Payload::ThreadUpdated(t) => Some(&t.channel_id),
+        Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(i) }) => Some(&i.channel_id),
         _ => None,
     }
 }
 
-/// Whether a member with `access` gets an event: not one about a channel they
-/// can't see, nor applications unless they can review them.
-fn shown_to(access: &Access, payload: &Payload) -> bool {
+/// Whether `account_id`, a member with `access`, gets an event: not one about
+/// a channel they can't see, nor applications unless they can review them,
+/// nor an interaction unless it's for them.
+fn shown_to(account_id: &str, access: &Access, payload: &Payload) -> bool {
     match payload {
         Payload::ApplicationUpdated(_) => access.has(pb::Permission::KickMembers),
+        Payload::InteractionCreated(p) => p.interaction.as_ref().is_some_and(|i| i.agent_id == account_id),
         payload => channel_of(payload).is_none_or(|channel_id| access.can_see(channel_id)),
     }
 }
@@ -108,7 +111,7 @@ impl View {
     async fn pass_unscrubbed(&mut self, event: &pb::Event) -> Vec<pb::Event> {
         let Some(payload) = &event.payload else { return vec![event.clone()] };
         if !changes_access(payload, &self.account_id) {
-            return if shown_to(&self.access, payload) { vec![event.clone()] } else { vec![] };
+            return if shown_to(&self.account_id, &self.access, payload) { vec![event.clone()] } else { vec![] };
         }
         let before = self.access.visible();
         match self.load().await {
@@ -421,7 +424,7 @@ impl EventService for Api {
                 // What they can't see now is left out, as a stream leaves it out.
                 events.retain(|e| match &e.payload {
                     Some(Payload::ChannelDeleted(_)) | None => true,
-                    Some(payload) => shown_to(&access, payload),
+                    Some(payload) => shown_to(&account.id, &access, payload),
                 });
                 Ok(pb::ListEventsResponse { events, has_more })
             }

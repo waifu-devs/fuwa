@@ -195,6 +195,19 @@
     channel, a banned member's messages or an account takes their polls or
     votes along (`polls::forget`, `forget_voter`). Votes per account a minute
     are capped by `poll_votes_per_minute`, unlimited unless set.
+    Commands (`api/commands.rs`, `CommandService`, docs/commands.md): an
+    agent's slash commands per server in the server file's `commands` (one
+    protobuf blob each), and `interactions` (a run or a press, kept 15
+    minutes and swept on write, counting answers, at most 5). The
+    `InteractionCreated` event carries the arguments, so `events::shown_to`
+    passes it only to its agent: any new event only one account should see
+    goes there too. Answers are `SendMessage` with `interaction_id`
+    (`commands::answer`, inside the send's write); buttons are
+    `SendMessage.components`, kept in extras tag 11 and checked by
+    `commands::check_components`. Not in threads, secure or shared channels
+    (`shared::no_pings` drops them from shared copies). Runs and presses per
+    account a minute are capped by `commands_per_minute`. Web:
+    `components/chat/Commands.tsx`.
   - `webhooks.rs`: posting through a webhook over plain HTTP
     (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
     body), with each webhook's 30-a-minute limit (counted only for posts

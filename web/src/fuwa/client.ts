@@ -7,6 +7,7 @@ import { AuthService } from "@/gen/fuwa/v1/auth_pb";
 import { AutoModService } from "@/gen/fuwa/v1/automod_pb";
 import { CallService } from "@/gen/fuwa/v1/call_pb";
 import { ChannelService, SharedChannelService } from "@/gen/fuwa/v1/channel_pb";
+import { CommandService } from "@/gen/fuwa/v1/command_pb";
 import { DirectMessageService } from "@/gen/fuwa/v1/dm_pb";
 import { EmojiService } from "@/gen/fuwa/v1/emoji_pb";
 import { EventService } from "@/gen/fuwa/v1/event_pb";
@@ -50,6 +51,7 @@ export type Api = {
   calls: Client<typeof CallService>;
   webhooks: Client<typeof WebhookService>;
   agents: Client<typeof AgentService>;
+  commands: Client<typeof CommandService>;
   sso: Client<typeof SsoService>;
   shared: Client<typeof SharedChannelService>;
   search: Client<typeof SearchService>;
@@ -90,6 +92,7 @@ export function makeApi(url: string, token: () => string | null): Api {
     calls: createClient(CallService, transport),
     webhooks: createClient(WebhookService, transport),
     agents: createClient(AgentService, transport),
+    commands: createClient(CommandService, transport),
     sso: createClient(SsoService, transport),
     shared: createClient(SharedChannelService, transport),
     search: createClient(SearchService, transport),

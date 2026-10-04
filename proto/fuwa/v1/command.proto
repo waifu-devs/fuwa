@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/types.proto";
+
+// Slash commands and buttons: how people use agents (docs/commands.md).
+//
+// An agent sets its commands in each server it's in. Members see them when
+// they type "/" and run them; the agent gets an InteractionCreated that only
+// it can see, and answers with an ordinary message carrying the interaction's
+// id (SendMessageRequest.interaction_id). Agents' messages can carry buttons;
+// pressing one is an interaction too.
+//
+// Running commands and pressing buttons are capped per account by the
+// instance's commands_per_minute, unlimited unless set.
+service CommandService {
+  // Agents only: replaces the caller's commands in a server it's in.
+  rpc SetCommands(SetCommandsRequest) returns (SetCommandsResponse);
+  // Any member: the commands of the agents in the server, by agent, then in
+  // the order each agent set them.
+  rpc ListCommands(ListCommandsRequest) returns (ListCommandsResponse);
+  // Runs an agent's command in a channel. Needs SEND_MESSAGES there, and the
+  // agent must be able to see the channel too.
+  rpc RunCommand(RunCommandRequest) returns (RunCommandResponse);
+  // Presses a button on an agent's message: any member who can see it.
+  rpc PressButton(PressButtonRequest) returns (PressButtonResponse);
+}
+
+message Command {
+  // What people type after "/": 1 to 32 of a-z, 0-9, _ and -, unique per
+  // agent in a server.
+  string name = 1;
+  // 1 to 100 characters.
+  string description = 2;
+  // Up to 10, required ones first.
+  repeated CommandOption options = 3;
+}
+
+enum CommandOptionType {
+  COMMAND_OPTION_TYPE_UNSPECIFIED = 0;
+  // Up to 1000 characters.
+  COMMAND_OPTION_TYPE_STRING = 1;
+  COMMAND_OPTION_TYPE_INTEGER = 2;
+  COMMAND_OPTION_TYPE_BOOLEAN = 3;
+  // A member of the server.
+  COMMAND_OPTION_TYPE_USER = 4;
+  // A channel of the server the person running it can see.
+  COMMAND_OPTION_TYPE_CHANNEL = 5;
+  // A role of the server.
+  COMMAND_OPTION_TYPE_ROLE = 6;
+}
+
+message CommandOption {
+  // Like a command's name.
+  string name = 1;
+  // 1 to 100 characters.
+  string description = 2;
+  // Unset is STRING.
+  CommandOptionType type = 3;
+  bool required = 4;
+  // STRING only: up to 25 values (1 to 100 characters each) to pick from;
+  // nothing else is taken.
+  repeated string choices = 5;
+}
+
+message SetCommandsRequest {
+  string server_id = 1;
+  // Up to 50; empty removes them all.
+  repeated Command commands = 2;
+}
+
+message SetCommandsResponse {
+  repeated Command commands = 1;
+}
+
+message ListCommandsRequest {
+  string server_id = 1;
+}
+
+message ServerCommand {
+  string agent_id = 1;
+  Command command = 2;
+}
+
+message ListCommandsResponse {
+  repeated ServerCommand commands = 1;
+  // The agents they belong to.
+  repeated User agents = 2;
+}
+
+message RunCommandRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  string agent_id = 3;
+  string command = 4;
+  // Each option at most once; required ones must be there.
+  repeated CommandArgument arguments = 5;
+}
+
+message RunCommandResponse {
+  // What the agent's answer will carry as its interaction.
+  string interaction_id = 1;
+}
+
+message PressButtonRequest {
+  string server_id = 1;
+  string message_id = 2;
+  string custom_id = 3;
+}
+
+message PressButtonResponse {
+  string interaction_id = 1;
+}

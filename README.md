@@ -158,6 +158,7 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_ATTACHMENT_UPLOAD` | unlimited | Largest file one message may carry, like `100MB` |
 | `FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY` | unlimited | Files one account may send in a day (UTC), apart from pictures, like `2GiB` |
 | `FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY` | unlimited | Times a day (UTC) one server's Smart filter may ask its moderation provider; past it, messages go through the Smart filter unchecked (also set from the app: Instance settings, Moderation) |
+| `FUWA_LIMIT_COMMANDS_PER_MINUTE` | unlimited | Times one account may run agents' slash commands or press their buttons in a minute |
 | `FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE` | unlimited | Messages a minute all the people of one server on another instance may send together to channels shared from here (also set from the app: Instance settings, Other instances) |
 | `FUWA_LIMIT_SHARED_REMOTE_PEOPLE` | unlimited | People one server on another instance may bring to a server's shared channels; past it, no one new from that server joins in (also set from the app: Instance settings, Other instances) |
 | `FUWA_TELEMETRY` | `on` | The anonymous usage signal and health reports; `off` turns both off (so does `DO_NOT_TRACK=1`), and apps on the instance then send no reports either |
@@ -353,6 +354,10 @@ until their owner marks them public: then any server's managers can add them
 by username. They talk with the roles they're given, show an AGENT badge,
 can't own servers or use direct messages, and go away with the person who
 made them.
+
+Agents can give each server slash commands that people run from the
+composer, and put buttons on their messages; the agent hears about each run
+or press, and nobody else does. See [docs/commands.md](docs/commands.md).
 
 For JavaScript and TypeScript, the [`@waifu-devs/fuwa`](sdk/) SDK does the
 rest: typed clients, commands and mentions, and an event stream that

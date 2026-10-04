@@ -65,6 +65,7 @@ import { messageMenu } from "@/components/menus/message";
 import { items } from "@/lib/context-menu";
 import { Embeds } from "@/components/chat/Embeds";
 import { PollCard } from "@/components/chat/Poll";
+import { MessageButtons, UsedCommand } from "@/components/chat/Commands";
 import { PollPlace, type PollPlaceValue } from "@/components/chat/pollPlace";
 import { Attachments, PendingFiles } from "@/components/chat/Attachments";
 import { GifMessage } from "@/components/chat/GifMessage";
@@ -838,6 +839,7 @@ const MessageRow = memo(function MessageRow({
         ) : (
           <>
             {message.threadId && <AlsoSentNote message={message} inThread={inThread} onOpen={actions.thread} />}
+            {message.interaction && <UsedCommand message={message} instanceKey={instanceKey} serverId={actions.serverId} />}
             {message.content && <MessageBody content={message.content} emojis={message.emojis} display={display} />}
             {edited && (
               <span className="text-[0.7rem] text-muted-foreground" title={formatFull(toDate(message.editedAt))}>
@@ -850,6 +852,7 @@ const MessageRow = memo(function MessageRow({
             <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
             {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
             {message.poll && <PollCard message={message} mine={mine} animate={animate} />}
+            <MessageButtons message={message} />
           </>
         )}
       </MessageLine>

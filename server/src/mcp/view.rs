@@ -179,6 +179,17 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
         "mentions_everyone": m.mentions_everyone,
         "mention_role_ids": m.mention_role_ids,
         "mention_user_ids": m.mention_user_ids,
+        "buttons": buttons(&m.components),
+        // Who used what; never what they typed.
+        "interaction": m.interaction.as_ref().map(|i| {
+            let kind = pb::InteractionKind::try_from(i.kind).unwrap_or_default();
+            trim(json!({
+                "id": i.id,
+                "kind": name(kind.as_str_name(), "INTERACTION_KIND_"),
+                "command": i.command,
+                "user_id": i.user_id,
+            }))
+        }),
         "poll": m.poll.as_ref().map(poll),
         "created_at": time(&m.created_at),
         "edited_at": time(&m.edited_at),
@@ -207,6 +218,66 @@ pub fn poll(p: &pb::Poll) -> Value {
         "my_answer_ids": p.my_answer_ids,
         "ends_at": time(&p.ends_at),
         "ended_at": time(&p.ended_at),
+    }))
+}
+
+/// A message's buttons, row by row, as members see them.
+fn buttons(rows: &[pb::ComponentRow]) -> Vec<Value> {
+    rows.iter()
+        .map(|row| {
+            let buttons: Vec<Value> = row
+                .buttons
+                .iter()
+                .map(|b| {
+                    let style = pb::ButtonStyle::try_from(b.style).unwrap_or_default();
+                    trim(json!({
+                        "label": b.label,
+                        "custom_id": b.custom_id,
+                        "style": name(style.as_str_name(), "BUTTON_STYLE_"),
+                        "url": b.url,
+                        "disabled": b.disabled,
+                    }))
+                })
+                .collect();
+            Value::from(buttons)
+        })
+        .collect()
+}
+
+/// A slash command, as its agent set it.
+pub fn command(c: &pb::Command) -> Value {
+    let options: Vec<Value> = c
+        .options
+        .iter()
+        .map(|o| {
+            let kind = pb::CommandOptionType::try_from(o.r#type).unwrap_or_default();
+            trim(json!({
+                "name": o.name,
+                "description": o.description,
+                "type": name(kind.as_str_name(), "COMMAND_OPTION_TYPE_"),
+                "required": o.required,
+                "choices": o.choices,
+            }))
+        })
+        .collect();
+    trim(json!({ "name": c.name, "description": c.description, "options": options }))
+}
+
+/// An interaction, for the agent it's for.
+pub fn interaction(i: &pb::Interaction) -> Value {
+    let kind = pb::InteractionKind::try_from(i.kind).unwrap_or_default();
+    let arguments: Map<String, Value> =
+        i.arguments.iter().map(|a| (a.name.clone(), Value::from(a.value.clone()))).collect();
+    trim(json!({
+        "id": i.id,
+        "kind": name(kind.as_str_name(), "INTERACTION_KIND_"),
+        "channel_id": i.channel_id,
+        "user_id": i.user_id,
+        "command": i.command,
+        "arguments": if arguments.is_empty() { Value::Null } else { Value::Object(arguments) },
+        "message_id": i.message_id,
+        "custom_id": i.custom_id,
+        "created_at": time(&i.created_at),
     }))
 }
 
@@ -259,6 +330,11 @@ pub fn event(e: &pb::Event) -> Value {
                 "locked": p.thread.as_ref().is_some_and(|t| t.locked),
             }),
         ),
+        // Only the agent it's for ever gets this (events.rs), so it shows
+        // whole: what was used, by whom, with what.
+        Some(Payload::InteractionCreated(p)) => {
+            ("interaction_created", json!({ "interaction": p.interaction.as_ref().map(interaction) }))
+        }
         None => ("unknown", json!({})),
     };
     let mut value = trim(json!({
