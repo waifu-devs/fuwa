@@ -1789,6 +1789,39 @@ async fn split_instances_meet_through_their_gateways() {
     b.stop().await;
 }
 
+/// Presence is kept on the directory, reached through the gateway, and a
+/// join on a shard introduces the newcomer to the server's members.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn presence_goes_through_the_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let cluster = start_cluster(root.path(), &[]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let channel = Channel::from_shared(cluster.gateway.url()).unwrap().connect().await.unwrap();
+    let mut presence = pb::presence_service_client::PresenceServiceClient::new(channel);
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user) = sign_up(&mut c, "mika").await;
+    let server = create_server(&mut c, &juan, "Games").await;
+
+    let mut heard = presence.watch_presence(authed(&juan, pb::WatchPresenceRequest {})).await.unwrap().into_inner();
+    let first = tokio::time::timeout(Duration::from_secs(10), heard.message()).await.unwrap().unwrap().unwrap();
+    assert!(first.ready);
+    let online = pb::UpdatePresenceRequest { app: "web".into(), ..Default::default() };
+    presence.update_presence(authed(&mika, online)).await.unwrap();
+    join(&mut c, &mika, &server.id).await.unwrap();
+    let seen = loop {
+        let message = tokio::time::timeout(Duration::from_secs(10), heard.message()).await.unwrap().unwrap().unwrap();
+        if let Some(presence) = message.presence {
+            break presence;
+        }
+    };
+    assert_eq!(seen.user_id, mika_user.id);
+    assert_eq!(seen.status, pb::PresenceStatus::Online as i32);
+    assert_eq!(cluster.directory.app().presence.online_count(), 1);
+    // A stream passed through the gateway would hold its shutdown open.
+    drop(heard);
+    cluster.stop().await;
+}
+
 async fn fed_a_fingerprint(c: &mut Clients, admin: &str) -> String {
     c.admin.get_federation(authed(admin, pb::GetFederationRequest {})).await.unwrap().into_inner().fingerprint
 }

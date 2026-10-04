@@ -233,6 +233,36 @@ impl Index {
         }
     }
 
+    /// Everyone who shares a server with `account_id` and passes `keep`, with
+    /// the servers they share. Leaves `account_id` out.
+    pub fn neighbours(&self, account_id: &str, keep: impl Fn(&str) -> bool) -> HashMap<String, Vec<String>> {
+        let inner = self.read();
+        let mut found: HashMap<String, Vec<String>> = HashMap::new();
+        let Some(servers) = inner.memberships.get(account_id) else { return found };
+        for server_id in servers {
+            for member in inner.members.get(server_id).into_iter().flatten() {
+                if member != account_id && keep(member) {
+                    found.entry(member.clone()).or_default().push(server_id.clone());
+                }
+            }
+        }
+        found
+    }
+
+    /// The servers two accounts share.
+    pub fn shared_servers(&self, a: &str, b: &str) -> Vec<String> {
+        let inner = self.read();
+        match (inner.memberships.get(a), inner.memberships.get(b)) {
+            (Some(a), Some(b)) => a.intersection(b).cloned().collect(),
+            _ => vec![],
+        }
+    }
+
+    /// The members of a server who pass `keep`.
+    pub fn members_where(&self, server_id: &str, keep: impl Fn(&str) -> bool) -> Vec<String> {
+        self.read().members.get(server_id).into_iter().flatten().filter(|id| keep(id)).cloned().collect()
+    }
+
     /// Discoverable servers, busiest first.
     pub fn discoverable(&self) -> Vec<pb::Server> {
         let inner = self.read();
