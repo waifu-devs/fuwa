@@ -343,6 +343,7 @@ mod tests {
             url: "https://fuwa.example/media/f".into(),
             width,
             height: width / 2,
+            voice: None,
         };
         let m = pb::Message {
             id: "m".into(),
@@ -363,6 +364,20 @@ mod tests {
                 },
                 { "filename": "dog.png", "content_type": "image/png", "size": 2048, "url": "https://fuwa.example/media/f" },
             ])
+        );
+        // A voice message: its length, never its waveform.
+        let voice = pb::Attachment {
+            filename: "voice-message.ogg".into(),
+            content_type: "audio/ogg; codecs=opus".into(),
+            size: 4096,
+            voice: Some(pb::VoiceNote { duration_ms: 3000, waveform: vec![9, 200, 40] }),
+            ..Default::default()
+        };
+        let m = pb::Message { id: "v".into(), attachments: vec![voice], ..Default::default() };
+        let shown = message(&m, &HashMap::new());
+        assert_eq!(
+            shown["attachments"],
+            json!([{ "filename": "voice-message.ogg", "content_type": "audio/ogg; codecs=opus", "size": 4096, "voice_duration_ms": 3000 }])
         );
     }
 }
