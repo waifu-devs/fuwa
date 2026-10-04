@@ -83,14 +83,9 @@ pub async fn keep(app: &App, ids: &[String]) {
 
 /// Writes a sealed upload's body to `temp`: exactly `size` bytes of anything.
 /// Returns the size kept.
-pub async fn receive_file(
-    id: &str,
-    size: i64,
-    temp: &Path,
-    body: Body,
-) -> std::result::Result<i64, (StatusCode, String)> {
+pub async fn receive_file(size: i64, temp: &Path, body: Body) -> std::result::Result<i64, (StatusCode, String)> {
     let broken = |_: std::io::Error| {
-        tracing::error!(media = %id, "couldn't store a sealed upload");
+        tracing::error!("couldn't store a sealed upload");
         (StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string())
     };
     let mut file = tokio::fs::File::create(temp).await.map_err(broken)?;
