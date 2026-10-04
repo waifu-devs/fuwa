@@ -10,13 +10,16 @@ mod channels;
 mod dms;
 mod emoji;
 mod events;
+mod friends;
 mod gifs;
 mod invites;
 mod join;
 mod media;
 mod messages;
 mod node;
+mod polls;
 mod roles;
+mod search;
 mod secure;
 mod servers;
 mod shared;
@@ -27,6 +30,8 @@ mod webhooks;
 pub(crate) use account::export_server;
 pub use calls::{hang_up_server, spawn_voice_guard, spawn_voice_sweeper};
 pub use media::PictureOwner;
+pub(crate) use polls::{close_due as close_due_polls, forget_voter as forget_poll_voter};
+pub use search::spawn_search_indexer;
 pub use secure::MAX_SECURE_MEMBERS;
 pub use shared::{
     arrived as shared_arrived, returned as shared_returned, shared_call, spawn_shared_fanout, undo as shared_undo,

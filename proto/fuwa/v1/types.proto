@@ -200,6 +200,10 @@ message Member {
   // owner or an agent) without one, or whose sign-in is older than
   // sso_recheck_days, sees no channels until they sign in again.
   google.protobuf.Timestamp sso_signed_in_at = 9;
+  // When they last went through the server's onboarding (or skipped it);
+  // unset if they never have. Only the member themselves and managers
+  // (MANAGE_SERVER) see it.
+  google.protobuf.Timestamp onboarded_at = 10;
 }
 
 // ============================================================================
@@ -274,6 +278,9 @@ enum Permission {
   // Start a thread under a message. Replying in a thread that's already
   // there needs SEND_MESSAGES.
   PERMISSION_CREATE_THREADS = 26;
+  // Send polls (SendMessageRequest.poll). Voting needs only to see the
+  // channel.
+  PERMISSION_CREATE_POLLS = 27;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -366,6 +373,22 @@ message Server {
   // leave the channel's list of threads until someone replies again. Zero
   // never archives them.
   int32 thread_archive_hours = 22;
+  // A wide picture across the top of its welcome, applying and onboarding
+  // screens, its invites and its Browse card: an upload on this instance
+  // (MEDIA_PURPOSE_BANNER, uploaded for this server), or empty for none.
+  string banner_url = 23;
+  // The point of the banner to keep in view where it's shown in another
+  // shape than it was cropped to (a phone, a card), in percent of its width
+  // and height from the top left: 50, 50 is the middle.
+  int32 banner_focus_x = 24;
+  int32 banner_focus_y = 25;
+  // A color to go with the banner, as 0xRRGGBB, picked from it or by hand.
+  // Apps tint the welcome, applying and onboarding screens with it. Unset
+  // for the app's own.
+  optional int32 accent_color = 26;
+  // It has onboarding turned on: new members go through its steps once
+  // they're in. See JoinService.GetOnboarding.
+  bool has_onboarding = 27;
 }
 
 // What new members see once they're in: a few words and the channels to
@@ -384,6 +407,69 @@ message WelcomeChannel {
   string description = 2;
   // A Unicode emoji, or one of the server's own written <:name:id>. Empty for none.
   string emoji = 3;
+}
+
+// What new members go through once they're in, a step at a time, before the
+// welcome screen: picking what they're into (which hands out roles and
+// suggests channels), the rules, and saying hello. Discord calls it
+// onboarding.
+message Onboarding {
+  bool enabled = 1;
+  // Up to 6, in order.
+  repeated OnboardingStep steps = 2;
+  // Who last saved it. Kept by the server only, never sent: its roles are
+  // handed out only while they still rank below this person's.
+  string set_by = 3;
+}
+
+enum OnboardingStepKind {
+  ONBOARDING_STEP_KIND_UNSPECIFIED = 0;
+  // Pick from options, each of which can hand out roles and suggest channels.
+  ONBOARDING_STEP_KIND_PICK = 1;
+  // Read the server's rules and agree to them. Shown only to members who
+  // haven't agreed yet, and never skippable.
+  ONBOARDING_STEP_KIND_RULES = 2;
+  // Say hello in a channel, through the message box (MessageService), so
+  // it's an ordinary message.
+  ONBOARDING_STEP_KIND_HELLO = 3;
+}
+
+message OnboardingStep {
+  // Given by the server and kept while the step is. Empty for a new one.
+  string id = 1;
+  OnboardingStepKind kind = 2;
+  // 1 to 80 characters.
+  string title = 3;
+  // Inline Markdown, up to 200 characters.
+  string description = 4;
+  // People can go on without doing it. PICK steps that aren't skippable
+  // need at least one option picked.
+  bool skippable = 5;
+  // PICK: 1 to 12 options.
+  repeated OnboardingOption options = 6;
+  // PICK: more than one option can be picked.
+  bool multiple = 7;
+  // HELLO: the text channel to say hello in. Members who can't see it or
+  // talk there skip the step.
+  string channel_id = 8;
+  // HELLO: what the message box starts with, up to 200 characters.
+  string hello = 9;
+}
+
+message OnboardingOption {
+  // Given by the server and kept while the option is. Empty for a new one.
+  string id = 1;
+  // 1 to 50 characters.
+  string label = 2;
+  // Up to 100 characters.
+  string description = 3;
+  // A Unicode emoji, or one of the server's own written <:name:id>. Empty for none.
+  string emoji = 4;
+  // Up to 5 roles picking it hands out: ranked below whoever set them here,
+  // and never ones with moderating or managing permissions.
+  repeated string role_ids = 5;
+  // Up to 5 channels it suggests. Members only get the ones they can see.
+  repeated string channel_ids = 6;
 }
 
 // A server's own emoji, written in messages as <:name:id>.
@@ -669,6 +755,9 @@ message SharedServer {
   string id = 1;
   string name = 2;
   string icon_url = 3;
+  // Its instance, when it's another one: the host (and port, if any) its
+  // people's names are shown with ("aiko · chat.example.com").
+  string instance = 4;
 }
 
 // Who wrote a message in a shared channel and which server they're from,
@@ -728,8 +817,39 @@ message Message {
   ThreadSummary thread = 19;
   // A thread reply its author also sent to the channel.
   bool also_in_channel = 20;
+  // The message is a poll. (17 is the emoji picker's, 18 to 20 are threads'.)
+  Poll poll = 21;
   // A GIF sent with it (GifService), kept on this instance.
   MessageGif gif = 22;
+}
+
+// A poll and how it stands. Counts are everyone's (for an anonymous poll
+// that's still running, only `voters`: each answer's votes are 0 until it
+// closes); my_answer_ids is the reader's own vote, filled only in answers
+// to them (never in events), and lost once an anonymous poll closes.
+message Poll {
+  string question = 1;
+  repeated PollAnswer answers = 2;
+  bool multiple = 3;
+  // Votes are secret: ListPollVoters refuses, events never say who, and
+  // the counts per answer show only once it closes.
+  bool anonymous = 4;
+  // When it closes by itself. Unset: it runs until it's ended.
+  google.protobuf.Timestamp ends_at = 5;
+  // Set when someone ended it early.
+  google.protobuf.Timestamp ended_at = 6;
+  string ended_by_id = 7;
+  // How many people have voted.
+  int64 voters = 8;
+  repeated uint32 my_answer_ids = 9;
+}
+
+message PollAnswer {
+  // Stable within the poll: 1, 2, 3...
+  uint32 id = 1;
+  string text = 2;
+  string emoji = 3;
+  int64 votes = 4;
 }
 
 // A thread under a message, as the channel shows it.
@@ -934,6 +1054,7 @@ message Event {
     SecureRecordDeleted secure_record_deleted = 28;
     SharedChannelsUpdated shared_channels_updated = 29;
     ThreadUpdated thread_updated = 30;
+    PollUpdated poll_updated = 31;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).
@@ -1020,6 +1141,21 @@ message MessageCreated {
 
 message MessageUpdated {
   Message message = 1;
+}
+
+// Someone voted in a poll, took a vote back, or the poll was ended (or,
+// for an anonymous poll, its time ran out, when its counts show). The
+// event's actor is the voter only when the poll's votes are public; for an
+// anonymous poll it's empty.
+message PollUpdated {
+  string channel_id = 1;
+  string message_id = 2;
+  // The counts now; my_answer_ids is empty.
+  Poll poll = 3;
+  // Public polls only: who voted and what they picked now (empty when they
+  // took it back). Empty for an end, and always for anonymous polls.
+  string voter_id = 4;
+  repeated uint32 voter_answer_ids = 5;
 }
 
 message MessageDeleted {

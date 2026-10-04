@@ -10,6 +10,7 @@ import { ChannelService, SharedChannelService } from "@/gen/fuwa/v1/channel_pb";
 import { DirectMessageService } from "@/gen/fuwa/v1/dm_pb";
 import { EmojiService } from "@/gen/fuwa/v1/emoji_pb";
 import { EventService } from "@/gen/fuwa/v1/event_pb";
+import { FriendService } from "@/gen/fuwa/v1/friend_pb";
 import { GifService } from "@/gen/fuwa/v1/gif_pb";
 import { InviteService } from "@/gen/fuwa/v1/invite_pb";
 import { JoinService } from "@/gen/fuwa/v1/join_pb";
@@ -17,6 +18,7 @@ import { MediaService } from "@/gen/fuwa/v1/media_pb";
 import { MessageService } from "@/gen/fuwa/v1/message_pb";
 import { NodeService } from "@/gen/fuwa/v1/node_pb";
 import { RoleService } from "@/gen/fuwa/v1/role_pb";
+import { SearchService } from "@/gen/fuwa/v1/search_pb";
 import { SecureChannelService } from "@/gen/fuwa/v1/secure_pb";
 import { ServerService } from "@/gen/fuwa/v1/server_pb";
 import { SsoService } from "@/gen/fuwa/v1/sso_pb";
@@ -39,6 +41,7 @@ export type Api = {
   invites: Client<typeof InviteService>;
   join: Client<typeof JoinService>;
   dms: Client<typeof DirectMessageService>;
+  friends: Client<typeof FriendService>;
   secure: Client<typeof SecureChannelService>;
   automod: Client<typeof AutoModService>;
   emojis: Client<typeof EmojiService>;
@@ -47,6 +50,7 @@ export type Api = {
   agents: Client<typeof AgentService>;
   sso: Client<typeof SsoService>;
   shared: Client<typeof SharedChannelService>;
+  search: Client<typeof SearchService>;
 };
 
 /**
@@ -76,6 +80,7 @@ export function makeApi(url: string, token: () => string | null): Api {
     invites: createClient(InviteService, transport),
     join: createClient(JoinService, transport),
     dms: createClient(DirectMessageService, transport),
+    friends: createClient(FriendService, transport),
     secure: createClient(SecureChannelService, transport),
     automod: createClient(AutoModService, transport),
     emojis: createClient(EmojiService, transport),
@@ -84,5 +89,6 @@ export function makeApi(url: string, token: () => string | null): Api {
     agents: createClient(AgentService, transport),
     sso: createClient(SsoService, transport),
     shared: createClient(SharedChannelService, transport),
+    search: createClient(SearchService, transport),
   };
 }

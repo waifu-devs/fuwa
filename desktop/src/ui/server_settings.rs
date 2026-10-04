@@ -38,6 +38,7 @@ mod channels;
 mod emoji;
 mod roles;
 pub(crate) use roles::switch;
+mod shared;
 mod webhooks;
 mod welcome;
 
@@ -52,6 +53,11 @@ pub enum ServerSettingsEvent {
     CreateChannel {
         parent: String,
     },
+    /// Say something for a moment, over the settings.
+    Toast {
+        icon: &'static str,
+        title: String,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -63,6 +69,7 @@ enum Page {
     Channels,
     Emoji,
     Integrations,
+    Shared,
     Members,
     Bans,
     AutoMod,
@@ -79,6 +86,7 @@ impl Page {
             Page::Channels => "Channels",
             Page::Emoji => "Emoji",
             Page::Integrations => "Integrations",
+            Page::Shared => "Shared channels",
             Page::Members => "Members",
             Page::Bans => "Bans",
             Page::AutoMod => "AutoMod",
@@ -95,6 +103,7 @@ impl Page {
             Page::Channels => "hash",
             Page::Emoji => "face-slightly-smiling-plus",
             Page::Integrations => "webhook",
+            Page::Shared => "link-2",
             Page::Members => "users",
             Page::Bans => "gavel",
             Page::AutoMod => "bot",
@@ -113,6 +122,9 @@ impl Page {
             Page::Integrations => {
                 "Agents, accounts programs drive, and webhooks, addresses other apps post messages to."
             }
+            Page::Shared => {
+                "Channels shown in another server, or from one. Messages stay with the server the channel comes from."
+            }
             Page::Members => "Everyone here. Time out, kick or ban the people you rank above.",
             Page::Bans => "Who's kept out, and why.",
             Page::AutoMod => {
@@ -124,8 +136,16 @@ impl Page {
 }
 
 /// The settings group, then the moderation group, as on the web.
-const SETTINGS: [Page; 7] =
-    [Page::Overview, Page::Welcome, Page::Invites, Page::Roles, Page::Channels, Page::Emoji, Page::Integrations];
+const SETTINGS: [Page; 8] = [
+    Page::Overview,
+    Page::Welcome,
+    Page::Invites,
+    Page::Roles,
+    Page::Channels,
+    Page::Emoji,
+    Page::Integrations,
+    Page::Shared,
+];
 const MODERATION: [Page; 4] = [Page::Members, Page::Bans, Page::AutoMod, Page::AuditLog];
 
 /// The pages someone with this access may open.
@@ -155,6 +175,9 @@ fn pages(access: &crate::core::permissions::Access) -> Vec<Page> {
     }
     if access.has(P::ManageWebhooks) || access.has(P::ManageServer) {
         out.push(Page::Integrations);
+    }
+    if access.has(P::ManageServer) {
+        out.push(Page::Shared);
     }
     if members {
         out.push(Page::Members);
@@ -218,6 +241,7 @@ pub struct ServerSettingsView {
     automod: automod::AutoMod,
     channels: channels::Channels,
     welcome: welcome::Welcome,
+    shared: shared::Shared,
     /// A floating bar of changes not saved yet, drawn over the page's foot.
     bar: Option<AnyElement>,
     _subscriptions: Vec<Subscription>,
@@ -248,6 +272,7 @@ impl ServerSettingsView {
         let (automod, automod_subscriptions) = automod::AutoMod::new(window, cx);
         let (welcome, welcome_subscriptions) = welcome::Welcome::new(window, cx);
         let (channels, channel_subscriptions) = channels::Channels::new(window, cx);
+        let (shared, shared_subscriptions) = shared::Shared::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe(&name, |_: &mut Self, _, e: &InputEvent, cx| {
                 if let InputEvent::Change = e {
@@ -272,6 +297,7 @@ impl ServerSettingsView {
         subscriptions.extend(automod_subscriptions);
         subscriptions.extend(welcome_subscriptions);
         subscriptions.extend(channel_subscriptions);
+        subscriptions.extend(shared_subscriptions);
         Self {
             core,
             key,
@@ -301,6 +327,7 @@ impl ServerSettingsView {
             automod,
             welcome,
             channels,
+            shared,
             bar: None,
             _subscriptions: subscriptions,
         }
@@ -1202,6 +1229,15 @@ impl Render for ServerSettingsView {
             return div().into_any_element();
         };
         let allowed = pages(&access);
+        // Requests waiting on this server's approval, counted on the menu once the list is read.
+        let requests = self.core.shared.read(|s| {
+            s.instance(&self.key)
+                .and_then(|i| i.shared.get(&self.server))
+                .map_or(0, |l| l.connections.iter().filter(|c| c.home && crate::core::shared::waiting(c)).count())
+        });
+        if allowed.contains(&Page::Shared) {
+            self.load_shared(cx);
+        }
         // Permissions can change while it's open: fall back to a page still yours.
         let page = match self.page.filter(|pg| allowed.contains(pg)).or_else(|| allowed.first().copied()) {
             Some(page) => page,
@@ -1270,12 +1306,19 @@ impl Render for ServerSettingsView {
                         .when(on, |el| el.font_weight(FontWeight::BOLD))
                         .hover(move |s| s.bg(hover))
                         .on_click(cx.listener(move |this, _, _, cx| this.open(pg, cx)))
-                        .child(icon(pg.glyph()).size(px(17.0)).text_color(if on {
-                            p.primary
+                        .child(if pg == Page::Shared {
+                            crate::ui::shared_marks::glyph(17.0, if on { p.primary } else { p.muted_foreground })
+                                .into_any_element()
                         } else {
-                            p.muted_foreground
-                        }))
-                        .child(pg.label()),
+                            icon(pg.glyph())
+                                .size(px(17.0))
+                                .text_color(if on { p.primary } else { p.muted_foreground })
+                                .into_any_element()
+                        })
+                        .child(div().flex_1().child(pg.label()))
+                        .when(pg == Page::Shared && requests > 0, |el| {
+                            el.child(crate::ui::widgets::badge(requests as u32, &p))
+                        }),
                 );
                 y += 40.0;
             }
@@ -1313,6 +1356,7 @@ impl Render for ServerSettingsView {
                 }
                 both.into_any_element()
             }
+            Page::Shared => self.shared_page(&p, window, cx),
             Page::Members => self.members_page(&p, cx),
             Page::Bans => self.bans_page(&p, cx),
             Page::AutoMod => self.automod_page(&p, window, cx),
@@ -1654,6 +1698,7 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::ApplicationReject => ("user-x", red),
         A::JoinFormUpdate => ("clipboard-list", sky),
         A::WelcomeScreenUpdate => ("party-popper", pink),
+        A::OnboardingUpdate => ("sparkles", pink),
         A::AutoModRuleCreate => ("shield-check", green),
         A::AutoModRuleUpdate => ("shield-alert", sky),
         A::AutoModRuleDelete => ("shield-x", red),
@@ -1676,6 +1721,7 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::ThreadLock => ("lock", amber),
         A::ThreadUnlock => ("lock-open", green),
         A::ThreadDelete => ("message-square-x", red),
+        A::PollEnd => ("check", amber),
         A::Unspecified => ("scroll-text", p.muted_foreground.into()),
     }
 }
@@ -1918,6 +1964,11 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
             Some(_) => format!("{actor} turned off the welcome screen"),
             None => format!("{actor} changed the welcome screen"),
         },
+        A::OnboardingUpdate => match change("enabled").filter(|_| entry.changes.len() == 1) {
+            Some(c) if c.after == "true" => format!("{actor} turned on onboarding"),
+            Some(_) => format!("{actor} turned off onboarding"),
+            None => format!("{actor} changed the onboarding steps"),
+        },
         A::AutoModRuleCreate => format!("{actor} added the AutoMod rule **{}**", name_of(true)),
         A::AutoModRuleUpdate => format!("{actor} changed the AutoMod rule **{}**", name_of(true)),
         A::AutoModRuleDelete => format!("{actor} deleted the AutoMod rule **{}**", name_of(false)),
@@ -1966,6 +2017,7 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         A::ThreadLock => format!("{actor} locked {target}'s thread in {}", named_channel(&entry.channel_name)),
         A::ThreadUnlock => format!("{actor} unlocked {target}'s thread in {}", named_channel(&entry.channel_name)),
         A::ThreadDelete => format!("{actor} deleted {target}'s thread in {}", named_channel(&entry.channel_name)),
+        A::PollEnd => format!("{actor} ended {target}'s poll in {}", named_channel(&entry.channel_name)),
         A::Unspecified => format!("{actor} did something"),
     }
 }
@@ -2021,6 +2073,7 @@ mod tests {
                 Page::Channels,
                 Page::Emoji,
                 Page::Integrations,
+                Page::Shared,
                 Page::Members,
                 Page::Bans,
                 Page::AutoMod,

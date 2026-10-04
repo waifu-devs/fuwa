@@ -30,6 +30,7 @@ import {
   useState,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   AutoModTrigger,
@@ -45,7 +46,8 @@ import {
 } from "@/gen/fuwa/v1/types_pb";
 import { blockFromChannel, deleteMessage, dismissPending, editMessage, loadMessages, run, sendMessage } from "@/fuwa/actions";
 import { useAccess, useRoles } from "@/fuwa/hooks";
-import { threadKey, useFuwa, type PendingMessage } from "@/fuwa/store";
+import { store, threadKey, useFuwa, type PendingMessage } from "@/fuwa/store";
+import { doneJumping, useJump } from "@/fuwa/search";
 import { AlsoSentNote, RepliesRow } from "@/components/chat/Threads";
 import { useThreadOpener } from "@/lib/threads";
 import { sendsMessage } from "@/components/chat/Composer";
@@ -62,6 +64,8 @@ import { copyIdItem } from "@/components/menus/common";
 import { messageMenu } from "@/components/menus/message";
 import { items } from "@/lib/context-menu";
 import { Embeds } from "@/components/chat/Embeds";
+import { PollCard } from "@/components/chat/Poll";
+import { PollPlace, type PollPlaceValue } from "@/components/chat/pollPlace";
 import { Attachments, PendingFiles } from "@/components/chat/Attachments";
 import { GifMessage } from "@/components/chat/GifMessage";
 import { AppBadge } from "@/components/AppBadge";
@@ -96,6 +100,8 @@ export type MessageListHandle = {
 const FIRST_ROWS = 80;
 /** How many more rows each scroll to the top reveals before asking the server for older messages. */
 const MORE_ROWS = 80;
+/** How many pages back opening a search result goes looking for its message. */
+const JUMP_PAGES = 100;
 
 /*
  * Rows keep the same props while their message is unchanged, so memoized
@@ -213,6 +219,17 @@ export const MessageList = forwardRef<
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
   const myRoleIds = memberById.get(me?.id ?? "")?.roleIds;
+  const pollPlace = useMemo<PollPlaceValue>(
+    () => ({
+      instanceKey,
+      serverId,
+      channelId: channel.id,
+      canVote: !guestSide && !access.pending,
+      moderator: manager && !guestSide,
+      emojis,
+    }),
+    [instanceKey, serverId, channel.id, guestSide, access.pending, manager, emojis],
+  );
   const look = useMemo<ServerLook>(
     () => ({
       instanceKey,
@@ -358,12 +375,15 @@ export const MessageList = forwardRef<
     setMissed(0);
   };
 
+  useSearchJump({ instanceKey, serverId, channelId: channel.id, rows, skipped, setHidden, scroller, atBottom });
+
   const beginning = state && !state.loading && !state.hasMore && skipped === 0;
   const meId = me?.id;
   const meMember = memberById.get(meId ?? "");
 
   return (
     <ServerLookProvider value={look}>
+    <PollPlace.Provider value={pollPlace}>
     <div className="relative min-h-0 flex-1">
       <div ref={scroller} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">
         <motion.div
@@ -474,6 +494,7 @@ export const MessageList = forwardRef<
         )}
       </AnimatePresence>
     </div>
+    </PollPlace.Provider>
     </ServerLookProvider>
   );
 });
@@ -676,6 +697,71 @@ export function MessageBody({
 /** A row's `clock` is only there so a new clock setting redraws its times. */
 type Redraw = { clock: Clock };
 
+/** Opening a search result: loads back to its message, brings it into view and lets it glow a moment. */
+function useSearchJump({
+  instanceKey,
+  serverId,
+  channelId,
+  rows,
+  skipped,
+  setHidden,
+  scroller,
+  atBottom,
+}: {
+  instanceKey: string;
+  serverId: string;
+  channelId: string;
+  rows: { key: string }[];
+  skipped: number;
+  setHidden: (n: number) => void;
+  scroller: RefObject<HTMLDivElement | null>;
+  atBottom: RefObject<boolean>;
+}) {
+  const jumpTo = useJump(instanceKey, channelId);
+  const [jumped, setJumped] = useState<{ id: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!jumpTo) return;
+    let cancelled = false;
+    const current = () => store.get().instances[instanceKey]?.messages[channelId];
+    const found = () => !!current()?.items.some((m) => m.id === jumpTo.messageId);
+    void (async () => {
+      const deadline = Date.now() + 20_000;
+      for (let pages = 0; pages < JUMP_PAGES && !cancelled && !found() && Date.now() < deadline; ) {
+        const s = current();
+        if (!s || s.loading) {
+          await new Promise((r) => setTimeout(r, 40));
+          continue;
+        }
+        if (!s.hasMore) break;
+        await run(loadMessages(instanceKey, serverId, channelId, true)).catch(() => {});
+        pages++;
+      }
+      if (cancelled) return;
+      doneJumping(jumpTo);
+      if (found()) setJumped({ id: jumpTo.messageId, at: jumpTo.at });
+      else toast("That message is too far back to open here yet; scroll up to find it");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jumpTo, instanceKey, serverId, channelId]);
+  // Its row has to be drawn first.
+  const jumpRow = jumped ? rows.findIndex((r) => r.key === jumped.id) : -1;
+  if (jumpRow !== -1 && jumpRow < skipped) setHidden(Math.max(0, jumpRow - 20));
+  useLayoutEffect(() => {
+    if (!jumped || jumpRow === -1 || jumpRow < skipped) return;
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-message-id="${jumped.id}"]`);
+    if (!el) return;
+    atBottom.current = false;
+    el.scrollIntoView({ block: "center" });
+    // The glow fades out by itself (its animation ends at no opacity); taking the class off first plays it again.
+    el.classList.remove("jumped");
+    void el.offsetWidth;
+    el.classList.add("jumped");
+    setJumped(null);
+  }, [jumped, jumpRow, skipped, scroller, atBottom]);
+}
+
 const MessageRow = memo(function MessageRow({
   message,
   from,
@@ -763,6 +849,7 @@ const MessageRow = memo(function MessageRow({
             <Embeds embeds={message.embeds} animate={animate} />
             <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
             {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
+            {message.poll && <PollCard message={message} mine={mine} animate={animate} />}
           </>
         )}
       </MessageLine>

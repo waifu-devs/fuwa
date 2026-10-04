@@ -13,12 +13,14 @@ import {
   ChannelType,
   EventSchema,
   JoinFormSchema,
+  OnboardingSchema,
   WelcomeScreenSchema,
   type AnnouncementTone,
   type Attachment,
   type AutoModRule,
   type Emoji,
   type WelcomeScreen,
+  type Onboarding,
   type Application,
   type Channel,
   type Member,
@@ -43,6 +45,7 @@ import { call, FuwaError, toFuwaError } from "./errors";
 import { instanceKey, normalizeUrl } from "./saved";
 import { wipeDms } from "@/e2ee/engine";
 import { outsideEmojis } from "@/lib/emoji-catalog";
+import { forgetRecentSearches } from "@/lib/search-query";
 import { reportUsage } from "@/lib/reports";
 import { addInstance, engine, follow, removeInstance } from "./sync";
 import {
@@ -59,6 +62,7 @@ import {
   withThreadSummary,
   without,
   withSharedAuthors,
+  withPoll,
   withUpdatedUser,
   withUsers,
   type PendingMessage,
@@ -283,6 +287,7 @@ export const signOut = (key: string) =>
   Effect.gen(function* () {
     yield* call((signal) => api(key).auth.signOut({}, { signal })).pipe(Effect.ignore);
     addInstance(engine(key).url, null);
+    forgetRecentSearches(key);
     // The session's device is gone; what it kept here goes too.
     yield* Effect.promise(() => wipeDms(key));
   });
@@ -291,6 +296,7 @@ export const forget = (key: string) =>
   Effect.gen(function* () {
     if (engine(key).token) yield* call((signal) => api(key).auth.signOut({}, { signal })).pipe(Effect.ignore);
     removeInstance(key);
+    forgetRecentSearches(key);
     yield* Effect.promise(() => wipeDms(key));
   });
 
@@ -538,6 +544,7 @@ export const deleteAccount = (key: string, confirm: { password?: string; code?: 
   Effect.gen(function* () {
     yield* call((signal) => api(key).account.deleteAccount(confirm, { signal }));
     removeInstance(key);
+    forgetRecentSearches(key);
     yield* Effect.promise(() => wipeDms(key));
     return true;
   });
@@ -938,6 +945,12 @@ export const updateServer = (
     minAccountAgeSeconds?: number;
     applications?: boolean;
     linkedOnly?: boolean;
+    /** Empty for no banner. */
+    bannerUrl?: string;
+    bannerFocusX?: number;
+    bannerFocusY?: number;
+    /** 0xRRGGBB, or -1 for none. */
+    accentColor?: number;
   },
 ) =>
   Effect.gen(function* () {
@@ -1271,6 +1284,65 @@ export const sendMessage = (
     }
   });
 
+/** What the poll editor makes: a question, its answers and how it runs. */
+export type PollDraft = {
+  question: string;
+  answers: { text: string; emoji: string }[];
+  multiple: boolean;
+  anonymous: boolean;
+  /** 1 to 336, or 0 to run until someone ends it. */
+  hours: number;
+};
+
+/** Sends a poll as a message of its own. */
+export const sendPoll = (key: string, serverId: string, channelId: string, draft: PollDraft) =>
+  Effect.gen(function* () {
+    reportUsage("poll.create");
+    const { message } = yield* call((signal) =>
+      api(key).messages.sendMessage(
+        {
+          serverId,
+          channelId,
+          poll: {
+            question: draft.question.trim(),
+            answers: draft.answers.map((a) => ({ text: a.text.trim(), emoji: a.emoji })),
+            multiple: draft.multiple,
+            anonymous: draft.anonymous,
+            durationHours: draft.hours,
+          },
+        },
+        { signal },
+      ),
+    );
+    updateInstance(key, (i) => {
+      const loaded = i.messages[channelId];
+      return loaded && message ? { ...i, messages: { ...i.messages, [channelId]: { ...loaded, items: upsertMessage(loaded.items, message) } } } : i;
+    });
+    return message!;
+  });
+
+/** Votes in a poll, replacing your vote; no answers takes it back. */
+export const votePoll = (key: string, serverId: string, channelId: string, messageId: string, answerIds: number[]) =>
+  Effect.gen(function* () {
+    reportUsage(answerIds.length ? "poll.vote" : "poll.unvote");
+    const { poll } = yield* call((signal) => api(key).messages.votePoll({ serverId, messageId, answerIds }, { signal }));
+    if (poll) updateInstance(key, (i) => withPoll(i, channelId, messageId, poll, poll.myAnswerIds));
+    return poll!;
+  });
+
+/** Ends a poll before its time: its creator, or a moderator. */
+export const endPoll = (key: string, serverId: string, channelId: string, messageId: string) =>
+  Effect.gen(function* () {
+    reportUsage("poll.end");
+    const { poll } = yield* call((signal) => api(key).messages.endPoll({ serverId, messageId }, { signal }));
+    if (poll) updateInstance(key, (i) => withPoll(i, channelId, messageId, poll, poll.myAnswerIds));
+    return poll!;
+  });
+
+/** Who voted for one answer of a public poll, a page at a time. */
+export const listPollVoters = (key: string, serverId: string, messageId: string, answerId: number, afterId = "") =>
+  call((signal) => api(key).messages.listPollVoters({ serverId, messageId, answerId, afterId, limit: 50 }, { signal }));
+
 export const dismissPending = (key: string, at: string, pendingNonce: string) =>
   updateInstance(key, (i) => ({
     ...i,
@@ -1464,6 +1536,31 @@ export const setWelcomeScreen = (key: string, serverId: string, welcomeScreen: W
       return server ? addServer(i, { ...server, hasWelcomeScreen: saved.enabled }) : i;
     });
     return saved;
+  });
+
+// ───────────────────────── Onboarding ─────────────────────────
+
+export const getOnboarding = (key: string, serverId: string) =>
+  call((signal) => api(key).join.getOnboarding({ serverId }, { signal })).pipe(Effect.map((r) => r.onboarding ?? create(OnboardingSchema)));
+
+export const setOnboarding = (key: string, serverId: string, onboarding: Onboarding) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) => api(key).join.setOnboarding({ serverId, onboarding }, { signal }));
+    const saved = res.onboarding ?? create(OnboardingSchema);
+    updateInstance(key, (i) => {
+      const server = i.servers.find((s) => s.id === serverId);
+      return server ? addServer(i, { ...server, hasOnboarding: saved.enabled }) : i;
+    });
+    return saved;
+  });
+
+/** You went through a server's onboarding, picking these options (none to skip it). */
+export const finishOnboarding = (key: string, serverId: string, optionIds: string[]) =>
+  Effect.gen(function* () {
+    reportUsage(optionIds.length ? "onboarding.finish" : "onboarding.skip");
+    const { member } = yield* call((signal) => api(key).join.finishOnboarding({ serverId, optionIds }, { signal }));
+    storeMember(key, serverId, member);
+    return true;
   });
 
 // ───────────────────────── Agents ─────────────────────────

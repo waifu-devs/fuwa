@@ -218,6 +218,15 @@ pub struct Limits {
     /// FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY: how many times a day (UTC) one
     /// server's Smart filter may ask its provider.
     pub automod_checks_per_day: Option<i64>,
+    /// FUWA_LIMIT_POLL_VOTES_PER_MINUTE: how many votes one account may make
+    /// in polls in a minute.
+    pub poll_votes_per_minute: Option<i64>,
+    /// FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE: messages a minute all the
+    /// people of one server on another instance may send together.
+    pub shared_remote_sends_per_minute: Option<i64>,
+    /// FUWA_LIMIT_SHARED_REMOTE_PEOPLE: people one server on another
+    /// instance may bring to a server's shared channels.
+    pub shared_remote_people: Option<i64>,
 }
 
 impl Limits {
@@ -366,6 +375,9 @@ impl Config {
             attachment_upload_bytes: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOAD")?,
             attachment_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY")?,
             automod_checks_per_day: count("FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY")?,
+            poll_votes_per_minute: count("FUWA_LIMIT_POLL_VOTES_PER_MINUTE")?,
+            shared_remote_sends_per_minute: count("FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE")?,
+            shared_remote_people: count("FUWA_LIMIT_SHARED_REMOTE_PEOPLE")?,
         };
 
         let do_not_track = get("DO_NOT_TRACK").is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"));

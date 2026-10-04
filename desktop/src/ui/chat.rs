@@ -17,6 +17,7 @@ use gpui_kit::{
 };
 
 use crate::core::config::Density;
+use crate::core::shared;
 use crate::core::store::{Connection, InstanceState, user_name};
 use crate::core::vault::ItemKind;
 use crate::pb;
@@ -72,6 +73,8 @@ pub enum Row {
         icon: &'static str,
         title: String,
         body: String,
+        /// A shared channel's note under it, until closed: its key in prefs, a title and a line.
+        shared: Option<(String, String, String)>,
     },
     /// Something that happened, not something said.
     Note {
@@ -110,6 +113,12 @@ pub struct Msg {
     pub badge: Option<&'static str>,
     /// Cards an app posted with it.
     pub embeds: Vec<pb::Embed>,
+    /// In a shared channel: the server the author is from, when it isn't this one.
+    pub from: Option<pb::SharedServer>,
+    /// At a shared channel's home, with Kick Members: this author can be kept out of it.
+    pub keep_out: bool,
+    /// Asking whether to keep this author out.
+    pub keeping_out: bool,
     /// What it was built from (0 when it isn't kept between changes).
     pub sig: u64,
 }
@@ -131,7 +140,7 @@ impl Row {
     fn digest(&self, h: &mut DefaultHasher) {
         match self {
             Row::Older { loading } => ("older", loading).hash(h),
-            Row::Start { title, .. } => ("start", title).hash(h),
+            Row::Start { title, shared, .. } => ("start", title, shared).hash(h),
             Row::Note { id, text, .. } => (id, text).hash(h),
             Row::Msg(m) if m.sig != 0 => (m.sig, m.head).hash(h),
             Row::Msg(m) => {
@@ -151,7 +160,13 @@ impl FuwaApp {
                 let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
                 let mut rows = Vec::new();
                 let Some(loaded) = i.messages.get(&channel) else { return rows };
-                let name = i.channel(&server, &channel).map(|c| c.name.clone()).unwrap_or_default();
+                let here = i.channel(&server, &channel);
+                let name = here.map(|c| c.name.clone()).unwrap_or_default();
+                // In a shared channel each side moderates its own people: a guest's moderators can't
+                // delete the home's, and only the home keeps someone from another server out.
+                let shared = here.and_then(|c| c.shared.as_ref());
+                let guest_side = shared.is_some_and(|s| !s.home);
+                let keeps_out = shared.is_some_and(|s| s.home) && i.access(&server).has(pb::Permission::KickMembers);
                 let look = Look::of(i, &server);
                 let mut kept = Built::default();
                 // Each author as shown (name, colour, badge, picture), looked up once.
@@ -177,10 +192,33 @@ impl FuwaApp {
                 if loaded.has_more {
                     rows.push(Row::Older { loading: loaded.loading });
                 } else {
+                    let note = here.filter(|_| !self.prefs.shared_notes_closed.contains(&format!("{key}/{channel}")));
                     rows.push(Row::Start {
                         icon: "hash",
                         title: format!("Welcome to #{name}"),
                         body: format!("This is the start of #{name}."),
+                        shared: note.and_then(|c| {
+                            let label = shared::shared_label(c)?;
+                            let sh = c.shared.as_ref()?;
+                            let home = if sh.home {
+                                "this server".to_owned()
+                            } else {
+                                sh.home_server.as_ref().map_or("the other server".into(), |s| s.name.clone())
+                            };
+                            let others = if label.names.is_empty() { "another server".into() } else { label.names };
+                            Some((
+                                format!("{key}/{channel}"),
+                                if sh.home {
+                                    format!("You share this channel with {others}")
+                                } else {
+                                    format!("This channel comes from {others}")
+                                },
+                                format!(
+                                    "People from both servers read and write here. Messages are kept only on {home}, \
+                                     and each server looks after its own people."
+                                ),
+                            ))
+                        }),
                     });
                 }
                 for m in &loaded.items {
@@ -205,12 +243,17 @@ impl FuwaApp {
                     };
                     let (author_name, color, badge, user) = &*who;
                     let editing = self.editing.as_deref() == Some(m.id.as_str());
+                    let from = shared::foreign_server(m, &server).cloned();
+                    let keep_out = keeps_out && from.is_some() && hook.is_none();
+                    let keeping_out = keep_out && self.keeping_out.as_deref() == Some(m.id.as_str());
+                    let can_delete = m.author_id == me || (manage && !(guest_side && from.is_some()));
                     let mut h = DefaultHasher::new();
                     (&m.content, m.edited_at.as_ref().map(|t| (t.seconds, t.nanos)), m.embeds.len()).hash(&mut h);
                     (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
                     user.as_ref().map(|u| (&u.avatar_url, &u.username)).hash(&mut h);
                     (look.digest, editing, manage, suppress, &me, &mine).hash(&mut h);
                     (m.mentions_everyone, &m.mention_role_ids).hash(&mut h);
+                    (from.as_ref().map(|f| (&f.id, &f.name, &f.icon_url)), keep_out, keeping_out, can_delete).hash(&mut h);
                     // Never 0, which means "not kept".
                     let sig = h.finish() | 1;
                     let (key, was) = match built.remove_entry(&m.id) {
@@ -228,7 +271,7 @@ impl FuwaApp {
                             shown: mention_links(&images_as_links(&m.content), &look),
                             mentions_me: i.pings_me(&server, m, suppress),
                             editing,
-                            can_delete: m.author_id == me || manage,
+                            can_delete,
                             at: ms_of(m.created_at.as_ref()),
                             edited: m.edited_at.is_some(),
                             head: true,
@@ -239,6 +282,9 @@ impl FuwaApp {
                             unreadable: false,
                             badge: *badge,
                             embeds: m.embeds.clone(),
+                            from: from.clone(),
+                            keep_out,
+                            keeping_out,
                             sig,
                         }),
                     };
@@ -266,6 +312,9 @@ impl FuwaApp {
                         unreadable: false,
                         badge: None,
                         embeds: Vec::new(),
+                        from: None,
+                        keep_out: false,
+                        keeping_out: false,
                         sig: 0,
                     })));
                 }
@@ -287,6 +336,7 @@ impl FuwaApp {
                     body: format!(
                         "This is the start of your private conversation with {other}. It's end-to-end encrypted: only your devices and theirs can read it."
                     ),
+                    shared: None,
                 }];
                 for item in i.dms.items.get(&conversation).into_iter().flatten() {
                     let name = person(&item.sender_id).map(|u| user_name(&u)).unwrap_or_else(|| "Someone".into());
@@ -311,6 +361,9 @@ impl FuwaApp {
                             unreadable: false,
                             badge: None,
                             embeds: Vec::new(),
+                            from: None,
+                            keep_out: false,
+                            keeping_out: false,
                         sig: 0,
                         }))),
                         ItemKind::Text => {}
@@ -334,6 +387,9 @@ impl FuwaApp {
                             unreadable: true,
                             badge: None,
                             embeds: Vec::new(),
+                            from: None,
+                            keep_out: false,
+                            keeping_out: false,
                         sig: 0,
                         }))),
                         ItemKind::Joined => rows.push(Row::Note {
@@ -383,6 +439,9 @@ impl FuwaApp {
                         unreadable: false,
                         badge: None,
                         embeds: Vec::new(),
+                        from: None,
+                        keep_out: false,
+                        keeping_out: false,
                         sig: 0,
                     })));
                 }
@@ -511,6 +570,9 @@ impl FuwaApp {
             .border_color(p.border)
             .child(icon("hash").size(px(20.0)).text_color(p.muted_foreground))
             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(channel.name.clone()))
+            .when_some(shared::pill_text(&channel), |el, text| {
+                el.child(crate::ui::shared_marks::pill(text, &channel.id, &p))
+            })
             .when(!channel.topic.is_empty(), |el| {
                 el.child(div().w(px(1.0)).h(px(20.0)).bg(p.border)).child(
                     div()
@@ -600,6 +662,10 @@ impl FuwaApp {
                 Some(Target::Channel { server, .. }) => Some(server),
                 _ => None,
             },
+            url: self
+                .target()
+                .and_then(|t| self.core.shared.read(|s| s.instance(t.key()).map(|i| i.url.clone())))
+                .unwrap_or_default(),
         });
         let target = self.list.target.clone().unwrap_or_default();
         let loading = rows.is_empty();
@@ -1098,6 +1164,8 @@ struct RowCtx {
     edit_box: gpui_kit::Entity<gpui_kit::component::input::TextareaState>,
     key: String,
     server: Option<String>,
+    /// The instance's address, which pictures of other servers must come from.
+    url: String,
 }
 
 fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElement {
@@ -1117,7 +1185,7 @@ fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElemen
                 ))
                 .into_any_element()
         }
-        Row::Start { icon: glyph, title, body } => div()
+        Row::Start { icon: glyph, title, body, shared } => div()
             .px(px(20.0))
             .pt(px(32.0))
             .pb(px(16.0))
@@ -1137,6 +1205,7 @@ fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElemen
             )
             .child(div().text_2xl().font_weight(FontWeight::EXTRA_BOLD).child(title.clone()))
             .child(div().text_color(p.muted_foreground).child(body.clone()))
+            .when_some(shared.clone(), |el, (note, title, line)| el.child(shared_note(note, title, line, &p, ctx)))
             .into_any_element(),
         Row::Note { icon: glyph, text, .. } => div()
             .px(px(20.0))
@@ -1157,6 +1226,64 @@ fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElemen
     } else {
         el
     }
+}
+
+/// Said once at the start of a shared channel: which servers talk here and
+/// where what's said is kept. Closing it is remembered on this computer.
+fn shared_note(note: String, title: String, line: String, p: &Palette, ctx: &Rc<RowCtx>) -> impl IntoElement {
+    let this = ctx.this.clone();
+    motion::rise(
+        div()
+            .relative()
+            .mt(px(16.0))
+            .max_w(px(576.0))
+            .flex()
+            .items_start()
+            .gap(px(12.0))
+            .p(px(12.0))
+            .pr(px(40.0))
+            .rounded(corner(16.0))
+            .border_1()
+            .border_color(alpha(p.primary, 0.25))
+            .bg(alpha(p.primary, 0.05))
+            .child(
+                div()
+                    .flex_none()
+                    .size(px(36.0))
+                    .rounded(corner(12.0))
+                    .bg(alpha(p.primary, 0.15))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(crate::ui::shared_marks::glyph(20.0, p.primary)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_sm()
+                    .child(div().font_weight(FontWeight::BOLD).child(title))
+                    .child(div().text_color(p.muted_foreground).child(line)),
+            )
+            .child(div().absolute().top(px(8.0)).right(px(8.0)).child(
+                icon_button(SharedString::from(format!("shared-note-close|{note}")), "x", p).on_click(
+                    move |_, _, cx| {
+                        let note = note.clone();
+                        let _ = this.update(cx, |this, cx| {
+                            this.core.set_prefs(|prefs| {
+                                prefs.shared_notes_closed.insert(note);
+                            });
+                            this.prefs = this.core.prefs();
+                            this.sync_list(cx);
+                            cx.notify();
+                        });
+                    },
+                ),
+            )),
+        "shared-note",
+        Duration::from_millis(150),
+        10.0,
+    )
 }
 
 /// Opens someone's card from a message: their name, their picture, or a mention.
@@ -1238,6 +1365,9 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
                 .items_baseline()
                 .gap(px(8.0))
                 .child(name)
+                .when_some(m.from.as_ref(), |el, from| {
+                    el.child(div().self_center().child(crate::ui::shared_marks::server_tag(from, &ctx.url, p)))
+                })
                 .when_some(m.badge, |el, badge| {
                     el.child(app_badge(SharedString::from(format!("badge|{}", m.id)), badge, p))
                 })
@@ -1327,13 +1457,14 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
 
     let can_edit = m.mine && !m.pending && !m.unreadable && !m.editing;
     let can_delete = m.can_delete && !m.pending && !m.editing;
-    let actions = (can_edit || can_delete).then(|| {
+    let keep_out = m.keep_out && !m.editing;
+    let actions = (can_edit || can_delete || keep_out).then(|| {
         let id = m.id.clone();
         div()
             .absolute()
             .right(px(16.0))
             .top(px(-10.0))
-            .opacity(0.0)
+            .opacity(if m.keeping_out { 1.0 } else { 0.0 })
             .group_hover("msg", |s| s.opacity(1.0))
             .flex()
             .p(px(2.0))
@@ -1357,12 +1488,64 @@ fn message(m: &Msg, p: &Palette, ctx: &Rc<RowCtx>, _cx: &mut App) -> AnyElement 
                     },
                 ))
             })
-            .when(can_delete, |el| {
-                let this = ctx.this.clone();
+            .when(can_delete && !m.keeping_out, |el| {
+                let (this, id) = (ctx.this.clone(), id.clone());
                 el.child(icon_button_in(SharedString::from(format!("del|{id}")), "trash", p, p.destructive).on_click(
                     move |_, _, cx| {
                         let _ = this.update(cx, |this, cx| this.delete(id.clone(), cx));
                     },
+                ))
+            })
+            .when(keep_out && !m.keeping_out, |el| {
+                let (this, id) = (ctx.this.clone(), id.clone());
+                el.child(
+                    icon_button_in(SharedString::from(format!("keep|{id}")), "user-x", p, p.destructive)
+                        .tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new("Keep out of this channel").build(window, cx)
+                        })
+                        .on_click(move |_, _, cx| {
+                            let _ = this.update(cx, |this, cx| {
+                                this.keeping_out = Some(id.clone());
+                                this.sync_list(cx);
+                                cx.notify();
+                            });
+                        }),
+                )
+            })
+            .when(m.keeping_out, |el| {
+                let (yes, no) = (ctx.this.clone(), ctx.this.clone());
+                let (id, author) = (id.clone(), m.user.as_ref().map(|u| u.id.clone()).unwrap_or_default());
+                let name = m.name.clone();
+                el.child(motion::slide_in(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .px(px(8.0))
+                                .text_xs()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(p.destructive)
+                                .child(format!("Keep {name} out?")),
+                        )
+                        .child(
+                            icon_button_in(SharedString::from(format!("keep-yes|{id}")), "check", p, p.destructive)
+                                .on_click(move |_, _, cx| {
+                                    let _ = yes.update(cx, |this, cx| this.keep_out(author.clone(), name.clone(), cx));
+                                }),
+                        )
+                        .child(icon_button(SharedString::from(format!("keep-no|{id}")), "x", p).on_click(
+                            move |_, _, cx| {
+                                let _ = no.update(cx, |this, cx| {
+                                    this.keeping_out = None;
+                                    this.sync_list(cx);
+                                    cx.notify();
+                                });
+                            },
+                        )),
+                    SharedString::from(format!("keep-ask|{id}")),
+                    8.0,
                 ))
             })
     });
@@ -1706,6 +1889,9 @@ fn auto_mod_row(i: &InstanceState, server: &str, m: &pb::Message, alert: &pb::Au
         unreadable: false,
         badge: Some("BOT"),
         embeds: Vec::new(),
+        from: None,
+        keep_out: false,
+        keeping_out: false,
         sig: 0,
     }
 }

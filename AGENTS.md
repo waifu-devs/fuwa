@@ -64,6 +64,15 @@
     (`DirectMessageService`) checks what the server can see (who sends, the
     group id, epoch and content type in the MLS header, that key packages
     name the account and device they claim) and never decrypts anything.
+  - `friends.rs`: friends, requests and blocks (`docs/friends.md`), in
+    node.db's `friend_links` (each person's own row about the other, so a
+    block or a declined request stays on one side) and `friend_settings`,
+    plus who's online (an open `WatchFriends` stream) and the per-account
+    request limit, in memory. `api/friends.rs` is `FriendService`, answered
+    where accounts are; its `Api::may_message` decides who may open, write in
+    or call a direct-message conversation. A friend list is its owner's
+    alone: never in a server's events or audit log, never shown to other
+    members, servers or agents, and a block is told to nobody.
   - `twofactor.rs`: TOTP codes (RFC 6238) and backup codes for two-step sign-in.
   - `linked.rs`: signing in with waifu.dev (linked accounts): the instance is an
     OpenAuth client whose client ID is its public URL. `AuthService`'s
@@ -151,6 +160,22 @@
     `spawn_shared_fanout` passes message events back, published at the guest
     as sequence 0. Message calls on a channel check `shared::link_of` first;
     new channel kinds or message paths must too.
+    Polls (`api/polls.rs`): a message can carry a poll (`Message.poll`),
+    kept in the server file's `polls` (question, answers and the tally, which
+    every vote rewrites, so votes at once clash and run again and the counts
+    in `PollUpdated` events follow each other) and `poll_votes` (one row per
+    voter and answer, no time). Anonymous polls never say who voted: votes
+    are stored under an HMAC of the account id keyed by the poll's own
+    `voter_key`, their events have no actor, `ListPollVoters` refuses them,
+    exports leave their votes out, and counts per answer stay hidden until
+    they close (`shown`); closing (ending, or `close_due` every minute for
+    those whose time ran out) deletes their votes and key and keeps the
+    counts. Votes are read back only for the voter (`my_answer_ids`, never
+    in events). Not in shared or secure channels, nor direct messages (a
+    channel with polls running can't be shared). Deleting a message, a
+    channel, a banned member's messages or an account takes their polls or
+    votes along (`polls::forget`, `forget_voter`). Votes per account a minute
+    are capped by `poll_votes_per_minute`, unlimited unless set.
   - `webhooks.rs`: posting through a webhook over plain HTTP
     (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
     body), with each webhook's 30-a-minute limit (counted only for posts
@@ -201,6 +226,22 @@
     message through that rule and is counted in the anonymous report by
     kind and provider id. The web pages are `settings/instance/Moderation.tsx`
     and the Smart filter in `settings/server/AutoMod.tsx`.
+  - `search.rs` and `api/search.rs`: searching a server's messages
+    (`SearchService`). Turso's own full-text search needs a new dependency
+    and doesn't run in MVCC, so the index is plain tables in the server's file
+    (`search_words`, `search_docs`, `search_postings`, `search_state`).
+    `search.rs` cuts text into words (folded case, accents and full-width
+    forms; CJK as pairs of characters; `@name` mentions; attachment names and
+    embeds) and is pure; `VERSION` going up rebuilds every index. One
+    indexer per shard (`spawn_search_indexer`) follows each server's events
+    through `Hub::search_tap` and builds servers that had messages before
+    search, newest first, in small `write_quiet` batches between other
+    writes. A search ANDs the words (the last one as a prefix), filters by
+    author, channel, mention, what a message has and dates, only in channels
+    the searcher can see, and re-reads each hit from `messages`. Searches are
+    never logged, stored or shown to AutoMod; a token bucket per account
+    limits them. Secure channels and other instances' shared messages aren't
+    indexed.
   - `permissions.rs`: roles and permissions. `Rules::access` works out what a
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's
@@ -373,7 +414,11 @@
     instance, and whether a message should notify), `account.rs` (profile,
     pictures, password, signed-in devices, rules, the welcome screen, creating
     channels), `moderation.rs` (time outs, kicks and bans, and who may do
-    them to whom: the permission plus outranking them), `server_admin.rs`
+    them to whom: the permission plus outranking them), `shared.rs`
+    (channels shared between servers: share codes and finding one in pasted
+    text, previews, asking and approving, what the other side may do,
+    keeping someone out, and the labels the web's `lib/shared.ts` makes),
+    `server_admin.rs`
     (a server's settings, invites, bans and audit log), `calls.rs` (who's in
     voice and which conversations have a call, and the direct-message call
     frame encryption, byte for byte the web app's; the call itself comes
@@ -414,7 +459,8 @@
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
     in both), `settings_keys.rs` the Keyboard page where they're changed,
     `server_settings.rs` a server's settings
-    (overview, welcome screen, invites, roles, channels, emoji, integrations, members,
+    (overview, welcome screen, invites, roles, channels, emoji, integrations,
+    shared channels, members,
     bans, AutoMod, audit log; the server's name opens it; a cached view, so
     it redraws only when the server changes, and its flourishes play once
     rather than loop; `save_bar` is the floating unsaved-changes bar pages
@@ -438,7 +484,13 @@
     time with `core/arrange.rs`'s `step`, each one's name, topic, category
     and slow mode, and who can see and do what in it, saved as one
     `SetChannelPermissions`; the New button opens the app's new-channel
-    dialog and stays in settings),
+    dialog and stays in settings; its Share tab makes a channel's share
+    codes), `server_settings/shared.rs` the Shared channels page (paste a
+    code, see where it leads, ask to connect; approve, turn down and
+    disconnect; what each side may do; codes still out; people kept out)
+    and the Share tab, with `shared_marks.rs` drawing the linked rings, the
+    sidebar badge, the header pill and the other server's tag beside a name
+    (a server picture only from this instance),
     `instance_settings.rs` an instance's settings for its admins (the gear
     by the instance's name; General, Sign-ups, Single sign-on
     (`instance_settings/sso.rs`: the identity provider, SAML metadata read
@@ -527,6 +579,15 @@
     `src/fuwa/dms.ts` are the actions; the screens are in `components/dm/`
     (`DmList`, `DmView`, `EncryptionDialog` with the safety number), routed at
     `/<instance>/dm/<conversation>`.
+  - `src/fuwa/search.ts`, `src/lib/search-query.ts`, `components/search/`:
+    the search bar (Mod+F) and results panel. `search-query.ts` reads
+    `from:`, `in:`, `has:`, `mentions:`, `before:`, `after:` and `during:`
+    and keeps recent searches on the device only; members and channels are
+    turned into ids before asking the instance. Results mark matches with
+    private-use characters that `components/search/highlight.ts` turns into
+    `<mark>` inside the one Markdown component. Jumping to a result goes
+    through `requestJump`, which `MessageList` takes by loading older pages
+    until the message is there.
   - Right-click menus (`docs/context-menus.md` lists them for every app): one
     menu at a time, `components/ContextMenu.tsx` (`useContextMenu` on the
     element, `ContextMenuHost` draws it with the animated dropdown menu);
@@ -551,6 +612,14 @@
     `settings/app/ShaderEditor.tsx`. Theme files never make the app load
     anything: pictures travel inside them and are uploaded on import. Settings
     pages: `settings/app/Themes.tsx` and `Backgrounds.tsx`.
+  - Friends (`docs/friends.md`): `src/fuwa/friends.ts` follows
+    `WatchFriends` beside the event stream (which is also what shows you
+    online) and holds the actions; `pages/FriendsPage.tsx` is
+    `/<instance>/friends` (online, all, pending, blocked; only the lines in
+    view drawn), `components/friends/FriendActions.tsx` the buttons on
+    profile cards, `settings/account/FriendPrivacy.tsx` the settings, and
+    `lib/friends.ts` the pure parts. Conversations with people you blocked
+    stay out of `DmList`.
   - `src/lib/notifications.ts`: how a message reaches you: your settings for
     its channel, then its server (both stored on the instance, so they follow
     you across devices), then this device's Notifications settings. Muted means
@@ -580,7 +649,14 @@
     only), `ApplyDialog.tsx` the application, `Rules.tsx` the rules sheet a
     new member agrees to (the composer shows it until they do), and
     `Applied.tsx` the applications waiting in the rail. `Welcome.tsx` greets
-    new members once with the welcome screen (remembered in this browser). Those are kept in
+    new members once with the welcome screen (remembered in this browser), or
+    with `Onboarding.tsx` when the server has onboarding steps (picks that
+    give harmless roles and channels, the rules, a hello; `JoinService`'s
+    Get/Set/FinishOnboarding, `server.onboarding` as protobuf, a member's
+    `onboarded_at`). All of them, `ApplicationStatus.tsx` and invite pages
+    sit under the server's banner (`join/Banner.tsx`, `lib/banner.ts`: a
+    focal point and an optional accent color); admins set it all on one page
+    with a live preview, `settings/server/WelcomeAndOnboarding.tsx`. Those are kept in
     this browser (`src/lib/applied.ts`) and `AppliedWatcher` asks the
     instance how they went. Reviewers use `settings/server/Applications.tsx`;
     owners write rules and questions in `settings/server/JoinFormEditor.tsx`.
@@ -750,6 +826,13 @@
   a `DirectMessageContent`. Who belongs in a channel's group is
   `secure_members` (who can see it, people only); keep it in step with any
   change to how channel access is worked out.
+- Friends are private (`docs/friends.md`): only the two people a change is
+  about are told, a block is never shown to the person blocked (their
+  requests look sent, their messages are taken and kept from the blocker,
+  their calls never ring; no refusal a block alone would cause), and nothing
+  about friends reaches a server, its logs or an agent. A new path that
+  starts or carries a direct message asks `Api::may_message`, and a new way
+  of reading one hides what the reader's blocked people sent.
 - Direct messages are end-to-end encrypted, always: no off switch, no
   server-side copy of keys or plaintext, nothing about their content in logs,
   events, exports or the usage signal. The server checks only what it can

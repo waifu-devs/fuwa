@@ -46,6 +46,11 @@ fn reason(value: &str) -> Result<String> {
 }
 
 /// A time as the audit log keeps it: unix milliseconds, or empty for none.
+/// A color as the audit log shows it: #rrggbb, or empty for none.
+fn color_label(color: Option<i32>) -> String {
+    color.map(|c| format!("#{c:06x}")).unwrap_or_default()
+}
+
 fn audit_time(t: Option<&prost_types::Timestamp>) -> String {
     t.map(|t| millis(t).to_string()).unwrap_or_default()
 }
@@ -237,12 +242,39 @@ impl ServerService for Api {
                 let name = req.name.as_deref().map(|v| text("name", v, 1, 100)).transpose()?;
                 let description = req.description.as_deref().map(|v| text("description", v, 0, 1000)).transpose()?;
                 let icon_url = req.icon_url.as_deref().map(|v| url("icon_url", v)).transpose()?.map(|v| self.app.picture_link(&v));
-                let old_icon = sdb.server().await?.icon_url;
+                let banner_url =
+                    req.banner_url.as_deref().map(|v| url("banner_url", v)).transpose()?.map(|v| self.app.picture_link(&v));
+                let focus = |name: &str, value: Option<i32>| match value {
+                    Some(v) if !(0..=100).contains(&v) => Err(Error::invalid(format!("{name} is 0 to 100"))),
+                    other => Ok(other),
+                };
+                let banner_focus_x = focus("the banner's focus", req.banner_focus_x)?;
+                let banner_focus_y = focus("the banner's focus", req.banner_focus_y)?;
+                // -1 takes the color away.
+                let accent_color = match req.accent_color {
+                    Some(-1) => Some(None),
+                    Some(c) if (0..=0xFF_FFFF).contains(&c) => Some(Some(c)),
+                    Some(_) => return Err(Error::invalid("a color is 0xRRGGBB")),
+                    None => None,
+                };
+                let current = sdb.server().await?;
+                let (old_icon, old_banner) = (current.icon_url, current.banner_url);
                 let new_icon = match icon_url.as_deref().filter(|url| *url != old_icon) {
                     Some(url) => self.check_picture(&account, pb::MediaPurpose::ServerIcon, url, Some(&sdb.id)).await?,
                     None => None,
                 };
+                let new_banner = match banner_url.as_deref().filter(|url| *url != old_banner) {
+                    Some(url) => self.check_picture(&account, pb::MediaPurpose::Banner, url, Some(&sdb.id)).await?,
+                    None => None,
+                };
+                // A server's banner is a picture uploaded here, never a link to
+                // another site, which this instance would then fetch for every
+                // person who sees the server.
+                if banner_url.as_deref().is_some_and(|url| !url.is_empty() && url != old_banner) && new_banner.is_none() {
+                    return Err(Error::invalid("upload the banner here rather than linking to it"));
+                }
                 self.keep_picture(new_icon.as_deref(), Some(&sdb.id)).await;
+                self.keep_picture(new_banner.as_deref(), Some(&sdb.id)).await;
                 if let Some(level) = req.default_notifications
                     && !matches!(
                         pb::NotificationLevel::try_from(level),
@@ -257,7 +289,7 @@ impl ServerService for Api {
                 if req.thread_archive_hours.is_some_and(|hours| !(0..=MAX_THREAD_ARCHIVE_HOURS).contains(&hours)) {
                     return Err(Error::invalid("threads are archived after at most a year"));
                 }
-                let server = sdb
+                let written = sdb
                     .write(&account.id, async |conn, events| {
                         let before = store::load_server(conn).await?;
                         if let Some(channel_id) = req.system_channel_id.as_deref().filter(|id| !id.is_empty()) {
@@ -281,11 +313,14 @@ impl ServerService for Api {
                          system_channel_id = CASE WHEN ?6 IS NULL THEN system_channel_id WHEN ?6 = '' THEN NULL ELSE ?6 END,
                          min_account_age_seconds = coalesce(?8, min_account_age_seconds),
                          applications = coalesce(?9, applications), linked_only = coalesce(?10, linked_only),
-                         thread_archive_hours = coalesce(?11, thread_archive_hours), updated_at = ?7",
+                         thread_archive_hours = coalesce(?11, thread_archive_hours),
+                         banner_url = coalesce(?12, banner_url), banner_focus_x = coalesce(?13, banner_focus_x),
+                         banner_focus_y = coalesce(?14, banner_focus_y),
+                         accent_color = CASE WHEN ?15 THEN ?16 ELSE accent_color END, updated_at = ?7",
                             (
                                 name,
                                 description,
-                                icon_url,
+                                icon_url.as_deref(),
                                 req.discoverable,
                                 req.default_notifications,
                                 req.system_channel_id.as_deref(),
@@ -294,6 +329,11 @@ impl ServerService for Api {
                                 req.applications,
                                 req.linked_only,
                                 req.thread_archive_hours,
+                                banner_url.as_deref(),
+                                banner_focus_x,
+                                banner_focus_y,
+                                accent_color.is_some(),
+                                accent_color.flatten(),
                             ),
                         )
                         .await?;
@@ -312,16 +352,48 @@ impl ServerService for Api {
                             )
                             .change("applications", before.applications, server.applications)
                             .change("linked_only", before.linked_only, server.linked_only)
-                            .change("thread_archive_hours", before.thread_archive_hours, server.thread_archive_hours);
+                            .change("thread_archive_hours", before.thread_archive_hours, server.thread_archive_hours)
+                            .change("banner_url", &before.banner_url, &server.banner_url)
+                            .change(
+                                "banner_focus",
+                                format!("{},{}", before.banner_focus_x, before.banner_focus_y),
+                                format!("{},{}", server.banner_focus_x, server.banner_focus_y),
+                            )
+                            .change("accent_color", color_label(before.accent_color), color_label(server.accent_color));
                         if !entry.changes.is_empty() {
                             store::audit(conn, &account.id, entry).await?;
                         }
                         events.push(Payload::ServerUpdated(pb::ServerUpdated { server: Some(server.clone()) }));
-                        Ok(server)
+                        Ok((server, before))
                     })
-                    .await?;
+                    .await;
+                let (server, before) = match written {
+                    Ok(written) => written,
+                    Err(err) => {
+                        // Nothing was saved: the pictures just checked in go again,
+                        // unless another save of the same picture made it live.
+                        let live = sdb.server().await.ok();
+                        let in_use = |url: &str| live.as_ref().is_none_or(|s| s.icon_url == url || s.banner_url == url);
+                        if new_icon.is_some() {
+                            let icon = icon_url.as_deref().unwrap_or_default();
+                            if !in_use(icon) {
+                                self.drop_picture(icon, &old_icon, PictureOwner::Server(&sdb.id)).await;
+                            }
+                        }
+                        if new_banner.is_some() {
+                            let banner = banner_url.as_deref().unwrap_or_default();
+                            if !in_use(banner) {
+                                self.drop_picture(banner, &old_banner, PictureOwner::Server(&sdb.id)).await;
+                            }
+                        }
+                        return Err(err);
+                    }
+                };
                 self.app.server_changed(&server).await;
-                self.drop_picture(&old_icon, &server.icon_url, PictureOwner::Server(&server.id)).await;
+                // What the write replaced, read inside it, so a change racing
+                // this one can't leave a picture behind.
+                self.drop_picture(&before.icon_url, &server.icon_url, PictureOwner::Server(&server.id)).await;
+                self.drop_picture(&before.banner_url, &server.banner_url, PictureOwner::Server(&server.id)).await;
                 Ok(pb::UpdateServerResponse { server: Some(server) })
             }
             .await,
@@ -690,6 +762,7 @@ impl ServerService for Api {
                             if conn.execute("DELETE FROM messages WHERE id = ?1", [id.as_str()]).await? == 0 {
                                 continue;
                             }
+                            super::polls::forget(conn, &id).await?;
                             files.extend(crate::attachments::forget_message(conn, &id).await?);
                             change.messages -= 1;
                             change.message_bytes -= size;

@@ -28,8 +28,8 @@ const MIGRATIONS: &[&str] =
 /// The most single-use key packages kept for one device.
 pub const MAX_KEY_PACKAGES: i64 = 100;
 
-/// Single-use key packages one account may take, each hour, from devices of
-/// people it has no conversation with (adding them to secure channels).
+/// Single-use key packages one account may take, each hour, from other
+/// people's devices (partners' too, so a block never shows in the answer).
 /// Past that it gets their last-resort key package instead, so nobody can
 /// use up someone else's single-use ones by claiming them over and over.
 pub const STRANGER_CLAIMS_PER_HOUR: u32 = 2000;
@@ -424,22 +424,43 @@ impl DmDb {
         if claims.len() > 65_536 {
             claims.retain(|_, (start, _)| now - *start < HOUR_MS);
         }
-        let mut count = |key: String, cap: u32| {
-            let (start, taken) = claims.entry(key).or_insert((now, 0));
-            if now - *start >= HOUR_MS {
-                (*start, *taken) = (now, 0);
-            }
-            (*taken < cap).then(|| *taken += 1).is_some()
-        };
+        // Both budgets are checked before either is counted, so a claim the
+        // account's budget refuses doesn't use up the device's.
         let mut allowed = HashSet::new();
         for &device_id in device_ids {
-            if count(format!("{account_id}/{device_id}"), STRANGER_CLAIMS_PER_DEVICE)
-                && count(account_id.to_string(), STRANGER_CLAIMS_PER_HOUR)
+            let device_key = format!("{account_id}/{device_id}");
+            let left = |claims: &mut HashMap<String, (i64, u32)>, key: &str, cap: u32| {
+                let (start, taken) = claims.entry(key.to_string()).or_insert((now, 0));
+                if now - *start >= HOUR_MS {
+                    (*start, *taken) = (now, 0);
+                }
+                *taken < cap
+            };
+            if left(&mut claims, &device_key, STRANGER_CLAIMS_PER_DEVICE)
+                && left(&mut claims, account_id, STRANGER_CLAIMS_PER_HOUR)
             {
+                for key in [device_key.as_str(), account_id] {
+                    if let Some((_, taken)) = claims.get_mut(key) {
+                        *taken += 1;
+                    }
+                }
                 allowed.insert(device_id);
             }
         }
         allowed
+    }
+
+    /// Gives back claims [`DmDb::take_stranger_claims`] counted when no key
+    /// package came of them.
+    pub fn refund_stranger_claims(&self, account_id: &str, device_ids: &HashSet<&str>) {
+        let mut claims = self.stranger_claims.lock().unwrap_or_else(|p| p.into_inner());
+        for device_id in device_ids {
+            for key in [format!("{account_id}/{device_id}"), account_id.to_string()] {
+                if let Some((_, taken)) = claims.get_mut(&key) {
+                    *taken = taken.saturating_sub(1);
+                }
+            }
+        }
     }
 
     /// Takes a key package for each device: a single-use one while it has
@@ -1198,6 +1219,15 @@ mod tests {
         }
         assert!(dms.take_stranger_claims("b", &["d0"], now + 9).is_empty());
         assert_eq!(dms.take_stranger_claims("b", &["d1"], now + 9).len(), 1);
+        // A claim that came to nothing is given back.
+        dms.refund_stranger_claims("b", &HashSet::from(["d0"]));
+        assert_eq!(dms.take_stranger_claims("b", &["d0"], now + 10).len(), 1);
+        // One the account's budget refuses leaves the device's alone: "a" is
+        // out of budget, so "d2499" (claimed once) still has 2 left after it.
+        assert!(dms.take_stranger_claims("a", &["d2499"], now + 11).is_empty());
+        dms.refund_stranger_claims("a", &HashSet::from(["d0", "d1"]));
+        assert_eq!(dms.take_stranger_claims("a", &["d2499"], now + 12).len(), 1);
+        assert_eq!(dms.take_stranger_claims("a", &["d2499"], now + 13).len(), 1);
         assert_eq!(dms.take_stranger_claims("a", &devices[..10], now + HOUR_MS).len(), 10);
     }
 

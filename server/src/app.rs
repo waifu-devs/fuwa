@@ -49,6 +49,8 @@ pub struct App {
     dms: Option<DmDb>,
     /// Uploaded pictures, under `<data>/media/`, where `node` is.
     media: Option<crate::media::Store>,
+    /// Friends, requests, blocks and who's online, where `node` is.
+    friends: Option<crate::friends::Friends>,
     /// Every server and who's in it, where `node` is.
     pub index: Index,
     /// The servers whose files are here: all of them, or a shard's share.
@@ -168,6 +170,7 @@ impl App {
             (None, Some(node)) => node.picture_key().await?,
             (None, None) => return Err(Error::internal("a shard needs FUWA_CLUSTER_KEY")),
         };
+        let friends = node.as_ref().map(|node| crate::friends::Friends::new(node.db().clone()));
         let index = Index::default();
         let (settings, announcement) = match &node {
             Some(node) => (Settings::load(&config, &node.settings().await?), node.announcement().await?),
@@ -197,6 +200,7 @@ impl App {
             node,
             dms,
             media,
+            friends,
             index,
             servers,
             hub,
@@ -248,6 +252,11 @@ impl App {
     pub async fn sweep_devices(&self) -> Result<usize> {
         let live = self.node()?.live_session_ids(None).await?;
         self.dms()?.sweep(&live).await
+    }
+
+    /// Friends, requests and blocks, where accounts are kept.
+    pub fn friends(&self) -> Result<&crate::friends::Friends> {
+        self.friends.as_ref().ok_or_else(|| Error::internal("this part of the instance doesn't keep friends"))
     }
 
     /// Uploaded pictures' files, where accounts are kept.
@@ -341,8 +350,10 @@ impl App {
             .add_service(MediaServiceServer::new(api.clone()))
             .add_service(crate::pb::gif_service_server::GifServiceServer::new(api.clone()))
             .add_service(DirectMessageServiceServer::new(api.clone()))
+            .add_service(crate::pb::friend_service_server::FriendServiceServer::new(api.clone()))
             .add_service(crate::pb::call_service_server::CallServiceServer::new(api.clone()))
             .add_service(crate::pb::secure_channel_service_server::SecureChannelServiceServer::new(api.clone()))
+            .add_service(crate::pb::search_service_server::SearchServiceServer::new(api.clone()))
             .add_service(crate::pb::shared_channel_service_server::SharedChannelServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
@@ -567,6 +578,8 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     }
     if matches!(app.link, Link::Alone | Link::Shard(_)) {
         spawn_sso_rechecks(app.clone());
+        spawn_poll_closings(app.clone());
+        crate::api::spawn_search_indexer(app.clone());
     }
     spawn_signal_handler(app.shutdown.clone());
     crate::api::spawn_voice_sweeper(app.clone());
@@ -623,8 +636,29 @@ fn spawn_sso_rechecks(app: Arc<App>) {
     });
 }
 
-/// Hourly: drops expired sessions, the direct-message devices they had, and
-/// uploads nothing uses.
+/// Every minute: anonymous polls whose time ran out lose their votes (only
+/// the counts stay) and show everyone the counts.
+fn spawn_poll_closings(app: Arc<App>) {
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            tokio::select! {
+                _ = app.shutdown.cancelled() => return,
+                _ = every.tick() => {
+                    let now = crate::id::now_ms();
+                    for sdb in app.servers.all() {
+                        if crate::api::close_due_polls(&sdb, now).await.is_err() {
+                            tracing::warn!(server = %sdb.id, "couldn't close the anonymous polls whose time ran out");
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Hourly: drops expired sessions, the direct-message devices they had,
+/// uploads nothing uses, and friend requests that ran out.
 fn spawn_housekeeping(app: Arc<App>) {
     tokio::spawn(async move {
         let mut every = tokio::time::interval(Duration::from_secs(60 * 60));
@@ -640,6 +674,9 @@ fn spawn_housekeeping(app: Arc<App>) {
                     }
                     if let Err(err) = app.sweep_media(crate::id::now_ms()).await {
                         tracing::warn!(error = %err, "couldn't sweep unused uploads");
+                    }
+                    if async { app.friends()?.sweep(crate::id::now_ms()).await }.await.is_err() {
+                        tracing::warn!("couldn't sweep friend requests that ran out");
                     }
                 }
             }

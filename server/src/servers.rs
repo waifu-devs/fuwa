@@ -48,6 +48,9 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0021_mcp_access.sql"),
     include_str!("../migrations/server/0022_threads.sql"),
     include_str!("../migrations/server/0023_attachments.sql"),
+    include_str!("../migrations/server/0026_search.sql"),
+    include_str!("../migrations/server/0028_banner_onboarding.sql"),
+    include_str!("../migrations/server/0029_polls.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -283,6 +286,16 @@ impl ServerDb {
         self.run(actor_id, f).await
     }
 
+    /// Runs a change that sends no events, alongside other writes, in its own
+    /// transaction: for what the server keeps about itself, like the search
+    /// index. Refused while the server is being moved, like any write.
+    pub async fn write_quiet<T>(&self, f: impl AsyncFnOnce(&Connection) -> Result<T> + Clone) -> Result<T> {
+        self.writable()?;
+        let _shared = self.db.shared().await;
+        self.writable()?;
+        db::transaction(&db::connect(&self.db)?, f).await
+    }
+
     /// Refuses changes while the server is being moved to another shard: the
     /// gateway holds them and tries again, on the new shard once it's there.
     pub fn writable(&self) -> Result<()> {
@@ -442,33 +455,56 @@ impl ServerDb {
     /// tool opens it. Writes to the server wait while it's copied, so the copy
     /// is one moment.
     pub async fn export_to(&self, dest: &Path) -> Result<()> {
-        let path = dest
-            .to_str()
-            .filter(|p| !p.contains('\''))
-            .ok_or_else(|| Error::internal(format!("can't export to {}", dest.display())))?;
+        // A first copy is touched up, then copied again into `dest`: what's
+        // deleted from the first stays in its free pages, which a second
+        // VACUUM INTO leaves behind.
+        let draft = sidecar(dest, ".draft");
+        let result = self.export_through(&draft, dest).await;
+        for path in [&draft, dest] {
+            for suffix in ["-wal", "-log", ".db-log"] {
+                let _ = std::fs::remove_file(sidecar(path, suffix));
+            }
+        }
+        let _ = std::fs::remove_file(&draft);
+        result
+    }
+
+    async fn export_through(&self, draft: &Path, dest: &Path) -> Result<()> {
+        let quoted = |path: &Path| {
+            path.to_str()
+                .filter(|p| !p.contains('\''))
+                .map(str::to_string)
+                .ok_or_else(|| Error::internal(format!("can't export to {}", path.display())))
+        };
+        let (draft_path, dest_path) = (quoted(draft)?, quoted(dest)?);
         {
             let _alone = self.db.alone().await;
             let conn = self.read()?;
-            conn.execute(&format!("VACUUM INTO '{path}'"), ()).await?;
+            conn.execute(&format!("VACUUM INTO '{draft_path}'"), ()).await?;
         }
-        db::to_sqlite(dest, None).await?;
+        db::to_sqlite(draft, None).await?;
         {
             // Secrets stay on the instance: the provider's client secret and
             // sign-ins under way.
-            let (_db, conn) = db::open_plain(dest).await?;
+            let (_db, conn) = db::open_plain(draft).await?;
             let mut sso = load_sso(&conn).await?.provider;
             if !sso.oidc_client_secret.is_empty() {
                 sso.oidc_client_secret.clear();
                 conn.execute("UPDATE server SET sso = ?1", [sso.stored()]).await?;
             }
             conn.execute("DELETE FROM sso_sign_ins", ()).await?;
+            // Who voted in anonymous polls stays here too: their votes and
+            // keys are left out (their counts are in `polls.tally`).
+            conn.execute(
+                "DELETE FROM poll_votes WHERE message_id IN (SELECT message_id FROM polls WHERE anonymous = 1)",
+                (),
+            )
+            .await?;
+            conn.execute("UPDATE polls SET voter_key = NULL", ()).await?;
             db::pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").await?;
+            conn.execute(&format!("VACUUM INTO '{dest_path}'"), ()).await?;
         }
-        for suffix in ["-wal", "-log"] {
-            let mut side = dest.as_os_str().to_owned();
-            side.push(suffix);
-            let _ = std::fs::remove_file(side);
-        }
+        db::to_sqlite(dest, None).await?;
         Ok(())
     }
 
@@ -726,7 +762,8 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
         conn,
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
                 default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome,
-                sso, sso_required, sso_recheck_days, region, thread_archive_hours
+                sso, sso_required, sso_recheck_days, region, thread_archive_hours,
+                banner_url, banner_focus_x, banner_focus_y, accent_color, onboarding
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -753,6 +790,11 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 sso_recheck_days: r.get(18)?,
                 region: r.get(19)?,
                 thread_archive_hours: r.get(20)?,
+                banner_url: r.get(21)?,
+                banner_focus_x: r.get(22)?,
+                banner_focus_y: r.get(23)?,
+                accent_color: r.get(24)?,
+                has_onboarding: decode_onboarding(&r.get::<Vec<u8>>(25)?).enabled,
             })
         },
     )
@@ -793,10 +835,12 @@ pub async fn load_sso(conn: &Connection) -> Result<ServerSso> {
 /// When someone last signed in through the server's single sign-on.
 /// Leaves out when a member last signed in through the server's provider,
 /// unless `viewer` is that member or a manager: it's nobody else's business
-/// when they're online with their organization.
+/// when they're online with their organization. When they went through the
+/// onboarding is left out the same way.
 pub fn scrub_sso(member: &mut pb::Member, viewer: &str, manager: bool) {
     if !manager && member.user.as_ref().is_none_or(|u| u.id != viewer) {
         member.sso_signed_in_at = None;
+        member.onboarded_at = None;
     }
 }
 
@@ -1210,6 +1254,7 @@ pub async fn add_member(
         role_ids: vec![],
         pending,
         sso_signed_in_at: sso_signed_in_at(conn, &user.id).await?.map(timestamp),
+        onboarded_at: None,
     })
 }
 
@@ -1290,6 +1335,13 @@ pub async fn load_channel(conn: &Connection, server_id: &str, channel_id: &str) 
     Ok(Some(channel))
 }
 
+/// A server at either end of a shared channel, marked with its instance
+/// when it's on another one ("<id>@<instance>").
+pub fn shared_server(id: String, name: String, icon_url: String) -> pb::SharedServer {
+    let instance = id.split_once('@').map_or("", |(_, at)| crate::federation::display(at)).to_string();
+    pb::SharedServer { id, name, icon_url, instance }
+}
+
 /// Says which channels are shared with other servers, and which show
 /// another server's (docs/shared-channels.md).
 pub async fn attach_shared(conn: &Connection, channels: &mut [pb::Channel]) -> Result<()> {
@@ -1297,7 +1349,7 @@ pub async fn attach_shared(conn: &Connection, channels: &mut [pb::Channel]) -> R
         conn,
         "SELECT channel_id, guest_server_id, guest_name, guest_icon_url FROM channel_guests WHERE active = 1 ORDER BY created_at",
         (),
-        |r| Ok((r.get::<String>(0)?, pb::SharedServer { id: r.get(1)?, name: r.get(2)?, icon_url: r.get(3)? })),
+        |r| Ok((r.get::<String>(0)?, shared_server(r.get(1)?, r.get(2)?, r.get(3)?))),
     )
     .await?;
     let links = query_all(
@@ -1305,13 +1357,7 @@ pub async fn attach_shared(conn: &Connection, channels: &mut [pb::Channel]) -> R
         "SELECT channel_id, home_server_id, home_server_name, home_server_icon_url, home_channel_name
          FROM channel_links WHERE active = 1 AND channel_id IS NOT NULL",
         (),
-        |r| {
-            Ok((
-                r.get::<String>(0)?,
-                pb::SharedServer { id: r.get(1)?, name: r.get(2)?, icon_url: r.get(3)? },
-                r.get::<String>(4)?,
-            ))
-        },
+        |r| Ok((r.get::<String>(0)?, shared_server(r.get(1)?, r.get(2)?, r.get(3)?), r.get::<String>(4)?)),
     )
     .await?;
     if guests.is_empty() && links.is_empty() {
@@ -1321,7 +1367,7 @@ pub async fn attach_shared(conn: &Connection, channels: &mut [pb::Channel]) -> R
         None
     } else {
         let server = load_server(conn).await?;
-        Some(pb::SharedServer { id: server.id, name: server.name, icon_url: server.icon_url })
+        Some(shared_server(server.id, server.name, server.icon_url))
     };
     for channel in channels.iter_mut() {
         if let Some((_, home, home_channel_name)) = links.iter().find(|(id, ..)| *id == channel.id) {
@@ -1420,7 +1466,7 @@ pub async fn user(conn: &Connection, user_id: &str) -> Result<Option<pb::User>> 
 }
 
 pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, members.nickname, members.joined_at, members.timed_out_until, members.pending,
-     (SELECT signed_in_at FROM sso_identities WHERE sso_identities.user_id = members.user_id)";
+     (SELECT signed_in_at FROM sso_identities WHERE sso_identities.user_id = members.user_id), members.onboarded_at";
 
 /// Reads a member row; their roles come from [`permissions::attach_roles`].
 pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member> + '_ {
@@ -1434,6 +1480,7 @@ pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member>
             role_ids: vec![],
             pending: r.get(10)?,
             sso_signed_in_at: r.get::<Option<i64>>(11)?.map(timestamp),
+            onboarded_at: r.get::<Option<i64>>(12)?.map(timestamp),
         })
     }
 }
@@ -1603,6 +1650,25 @@ pub async fn save_welcome(conn: &Connection, welcome: &pb::WelcomeScreen) -> Res
             .collect(),
     };
     conn.execute("UPDATE server SET welcome = ?1, updated_at = ?2", (to_json(&stored)?, now_ms())).await?;
+    Ok(())
+}
+
+/// An onboarding as the server's file keeps it; none if it can't be read.
+fn decode_onboarding(bytes: &[u8]) -> pb::Onboarding {
+    pb::Onboarding::decode(bytes).unwrap_or_default()
+}
+
+/// The server's onboarding, whole.
+pub async fn load_onboarding(conn: &Connection) -> Result<pb::Onboarding> {
+    let bytes = query_one(conn, "SELECT onboarding FROM server", (), |r| r.get::<Vec<u8>>(0))
+        .await?
+        .ok_or_else(|| Error::internal("server row missing"))?;
+    Ok(decode_onboarding(&bytes))
+}
+
+/// Replaces the onboarding, inside a write.
+pub async fn save_onboarding(conn: &Connection, onboarding: &pb::Onboarding) -> Result<()> {
+    conn.execute("UPDATE server SET onboarding = ?1, updated_at = ?2", (onboarding.encode_to_vec(), now_ms())).await?;
     Ok(())
 }
 
