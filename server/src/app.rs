@@ -454,6 +454,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         agent_creation: settings.agent_creation as i32,
         telemetry: settings.telemetry,
         shared_channels: settings.shared_channels,
+        profile_effects: settings.profile_effects,
         announcement,
         build: Some(pb::Build {
             version: crate::VERSION.into(),

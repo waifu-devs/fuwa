@@ -160,6 +160,10 @@ message InstanceSettings {
   bool federation = 34;
   // Instances this one never talks to, by host name (chat.example.com).
   repeated string federation_blocked_hosts = 35;
+  // People may put an animated effect on their profile card. Turning it off
+  // hides everyone's (their picks are kept for when it's back on).
+  // FUWA_PROFILE_EFFECTS, on unless set.
+  bool profile_effects = 39;
 }
 
 // One moderation provider, as the instance's admins set it up: one fuwa
