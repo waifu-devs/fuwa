@@ -271,6 +271,20 @@
     reserved with `MediaService.CreateUpload` (`api/media.rs`) and checks its
     bytes really are the picture type it claims; `GET /media/<id>` serves it.
     Pictures nothing uses are swept hourly and at startup.
+  - `attachments.rs`: files sent with messages (`MEDIA_PURPOSE_ATTACHMENT`,
+    any kind). Uploaded for one server and stored with its pictures (on its
+    shard when split); a message may only link this instance's uploads, and
+    its server file keeps an `attachments` row per file, written and deleted
+    with the message (or its channel, a ban's purge, an AutoMod takedown),
+    counted in the server's attachment bytes. The row is what serves the
+    file: the kind found in its bytes (`media::kind_of`, never the client's),
+    `Content-Disposition: attachment` for anything but pictures, audio and
+    video, nosniff and a sandbox CSP always, single ranges for players.
+    Caps: FUWA_LIMIT_ATTACHMENT_UPLOAD and _UPLOADS_PER_DAY (node.db
+    `attachment_days`), the server's `attachment_bytes`. Not in secure
+    channels (they'd upload ciphertext) or channels shared from another
+    server yet. The web app's side is `components/chat/Attachments.tsx`,
+    `ComposerFiles.tsx` and `staged.ts`.
   - `outside.rs`: pictures from other sites. No client ever loads a picture
     from anywhere but a fuwa instance, since that site would learn the
     reader's IP address: any picture link that isn't an upload (embed images,
