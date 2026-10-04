@@ -58,8 +58,9 @@ const fn action(
     Action { id, label, group, combo, while_typing, repeats }
 }
 
-pub const ACTIONS: [Action; 14] = [
+pub const ACTIONS: [Action; 15] = [
     action("quickSwitcher", "Find a server or channel", Group::Navigation, Some("Mod+K"), true, false),
+    action("searchServer", "Search this server's messages", Group::Navigation, Some("Mod+F"), true, false),
     action("previousServer", "Previous server", Group::Navigation, Some("Mod+Alt+ArrowUp"), true, true),
     action("nextServer", "Next server", Group::Navigation, Some("Mod+Alt+ArrowDown"), true, true),
     action("previousChannel", "Previous channel", Group::Navigation, Some("Alt+ArrowUp"), true, true),

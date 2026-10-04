@@ -255,7 +255,7 @@ impl Row {
         self.id_str().to_owned()
     }
 
-    fn id_str(&self) -> &str {
+    pub(crate) fn id_str(&self) -> &str {
         match self {
             Row::Older { .. } => "older",
             Row::Start { .. } => "start",
@@ -666,6 +666,7 @@ impl FuwaApp {
                 })
                 .when(channel.topic.is_empty(), |el| el.child(div().flex_1()))
         }
+        .when(!secure, |el| el.child(self.search_field(window, cx)))
         .child(self.header_buttons(key, server, &channel.id, &p, cx));
 
         let blocked = self.channel_blocked(key, server, &channel.id);
@@ -681,7 +682,9 @@ impl FuwaApp {
             .child(self.composer_bar(blocked, window, cx));
 
         let mut view = div().size_full().relative().flex().child(column);
-        if self.members_open {
+        if let Some(panel) = self.search_panel(window, cx) {
+            view = view.child(panel);
+        } else if self.members_open {
             view = view.child(self.members_panel(key, server, window, cx));
         }
         if let Some(Menu::Channel { key, server, channel }) = self.menu.clone() {
@@ -769,6 +772,7 @@ impl FuwaApp {
                 .target()
                 .and_then(|t| self.core.shared.read(|s| s.instance(t.key()).map(|i| i.url.clone())))
                 .unwrap_or_default(),
+            jumped: self.search.jumped.clone().filter(|(_, at)| at.elapsed() < JUMP_GLOW),
         });
         let target = self.list.target.clone().unwrap_or_default();
         let loading = rows.is_empty();
@@ -1323,6 +1327,8 @@ struct RowCtx {
     server: Option<String>,
     /// The instance's address, which pictures of other servers must come from.
     url: String,
+    /// The message a search result opened, which glows a moment.
+    jumped: Option<(String, Instant)>,
 }
 
 fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElement {
@@ -1388,13 +1394,31 @@ fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElemen
             .into_any_element(),
         Row::Msg(m) => message(m, &p, ctx, cx),
     };
-    if is_fresh {
+    let el = if is_fresh {
         motion::rise(div().child(el), SharedString::from(format!("rise|{}|{ix}", row.id())), Duration::ZERO, 14.0)
             .into_any_element()
     } else {
         el
+    };
+    match &ctx.jumped {
+        // Where a search result led: a glow that fades by itself.
+        Some((id, at)) if id == row.id_str() => {
+            let glow = p.primary;
+            gpui_kit::AnimationExt::with_animation(
+                div().child(el),
+                SharedString::from(format!("jumped|{id}|{at:?}")),
+                // Stays lit a moment, then fades.
+                gpui_kit::Animation::new(JUMP_GLOW).with_easing(|t: f32| t * t * t),
+                move |el, t| el.bg(alpha(glow, 0.22 * (1.0 - t))),
+            )
+            .into_any_element()
+        }
+        _ => el,
     }
 }
+
+/// How long a message a search result opened glows.
+const JUMP_GLOW: Duration = Duration::from_millis(2400);
 
 /// Said once at the start of a shared channel: which servers talk here and
 /// where what's said is kept. Closing it is remembered on this computer.

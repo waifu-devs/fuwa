@@ -171,6 +171,7 @@ impl FuwaApp {
                 }
             }
             "insertTimestamp" => self.open_time_picker(window, cx),
+            "searchServer" => self.focus_search(window, cx),
             "toggleMembers" => self.members_open = !self.members_open,
             "openSettings" => {
                 if self.settings.is_some() {

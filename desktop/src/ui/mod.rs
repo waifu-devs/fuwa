@@ -29,6 +29,7 @@ pub mod perf;
 mod png;
 mod polls;
 mod rail;
+mod search;
 mod secure;
 mod server_settings;
 mod settings;
