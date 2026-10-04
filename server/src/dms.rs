@@ -453,6 +453,13 @@ impl DmDb {
         allowed
     }
 
+    /// Forgets claim counts from hours that are over, so the map holds only
+    /// this hour's claimers between sweeps.
+    fn forget_stale_claims(&self, now: i64) {
+        let mut claims = self.stranger_claims.lock().unwrap_or_else(|p| p.into_inner());
+        claims.retain(|_, (start, _)| now - *start < HOUR_MS);
+    }
+
     /// Gives back claims [`DmDb::take_stranger_claims`] counted when no key
     /// package came of them.
     pub fn refund_stranger_claims(&self, account_id: &str, device_ids: &HashSet<&str>) {
@@ -509,6 +516,7 @@ impl DmDb {
     /// Forgets the devices whose sessions ended (those not in `live_sessions`)
     /// and key packages that ran out. How many devices went.
     pub async fn sweep(&self, live_sessions: &HashSet<String>) -> Result<usize> {
+        self.forget_stale_claims(now_ms());
         let conn = self.read()?;
         let gone: Vec<String> = query_all(&conn, "SELECT id, session_id FROM devices", (), |r| {
             Ok((r.get::<String>(0)?, r.get::<String>(1)?))
@@ -1310,6 +1318,10 @@ mod tests {
         assert_eq!(dms.take_stranger_claims("a", &["d2499"], now + 12).len(), 1);
         assert_eq!(dms.take_stranger_claims("a", &["d2499"], now + 13).len(), 1);
         assert_eq!(dms.take_stranger_claims("a", &devices[..10], now + HOUR_MS).len(), 10);
+        // The sweep forgets the hours that are over and keeps this one's.
+        dms.forget_stale_claims(now + HOUR_MS + 100);
+        let left = dms.stranger_claims.lock().unwrap().len();
+        assert_eq!(left, 11);
     }
 
     #[tokio::test]

@@ -62,6 +62,6 @@ account, never per address).
   messages without thread summaries, and replies kept to their threads stay
   home. Threads there would need `thread_id` in `GuestSend`, `GuestList` and
   `SharedCall`, and `ThreadUpdated` passed to guests.
-- Secure channels don't use MessageService, so none of this applies. Threads
-  there would carry the thread id inside the encrypted record, since the
-  server can't sum up replies it can't read.
+- Secure channels don't use MessageService. Their threads live inside the
+  encryption and the devices do what the server does here: see
+  [secure-channels.md](secure-channels.md#threads).
