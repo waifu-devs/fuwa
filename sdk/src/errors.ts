@@ -133,10 +133,13 @@ const classes: Partial<Record<Code, typeof FuwaError>> = {
 const UNITS: Record<string, number> = { second: 1_000, minute: 60_000, hour: 3_600_000, day: 86_400_000 };
 
 /**
- * How long to wait, from the instance's answer: a `retry-after` header in
- * seconds, or slow mode's "you can send again in 12 seconds".
+ * How long to wait, from the instance's answer: its `fuwa-retry-after-ms`
+ * header, a `retry-after` header in seconds, or (from older instances) slow
+ * mode's "you can send again in 12 seconds".
  */
 export function retryAfterOf(message: string, metadata?: Headers): number | undefined {
+  const exact = metadata?.get("fuwa-retry-after-ms");
+  if (exact && /^\d+$/.test(exact.trim())) return Number(exact);
   const header = metadata?.get("retry-after");
   if (header && /^\d+(\.\d+)?$/.test(header.trim())) return Math.ceil(Number(header) * 1000);
   const m = /again in (\d+) (second|minute|hour|day)s?\b/.exec(message);

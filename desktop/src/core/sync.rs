@@ -235,6 +235,7 @@ async fn follow_events(
                     .iter()
                     .map(|id| pb::ServerCursor { server_id: id.clone(), after_sequence: s.cursors.get(id).copied() })
                     .collect(),
+                ..Default::default()
             }
         };
         let outcome = tokio::select! {
