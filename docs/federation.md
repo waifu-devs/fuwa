@@ -53,10 +53,13 @@ settings). Off, the instance answers other instances with nothing but "off".
   serves them with the key (`GetKeyResponse.rotations`).
 - Then it pings every instance it pinned (and hasn't blocked), so each one
   moves now. One it couldn't reach moves the next time they talk.
-- When a signed call or answer from a pinned instance fails its signature
-  check, the receiver fetches that instance's key again: no more than once
-  every 5 minutes for one instance, and within the caps on fetching
-  strangers' keys. It moves to the new key only if the rotations lead there
+- Every envelope also names the key it was signed with (`Envelope.key`),
+  only as a hint. When a signed call or answer from a pinned instance fails
+  its signature check but checks out with the key it names, the receiver
+  fetches that instance's key again: no more than once every 5 minutes for
+  one instance and named key (an admin's check looks every time), and
+  within the caps on fetching strangers' keys. Envelopes forged with other
+  keys get looks of their own, so they can't use up a real rotation's. It moves to the new key only if the rotations lead there
   from the key it pinned, each one signed by the key before it for that
   origin, never back to a key it already left. Then it checks the call
   again with the new key. Otherwise the call is refused as before.
