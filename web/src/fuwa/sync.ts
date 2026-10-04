@@ -277,7 +277,8 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           let next = applySnapshot(current, server.server, channels.channels, members.members, roles.roles, emojis.emojis);
           next = { ...next, voice: { ...next.voice, [serverId]: voice } };
           const focus = s.focus?.instance === key ? s.focus.channel : null;
-          for (const event of held.get(serverId) ?? []) next = applyEvent(next, event, focus);
+          const thread = s.focus?.instance === key ? (s.focus.thread ?? null) : null;
+          for (const event of held.get(serverId) ?? []) next = applyEvent(next, event, focus, thread);
           return { ...s, instances: { ...s.instances, [key]: next } };
         });
         held.delete(serverId);
@@ -322,7 +323,8 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           if (!current?.synced[serverId]) return s;
           let next = withChannels(current, serverId, channels);
           const focus = s.focus?.instance === key ? s.focus.channel : null;
-          for (const event of relisting.get(serverId) ?? []) next = applyEvent(next, event, focus);
+          const thread = s.focus?.instance === key ? (s.focus.thread ?? null) : null;
+          for (const event of relisting.get(serverId) ?? []) next = applyEvent(next, event, focus, thread);
           return { ...s, instances: { ...s.instances, [key]: next } };
         });
       }).pipe(
@@ -412,7 +414,8 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
             const current = s.instances[key];
             if (!current) return s;
             const focus = s.focus?.instance === key ? s.focus.channel : null;
-            return { ...s, instances: { ...s.instances, [key]: applyEvent(current, event, focus) } };
+            const thread = s.focus?.instance === key ? (s.focus.thread ?? null) : null;
+            return { ...s, instances: { ...s.instances, [key]: applyEvent(current, event, focus, thread) } };
           });
           onLiveEvent(key, event);
           dmEngine(key)?.onServerEvent(event);
