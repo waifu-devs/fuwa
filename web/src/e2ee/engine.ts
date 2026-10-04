@@ -30,6 +30,7 @@ import { reportError } from "@/lib/reports";
 import { BackupSync } from "./backup";
 import * as history from "./history";
 import * as vault from "./vault";
+import { toVoiceMessage, voiceLength, voiceOf } from "./voice";
 import { loadE2ee, type Commit, type Device, type E2ee, type Processed, type WasmMember } from "./wasm";
 
 /**
@@ -113,7 +114,8 @@ type Room = {
   welcome(): Promise<{ sequence: bigint; data: Uint8Array } | undefined>;
   groupInfo(): Promise<{ epoch: bigint; groupInfo: Uint8Array }>;
   commit(commit: Commit, welcome: boolean): Promise<Rec | undefined>;
-  message(ciphertext: Uint8Array): Promise<void>;
+  /** Sends an encrypted message, with the sealed files it carries (direct messages only). */
+  message(ciphertext: Uint8Array, mediaIds?: string[]): Promise<void>;
   /** Whether earlier messages are passed on to devices added later (secure channels only), asked fresh. */
   shares(): Promise<boolean>;
   /** Passes earlier messages on, right after this device's commit that added devices. */
@@ -171,15 +173,22 @@ function item(vaultKey: string, conversation: string, fields: Partial<vault.Item
 const ref = (m: WasmMember): vault.DeviceRef => ({ userId: m.userId, deviceId: m.deviceId });
 
 /** The plaintext of a message: what only the conversation's devices see. */
-export type Content = { text: string; replyTo?: number } | { edit: number; text: string };
+export type Content =
+  | { text: string; replyTo?: number }
+  | { edit: number; text: string }
+  | { voice: vault.Voice; replyTo?: number };
 
 function contentOf(content: Content): DirectMessageContent {
   const body: DirectMessageContent["body"] =
-    "edit" in content
-      ? { case: "edit", value: create(DirectMessageEditSchema, { sequence: BigInt(content.edit), content: content.text }) }
-      : { case: "text", value: create(DirectMessageTextSchema, { content: content.text, replyToSequence: BigInt(content.replyTo ?? 0) }) };
+    "voice" in content
+      ? { case: "voice", value: toVoiceMessage(content.voice, content.replyTo) }
+      : "edit" in content
+        ? { case: "edit", value: create(DirectMessageEditSchema, { sequence: BigInt(content.edit), content: content.text }) }
+        : { case: "text", value: create(DirectMessageTextSchema, { content: content.text, replyToSequence: BigInt(content.replyTo ?? 0) }) };
   return create(DirectMessageContentSchema, { body });
 }
+
+export { voiceLength };
 
 const encode = (content: Content): Uint8Array => toBinary(DirectMessageContentSchema, contentOf(content));
 
@@ -512,8 +521,8 @@ export class DmEngine {
             CALL,
           )
         ).record,
-      message: async (message) => {
-        await dms.postMessage({ conversationId: id, message }, CALL);
+      message: async (message, mediaIds = []) => {
+        await dms.postMessage({ conversationId: id, message, mediaIds }, CALL);
       },
       shares: async () => false,
       history: async () => {},
@@ -613,7 +622,7 @@ export class DmEngine {
       await vault.write(this.vaultKey, { device: this.saved(), notes: [note], items: [...changed.values()], forgetSent });
       this.tell(id);
       for (const i of changed.values()) {
-        if (i.kind === "text" && !had.has(i.seq) && i.senderId !== this.me.id && !i.sharedBy) c.notify(i);
+        if (vault.isMessage(i) && !had.has(i.seq) && i.senderId !== this.me.id && !i.sharedBy) c.notify(i);
       }
       if (rejoin) {
         if (depth < 2) await this.catchUp(id, depth + 1);
@@ -760,6 +769,21 @@ export class DmEngine {
           content: body.value.content.slice(0, MAX_DM),
           replyTo: Number(body.value.replyToSequence),
           signed,
+        }),
+      );
+    } else if (body.case === "voice" && !c.channel) {
+      const voice = voiceOf(body.value);
+      if (!voice) return unreadable();
+      put(
+        item(this.vaultKey, c.id, {
+          seq,
+          at,
+          kind: "voice",
+          senderId,
+          deviceId,
+          content: `Voice message (${voiceLength(voice.durationMs)})`,
+          replyTo: Number(body.value.replyToSequence),
+          voice,
         }),
       );
     } else if (body.case === "edit") {
@@ -1056,15 +1080,17 @@ export class DmEngine {
       await this.catchUp(id);
       const c = this.room(id);
       if (!c) throw new DmError("that conversation isn't here");
+      if (c.channel && "voice" in content) throw new DmError("Voice messages can't be sent in secure channels yet.");
       await this.reconcile(c);
       const plaintext = c.channel ? this.signedContent(id, content) : encode(content);
+      const mediaIds = "voice" in content ? [content.voice.mediaId] : [];
       for (let attempt = 0; ; attempt++) {
         const ciphertext = this.device.encrypt(id, plaintext);
         const hash = this.e2ee.sha256(ciphertext);
         // Kept first: this device can't open what it sent, so this is how it knows what it said.
         await vault.write(this.vaultKey, { device: this.saved(), sent: [{ hash, plaintext }] });
         try {
-          await c.message(ciphertext);
+          await c.message(ciphertext, mediaIds);
           break;
         } catch (err) {
           await vault.write(this.vaultKey, { forgetSent: [hash] });
@@ -1140,7 +1166,7 @@ export class DmEngine {
     const looking = focused?.instance === this.key && focused.channel === id && document.visibilityState === "visible";
     const unread = looking
       ? 0
-      : items.filter((i) => i.kind === "text" && !i.deleted && i.senderId !== this.me.id && i.seq > note.read).length;
+      : items.filter((i) => vault.isMessage(i) && !i.deleted && i.senderId !== this.me.id && i.seq > note.read).length;
     const safety = this.safetyNumber(c, members);
     updateDms(this.key, (d) => ({
       ...d,

@@ -116,7 +116,10 @@ private keys are. It does see, and has to, to deliver:
   it was (padded);
 - which devices each account has (a label from the browser, like "Chrome on
   Windows", and their public keys);
-- which records are commits and which are messages, and when one is deleted.
+- which records are commits and which are messages, and when one is deleted;
+- which messages carry a sealed file (a voice message), and that file's size,
+  padded to 32 KiB steps: roughly how long it is, to within about eight
+  seconds.
 
 Deleting a message removes its ciphertext from the instance and leaves a gap;
 copies already on devices are removed from the screen when they see the
@@ -156,7 +159,10 @@ in Settings, under Devices.
   channel (messages with their edits and deletions, device lines, history
   settings and resets), each with its conversation and place, and a secure
   channel message's signed form so it can still be passed on as shared
-  history. Not lines a device couldn't read, nor its own "joined" marker.
+  history. A voice message's line carries its file's id, key, hash and
+  waveform (`BackupItem.voice`), so a restored device can still play it; the
+  sealed file itself stays on the instance, and goes when the message is
+  deleted. Not lines a device couldn't read, nor its own "joined" marker.
 - **Parts.** A few seconds after a device writes lines, it seals them in a
   part: a `BackupPart` (padded with zeros to an exact multiple of 4 KiB)
   encrypted with AES-256-GCM under HKDF-SHA256 of the key (info `encrypt`), a
@@ -205,6 +211,40 @@ in Settings, under Devices.
   app's device, vault and screens; `backup.ts` and `backupkey.ts` for the
   message backup, shown in `components/settings/account/MessageBackup.tsx`.
 
+## Voice messages
+
+A voice message is recorded on the device (the browser's Opus encoder,
+written as an Ogg Opus file by the app itself) and **sealed** there: a new
+random AES-256-GCM key for that file alone, the sealed bytes being the
+12-byte nonce, then the ciphertext and its tag. The device uploads the
+sealed bytes (`DirectMessageService.CreateSealedUpload`, then a PUT like a
+picture's), and sends an ordinary encrypted message whose content
+(`DirectMessageVoice`) holds the file's id, its key, the SHA-256 of the
+sealed bytes, how long it plays and its waveform (worked out on the sender's
+device). Before sealing, the file is padded (a 0x80 byte, then zeros) to a
+multiple of 32 KiB. So the instance keeps bytes it can't open and never
+learns the key, the shape of the sound or its exact length (the padded size
+gives it away to within about eight seconds); nobody else, transcription
+services included, ever gets it.
+
+`PostMessage` names the file in `media_ids`, which ties it to that record
+(dms.db's `record_media`): one file, one message, and deleting the message
+deletes the file. A file never sent is swept after a day like any unused
+upload; one a message carries never is. Devices fetch it from their own instance by id (never from a link
+in the message), check its size and hash (refusing any over 8 MiB before fetching, and
+reading no more than the size the message gave), then open it; the player keeps
+the opened sound in memory only. Admins can cap how long
+(`voice_message_seconds`, which apps honour, since the instance can't check)
+and how big (`voice_message_bytes`, checked on the sealed size) one may be,
+and how many bytes of them an account may upload a day
+(`voice_message_bytes_per_day`, counted apart from pictures, in dms.db's
+`sealed_days`); none is capped unless they set it. A file is kept from the
+sweep only once the message carrying it is in, so a send that fails leaves
+nothing behind for good; the app sends it again with the same file. The server side is
+`server/src/sealed.rs`; the web app's is `web/src/voice/` and
+`web/src/components/voice/`, written so a server channel's composer and
+messages can use the same recorder and player.
+
 ## Calls
 
 Calls in direct messages are end-to-end encrypted with the same groups: each
@@ -228,4 +268,4 @@ devices of everyone the channel's permissions let see it. See
 - **Backup cleanup.** A backup only grows until someone starts it over;
   rewriting it without deleted lines would keep it small and forget them.
 - **Group DMs**, search (it can only ever happen on the device), and
-  attachments.
+  attachments other than voice messages (sealed files are the way in).
