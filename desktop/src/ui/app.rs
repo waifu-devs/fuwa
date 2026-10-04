@@ -885,6 +885,9 @@ impl FuwaApp {
         self._subscriptions.push(cx.subscribe_in(&view, window, |this: &mut Self, _, event, _, cx| {
             match event {
                 InstanceSettingsEvent::Close => this.instance_settings = None,
+                InstanceSettingsEvent::Toast { icon, title } => {
+                    this.toast(icon, title.clone(), String::new(), None, None, cx)
+                }
             }
             cx.notify();
         }));
@@ -1393,8 +1396,10 @@ impl FuwaApp {
             self.dialog = None;
         } else if self.server_settings.is_some() {
             self.server_settings = None;
-        } else if self.instance_settings.is_some() {
-            self.instance_settings = None;
+        } else if let Some(view) = self.instance_settings.clone() {
+            if !view.update(cx, |v, cx| v.escape(cx)) {
+                self.instance_settings = None;
+            }
         } else if self.settings.is_some() {
             self.settings = None;
         } else if let Some(connect) = &self.connect {
@@ -1469,13 +1474,17 @@ impl FuwaApp {
             return base.child(connect.clone()).into_any_element();
         }
 
+        let announcement = self.render_announcement(window, cx);
         base.child(
-            div()
-                .size_full()
-                .flex()
-                .child(self.render_rail(window, cx))
-                .child(self.render_sidebar(window, cx))
-                .child(self.render_main(window, cx)),
+            div().size_full().flex().flex_col().when_some(announcement, |el, banner| el.child(banner)).child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .child(self.render_rail(window, cx))
+                    .child(self.render_sidebar(window, cx))
+                    .child(self.render_main(window, cx)),
+            ),
         )
         .when_some(self.connect.clone(), |el, connect| {
             el.child(crate::ui::overlay::scrim("connect-scrim", &p).child(connect))

@@ -949,13 +949,13 @@ impl FuwaApp {
 
     fn instance_page(&mut self, key: &str, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = pal(cx);
-        let Some((name, url, node, me, connection, problem, can_create)) = self.core.shared.read(|s| {
+        let Some((name, url, me, connection, problem, can_create)) = self.core.shared.read(|s| {
             s.instance(key).map(|i| {
                 let creation = i.node.as_ref().map(|n| n.server_creation).unwrap_or_default();
                 let can_create = creation == pb::ServerCreation::Everyone as i32
                     || creation == pb::ServerCreation::Unspecified as i32
                     || (creation == pb::ServerCreation::Admins as i32 && i.admin);
-                (i.name(), i.url.clone(), i.node.clone(), i.me.clone(), i.connection, i.problem.clone(), can_create)
+                (i.name(), i.url.clone(), i.me.clone(), i.connection, i.problem.clone(), can_create)
             })
         }) else {
             return div().into_any_element();
@@ -968,8 +968,6 @@ impl FuwaApp {
             Connection::Offline => "Offline",
             Connection::SignedOut => "Signed out",
         };
-        let announcement =
-            node.as_ref().and_then(|n| n.announcement.as_ref()).filter(|a| !a.text.is_empty()).map(|a| a.text.clone());
         let signed_out = connection == Connection::SignedOut;
         let k = key.to_owned();
         let body = card(&p)
@@ -1012,19 +1010,6 @@ impl FuwaApp {
                             ),
                     ),
             )
-            .when_some(announcement, |el, text| {
-                el.child(
-                    div()
-                        .flex()
-                        .gap(px(10.0))
-                        .px(px(14.0))
-                        .py(px(10.0))
-                        .rounded(corner(12.0))
-                        .bg(alpha(p.primary, 0.1))
-                        .child(icon("megaphone").size(px(16.0)).text_color(p.primary))
-                        .child(div().text_sm().child(text)),
-                )
-            })
             .when_some(me.filter(|_| !signed_out), |el, me| {
                 el.child(div().flex().items_center().gap(px(12.0)).child(avatar(Some(&me), 40.0, &p)).child(
                     div().flex().flex_col().child(div().font_weight(FontWeight::BOLD).child(user_name(&me))).child(

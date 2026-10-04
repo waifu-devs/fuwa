@@ -14,6 +14,7 @@ pub mod calls;
 pub mod config;
 pub mod dms;
 pub mod instance_admin;
+pub mod instance_manage;
 pub mod keybinds;
 pub mod linked;
 pub mod moderation;

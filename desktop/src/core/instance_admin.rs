@@ -268,7 +268,12 @@ pub fn copy_field(into: &mut pb::InstanceSettings, from: &pb::InstanceSettings, 
         "calls" => into.calls = from.calls,
         "call_recordings" => into.call_recordings = from.call_recordings,
         "ice_urls" => into.ice_urls = from.ice_urls.clone(),
-        "turn_secret" => into.turn_secret = from.turn_secret.clone(),
+        // The instance never sends the secret back, only whether one is saved and its end.
+        "turn_secret" => {
+            into.turn_secret = from.turn_secret.clone();
+            into.turn_secret_set = from.turn_secret_set;
+            into.turn_secret_hint = from.turn_secret_hint.clone();
+        }
         "automod_providers" => into.automod_providers = from.automod_providers.clone(),
         _ => set_cap(into, path, cap(from, path)),
     }
@@ -448,6 +453,19 @@ mod tests {
 
     fn custom(url: &str) -> pb::AutoModProviderSettings {
         pb::AutoModProviderSettings { id: "custom".into(), name: "Ours".into(), url: url.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn an_empty_turn_secret_keeps_the_saved_one() {
+        let saved =
+            pb::InstanceSettings { turn_secret_set: true, turn_secret_hint: "0123".into(), ..Default::default() };
+        let mut draft = saved.clone();
+        assert!(changed(&draft, &saved).is_empty());
+        draft.turn_secret = "a-new-turn-secret".into();
+        assert_eq!(changed(&draft, &saved), ["turn_secret"]);
+        let mut back = pb::InstanceSettings::default();
+        copy_field(&mut back, &saved, "turn_secret");
+        assert!(back.turn_secret_set && back.turn_secret_hint == "0123" && back.turn_secret.is_empty());
     }
 
     #[test]

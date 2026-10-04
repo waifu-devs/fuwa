@@ -392,6 +392,10 @@ impl InstanceSettingsView {
         p: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // Pages that aren't settings have no default to show.
+        if paths.is_empty() {
+            return div().into_any_element();
+        }
         let key = paths.first().copied().unwrap_or_default();
         if !self.overridden_any(paths) {
             return motion::rise(

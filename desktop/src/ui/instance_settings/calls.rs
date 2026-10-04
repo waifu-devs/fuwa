@@ -162,7 +162,7 @@ impl InstanceSettingsView {
                      password from it for each call, good for an hour, that names no account.",
                 ),
                 &["turn_secret"],
-                if defaults.turn_secret.is_empty() { "none" } else { "set" },
+                if defaults.turn_secret_set { "set" } else { "none" },
                 4,
                 Input::new(secret).prefix(icon("key-round").size(px(15.0)).text_color(p.muted_foreground)),
                 p,

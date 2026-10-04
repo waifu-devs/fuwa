@@ -1,0 +1,253 @@
+//! The instance's announcement, across the top of the app while you're on
+//! that instance: news in the theme's color, heads-ups in amber, and urgent
+//! ones in red, which can't be closed. A closed banner stays closed on this
+//! computer until the admins put up a new one. Like the web app's
+//! `AnnouncementBanner.tsx`, whose look per tone is in its `app.css`.
+
+use std::time::Duration;
+
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    AnyElement, FontWeight, Hsla, IntoElement, ParentElement as _, SharedString, Styled as _, Window, div, hsla,
+    linear_color_stop, linear_gradient, px,
+};
+
+use crate::core::instance_manage::{ends_label, ends_ms, stamp_label, tone_of};
+use crate::pb::{self, AnnouncementTone as Tone};
+use crate::ui::motion;
+use crate::ui::theme::{Palette, alpha, mix};
+use crate::ui::widgets::icon;
+
+/// The heads-up amber, and the near-black on it.
+pub fn amber() -> Hsla {
+    gpui_kit::rgb(0xf59e0b).into()
+}
+
+fn ink() -> Hsla {
+    gpui_kit::rgb(0x1c1917).into()
+}
+
+pub fn glyph(tone: Tone) -> &'static str {
+    match tone {
+        Tone::Warning => "triangle-alert",
+        Tone::Critical => "siren",
+        _ => "megaphone",
+    }
+}
+
+/// The banner itself, also the live preview on the Announcement page. `close`
+/// is its close button, when it can be closed; `id` keeps its motion apart
+/// from another banner's.
+pub fn banner(
+    id: &str,
+    a: &pb::Announcement,
+    now: i64,
+    close: Option<AnyElement>,
+    p: &Palette,
+    window: &Window,
+) -> AnyElement {
+    let tone = tone_of(a);
+    let (bg, fg, chip, chip_fg) = match tone {
+        Tone::Warning => (mix(p.background, gpui_kit::rgb(0xf59e0b), 0.18), p.foreground.into(), amber(), ink()),
+        Tone::Critical => {
+            (hsla(0.0, 0.72, 0.51, 1.0), gpui_kit::white(), alpha(gpui_kit::rgb(0xffffff), 0.22), gpui_kit::white())
+        }
+        _ => (mix(p.background, p.primary, 0.14), p.foreground.into(), p.primary.into(), p.primary_foreground.into()),
+    };
+    let period = match tone {
+        Tone::Warning => 2200,
+        Tone::Critical => 1100,
+        _ => 4500,
+    };
+    // Each tone's icon moves its own way: news waves now and then, heads-ups
+    // bob, urgent ones swing like a siren.
+    let mark = motion::ambient(
+        div().child(icon(glyph(tone)).size(px(16.0)).text_color(chip_fg)),
+        SharedString::from(format!("{id}-glyph-{}", tone as i32)),
+        Duration::from_millis(period),
+        window,
+        move |el, t| match tone {
+            Tone::Warning => el.relative().top(px(-1.5 * (t * std::f32::consts::TAU).sin().abs())),
+            Tone::Critical => el.relative().left(px(1.5 * (t * std::f32::consts::TAU).sin())),
+            _ => {
+                let k = ((t - 0.7) / 0.18).clamp(0.0, 1.0);
+                let wave = if k > 0.0 && k < 1.0 { (k * 3.0 * std::f32::consts::PI).sin() * (1.0 - k) } else { 0.0 };
+                el.relative().top(px(-3.0 * wave.abs())).left(px(-2.0 * wave))
+            }
+        },
+    );
+    let badge = motion::once(
+        div()
+            .relative()
+            .flex_none()
+            .size(px(28.0))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(chip)
+            .when(tone == Tone::Critical, |el| {
+                el.child(motion::ambient(
+                    div().absolute().inset_0().rounded_full().bg(alpha(gpui_kit::rgb(0xffffff), 0.4)),
+                    SharedString::from(format!("{id}-ping")),
+                    Duration::from_millis(1000),
+                    window,
+                    |el, t| el.opacity(0.6 * (1.0 - t)).size(px(28.0 + 12.0 * t)).top(px(-6.0 * t)).left(px(-6.0 * t)),
+                ))
+            })
+            .child(mark),
+        SharedString::from(format!("{id}-badge-{}", tone as i32)),
+        Duration::from_millis(420),
+        |el, t| {
+            // Pops in turning, as on the web.
+            let s = 1.0 - (1.0 - t).powi(3);
+            el.opacity(s)
+        },
+    );
+    let ends = ends_ms(a).map(|at| (ends_label(at, now), stamp_label(at, now)));
+    let words = motion::rise(
+        div().min_w_0().flex_shrink(1.0).text_sm().font_weight(FontWeight::BOLD).text_color(fg).line_clamp(2).child(
+            crate::ui::text::markdown(
+                SharedString::from(format!("{id}-text-{}", a.id)),
+                crate::ui::text::images_as_links(&a.text),
+            ),
+        ),
+        SharedString::from(format!("{id}-words-{}|{}", a.id, a.text.len())),
+        Duration::from_millis(80),
+        8.0,
+    );
+    let mut row = div()
+        .relative()
+        .overflow_hidden()
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(px(12.0))
+        .px(px(48.0))
+        .py(px(8.0))
+        .bg(bg)
+        .text_color(fg)
+        .when(tone == Tone::Info, |el| el.border_b_1().border_color(alpha(p.primary, 0.3)))
+        .child(badge)
+        .child(words)
+        .when_some(ends, |el, (short, _)| {
+            el.child(
+                div()
+                    .flex_none()
+                    .px(px(8.0))
+                    .py(px(2.0))
+                    .rounded_full()
+                    .bg(if p.dark || tone == Tone::Critical {
+                        alpha(gpui_kit::rgb(0xffffff), 0.1)
+                    } else {
+                        alpha(gpui_kit::rgb(0x000000), 0.1)
+                    })
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .child(format!("Until {short}")),
+            )
+        });
+    if tone == Tone::Critical {
+        // A light sweeps across it.
+        row = row.child(motion::ambient(
+            div().absolute().top_0().bottom_0().w(px(260.0)).bg(linear_gradient(
+                100.0,
+                linear_color_stop(alpha(gpui_kit::rgb(0xffffff), 0.0), 0.0),
+                linear_color_stop(alpha(gpui_kit::rgb(0xffffff), 0.22), 1.0),
+            )),
+            SharedString::from(format!("{id}-sweep")),
+            Duration::from_millis(2600),
+            window,
+            |el, t| el.left(gpui_kit::relative(-0.3 + 1.6 * t)).opacity((1.0 - (2.0 * t - 1.0).abs()) * 0.9),
+        ));
+    }
+    if tone == Tone::Warning {
+        row = row.child(hazard(id, window));
+    }
+    if let Some(close) = close {
+        row = row.child(div().absolute().right(px(8.0)).top_0().bottom_0().flex().items_center().child(close));
+    }
+    row.into_any_element()
+}
+
+/// The striped edge under a heads-up, moving along.
+fn hazard(id: &str, window: &Window) -> AnyElement {
+    let mut stripes = div().absolute().top_0().bottom_0().left(px(-32.0)).flex();
+    for n in 0..240 {
+        stripes = stripes.child(div().w(px(8.0)).h_full().bg(if n % 2 == 0 { amber() } else { ink() }));
+    }
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .h(px(3.0))
+        .overflow_hidden()
+        .opacity(0.85)
+        .child(motion::ambient(
+            stripes,
+            SharedString::from(format!("{id}-hazard")),
+            Duration::from_millis(1200),
+            window,
+            |el, t| el.left(px(-32.0 + 16.0 * t)),
+        ))
+        .into_any_element()
+}
+
+impl crate::ui::app::FuwaApp {
+    /// The banner for the instance you're on, unless it's down, over or closed here.
+    pub(crate) fn render_announcement(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> Option<AnyElement> {
+        use crate::ui::app::Nav;
+        use gpui_kit::{InteractiveElement as _, StatefulInteractiveElement as _};
+        let key = match &self.nav {
+            Nav::Instance { key } | Nav::Server { key, .. } => key.clone(),
+            Nav::Home { dm: Some((key, _)) } => key.clone(),
+            Nav::Home { dm: None } => return None,
+        };
+        let now = crate::core::dms::now_ms();
+        let a = self
+            .core
+            .shared
+            .read(|s| s.instance(&key).and_then(|i| i.node.as_ref()).and_then(|n| n.announcement.clone()))?;
+        if !crate::core::instance_manage::is_live(Some(&a), now) {
+            return None;
+        }
+        let critical = tone_of(&a) == Tone::Critical;
+        if !critical && self.prefs.closed_announcements.get(&key) == Some(&a.id) {
+            return None;
+        }
+        let p = crate::ui::widgets::pal(cx);
+        let close = (!critical).then(|| {
+            let (key, id) = (key.clone(), a.id.clone());
+            div()
+                .id("announcement-close")
+                .size(px(28.0))
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .hover(|s| s.bg(alpha(gpui_kit::rgb(0x808080), 0.2)))
+                .active(|s| s.top(px(1.0)))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.core.set_prefs(|p| {
+                        p.closed_announcements.insert(key.clone(), id.clone());
+                    });
+                    this.prefs = this.core.prefs();
+                    cx.notify();
+                }))
+                .child(icon("x").size(px(16.0)))
+                .into_any_element()
+        });
+        Some(motion::once(
+            div().flex_none().child(banner("announcement", &a, now, close, &p, window)),
+            SharedString::from(format!("announcement-in-{key}-{}", a.id)),
+            Duration::from_millis(320),
+            |el, t| el.opacity(t),
+        ))
+    }
+}
