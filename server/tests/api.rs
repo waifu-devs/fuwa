@@ -234,6 +234,7 @@ async fn a_community_end_to_end() {
             &juan,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: Some(0) }],
+                ..Default::default()
             },
         ))
         .await
@@ -548,7 +549,10 @@ async fn a_community_end_to_end() {
         .events
         .subscribe(authed(
             &juan,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -930,6 +934,7 @@ async fn browsers_can_call_over_grpc_web() {
         .unwrap();
     let request = pb::SubscribeRequest {
         servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: Some(0) }],
+        ..Default::default()
     };
     let payload = prost::Message::encode_to_vec(&request);
     let mut framed = vec![0u8];
@@ -972,7 +977,10 @@ async fn streams_are_told_to_reconnect_when_the_instance_stops() {
         .events
         .subscribe(authed(
             &token,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: server.id, after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: server.id, after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -1044,6 +1052,7 @@ async fn concurrent_writes_stay_ordered_and_counted() {
             &owner,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+                ..Default::default()
             },
         ))
         .await
@@ -1116,6 +1125,7 @@ async fn concurrent_writes_stay_ordered_and_counted() {
             &owner,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: Some(11) }],
+                ..Default::default()
             },
         ))
         .await
@@ -1636,6 +1646,7 @@ async fn profiles_nicknames_and_notification_settings() {
             &juan,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+                ..Default::default()
             },
         ))
         .await
@@ -1892,6 +1903,7 @@ async fn data_export_and_account_deletion() {
             &juan,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+                ..Default::default()
             },
         ))
         .await
@@ -2208,7 +2220,10 @@ async fn server_settings_and_moderation() {
         .events
         .subscribe(authed(
             &aoi,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -2245,6 +2260,7 @@ async fn server_settings_and_moderation() {
             &aoi,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: Some(0) }],
+                ..Default::default()
             },
         ))
         .await
@@ -3477,7 +3493,10 @@ async fn roles_and_channel_permissions() {
         .events
         .subscribe(authed(
             &aoi,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -4998,6 +5017,7 @@ async fn custom_emoji_and_the_welcome_screen() {
             &member,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+                ..Default::default()
             },
         ))
         .await
@@ -6257,7 +6277,10 @@ async fn channels_shared_between_servers() {
         .events
         .subscribe(authed(
             &rin,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: guest.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: guest.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()

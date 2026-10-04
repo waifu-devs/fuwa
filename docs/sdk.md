@@ -118,10 +118,12 @@ To catch up on what happened while the program was stopped, save
 strings) and pass them back as `cursors`. Servers without one start with new
 events only. The example saves them to a file every few seconds.
 
-The instance doesn't yet send an agent an event when it's added to a server,
-so the agent lists its servers every `serverRefreshMs` (30 seconds) and
-starts following new ones (`serverAdded`). Being removed or the server being
-deleted arrives as an event straight away (`serverRemoved`).
+The agent lists its servers every `serverRefreshMs` (30 seconds) and starts
+following new ones (`serverAdded`). Being removed or the server being deleted
+arrives as an event straight away (`serverRemoved`). Instances can also add a
+server to a stream the moment the agent is added to it (`follow_new_servers`
+on `EventService.Subscribe`, announced as `followed`); the SDK doesn't use
+that yet.
 
 ### When things go wrong
 

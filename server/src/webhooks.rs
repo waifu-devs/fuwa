@@ -193,6 +193,14 @@ fn failed(err: Error) -> Response {
             response.headers_mut().insert(crate::error::NOT_READY, HeaderValue::from_static("1"));
             response
         }
+        Error::Limited(message, wait_ms) => {
+            let mut response = answer(StatusCode::TOO_MANY_REQUESTS, &message);
+            let seconds = (wait_ms.max(1) + 999) / 1000;
+            if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+                response.headers_mut().insert(axum::http::header::RETRY_AFTER, value);
+            }
+            response
+        }
         err => {
             let status = match &err {
                 Error::InvalidArgument(_) => StatusCode::BAD_REQUEST,

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{Stream, StreamExt};
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use tokio_stream::StreamMap;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
@@ -174,10 +175,16 @@ impl EventService for Api {
         let started = std::time::Instant::now();
         let caller = self.caller(request.metadata()).await?;
         let account = caller.account;
-        let cursors = request.into_inner().servers;
-        if cursors.is_empty() || cursors.len() > MAX_SERVERS {
+        let pb::SubscribeRequest { servers: cursors, follow_new_servers } = request.into_inner();
+        if cursors.len() > MAX_SERVERS || (cursors.is_empty() && !follow_new_servers) {
             return Err(Error::invalid(format!("follow 1 to {MAX_SERVERS} servers per stream")).into());
         }
+        // A split instance's gateway follows new servers itself, from the
+        // directory, and asks shards only for the ones it knows of.
+        let follow_new = follow_new_servers && !self.app.config.cluster.is_split();
+        // Listening before anything else, so nothing said meanwhile is missed.
+        let mut ended = self.app.ended_sessions();
+        let mut joined = self.app.joined_servers();
 
         // Start listening before replaying, so nothing committed in between is missed.
         // A server deleted, or left (or been removed from) while the client was
@@ -213,10 +220,11 @@ impl EventService for Api {
         let app = self.app.clone();
         let token_hash = caller.token_hash;
         let account_id = account.id.clone();
+        let api = self.clone();
         tokio::spawn(async move {
             let send = async |item| tx.send(item).await.is_ok();
             for event in gone {
-                if !send(Ok(pb::SubscribeResponse { event: Some(event), ready: None })).await {
+                if !send(Ok(pb::SubscribeResponse { event: Some(event), ..Default::default() })).await {
                     return;
                 }
             }
@@ -251,7 +259,7 @@ impl EventService for Api {
                         sequence = last.sequence;
                         for event in page {
                             for event in view.pass(&event).await {
-                                if !send(Ok(pb::SubscribeResponse { event: Some(event), ready: None })).await {
+                                if !send(Ok(pb::SubscribeResponse { event: Some(event), ..Default::default() })).await {
                                     return;
                                 }
                             }
@@ -266,8 +274,11 @@ impl EventService for Api {
             }
             let ready = pb::SubscribeReady { servers: heads };
             crate::reports::server_timing("subscribe.ready", started.elapsed());
-            if !send(Ok(pb::SubscribeResponse { event: None, ready: Some(ready) })).await {
+            if !send(Ok(pb::SubscribeResponse { ready: Some(ready), ..Default::default() })).await {
                 return;
+            }
+            if live.is_empty() && !follow_new {
+                return; // nothing left to follow
             }
 
             let mut heartbeat = tokio::time::interval(HEARTBEAT);
@@ -287,11 +298,55 @@ impl EventService for Api {
                             send(Err(Status::unauthenticated("this device was signed out"))).await;
                             return;
                         }
-                        if !send(Ok(pb::SubscribeResponse { event: None, ready: None })).await {
+                        if !send(Ok(pb::SubscribeResponse::default())).await {
                             return;
                         }
                     }
-                    item = live.next() => match item {
+                    // Some session of the caller's just ended: if it's this one,
+                    // the stream ends now rather than at the next heartbeat.
+                    ended = ended.recv() => {
+                        let ours = match ended {
+                            Ok(id) => *id == *account_id,
+                            Err(RecvError::Lagged(_)) => true,
+                            Err(RecvError::Closed) => return,
+                        };
+                        if ours && matches!(app.session_live(&token_hash).await, Ok(false)) {
+                            send(Err(Status::unauthenticated("this device was signed out"))).await;
+                            return;
+                        }
+                    }
+                    // Joined somewhere (an agent added to a server, say): follow
+                    // it from now on, and say from where.
+                    next = joined.recv(), if follow_new => {
+                        let server_id = match next {
+                            Ok((who, server_id)) if *who == *account_id => server_id,
+                            Ok(_) | Err(RecvError::Lagged(_)) => continue,
+                            Err(RecvError::Closed) => return,
+                        };
+                        if views.contains_key(&*server_id) || views.len() >= MAX_SERVERS {
+                            continue;
+                        }
+                        let Ok(Seat { sdb, access, .. }) = api.membership(&account, &server_id).await else {
+                            continue; // gone again already
+                        };
+                        let receiver = app.hub.subscribe(&sdb.id);
+                        let sequence = match sdb.head_sequence().await {
+                            Ok(head) => head,
+                            Err(err) => {
+                                send(Err(err.into())).await;
+                                return;
+                            }
+                        };
+                        let view = View { sdb: sdb.clone(), account_id: account_id.clone(), access, replaying: false };
+                        last_sent.insert(sdb.id.clone(), sequence);
+                        live.insert(sdb.id.clone(), BroadcastStream::new(receiver));
+                        views.insert(sdb.id.clone(), view);
+                        let head = pb::ServerHead { server_id: sdb.id.clone(), sequence };
+                        if !send(Ok(pb::SubscribeResponse { followed: Some(head), ..Default::default() })).await {
+                            return;
+                        }
+                    }
+                    item = live.next(), if !live.is_empty() => match item {
                         None => return,
                         Some((server_id, Err(BroadcastStreamRecvError::Lagged(_)))) => {
                             let message = format!("fell behind on server {server_id}; subscribe again from your last sequence");
@@ -318,14 +373,14 @@ impl EventService for Api {
                                 _ => vec![(*event).clone()],
                             };
                             for event in out {
-                                if !send(Ok(pb::SubscribeResponse { event: Some(event), ready: None })).await {
+                                if !send(Ok(pb::SubscribeResponse { event: Some(event), ..Default::default() })).await {
                                     return;
                                 }
                             }
                             if ends {
                                 live.remove(&server_id);
                                 views.remove(&server_id);
-                                if live.is_empty() {
+                                if live.is_empty() && !follow_new {
                                     return;
                                 }
                             }

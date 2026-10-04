@@ -438,7 +438,19 @@ fn failed(status: &Status) -> Value {
     if matches!(status.code(), tonic::Code::Internal | tonic::Code::Unknown | tonic::Code::Unavailable) {
         crate::reports::server_error("mcp_tool", Some("mcp.tools/call"));
     }
-    json!({ "content": [{ "type": "text", "text": format!("{why}: {}", status.message()) }], "isError": true })
+    // Slow mode and rate limits say how long to wait, for the agent to wait it.
+    let retry_after_ms =
+        status.metadata().get(crate::error::RETRY_AFTER_MS).and_then(|value| value.to_str().ok()?.parse::<i64>().ok());
+    match retry_after_ms {
+        Some(ms) => json!({
+            "content": [{ "type": "text", "text": format!("{why}: {} (retry after {ms} ms)", status.message()) }],
+            "structuredContent": { "error": why, "retry_after_ms": ms },
+            "isError": true,
+        }),
+        None => {
+            json!({ "content": [{ "type": "text", "text": format!("{why}: {}", status.message()) }], "isError": true })
+        }
+    }
 }
 
 /// Runs one tool. The outer error is bad arguments; the inner one is the API's answer.
@@ -616,8 +628,10 @@ async fn events_after(cx: &Cx, server_id: String, after: i64, limit: i32) -> Res
 
 /// The server's latest sequence: a live stream's `ready`, taken and let go.
 async fn head(cx: &Cx, server_id: String) -> Result<i64, Status> {
-    let req =
-        pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: server_id.clone(), after_sequence: None }] };
+    let req = pb::SubscribeRequest {
+        servers: vec![pb::ServerCursor { server_id: server_id.clone(), after_sequence: None }],
+        ..Default::default()
+    };
     let mut stream = call!(cx, event_service_client::EventServiceClient.subscribe(req))?;
     let waiting = async {
         while let Some(response) = stream.message().await? {

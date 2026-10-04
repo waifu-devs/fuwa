@@ -193,6 +193,7 @@ impl Api {
         self.app.forget_account(&account.id, &gone).await?;
         let uploads = self.app.node()?.account_media(&account.id).await?;
         self.app.node()?.delete_account(&account.id).await?;
+        self.app.sessions_ended(&account.id);
         // Their conversations stay for the other person in each; their devices go.
         self.app.dms()?.forget_account(&account.id).await?;
         if let Err(err) = self.app.delete_media(&uploads).await {
@@ -241,6 +242,7 @@ impl AccountService for Api {
                 if !self.app.node()?.delete_session_by_id(&account.id, &request.get_ref().session_id).await? {
                     return Err(Error::NotFound("session"));
                 }
+                self.app.sessions_ended(&account.id);
                 Ok(pb::RevokeSessionResponse {})
             }
             .await,
@@ -255,6 +257,7 @@ impl AccountService for Api {
             async {
                 let caller = self.caller(request.metadata()).await?;
                 let revoked = self.app.node()?.delete_other_sessions(&caller.account.id, &caller.token_hash).await?;
+                self.app.sessions_ended(&caller.account.id);
                 Ok(pb::RevokeOtherSessionsResponse { revoked: revoked as i32 })
             }
             .await,

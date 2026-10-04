@@ -73,6 +73,13 @@ pub struct App {
     picture_key: crate::outside::Key,
     /// How this instance talks to other fuwa instances (docs/federation.md).
     pub federation: crate::federation::Federation,
+    /// Accounts some of whose sessions were just ended (signed out, a token
+    /// reset, an account disabled or deleted), so their live streams check
+    /// at once rather than at their next heartbeat. See [`App::sessions_ended`].
+    ended: tokio::sync::broadcast::Sender<Arc<str>>,
+    /// Accounts joining servers, as (account, server), for streams that
+    /// follow new servers. See [`App::joined_server`].
+    joined: tokio::sync::broadcast::Sender<(Arc<str>, Arc<str>)>,
 }
 
 /// Where the parts this process doesn't run are.
@@ -210,6 +217,8 @@ impl App {
             media_link,
             picture_key,
             federation,
+            ended: tokio::sync::broadcast::Sender::new(256),
+            joined: tokio::sync::broadcast::Sender::new(256),
         });
         if app.node.is_some() {
             app.sweep_media(crate::id::now_ms()).await?;
@@ -225,6 +234,28 @@ impl App {
     /// Accounts, sessions and settings. Only a single process and a split
     /// instance's directory keep them; the gateways route every call that
     /// needs them there.
+    /// Says some of an account's sessions just ended. Live streams here check
+    /// theirs at once, and a directory passes it on to its shards for theirs.
+    pub fn sessions_ended(&self, account_id: &str) {
+        let _ = self.ended.send(account_id.into());
+    }
+
+    /// The accounts whose sessions end from now on, for a live stream to follow.
+    pub fn ended_sessions(&self) -> tokio::sync::broadcast::Receiver<Arc<str>> {
+        self.ended.subscribe()
+    }
+
+    /// Says an account just joined a server, where the index of who's in what
+    /// is kept (a single process, or a directory, which passes it on to gateways).
+    pub fn joined_server(&self, account_id: &str, server_id: &str) {
+        let _ = self.joined.send((account_id.into(), server_id.into()));
+    }
+
+    /// Accounts joining servers from now on, as (account, server).
+    pub fn joined_servers(&self) -> tokio::sync::broadcast::Receiver<(Arc<str>, Arc<str>)> {
+        self.joined.subscribe()
+    }
+
     pub fn node(&self) -> Result<&NodeDb> {
         self.node.as_ref().ok_or_else(|| Error::internal("this part of the instance doesn't keep accounts"))
     }
@@ -503,7 +534,13 @@ pub fn cors(source: Arc<impl HasSettings>) -> CorsLayer {
             "mcp-session-id",
             "last-event-id",
         ]))
-        .expose_headers(headers(&["grpc-status", "grpc-message", "grpc-status-details-bin", "www-authenticate"]))
+        .expose_headers(headers(&[
+            "grpc-status",
+            "grpc-message",
+            "grpc-status-details-bin",
+            "www-authenticate",
+            crate::error::RETRY_AFTER_MS,
+        ]))
         .max_age(Duration::from_secs(2 * 60 * 60))
 }
 

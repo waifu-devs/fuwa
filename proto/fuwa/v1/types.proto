@@ -706,6 +706,10 @@ message Message {
   MessageWebhook webhook = 15;
   // In a shared channel: who wrote it and from which server.
   SharedAuthor shared = 16;
+  // The members it names as <@id> (or <@!id>), once each, in order: the
+  // people a client highlights it for. Up to 50; ids of anyone not in the
+  // server are left out.
+  repeated string mention_user_ids = 23;
 }
 
 // The name and picture a webhook message was posted under: the webhook's

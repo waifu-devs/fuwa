@@ -155,6 +155,7 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
         "embeds": embeds,
         "mentions_everyone": m.mentions_everyone,
         "mention_role_ids": m.mention_role_ids,
+        "mention_user_ids": m.mention_user_ids,
         "created_at": time(&m.created_at),
         "edited_at": time(&m.edited_at),
     }))

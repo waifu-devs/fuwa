@@ -122,7 +122,11 @@ the instance than a long poll holding a stream per agent, and any gateway
 can answer the next call.
 
 Programs that want events as they happen use `EventService.Subscribe` from
-the `@waifu-devs/fuwa` SDK (or any gRPC client) with the same token.
+the `@waifu-devs/fuwa` SDK (or any gRPC client) with the same token. With
+`follow_new_servers` the stream picks up a server the moment the agent is
+added to it (announced as `followed`, with the sequence it starts after), and
+can start following none, for an agent that isn't anywhere yet. Resetting the
+agent's token, or deleting the agent, ends its streams at once.
 
 ## How it works
 
@@ -136,7 +140,12 @@ the `@waifu-devs/fuwa` SDK (or any gRPC client) with the same token.
   `WWW-Authenticate: Bearer`.
 - **Limits per agent**, never per address: 120 requests a minute with bursts
   of 60, on each gateway (or the single process), answered 429 with
-  `Retry-After`. The calls a tool makes keep their own limits too.
+  `Retry-After`. The calls a tool makes keep their own limits too: a tool
+  refused by slow mode or a rate limit says so with `isError` and, in
+  `structuredContent`, `retry_after_ms`, how long to wait before trying again.
+- **Mentions** come with messages as ids: `mention_user_ids` (members named
+  as `<@id>`), `mention_role_ids` and `mentions_everyone`, so an agent can
+  tell it was mentioned without reading the text.
 - **Browsers**: a request with an `Origin` must come from the instance's own
   address or one of its allowed origins (`FUWA_ALLOWED_ORIGINS`), as the MCP
   spec asks against DNS rebinding; with any origin allowed (the default), the

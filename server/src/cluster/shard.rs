@@ -177,6 +177,9 @@ async fn stay_in_touch(app: Arc<App>) {
                                         .collect();
                                     app.replace_settings(settings);
                                 }
+                                for account_id in &message.sessions_ended {
+                                    app.sessions_ended(account_id);
+                                }
                                 if first {
                                     first = false;
                                     backoff.reset();

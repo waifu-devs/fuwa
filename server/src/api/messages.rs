@@ -16,6 +16,8 @@ const MAX_ATTACHMENTS: usize = 10;
 const MAX_EMBEDS: usize = 10;
 /// Most roles one message pings.
 const MAX_ROLE_MENTIONS: usize = 50;
+/// Most members one message names that it says it mentions.
+const MAX_USER_MENTIONS: usize = 50;
 
 /// What's stored in a message's `extras` column.
 #[derive(Clone, PartialEq, prost::Message)]
@@ -32,6 +34,8 @@ struct Extras {
     auto_mod: Option<pb::AutoModAlert>,
     #[prost(message, optional, tag = "6")]
     webhook: Option<pb::MessageWebhook>,
+    #[prost(string, repeated, tag = "10")]
+    mention_user_ids: Vec<String>,
 }
 
 impl Extras {
@@ -43,6 +47,7 @@ impl Extras {
             mention_role_ids: message.mention_role_ids.clone(),
             auto_mod: message.auto_mod.clone(),
             webhook: message.webhook.clone(),
+            mention_user_ids: message.mention_user_ids.clone(),
         };
         (extras != Extras::default()).then(|| extras.encode_to_vec())
     }
@@ -80,6 +85,44 @@ fn role_tokens(content: &str) -> Vec<&str> {
         }
     }
     ids
+}
+
+/// The ids written as `<@id>` or `<@!id>` in `content`, once each, in order.
+fn user_tokens(content: &str) -> Vec<&str> {
+    let mut ids = Vec::new();
+    for (start, _) in content.match_indices("<@") {
+        let rest = &content[start + 2..];
+        let rest = rest.strip_prefix('!').unwrap_or(rest);
+        if let Some(end) = rest.find('>')
+            && end > 0
+            && end <= 32
+            && rest[..end].bytes().all(|b| b.is_ascii_alphanumeric())
+            && !ids.contains(&&rest[..end])
+        {
+            ids.push(&rest[..end]);
+        }
+    }
+    ids
+}
+
+/// The members `content` names, for [`pb::Message::mention_user_ids`]: ids
+/// of anyone not in the server are left out, so a client can trust them.
+async fn mentioned_users(conn: &turso::Connection, content: &str) -> Result<Vec<String>> {
+    let mut ids = Vec::new();
+    // Looked up one by one, so only so many names are looked at.
+    for id in user_tokens(content).into_iter().take(2 * MAX_USER_MENTIONS) {
+        if ids.len() >= MAX_USER_MENTIONS {
+            break;
+        }
+        let member =
+            query_one(conn, "SELECT user_id FROM members WHERE user_id = ?1", [id], |r| r.get::<String>(0)).await?;
+        if let Some(id) = member
+            && !ids.contains(&id)
+        {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
 }
 
 /// Who a message pings, given what its author can do in its channel: everyone
@@ -133,6 +176,7 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 auto_mod: None,
                 webhook: None,
                 shared: None,
+                mention_user_ids: vec![],
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -154,6 +198,7 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
         message.mention_role_ids = extras.mention_role_ids;
         message.auto_mod = extras.auto_mod;
         message.webhook = extras.webhook;
+        message.mention_user_ids = extras.mention_user_ids;
     }
     Ok(message)
 }
@@ -237,7 +282,8 @@ pub(super) async fn check_slowmode(
     }
     let period = i64::from(channel.slowmode_seconds) * 1000;
     let slowed = |sent_at: i64| {
-        Error::ResourceExhausted(format!("slow mode is on; you can send again in {}", wait(sent_at + period - now)))
+        let left = sent_at + period - now;
+        Error::Limited(format!("slow mode is on; you can send again in {}", wait(left)), left)
     };
     let last = query_one(
         conn,
@@ -570,6 +616,7 @@ impl MessageService for Api {
                         }
                         let (mentions_everyone, mention_role_ids) =
                             mentions(conn, &sdb.id, &access, &channel.id, &req.content).await?;
+                        let mention_user_ids = mentioned_users(conn, &req.content).await?;
                         let message = pb::Message {
                             id: new_id(),
                             server_id: sdb.id.clone(),
@@ -587,6 +634,7 @@ impl MessageService for Api {
                             auto_mod: None,
                             webhook: None,
                             shared: None,
+                            mention_user_ids,
                         };
                         insert_message(conn, &message, now).await?;
                         events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
@@ -728,6 +776,7 @@ impl MessageService for Api {
                         let growth = req.content.len() as i64 - message.content.len() as i64;
                         (message.mentions_everyone, message.mention_role_ids) =
                             mentions(conn, &sdb.id, &access, &message.channel_id, &req.content).await?;
+                        message.mention_user_ids = mentioned_users(conn, &req.content).await?;
                         message.content = req.content.clone();
                         message.edited_at = Some(timestamp(now));
                         conn.execute(
@@ -837,5 +886,6 @@ mod tests {
         assert!(!says_everyone("@everyoneelse"));
         assert!(!says_everyone("@@here"));
         assert_eq!(role_tokens("<@&ABC> and <@&ABC>, <@&> <@&D-E> <@&FG>"), ["ABC", "FG"]);
+        assert_eq!(user_tokens("<@AB> <@!AB> <@!CD> <@&EF> <@> <@G-H> <@IJ"), ["AB", "CD"]);
     }
 }

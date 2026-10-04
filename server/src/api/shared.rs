@@ -730,6 +730,7 @@ fn shown_here(mut message: pb::Message, server_id: &str, link: &LinkRow) -> pb::
 fn no_pings(message: &mut pb::Message) {
     message.mentions_everyone = false;
     message.mention_role_ids.clear();
+    message.mention_user_ids.clear();
 }
 
 /// Runs this server's own AutoMod over what one of its people writes in a
