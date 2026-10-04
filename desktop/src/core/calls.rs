@@ -3,16 +3,12 @@
 //! from the event streams), and the end-to-end encryption calls in direct
 //! messages use, byte for byte the same as the web app's
 //! (web/src/calls/frames.worker.ts), so a desktop app and a browser can
-//! share a call once the app has sound.
+//! share one.
 //!
-//! What's still to come here (docs/calls.md): the call itself. The plan is
-//! str0m as the WebRTC client (the same library the media part runs), cpal
-//! for the microphone and speakers, and Opus, talking to `CallService` the
-//! way web/src/calls/engine.ts does: join for a session and a place on the
-//! media part, keep the place every few seconds, answer the media part's
-//! offers over the "fuwa" data channel, and rejoin with the same session
-//! when it says it's restarting. Every participant's stream id is their
-//! account id, so each camera can later go to its own window.
+//! The call itself (voice channels, sound only so far) is in
+//! [`voice`](crate::core::voice): str0m, Opus and cpal, talking to
+//! `CallService` the way web/src/calls/engine.ts does. Direct-message calls
+//! will seal their frames with [`FrameKey`].
 //!
 //! [`Store`]: crate::core::store::Store
 
