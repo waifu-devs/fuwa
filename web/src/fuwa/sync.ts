@@ -4,6 +4,7 @@ import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
 import { ChannelType, type Event } from "@/gen/fuwa/v1/types_pb";
 import { dmEngine, startDms, stopDms, wipeDms } from "@/e2ee/engine";
 import { onLiveEvent, onRemoved } from "@/lib/notify";
+import { fromItems } from "@/lib/rail";
 import { reportStartup, reportTiming, type ReportTarget } from "@/lib/reports";
 import { makeApi, type Api } from "./client";
 import { followFriends } from "./friends";
@@ -171,6 +172,12 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
       Effect.catchAll((err) => (err.signedOut ? Effect.fail(err) : Effect.succeed({}))),
     );
     patchInstance(key, { notifications });
+    // So is how you arranged your servers; an older instance just keeps the order you joined in.
+    const rail = yield* call((signal) => api.account.getServerArrangement({}, { signal })).pipe(
+      Effect.map((r) => (r.updatedAt ? fromItems(r.items) : null)),
+      Effect.catchAll((err) => (err.signedOut ? Effect.fail(err) : Effect.succeed(null))),
+    );
+    patchInstance(key, { rail });
 
     const { servers } = yield* retrying(call((signal) => api.servers.listServers({}, { signal })));
     updateInstance(key, (i) => servers.reduce(addServer, i));

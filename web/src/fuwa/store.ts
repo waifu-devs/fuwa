@@ -22,6 +22,7 @@ import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Item } from "@/e2ee/vault";
 import { loadApplied, type Applied } from "@/lib/applied";
 import { emptyFriends, type FriendsState } from "@/lib/friends";
+import type { RailLayout } from "@/lib/rail";
 import { sortRoles } from "@/lib/permissions";
 
 /**
@@ -125,6 +126,8 @@ export type InstanceState = {
   synced: Record<string, boolean>;
   /** Your notification settings, by `notificationKey`. Only servers and channels that have some. */
   notifications: Record<string, NotificationSettings>;
+  /** How you arranged your servers on the rail (kept on your account); null until you do. */
+  rail: RailLayout | null;
   /** Profiles looked at, by user id. */
   profiles: Record<string, Profile>;
   /** Per server you can review applications for, once loaded: the ones waiting, oldest first. */
@@ -196,6 +199,7 @@ export function emptyInstance(key: string, url: string): InstanceState {
     unread: {},
     synced: {},
     notifications: {},
+    rail: null,
     profiles: {},
     applications: {},
     applied: loadApplied(key),
