@@ -64,10 +64,19 @@ impl Api {
 
     /// The caller's arrangement, without servers they've left since.
     async fn arrangement(&self, account: &Account) -> Result<(Vec<pb::ServerRailItem>, Option<i64>)> {
+        Self::not_an_agent(account)?;
         let (items, updated_at) = self.app.node()?.server_arrangement(&account.id).await?;
         let index = &self.app.index;
         let items = tidy_arrangement(items, |id| index.is_member(&account.id, id))?;
         Ok((items, updated_at))
+    }
+
+    /// Agents have no rail to arrange.
+    fn not_an_agent(account: &Account) -> Result<()> {
+        if account.kind == pb::AccountKind::Agent {
+            return Err(Error::denied("agents don't arrange servers"));
+        }
+        Ok(())
     }
 
     fn two_factor_on(account: &Account) -> Result<()> {
@@ -403,6 +412,7 @@ impl AccountService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
+                Self::not_an_agent(&account)?;
                 let index = &self.app.index;
                 let items = tidy_arrangement(request.into_inner().items, |id| index.is_member(&account.id, id))?;
                 let updated_at = self.app.node()?.set_server_arrangement(&account.id, items.clone()).await?;
@@ -474,6 +484,7 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
     let sessions = node.sessions(&account.id, &caller.token_hash).await?;
     let notifications = node.notification_settings(&account.id).await?;
     let (arrangement, _) = node.server_arrangement(&account.id).await?;
+    let arrangement = tidy_arrangement(arrangement, |id| app.index.is_member(&account.id, id))?;
     let settings = app.settings();
     let head = json!({
         "format": "fuwa.export.v1",
@@ -657,6 +668,35 @@ pub(crate) async fn export_server(sdb: &ServerDb, account_id: &str, tx: &ExportP
     Ok(emit(piece, starts_server).await)
 }
 
+/// Unicode format characters (category Cf): invisible, and some (bidi
+/// overrides and isolates) reorder the text around them.
+fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{ad}'
+            | '\u{600}'..='\u{605}'
+            | '\u{61c}'
+            | '\u{6dd}'
+            | '\u{70f}'
+            | '\u{890}'..='\u{891}'
+            | '\u{8e2}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206f}'
+            | '\u{feff}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{110bd}'
+            | '\u{110cd}'
+            | '\u{13430}'..='\u{1343f}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0001}'
+            | '\u{e0020}'..='\u{e007f}'
+    )
+}
+
 /// Checks an arrangement and keeps only what applies: servers the person is
 /// in (`member`), each once, in folders that still hold one. Refuses one over
 /// the caps or with a malformed folder.
@@ -674,7 +714,8 @@ fn tidy_arrangement(items: Vec<pb::ServerRailItem>, member: impl Fn(&str) -> boo
                 if !id_ok || !folders.insert(f.id.as_str()) {
                     return Err(Error::invalid("a folder's id is missing, malformed or used twice"));
                 }
-                if f.name.chars().count() > FOLDER_NAME_CHARS || f.name.chars().any(char::is_control) {
+                if f.name.chars().count() > FOLDER_NAME_CHARS || f.name.chars().any(|c| c.is_control() || invisible(c))
+                {
                     return Err(Error::invalid("folder names are up to 32 characters"));
                 }
                 if f.color > 0xff_ffff {
@@ -770,6 +811,13 @@ mod tests {
         assert!(tidy_arrangement(many, any).is_err());
         let folders: Vec<_> = (0..201).map(|n| folder(&format!("f{n}"), &["a"])).collect();
         assert!(tidy_arrangement(folders, any).is_err());
+        for sneaky in ["\u{202e}gnp.exe", "a\u{2066}b", "zero\u{200b}width"] {
+            let mut f = folder("f", &["a"]);
+            if let Some(Item::Folder(x)) = &mut f.item {
+                x.name = sneaky.into();
+            }
+            assert!(tidy_arrangement(vec![f], any).is_err());
+        }
         // Exactly 32 characters (not bytes) is fine.
         let mut wide = folder("f", &["a"]);
         if let Some(Item::Folder(f)) = &mut wide.item {

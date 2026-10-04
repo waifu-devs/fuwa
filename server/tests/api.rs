@@ -5434,6 +5434,9 @@ async fn agents_are_made_by_people_and_added_by_managers() {
     let me_agent = me(&mut c, &token).await.unwrap();
     assert_eq!(me_agent.username, "helper");
     assert_eq!(sign_in(&mut c, "helper", "whatever123").await.unwrap_err().code(), Code::Unauthenticated);
+    // Agents have no rail to arrange.
+    let arranged = c.account.get_server_arrangement(authed(&token, pb::GetServerArrangementRequest {})).await;
+    assert_eq!(arranged.unwrap_err().code(), Code::PermissionDenied);
     let listed = c.agents.list_agents(authed(&owner, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents;
     assert_eq!(listed.len(), 1);
     assert!(listed[0].last_active_at.is_some(), "using the token shows");

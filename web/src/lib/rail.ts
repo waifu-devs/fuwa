@@ -137,7 +137,7 @@ export function editFolder(layout: RailLayout, id: string, change: Partial<Omit<
   return layout.flatMap((e): RailLayout => {
     if (e.kind !== "folder" || e.folder.id !== id) return [e];
     if (!change) return e.folder.servers.map((s) => ({ kind: "server", id: s }));
-    return [{ kind: "folder", folder: { ...e.folder, ...change, name: (change.name ?? e.folder.name).trim().slice(0, FOLDER_NAME_MAX) } }];
+    return [{ kind: "folder", folder: { ...e.folder, ...change, name: cleanName(change.name ?? e.folder.name) } }];
   });
 }
 
@@ -186,3 +186,6 @@ export function folderLabel(folder: RailFolder, servers: Map<string, { name: str
   const names = folder.servers.map((id) => servers.get(id)?.name ?? "").filter(Boolean);
   return names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ") || "Folder";
 }
+
+/** A folder name as the instance takes it: no invisible or control characters, trimmed, 32 characters at most. */
+export const cleanName = (name: string) => [...name.replace(/[\p{Cc}\p{Cf}]/gu, "").trim()].slice(0, FOLDER_NAME_MAX).join("").trim();

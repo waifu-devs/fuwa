@@ -60,6 +60,7 @@ test("folders are renamed, recolored and dissolved in place", () => {
     kind: "folder",
     folder: { id: "g", name: "Games", color: 0xff66aa, servers: ["b", "c"] },
   });
+  assert.equal((editFolder(layout, "g", { name: "\u202egnp.exe\u200b" })[1] as { folder: { name: string } }).folder.name, "gnp.exe");
   assert.deepEqual(editFolder(layout, "g", null), [s("a"), s("b"), s("c"), s("d")]);
   assert.deepEqual(folderOf(layout, "d", fixedId), [s("a"), f("g", ["b", "c"]), f("new", ["d"])]);
   assert.match(folderId(), /^f-[0-9a-z]{1,30}$/);
