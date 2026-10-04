@@ -23,6 +23,12 @@ use crate::twofactor;
 /// Messages read from a server at a time while exporting.
 const EXPORT_PAGE: i64 = 500;
 
+/// What one server arrangement may hold, so a row stays a few tens of KB.
+const ARRANGED_SERVERS: usize = 1000;
+const ARRANGED_FOLDERS: usize = 200;
+const FOLDER_ID_CHARS: usize = 32;
+const FOLDER_NAME_CHARS: usize = 32;
+
 type ExportStream = Pin<Box<dyn Stream<Item = Result<pb::ExportDataResponse, Status>> + Send>>;
 
 impl Api {
@@ -54,6 +60,14 @@ impl Api {
         }
         self.app.limiter.succeeded(&guesses);
         Ok(())
+    }
+
+    /// The caller's arrangement, without servers they've left since.
+    async fn arrangement(&self, account: &Account) -> Result<(Vec<pb::ServerRailItem>, Option<i64>)> {
+        let (items, updated_at) = self.app.node()?.server_arrangement(&account.id).await?;
+        let index = &self.app.index;
+        let items = tidy_arrangement(items, |id| index.is_member(&account.id, id))?;
+        Ok((items, updated_at))
     }
 
     fn two_factor_on(account: &Account) -> Result<()> {
@@ -368,6 +382,36 @@ impl AccountService for Api {
         )
     }
 
+    async fn get_server_arrangement(
+        &self,
+        request: Request<pb::GetServerArrangementRequest>,
+    ) -> Result<Response<pb::GetServerArrangementResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let (items, updated_at) = self.arrangement(&account).await?;
+                Ok(pb::GetServerArrangementResponse { items, updated_at: updated_at.map(timestamp) })
+            }
+            .await,
+        )
+    }
+
+    async fn set_server_arrangement(
+        &self,
+        request: Request<pb::SetServerArrangementRequest>,
+    ) -> Result<Response<pb::SetServerArrangementResponse>, Status> {
+        respond(
+            async {
+                let account = self.account(request.metadata()).await?;
+                let index = &self.app.index;
+                let items = tidy_arrangement(request.into_inner().items, |id| index.is_member(&account.id, id))?;
+                let updated_at = self.app.node()?.set_server_arrangement(&account.id, items.clone()).await?;
+                Ok(pb::SetServerArrangementResponse { items, updated_at: Some(timestamp(updated_at)) })
+            }
+            .await,
+        )
+    }
+
     type ExportDataStream = ExportStream;
 
     async fn export_data(&self, request: Request<pb::ExportDataRequest>) -> Result<Response<ExportStream>, Status> {
@@ -429,6 +473,7 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
     let profile = node.profile(&account.id).await?.ok_or(Error::NotFound("account"))?;
     let sessions = node.sessions(&account.id, &caller.token_hash).await?;
     let notifications = node.notification_settings(&account.id).await?;
+    let (arrangement, _) = node.server_arrangement(&account.id).await?;
     let settings = app.settings();
     let head = json!({
         "format": "fuwa.export.v1",
@@ -472,6 +517,17 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
             "muted_until": wire_time(&n.muted_until),
             "suppress_everyone": n.suppress_everyone,
         })).collect::<Vec<_>>(),
+        "server_arrangement": arrangement.iter().filter_map(|item| match &item.item {
+            Some(pb::server_rail_item::Item::ServerId(id)) => Some(json!({ "server_id": id })),
+            Some(pb::server_rail_item::Item::Folder(f)) => Some(json!({
+                "folder": {
+                    "name": f.name,
+                    "color": (f.color != 0).then(|| format!("#{:06x}", f.color)),
+                    "server_ids": f.server_ids,
+                },
+            })),
+            None => None,
+        }).collect::<Vec<_>>(),
     });
     let mut head = serde_json::to_string_pretty(&head).map_err(|err| Error::internal(err.to_string()))?;
     head.truncate(head.trim_end().len() - 1); // the closing brace, reopened for the servers
@@ -599,4 +655,126 @@ pub(crate) async fn export_server(sdb: &ServerDb, account_id: &str, tx: &ExportP
     }
     piece.push_str("]}");
     Ok(emit(piece, starts_server).await)
+}
+
+/// Checks an arrangement and keeps only what applies: servers the person is
+/// in (`member`), each once, in folders that still hold one. Refuses one over
+/// the caps or with a malformed folder.
+fn tidy_arrangement(items: Vec<pb::ServerRailItem>, member: impl Fn(&str) -> bool) -> Result<Vec<pb::ServerRailItem>> {
+    use pb::server_rail_item::Item;
+    let mut servers = 0;
+    let mut folders = std::collections::HashSet::new();
+    for item in &items {
+        match &item.item {
+            Some(Item::ServerId(_)) => servers += 1,
+            Some(Item::Folder(f)) => {
+                servers += f.server_ids.len();
+                let id_ok = (1..=FOLDER_ID_CHARS).contains(&f.id.len())
+                    && f.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+                if !id_ok || !folders.insert(f.id.as_str()) {
+                    return Err(Error::invalid("a folder's id is missing, malformed or used twice"));
+                }
+                if f.name.chars().count() > FOLDER_NAME_CHARS || f.name.chars().any(char::is_control) {
+                    return Err(Error::invalid("folder names are up to 32 characters"));
+                }
+                if f.color > 0xff_ffff {
+                    return Err(Error::invalid("a folder's color is 0xRRGGBB"));
+                }
+            }
+            None => {}
+        }
+    }
+    if servers > ARRANGED_SERVERS || folders.len() > ARRANGED_FOLDERS {
+        return Err(Error::invalid("an arrangement holds up to 1000 servers and 200 folders"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut keep = |id: &String| member(id) && seen.insert(id.clone());
+    Ok(items
+        .into_iter()
+        .filter_map(|item| match item.item? {
+            Item::ServerId(id) => keep(&id).then_some(pb::ServerRailItem { item: Some(Item::ServerId(id)) }),
+            Item::Folder(mut f) => {
+                f.server_ids.retain(|id| keep(id));
+                f.name = f.name.trim().to_string();
+                (!f.server_ids.is_empty()).then_some(pb::ServerRailItem { item: Some(Item::Folder(f)) })
+            }
+        })
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pb::server_rail_item::Item;
+
+    fn server(id: &str) -> pb::ServerRailItem {
+        pb::ServerRailItem { item: Some(Item::ServerId(id.into())) }
+    }
+
+    fn folder(id: &str, servers: &[&str]) -> pb::ServerRailItem {
+        pb::ServerRailItem {
+            item: Some(Item::Folder(pb::ServerFolder {
+                id: id.into(),
+                name: " Games ".into(),
+                color: 0xff66aa,
+                server_ids: servers.iter().map(|s| s.to_string()).collect(),
+            })),
+        }
+    }
+
+    #[test]
+    fn arrangements_keep_what_applies() {
+        let member = |id: &str| id != "left";
+        let tidy = tidy_arrangement(
+            vec![
+                server("a"),
+                folder("f1", &["b", "left", "a", "c"]),
+                folder("f2", &["left"]),
+                server("left"),
+                server("c"),
+                server("d"),
+                pb::ServerRailItem { item: None },
+            ],
+            member,
+        )
+        .unwrap();
+        assert_eq!(tidy.len(), 3);
+        assert_eq!(tidy[0], server("a"));
+        let Some(Item::Folder(f)) = &tidy[1].item else { panic!("a folder") };
+        assert_eq!((f.name.as_str(), f.server_ids.clone()), ("Games", vec!["b".to_string(), "c".to_string()]));
+        assert_eq!(tidy[2], server("d"));
+    }
+
+    #[test]
+    fn arrangements_refuse_what_is_malformed() {
+        let any = |_: &str| true;
+        for bad in [
+            vec![folder("", &["a"])],
+            vec![folder("no spaces", &["a"])],
+            vec![folder(&"x".repeat(33), &["a"])],
+            vec![folder("f", &["a"]), folder("f", &["b"])],
+        ] {
+            assert!(tidy_arrangement(bad, any).is_err());
+        }
+        let mut long = folder("f", &["a"]);
+        if let Some(Item::Folder(f)) = &mut long.item {
+            f.name = "ü".repeat(33);
+        }
+        assert!(tidy_arrangement(vec![long], any).is_err());
+        let mut dark = folder("f", &["a"]);
+        if let Some(Item::Folder(f)) = &mut dark.item {
+            f.color = 0x100_0000;
+        }
+        assert!(tidy_arrangement(vec![dark], any).is_err());
+        let many: Vec<_> = (0..1001).map(|n| server(&n.to_string())).collect();
+        assert!(tidy_arrangement(many, any).is_err());
+        let folders: Vec<_> = (0..201).map(|n| folder(&format!("f{n}"), &["a"])).collect();
+        assert!(tidy_arrangement(folders, any).is_err());
+        // Exactly 32 characters (not bytes) is fine.
+        let mut wide = folder("f", &["a"]);
+        if let Some(Item::Folder(f)) = &mut wide.item {
+            f.name = "ü".repeat(32);
+        }
+        assert!(tidy_arrangement(vec![wide], any).is_ok());
+    }
 }

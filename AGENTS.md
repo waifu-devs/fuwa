@@ -25,7 +25,10 @@
   - `api/`: one file per gRPC service, all implemented on `Api`.
   - `node.rs`: the instance database (`node.db`): accounts and profiles,
     sessions (devices), two-step sign-in (TOTP secrets, backup codes, sign-in
-    tickets), notification settings, meta (the install id, the announcement).
+    tickets), notification settings, server arrangements (each person's rail
+    order and folders, `AccountService.Get/SetServerArrangement`; the web side
+    is `lib/rail.ts`, `components/RailFolder.tsx` and `hooks/use-rail-arrange.ts`),
+    meta (the install id, the announcement).
     Admins can turn an account off (`disabled_at`): it loses its sessions and
     can't sign in until it's turned back on. What belongs to a person but not to
     one server lives here; a server file keeps only a copy of what its members
