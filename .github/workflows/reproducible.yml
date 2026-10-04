@@ -3,20 +3,16 @@ name: Reproducible build
 # Builds the release binary twice from scratch, minutes apart, and fails if the
 # two differ by a single byte. A client can only check that a server runs an
 # official build if anyone can rebuild that build and get the same bytes.
+#
+# Slow (two from-scratch builds, about 10 minutes), so it runs only when started by
+# hand: Actions > Reproducible build > Run workflow. (It used to start a skipped run
+# for every push and pull request.)
 on:
-  pull_request:
-  push:
-    branches: [master]
-  # Actions > Reproducible build > Run workflow.
   workflow_dispatch:
 
 jobs:
   twice:
     name: Same commit, same binary
-    # Slow (two from-scratch builds, about 10 minutes), so it's off on pull requests
-    # and pushes for now and only runs when started by hand. Delete this line to
-    # turn it back on.
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

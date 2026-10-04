@@ -628,6 +628,14 @@
   Dockerfile's `SOURCE_DATE_EPOCH`, and pin any new base image by digest.
   This is what will let clients check, later, that a server runs an official
   build, and one build covers every part of a split instance.
+- CI runs only the jobs a change can affect, and Publish image builds and
+  redeploys fuwa.chat only when something the image is built from changed
+  since the last image it published. `.github/scripts/changes.sh` decides
+  both: a job is skipped only when every changed file is on its list of files
+  that can't affect it, so a new folder runs everything until it's listed
+  there. A pull request that changes what the Dockerfile builds with (the
+  Dockerfile, a manifest, the web build's config) also builds the image in
+  CI. Require the "CI passed" check, not the jobs under it.
 - Every part of a split instance (`FUWA_ROLE`) is the same binary; the part is
   configuration, never a build feature. Handlers that take a `server_id` run
   on the shard holding it, so they read only that server's file and reach

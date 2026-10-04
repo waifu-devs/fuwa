@@ -6,6 +6,12 @@ name: Publish image
 # machines alike and comes with a signed record of the commit and workflow that
 # built it. Anyone can check that record:
 #   gh attestation verify oci://ghcr.io/waifu-devs/fuwa:latest --repo waifu-devs/fuwa
+#
+# A merge that changes nothing the image is built from (docs, the desktop app,
+# .railway/, other workflows: .github/scripts/changes.sh) builds and redeploys
+# nothing; the next one that does carries it. A merge that lands while an earlier
+# one is still building stops that build and builds both, so a burst of merges
+# builds and redeploys fuwa.chat once. A redeploy that has started always finishes.
 on:
   push:
     branches: [master]
@@ -22,11 +28,46 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
+  # Whether anything the image is built from changed since the last run on master
+  # that finished (a release tag always builds).
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      image: ${{ steps.changes.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: changes
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF" = refs/heads/master ]; then
+            base=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/publish.yml/runs?branch=master&event=push&status=success&per_page=1" \
+              --jq '.workflow_runs[0].head_sha // empty') || base=
+            echo "last published from: ${base:-none}"
+            .github/scripts/changes.sh since "${base:-none}" | grep '^image=' >> "$GITHUB_OUTPUT"
+          else
+            .github/scripts/changes.sh all | grep '^image=' >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   # Each architecture builds on a machine of its own kind (emulating ARM would
   # take an hour of Rust), and pushes its image by digest alone. The next job
   # puts the two under the tags.
   build:
     name: Build (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
+    # On master a newer build stops this one (a run it stops never counts as
+    # published, so the newer one compares against the last that finished and
+    # carries this one's changes). Tags always finish.
+    concurrency:
+      group: publish-build-${{ github.ref }}-${{ matrix.arch }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/master' }}
     strategy:
       matrix:
         include:

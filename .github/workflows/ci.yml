@@ -2,17 +2,62 @@ name: CI
 
 on:
   pull_request:
+    # closed: merging or closing a pull request stops its run (below).
+    types: [opened, synchronize, reopened, closed]
   push:
     branches: [master]
   # Actions > CI > Run workflow runs everything, the slow jobs included.
   workflow_dispatch:
 
+# One run per pull request: a new push stops the run for the old one, and merging
+# stops it too, since master's own run then tests the merged code. Runs on master
+# all finish, so each commit there gets its result.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
+  # Which jobs this change needs (.github/scripts/changes.sh): a job whose files didn't
+  # change is skipped, and "CI passed" stands for all of them.
+  changes:
+    name: What changed
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      server: ${{ steps.changes.outputs.server }}
+      desktop: ${{ steps.changes.outputs.desktop }}
+      proto: ${{ steps.changes.outputs.proto }}
+      docker: ${{ steps.changes.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: changes
+        shell: bash
+        run: |
+          case "$EVENT" in
+            pull_request) .github/scripts/changes.sh pr "$PR" >> "$GITHUB_OUTPUT" ;;
+            # The image check is for pull requests: on master, Publish image builds it.
+            push) .github/scripts/changes.sh since "$BEFORE" | sed 's/^docker=.*/docker=false/' >> "$GITHUB_OUTPUT" ;;
+            *) .github/scripts/changes.sh all >> "$GITHUB_OUTPUT" ;;
+          esac
+          cat "$GITHUB_OUTPUT"
+        env:
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+
   server:
     # One Rust build for both: the tests run with the web client built in, and a
     # second clippy (which reuses the dependencies) keeps the API-only build clean.
     # The web client needs its WebAssembly (e2ee-wasm) built first.
     name: Server and web client (fmt, clippy, tests, build)
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +81,11 @@ jobs:
         with:
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
+      # Only master saves the cache, which every pull request starts from; a pull
+      # request's own copy would only crowd the others out of the 10 GB.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       # The version e2ee-wasm/Cargo.toml pins.
       - uses: taiki-e/install-action@v2
         with:
@@ -60,6 +109,8 @@ jobs:
     # Its own workspace (GPUI stays out of the server's lock file); its tests
     # run a real instance in-process, so they build the server too.
     name: Desktop app (fmt, clippy, tests)
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -77,12 +128,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
 
   proto:
     name: Protocol (buf lint)
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,9 +152,12 @@ jobs:
 
   docker:
     name: Docker image
-    # Slow (about 8 minutes), so it's off on pull requests and pushes for now and
-    # only runs when CI is started by hand. Delete this line to turn it back on.
-    if: github.event_name == 'workflow_dispatch'
+    # About 8 minutes from scratch, so it runs only for a pull request that changes
+    # what the image is built with (the Dockerfile, manifests, the web build's
+    # config: .github/scripts/changes.sh), or when CI is started by hand. It starts
+    # from the layers Publish image keeps for master and saves none of its own.
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -111,8 +168,7 @@ jobs:
           push: false
           load: true
           tags: fuwa:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=amd64
       - name: Starts, answers its health check and serves the app
         run: |
           docker run -d --name fuwa -p 8080:8080 -e FUWA_TELEMETRY=off fuwa:ci
@@ -126,3 +182,14 @@ jobs:
           done
           docker logs fuwa
           exit 1
+
+  # The one check to require: it passes when every job this change needed passed.
+  passed:
+    name: CI passed
+    needs: [changes, server, desktop, proto, docker]
+    if: always() && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo "Every job this change needed passed."
