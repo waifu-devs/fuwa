@@ -170,6 +170,7 @@ impl FuwaApp {
                     self.composer.update(cx, |s, cx| s.focus(window, cx));
                 }
             }
+            "insertTimestamp" => self.open_time_picker(window, cx),
             "toggleMembers" => self.members_open = !self.members_open,
             "openSettings" => {
                 if self.settings.is_some() {

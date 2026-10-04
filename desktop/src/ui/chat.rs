@@ -29,6 +29,7 @@ use crate::ui::mentions::{Look, Pick, SCHEME, mention_links};
 use crate::ui::motion;
 use crate::ui::text::{clock, images_as_links, ms_of, when};
 use crate::ui::theme::{Palette, alpha, corner, mix};
+use crate::ui::timestamps::timestamp_nodes;
 use crate::ui::widgets::{
     app_badge, avatar, card, conn_dot, error_line, fuwa_mark, icon, icon_button, icon_button_in, is_agent, pal,
     primary_button, soft_button,
@@ -44,7 +45,7 @@ pub(crate) struct Who {
 fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg {
     Msg {
         id,
-        shown: images_as_links(&content),
+        shown: timestamp_nodes(&images_as_links(&content)),
         user: who.user,
         name: who.name,
         color: who.color,
@@ -415,7 +416,7 @@ impl FuwaApp {
                             name: author_name.clone(),
                             color: *color,
                             content: m.content.clone(),
-                            shown: mention_links(&images_as_links(&m.content), &look.with(&m.emojis)),
+                            shown: mention_links(&timestamp_nodes(&images_as_links(&m.content)), &look.with(&m.emojis)),
                             mentions_me: i.pings_me(&server, m, suppress),
                             editing,
                             can_delete,
@@ -447,7 +448,7 @@ impl FuwaApp {
                         name: i.display_name(Some(&server), &me),
                         color: i.name_color(&server, &me).map(|c| rgb(c).into()),
                         content: p.content.clone(),
-                        shown: mention_links(&images_as_links(&p.content), &look.with(&p.emojis)),
+                        shown: mention_links(&timestamp_nodes(&images_as_links(&p.content)), &look.with(&p.emojis)),
                         mentions_me: false,
                         editing: false,
                         can_delete: false,
@@ -593,6 +594,7 @@ impl FuwaApp {
         self.fresh.retain(|_, at| at.elapsed() < Duration::from_secs(2));
         self.poll_tick(&rows, cx);
         self.rows = Rc::new(rows);
+        self.time_tick(cx);
     }
 
     pub(crate) fn render_main(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -828,6 +830,7 @@ impl FuwaApp {
                 .into_any_element();
         }
         let emoji_panel = self.emoji_open.then(|| self.emoji_panel(&p, cx));
+        let time_panel = self.time_picker_panel(&p, cx);
         let recording = self.recording_here();
         // The microphone takes the send button's place while nothing's typed, as on the web.
         let voice = (recording || (!typed && self.can_record())).then(|| self.voice_button(&p, cx));
@@ -848,6 +851,7 @@ impl FuwaApp {
             .pb(px(20.0))
             .when_some(self.picker.clone(), |el, picker| el.child(self.picker_list(picker, &p, cx)))
             .children(emoji_panel)
+            .children(time_panel)
             .child(
                 div()
                     .flex()
@@ -868,7 +872,7 @@ impl FuwaApp {
                         inset: false,
                     }])
                     .child(field)
-                    .when(!recording, |el| el.child(self.emoji_button(&p, cx)))
+                    .when(!recording, |el| el.child(self.timestamp_button(&p, cx)).child(self.emoji_button(&p, cx)))
                     .when(self.can_poll(), |el| {
                         el.child(
                             icon_button("poll-open", "chart-column", &p)

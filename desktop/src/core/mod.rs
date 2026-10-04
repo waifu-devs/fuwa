@@ -35,6 +35,7 @@ pub mod sso;
 pub mod store;
 mod sync;
 pub mod themes;
+pub mod timestamps;
 pub mod updates;
 pub mod vault;
 pub mod voice;

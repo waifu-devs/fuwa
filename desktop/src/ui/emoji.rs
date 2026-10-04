@@ -392,7 +392,10 @@ impl gpui_kit::component::text::MarkdownPlugin for Plugin {
 
 /// Markdown with the emoji plugin, kept between frames.
 pub fn markdown_extensions() -> gpui_kit::component::text::MarkdownExtensions {
-    gpui_kit::component::text::MarkdownExtensions::default().plugin(Plugin).parser_revision(1)
+    gpui_kit::component::text::MarkdownExtensions::default()
+        .plugin(Plugin)
+        .plugin(crate::ui::timestamps::Plugin)
+        .parser_revision(2)
 }
 
 #[cfg(test)]
