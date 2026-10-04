@@ -495,6 +495,7 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
                 message_id: args.text("message_id")?,
                 content: args.text("content")?,
                 channel_id: args.optional("channel_id")?,
+                ..Default::default()
             };
             call!(cx, message_service_client::MessageServiceClient.update_message(req))
                 .map(|r| json!({ "message": view::messages(r.message.as_slice(), std::slice::from_ref(&cx.me)).pop() }))
