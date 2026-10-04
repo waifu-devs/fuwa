@@ -41,6 +41,7 @@ pub(crate) enum Page {
     Accounts,
     Keyboard,
     Privacy,
+    Updates,
     About,
 }
 
@@ -48,7 +49,7 @@ pub(crate) enum Page {
 const ACCOUNT_PAGES: [(Page, &str, &str); 2] =
     [(Page::Profile, "user-round-pen", "Profile"), (Page::Security, "key-round", "Password and devices")];
 
-const PAGES: [(Page, &str, &str); 9] = [
+const PAGES: [(Page, &str, &str); 10] = [
     (Page::Appearance, "palette", "Appearance"),
     (Page::Background, "image", "Background"),
     (Page::Motion, "sparkles", "Motion"),
@@ -57,6 +58,7 @@ const PAGES: [(Page, &str, &str); 9] = [
     (Page::Accounts, "user", "Accounts"),
     (Page::Keyboard, "keyboard", "Keyboard"),
     (Page::Privacy, "shield-check", "Privacy"),
+    (Page::Updates, "refresh-cw", "Updates"),
     (Page::About, "info", "About"),
 ];
 
@@ -352,6 +354,11 @@ impl SettingsView {
                 "Privacy".into(),
                 "What this app tells anyone, and only if you let it.".into(),
                 self.privacy_page(prefs, p, window, cx),
+            ),
+            Page::Updates => (
+                "Updates".into(),
+                "New versions of the app, checked before they run.".into(),
+                self.updates_page(prefs, p, window, cx),
             ),
             Page::About => {
                 let body = div()

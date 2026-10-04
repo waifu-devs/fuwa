@@ -7,7 +7,7 @@
     "dev": "vite",
     "wasm": "node scripts/e2ee.mjs",
     "build": "tsc --noEmit && vite build",
-    "generate": "buf generate --template buf.gen.yaml",
+    "generate": "buf generate --template buf.gen.yaml && cp ../proto/fuwa/v1/features.json src/gen/features.json",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "doctor": "react-doctor",

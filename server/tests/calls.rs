@@ -31,6 +31,7 @@ async fn start(dir: &Path) -> Instance {
     let config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         "FUWA_MEDIA_PORT" => Some("0".into()),
         "FUWA_MEDIA_ADDRESSES" => Some("127.0.0.1".into()),
         "FUWA_ICE_URLS" => Some("stun:stun.example.com:3478,turn:turn.example.com:3478".into()),
