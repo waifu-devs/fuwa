@@ -367,6 +367,7 @@ async fn a_community_end_to_end() {
                 server_id: sid.clone(),
                 message_id: sent[0].id.clone(),
                 content: "hijacked".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -381,6 +382,7 @@ async fn a_community_end_to_end() {
                 server_id: sid.clone(),
                 message_id: sent[0].id.clone(),
                 content: "message zero".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -2052,6 +2054,7 @@ async fn server_settings_and_moderation() {
                 server_id: sid.clone(),
                 message_id: welcomed[0].id.clone(),
                 content: "hi".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -4587,6 +4590,7 @@ async fn automod_catches_messages() {
                 server_id: server.id.clone(),
                 message_id: sent.id.clone(),
                 content: "a scammer!".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -4980,6 +4984,134 @@ async fn smart_filter_checks_stop_at_the_daily_limit() {
     c.admin.update_settings(authed(&admin, raised)).await.unwrap();
     send(&mut c, &member, &server.id, &general.id, "five").await.unwrap();
     assert_eq!(usage(&mut c, &owner, &server.id).await.automod_checks_today, 3);
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn emoji_from_other_servers_go_with_the_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (friend, _, _) = sign_up(&mut c, "friend").await;
+    let emotes = create_server(&mut c, &owner, "Emotes", true).await;
+    let lounge = create_server(&mut c, &owner, "Lounge", true).await;
+    join(&mut c, &friend, &lounge.id).await;
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: lounge.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.r#type == pb::ChannelType::Text as i32)
+        .unwrap();
+
+    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, png(300, 1)).await;
+    let wave = c
+        .emojis
+        .create_emoji(authed(
+            &owner,
+            pb::CreateEmojiRequest { server_id: emotes.id.clone(), name: "wave".into(), url: picture.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .emoji
+        .unwrap();
+    let lounge_picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, png(200, 2)).await;
+    let local = c
+        .emojis
+        .create_emoji(authed(
+            &owner,
+            pb::CreateEmojiRequest { server_id: lounge.id.clone(), name: "home".into(), url: lounge_picture },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .emoji
+        .unwrap();
+    let token = format!("<:wave:{}>", wave.id);
+    let icon = upload(&mut c, &instance, &owner, pb::MediaPurpose::ServerIcon, png(100, 3)).await;
+    let client = c.messages.clone();
+    let sent = |who: &str, content: String, emojis: Vec<pb::Emoji>| {
+        let mut messages = client.clone();
+        let request = authed(
+            who,
+            pb::SendMessageRequest {
+                server_id: lounge.id.clone(),
+                channel_id: general.id.clone(),
+                content,
+                emojis,
+                ..Default::default()
+            },
+        );
+        async move { messages.send_message(request).await.unwrap().into_inner().message.unwrap() }
+    };
+
+    // Someone in both servers brings the emoji along; it's stored as the
+    // instance has it, without who made it or its size.
+    let message = sent(&owner, format!("hi {token} <:home:{}>", local.id), vec![wave.clone(), local.clone()]).await;
+    assert_eq!(message.emojis.len(), 1, "{:?}", message.emojis);
+    let carried = &message.emojis[0];
+    assert_eq!(
+        (carried.id.as_str(), carried.server_id.as_str(), carried.name.as_str(), carried.url.as_str()),
+        (wave.id.as_str(), emotes.id.as_str(), "wave", picture.as_str())
+    );
+    assert!(carried.creator_id.is_empty() && carried.size == 0 && !carried.animated);
+
+    // Someone who isn't in the emoji's server can't. Only the id sent counts:
+    // the name and picture come from the server, whatever was sent, and an
+    // id it has no emoji for is left out.
+    assert!(sent(&friend, format!("hi {token}"), vec![wave.clone()]).await.emojis.is_empty());
+    let forged = pb::Emoji { url: icon, name: "renamed".into(), ..wave.clone() };
+    let back = sent(&owner, format!("hi {token}"), vec![forged]).await.emojis;
+    assert_eq!((back[0].name.as_str(), back[0].url.as_str()), ("wave", picture.as_str()));
+    let made_up = pb::Emoji { id: "madeup0000000000".into(), ..wave.clone() };
+    assert!(sent(&owner, "hi <:wave:madeup0000000000>".into(), vec![made_up]).await.emojis.is_empty());
+    let elsewhere = pb::Emoji {
+        url: format!("https://evil.example{}", &picture[picture.find("/media/").unwrap()..]),
+        ..wave.clone()
+    };
+    assert_eq!(sent(&owner, format!("hi {token}"), vec![elsewhere]).await.emojis[0].url, picture);
+    // One the text doesn't use is left out.
+    assert!(sent(&owner, "no emoji here".into(), vec![wave.clone()]).await.emojis.is_empty());
+
+    // Others read it back with the emoji.
+    let listed = c
+        .messages
+        .list_messages(authed(
+            &friend,
+            pb::ListMessagesRequest {
+                server_id: lounge.id.clone(),
+                channel_id: general.id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .messages;
+    let first = listed.iter().find(|m| m.id == message.id).unwrap();
+    assert_eq!(first.emojis, message.emojis);
+
+    // Edits keep the ones the text still uses and drop the rest.
+    let edit = |content: String| pb::UpdateMessageRequest {
+        server_id: lounge.id.clone(),
+        message_id: message.id.clone(),
+        content,
+        ..Default::default()
+    };
+    let kept = c.messages.update_message(authed(&owner, edit(format!("still {token}")))).await.unwrap();
+    assert_eq!(kept.into_inner().message.unwrap().emojis.len(), 1);
+    let dropped = c.messages.update_message(authed(&owner, edit("gone".into()))).await.unwrap();
+    assert!(dropped.into_inner().message.unwrap().emojis.is_empty());
+    // Too long an edit is refused before anything reads it, even of a
+    // message that isn't there.
+    let long = pb::UpdateMessageRequest { message_id: "nothere000000000".into(), ..edit("<:a".repeat(5000)) };
+    let refused = c.messages.update_message(authed(&friend, long)).await.unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
     instance.stop().await;
 }
 
@@ -5594,7 +5726,8 @@ async fn webhooks_post_into_channels() {
                     channel_id: String::new(),
                     server_id: server.id.clone(),
                     message_id: message.id.clone(),
-                    content: "mine now".into()
+                    content: "mine now".into(),
+                    emojis: vec![],
                 }
             ))
             .await
@@ -6597,6 +6730,7 @@ async fn channels_shared_between_servers() {
                 message_id: hi.id.clone(),
                 content: "hi from guest".into(),
                 channel_id: String::new(),
+                emojis: vec![],
             },
         ))
         .await
