@@ -3,6 +3,7 @@ import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
 import type { AccountFilter, AutoModProviderSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
+import type { McpAccessMode } from "@/gen/fuwa/v1/agent_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
 import type { ChannelPlacement, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
 import type { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
@@ -1393,6 +1394,15 @@ export const deleteAgent = (key: string, agentId: string) =>
 export const addAgent = (key: string, serverId: string, username: string) =>
   call((signal) => api(key).agents.addAgent({ serverId, username: username.trim().replace(/^@/, "") }, { signal })).pipe(
     Effect.map((r) => r.member!),
+  );
+
+/** Which of a server's agents may use the instance's MCP endpoint (docs/mcp.md). */
+export const getMcpAccess = (key: string, serverId: string) =>
+  call((signal) => api(key).agents.getMcpAccess({ serverId }, { signal })).pipe(Effect.map((r) => r.access!));
+
+export const setMcpAccess = (key: string, serverId: string, mode: McpAccessMode, agentIds: string[]) =>
+  call((signal) => api(key).agents.setMcpAccess({ serverId, access: { mode, agentIds } }, { signal })).pipe(
+    Effect.map((r) => r.access!),
   );
 
 // ───────────────────────── Webhooks ─────────────────────────
