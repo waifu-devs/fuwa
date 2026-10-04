@@ -8,6 +8,7 @@ import { PictureCropper } from "@/components/PictureCropper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PICTURE, PICTURE_TYPES, type PictureKind } from "@/lib/pictures";
+import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
 const PURPOSE: Record<PictureKind, MediaPurpose> = {
@@ -135,7 +136,9 @@ export function PictureField({
 
   // A link that isn't one stays open so it can be fixed.
   const showLink = !compact && (linking || !isLink(value));
-  const shown = upload?.preview ?? (value && isLink(value) && !broken ? value.trim() : null);
+  // A typed link to another site isn't loaded (it would learn this person's
+  // address): only pictures on a trusted instance show before saving.
+  const shown = upload?.preview ?? ((value && isLink(value) && !broken && shownPicture(value.trim())) || null);
   const tile = (
     <motion.button
       type="button"

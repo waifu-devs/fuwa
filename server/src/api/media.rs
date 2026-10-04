@@ -59,12 +59,13 @@ impl MediaService for Api {
                         if !matches!(
                             purpose,
                             pb::MediaPurpose::ServerIcon
+                                | pb::MediaPurpose::Banner
                                 | pb::MediaPurpose::Emoji
                                 | pb::MediaPurpose::Avatar
                                 | pb::MediaPurpose::Attachment
                         ) {
                             return Err(Error::invalid(
-                                "only icons, emoji, webhook pictures and attachments are uploaded for a server",
+                                "only icons, banners, emoji, webhook pictures and attachments are uploaded for a server",
                             ));
                         }
                         let id = crate::id::parse_id("server_id", id)?;

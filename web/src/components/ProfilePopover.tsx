@@ -10,6 +10,7 @@ import { useFuwa } from "@/fuwa/store";
 import { MemberRoles } from "@/components/MemberRoles";
 import { ModerateDialog, useModeration, type ModAction } from "@/components/ModerateDialog";
 import { ProfileCard } from "@/components/ProfileCard";
+import { FriendActions } from "@/components/friends/FriendActions";
 import { isAgent, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { toast } from "@/lib/ui";
@@ -55,6 +56,8 @@ export function ProfilePopover({
     const status = s.instances[instanceKey]?.dms.status;
     return !me && !isAgent(user) && (status === "ready" || status === "starting");
   });
+  // Friends are people's, on instances that have them.
+  const canFriend = useFuwa((s) => !me && !isAgent(user) && s.instances[instanceKey]?.friends.status === "ready");
   const [opening, setOpening] = useState(false);
   const navigate = useNavigate();
 
@@ -87,7 +90,7 @@ export function ProfilePopover({
       <AnimatePresence>
         {open && (
           <Popover.Portal forceMount>
-            <Popover.Content forceMount side={roomy ? side : "bottom"} align="start" sideOffset={10} collisionPadding={12} className="z-50 outline-none">
+            <Popover.Content forceMount side={roomy ? side : "bottom"} align="start" sideOffset={10} collisionPadding={12} className="scroll-thin z-50 max-h-(--radix-popover-content-available-height) overflow-y-auto outline-none">
               <motion.div
                 initial={{ opacity: 0, scale: 0.92, y: 6 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -142,6 +145,16 @@ export function ProfilePopover({
                         className="size-3.5 opacity-80 transition-transform duration-300 group-hover:translate-x-0.5"
                       />
                     </motion.button>
+                  </motion.div>
+                )}
+                {canFriend && user && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ type: "spring", stiffness: 520, damping: 32, delay: 0.065 }}
+                    className="mt-2 rounded-2xl border bg-popover p-1.5 shadow-lg"
+                  >
+                    <FriendActions instanceKey={instanceKey} user={user} />
                   </motion.div>
                 )}
                 {canModerate && (

@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { CompassIcon, HashIcon, SettingsIcon } from "lucide-react";
+import { CompassIcon, HashIcon, SettingsIcon, UsersIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState, type Ref } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
@@ -7,7 +7,8 @@ import { useFuwa, type InstanceState } from "@/fuwa/store";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
 import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
-import { SPRING, SwapText } from "@/components/motion";
+import { Count, SPRING, SwapText } from "@/components/motion";
+import { waitingForYou } from "@/lib/friends";
 import { UserPanel } from "@/components/UserPanel";
 import { CallPanel } from "@/components/calls/CallPanel";
 import { DmList } from "@/components/dm/DmList";
@@ -66,6 +67,7 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
       </header>
       {inst.admin && <InstanceSettingsDialog open={settings} onOpenChange={setSettings} instanceKey={instanceKey} />}
       <div className="scroll-thin flex-1 overflow-y-auto p-2">
+        <FriendsLink instanceKey={instanceKey} onOpen={() => compact && setNavOpen(false)} />
         <Link
           to="/$instance"
           params={{ instance: instanceKey }}
@@ -97,6 +99,38 @@ export function InstanceSidebar({ instanceKey }: { instanceKey: string }) {
       <CallPanel />
       <UserPanel instanceKey={instanceKey} />
     </>
+  );
+}
+
+/** Friends, with how many requests wait for your answer. Hidden on instances from before friends. */
+function FriendsLink({ instanceKey, onOpen }: { instanceKey: string; onOpen: () => void }) {
+  const status = useFuwa((s) => s.instances[instanceKey]?.friends.status ?? "off");
+  const waiting = useFuwa((s) => waitingForYou(s.instances[instanceKey]?.friends.list ?? []));
+  if (status === "off" || status === "unsupported") return null;
+  return (
+    <Link
+      to="/$instance/friends"
+      params={{ instance: instanceKey }}
+      onClick={onOpen}
+      className="group flex items-center gap-2 rounded-lg px-2 py-2 text-sm font-bold text-muted-foreground transition hover:bg-muted hover:text-foreground data-[status=active]:bg-primary/15 data-[status=active]:text-primary"
+    >
+      <UsersIcon className="size-4 transition-transform duration-300 group-hover:scale-110" /> Friends
+      <AnimatePresence>
+        {waiting > 0 && (
+          <motion.span
+            key="waiting"
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            exit={{ scale: 0 }}
+            transition={{ type: "spring", stiffness: 600, damping: 18 }}
+            title={waiting === 1 ? "A friend request is waiting" : `${waiting} friend requests are waiting`}
+            className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1.5 text-[0.7rem] font-extrabold text-primary-foreground"
+          >
+            <Count value={waiting} max={99} />
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </Link>
   );
 }
 

@@ -195,10 +195,15 @@ impl Api {
         self.app.node()?.delete_account(&account.id).await?;
         // Their conversations stay for the other person in each; their devices go.
         self.app.dms()?.forget_account(&account.id).await?;
-        if let Err(err) = self.app.delete_media(&uploads).await {
-            tracing::warn!(account = %account.id, error = %err, "couldn't delete a deleted account's pictures");
+        // Nobody keeps them as a friend, a request or a block.
+        super::friends::forget_account(&self.app, &account.id).await?;
+        // Fixed messages: the cause can carry storage hostnames, and whose
+        // account it was stays out of the logs.
+        if self.app.delete_media(&uploads).await.is_err() {
+            crate::reports::server_error("account_pictures_cleanup_failed", None);
+            tracing::warn!("couldn't delete a deleted account's pictures");
         }
-        tracing::info!(account = %account.id, "account deleted");
+        tracing::info!("account deleted");
         Ok(())
     }
 }
@@ -483,6 +488,12 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
     let profile = node.profile(&account.id).await?.ok_or(Error::NotFound("account"))?;
     let sessions = node.sessions(&account.id, &caller.token_hash).await?;
     let notifications = node.notification_settings(&account.id).await?;
+    let friends = app.friends()?;
+    let links = friends.links(&account.id, now_ms()).await?;
+    let ids: Vec<&str> = links.iter().map(|l| l.other_id.as_str()).collect();
+    let names: std::collections::HashMap<String, String> =
+        node.accounts(&ids).await?.into_iter().map(|a| (a.id, a.username)).collect();
+    let friend_settings = friends.settings(&account.id).await?;
     let (arrangement, _) = node.server_arrangement(&account.id).await?;
     let arrangement = tidy_arrangement(arrangement, |id| app.index.is_member(&account.id, id))?;
     let settings = app.settings();
@@ -529,6 +540,25 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
             "muted_until": wire_time(&n.muted_until),
             "suppress_everyone": n.suppress_everyone,
         })).collect::<Vec<_>>(),
+        "friends": links.iter().map(|l| json!({
+            "user_id": l.other_id,
+            "username": names.get(&l.other_id),
+            "state": match l.state {
+                pb::FriendState::Friend => "friend",
+                pb::FriendState::Outgoing => "request sent",
+                pb::FriendState::Incoming => "request received",
+                pb::FriendState::Blocked => "blocked",
+                pb::FriendState::Unspecified => "none",
+            },
+            "since": time(l.created_at),
+            "expires_at": l.expires_at.map_or(Value::Null, time),
+        })).collect::<Vec<_>>(),
+        "friend_settings": {
+            "requests_from": friend_settings.requests_from().as_str_name(),
+            "direct_messages_from": friend_settings.direct_messages_from().as_str_name(),
+            "hide_online": friend_settings.hide_online,
+            "hide_mutual_friends": friend_settings.hide_mutual_friends,
+        },
         "server_arrangement": arrangement.iter().filter_map(|item| match &item.item {
             Some(pb::server_rail_item::Item::ServerId(id)) => Some(json!({ "server_id": id })),
             Some(pb::server_rail_item::Item::Folder(f)) => Some(json!({

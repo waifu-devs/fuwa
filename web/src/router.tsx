@@ -14,6 +14,7 @@ import { AppOverlays, StreamerBanner } from "@/components/Shortcuts";
 import { instanceKey } from "@/fuwa/saved";
 import { DmView } from "@/components/dm/DmView";
 import { InstanceHome } from "@/pages/InstanceHome";
+import { FriendsPage } from "@/pages/FriendsPage";
 import { InvitePage } from "@/pages/InvitePage";
 import { LinkedCallback } from "@/pages/LinkedCallback";
 import { SsoDone } from "@/pages/SsoDone";
@@ -129,6 +130,16 @@ const dm = createRoute({
   },
 });
 
+/** Your friends on an instance, with requests and blocks. */
+const friends = createRoute({
+  getParentRoute: () => instance,
+  path: "friends",
+  component: function FriendsRoute() {
+    const { instance: key } = useParams({ from: "/$instance/friends" });
+    return <FriendsPage key={key} instanceKey={key} />;
+  },
+});
+
 const server = createRoute({ getParentRoute: () => instance, path: "$server" });
 
 const serverIndex = createRoute({
@@ -155,7 +166,7 @@ const routeTree = root.addChildren([
   inviteHere,
   linkedCallback,
   ssoDone,
-  instance.addChildren([instanceIndex, invite, dm, server.addChildren([serverIndex, channel])]),
+  instance.addChildren([instanceIndex, invite, dm, friends, server.addChildren([serverIndex, channel])]),
 ]);
 
 export const router = createRouter({

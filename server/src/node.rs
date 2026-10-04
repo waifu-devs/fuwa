@@ -31,6 +31,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0014_server_arrangements.sql"),
     include_str!("../migrations/node/0018_gifs.sql"),
     include_str!("../migrations/node/0019_attachment_days.sql"),
+    include_str!("../migrations/node/0020_friends.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
@@ -615,6 +616,13 @@ impl NodeDb {
             |row| Ok((account(row)?, row.get::<Option<String>>(ACCOUNT_COLUMN_COUNT)?.unwrap_or_default())),
         )
         .await
+    }
+
+    /// Any kind of account, by username (lowercase).
+    pub async fn account_by_username(&self, username: &str) -> Result<Option<Account>> {
+        let conn = self.read()?;
+        query_one(&conn, &format!("SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE username = ?1"), [username], account)
+            .await
     }
 
     pub async fn account(&self, id: &str) -> Result<Option<Account>> {
@@ -1647,20 +1655,21 @@ impl NodeDb {
         .await
     }
 
-    /// A server's files in use: its icon, emoji, webhooks' pictures and
-    /// messages' attachments.
+    /// A server's files in use: its icon, banner, emoji, webhooks' pictures
+    /// and messages' attachments.
     pub async fn server_media(&self, server_id: &str) -> Result<Vec<String>> {
         let conn = self.read()?;
         query_all(
             &conn,
             "SELECT id FROM media WHERE server_id = ?1 AND stored_at IS NOT NULL AND used_at IS NOT NULL
-             AND purpose IN (?2, ?3, ?4, ?5) ORDER BY id",
+             AND purpose IN (?2, ?3, ?4, ?5, ?6) ORDER BY id",
             (
                 server_id,
                 pb::MediaPurpose::ServerIcon as i64,
                 pb::MediaPurpose::Emoji as i64,
                 pb::MediaPurpose::Avatar as i64,
                 pb::MediaPurpose::Attachment as i64,
+                pb::MediaPurpose::Banner as i64,
             ),
             |r| r.get::<String>(0),
         )
