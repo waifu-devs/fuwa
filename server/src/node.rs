@@ -1080,20 +1080,29 @@ impl NodeDb {
     /// Which of `ids` picked invisible: they show offline everywhere, to
     /// friends too.
     pub async fn invisible_of(&self, ids: &[&str]) -> Result<HashSet<String>> {
+        let mut invisible = HashSet::new();
         if ids.is_empty() {
-            return Ok(Default::default());
+            return Ok(invisible);
         }
-        let placeholders = (2..=ids.len() + 1).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
-        let mut params = vec![turso::Value::from(pb::PresenceStatus::Invisible as i64)];
-        params.extend(ids.iter().map(|id| turso::Value::from(*id)));
-        let rows = query_all(
-            &self.read()?,
-            &format!("SELECT account_id FROM presence_settings WHERE status = ?1 AND account_id IN ({placeholders})"),
-            params,
-            |r| r.get::<String>(0),
-        )
-        .await?;
-        Ok(rows.into_iter().collect())
+        let conn = self.read()?;
+        // A few hundred at a time: a long friends list stays under SQLite's
+        // limit on bound values.
+        for chunk in ids.chunks(500) {
+            let placeholders = (2..=chunk.len() + 1).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+            let mut params = vec![turso::Value::from(pb::PresenceStatus::Invisible as i64)];
+            params.extend(chunk.iter().map(|id| turso::Value::from(*id)));
+            let rows = query_all(
+                &conn,
+                &format!(
+                    "SELECT account_id FROM presence_settings WHERE status = ?1 AND account_id IN ({placeholders})"
+                ),
+                params,
+                |r| r.get::<String>(0),
+            )
+            .await?;
+            invisible.extend(rows);
+        }
+        Ok(invisible)
     }
 
     pub async fn set_presence_settings(&self, account_id: &str, settings: &pb::PresenceSettings) -> Result<()> {
