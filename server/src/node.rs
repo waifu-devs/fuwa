@@ -1449,12 +1449,15 @@ impl NodeDb {
             // Every reservation writes the account's row for the day, so ones
             // made at once clash here and the counts below hold.
             let day = now / DAY_MS;
-            conn.execute(
-                "INSERT INTO upload_days (account_id, day, bytes) VALUES (?1, ?2, ?3)
-                 ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes",
-                (row.account_id.as_str(), day, row.size),
-            )
-            .await?;
+            // Sealed files are counted apart, in dms.db (Dms::count_sealed).
+            if row.purpose != pb::MediaPurpose::Sealed {
+                conn.execute(
+                    "INSERT INTO upload_days (account_id, day, bytes) VALUES (?1, ?2, ?3)
+                     ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes",
+                    (row.account_id.as_str(), day, row.size),
+                )
+                .await?;
+            }
             if let Some(cap) = bytes_per_day {
                 let today = query_one(
                     conn,

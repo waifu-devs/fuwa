@@ -74,6 +74,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "picture_upload_bytes_per_day", get: (s) => s.pictureUploadBytesPerDay },
   { path: "voice_message_seconds", get: (s) => s.voiceMessageSeconds },
   { path: "voice_message_bytes", get: (s) => s.voiceMessageBytes },
+  { path: "voice_message_bytes_per_day", get: (s) => s.voiceMessageBytesPerDay },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
@@ -629,6 +630,21 @@ export function InstanceSettingsDialog({
               >
                 <Cap label="Up to" bytes value={draft.voiceMessageBytes} onChange={(v) => patch((d) => (d.voiceMessageBytes = v))} />
               </Setting>
+              <Setting
+                id="voice-message-bytes-per-day"
+                title="Voice messages a day"
+                hint="What one account may send in a day (UTC), counted apart from pictures."
+                defaultLabel={size(defaults.voiceMessageBytesPerDay)}
+                delay={0.2}
+                {...resetter("voice_message_bytes_per_day")}
+              >
+                <Cap
+                  label="Up to"
+                  bytes
+                  value={draft.voiceMessageBytesPerDay}
+                  onChange={(v) => patch((d) => (d.voiceMessageBytesPerDay = v))}
+                />
+              </Setting>
             </>
           )}
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
@@ -783,6 +799,9 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "voice_message_bytes":
         into.voiceMessageBytes = from.voiceMessageBytes;
+        break;
+      case "voice_message_bytes_per_day":
+        into.voiceMessageBytesPerDay = from.voiceMessageBytesPerDay;
         break;
       default: {
         // Settings copied above by their own pages' functions.

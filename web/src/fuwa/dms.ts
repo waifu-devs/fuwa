@@ -111,8 +111,12 @@ export async function setSecureHistory(key: string, serverId: string, channelId:
 
 // ───────────────────────── Voice messages ─────────────────────────
 
-/** Recordings waiting to go, by pending nonce, so a failed one can be sent again. */
-const clips = new Map<string, { clip: Clip; replyTo: number }>();
+/**
+ * Recordings waiting to go, by pending nonce, so a failed one can be sent
+ * again: with the file it already uploaded, if it got that far.
+ */
+type Outgoing = { clip: Clip; replyTo: number; uploaded?: VoiceFile };
+const clips = new Map<string, Outgoing>();
 
 /** Why a sealed upload's PUT failed, in words. */
 async function put(key: string, uploadUrl: string, bytes: Uint8Array<ArrayBuffer>) {
@@ -130,31 +134,48 @@ async function put(key: string, uploadUrl: string, bytes: Uint8Array<ArrayBuffer
  */
 export async function sendVoiceDm(key: string, id: string, clip: Clip, replyTo = 0) {
   reportUsage("dm.voice");
+  await sendVoice(key, id, { clip, replyTo });
+}
+
+async function sendVoice(key: string, id: string, out: Outgoing) {
+  const { clip, replyTo } = out;
   const nonce = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-  clips.set(nonce, { clip, replyTo });
+  clips.set(nonce, out);
   setPending(key, id, (list) => [
     ...list,
     { nonce, content: "", createdAt: Date.now(), failed: null, voice: { durationMs: clip.durationMs, waveform: clip.waveform } },
   ]);
   const started = performance.now();
   try {
-    const sealed = await seal(clip.ogg);
-    const reserved = await engine(key).api.dms.createSealedUpload(
-      { conversationId: id, size: BigInt(sealed.bytes.length) },
-      { timeoutMs: 20_000 },
-    );
-    await put(key, reserved.uploadUrl, sealed.bytes);
-    const voice: VoiceFile = {
-      mediaId: reserved.mediaId,
-      key: sealed.key,
-      sha256: sealed.sha256,
-      size: sealed.bytes.length,
-      durationMs: clip.durationMs,
-      waveform: clip.waveform,
-    };
-    // This device already has the sound: no need to fetch it back to play it.
-    keepOpened(reserved.mediaId, clip.ogg);
-    await ready(key).send(id, { voice, replyTo });
+    // Sent again after a failure: the file it uploaded is still waiting for it.
+    let voice = out.uploaded;
+    if (!voice) {
+      const sealed = await seal(clip.ogg);
+      const reserved = await engine(key).api.dms.createSealedUpload(
+        { conversationId: id, size: BigInt(sealed.bytes.length) },
+        { timeoutMs: 20_000 },
+      );
+      await put(key, reserved.uploadUrl, sealed.bytes);
+      voice = {
+        mediaId: reserved.mediaId,
+        key: sealed.key,
+        sha256: sealed.sha256,
+        size: sealed.bytes.length,
+        durationMs: clip.durationMs,
+        waveform: clip.waveform,
+      };
+      out.uploaded = voice;
+      // This device already has the sound: no need to fetch it back to play it.
+      keepOpened(reserved.mediaId, clip.ogg);
+    }
+    try {
+      await ready(key).send(id, { voice, replyTo });
+    } catch (err) {
+      // Swept (it waited over a day) or otherwise gone: upload it anew next time.
+      const code = err instanceof DmError ? null : toFuwaError(err).code;
+      if (code === Code.NotFound || code === Code.InvalidArgument) out.uploaded = undefined;
+      throw err;
+    }
     reportTiming("dm.voice_send", performance.now() - started);
     clips.delete(nonce);
     setPending(key, id, (list) => list.filter((p) => p.nonce !== nonce));
@@ -171,7 +192,7 @@ export async function retryPending(key: string, id: string, pending: PendingMess
   if (!pending.voice) return retryDm(key, id, pending);
   dismissDm(key, id, pending.nonce);
   clips.delete(pending.nonce);
-  if (saved) await sendVoiceDm(key, id, saved.clip, saved.replyTo);
+  if (saved) await sendVoice(key, id, saved);
 }
 
 /** Drops a message that didn't send, and its recording. */

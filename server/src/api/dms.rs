@@ -408,6 +408,7 @@ impl Api {
                 &media_ids,
             )
             .await?;
+        crate::sealed::keep(&self.app, &media_ids).await;
         Ok(pb::PostMessageResponse { record: Some(record) })
     }
 
@@ -443,8 +444,8 @@ impl Api {
         };
         let token = crate::auth::new_token();
         let expires_at = now_ms() + media::UPLOAD_TTL_MS;
-        // Counted in the account's uploads for the day, but under no daily
-        // cap: the per-message cap above is the one admins set for these.
+        // Under their own daily cap, apart from pictures'.
+        self.app.dms()?.count_sealed(&account.id, req.size, settings.limits.voice_message_bytes_per_day).await?;
         self.app.node()?.reserve_media(&row, &crate::auth::hash_token(&token), expires_at, None).await?;
         let base = &settings.public_url;
         Ok(pb::CreateSealedUploadResponse {

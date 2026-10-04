@@ -8,3 +8,12 @@ CREATE TABLE record_media (
 );
 
 CREATE INDEX record_media_by_record ON record_media (conversation_id, seq);
+
+-- Bytes of sealed files each account reserved each day (UTC), for the
+-- instance's daily cap on them; apart from node.db's picture counts.
+CREATE TABLE sealed_days (
+  account_id TEXT NOT NULL,
+  day INTEGER NOT NULL,
+  bytes INTEGER NOT NULL,
+  PRIMARY KEY (account_id, day)
+);

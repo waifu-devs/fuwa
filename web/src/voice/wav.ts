@@ -12,18 +12,34 @@ export function playsOgg(): boolean {
   return a.canPlayType('audio/ogg; codecs="opus"') !== "";
 }
 
+/**
+ * The most this fallback decodes: fifteen minutes. A file's own stated
+ * length is what someone else wrote, so it only ever shortens this.
+ */
+const MAX_FRAMES = 15 * 60 * 48_000;
+
 export async function oggToWav(ogg: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
   if (typeof AudioDecoder === "undefined") throw new Error("this browser can't play voice messages");
   const file = readOggOpus(ogg);
   const channels = Math.max(1, Math.min(2, file.channels));
+  const limit = Math.min(MAX_FRAMES, file.samples > 0 ? file.preSkip + file.samples : MAX_FRAMES);
+  // Recordings here are 20 ms packets, so the stated length never needs
+  // more than this many; a file of tiny packets can't make it decode more.
+  const packets = file.packets.slice(0, Math.ceil(limit / 960) + 1);
   const pcm: Float32Array[] = [];
+  let kept = 0;
   let failed: unknown = null;
   const decoder = new AudioDecoder({
     output: (data) => {
-      const frames = data.numberOfFrames;
+      const frames = Math.min(data.numberOfFrames, limit - kept);
+      if (frames <= 0) {
+        data.close();
+        return;
+      }
+      kept += frames;
       const out = new Float32Array(frames * channels);
       for (let c = 0; c < channels; c++) {
-        const plane = new Float32Array(frames);
+        const plane = new Float32Array(data.numberOfFrames);
         data.copyTo(plane, { planeIndex: c, format: "f32-planar" });
         for (let i = 0; i < frames; i++) out[i * channels + c] = plane[i]!;
       }
@@ -36,7 +52,7 @@ export async function oggToWav(ogg: Uint8Array): Promise<Uint8Array<ArrayBuffer>
   });
   decoder.configure({ codec: "opus", sampleRate: 48_000, numberOfChannels: channels });
   let timestamp = 0;
-  for (const packet of file.packets) {
+  for (const packet of packets) {
     decoder.decode(new EncodedAudioChunk({ type: "key", timestamp, data: packet }));
     timestamp += 20_000;
   }

@@ -482,9 +482,42 @@ async fn voice_messages_carry_sealed_files() {
         dms.post_message(post(&juan.token, message(&juan.device), vec![reserved.media_id.clone()])).await.unwrap_err();
     assert_eq!(twice.code(), Code::InvalidArgument);
 
+    // A file whose message didn't go in isn't kept: the sweep takes it.
+    let stray = dms.create_sealed_upload(reserve(&juan.token, sealed.len())).await.unwrap().into_inner();
+    http.put(on(&instance, &stray.upload_url)).body(sealed.clone()).send().await.unwrap();
+    let stale = message(&juan.device);
+    let empty = juan.device.commit(&cid, &[], &[], &allowed).unwrap();
+    let moved = dms
+        .post_commit(authed(
+            &juan.token,
+            pb::PostCommitRequest {
+                conversation_id: cid.clone(),
+                commit: empty.commit.clone(),
+                group_info: empty.group_info.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .record
+        .unwrap();
+    juan.device.process(&cid, &moved.data, true, &allowed).unwrap();
+    dms.post_message(post(&juan.token, stale, vec![stray.media_id.clone()])).await.unwrap_err();
+
     // Kept past the sweep for unused uploads.
     instance.app.sweep_media(i64::MAX / 2).await.unwrap();
     assert_eq!(http.get(on(&instance, &reserved.url)).send().await.unwrap().status(), reqwest::StatusCode::OK);
+    assert_eq!(http.get(on(&instance, &stray.url)).send().await.unwrap().status(), reqwest::StatusCode::NOT_FOUND);
+
+    // A daily cap admins set counts sealed bytes apart from pictures.
+    let mut settings = (*instance.app.settings()).clone();
+    settings.limits.voice_message_bytes_per_day = Some(3 * sealed.len() as i64);
+    settings.limits.picture_upload_bytes_per_day = Some(1);
+    instance.app.replace_settings(settings);
+    dms.create_sealed_upload(reserve(&juan.token, sealed.len())).await.unwrap();
+    let daily = dms.create_sealed_upload(reserve(&juan.token, sealed.len())).await.unwrap_err();
+    assert_eq!(daily.code(), Code::ResourceExhausted);
 
     // A cap admins set is checked on the sealed size.
     let mut settings = (*instance.app.settings()).clone();

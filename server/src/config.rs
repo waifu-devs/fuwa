@@ -205,6 +205,9 @@ pub struct Limits {
     pub voice_message_seconds: Option<i64>,
     /// FUWA_LIMIT_VOICE_MESSAGE_BYTES: the biggest voice message, sealed.
     pub voice_message_bytes: Option<i64>,
+    /// FUWA_LIMIT_VOICE_MESSAGES_PER_DAY: how many bytes of voice messages
+    /// one account may upload a day (UTC), apart from pictures.
+    pub voice_message_bytes_per_day: Option<i64>,
 }
 
 impl Limits {
@@ -353,6 +356,7 @@ impl Config {
             automod_checks_per_day: count("FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY")?,
             voice_message_seconds: count("FUWA_LIMIT_VOICE_MESSAGE_SECONDS")?,
             voice_message_bytes: bytes("FUWA_LIMIT_VOICE_MESSAGE_BYTES")?,
+            voice_message_bytes_per_day: upload_bytes("FUWA_LIMIT_VOICE_MESSAGES_PER_DAY")?,
         };
 
         let do_not_track = get("DO_NOT_TRACK").is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"));

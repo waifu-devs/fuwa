@@ -117,7 +117,9 @@ private keys are. It does see, and has to, to deliver:
 - which devices each account has (a label from the browser, like "Chrome on
   Windows", and their public keys);
 - which records are commits and which are messages, and when one is deleted;
-- which messages carry a sealed file (a voice message), and that file's size.
+- which messages carry a sealed file (a voice message), and that file's size,
+  padded to 32 KiB steps: roughly how long it is, to within about eight
+  seconds.
 
 Deleting a message removes its ciphertext from the instance and leaves a gap;
 copies already on devices are removed from the screen when they see the
@@ -162,8 +164,10 @@ sealed bytes (`DirectMessageService.CreateSealedUpload`, then a PUT like a
 picture's), and sends an ordinary encrypted message whose content
 (`DirectMessageVoice`) holds the file's id, its key, the SHA-256 of the
 sealed bytes, how long it plays and its waveform (worked out on the sender's
-device). So the instance keeps bytes it can't open and never learns the
-key, the length or the shape of the sound; nobody else, transcription
+device). Before sealing, the file is padded (a 0x80 byte, then zeros) to a
+multiple of 32 KiB. So the instance keeps bytes it can't open and never
+learns the key, the shape of the sound or its exact length (the padded size
+gives it away to within about eight seconds); nobody else, transcription
 services included, ever gets it.
 
 `PostMessage` names the file in `media_ids`, which ties it to that record
@@ -173,8 +177,12 @@ upload. Devices fetch it from their own instance by id (never from a link
 in the message), check its size and hash, then open it; the player keeps
 the opened sound in memory only. Admins can cap how long
 (`voice_message_seconds`, which apps honour, since the instance can't check)
-and how big (`voice_message_bytes`, checked on the sealed size) one may be;
-neither is capped unless they set it. The server side is
+and how big (`voice_message_bytes`, checked on the sealed size) one may be,
+and how many bytes of them an account may upload a day
+(`voice_message_bytes_per_day`, counted apart from pictures, in dms.db's
+`sealed_days`); none is capped unless they set it. A file is kept from the
+sweep only once the message carrying it is in, so a send that fails leaves
+nothing behind for good; the app sends it again with the same file. The server side is
 `server/src/sealed.rs`; the web app's is `web/src/voice/` and
 `web/src/components/voice/`, written so a server channel's composer and
 messages can use the same recorder and player.

@@ -33,8 +33,8 @@ pub const MIN_BYTES: i64 = 12 + 16;
 pub const MAX_PER_MESSAGE: usize = 10;
 
 /// Checks that `ids` are sealed uploads of `account_id`'s, stored and not yet
-/// carried by a message, and keeps them from the sweep. Answers their ids in
-/// canonical form.
+/// carried by a message. Answers their ids in canonical form; [`keep`] them
+/// once the message is in.
 pub async fn carry(app: &App, account_id: &str, ids: &[String]) -> Result<Vec<String>> {
     if ids.len() > MAX_PER_MESSAGE {
         return Err(Error::invalid(format!("a message can carry at most {MAX_PER_MESSAGE} files")));
@@ -62,13 +62,23 @@ pub async fn carry(app: &App, account_id: &str, ids: &[String]) -> Result<Vec<St
         }
         carried.push(id);
     }
-    // Kept before the record is added: a record that then fails to go in
-    // leaves the file kept until the message is sent again (it's retried with
-    // the same file) rather than a message whose file was swept.
-    for id in &carried {
-        node.use_media(id, None).await?;
-    }
     Ok(carried)
+}
+
+/// Keeps files a message that went in carries from the sweep. Only then: a
+/// message that fails to go in leaves its files to the sweep, so nothing
+/// stays kept without a record that deletes it.
+pub async fn keep(app: &App, ids: &[String]) {
+    for id in ids {
+        let kept = match app.node() {
+            Ok(node) => node.use_media(id, None).await,
+            Err(err) => Err(err),
+        };
+        if kept.is_err() {
+            // The record still names it; the sweep may take it after a day.
+            tracing::error!("couldn't keep a sent message's sealed file");
+        }
+    }
 }
 
 /// Writes a sealed upload's body to `temp`: exactly `size` bytes of anything.

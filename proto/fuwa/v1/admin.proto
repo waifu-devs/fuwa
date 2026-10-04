@@ -167,6 +167,10 @@ message InstanceSettings {
   // The biggest voice message, sealed, in bytes; unset for no cap.
   // FUWA_LIMIT_VOICE_MESSAGE_BYTES.
   optional int64 voice_message_bytes = 38;
+  // How many bytes of voice messages one account may upload a day (UTC);
+  // unset for no cap. Counted apart from pictures.
+  // FUWA_LIMIT_VOICE_MESSAGES_PER_DAY.
+  optional int64 voice_message_bytes_per_day = 39;
 }
 
 // One moderation provider, as the instance's admins set it up: one fuwa
