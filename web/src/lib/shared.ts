@@ -8,11 +8,20 @@ import type { Channel, Message, SharedServer } from "@/gen/fuwa/v1/types_pb";
  */
 
 /**
- * A share code is the home server's id, a dash and 16 letters and digits. People paste
+ * A share code is the home server's id, a dash and 16 letters and digits, then "@" and
+ * the home's instance when it's for servers on other instances too. People paste
  * them out of chats, so look for one anywhere in the text. Returns "" when there's none.
  */
 export function findShareCode(text: string): string {
-  return /[0-9A-HJKMNP-TV-Z]{26}-[A-Za-z0-9]{16}/i.exec(text)?.[0] ?? "";
+  return SHARE_CODE.exec(text)?.[0] ?? "";
+}
+
+const SHARE_CODE = /[0-9A-HJKMNP-TV-Z]{26}-[A-Za-z0-9]{16}(?:@(?:https?:\/\/)?(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::\d{1,5})?)?/i;
+
+/** The instance a share code names, as people read it, or "" for a code for this instance only. */
+export function shareCodeInstance(code: string): string {
+  const at = code.indexOf("@");
+  return at < 0 ? "" : code.slice(at + 1).replace(/^https:\/\//, "");
 }
 
 /** Who's on the other end of a shared channel, as the sidebar and header say it. */

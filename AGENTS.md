@@ -399,7 +399,10 @@
     like server settings, sharing its `save_bar`, `switch` and chips; its
     Manage group acts straight away instead: `instance_settings/accounts.rs`
     finds accounts and makes admins, resets passwords or turns accounts off,
-    in a list that draws only the rows in sight, and
+    in a list that draws only the rows in sight,
+    `instance_settings/servers.rs` lists every server and opens one to change
+    its caps, move its region, end its shared channels, save its file or
+    delete it (over `core/instance_servers.rs`), and
     `instance_settings/announcement.rs` puts up the banner, over
     `core/instance_manage.rs`),
     `announcement.rs` that banner across the top of the app (news, heads-up
