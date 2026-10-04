@@ -195,8 +195,9 @@ What the operator must still do:
   holds, and that calls through a gateway in another region pass through it
   (or run gateways in the region, and later regional addresses).
 - Answer requests that aren't self-service: erasure of a server's content
-  (deleting the server, then emptying `deleted/` on its shard and the bucket's
-  copies after the retention they choose), access requests by people without
+  (deleting the server, which deletes its pictures everywhere, then emptying
+  `deleted/` on its shard and the bucket's copies of its file after the
+  retention they choose), access requests by people without
   an account, and records of processing.
 - Put the directory in the region whose rules the instance follows, and keep
   backups (Railway volume backups, buckets) in the same region as what they

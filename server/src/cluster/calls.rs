@@ -108,11 +108,26 @@ impl App {
                     tracing::warn!(server = %server_id, error = %err, "couldn't forget where a deleted server was");
                 }
                 self.forget_notifications(server_id, None, None).await;
+                self.drop_server_media(server_id).await;
             }
             Link::Alone => {
                 self.index.remove(server_id);
                 self.forget_notifications(server_id, None, None).await;
+                self.drop_server_media(server_id).await;
             }
+        }
+    }
+
+    /// Deletes the pictures kept here that were made for or used by a server
+    /// that's gone, and their rows. A failure is logged and reported.
+    async fn drop_server_media(&self, server_id: &str) {
+        let dropped = async {
+            let ids = self.node()?.media_of_server(server_id).await?;
+            self.delete_media(&ids).await
+        };
+        if dropped.await.is_err() {
+            tracing::warn!(server = %server_id, "couldn't delete a deleted server's pictures");
+            crate::reports::server_error("server_media_drop", Some("cluster::calls"));
         }
     }
 
@@ -519,11 +534,16 @@ impl App {
     // ─────────────── Between shared channels' servers ───────────────
 
     /// A call between the two ends of a shared channel, answered where the
-    /// server it's for is kept: here, or on its shard through the directory
-    /// (shards don't know each other).
+    /// server it's for is kept: here, on its shard through the directory
+    /// (shards don't know each other), or on another instance.
     pub async fn shared(self: &Arc<Self>, call: cpb::SharedCall) -> Result<cpb::SharedReply> {
         if self.servers.holds(&call.server_id) {
             return crate::api::shared_call(self, call).await;
+        }
+        // A server on another instance ("<id>@<instance>"): the part that
+        // keeps the instance's key calls it; a shard passes it there.
+        if call.server_id.contains('@') && !matches!(self.link, Link::Shard(_)) {
+            return crate::federation::shared(self, call).await;
         }
         match &self.link {
             Link::Shard(link) => {
