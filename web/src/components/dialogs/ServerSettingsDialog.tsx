@@ -55,7 +55,7 @@ import { SharedConnectionState } from "@/gen/fuwa/v1/channel_pb";
 import { listConnections } from "@/fuwa/actions";
 import { SingleSignOn } from "@/components/settings/server/SingleSignOn";
 import { ServerAgents } from "@/components/settings/server/ServerAgents";
-import { WelcomeScreenEditor } from "@/components/settings/server/WelcomeScreenEditor";
+import { WelcomeAndOnboarding } from "@/components/settings/server/WelcomeAndOnboarding";
 import { JoinFormEditor } from "@/components/settings/server/JoinFormEditor";
 import { ServerDoor } from "@/components/join/ServerDoor";
 import { useFuwa } from "@/fuwa/store";
@@ -180,14 +180,19 @@ export function ServerSettingsDialog({
     },
     {
       id: "welcome",
-      label: "Welcome screen",
+      label: "Welcome & onboarding",
       icon: PartyPopperIcon,
-      description: "What new members see first: a few words and channels to start in.",
-      keywords: "welcome onboarding new members greet suggested channels",
+      description: "The banner, the welcome screen and the first steps new members take, previewed as you go.",
+      keywords: "welcome onboarding new members greet suggested channels banner header cover accent color interests",
       settings: [
+        { id: "banner-picture", label: "Banner", keywords: "header cover picture image" },
+        { id: "banner-focus", label: "Banner focal point", keywords: "crop position" },
+        { id: "accent-color", label: "Accent color", keywords: "colour tint theme" },
         { id: "welcome-enabled", label: "Show a welcome screen" },
         { id: "welcome-description", label: "Welcome message", keywords: "description" },
         { id: "welcome-channels", label: "Suggested channels", keywords: "start here" },
+        { id: "onboarding-enabled", label: "Onboarding", keywords: "steps interests" },
+        { id: "onboarding-steps", label: "Onboarding steps", keywords: "pick interests roles channels rules hello" },
       ],
     },
     {
@@ -294,7 +299,7 @@ export function ServerSettingsDialog({
       {tab === "access" && can("access") && <Access instanceKey={instanceKey} server={server} />}
       {tab === "sso" && can("sso") && <SingleSignOn instanceKey={instanceKey} server={server} />}
       {tab === "join-form" && can("join-form") && <JoinFormEditor instanceKey={instanceKey} server={server} onOpenAccess={() => setTab("access")} />}
-      {tab === "welcome" && can("welcome") && <WelcomeScreenEditor instanceKey={instanceKey} server={server} />}
+      {tab === "welcome" && can("welcome") && <WelcomeAndOnboarding instanceKey={instanceKey} server={server} />}
       {tab === "emoji" && can("emoji") && <Emoji instanceKey={instanceKey} serverId={server.id} />}
       {tab === "integrations" && can("integrations") && (
         <div className="flex flex-col gap-8">

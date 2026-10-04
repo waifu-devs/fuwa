@@ -11,6 +11,7 @@ import { ChannelService, SharedChannelService } from "./gen/fuwa/v1/channel_pb.j
 import { DirectMessageService } from "./gen/fuwa/v1/dm_pb.js";
 import { EmojiService } from "./gen/fuwa/v1/emoji_pb.js";
 import { EventService } from "./gen/fuwa/v1/event_pb.js";
+import { FriendService } from "./gen/fuwa/v1/friend_pb.js";
 import { InviteService } from "./gen/fuwa/v1/invite_pb.js";
 import { JoinService } from "./gen/fuwa/v1/join_pb.js";
 import { MediaService } from "./gen/fuwa/v1/media_pb.js";
@@ -72,6 +73,8 @@ export interface Fuwa {
   invites: Client<typeof InviteService>;
   join: Client<typeof JoinService>;
   dms: Client<typeof DirectMessageService>;
+  /** Friends, requests and blocks; people only (agents can't have friends). */
+  friends: Client<typeof FriendService>;
   secure: Client<typeof SecureChannelService>;
   automod: Client<typeof AutoModService>;
   emojis: Client<typeof EmojiService>;
@@ -188,6 +191,7 @@ export function createFuwa(options: FuwaOptions): Fuwa {
     invites: client(InviteService),
     join: client(JoinService),
     dms: client(DirectMessageService),
+    friends: client(FriendService),
     secure: client(SecureChannelService),
     automod: client(AutoModService),
     emojis: client(EmojiService),

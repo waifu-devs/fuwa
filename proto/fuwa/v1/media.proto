@@ -38,6 +38,7 @@ service MediaService {
 enum MediaPurpose {
   MEDIA_PURPOSE_UNSPECIFIED = 0;
   MEDIA_PURPOSE_AVATAR = 1;
+  // A profile banner, or with a server_id, a server's banner.
   MEDIA_PURPOSE_BANNER = 2;
   MEDIA_PURPOSE_SERVER_ICON = 3;
   // A server's custom emoji.
@@ -70,10 +71,11 @@ message CreateUploadRequest {
   // `picture_upload_bytes` (or for an attachment `attachment_upload_bytes`)
   // when that's set.
   int64 size = 3;
-  // For a server's icon, an emoji, a webhook's picture or an attachment
-  // (where it's required): the server it's for (you must be in it). The file
-  // can then only be used there, and on an instance split across regions its
-  // bytes go straight to the server's region rather than the home one.
+  // For a server's icon or banner, an emoji, a webhook's picture or an
+  // attachment (required for an attachment and a server's banner): the
+  // server it's for (you must be in it). The file can then only be used
+  // there, and on an instance split across regions its bytes go straight to
+  // the server's region rather than the home one.
   string server_id = 4;
 }
 
