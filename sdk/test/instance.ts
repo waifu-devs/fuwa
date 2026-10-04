@@ -46,7 +46,9 @@ export async function startInstance(): Promise<Instance> {
         FUWA_PUBLIC_URL: url,
         FUWA_TELEMETRY: "off",
         FUWA_WEB: "off",
-        FUWA_MEDIA_PORT: "off",
+        // Calls on, on a port of the system's choosing: the voice bridge needs the media part.
+        FUWA_MEDIA_PORT: "0",
+        FUWA_MEDIA_ADDRESSES: "127.0.0.1",
         RUST_LOG: "warn",
       },
       stdio: ["ignore", "pipe", "pipe"],

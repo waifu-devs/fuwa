@@ -9,13 +9,16 @@ import {
   FuwaError,
   InvalidArgumentError,
   NotFoundError,
+  OggOpusWriter,
   RateLimitedError,
   UnauthenticatedError,
   UnavailableError,
   createFuwa,
   instanceUrl,
   mentions,
+  opusPacketDuration,
   parseCommand,
+  readOggOpus,
   retryAfterOf,
   toFuwaError,
   type Fuwa,
@@ -217,4 +220,23 @@ test("the token goes in the authorization header, to the instance only", async (
   assert.equal(seen.length, 1);
   assert.equal(seen[0]!.url, "http://127.0.0.1:9/fuwa.v1.AuthService/GetMe");
   assert.equal(seen[0]!.auth, "Bearer secret-token");
+});
+
+test("Opus packet lengths come from their first byte", () => {
+  assert.equal(opusPacketDuration(Uint8Array.of(0x08)), 20); // SILK, 20 ms, one frame
+  assert.equal(opusPacketDuration(Uint8Array.of(0xfc)), 20); // CELT FB, 20 ms
+  assert.equal(opusPacketDuration(Uint8Array.of(0x18)), 60); // SILK, 60 ms
+  assert.equal(opusPacketDuration(Uint8Array.of(0xf9)), 40); // CELT 20 ms, two frames
+  assert.equal(opusPacketDuration(Uint8Array.of(0xfb, 0x03)), 60); // CELT 20 ms, three frames
+});
+
+test("Ogg Opus files round-trip", () => {
+  const writer = new OggOpusWriter({ channels: 2, serial: 7 });
+  const packets = Array.from({ length: 120 }, (_, i) => Uint8Array.from({ length: 1 + (i * 37) % 600 }, (_, j) => (j ? (i + j) & 0xff : 0xfc)));
+  for (const p of packets) writer.add(p);
+  const file = writer.finish();
+  const { head, packets: back } = readOggOpus(file);
+  assert.equal(head.channels, 2);
+  assert.deepEqual(back, packets);
+  assert.throws(() => readOggOpus(Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28)), /Ogg/);
 });

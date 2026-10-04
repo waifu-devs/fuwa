@@ -10,6 +10,10 @@ Node 20 or newer and in browsers, as ES modules or CommonJS.
 - **Agents**: sign in with the agent's token, follow every server it's in,
   answer commands and mentions, send, reply and edit, with reconnecting and
   catching up handled.
+- **Voice**: join a voice channel, hear each person's sound labelled with
+  who said it, know who's speaking, and talk, from Opus frames or an Ogg
+  Opus file. No WebRTC: it's the instance's voice bridge for programs, so
+  nothing but the instance is ever contacted.
 - **Helpers**: paging through messages and events, uploading pictures,
   retries that respect slow mode, and errors you can tell apart with
   `instanceof`.
@@ -156,6 +160,55 @@ Each try gets its own 30-second deadline (`timeoutMs`). Change any of it with
 `retry: { retries, baseDelayMs, maxDelayMs, maxRetryAfterMs }`, or turn it off
 with `retry: false`.
 
+## Voice
+
+An agent joins a voice channel with `agent.joinVoice(serverId, channelId)`.
+It's in the channel as itself, with its roles (CONNECT to join, SPEAK to be
+heard), and everyone sees it there with its AGENT badge. Under the hood it's
+`CallService.ListenVoice` and `SpeakVoice` (docs/calls.md, "Agents, bots and
+apps"): no WebRTC, no ICE, STUN or TURN, nothing but the instance.
+
+```ts
+const voice = await agent.joinVoice(serverId, channelId);
+
+voice.on("speaking", (userId) => console.log(userId, "started talking"));
+voice.on("silent", (userId) => console.log(userId, "stopped"));
+voice.on("frame", (frame) => {
+  // frame.userId said frame.opus: one Opus packet, 48 kHz, 20 ms.
+});
+
+await voice.play(readFileSync("hello.ogg")); // an Ogg Opus file, 20 ms frames
+await voice.speak(opusFrames);               // or frames from any Opus encoder
+await voice.setState({ selfMute: true });
+await voice.leave();
+```
+
+- **Hearing**: each frame comes as an event and from `for await (const frame
+  of voice)`. `speaking` and `silent` say when someone starts and stops
+  sending sound (`silenceMs`, 300 ms by default; Opus's one-byte silence
+  packets don't count). `voice.speaking` is who's talking now.
+- **Talking**: `speak` takes Opus frames (48 kHz, 20 ms, mono or stereo) from
+  a list or an async iterable, and sends them about as fast as they play;
+  it resolves about when the last one is heard. `play` reads an Ogg Opus
+  file (`ffmpeg -i in.wav -c:a libopus -frame_duration 20 out.ogg`) and
+  refuses one whose frames aren't 20 ms.
+- **Files**: `readOggOpus` and `OggOpusWriter` read and write Ogg Opus in
+  plain TypeScript, so an agent can save what each person said
+  (`writer.add(frame.opus)` per frame, `writer.finish()` for the bytes).
+  Decoding to raw sound or encoding from it needs an Opus library of your
+  choice; the SDK carries none.
+- **Staying in**: when the connection drops or the instance restarts, it
+  joins again with the same place (`reconnecting`, then `rejoined`), and
+  `speak` waits for it. Being taken out by a moderator, kicked, losing
+  CONNECT or joining from somewhere else ends it: `voice.closed` rejects with
+  that error (FailedPrecondition). Stopping the agent leaves its channels.
+
+Voice channels only: calls in direct messages are end-to-end encrypted
+between people's apps, and agents don't use direct messages. Cameras and
+screen sharing aren't open to programs yet. [`examples/voice-agent.ts`](../sdk/examples/voice-agent.ts)
+joins on `/join`, says back what each person said once they pause, and plays
+a file on `/play`.
+
 ## The clients on their own
 
 `createFuwa` gives typed clients for every service, for apps that aren't
@@ -192,6 +245,8 @@ The other pieces:
   uploads a picture the way the apps do (`MediaService.CreateUpload`, then a
   PUT of the bytes) and returns its `url`, for an avatar, an emoji or a server
   icon. The bytes only go to the instance's own address.
+- `joinVoice(fuwa, { serverId, channelId })` is `agent.joinVoice` for any
+  account.
 - `parseCommand`, `mentions`, `roleMention` and `emoji` read and write the
   text conventions: commands, `@username`, `<@&role>` and `<:name:id>`.
 
@@ -217,7 +272,7 @@ FUWA_BIN=../target/debug/fuwa pnpm test:instance   # against a real instance
 ```
 
 The instance tests start the binary on a free port with its data in a
-temporary folder: a person makes a server and an agent, and the agent answers
+temporary folder and calls on: a person makes a server and an agent, and the agent answers
 commands, catches up after being stopped, reconnects across a restart of the
 instance, notices a new server, waits out slow mode and uploads a picture.
 CI runs all of it when `sdk/` or `proto/` change.

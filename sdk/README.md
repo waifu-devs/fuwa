@@ -2,8 +2,8 @@
 
 The official TypeScript SDK for [fuwa](https://github.com/waifu-devs/fuwa):
 typed clients for every service, and agents (bots) that follow events, answer
-commands and mentions, and post messages, with reconnecting and catching up
-handled. Node 20+ and browsers, ES modules and CommonJS.
+commands and mentions, post messages, and hear and talk in voice channels,
+with reconnecting and catching up handled. Node 20+ and browsers, ES modules and CommonJS.
 
 ```ts
 import { Agent } from "@waifu-devs/fuwa";

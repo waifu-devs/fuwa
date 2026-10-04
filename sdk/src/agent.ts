@@ -8,6 +8,7 @@ import type { Media } from "./gen/fuwa/v1/media_pb.js";
 import { messages, type MessagePagesOptions, type MessageWithAuthor } from "./pages.js";
 import { parseCommand, mentions, type ParsedCommand } from "./text.js";
 import { uploadPicture, type UploadOptions } from "./upload.js";
+import { VoiceConnection, type JoinVoiceOptions } from "./voice.js";
 
 export interface AgentOptions extends Omit<FuwaOptions, "token"> {
   /**
@@ -132,6 +133,7 @@ export class Agent {
   #follower: EventFollower | undefined;
   #stop: AbortController | undefined;
   #closed: Promise<void> | undefined;
+  #voices = new Set<VoiceConnection>();
 
   constructor(options: AgentOptions) {
     if (!options.token) throw new TypeError("an agent needs its token");
@@ -246,6 +248,7 @@ export class Agent {
 
   /** Stops following and waits for running handlers to finish. */
   async stop(): Promise<void> {
+    await Promise.all([...this.#voices].map((v) => v.leave()));
     this.#stop?.abort();
     await this.#closed?.catch(() => {});
   }
@@ -288,6 +291,17 @@ export class Agent {
   /** Uploads a picture to the instance (see uploadPicture). */
   upload(options: UploadOptions): Promise<Media> {
     return uploadPicture(this.api, options);
+  }
+
+  /**
+   * Joins a voice channel to hear and talk (see VoiceConnection): no WebRTC,
+   * only the instance. Stopping the agent leaves it too.
+   */
+  async joinVoice(serverId: string, channelId: string, options: Omit<JoinVoiceOptions, "serverId" | "channelId"> = {}): Promise<VoiceConnection> {
+    const voice = await VoiceConnection.join(this.api, { ...options, serverId, channelId });
+    this.#voices.add(voice);
+    voice.closed.catch(() => {}).finally(() => this.#voices.delete(voice));
+    return voice;
   }
 
   /** A channel's messages, newest first by default (see `messages`). */

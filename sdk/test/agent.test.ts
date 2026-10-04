@@ -6,8 +6,11 @@ import { after, before, test } from "node:test";
 import {
   Agent,
   ChannelType,
+  Code,
   MediaPurpose,
+  FuwaError,
   NotFoundError,
+  OggOpusWriter,
   RateLimitedError,
   UnauthenticatedError,
   createFuwa,
@@ -15,6 +18,7 @@ import {
   listEvents,
   type Fuwa,
   type Message,
+  type VoiceFrame,
 } from "@waifu-devs/fuwa";
 import { startInstance, until, type Instance } from "./instance.ts";
 
@@ -227,6 +231,92 @@ test("pages walk a channel both ways", async () => {
   let count = 0;
   for await (const _ of listEvents(person, serverId, { pageSize: 5 })) count++;
   assert.ok(count >= 7);
+});
+
+test("agents hear and talk in voice channels", async () => {
+  const { channel: voice } = await person.channels.createChannel({ serverId, name: "Lounge", type: ChannelType.VOICE });
+  const listenerToken = (await person.agents.createAgent({ username: "listener", displayName: "Listener" })).token;
+  await person.agents.addAgent({ serverId, username: "listener" });
+  const talker = newAgent();
+  const listener = new Agent({ url: instance.url, token: listenerToken, onError: (e) => assert.fail(e as Error) });
+  agents.push(listener);
+  await talker.start();
+  await listener.start();
+
+  const ear = await listener.joinVoice(serverId, voice!.id);
+  const mouth = await talker.joinVoice(serverId, voice!.id);
+  assert.ok(mouth.sessionId);
+  assert.equal(mouth.state?.channelId, voice!.id);
+  const { states } = await person.calls.listVoiceStates({ serverId });
+  assert.deepEqual(new Set(states.map((s) => s.userId)), new Set([talker.me.id, listener.me.id]));
+
+  const talk: string[] = [];
+  ear.on("speaking", (id) => void talk.push(`start:${id}`));
+  ear.on("silent", (id) => void talk.push(`stop:${id}`));
+  const heard: VoiceFrame[] = [];
+  const reading = (async () => {
+    for await (const frame of ear) {
+      heard.push(frame);
+      if (heard.length === 25) return;
+    }
+  })();
+
+  // An Ogg Opus file of 25 frames: 20 ms each (0xfc), numbered.
+  const file = new OggOpusWriter();
+  for (let i = 0; i < 25; i++) file.add(Uint8Array.of(0xfc, i, 1, 2, 3));
+  const started = Date.now();
+  await mouth.play(file.finish());
+  assert.ok(Date.now() - started >= 300, "it plays about as fast as the sound lasts");
+  await reading;
+  assert.ok(heard.every((f) => f.userId === talker.me.id));
+  assert.deepEqual(
+    heard.map((f) => f.opus[1]),
+    Array.from({ length: 25 }, (_, i) => i),
+  );
+  assert.equal((heard[1]!.timestamp - heard[0]!.timestamp) >>> 0, 960);
+  await until("stopped speaking", () => talk.includes(`stop:${talker.me.id}`) || undefined, 3000);
+  assert.equal(talk[0], `start:${talker.me.id}`);
+
+  // 60 ms frames don't fit a voice channel.
+  const long = new OggOpusWriter();
+  long.add(Uint8Array.of(0x18, 1, 2, 3));
+  await assert.rejects(mouth.play(long.finish()), /20 ms/);
+
+  const muted = await mouth.setState({ selfMute: true });
+  assert.equal(muted?.selfMute, true);
+
+  // A moderator takes the listener out: that's final.
+  await person.calls.moderateVoice({ serverId, userId: listener.me.id, disconnect: true });
+  const ended = await ear.closed.then(
+    () => undefined,
+    (e) => e,
+  );
+  assert.ok(ended instanceof FuwaError && ended.code === Code.FailedPrecondition, String(ended));
+
+  await mouth.leave();
+  await mouth.closed;
+  await until("nobody left in voice", async () =>
+    (await person.calls.listVoiceStates({ serverId })).states.length === 0 || undefined,
+  );
+  await listener.stop();
+  await talker.stop();
+});
+
+test("a voice connection rejoins after the instance restarts", async () => {
+  const { channel: voice } = await person.channels.createChannel({ serverId, name: "Stage", type: ChannelType.VOICE });
+  const agent = newAgent();
+  await agent.start();
+  const conn = await agent.joinVoice(serverId, voice!.id);
+  const session = conn.sessionId;
+  const events: string[] = [];
+  conn.on("reconnecting", () => void events.push("reconnecting"));
+  conn.on("rejoined", () => void events.push("rejoined"));
+  await instance.restart();
+  await until("rejoined", () => events.includes("rejoined") || undefined, 20_000);
+  assert.equal(conn.sessionId, session, "it keeps its place");
+  await conn.speak([Uint8Array.of(0xfc, 9, 9, 9)]);
+  await agent.stop();
+  await assert.doesNotReject(conn.closed);
 });
 
 test("a reset token stops a running agent with UnauthenticatedError", async () => {

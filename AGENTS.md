@@ -23,7 +23,8 @@
   CI). `client.ts` makes the typed clients (`createFuwa`: auth, typed errors
   from `errors.ts`, retries from `retry.ts`), `events.ts` the reconnecting
   `EventFollower`, `agent.ts` the `Agent` (commands, mentions, typed event
-  handlers), `pages.ts`, `upload.ts` and `text.ts` the helpers. It never logs
+  handlers), `voice.ts` voice channels over ListenVoice/SpeakVoice (no WebRTC), `ogg.ts`
+  Ogg Opus files, `pages.ts`, `upload.ts` and `text.ts` the helpers. It never logs
   tokens or addresses and reports nothing. `test/agent.test.ts` drives a real
   instance (`FUWA_BIN`); new agent-facing calls get a helper and a test there.
 - `voice/`: `fuwa-voice`, the client crate programs use to hear and talk in
