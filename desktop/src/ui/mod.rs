@@ -34,6 +34,7 @@ mod settings_keys;
 mod settings_look;
 mod settings_privacy;
 mod settings_updates;
+mod shared_marks;
 mod sidebar;
 pub mod text;
 pub mod theme;

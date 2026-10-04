@@ -9,6 +9,7 @@ use fuwa_desktop::core::config::Paths;
 use fuwa_desktop::core::dms::{Content, DmStatus, now_ms};
 use fuwa_desktop::core::moderation::{Action, timed_out_until};
 use fuwa_desktop::core::reports;
+use fuwa_desktop::core::shared;
 use fuwa_desktop::core::store::{Connection, Focus, Store};
 use fuwa_desktop::core::updates;
 use fuwa_desktop::core::vault::ItemKind;
@@ -146,8 +147,8 @@ fn two_people_talk_in_a_server_and_in_private() {
         s.instance(&key).unwrap().messages[&general].items.iter().find(|m| m.content == ping).unwrap().id.clone()
     });
     {
-        let (core, key, sid) = (alice.clone(), key.clone(), server.id.clone());
-        wait(&alice, async move { core.edit_message(&key, &sid, &id, "hey, look (edited)").await }).unwrap();
+        let (core, key, sid, cid) = (alice.clone(), key.clone(), server.id.clone(), general.clone());
+        wait(&alice, async move { core.edit_message(&key, &sid, &cid, &id, "hey, look (edited)").await }).unwrap();
     }
     until(&bob, "the edit", |s| {
         s.instance(&key).unwrap().messages[&general]
@@ -427,6 +428,118 @@ fn instance_admins_manage_every_server() {
     wait(&app, async move { core.delete_any_server(&k, &id).await }).unwrap();
     let (core, k) = (app.clone(), key.clone());
     assert!(wait(&app, async move { core.list_instance_servers(&k).await }).unwrap().is_empty());
+
+    instance.app.shutdown.cancel();
+    drop(instance.runtime);
+}
+
+#[test]
+fn servers_share_a_channel() {
+    // SAFETY: set before anything reads it.
+    unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
+    let data = tempfile::tempdir().unwrap();
+    let instance = start_instance(data.path());
+    let (home_a, home_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let alice = Core::start(Paths::under(home_a.path())).unwrap();
+    let bob = Core::start(Paths::under(home_b.path())).unwrap();
+    let key = {
+        let (core, url) = (alice.clone(), instance.url.clone());
+        wait(&alice, async move { core.sign_up(&url, "alice", "correct horse battery", "Alice").await }).unwrap()
+    };
+    {
+        let (core, url) = (bob.clone(), instance.url.clone());
+        wait(&bob, async move { core.sign_up(&url, "bob", "correct horse battery", "Bob").await }).unwrap();
+    }
+    for core in [&alice, &bob] {
+        until(core, "signed in and live", |s| {
+            s.instance(&key).is_some_and(|i| i.me.is_some() && i.connection == Connection::Live)
+        });
+    }
+    // Each has a server of their own: Alice's is the channel's home, Bob's shows it.
+    let make = |core: &Arc<Core>, name: &'static str| {
+        let (c, k) = (core.clone(), key.clone());
+        let server = wait(core, async move { c.create_server(&k, name).await }).unwrap();
+        until(core, "the new server", |s| s.instance(&key).is_some_and(|i| i.synced.contains(&server.id)));
+        server
+    };
+    let (tea, owls) = (make(&alice, "Tea house"), make(&bob, "Night owls"));
+    let general = alice
+        .shared
+        .read(|s| s.instance(&key).unwrap().channels[&tea.id].iter().find(|c| c.r#type == 1).unwrap().id.clone());
+
+    // Alice makes a code; pasted with words around it, Bob's app finds it and shows where it leads.
+    let (core, k, sid, cid) = (alice.clone(), key.clone(), tea.id.clone(), general.clone());
+    let code = wait(&alice, async move { core.create_share_code(&k, &sid, &cid, false).await }).unwrap().code;
+    let pasted = format!("here you go: {code} (works for a week)");
+    assert_eq!(shared::find_share_code(&pasted), code);
+    assert_eq!(shared::share_code_instance(&code), "", "a code for this instance only");
+    let (core, k, sid, c) = (bob.clone(), key.clone(), owls.id.clone(), code.clone());
+    let preview = wait(&bob, async move { core.preview_share(&k, &sid, &c).await }).unwrap();
+    assert_eq!(preview.home_server.unwrap().name, "Tea house");
+    let (core, k, sid, c) = (bob.clone(), key.clone(), owls.id.clone(), code.clone());
+    wait(&bob, async move { core.accept_share(&k, &sid, &c, "tea-talk", "").await }).unwrap();
+
+    // Alice sees the request waiting, live, and approves it.
+    let (core, k, sid) = (alice.clone(), key.clone(), tea.id.clone());
+    wait(&alice, async move { core.list_connections(&k, &sid).await }).unwrap();
+    until(&alice, "Bob's request", |s| {
+        s.instance(&key).unwrap().shared[&tea.id].connections.iter().any(|c| c.home && shared::waiting(c))
+    });
+    let connection = alice.shared.read(|s| s.instance(&key).unwrap().shared[&tea.id].connections[0].id.clone());
+    let (core, k, sid, id) = (alice.clone(), key.clone(), tea.id.clone(), connection.clone());
+    wait(&alice, async move { core.review_share(&k, &sid, &id, true).await }).unwrap();
+    until(&alice, "the connection, connected", |s| {
+        s.instance(&key).unwrap().shared[&tea.id].connections.iter().any(|c| c.id == connection && !shared::waiting(c))
+    });
+
+    // The channel shows up in Bob's server under his name for it, marked as from Alice's.
+    until(&bob, "the shown channel", |s| {
+        s.instance(&key).unwrap().channels[&owls.id].iter().any(|c| c.name == "tea-talk" && c.shared.is_some())
+    });
+    let shown = bob
+        .shared
+        .read(|s| s.instance(&key).unwrap().channels[&owls.id].iter().find(|c| c.name == "tea-talk").unwrap().clone());
+    assert_eq!(shared::shared_label(&shown).unwrap().text, "Shared from Tea house");
+
+    // Bob writes there and edits it, naming the channel his server doesn't hold.
+    let (core, k, sid, cid) = (bob.clone(), key.clone(), owls.id.clone(), shown.id.clone());
+    wait(&bob, async move { core.load_messages(&k, &sid, &cid, false).await }).unwrap();
+    let (core, k, sid, cid) = (bob.clone(), key.clone(), owls.id.clone(), shown.id.clone());
+    wait(&bob, async move { core.send_message(&k, &sid, &cid, "hi from the owls").await }).unwrap();
+    until(&bob, "Bob's message", |s| {
+        s.instance(&key).unwrap().messages[&shown.id].items.iter().any(|m| m.content == "hi from the owls")
+    });
+    let id = bob.shared.read(|s| s.instance(&key).unwrap().messages[&shown.id].items.last().unwrap().id.clone());
+    let (core, k, sid, cid, mid) = (bob.clone(), key.clone(), owls.id.clone(), shown.id.clone(), id.clone());
+    wait(&bob, async move { core.edit_message(&k, &sid, &cid, &mid, "hi from the owls!").await }).unwrap();
+
+    // At the home it's tagged with Bob's server, and his name is known though he isn't a member.
+    let (core, k, sid, cid) = (alice.clone(), key.clone(), tea.id.clone(), general.clone());
+    wait(&alice, async move { core.load_messages(&k, &sid, &cid, false).await }).unwrap();
+    until(&alice, "Bob's edited message", |s| {
+        s.instance(&key).unwrap().messages[&general].items.iter().any(|m| m.content == "hi from the owls!")
+    });
+    let (from, name) = alice.shared.read(|s| {
+        let i = s.instance(&key).unwrap();
+        let m = i.messages[&general].items.iter().find(|m| m.id == id).unwrap();
+        (shared::foreign_server(m, &tea.id).map(|f| f.name.clone()), i.display_name(Some(&tea.id), &m.author_id))
+    });
+    assert_eq!(from.as_deref(), Some("Night owls"));
+    assert_eq!(name, "Bob");
+
+    // Alice keeps Bob out of the channel; he's on her list of people kept out.
+    let bob_id = bob.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().id);
+    let (core, k, sid, cid, uid) = (alice.clone(), key.clone(), tea.id.clone(), general.clone(), bob_id.clone());
+    wait(&alice, async move { core.block_from_channel(&k, &sid, &cid, &uid, true).await }).unwrap();
+    until(&alice, "Bob kept out", |s| {
+        s.instance(&key).unwrap().shared[&tea.id].blocks.iter().any(|b| b.user.as_ref().is_some_and(|u| u.id == bob_id))
+    });
+
+    // Bob's server lets the channel go; it leaves his sidebar, and Alice's list.
+    let (core, k, sid, id) = (bob.clone(), key.clone(), owls.id.clone(), connection.clone());
+    wait(&bob, async move { core.disconnect_shared(&k, &sid, &id).await }).unwrap();
+    until(&bob, "the channel gone", |s| s.instance(&key).unwrap().channels[&owls.id].iter().all(|c| c.id != shown.id));
+    until(&alice, "the connection gone", |s| s.instance(&key).unwrap().shared[&tea.id].connections.is_empty());
 
     instance.app.shutdown.cancel();
     drop(instance.runtime);

@@ -205,6 +205,8 @@ pub struct FuwaApp {
     pub focus: gpui_kit::FocusHandle,
     /// The message being edited in the open list (an id, or a private message's sequence).
     pub editing: Option<String>,
+    /// The message whose author (from another server) we're asking whether to keep out.
+    pub keeping_out: Option<String>,
     pub edit_box: Entity<TextareaState>,
     pub picker: Option<Picker>,
     /// Where the @ list was closed with Escape, so it stays closed for that mention.
@@ -376,6 +378,7 @@ impl FuwaApp {
             copied: None,
             focus: cx.focus_handle(),
             editing: None,
+            keeping_out: None,
             edit_box,
             picker: None,
             picker_dismissed: None,
@@ -757,6 +760,38 @@ impl FuwaApp {
         self.run(cx, async move { core.send_message(&key, &server, &channel, &content).await }, |_, _, cx| cx.notify());
     }
 
+    /// At a shared channel's home: keeps someone from another server out of it.
+    pub fn keep_out(&mut self, user_id: String, name: String, cx: &mut Context<Self>) {
+        let Some(Target::Channel { key, server, channel }) = self.target() else { return };
+        let channel_name = self
+            .core
+            .shared
+            .read(|s| s.instance(&key).and_then(|i| i.channel(&server, &channel)).map(|c| c.name.clone()))
+            .unwrap_or_default();
+        let core = self.core.clone();
+        self.run(
+            cx,
+            async move { core.block_from_channel(&key, &server, &channel, &user_id, true).await },
+            move |this, result, cx| {
+                this.keeping_out = None;
+                this.sync_list(cx);
+                match result {
+                    Ok(()) => this.toast(
+                        "user-x",
+                        format!("{name} can't see #{channel_name} anymore"),
+                        String::new(),
+                        None,
+                        None,
+                        cx,
+                    ),
+                    Err(err) => {
+                        this.toast("circle-alert", "Couldn't keep them out".into(), err.message, None, None, cx)
+                    }
+                }
+            },
+        );
+    }
+
     pub fn delete(&mut self, id: String, cx: &mut Context<Self>) {
         let core = self.core.clone();
         match self.target() {
@@ -912,6 +947,9 @@ impl FuwaApp {
             |this: &mut Self, view, event: &ServerSettingsEvent, window, cx| {
                 match event {
                     ServerSettingsEvent::Close => this.server_settings = None,
+                    ServerSettingsEvent::Toast { icon, title } => {
+                        this.toast(icon, title.clone(), String::new(), None, None, cx)
+                    }
                     ServerSettingsEvent::Moderate { user_id, action } => {
                         let (key, server) = {
                             let v = view.read(cx);

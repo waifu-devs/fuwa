@@ -100,14 +100,16 @@ export function SharedPill({ channel }: { channel: Pick<Channel, "shared"> }) {
 export function ServerTag({ server, className }: { server: SharedServer; className?: string }) {
   return (
     <span
-      title={`From ${server.name}`}
+      title={server.instance ? `From ${server.name} on ${server.instance}` : `From ${server.name}`}
       className={cn(
-        "server-tag inline-flex max-w-40 shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-px align-middle text-[0.68rem] leading-4 font-bold text-muted-foreground",
+        "server-tag inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-px align-middle text-[0.68rem] leading-4 font-bold text-muted-foreground",
+        server.instance ? "max-w-64 min-w-0 shrink" : "max-w-40",
         className,
       )}
     >
       <ServerIcon server={server} className="size-3.5 rounded-full text-[0.45rem]" />
-      <span className="truncate">{server.name}</span>
+      <span className={cn("truncate", server.instance && "max-w-28 shrink-0")}>{server.name}</span>
+      {server.instance && <span className="min-w-0 truncate font-normal opacity-80">· {server.instance}</span>}
     </span>
   );
 }

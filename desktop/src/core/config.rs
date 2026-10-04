@@ -162,6 +162,8 @@ pub struct Prefs {
     /// Fetches and checks new versions of the app in the background, for
     /// "Restart to update" (see `updates.rs`); off, it only says when one is out.
     pub auto_update: bool,
+    /// Shared channels whose note at the start was closed, as `instance/channel`.
+    pub shared_notes_closed: std::collections::BTreeSet<String>,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -194,6 +196,7 @@ impl Default for Prefs {
             share_reports: true,
             closed_announcements: Default::default(),
             auto_update: true,
+            shared_notes_closed: Default::default(),
         }
     }
 }
