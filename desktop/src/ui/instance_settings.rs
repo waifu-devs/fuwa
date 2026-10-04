@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+mod accounts;
+mod announcement;
 mod calls;
 mod controls;
 mod general;
@@ -37,6 +39,11 @@ use crate::ui::widgets::{error_line, icon, pal, soft_button};
 
 pub enum InstanceSettingsEvent {
     Close,
+    /// A short note in the app's corner, like the web's toasts.
+    Toast {
+        icon: &'static str,
+        title: String,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -47,6 +54,8 @@ enum Page {
     Privacy,
     Calls,
     Moderation,
+    Accounts,
+    Announcement,
 }
 
 impl Page {
@@ -58,6 +67,8 @@ impl Page {
             Page::Privacy => "Privacy",
             Page::Calls => "Calls",
             Page::Moderation => "Moderation",
+            Page::Accounts => "Accounts",
+            Page::Announcement => "Announcement",
         }
     }
 
@@ -69,6 +80,8 @@ impl Page {
             Page::Privacy => "shield-check",
             Page::Calls => "audio-lines",
             Page::Moderation => "shield-alert",
+            Page::Accounts => "users",
+            Page::Announcement => "megaphone",
         }
     }
 
@@ -80,12 +93,22 @@ impl Page {
             Page::Privacy => "What this instance tells Waifu Devs.",
             Page::Calls => "Voice channels and calls in direct messages.",
             Page::Moderation => "Services servers' AutoMod can ask about messages.",
+            Page::Accounts => "Everyone with an account here. Make admins, reset passwords, or turn an account off.",
+            Page::Announcement => "A banner at the top of the app for everyone on this instance.",
         }
+    }
+
+    /// Pages that look after the instance rather than change its settings.
+    fn manages(self) -> bool {
+        matches!(self, Page::Accounts | Page::Announcement)
     }
 }
 
-/// The instance group, in the web's order.
-const PAGES: [Page; 6] = [Page::General, Page::SignUps, Page::Limits, Page::Privacy, Page::Calls, Page::Moderation];
+/// The menu's groups and their pages, in the web's order.
+const GROUPS: [(&str, &[Page]); 2] = [
+    ("INSTANCE", &[Page::General, Page::SignUps, Page::Limits, Page::Privacy, Page::Calls, Page::Moderation]),
+    ("MANAGE", &[Page::Accounts, Page::Announcement]),
+];
 
 type GetText = fn(&pb::InstanceSettings) -> String;
 type SetText = fn(&mut pb::InstanceSettings, String);
@@ -166,6 +189,8 @@ pub struct InstanceSettingsView {
     /// The unit each size cap is typed in.
     units: HashMap<&'static str, usize>,
     bar: Option<AnyElement>,
+    announce: announcement::Announce,
+    accounts: accounts::Accounts,
     _subscriptions: Vec<Subscription>,
     _boxes: Vec<Subscription>,
 }
@@ -184,6 +209,9 @@ impl InstanceSettingsView {
             }
         })
         .detach();
+        let (announce, announce_sub) = announcement::Announce::new(window, cx);
+        let (accounts, mut boxes) = accounts::Accounts::new(window, cx);
+        boxes.push(announce_sub);
         let mut view = Self {
             core,
             key,
@@ -201,8 +229,10 @@ impl InstanceSettingsView {
             caps: HashMap::new(),
             units: HashMap::new(),
             bar: None,
+            announce,
+            accounts,
             _subscriptions: Vec::new(),
-            _boxes: Vec::new(),
+            _boxes: boxes,
         };
         view.make_boxes(window, cx);
         view.load(window, cx);
@@ -553,6 +583,11 @@ impl InstanceSettingsView {
             },
         );
         cx.notify();
+    }
+
+    /// Esc closes a dialog over the page first; false when there was none.
+    pub fn escape(&mut self, cx: &mut Context<Self>) -> bool {
+        self.close_account_dialog(cx)
     }
 
     fn open(&mut self, page: Page, cx: &mut Context<Self>) {
@@ -1268,41 +1303,54 @@ impl Render for InstanceSettingsView {
                 )
                 .child(div().text_xs().text_color(p.muted_foreground).child("Instance settings")),
         );
-        menu = menu.child(
-            div()
-                .h(px(30.0))
-                .px(px(10.0))
-                .text_size(px(11.0))
-                .font_weight(FontWeight::EXTRA_BOLD)
-                .text_color(p.muted_foreground)
-                .child("INSTANCE"),
-        );
-        let top = 62.0 + 30.0;
-        let mut at_y = top;
-        for (n, pg) in PAGES.into_iter().enumerate() {
-            let on = pg == page;
-            if on {
-                at_y = top + 40.0 * n as f32;
-            }
-            let hover = alpha(p.primary, 0.08);
+        let mut at_y = 0.0;
+        let mut y = 62.0;
+        for (group, pages) in GROUPS {
             menu = menu.child(
                 div()
-                    .id(SharedString::from(format!("imenu-{}", pg.label())))
-                    .h(px(38.0))
-                    .mb(px(2.0))
+                    .h(px(30.0))
                     .px(px(10.0))
                     .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .rounded(corner(10.0))
-                    .cursor_pointer()
-                    .text_color(if on { p.foreground } else { p.muted_foreground })
-                    .when(on, |el| el.font_weight(FontWeight::BOLD))
-                    .hover(move |s| s.bg(hover))
-                    .on_click(cx.listener(move |this, _, _, cx| this.open(pg, cx)))
-                    .child(icon(pg.glyph()).size(px(17.0)).text_color(if on { p.primary } else { p.muted_foreground }))
-                    .child(pg.label()),
+                    .items_end()
+                    .pb(px(8.0))
+                    .text_size(px(11.0))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .text_color(p.muted_foreground)
+                    .child(group),
             );
+            y += 30.0;
+            for &pg in pages {
+                let on = pg == page;
+                if on {
+                    at_y = y;
+                }
+                y += 40.0;
+                let hover = alpha(p.primary, 0.08);
+                menu = menu.child(
+                    div()
+                        .id(SharedString::from(format!("imenu-{}", pg.label())))
+                        .h(px(38.0))
+                        .mb(px(2.0))
+                        .px(px(10.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .rounded(corner(10.0))
+                        .cursor_pointer()
+                        .text_color(if on { p.foreground } else { p.muted_foreground })
+                        .when(on, |el| el.font_weight(FontWeight::BOLD))
+                        .hover(move |s| s.bg(hover))
+                        .on_click(cx.listener(move |this, _, _, cx| this.open(pg, cx)))
+                        .child(icon(pg.glyph()).size(px(17.0)).text_color(if on {
+                            p.primary
+                        } else {
+                            p.muted_foreground
+                        }))
+                        .child(pg.label()),
+                );
+            }
+            y += 10.0;
+            menu = menu.child(div().h(px(10.0)));
         }
         let at = motion::follow("instance-settings-hl", at_y, window, cx);
         let menu = div()
@@ -1320,7 +1368,13 @@ impl Render for InstanceSettingsView {
             .child(menu);
 
         self.bar = None;
-        let body = if let Some(error) = &self.load_error {
+        let body = if page.manages() {
+            match page {
+                Page::Accounts => self.accounts_page(&p, window, cx),
+                Page::Announcement => self.announcement_page(&p, window, cx),
+                _ => div().into_any_element(),
+            }
+        } else if let Some(error) = &self.load_error {
             div().text_sm().text_color(p.muted_foreground).child(error.clone()).into_any_element()
         } else if self.draft.is_none() {
             shimmer_rows(3, &p).into_any_element()
@@ -1332,6 +1386,7 @@ impl Render for InstanceSettingsView {
                 Page::Calls => self.calls_page(&p, window, cx),
                 Page::Privacy => self.privacy_page(&p, cx),
                 Page::Moderation => self.moderation_page(&p, window, cx),
+                Page::Accounts | Page::Announcement => div().into_any_element(),
             }
         };
         let changed = self.changed();
@@ -1346,8 +1401,11 @@ impl Render for InstanceSettingsView {
                 |this: &mut Self, window, cx| this.commit(this.changed(), Vec::new(), window, cx),
             ));
         }
+        // The accounts list scrolls on its own, drawing only the rows in sight.
+        let fills = page == Page::Accounts;
         let content = div()
             .w(px(720.0))
+            .when(fills, |el| el.h_full())
             .flex()
             .flex_col()
             .gap(px(6.0))
@@ -1358,6 +1416,7 @@ impl Render for InstanceSettingsView {
             .child(body)
             .child(div().h(px(if self.bar.is_some() { 90.0 } else { 0.0 })));
 
+        let dialog = self.account_dialog(&p, window, cx);
         motion::fade_in(
             div()
                 .id("instance-settings")
@@ -1382,7 +1441,7 @@ impl Render for InstanceSettingsView {
                         .id("instance-settings-body")
                         .flex_1()
                         .h_full()
-                        .overflow_y_scroll()
+                        .when(!fills, |el| el.overflow_y_scroll())
                         .pt(px(56.0))
                         .px(px(40.0))
                         .pb(px(40.0))
@@ -1430,7 +1489,8 @@ impl Render for InstanceSettingsView {
                         .child(
                             div().text_xs().font_weight(FontWeight::BOLD).text_color(p.muted_foreground).child("ESC"),
                         ),
-                ),
+                )
+                .when_some(dialog, |el, dialog| el.child(dialog)),
             "instance-settings-in",
             Duration::from_millis(160),
         )

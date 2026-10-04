@@ -1,6 +1,7 @@
 //! The window, drawn with GPUI Kit. It reads the core's store and calls its
 //! methods; everything it shows moves the way the web app does.
 
+mod announcement;
 pub mod app;
 mod arrange;
 mod assets;

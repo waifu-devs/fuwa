@@ -157,6 +157,8 @@ pub struct Prefs {
     /// Sends anonymous counts of errors, slow paths and feature use to your
     /// own instance, while its telemetry is on (see `reports.rs`).
     pub share_reports: bool,
+    /// The announcement closed on each instance, by its id, so it stays closed until a new one.
+    pub closed_announcements: std::collections::BTreeMap<String, String>,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -187,6 +189,7 @@ impl Default for Prefs {
             keybinds: Default::default(),
             custom_keybinds: Vec::new(),
             share_reports: true,
+            closed_announcements: Default::default(),
         }
     }
 }

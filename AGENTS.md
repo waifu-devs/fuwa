@@ -384,7 +384,14 @@
     path and keeps unsaved edits across a save; the pages are built from
     `instance_settings/controls.rs`, the web's `settings/controls.tsx`:
     a setting with its default and reset, option cards, caps; a cached view
-    like server settings, sharing its `save_bar`, `switch` and chips),
+    like server settings, sharing its `save_bar`, `switch` and chips; its
+    Manage group acts straight away instead: `instance_settings/accounts.rs`
+    finds accounts and makes admins, resets passwords or turns accounts off,
+    in a list that draws only the rows in sight, and
+    `instance_settings/announcement.rs` puts up the banner, over
+    `core/instance_manage.rs`),
+    `announcement.rs` that banner across the top of the app (news, heads-up
+    or urgent, which can't be closed; a closed one stays closed in prefs),
     `moderate.rs` the time out, kick and ban
     buttons and dialog; `emoji.rs` (the built-in list, server emoji tokens,
     the `:name:` list, and a Markdown plugin that draws emoji inline),
