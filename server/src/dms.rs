@@ -241,8 +241,8 @@ impl DmDb {
         &self.db
     }
 
-    fn read(&self) -> Result<Connection> {
-        db::connect(&self.db)
+    fn read(&self) -> Result<db::Pooled> {
+        self.db.conn()
     }
 
     // ───────────────────────── Devices ─────────────────────────
@@ -475,7 +475,7 @@ impl DmDb {
             )
             .await
         };
-        if let Some(conversation) = found(&self.read()?).await? {
+        if let Some(conversation) = found(&*self.read()?).await? {
             return Ok((conversation, false));
         }
         let now = now_ms();
@@ -509,7 +509,7 @@ impl DmDb {
         .await;
         match started {
             // Started by someone else just now.
-            Err(err) if db::is_unique_violation(&err) => match found(&self.read()?).await? {
+            Err(err) if db::is_unique_violation(&err) => match found(&*self.read()?).await? {
                 Some(conversation) => Ok((conversation, false)),
                 None => Err(err),
             },
@@ -759,8 +759,8 @@ impl DmDb {
     /// the outbox, one write at a time so watchers get events in commit order.
     /// A clash runs `f` again (see [`db::transaction`]).
     async fn write<T>(&self, f: impl AsyncFnOnce(&Connection, &mut Outbox) -> Result<T> + Clone) -> Result<T> {
-        let _shared = self.db.shared().await;
-        let conn = db::connect(&self.db)?;
+        let _writing = self.db.writing().await?;
+        let conn = self.db.conn()?;
         let mut attempt = 0;
         loop {
             db::begin(&conn).await?;

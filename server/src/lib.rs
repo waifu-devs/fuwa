@@ -30,6 +30,7 @@ pub mod rtc;
 pub mod servers;
 pub mod settings;
 pub mod sso;
+pub mod streams;
 pub mod telemetry;
 pub mod twofactor;
 pub mod voice;

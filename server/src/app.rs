@@ -55,6 +55,8 @@ pub struct App {
     pub servers: Servers,
     pub hub: Arc<Hub>,
     pub limiter: SignInLimiter,
+    /// Live event streams held open, per account and in all.
+    pub streams: Arc<crate::streams::Streams>,
     pub started: Instant,
     /// Cancelled when the instance shuts down, ending live streams.
     pub shutdown: CancellationToken,
@@ -189,6 +191,7 @@ impl App {
         let federation = crate::federation::Federation::new(config.federation_allow_private);
         let shutdown = CancellationToken::new();
         let media_link = media_link(&config, &shutdown).await;
+        let streams = crate::streams::Streams::new(config.streams_per_account, config.max_streams);
 
         let app = Arc::new(Self {
             config,
@@ -201,6 +204,7 @@ impl App {
             servers,
             hub,
             limiter: SignInLimiter::default(),
+            streams,
             started: Instant::now(),
             shutdown,
             link,
@@ -370,9 +374,19 @@ impl App {
             let app = self.clone();
             router = router.route(
                 "/healthz/parts",
+                get(move |headers: http::HeaderMap| {
+                    let app = app.clone();
+                    async move { crate::cluster::status::parts(&app, &headers).await }
+                }),
+            );
+        } else {
+            // How busy a shard is, for its directory's answer (behind the cluster key).
+            let app = self.clone();
+            router = router.route(
+                "/healthz/load",
                 get(move || {
                     let app = app.clone();
-                    async move { crate::cluster::status::parts(&app).await }
+                    async move { crate::cluster::status::json_response(&crate::cluster::status::load(&app)) }
                 }),
             );
         }
@@ -405,6 +419,18 @@ impl App {
         let key: Arc<str> = self.config.cluster.key.as_deref().unwrap_or_default().into();
         router.layer(axum::middleware::from_fn_with_state(key, crate::cluster::require_key))
     }
+}
+
+/// Sends what each answer writes straight away. Without it, the small
+/// frames a gRPC answer ends with wait for the client's acknowledgement of
+/// the ones before (Nagle), adding up to 40 ms to every call.
+pub fn no_delay(
+    listener: tokio::net::TcpListener,
+) -> impl axum::serve::Listener<Io = tokio::net::TcpStream, Addr = SocketAddr> {
+    use axum::serve::ListenerExt;
+    listener.tap_io(|stream| {
+        let _ = stream.set_nodelay(true);
+    })
 }
 
 /// Where calls' sound goes: a media part in this process (when it runs
@@ -567,7 +593,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     }
 
     let shutdown = app.shutdown.clone();
-    let served = axum::serve(listener, app.router())
+    let served = axum::serve(crate::app::no_delay(listener), app.router())
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
         .await
         .map_err(|err| format!("server error: {err}"));

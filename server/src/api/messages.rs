@@ -514,7 +514,7 @@ impl MessageService for Api {
                 check_content(&req.content, !req.attachments.is_empty() || !req.embeds.is_empty())?;
                 check_extras(&mut req.attachments, &req.embeds)?;
                 check_embed_links(&self.app, &mut req.embeds)?;
-                if let Some(link) = shared::link_of(&sdb.read()?, &req.channel_id).await? {
+                if let Some(link) = shared::link_of(&*sdb.read()?, &req.channel_id).await? {
                     let message = shared::guest_send(&self.app, &sdb, &account, &member, &access, &link, req).await?;
                     return Ok(pb::SendMessageResponse { message: Some(message) });
                 }
@@ -665,7 +665,7 @@ impl MessageService for Api {
                 check_not_timed_out(&member)?;
                 let located = shared::locate(
                     &self.app,
-                    &sdb.read()?,
+                    &*sdb.read()?,
                     &sdb.id,
                     &account,
                     &access,
@@ -679,7 +679,7 @@ impl MessageService for Api {
                     return Ok(pb::UpdateMessageResponse { message: Some(message) });
                 }
                 // A provider is asked before the write, about new text the author wrote.
-                let before = load_message(&sdb.read()?, &sdb.id, &req.message_id).await?;
+                let before = load_message(&*sdb.read()?, &sdb.id, &req.message_id).await?;
                 let (asked, later) = match before {
                     Some(m) if m.author_id == account.id && m.content != req.content => {
                         automod::ask_soon(&self.app, &sdb, &member, &access, &m.channel_id, &req.content, &[]).await
@@ -762,7 +762,7 @@ impl MessageService for Api {
                 access.require_not_timed_out()?;
                 let located = shared::locate(
                     &self.app,
-                    &sdb.read()?,
+                    &*sdb.read()?,
                     &sdb.id,
                     &account,
                     &access,

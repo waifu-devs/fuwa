@@ -94,6 +94,12 @@ pub struct Config {
     /// Where the databases and pictures are continuously copied to:
     /// FUWA_S3_* (a bucket) or FUWA_REPLICA_PATH (a directory). None is off.
     pub replica: Option<ReplicaConfig>,
+    /// FUWA_STREAMS_PER_ACCOUNT: live connections (apps and tabs) one account
+    /// may hold open at once on this part, default 32; `unlimited` for none.
+    pub streams_per_account: Option<usize>,
+    /// FUWA_MAX_STREAMS: live connections this part holds open at once, for
+    /// everyone. Unlimited by default; see docs/capacity.md for what a box holds.
+    pub max_streams: Option<usize>,
 }
 
 impl std::fmt::Debug for Config {
@@ -117,6 +123,8 @@ impl std::fmt::Debug for Config {
             .field("web", &self.web)
             .field("cluster", &self.cluster)
             .field("replica", &self.replica)
+            .field("streams_per_account", &self.streams_per_account)
+            .field("max_streams", &self.max_streams)
             .field("automod_providers", &self.automod_providers)
             .finish()
     }
@@ -443,6 +451,19 @@ impl Config {
         }
         let media_urls = media_urls.into_iter().map(|u| u.trim_end_matches('/').to_string()).collect();
 
+        let count = |key: &str, default: Option<usize>| -> Result<Option<usize>, String> {
+            match get(key).as_deref().map(str::trim) {
+                None => Ok(default),
+                Some("unlimited") => Ok(None),
+                Some(value) => match value.parse::<usize>() {
+                    Ok(n) if n >= 1 => Ok(Some(n)),
+                    _ => Err(format!("{key} must be a whole number, 1 or more, or unlimited, got {value:?}")),
+                },
+            }
+        };
+        let streams_per_account = count("FUWA_STREAMS_PER_ACCOUNT", Some(crate::streams::PER_ACCOUNT))?;
+        let max_streams = count("FUWA_MAX_STREAMS", None)?;
+
         let replica = match (replica(&get)?, cluster.role) {
             // Only the parts that keep files replicate them: a split
             // instance's directory and shards. One process keeps plain local files.
@@ -498,6 +519,8 @@ impl Config {
             media,
             media_urls,
             replica,
+            streams_per_account,
+            max_streams,
         })
     }
 }

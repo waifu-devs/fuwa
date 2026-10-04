@@ -608,6 +608,12 @@ async fn a_split_instance_works_like_one() {
     assert!(parts.contains(&serde_json::json!({ "part": "directory", "up": true })));
     assert_eq!(parts.iter().filter(|p| p["part"] == "shard" && p["up"] == true).count(), cluster.shards.len());
     assert!(!parts.iter().any(|p| p.to_string().contains("http")), "no addresses: {parts:?}");
+    // How busy each shard is, and this gateway's streams, but the busiest servers only for an admin.
+    assert!(parts.iter().filter(|p| p["part"] == "shard").all(|p| p["load"]["streams"].is_u64()), "{parts:?}");
+    assert!(parts.iter().any(|p| p["part"] == "gateway" && p["load"]["streams"].is_u64()), "{parts:?}");
+    assert!(!parts.iter().any(|p| p.to_string().contains("busiest")), "busiest is for admins: {parts:?}");
+    let shard_load = http.get(format!("{}/healthz/load", cluster.shards[0].url())).send().await.unwrap();
+    assert_eq!(shard_load.headers().get("grpc-status").map(|v| v.to_str().unwrap()), Some("7"));
     let direct = http.get(format!("{}/healthz/parts", cluster.directory.url())).send().await.unwrap();
     // Refused like any call without the cluster key.
     assert_eq!(direct.headers().get("grpc-status").map(|v| v.to_str().unwrap()), Some("7"));

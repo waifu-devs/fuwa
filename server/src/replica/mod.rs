@@ -223,6 +223,7 @@ impl Replica {
     /// its log into it.
     pub async fn track(&self, name: &str, db: Arc<Db>) -> Result<()> {
         db::pragma(&db::connect(&db)?, "PRAGMA mvcc_checkpoint_threshold = -1").await?;
+        db.replicated();
         let position = self.load_position(name);
         let tracked = Arc::new(Tracked {
             name: name.to_string(),

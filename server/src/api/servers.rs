@@ -187,7 +187,7 @@ impl ServerService for Api {
                 let server = sdb.server().await?;
                 if !server.discoverable
                     && !account.admin
-                    && store::member(&sdb.read()?, &sdb.id, &account.id).await?.is_none()
+                    && store::member(&*sdb.read()?, &sdb.id, &account.id).await?.is_none()
                 {
                     return Err(Error::NotFound("server"));
                 }
@@ -338,7 +338,7 @@ impl ServerService for Api {
                     return Err(Error::denied("only the server's owner can delete it"));
                 }
                 // Servers its channels are shown in, and that show its own, let go too.
-                let ended = super::shared::take_server(&sdb.read()?).await?;
+                let ended = super::shared::take_server(&*sdb.read()?).await?;
                 self.app.servers.delete(&sdb.id, &actor).await?;
                 self.app.server_gone(&sdb.id).await;
                 super::shared::tell_ended(&self.app, &sdb.id, &actor, ended).await;

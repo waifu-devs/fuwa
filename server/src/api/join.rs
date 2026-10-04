@@ -124,7 +124,7 @@ impl JoinService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let Seat { sdb, access, .. } = self.membership(&account, &request.get_ref().server_id).await?;
-                let mut welcome = store::load_welcome(&sdb.read()?).await?;
+                let mut welcome = store::load_welcome(&*sdb.read()?).await?;
                 if !access.has(Permission::ManageServer) {
                     if !welcome.enabled {
                         welcome = pb::WelcomeScreen::default();
@@ -369,7 +369,7 @@ impl JoinService for Api {
                 let account = self.account(request.metadata()).await?;
                 let sdb = self.with(&account, &request.get_ref().server_id, Permission::KickMembers).await?.sdb;
                 let applications =
-                    store::load_applications(&sdb.read()?, &sdb.id, pb::ApplicationStatus::Pending).await?;
+                    store::load_applications(&*sdb.read()?, &sdb.id, pb::ApplicationStatus::Pending).await?;
                 Ok(pb::ListApplicationsResponse { applications })
             }
             .await,

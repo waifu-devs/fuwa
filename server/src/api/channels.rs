@@ -153,7 +153,7 @@ impl ChannelService for Api {
                 let Seat { sdb, access, .. } = self.membership(&account, &req.server_id).await?;
                 access.require_in(&req.channel_id, Permission::ViewChannels)?;
                 let channel =
-                    load_channel(&sdb.read()?, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
+                    load_channel(&*sdb.read()?, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
                 Ok(pb::GetChannelResponse { channel: Some(channel) })
             }
             .await,
@@ -168,7 +168,7 @@ impl ChannelService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let Seat { sdb, access, .. } = self.membership(&account, &request.get_ref().server_id).await?;
-                let mut channels = load_channels(&sdb.read()?, &sdb.id).await?;
+                let mut channels = load_channels(&*sdb.read()?, &sdb.id).await?;
                 channels.retain(|c| access.can_see(&c.id));
                 Ok(pb::ListChannelsResponse { channels })
             }

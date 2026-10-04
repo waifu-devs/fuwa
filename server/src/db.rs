@@ -7,8 +7,10 @@
 //! to live in a row that every such write updates, so they clash instead.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, Semaphore, SemaphorePermit};
 use turso::{Builder, Connection, Database, IntoParams, Row};
 
 use crate::error::{Error, Result};
@@ -53,6 +55,95 @@ pub struct Db {
     database: Database,
     path: PathBuf,
     gate: RwLock<()>,
+    /// Writes running at once (see [`WRITE_LANES`]).
+    lanes: Semaphore,
+    /// Writes running or waiting for a lane (see [`WRITE_QUEUE`]).
+    queued: AtomicUsize,
+    /// Writes let in since the file opened, for telling busy servers apart.
+    writes: AtomicU64,
+    /// The replica folds this file's log itself (`replica::Replica::track`).
+    replicated: AtomicBool,
+    /// A fold is running.
+    folding: AtomicBool,
+    /// Connections that finished their work, kept to be used again: opening
+    /// one and parsing every statement afresh was most of what a write cost.
+    idle: Arc<Mutex<Vec<(Connection, u32)>>>,
+    /// How many idle connections this file keeps.
+    keep: usize,
+}
+
+/// Writes to one file that run at once; the rest wait their turn. Commits
+/// go one at a time anyway, and many open transactions at once only clash
+/// and spin: with every write let in, 100 messages arriving together in one
+/// server took 260 ms each and half the CPU; four at a time, 55 ms and a
+/// quarter (docs/capacity.md).
+pub const WRITE_LANES: usize = 4;
+
+/// Writes to one file that may wait at once. Past this the file is busy:
+/// new writes are turned away straight away, rather than piling up until
+/// they time out and taking memory from every other server.
+pub const WRITE_QUEUE: usize = 512;
+
+/// What a write is told when its file's queue is full.
+pub const BUSY: &str = "this server is busy right now; try again in a moment";
+
+/// How big a file's log may grow before fuwa folds it into the file (the
+/// size at which Turso would fold it by itself). Turso's own fold is off:
+/// it ran inside whichever commit crossed the size, waiting for every other
+/// open transaction, while those waited on that commit, so the file's writes
+/// stalled until Turso gave up (seen under load in `examples/load.rs`).
+pub const FOLD_BYTES: u64 = 4_120_000;
+
+/// A write's turn at its file: its lane and its place in the queue.
+pub struct Writing<'a> {
+    _lane: SemaphorePermit<'a>,
+    _gate: RwLockReadGuard<'a, ()>,
+    _queued: Queued<'a>,
+}
+
+/// A place in a file's queue, given back however the write ends.
+struct Queued<'a>(&'a AtomicUsize);
+
+impl Drop for Queued<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Idle connections a file keeps by default (node.db keeps more, see [`Db::keep`]).
+const KEEP_IDLE: usize = 4;
+/// Uses after which a connection is closed rather than kept, so its cache of
+/// prepared statements can't grow without end.
+const USES: u32 = 10_000;
+
+/// A connection from a file's pool, back in the pool when dropped (unless a
+/// transaction was left open on it, by a request cancelled halfway: then it
+/// is closed, so nobody reads through a stale snapshot).
+pub struct Pooled {
+    conn: Option<(Connection, u32)>,
+    idle: Arc<Mutex<Vec<(Connection, u32)>>>,
+    keep: usize,
+}
+
+impl std::ops::Deref for Pooled {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        &self.conn.as_ref().expect("a pooled connection is there until dropped").0
+    }
+}
+
+impl Drop for Pooled {
+    fn drop(&mut self) {
+        let Some((conn, uses)) = self.conn.take() else { return };
+        if uses >= USES || !conn.is_autocommit().unwrap_or(false) {
+            return;
+        }
+        let mut idle = self.idle.lock().unwrap_or_else(|p| p.into_inner());
+        if idle.len() < self.keep {
+            idle.push((conn, uses));
+        }
+    }
 }
 
 impl std::ops::Deref for Db {
@@ -76,9 +167,85 @@ impl Db {
         PathBuf::from(name)
     }
 
+    /// A connection: an idle one if there is one, else a new one.
+    pub fn conn(&self) -> Result<Pooled> {
+        let reused = self.idle.lock().unwrap_or_else(|p| p.into_inner()).pop();
+        let (conn, uses) = match reused {
+            Some(found) => found,
+            None => (connect(&self.database)?, 0),
+        };
+        Ok(Pooled { conn: Some((conn, uses + 1)), idle: self.idle.clone(), keep: self.keep })
+    }
+
+    /// Keeps up to `keep` idle connections instead of [`KEEP_IDLE`], for a
+    /// file nearly every call reads (node.db).
+    pub fn keep(mut self, keep: usize) -> Self {
+        self.keep = keep;
+        self
+    }
+
     /// Held by every write while it runs.
     pub async fn shared(&self) -> RwLockReadGuard<'_, ()> {
         self.gate.read().await
+    }
+
+    /// A write's turn: a place in the queue (or [`BUSY`] when it's full), then
+    /// one of the lanes, then the gate, shared.
+    pub async fn writing(&self) -> Result<Writing<'_>> {
+        if self.queued.fetch_add(1, Ordering::AcqRel) >= WRITE_QUEUE {
+            self.queued.fetch_sub(1, Ordering::AcqRel);
+            crate::reports::server_error("server_busy", None);
+            return Err(Error::ResourceExhausted(BUSY.into()));
+        }
+        let queued = Queued(&self.queued);
+        self.writes.fetch_add(1, Ordering::Relaxed);
+        let lane = self.lanes.acquire().await.map_err(|_| Error::internal("the write lanes closed"))?;
+        let gate = self.gate.read().await;
+        Ok(Writing { _lane: lane, _gate: gate, _queued: queued })
+    }
+
+    /// Writes running or waiting on this file right now.
+    pub fn queued(&self) -> usize {
+        self.queued.load(Ordering::Acquire)
+    }
+
+    /// Writes let in since the file opened.
+    pub fn writes(&self) -> u64 {
+        self.writes.load(Ordering::Relaxed)
+    }
+
+    /// From now on the replica folds this file's log, after shipping it.
+    pub fn replicated(&self) {
+        self.replicated.store(true, Ordering::Release);
+    }
+
+    /// Folds the log into the file once it has passed [`FOLD_BYTES`], with
+    /// writes held meanwhile, unless the replica does that for this file.
+    /// Called after writes, with none of the write's own guards held.
+    pub async fn fold_if_big(&self) {
+        if self.replicated.load(Ordering::Acquire)
+            || std::fs::metadata(self.log_path()).map(|m| m.len()).unwrap_or(0) < FOLD_BYTES
+            || self.folding.swap(true, Ordering::AcqRel)
+        {
+            return;
+        }
+        // Given back however this ends, a caller that stops waiting included.
+        struct Folding<'a>(&'a AtomicBool);
+        impl Drop for Folding<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
+        let _folding = Folding(&self.folding);
+        let started = std::time::Instant::now();
+        let folded = {
+            let _alone = self.alone().await;
+            self.checkpoint().await
+        };
+        crate::reports::server_timing("db.fold", started.elapsed());
+        if folded.is_err() {
+            tracing::warn!(file = %self.path.display(), "couldn't fold a database's log into it; trying again after a later write");
+        }
     }
 
     /// Waits for the writes running now to finish and keeps new ones waiting.
@@ -117,7 +284,20 @@ pub async fn open(path: &Path, key: Option<&EncryptionKey>, migrations: &[&str])
         return Err(Error::internal(format!("{} stayed in {mode:?} journal mode", path.display())));
     }
     migrate(&conn, migrations).await?;
-    Ok(Db { database: db, path: path.to_path_buf(), gate: RwLock::new(()) })
+    // fuwa folds the log itself, between writes (see FOLD_BYTES).
+    pragma(&conn, "PRAGMA mvcc_checkpoint_threshold = -1").await?;
+    Ok(Db {
+        database: db,
+        path: path.to_path_buf(),
+        gate: RwLock::new(()),
+        lanes: Semaphore::new(WRITE_LANES),
+        queued: AtomicUsize::new(0),
+        writes: AtomicU64::new(0),
+        replicated: AtomicBool::new(false),
+        folding: AtomicBool::new(false),
+        idle: Arc::new(Mutex::new(Vec::new())),
+        keep: KEEP_IDLE,
+    })
 }
 
 /// Opening a file is where the wrong FUWA_ENCRYPTION_KEY shows up, as Turso's
@@ -213,24 +393,32 @@ const ATTEMPTS: u32 = 50;
 /// Runs `f` once in a concurrent write transaction on a connection of its
 /// own: for writes that may simply give way when they clash.
 pub async fn write_once<T>(db: &Db, f: impl AsyncFnOnce(&Connection) -> Result<T>) -> Result<T> {
-    let _shared = db.shared().await;
-    let conn = connect(db)?;
-    begin(&conn).await?;
-    let result = match f(&conn).await {
-        Ok(value) => conn.execute("COMMIT", ()).await.map(|_| value).map_err(Error::from),
-        Err(err) => Err(err),
+    let result = {
+        let _writing = db.writing().await?;
+        let conn = db.conn()?;
+        begin(&conn).await?;
+        let result = match f(&conn).await {
+            Ok(value) => conn.execute("COMMIT", ()).await.map(|_| value).map_err(Error::from),
+            Err(err) => Err(err),
+        };
+        if result.is_err() {
+            abort(&conn).await;
+        }
+        result
     };
-    if result.is_err() {
-        abort(&conn).await;
-    }
+    db.fold_if_big().await;
     result
 }
 
 /// Runs `f` in a concurrent write transaction on a connection of its own,
 /// committing if it succeeds. See [`transaction`].
 pub async fn write<T>(db: &Db, f: impl AsyncFnOnce(&Connection) -> Result<T> + Clone) -> Result<T> {
-    let _shared = db.shared().await;
-    transaction(&connect(db)?, f).await
+    let result = {
+        let _writing = db.writing().await?;
+        transaction(&*db.conn()?, f).await
+    };
+    db.fold_if_big().await;
+    result
 }
 
 /// Runs `f` in a concurrent write transaction (`BEGIN CONCURRENT`) on `conn`,
@@ -318,7 +506,7 @@ pub async fn query_one<T>(
     params: impl IntoParams,
     map: impl Fn(&Row) -> turso::Result<T>,
 ) -> Result<Option<T>> {
-    let mut rows = conn.query(sql, params).await?;
+    let mut rows = conn.prepare_cached(sql).await?.query(params).await?;
     let row = rows.next().await?;
     Ok(row.as_ref().map(map).transpose()?)
 }
@@ -329,7 +517,7 @@ pub async fn query_all<T>(
     params: impl IntoParams,
     map: impl Fn(&Row) -> turso::Result<T>,
 ) -> Result<Vec<T>> {
-    let mut rows = conn.query(sql, params).await?;
+    let mut rows = conn.prepare_cached(sql).await?.query(params).await?;
     let mut out = Vec::new();
     while let Some(row) = rows.next().await? {
         out.push(map(&row)?);
@@ -340,4 +528,69 @@ pub async fn query_all<T>(
 /// Whether a database error is a UNIQUE constraint failing.
 pub fn is_unique_violation(err: &Error) -> bool {
     matches!(err, Error::Database(e) if e.to_string().contains("UNIQUE constraint failed"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn scratch(migrations: &[&str]) -> (tempfile::TempDir, Db) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open(&dir.path().join("t.db"), None, migrations).await.unwrap();
+        (dir, db)
+    }
+
+    #[tokio::test]
+    async fn folds_its_own_log_once_it_is_big() {
+        let (_dir, db) = scratch(&["CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT NOT NULL)"]).await;
+        let body = "x".repeat(64 * 1024);
+        for _ in 0..80 {
+            let body = body.clone();
+            write(&db, async move |conn| {
+                conn.execute("INSERT INTO t (body) VALUES (?1)", [body]).await?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        }
+        let log = std::fs::metadata(db.log_path()).map(|m| m.len()).unwrap_or(0);
+        assert!(log < FOLD_BYTES, "the log was folded in, now {log} bytes");
+        let count = query_one(&db.conn().unwrap(), "SELECT count(*) FROM t", (), |r| r.get::<i64>(0)).await.unwrap();
+        assert_eq!(count, Some(80));
+    }
+
+    #[tokio::test]
+    async fn a_full_queue_says_busy_and_gives_places_back() {
+        let (_dir, db) = scratch(&[]).await;
+        let mut held = Vec::new();
+        for _ in 0..WRITE_LANES {
+            held.push(db.writing().await.unwrap());
+        }
+        // The rest wait for a lane, holding places in the queue.
+        let mut waiting: Vec<_> = (0..WRITE_QUEUE - WRITE_LANES).map(|_| Box::pin(db.writing())).collect();
+        for w in &mut waiting {
+            assert!(futures::poll!(w.as_mut()).is_pending());
+        }
+        assert_eq!(db.queued(), WRITE_QUEUE);
+        match db.writing().await {
+            Err(Error::ResourceExhausted(message)) => assert_eq!(message, BUSY),
+            other => panic!("expected busy, got {:?}", other.map(|_| ())),
+        }
+        drop(waiting);
+        drop(held);
+        assert_eq!(db.queued(), 0);
+        db.writing().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn connections_come_back_unless_a_transaction_was_left_open() {
+        let (_dir, db) = scratch(&[]).await;
+        drop(db.conn().unwrap());
+        assert_eq!(db.idle.lock().unwrap().len(), 1);
+        let conn = db.conn().unwrap();
+        assert_eq!(db.idle.lock().unwrap().len(), 0);
+        conn.execute("BEGIN CONCURRENT", ()).await.unwrap();
+        drop(conn);
+        assert_eq!(db.idle.lock().unwrap().len(), 0, "a connection mid-transaction is closed");
+    }
 }

@@ -412,7 +412,7 @@ pub async fn update_user(servers: &Servers, user: &pb::User, server_ids: &[Strin
 pub async fn forget_account(servers: &Servers, account_id: &str, placeholder: &pb::User) -> Result<Vec<String>> {
     let mut left_servers = Vec::new();
     for sdb in servers.all() {
-        if store::user(&sdb.read()?, account_id).await?.is_none() {
+        if store::user(&*sdb.read()?, account_id).await?.is_none() {
             continue;
         }
         let left = sdb
@@ -472,7 +472,7 @@ pub async fn describe_servers(servers: &Servers, ids: &[String]) -> Result<Vec<c
     let mut described = Vec::with_capacity(chosen.len());
     for sdb in chosen {
         let server = sdb.server().await?;
-        let owner = store::user(&sdb.read()?, &server.owner_id).await?;
+        let owner = store::user(&*sdb.read()?, &server.owner_id).await?;
         described.push(cpb::ServerDescription {
             usage: Some(sdb.usage().await?),
             own_limits: Some(sdb.own_limits().await?),
