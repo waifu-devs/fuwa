@@ -253,11 +253,19 @@ impl SettingsView {
                 .bg(p.card)
                 .border_1()
                 .border_color(p.border)
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
                 .text_sm()
-                .child(crate::ui::text::markdown(
-                    SharedString::from(format!("updates-notes-{}", release.version)),
-                    crate::ui::text::images_as_links(&release.notes),
-                ));
+                // The notes aren't covered by the release signature, so they're
+                // shown as plain text, nothing to click, and say where they came from.
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(p.muted_foreground)
+                        .child(format!("As {courier} passed them on; release notes aren't signed.")),
+                )
+                .children(release.notes.lines().map(|line| div().min_h(px(8.0)).child(line.to_owned())));
             page = page.child(section(&format!("What's new in {}", release.version), notes, p));
         }
         page.child(section("How updates work", how, p)).into_any_element()

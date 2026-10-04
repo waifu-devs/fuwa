@@ -5,13 +5,15 @@
 //! on it goes with the request) and keeps what it says: the version, when it
 //! came out, its notes, and its `SHA256SUMS` with the signature over them.
 //! Nothing is ever installed here: admins update the image or binary
-//! themselves (docs/self-hosting.md, "Updating"). `/healthz` and
-//! `Node.versions.newer_release` say when there's something to update to.
+//! themselves (docs/self-hosting.md, "Updating"). `Node.versions.newer_release`
+//! tells the instance's admins (only them) when there's something to update to.
 //!
 //! Desktop apps ask their instance rather than GitHub, so GitHub never learns
 //! who uses fuwa or from where: `GET /updates/latest.json` is what the
-//! instance knows, and `GET /updates/files/<name>` passes one of the latest
-//! release's desktop builds through from GitHub. An instance can't slip in a
+//! instance knows, and `GET /updates/files/<name>` hands over one of the
+//! latest release's desktop builds, fetched from GitHub once, checked against
+//! `SHA256SUMS`, and kept in the temporary folder while it's the latest.
+//! Someone reading slowly is cut off, so nobody can hold every place. An instance can't slip in a
 //! build of its own: apps check the signature on `SHA256SUMS` against the
 //! release key they were built with, and the file against `SHA256SUMS`,
 //! before anything runs (`desktop/src/core/updates.rs`).
@@ -63,8 +65,14 @@ const MAX_SIGNATURE_BYTES: usize = 1024;
 /// Release notes past this are cut.
 const MAX_NOTES_BYTES: usize = 20_000;
 
-/// Desktop builds passed through at once; more wait their turn.
+/// Desktop builds handed over at once; more wait their turn, briefly.
 const MAX_PASSES: usize = 16;
+const WAIT_FOR_A_PLACE: Duration = Duration::from_secs(30);
+/// A reader that takes nothing for this long is cut off, and so is any hand-over past the whole limit.
+const READER_STALL: Duration = Duration::from_secs(30);
+const PASS_LIMIT: Duration = Duration::from_secs(30 * 60);
+/// The largest desktop build kept.
+const MAX_FILE_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// What the instance knows about fuwa's latest release.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,18 +162,6 @@ impl Releases {
         })
     }
 
-    /// What `/healthz` says: "ok", and a second line when there's a newer fuwa.
-    pub fn health(&self) -> String {
-        match self.newer() {
-            Some(release) => format!(
-                "ok\nfuwa {} is out; this is {} (see Updating in docs/self-hosting.md)\n",
-                release.version,
-                crate::VERSION
-            ),
-            None => "ok".into(),
-        }
-    }
-
     /// `/updates/latest.json` and `/updates/files/<name>`, for desktop apps.
     pub fn routes(self: &Arc<Self>) -> Router {
         let (manifest, files) = (self.clone(), self.clone());
@@ -200,9 +196,9 @@ impl Releases {
         response
     }
 
-    /// One of the latest release's desktop builds, from GitHub. Only the
-    /// files listed in [`Latest::files`], so this can't be made to fetch
-    /// anything else.
+    /// One of the latest release's desktop builds. Only the files listed in
+    /// [`Latest::files`], so this can't be made to fetch anything else; each
+    /// is fetched from GitHub once and kept while it's the latest.
     async fn pass(&self, name: &str) -> Response {
         let Some(latest) = self.latest() else {
             return plain(StatusCode::NOT_FOUND, "this instance doesn't know of a fuwa release");
@@ -210,32 +206,127 @@ impl Releases {
         let Some(file) = latest.files.iter().find(|file| file.name == name) else {
             return plain(StatusCode::NOT_FOUND, "that isn't a file of the latest fuwa release");
         };
-        let Ok(permit) = PASSES.acquire().await else {
-            return plain(StatusCode::SERVICE_UNAVAILABLE, "try again in a moment");
+        let Some(sha256) = sum_of(&latest.sums, &file.name) else {
+            return plain(StatusCode::NOT_FOUND, "that isn't a file of the latest fuwa release");
         };
-        let url = format!("{DOWNLOAD_URL}v{}/{}", latest.version, file.name);
-        let response = match CLIENT.get(url).timeout(Duration::from_secs(30 * 60)).send().await {
-            Ok(response) if response.status().is_success() => response,
-            _ => {
+        let path = cache_dir().join(&latest.version).join(&file.name);
+        if !path.is_file() {
+            // One fetch at a time: whoever comes next finds the copy.
+            let _fetching = FETCHING.lock().await;
+            if !path.is_file() && keep(&latest.version, file, sha256, &path).await.is_err() {
                 tracing::warn!("couldn't fetch a fuwa desktop build from GitHub");
                 crate::reports::server_error("release_pass_failed", Some("releases::pass"));
                 return plain(StatusCode::BAD_GATEWAY, "GitHub didn't hand the file over; try again later");
             }
+        }
+        let Ok(Ok(permit)) = tokio::time::timeout(WAIT_FOR_A_PLACE, PASSES.acquire()).await else {
+            return plain(StatusCode::SERVICE_UNAVAILABLE, "try again in a moment");
         };
-        // The permit goes with the body, so it's held until the file's through.
-        let size = file.size;
-        let body = response.bytes_stream().map(move |chunk| {
-            let _held = &permit;
-            chunk.map_err(|_| std::io::Error::other("cut off"))
+        let Ok(mut source) = tokio::fs::File::open(&path).await else {
+            return plain(StatusCode::SERVICE_UNAVAILABLE, "try again in a moment");
+        };
+        // Read on a task of its own, which holds the place; a reader that
+        // stalls (or takes too long overall) ends it, and frees the place.
+        let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<bytes::Bytes>>(4);
+        tokio::spawn(async move {
+            let _held = permit;
+            let until = tokio::time::Instant::now() + PASS_LIMIT;
+            let mut buf = vec![0u8; 64 * 1024];
+            loop {
+                let chunk = match tokio::io::AsyncReadExt::read(&mut source, &mut buf).await {
+                    Ok(0) => return,
+                    Ok(n) => Ok(bytes::Bytes::copy_from_slice(&buf[..n])),
+                    Err(_) => Err(std::io::Error::other("cut off")),
+                };
+                let stop = chunk.is_err();
+                let wait = READER_STALL.min(until.saturating_duration_since(tokio::time::Instant::now()));
+                if tx.send_timeout(chunk, wait).await.is_err() || stop {
+                    return;
+                }
+            }
         });
+        let body = futures::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|chunk| (chunk, rx)) });
         let mut response = Response::new(Body::from_stream(body));
         let h = response.headers_mut();
         h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
-        h.insert(header::CONTENT_LENGTH, HeaderValue::from(size));
+        h.insert(header::CONTENT_LENGTH, HeaderValue::from(file.size));
         // A version's file never changes.
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=86400, immutable"));
         response
     }
+}
+
+/// Where fetched desktop builds are kept: the temporary folder, never the
+/// data volume, a folder per version.
+fn cache_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("fuwa-releases")
+}
+
+/// One fetch from GitHub at a time.
+static FETCHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// The SHA-256 `SHA256SUMS` gives a file.
+fn sum_of(sums: &str, name: &str) -> Option<[u8; 32]> {
+    let line = sums.lines().find(|line| line.split_whitespace().nth(1) == Some(name))?;
+    let hex = line.split_whitespace().next()?;
+    if hex.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (i, byte) in out.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(hex.get(i * 2..i * 2 + 2)?, 16).ok()?;
+    }
+    Some(out)
+}
+
+/// Fetches a desktop build into `path`, whole and matching its sum, and
+/// clears out older versions' copies.
+async fn keep(version: &str, file: &File, sha256: [u8; 32], path: &std::path::Path) -> Result<(), ()> {
+    use sha2::Digest as _;
+    use tokio::io::AsyncWriteExt as _;
+    if file.size > MAX_FILE_BYTES {
+        return Err(());
+    }
+    let dir = path.parent().ok_or(())?;
+    if let Ok(mut old) = tokio::fs::read_dir(cache_dir()).await {
+        while let Ok(Some(entry)) = old.next_entry().await {
+            if entry.file_name() != version {
+                let _ = tokio::fs::remove_dir_all(entry.path()).await;
+            }
+        }
+    }
+    tokio::fs::create_dir_all(dir).await.map_err(|_| ())?;
+    let url = format!("{DOWNLOAD_URL}v{version}/{}", file.name);
+    let response = CLIENT.get(url).timeout(PASS_LIMIT).send().await.map_err(|_| ())?;
+    if !response.status().is_success() {
+        return Err(());
+    }
+    let part = path.with_extension("part");
+    let result = async {
+        let mut out = tokio::fs::File::create(&part).await.map_err(|_| ())?;
+        let mut hash = sha2::Sha256::new();
+        let mut done = 0u64;
+        let mut body = response.bytes_stream();
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk.map_err(|_| ())?;
+            done += chunk.len() as u64;
+            if done > file.size {
+                return Err(());
+            }
+            hash.update(&chunk);
+            out.write_all(&chunk).await.map_err(|_| ())?;
+        }
+        out.sync_all().await.map_err(|_| ())?;
+        if done != file.size || <[u8; 32]>::from(hash.finalize()) != sha256 {
+            return Err(());
+        }
+        tokio::fs::rename(&part, path).await.map_err(|_| ())
+    }
+    .await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&part).await;
+    }
+    result
 }
 
 static PASSES: Semaphore = Semaphore::const_new(MAX_PASSES);
@@ -501,9 +592,9 @@ mod tests {
     }
 
     #[test]
-    fn health_names_a_newer_release_only() {
+    fn only_a_newer_release_counts() {
         let releases = Releases::new(true);
-        assert_eq!(releases.health(), "ok");
+        assert!(releases.newer().is_none());
         let mut latest = Latest {
             version: crate::VERSION.into(),
             published_at: "2026-10-04T01:00:00Z".into(),
@@ -514,11 +605,17 @@ mod tests {
             files: Vec::new(),
         };
         releases.set(latest.clone());
-        assert_eq!(releases.health(), "ok");
         assert!(releases.newer().is_none());
         latest.version = "999.0.0".into();
         releases.set(latest);
-        assert!(releases.health().starts_with("ok\nfuwa 999.0.0 is out; this is "));
         assert_eq!(releases.newer().unwrap().version, "999.0.0");
+    }
+
+    #[test]
+    fn sums_name_each_files_hash() {
+        let sums = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  fuwa-desktop-1.0.0-x86_64-linux\nzz  bad\n";
+        assert_eq!(sum_of(sums, "fuwa-desktop-1.0.0-x86_64-linux").unwrap()[..2], [0xba, 0x78]);
+        assert!(sum_of(sums, "bad").is_none());
+        assert!(sum_of(sums, "missing").is_none());
     }
 }

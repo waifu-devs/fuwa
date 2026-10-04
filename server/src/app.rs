@@ -329,7 +329,6 @@ impl App {
     /// carrying the cluster key.
     pub fn router(self: &Arc<Self>) -> Router {
         let api = Api::new(self.clone());
-        let releases = self.releases.clone();
         let (_, health) = tonic_health::server::health_reporter();
         let reflection = tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(crate::proto::FILE_DESCRIPTOR_SET)
@@ -376,8 +375,7 @@ impl App {
             .into_axum_router()
             .layer(axum::middleware::from_fn(crate::reports::time_calls))
             .layer(tonic_web::GrpcWebLayer::new())
-            // "ok", and whether a newer fuwa is out (docs/self-hosting.md, "Updating").
-            .route("/healthz", get(move || async move { releases.health() }));
+            .route("/healthz", get(|| async { "ok" }));
         if matches!(self.link, Link::Alone | Link::Directory(_)) {
             // Which parts are up, for a status page. A directory's is behind the cluster key
             // (only gateways ask it); a single process answers anyone.

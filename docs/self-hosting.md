@@ -369,10 +369,8 @@ fuwa never updates itself. At startup and then once a day it asks GitHub
 whether a newer release is out (`api.github.com`, a fixed address, with nothing
 about your instance or anyone on it), and when there is one it tells you:
 
-- the instance settings (General) show "fuwa 0.4.2 is out" to admins, with
-  links to the release's notes and to this section;
-- `/healthz` still answers `ok`, with a second line naming the new version,
-  so a monitor that reads the body can tell you;
+- the instance settings (General) show "fuwa 0.4.2 is out" to admins, and
+  only to them, with links to the release's notes and to this section;
 - the log says `a newer fuwa is out` once a day.
 
 `FUWA_UPDATE_CHECK=off` turns the check off. Desktop apps signed in to your
@@ -386,24 +384,13 @@ docker compose pull && docker compose up -d
 ```
 
 The `0.1` tag in `compose.yaml` follows every 0.1.x release, so that's all a
-patch release needs; a new minor version (0.2) means changing the tag. To have
-patch releases go on by themselves, a container updater such as
-[Watchtower](https://containrrr.dev/watchtower/) can pull and restart fuwa when
-its tag moves:
+patch release needs; a new minor version (0.2) means changing the tag.
 
-```yaml
-  watchtower:
-    image: containrrr/watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    # Only fuwa, checked once a day at 04:00.
-    command: --schedule "0 0 4 * * *" --cleanup fuwa
-```
-
-It restarts fuwa without a backup first, and each restart drops connections
-for a few seconds, which the apps ride out. On Railway, the image's automatic
-updates do the same (see [On Railway](#on-railway)).
+Updating is always your call, and these docs don't suggest container updaters
+that pull and restart fuwa by themselves (Watchtower and the like): they need
+the Docker socket, which is root on the host, skip the backup, and restart fuwa
+whenever a tag moves, dropping calls and connections for a few seconds. If you
+run one anyway, that's your choice to make, knowing that.
 
 With the binary, replace `/usr/local/bin/fuwa` and run
 `sudo systemctl restart fuwa`. Changes to the data happen by themselves when the
@@ -418,19 +405,29 @@ note with a Reload button. Nothing is forced: a tab never reloads by
 itself, and "Later" hides the note until the next update.
 
 The desktop app gets updates ready, and installs them only when the person
-says so. A little after it starts and then every six
-hours it asks the first instance it can reach (yours, if it's first) for
+says so. A little after it starts and then every six hours it asks the first instance it can reach (yours, if it's first) for
 `/updates/latest.json`, and fetches a newer build through
-`/updates/files/<name>`, which your instance passes through from GitHub
-(at most 16 at a time) so GitHub never sees who's updating. Your instance can't
+`/updates/files/<name>`, which your instance fetches from GitHub once per
+release, checks against `SHA256SUMS` and keeps in its temporary folder (never
+the data volume), so GitHub never sees who's updating. It hands over at most
+16 at a time and cuts off anyone who stops reading. Your instance can't
 change what it hands over: the app installs a build only when the release's
 `SHA256SUMS` carries a valid signature from a key the app was built with (see
 [Release signing](#release-signing)) and the file's SHA-256 matches it, and
-only when it's newer than the app. The checked download waits beside the
-app until the person presses "Restart to update"; quitting without pressing
+only when it's newer than the app. What it can do is keep quiet about a newer
+release, holding apps on the one they have; the signature has no date, so
+that isn't caught yet. The release notes it passes on aren't signed, so the
+app shows them as plain text, saying where they came from. Only https
+instances are asked, or plain http on this computer or a local network. The
+checked download waits beside the app until the person presses "Restart to update"; quitting without pressing
 it starts the same version again. People can turn "Download updates in the
 background" off in the app's settings (Updates); it then only says a new
 version is out.
+
+Apps and instances also agree on features by date: see
+[Compatibility dates](compatibility.md). An app older than a feature your
+instance has says "Update fuwa to use ..." there, and keeps working
+everywhere else.
 
 ### Release signing
 

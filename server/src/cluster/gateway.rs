@@ -270,10 +270,9 @@ impl Gateway {
                 "/healthz",
                 get(move || {
                     let followed = health.followed.load(Ordering::Relaxed);
-                    let said = health.releases.health();
                     async move {
                         match followed {
-                            true => (StatusCode::OK, said),
+                            true => (StatusCode::OK, "ok".to_string()),
                             false => (StatusCode::SERVICE_UNAVAILABLE, "waiting for the directory".to_string()),
                         }
                     }

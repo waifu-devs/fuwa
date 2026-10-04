@@ -928,14 +928,34 @@ async fn browsers_can_call_over_grpc_web() {
     assert_eq!(manifest.headers()["content-type"], "application/json");
     let manifest: fuwa_server::releases::Latest = manifest.json().await.unwrap();
     assert_eq!(manifest, newer);
-    // Admins learn of it from /healthz and GetNode; nothing updates by itself.
+    // Only the instance's admins hear of it, in GetNode; /healthz stays "ok". Nothing updates by itself.
     let health = http.get(format!("{base}/healthz")).send().await.unwrap().text().await.unwrap();
-    assert!(health.starts_with("ok\nfuwa 999.0.0 is out; this is "), "{health}");
-    let mut node = pb::node_service_client::NodeServiceClient::new(instance.channel().await);
-    let versions = node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap().versions.unwrap();
-    // And apps learn which features it has, and since when.
-    assert_eq!(versions.compatibility_date, fuwa_server::compat::date());
-    assert!(versions.features.iter().any(|f| f.id == "compatibility-dates"));
+    assert_eq!(health, "ok");
+    let mut c = clients(&instance).await;
+    let (admin, _, is_admin) = sign_up(&mut c, "ada").await;
+    assert!(is_admin);
+    let (member, _, _) = sign_up(&mut c, "bo").await;
+    for token in [None, Some(member.as_str())] {
+        let request = match token {
+            Some(token) => authed(token, pb::GetNodeRequest {}),
+            None => tonic::Request::new(pb::GetNodeRequest {}),
+        };
+        let versions = c.node.get_node(request).await.unwrap().into_inner().node.unwrap().versions.unwrap();
+        assert!(versions.newer_release.is_none(), "{token:?}");
+        // Everyone learns which features it has, and since when.
+        assert_eq!(versions.compatibility_date, fuwa_server::compat::date());
+        assert!(versions.features.iter().any(|f| f.id == "compatibility-dates"));
+    }
+    let versions = c
+        .node
+        .get_node(authed(&admin, pb::GetNodeRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .node
+        .unwrap()
+        .versions
+        .unwrap();
     let told = versions.newer_release.unwrap();
     assert_eq!((told.version.as_str(), told.url.as_str()), ("999.0.0", newer.page.as_str()));
     // Only the release's listed desktop builds pass through; anything else is never fetched.
@@ -944,6 +964,13 @@ async fn browsers_can_call_over_grpc_web() {
         let response = http.get(format!("{base}/updates/files/{name}")).send().await.unwrap();
         assert_eq!(response.status(), 404, "{name}");
     }
+    // A listed build is handed over from the copy kept after the first fetch.
+    let kept = std::env::temp_dir().join("fuwa-releases/999.0.0");
+    std::fs::create_dir_all(&kept).unwrap();
+    std::fs::write(kept.join("fuwa-desktop-999.0.0-x86_64-linux"), b"abc").unwrap();
+    let response = http.get(format!("{base}/updates/files/fuwa-desktop-999.0.0-x86_64-linux")).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.bytes().await.unwrap().as_ref(), b"abc");
 
     // Scanners' paths are turned away before the API or the web app sees them.
     for probe in ["/.env", "/wp-login.php", "/.git/config", "/actuator/env", "/wp-admin/"] {

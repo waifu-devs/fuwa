@@ -74,6 +74,9 @@ pub enum Manual {
     NoBuild,
     /// A package manager put the app here (the .deb); it updates it.
     Package,
+    /// A macOS app bundle, signed as a whole: swapping the program inside it
+    /// would break its signature, so the new one comes from the release page.
+    Bundle,
     /// The app can't write where it's installed.
     ReadOnly,
     /// A build made from source, which updates by building again.
@@ -93,6 +96,7 @@ impl Manual {
             Manual::Package => {
                 "Your package manager installed fuwa, so update it there, or take the new .deb from the release page."
             }
+            Manual::Bundle => "Download the new fuwa.app from the release page and drag it over this one.",
             Manual::ReadOnly => {
                 "fuwa can't write to the folder it's installed in. Download the new version from the release page."
             }
@@ -307,8 +311,11 @@ pub fn remember_program() {
         }
         std::env::current_exe().ok().and_then(|exe| exe.canonicalize().ok())
     });
-    // What a Windows update left behind.
-    if let Some(Some(program)) = PROGRAM.get() {
+    // What a Windows update left behind, once the new program is surely there:
+    // if both renames failed, the old copy is all there is.
+    if let Some(Some(program)) = PROGRAM.get()
+        && program.is_file()
+    {
         let _ = std::fs::remove_file(old_copy(program));
     }
 }
@@ -327,6 +334,9 @@ fn target() -> Result<Target, Manual> {
     if cfg!(target_os = "linux") && !appimage && (file.starts_with("/usr") || file.starts_with("/opt")) {
         return Err(Manual::Package);
     }
+    if in_bundle(&file) {
+        return Err(Manual::Bundle);
+    }
     let dir = file.parent().ok_or(Manual::ReadOnly)?;
     // Can a file be made beside it?
     let probe = dir.join(format!(".fuwa-update-probe-{}", std::process::id()));
@@ -336,6 +346,36 @@ fn target() -> Result<Target, Manual> {
             Ok(Target { file, appimage })
         }
         Err(_) => Err(Manual::ReadOnly),
+    }
+}
+
+/// Whether the program runs from inside a macOS app bundle.
+fn in_bundle(program: &Path) -> bool {
+    program.ancestors().any(|dir| dir.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("app")))
+}
+
+/// Whether the app may ask an instance about updates: over https, or plain
+/// http only to this computer or a local network.
+pub fn courier_allowed(url: &str) -> bool {
+    let Ok(uri) = url.parse::<http::Uri>() else { return false };
+    match uri.scheme_str() {
+        Some("https") => true,
+        Some("http") => uri.host().is_some_and(local_host),
+        _ => false,
+    }
+}
+
+fn local_host(host: &str) -> bool {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host.eq_ignore_ascii_case("localhost") || host.to_ascii_lowercase().ends_with(".local") {
+        return true;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
+        Ok(std::net::IpAddr::V6(ip)) => {
+            ip.is_loopback() || (ip.segments()[0] & 0xfe00) == 0xfc00 || (ip.segments()[0] & 0xffc0) == 0xfe80
+        }
+        Err(_) => false,
     }
 }
 
@@ -440,8 +480,13 @@ impl Core {
         }
         let started = std::time::Instant::now();
         set(self, Status::Checking);
-        let urls: Vec<String> =
-            self.shared.read(|s| s.order.clone()).iter().filter_map(|key| self.api(key).map(|api| api.url)).collect();
+        let urls: Vec<String> = self
+            .shared
+            .read(|s| s.order.clone())
+            .iter()
+            .filter_map(|key| self.api(key).map(|api| api.url))
+            .filter(|url| courier_allowed(url))
+            .collect();
         if urls.is_empty() {
             // Nowhere to ask until an instance is added.
             return set(self, Status::Idle);
@@ -736,6 +781,25 @@ mod tests {
         assert!(!newer("0.1.0", "0.1.0"));
         assert!(!newer("0.2.0-rc.1", "0.1.0"));
         assert!(!newer("1.0", "0.1.0"));
+    }
+
+    #[test]
+    fn updates_come_over_https_or_from_close_by() {
+        assert!(courier_allowed("https://fuwa.chat"));
+        assert!(courier_allowed("http://127.0.0.1:8787"));
+        assert!(courier_allowed("http://localhost:8787"));
+        assert!(courier_allowed("http://192.168.1.20"));
+        assert!(courier_allowed("http://[::1]:8787"));
+        assert!(courier_allowed("http://chat.local"));
+        assert!(!courier_allowed("http://fuwa.chat"));
+        assert!(!courier_allowed("http://8.8.8.8"));
+        assert!(!courier_allowed("ftp://fuwa.chat"));
+    }
+
+    #[test]
+    fn mac_app_bundles_update_by_hand() {
+        assert!(in_bundle(Path::new("/Applications/fuwa.app/Contents/MacOS/fuwa-desktop")));
+        assert!(!in_bundle(Path::new("/home/a/bin/fuwa-desktop")));
     }
 
     #[test]

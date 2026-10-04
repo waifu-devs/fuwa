@@ -210,11 +210,14 @@
     in node.db's `settings` table over the environment's defaults. Read them
     through `app.settings()`, never from `config`, so changes apply at once.
   - `telemetry.rs`: the anonymous usage signal (schema `fuwa.signal.v1`).
+  - `compat.rs`: compatibility dates. `proto/fuwa/v1/features.json` is the
+    one list of features apps must know, each dated; `Node.versions` carries
+    it with the instance's date and `min_client_date` (docs/compatibility.md).
   - `releases.rs`: whether a newer fuwa is out. A single process, the
     directory and gateways ask GitHub (fixed addresses, https, nothing about
     the instance) at startup and daily (`FUWA_UPDATE_CHECK`), and keep the
     latest release's version, notes, `SHA256SUMS` and its signature. Admins
-    see it as `Node.newer_release` and on `/healthz`; nothing installs itself.
+    alone see it, as `Node.versions.newer_release`; nothing installs itself.
     Desktop apps read `/updates/latest.json` and fetch their build through
     `/updates/files/<name>` (only the release's listed desktop files), so
     GitHub never sees them; they trust only the signature, not the instance.
@@ -329,7 +332,8 @@
     and a few feature counts, sent every 10 minutes through
     `NodeService.SendReport` to one signed-in instance whose telemetry is
     on, kept for next time when that fails; off with the "Help fix bugs"
-    setting, which counts nothing), `updates.rs` (the app updating itself:
+    setting, which counts nothing), `compat.rs` (compatibility dates: which
+    features an instance has that this build doesn't), `updates.rs` (the app updating itself:
     the latest release through an instance, installed only when newer, its
     `SHA256SUMS` signed by a key in `desktop/release-keys.txt` and the file
     matching it; the checked download waits beside the program or AppImage
@@ -479,7 +483,9 @@
     `/<instance>/dm/<conversation>`.
   - `components/UpdateReady.tsx` notices the instance serving the page has a
     newer web app (its index.html names another entry script, twice in a
-    row) and offers a reload, never forcing one; `lib/fresh.ts` is when. Admins see a newer fuwa
+    row) and offers a reload, never forcing one; `lib/fresh.ts` is when. It
+    also says "Update fuwa to use ..." for features an instance has that this
+    build doesn't (`lib/compat.ts`, docs/compatibility.md). Admins see a newer fuwa
     release in instance settings (`settings/instance/NewerRelease.tsx`).
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
