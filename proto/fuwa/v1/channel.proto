@@ -26,6 +26,12 @@ message CreateChannelRequest {
   ChannelType type = 3;
   string parent_id = 4;
   string topic = 5;
+  // 0 to 21600 (six hours); 0 leaves slow mode off.
+  int32 slowmode_seconds = 6;
+  // Who can see and use it, set in the same write as the channel, so it is
+  // never visible with other permissions. Needs Manage Roles, under the same
+  // rules as SetChannelPermissions.
+  repeated PermissionOverwrite permission_overwrites = 7;
 }
 
 message CreateChannelResponse {

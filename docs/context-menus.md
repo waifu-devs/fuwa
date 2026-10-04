@@ -43,7 +43,7 @@ Sections are drawn with a line between them; an empty one isn't drawn.
 
 | Section | Items |
 | --- | --- |
-| target | Copy (selected text) · Open link (shows its host) · Copy link · Open picture · Save picture · Copy picture link: only for what was right clicked |
+| target | Copy (selected text) · Open link (shows its host) · Copy link · Open picture · Save picture · Copy picture link (pictures from instances the app talks to only): only for what was right clicked |
 | react | (reactions, once they exist) |
 | primary | Edit message (yours) · Copy text |
 | manage | Keep *name* out (at a shared channel's home, with Kick Members, for someone from another server) |
@@ -70,7 +70,7 @@ text · Dismiss (failed).
 | --- | --- |
 | primary | Mark as read · Invite people · Copy link (on the instance's own address, like invite links) |
 | notifications | Mute channel ▸ (15 min, 1 h, 3 h, 8 h, 24 h, until turned back on) or Unmute channel · Notifications ▸ (Use the server's, All messages, Only @mentions, Nothing) |
-| manage | Edit channel · Permissions · Duplicate channel (not secure or shared channels; a private channel copies only with Manage Roles, and its copy is removed if its permissions can't be copied) |
+| manage | Edit channel · Permissions · Duplicate channel (not secure or shared channels; with permissions of its own, only with Manage Roles where the copy goes and outranking every role and member they name; the copy is made with its topic, slow mode and permissions in one request, so it is never seen with other permissions) |
 | developer | Copy channel ID |
 | danger | Delete channel (asks first) |
 

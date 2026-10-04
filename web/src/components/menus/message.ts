@@ -56,7 +56,8 @@ export function targetSection(trigger: MenuTrigger): MenuSection {
   const link = target.closest<HTMLAnchorElement>("a[href]");
   const picture = target.closest<HTMLImageElement>("img[src]");
   const href = link && element.contains(link) ? link.href : "";
-  const src = picture && element.contains(picture) && /^https?:/i.test(picture.src) ? picture.src : "";
+  // Only pictures from instances the app already talks to: opening or saving one asks nobody else.
+  const src = picture && element.contains(picture) ? shownPicture(picture.src) : "";
   return {
     id: "target",
     items: items(

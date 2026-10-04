@@ -10,13 +10,13 @@ import {
   Trash2Icon,
   UserPlusIcon,
 } from "lucide-react";
-import { ChannelType, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
-import { createChannel, deleteChannel, markChannelsRead, run, setChannelPermissions, updateChannel } from "@/fuwa/actions";
+import { ChannelType, OverwriteTarget, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
+import { createChannel, deleteChannel, markChannelsRead, run } from "@/fuwa/actions";
 import { accessNow, getInstance } from "@/fuwa/hooks";
 import { copyIdItem, notificationEntries, placeLink } from "@/components/menus/common";
 import { attempt, confirmFirst } from "@/components/menus/dialogs";
 import { items, withExtensions, type MenuContexts, type MenuSection } from "@/lib/context-menu";
-import { has, hasIn } from "@/lib/permissions";
+import { above, has, hasIn, outranks, standing, type Access } from "@/lib/permissions";
 import { reportError } from "@/lib/reports";
 import { copy, toast } from "@/lib/ui";
 
@@ -37,29 +37,45 @@ const texty = (c: Channel) => c.type === ChannelType.TEXT || c.type === ChannelT
 
 /**
  * A copy of a channel: its name, kind, category, topic, slow mode and who can
- * see it. A private channel's copy gets its permissions too, or it's taken
- * back, so a copy never opens up what the original kept closed.
+ * see it, all made in one step, so the copy is never seen with other
+ * permissions than the original's.
  */
 async function duplicate(instanceKey: string, serverId: string, channel: Channel) {
-  const made = await run(createChannel(instanceKey, serverId, channel.name, channel.type, channel.parentId));
   try {
-    if (channel.topic || channel.slowmodeSeconds)
-      await run(updateChannel(instanceKey, serverId, made.id, { topic: channel.topic, slowmodeSeconds: channel.slowmodeSeconds }));
-    if (channel.permissionOverwrites.length)
-      await run(
-        setChannelPermissions(
-          instanceKey,
-          serverId,
-          made.id,
-          channel.permissionOverwrites.map(({ targetId, target, allow, deny }) => ({ targetId, target, allow, deny })),
-        ),
-      );
+    await run(
+      createChannel(instanceKey, serverId, channel.name, channel.type, channel.parentId, {
+        topic: channel.topic,
+        slowmodeSeconds: channel.slowmodeSeconds,
+        permissionOverwrites: channel.permissionOverwrites,
+      }),
+    );
   } catch (err) {
     reportError("context_menu.duplicate_channel", "channel");
-    await run(deleteChannel(instanceKey, serverId, made.id)).catch(() => {});
     throw err;
   }
   toast(`Made a copy of ${channel.type === ChannelType.VOICE ? channel.name : `#${channel.name}`}`);
+}
+
+/**
+ * Whether every overwrite on a channel is one you could set: for @everyone,
+ * yourself, or roles and members below you, as the server checks.
+ */
+function outranksOverwrites(instanceKey: string, serverId: string, channel: Channel, access: Access) {
+  const inst = getInstance(instanceKey);
+  const roles = inst?.roles[serverId] ?? [];
+  const ownerId = inst?.servers.find((s) => s.id === serverId)?.ownerId ?? "";
+  const meId = inst?.me?.id;
+  const members = new Map((inst?.members[serverId] ?? []).map((m) => [m.user?.id ?? "", m]));
+  const positions = new Map(roles.map((r) => [r.id, r.position]));
+  return channel.permissionOverwrites.every((o) => {
+    if (o.targetId === serverId || o.targetId === meId) return true;
+    if (o.target === OverwriteTarget.MEMBER) {
+      const member = members.get(o.targetId);
+      return !member || outranks(access, standing(ownerId, roles, member));
+    }
+    const position = positions.get(o.targetId);
+    return position === undefined || above(access, position);
+  });
 }
 
 /**
@@ -76,7 +92,13 @@ export function channelMenu(ctx: MenuContexts["channel"], actions: ChannelMenuAc
   const roles = hasIn(access, channel.id, Permission.MANAGE_ROLES);
   // Making the copy needs Manage Channels where it goes; copying who may see it needs Manage Roles there.
   const createsHere = channel.parentId ? hasIn(access, channel.parentId, Permission.MANAGE_CHANNELS) : has(access, Permission.MANAGE_CHANNELS);
-  const copies = createsHere && channel.type !== ChannelType.SECURE && !channel.shared && (!channel.permissionOverwrites.length || roles);
+  // Copying who may see it needs Manage Roles where the copy goes, and to outrank everyone it names, as the server checks.
+  const rolesThere = channel.parentId ? hasIn(access, channel.parentId, Permission.MANAGE_ROLES) : has(access, Permission.MANAGE_ROLES);
+  const copies =
+    createsHere &&
+    channel.type !== ChannelType.SECURE &&
+    !channel.shared &&
+    (!channel.permissionOverwrites.length || (rolesThere && outranksOverwrites(instanceKey, serverId, channel, access)));
   const name = channel.type === ChannelType.VOICE ? channel.name : `#${channel.name}`;
   return withExtensions("channel", ctx, [
     {

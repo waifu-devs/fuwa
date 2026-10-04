@@ -4,7 +4,7 @@ import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
 import type { AccountFilter, AutoModProviderSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
-import type { ChannelPlacement, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
+import type { ChannelPlacement, CreateChannelRequest, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
 import type { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
@@ -1019,10 +1019,13 @@ export const refreshNode = (key: string) =>
 
 // ───────────────────────── Channels ─────────────────────────
 
-export const createChannel = (key: string, serverId: string, name: string, type: ChannelType, parentId = "") =>
+/** What else a new channel starts with, in the same write: a copy's topic, slow mode and permissions. */
+export type NewChannelExtras = Partial<Pick<CreateChannelRequest, "topic" | "slowmodeSeconds" | "permissionOverwrites">>;
+
+export const createChannel = (key: string, serverId: string, name: string, type: ChannelType, parentId = "", extras: NewChannelExtras = {}) =>
   Effect.gen(function* () {
     const { channel } = yield* call((signal) =>
-      api(key).channels.createChannel({ serverId, name, type, parentId }, { signal }),
+      api(key).channels.createChannel({ serverId, name, type, parentId, ...extras }, { signal }),
     );
     // So opening it right away doesn't race its event.
     if (channel) storeChannels(key, serverId, [channel]);
