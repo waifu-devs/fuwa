@@ -160,6 +160,7 @@ export function AppOverlays() {
       },
       focusComposer: () => document.querySelector<HTMLTextAreaElement>("[data-composer]")?.focus(),
       toggleMembers: () => runCommand("toggleMembers"),
+      insertTimestamp: () => runCommand("insertTimestamp"),
       toggleMute,
       toggleDeafen,
       toggleCamera: () => void toggleCamera(),

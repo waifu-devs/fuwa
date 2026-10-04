@@ -278,7 +278,7 @@ export const forget = (key: string) =>
   });
 
 export type ProfilePatch = Partial<
-  Pick<UpdateProfileRequest, "displayName" | "avatarUrl" | "pronouns" | "bio" | "bannerUrl" | "accentColor" | "status">
+  Pick<UpdateProfileRequest, "displayName" | "avatarUrl" | "pronouns" | "bio" | "bannerUrl" | "accentColor" | "status" | "effect">
 > & { statusExpiresAt?: Date | null };
 
 /** Changes your profile; only the fields given change. */
