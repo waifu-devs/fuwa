@@ -603,7 +603,7 @@ async fn follow(conn: Conn, servers: Vec<String>, shared: Arc<Shared>, ready_tx:
             .map(|(server_id, after)| pb::ServerCursor { server_id: server_id.clone(), after_sequence: *after })
             .collect();
         let started = Instant::now();
-        let mut request = Request::new(pb::SubscribeRequest { servers: cursors });
+        let mut request = Request::new(pb::SubscribeRequest { servers: cursors, ..Default::default() });
         request.metadata_mut().insert("authorization", format!("Bearer {}", conn.token).parse().unwrap());
         let stream = match conn.events().subscribe(request).await {
             Ok(s) => s.into_inner(),
