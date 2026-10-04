@@ -11,6 +11,7 @@ import {
   IdCardIcon,
   KeyboardIcon,
   KeyRoundIcon,
+  LanguagesIcon,
   LogOutIcon,
   MessageSquareTextIcon,
   MonitorSmartphoneIcon,
@@ -30,6 +31,7 @@ import { Appearance } from "@/components/settings/app/Appearance";
 import { Backgrounds } from "@/components/settings/app/Backgrounds";
 import { Themes } from "@/components/settings/app/Themes";
 import { Chat } from "@/components/settings/app/Chat";
+import { Language } from "@/components/settings/app/Language";
 import { KEYBIND_SETTINGS, Keybinds } from "@/components/settings/app/Keybinds";
 import { Notifications } from "@/components/settings/app/Notifications";
 import { Streamer } from "@/components/settings/app/Streamer";
@@ -101,6 +103,14 @@ const APP: SettingsSection[] = [
       { id: "clock", label: "Time format", keywords: "12 24 hour clock" },
       { id: "send-with", label: "Send messages with", keywords: "enter newline" },
     ],
+  },
+  {
+    id: "language",
+    label: "Language",
+    icon: LanguagesIcon,
+    description: "The language fuwa speaks on this device.",
+    keywords: "locale translation idioma español",
+    settings: [{ id: "language", label: "Language", keywords: "locale translation" }],
   },
   {
     id: "notifications",
@@ -303,6 +313,7 @@ export function UserSettings() {
       {section === "backdrop" && <Backgrounds instanceKey={key} />}
       {section === "accessibility" && <Accessibility />}
       {section === "chat" && <Chat />}
+      {section === "language" && <Language />}
       {section === "notifications" && <Notifications />}
       {section === "voice" && <Voice />}
       {section === "keybinds" && <Keybinds />}

@@ -32,6 +32,8 @@ RUN npm install --global pnpm@10.33.0
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web ./
+# The translations, shared with the desktop app.
+COPY locales /src/locales
 # vite.config.ts stamps the server's version into the app.
 COPY server/Cargo.toml /src/server/Cargo.toml
 COPY --from=wasm /pkg src/e2ee/pkg
