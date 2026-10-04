@@ -21,14 +21,44 @@ pub enum Trouble {
     NoSpeakers,
 }
 
+/// Opens and closes the microphone from anywhere, at once: closed while
+/// muted or deafened, so the system's "microphone in use" light goes off too.
+#[derive(Clone)]
+pub struct Listener {
+    /// What the sound thread goes by.
+    listening: Arc<AtomicBool>,
+    /// What was last asked for, so asking again changes nothing (a failed
+    /// open isn't retried until the next unmute).
+    wanted: Arc<AtomicBool>,
+    thread: Option<std::thread::Thread>,
+}
+
+impl Listener {
+    /// One with no sound thread behind it: for calls without devices (the tests).
+    pub fn detached(on: bool) -> Self {
+        Self { listening: Arc::new(AtomicBool::new(on)), wanted: Arc::new(AtomicBool::new(on)), thread: None }
+    }
+
+    pub fn listen(&self, on: bool) {
+        if self.wanted.swap(on, Ordering::Relaxed) == on {
+            return;
+        }
+        self.listening.store(on, Ordering::Relaxed);
+        if let Some(thread) = &self.thread {
+            thread.unpark();
+        }
+    }
+
+    /// Whether the microphone is meant to be open.
+    pub fn is_listening(&self) -> bool {
+        self.wanted.load(Ordering::Relaxed)
+    }
+}
+
 /// The devices a call uses, open until this is dropped.
 pub struct Devices {
     stop: Arc<AtomicBool>,
-    /// Whether the microphone should be open: closed while muted or
-    /// deafened, so the system's "microphone in use" light goes off too.
-    listening: Arc<AtomicBool>,
-    /// What the call last asked for, so asking again changes nothing.
-    wanted: AtomicBool,
+    listener: Listener,
     thread: Option<JoinHandle<()>>,
     trouble: Arc<Mutex<Vec<Trouble>>>,
 }
@@ -48,19 +78,13 @@ impl Devices {
                 .spawn(move || run(microphone, speakers, stop, listening, trouble))
                 .ok()
         };
-        let wanted = AtomicBool::new(listening.load(Ordering::Relaxed));
-        Self { stop, listening, wanted, thread, trouble }
+        let wanted = Arc::new(AtomicBool::new(listening.load(Ordering::Relaxed)));
+        let listener = Listener { listening, wanted, thread: thread.as_ref().map(|t| t.thread().clone()) };
+        Self { stop, listener, thread, trouble }
     }
 
-    /// Opens or closes the microphone.
-    pub fn listen(&self, on: bool) {
-        if self.wanted.swap(on, Ordering::Relaxed) == on {
-            return;
-        }
-        self.listening.store(on, Ordering::Relaxed);
-        if let Some(thread) = &self.thread {
-            thread.thread().unpark();
-        }
+    pub fn listener(&self) -> Listener {
+        self.listener.clone()
     }
 
     /// What isn't working, if anything.

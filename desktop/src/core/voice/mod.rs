@@ -19,7 +19,7 @@ use parking_lot::Mutex;
 use tokio::sync::{mpsc, watch};
 use tonic::Code;
 
-use self::devices::{Devices, Trouble};
+use self::devices::{Devices, Listener, Trouble};
 use self::link::{Happened, Link, Signal};
 use self::sound::{FRAME, Microphone, Mixer, Pipe};
 use super::Core;
@@ -94,6 +94,9 @@ enum Command {
 
 struct Active {
     id: u64,
+    /// The microphone, opened and closed with mute and deafen whatever the
+    /// call is doing (connecting, or waiting to rejoin).
+    microphone: Listener,
     commands: mpsc::UnboundedSender<Command>,
     selves: watch::Sender<Selves>,
 }
@@ -111,6 +114,12 @@ impl Core {
     /// The call you're in, if any.
     pub fn call(&self) -> Option<CallView> {
         self.voice.view.lock().clone()
+    }
+
+    /// Whether the call's microphone is meant to be open: for the tests.
+    #[doc(hidden)]
+    pub fn microphone_open(&self) -> Option<bool> {
+        self.voice.active.lock().as_ref().map(|a| a.microphone.is_listening())
     }
 
     /// Why the last call ended on its own, once: for a notice.
@@ -150,7 +159,19 @@ impl Core {
         };
         let (commands, commands_rx) = mpsc::unbounded_channel();
         let (selves_tx, selves_rx) = watch::channel(selves);
-        *self.voice.active.lock() = Some(Active { id, commands, selves: selves_tx });
+        let sound = match pipes {
+            Some((microphone, speakers)) => Sound { microphone, speakers, devices: None },
+            None => {
+                let (microphone, speakers) = (Arc::new(Pipe::microphone()), Arc::new(Pipe::speakers()));
+                let devices = Devices::open(microphone.clone(), speakers.clone(), !selves.mute && !selves.deaf);
+                Sound { microphone, speakers, devices: Some(devices) }
+            }
+        };
+        let microphone = match &sound.devices {
+            Some(devices) => devices.listener(),
+            None => Listener::detached(!selves.mute && !selves.deaf),
+        };
+        *self.voice.active.lock() = Some(Active { id, microphone, commands, selves: selves_tx });
         *self.voice.ended.lock() = None;
         *self.voice.view.lock() = Some(CallView {
             instance: instance.to_string(),
@@ -165,14 +186,6 @@ impl Core {
         self.shared.update(|_| ());
         reports::used("call.join_voice");
         let target = Target { server_id: server_id.into(), channel_id: channel_id.into(), me };
-        let sound = match pipes {
-            Some((microphone, speakers)) => Sound { microphone, speakers, devices: None },
-            None => {
-                let (microphone, speakers) = (Arc::new(Pipe::microphone()), Arc::new(Pipe::speakers()));
-                let devices = Devices::open(microphone.clone(), speakers.clone(), !selves.mute && !selves.deaf);
-                Sound { microphone, speakers, devices: Some(devices) }
-            }
-        };
         let core = Arc::downgrade(self);
         self.runtime.spawn(async move {
             let ended = run(core.clone(), id, api, target, sound, commands_rx, selves_rx).await;
@@ -207,9 +220,14 @@ impl Core {
     }
 
     fn set_selves(&self, f: impl FnOnce(&mut Selves)) {
-        let Some(active) = self.voice.active.lock().as_ref().map(|a| a.selves.clone()) else { return };
+        let Some((active, microphone)) =
+            self.voice.active.lock().as_ref().map(|a| (a.selves.clone(), a.microphone.clone()))
+        else {
+            return;
+        };
         active.send_modify(f);
         let selves = *active.borrow();
+        microphone.listen(!selves.mute && !selves.deaf);
         if let Some(view) = self.voice.view.lock().as_mut() {
             view.self_mute = selves.mute;
             view.self_deaf = selves.deaf;
@@ -479,10 +497,6 @@ async fn drive_until(
             _ = sleep => link.tick(),
             _ = tick.tick() => {
                 let now = *selves.borrow();
-                // The microphone is closed while muted or deafened, not just ignored.
-                if let Some(devices) = &sound.devices {
-                    devices.listen(!now.mute && !now.deaf);
-                }
                 let mut speaking = HashSet::new();
                 // A microphone running a touch faster than this clock would
                 // pile up delay: past 160 ms behind (more than a device hands

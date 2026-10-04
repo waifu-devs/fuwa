@@ -61,6 +61,14 @@ fn until_store(core: &Core, what: &str, check: impl Fn(&Store) -> bool) {
     until(what, || core.shared.read(&check));
 }
 
+/// Someone's voice state as the instance tells `core` it is now.
+fn shown(core: &Arc<Core>, key: &str, server_id: &str, user_id: &str) -> Option<pb::VoiceState> {
+    let api = core.api(key)?;
+    let request = pb::ListVoiceStatesRequest { server_id: server_id.into() };
+    let states = wait(core, async move { api.calls().list_voice_states(request).await }).ok()?.into_inner().states;
+    states.into_iter().find(|v| v.user_id == user_id)
+}
+
 /// Plays a tone into a microphone pipe in real time, 20 ms at a time, while `going`.
 fn speak(pipe: Arc<Pipe>, hz: f32, going: Arc<std::sync::atomic::AtomicBool>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
@@ -174,18 +182,14 @@ fn two_people_hear_each_other_in_a_voice_channel() {
     // Muted, she goes quiet for Bob, and the instance shows her muted.
     alice.set_self_mute(true);
     until("Alice muted", || listen(&b_out) < 0.01);
-    until_store(&bob, "Alice shown muted", |s| {
-        s.instance(&key).unwrap().voice[&server.id].iter().any(|v| v.user_id == alice_id && v.self_mute)
-    });
+    until("Alice shown muted", || shown(&bob, &key, &server.id, &alice_id).is_some_and(|v| v.self_mute));
     alice.set_self_mute(false);
     until("Alice back", || listen(&b_out) > 0.1);
 
     // Bob deafened hears nothing, and is shown deafened.
     bob.set_self_deaf(true);
     until("Bob deafened", || listen(&b_out) < 0.01);
-    until_store(&alice, "Bob shown deafened", |s| {
-        s.instance(&key).unwrap().voice[&server.id].iter().any(|v| v.user_id == bob_id && v.self_deaf)
-    });
+    until("Bob shown deafened", || shown(&alice, &key, &server.id, &bob_id).is_some_and(|v| v.self_deaf));
     bob.set_self_deaf(false);
     until("Bob hearing again", || listen(&b_out) > 0.1);
     going.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -194,10 +198,7 @@ fn two_people_hear_each_other_in_a_voice_channel() {
     // Leaving takes Bob out of the channel for Alice, right away.
     bob.leave_voice();
     assert!(bob.call().is_none());
-    until_store(&alice, "Bob gone from the channel", |s| {
-        let i = s.instance(&key).unwrap();
-        fuwa_desktop::core::calls::in_channel(&i.voice, &server.id, &voice.id).len() == 1
-    });
+    until("Bob gone from the channel", || shown(&alice, &key, &server.id, &bob_id).is_none());
 
     // Joining from somewhere else takes the place over: the first app hears it.
     let other_home = tempfile::tempdir().unwrap();
@@ -232,4 +233,28 @@ fn calls_get_through_over_tcp_alone() {
     until("Bob hearing Alice over TCP", || listen(&b_out) > 0.1);
     going.store(false, std::sync::atomic::Ordering::Relaxed);
     speaker.join().unwrap();
+}
+
+/// Muting while the call is trying to get back in (the instance is down)
+/// closes the microphone then and there, not once the call is back.
+#[test]
+fn muting_while_rejoining_closes_the_microphone() {
+    let Setup { key, server, voice, alice, _homes, _instance, .. } = setup("127.0.0.1");
+    alice.join_voice_with(
+        &key,
+        &server.id,
+        &voice.id,
+        Some((Arc::new(Pipe::microphone()), Arc::new(Pipe::speakers()))),
+    );
+    until("connected", || alice.call().is_some_and(|c| c.status == Status::Connected));
+    assert_eq!(alice.microphone_open(), Some(true));
+    // The instance and its media part go away.
+    _instance.1.shutdown.cancel();
+    until("trying to get back in", || alice.call().is_some_and(|c| c.status == Status::Reconnecting));
+    alice.set_self_mute(true);
+    assert_eq!(alice.microphone_open(), Some(false), "closed at once");
+    alice.set_self_mute(false);
+    assert_eq!(alice.microphone_open(), Some(true));
+    alice.set_self_deaf(true);
+    assert_eq!(alice.microphone_open(), Some(false), "deafened closes it too");
 }
