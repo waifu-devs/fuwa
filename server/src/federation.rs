@@ -973,7 +973,7 @@ async fn pin_for_share(app: &App, origin: &str, public_key: &[u8]) -> Result<cra
 
 fn shares_capped() -> Error {
     crate::reports::server_error("federation_shares_capped", Some("federation"));
-    Error::ResourceExhausted("too many share codes looked up at once; try again in a minute".into())
+    Error::Limited("too many share codes looked up at once; try again in a minute".into(), 60_000)
 }
 
 /// Sends a signed envelope to another instance and checks its signed answer.

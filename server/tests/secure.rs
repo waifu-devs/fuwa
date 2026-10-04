@@ -244,7 +244,10 @@ async fn a_secure_channel_follows_its_permissions() {
     let mut rin_events = pb::event_service_client::EventServiceClient::new(channel.clone())
         .subscribe(authed(
             &rin.token,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()

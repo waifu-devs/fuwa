@@ -1152,6 +1152,7 @@ async fn shown_one(
 fn no_pings(message: &mut pb::Message) {
     message.mentions_everyone = false;
     message.mention_role_ids.clear();
+    message.mention_user_ids.clear();
 }
 
 /// Runs this server's own AutoMod over what one of its people writes in a
@@ -1241,7 +1242,7 @@ pub(super) async fn guest_send(
 ) -> Result<pb::Message> {
     let channel_id = link.channel_id.clone().unwrap_or_default();
     let guest = guest_of(app, &sdb.read()?, &sdb.id, account, access, link).await?;
-    let pictures = automod::picture_links(&req.attachments, &req.embeds);
+    let pictures = automod::picture_links(&req.attachments, &req.embeds, &[]);
     review_here(app, sdb, member, access, &channel_id, &req.content, &pictures).await?;
     let call = Call::Send(cpb::GuestSend {
         guest: Some(guest),
@@ -1689,7 +1690,7 @@ async fn ask_home(
     {
         return None;
     }
-    let pictures = automod::picture_links(attachments, embeds);
+    let pictures = automod::picture_links(attachments, embeds, &[]);
     let member = pb::Member { user: Some(user), ..Default::default() };
     automod::ask(app, sdb, &member, &access, &channel_id, content, &pictures).await
 }

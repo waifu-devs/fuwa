@@ -168,7 +168,10 @@ async fn sound_goes_from_one_to_the_other() {
         .events
         .subscribe(authed(
             &mika,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -618,7 +621,10 @@ async fn programs_hear_and_talk_without_webrtc() {
         .events
         .subscribe(authed(
             &juan,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()

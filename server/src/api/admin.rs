@@ -295,6 +295,13 @@ impl AdminService for Api {
                 }
                 if let Some(disabled) = req.disabled {
                     self.app.node()?.set_disabled(&req.account_id, disabled, &reason).await?;
+                    if disabled {
+                        // Their agents' sessions went too.
+                        for agent in self.app.node()?.agents(&req.account_id).await? {
+                            self.app.sessions_ended(&agent.account.id);
+                        }
+                        self.app.sessions_ended(&req.account_id);
+                    }
                 }
                 if req.admin == Some(true) {
                     self.app.node()?.set_admin(&req.account_id, true).await?;
@@ -329,6 +336,7 @@ impl AdminService for Api {
                 let password = auth::temporary_password();
                 let hash = auth::hash_password(password.clone()).await?;
                 self.app.node()?.reset_password(&account.id, &hash, req.turn_off_two_factor).await?;
+                self.app.sessions_ended(&account.id);
                 tracing::info!(two_factor_off = req.turn_off_two_factor, "password reset by an admin");
                 Ok(pb::ResetAccountPasswordResponse { password })
             }
