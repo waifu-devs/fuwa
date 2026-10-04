@@ -267,7 +267,7 @@ impl JoinService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let Seat { sdb, access, .. } = self.membership(&account, &request.get_ref().server_id).await?;
-                let mut onboarding = store::load_onboarding(&sdb.read()?).await?;
+                let mut onboarding = store::load_onboarding(&*sdb.read()?).await?;
                 onboarding.set_by.clear();
                 if !access.has(Permission::ManageServer) {
                     if !onboarding.enabled {
