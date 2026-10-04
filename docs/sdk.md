@@ -190,20 +190,83 @@ await voice.leave();
   sending sound (`silenceMs`, 300 ms by default; Opus's one-byte silence
   packets don't count). `voice.speaking` is who's talking now.
 - **Talking**: `speak` takes Opus frames (48 kHz, 20 ms, mono or stereo) from
-  a list or an async iterable, and sends them about as fast as they play;
-  it resolves about when the last one is heard. `play` reads an Ogg Opus
-  file (`ffmpeg -i in.wav -c:a libopus -frame_duration 20 out.ogg`) and
-  refuses one whose frames aren't 20 ms.
-- **Files**: `readOggOpus` and `OggOpusWriter` read and write Ogg Opus in
-  plain TypeScript, so an agent can save what each person said
-  (`writer.add(frame.opus)` per frame, `writer.finish()` for the bytes).
-  Decoding to raw sound or encoding from it needs an Opus library of your
-  choice; the SDK carries none.
+  a list or an async iterable. Each frame goes out as soon as it comes, and
+  a source faster than real time is paced to about how fast it plays; it
+  resolves with `{ interrupted, by, sentMs }` about when the last one is
+  heard. Things said one after another wait their turn. `play` takes an Ogg
+  Opus file (`ffmpeg -i in.wav -c:a libopus -frame_duration 20 out.ogg`) or
+  a stream of one (a fetch `Response`, its body, any async iterable of
+  bytes), which starts playing as soon as its first page arrives. Packets
+  holding two or three 20 ms frames are split; other frame lengths are
+  refused.
+- **Files**: `readOggOpus`, `OggOpusReader` (pieces of any size as they
+  arrive), `oggOpusPackets` (a stream) and `OggOpusWriter` (`flush` and
+  `take` to send pages as they're written) read and write Ogg Opus in plain
+  TypeScript.
 - **Staying in**: when the connection drops or the instance restarts, it
   joins again with the same place (`reconnecting`, then `rejoined`), and
   `speak` waits for it. Being taken out by a moderator, kicked, losing
   CONNECT or joining from somewhere else ends it: `voice.closed` rejects with
   that error (FailedPrecondition). Stopping the agent leaves its channels.
+
+### Conversations
+
+For an agent people talk with, `utterance` is the unit to answer: what one
+person says from when they start until they pause for `utteranceGapMs` (600
+ms by default; 700 or so suits conversation). Its frames arrive while
+they're still talking, so a speech-to-text service can start straight away.
+
+```ts
+const voice = await agent.joinVoice(serverId, channelId, { utteranceGapMs: 700 });
+
+voice.on("utterance", async (utterance) => {
+  // Stream it as it's spoken: Ogg Opus pieces every 100 ms...
+  for await (const piece of utterance.ogg()) sendToSpeechService(piece);
+  // ...or wait for the pause and take the whole file.
+  await utterance.ended;
+  const text = await transcribe(await utterance.toOgg());
+
+  // Speak the answer as the speech service makes it.
+  const reply = await fetch(ttsUrl, { method: "POST", body: ..., signal });
+  const { interrupted } = await voice.play(reply, { interruptible: true });
+});
+```
+
+- `for await (const u of voice.utterances())` is the same as the event.
+  An utterance can be read any number of times, from its start, as frames
+  (`for await`), Opus packets (`opus()`), Ogg Opus pieces (`ogg()`), a
+  whole file once it ends (`toOgg()`) or PCM (`pcm(decoder)`). It ends at
+  `maxUtteranceMs` (60 s) at the latest, and the next one begins.
+- **Barge-in**: `interruptible: true` on `speak`, `play` or `speakPcm`
+  stops as soon as someone starts talking over it (or pass a test of who may
+  cut in), resolving with `interrupted: true` and who it was. What the
+  instance already has queued still plays out, at most about 300 ms.
+  `voice.stopSpeaking()` stops what's being said and everything waiting its
+  turn; `voice.talking` says whether anything is.
+- **Raw sound**: services that take or make 16-bit PCM instead of Opus need
+  an Opus library of your choice (the SDK carries none), given through two
+  small interfaces. `voice.speakPcm(pcm, { encoder, sampleRate, channels })`
+  cuts PCM of any piece size into 20 ms frames and encodes them;
+  `utterance.pcm(decoder)` decodes, with lost or unsent sound as silence so
+  the timing stays true. `pcmFromBytes` and `pcmToBytes` convert to and
+  from little-endian bytes.
+
+```ts
+import { OpusEncoder } from "@discordjs/opus";
+
+const enc = new OpusEncoder(24_000, 1);
+const encoder = { encode: (pcm: Int16Array) => enc.encode(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength)) };
+const res = await fetch(ttsUrl, { ... }); // 24 kHz 16-bit mono PCM
+await voice.speakPcm(pcmFromBytes(res.body!), { encoder, sampleRate: 24_000, interruptible: true });
+```
+
+The SDK sends sound nowhere but the instance; an agent that passes people's
+voices to a speech service is choosing to, and should say so where people
+can see it (the example says which host it uses when it joins).
+[`examples/voice-chat.ts`](../sdk/examples/voice-chat.ts) is a whole
+conversation: each utterance goes to a speech-to-text service, a language
+model answers, and each sentence is spoken as soon as it's written, with
+barge-in. It works with any service shaped like OpenAI's API.
 
 Voice channels only: calls in direct messages are end-to-end encrypted
 between people's apps, and agents don't use direct messages. Cameras and

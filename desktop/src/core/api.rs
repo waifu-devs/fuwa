@@ -101,6 +101,7 @@ clients! {
     account => "AccountService" pb::account_service_client::AccountServiceClient<Transport>,
     servers => "ServerService" pb::server_service_client::ServerServiceClient<Transport>,
     channels => "ChannelService" pb::channel_service_client::ChannelServiceClient<Transport>,
+    shared => "SharedChannelService" pb::shared_channel_service_client::SharedChannelServiceClient<Transport>,
     messages => "MessageService" pb::message_service_client::MessageServiceClient<Transport>,
     events => "EventService" pb::event_service_client::EventServiceClient<Transport>,
     roles => "RoleService" pb::role_service_client::RoleServiceClient<Transport>,

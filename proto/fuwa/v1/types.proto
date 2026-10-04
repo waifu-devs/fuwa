@@ -752,6 +752,9 @@ message SharedServer {
   string id = 1;
   string name = 2;
   string icon_url = 3;
+  // Its instance, when it's another one: the host (and port, if any) its
+  // people's names are shown with ("aiko · chat.example.com").
+  string instance = 4;
 }
 
 // Who wrote a message in a shared channel and which server they're from,

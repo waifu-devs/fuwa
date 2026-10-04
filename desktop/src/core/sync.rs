@@ -294,6 +294,10 @@ async fn stream_once(
                         None
                     }
                 };
+                if known.is_some() {
+                    tokio::spawn(relist_voice(core.clone(), key.to_owned(), api.clone(), head.server_id.clone()));
+                    tokio::spawn(reread_shown(core.clone(), key.to_owned(), api.clone(), head.server_id.clone()));
+                }
                 match known {
                     Some(true) => {
                         tokio::spawn(relist(core.clone(), key.to_owned(), api.clone(), head.server_id, state.clone()));
@@ -390,6 +394,15 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
     if let Some(notice) = notice {
         core.shared.notice(notice);
     }
+    // A server's shared channels changed: read them again where a manager has them open.
+    if matches!(event.payload, Some(Payload::SharedChannelsUpdated(_)))
+        && core.shared.read(|s| s.instance(key).is_some_and(|i| i.shared.contains_key(&sid)))
+    {
+        let (core, key, sid) = (core.clone(), key.to_owned(), sid.clone());
+        tokio::spawn(async move {
+            let _ = core.list_connections(&key, &sid).await;
+        });
+    }
     if outcome == Outcome::Gone {
         {
             let mut s = state.lock();
@@ -455,6 +468,55 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
 
 /// A replay goes by what you can see now, so channels you gained or lost
 /// while away only show up by listing them again.
+/// Who's in voice isn't kept in the server's log (those events carry no
+/// sequence), so any that came while the stream was away are lost: after a
+/// gap, read them again.
+async fn relist_voice(core: Arc<Core>, key: String, api: Api, server_id: String) {
+    let req = pb::ListVoiceStatesRequest { server_id: server_id.clone() };
+    let Ok(res) = rpc!(api.calls(), list_voice_states(req)).await else { return };
+    core.shared.instance(&key, |i| {
+        if i.synced.contains(&server_id) {
+            i.voice.insert(server_id, res.states);
+        }
+    });
+}
+
+/// What's said in a channel shown from another server arrives live but isn't
+/// in this server's log, so after a gap the channels open here read their
+/// latest messages again from the home.
+async fn reread_shown(core: Arc<Core>, key: String, api: Api, server_id: String) {
+    let shown: Vec<String> = core.shared.read(|s| {
+        let Some(i) = s.instance(&key) else { return Vec::new() };
+        i.channels
+            .get(&server_id)
+            .into_iter()
+            .flatten()
+            .filter(|c| c.shared.as_ref().is_some_and(|sh| !sh.home) && i.messages.contains_key(&c.id))
+            .map(|c| c.id.clone())
+            .collect()
+    });
+    for channel_id in shown {
+        let req = pb::ListMessagesRequest {
+            server_id: server_id.clone(),
+            channel_id: channel_id.clone(),
+            limit: 50,
+            ..Default::default()
+        };
+        let Ok(res) = rpc!(api.messages(), list_messages(req)).await else { continue };
+        core.shared.instance(&key, |i| {
+            for user in res.authors {
+                i.users.insert(user.id.clone(), user);
+            }
+            store::add_shared_authors(&mut i.users, &res.messages);
+            if let Some(loaded) = i.messages.get_mut(&channel_id) {
+                for m in res.messages {
+                    store::upsert_message(&mut loaded.items, m);
+                }
+            }
+        });
+    }
+}
+
 async fn relist(core: Arc<Core>, key: String, api: Api, server_id: String, state: Arc<Mutex<Follow>>) {
     state.lock().relisting.insert(server_id.clone(), Vec::new());
     let listed = retrying(&core, &key, || {
