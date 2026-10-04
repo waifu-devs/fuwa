@@ -574,9 +574,10 @@ async fn read_pictures(app: &crate::app::App, links: &[String]) -> Vec<providers
 }
 
 /// The links to a message's pictures a provider may be shown: attachments
-/// that say they're PNG, JPEG or WebP (by type or name), then embeds' images
-/// and thumbnails.
-pub(super) fn picture_links(attachments: &[pb::Attachment], embeds: &[pb::Embed]) -> Vec<String> {
+/// that say they're PNG, JPEG or WebP (by type or name), embeds' images and
+/// thumbnails, then the emoji from other servers it carries (checked uploads
+/// on this instance, read from its own files).
+pub(super) fn picture_links(attachments: &[pb::Attachment], embeds: &[pb::Embed], emojis: &[pb::Emoji]) -> Vec<String> {
     let readable = |a: &pb::Attachment| {
         let kind = a.content_type.to_ascii_lowercase();
         let name = a.filename.to_ascii_lowercase();
@@ -588,6 +589,7 @@ pub(super) fn picture_links(attachments: &[pb::Attachment], embeds: &[pb::Embed]
         .filter(|a| readable(a))
         .map(|a| a.url.clone())
         .chain(embeds.iter().flat_map(|e| [e.image_url.clone(), e.thumbnail_url.clone()]))
+        .chain(emojis.iter().map(|e| e.url.clone()))
         .filter(|link| !link.is_empty())
         .collect()
 }
@@ -973,6 +975,24 @@ impl AutoModService for Api {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Emoji from other servers a message carries are shown to the provider
+    /// after its attachments and embeds.
+    #[test]
+    fn carried_emoji_are_pictures_too() {
+        let attachment = pb::Attachment {
+            url: "https://fuwa.test/media/a".into(),
+            content_type: "image/png".into(),
+            ..Default::default()
+        };
+        let embed = pb::Embed { image_url: "https://example.com/e.jpg".into(), ..Default::default() };
+        let emoji = pb::Emoji { url: "https://fuwa.test/media/m".into(), ..Default::default() };
+        assert_eq!(
+            picture_links(&[attachment], &[embed], std::slice::from_ref(&emoji)),
+            ["https://fuwa.test/media/a", "https://example.com/e.jpg", "https://fuwa.test/media/m"]
+        );
+        assert_eq!(picture_links(&[], &[], &[emoji]), ["https://fuwa.test/media/m"]);
+    }
 
     /// A provider answer that comes after the message went out still blocks
     /// it: down it comes, with an alert and a time out, as before sending.

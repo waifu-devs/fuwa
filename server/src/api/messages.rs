@@ -628,7 +628,7 @@ impl MessageService for Api {
                 {
                     return Err(Error::ResourceExhausted("this server is out of storage".into()));
                 }
-                let pictures = automod::picture_links(&req.attachments, &req.embeds);
+                let pictures = automod::picture_links(&req.attachments, &req.embeds, &emojis);
                 // The Smart filter's provider is asked alongside: the message
                 // goes out at once, and its answer is acted on when it comes.
                 let (asked, later) = (
@@ -839,10 +839,27 @@ impl MessageService for Api {
                     _ => vec![],
                 };
                 let (asked, later) = match before {
-                    Some(m) if m.author_id == account.id && m.content != req.content => (
-                        None,
-                        automod::ask_after(&self.app, &sdb, &member, &access, &m.channel_id, &req.content, &[]).await,
-                    ),
+                    Some(m) if m.author_id == account.id && m.content != req.content => {
+                        // The text is asked about with the emoji from other
+                        // servers it newly carries; the message's other
+                        // pictures can't change.
+                        let added: Vec<pb::Emoji> =
+                            checked.iter().filter(|e| !m.emojis.iter().any(|had| had.id == e.id)).cloned().collect();
+                        let pictures = automod::picture_links(&[], &[], &added);
+                        (
+                            None,
+                            automod::ask_after(
+                                &self.app,
+                                &sdb,
+                                &member,
+                                &access,
+                                &m.channel_id,
+                                &req.content,
+                                &pictures,
+                            )
+                            .await,
+                        )
+                    }
                     _ => (None, None),
                 };
                 let message = sdb
