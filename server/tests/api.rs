@@ -6820,6 +6820,587 @@ async fn federation_refuses_internal_addresses() {
     instance.stop().await;
 }
 
+async fn reply(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    thread_id: &str,
+    content: &str,
+    also: bool,
+) -> Result<pb::Message, tonic::Status> {
+    c.messages
+        .send_message(authed(
+            token,
+            pb::SendMessageRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                content: content.into(),
+                thread_id: thread_id.into(),
+                also_send_to_channel: also,
+                ..Default::default()
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().message.unwrap())
+}
+
+async fn thread_page(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    thread_id: &str,
+) -> pb::ListMessagesResponse {
+    c.messages
+        .list_messages(authed(
+            token,
+            pb::ListMessagesRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                thread_id: thread_id.into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+}
+
+async fn list_threads(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    query: &str,
+) -> pb::ListThreadsResponse {
+    c.messages
+        .list_threads(authed(
+            token,
+            pb::ListThreadsRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                query: query.into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+}
+
+async fn followed(c: &mut Clients, token: &str, server_id: &str) -> Vec<String> {
+    c.messages
+        .list_followed_threads(authed(token, pb::ListFollowedThreadsRequest { server_id: server_id.into() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .thread_ids
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn replies_start_threads_under_messages() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let server = create_server(&mut c, &juan, "Threads", true).await;
+    let sid = server.id.clone();
+    assert_eq!(server.thread_archive_hours, 168, "a week by default");
+    for token in [&mika, &rin] {
+        c.servers
+            .join_server(authed(token, pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() }))
+            .await
+            .unwrap();
+    }
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels[0]
+        .id
+        .clone();
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let parent = send(&mut c, &juan, &sid, &general, "what should we name the cat?").await.unwrap();
+    let first = reply(&mut c, &mika, &sid, &general, &parent.id, "Mochi", false).await.unwrap();
+    assert_eq!(first.thread_id, parent.id);
+    reply(&mut c, &rin, &sid, &general, &parent.id, "Tofu, and I mean it", true).await.unwrap();
+    reply(&mut c, &mika, &sid, &general, &parent.id, "Mochi again", false).await.unwrap();
+
+    // The channel shows the parent with its summary, and only the reply also sent to it.
+    let mut channel = messages(&mut c, &juan, &sid, &general).await;
+    channel.retain(|m| m.kind == pb::MessageKind::Unspecified as i32);
+    let contents = channel.iter().map(|m| m.content.as_str()).collect::<Vec<_>>();
+    assert_eq!(contents, ["what should we name the cat?", "Tofu, and I mean it"]);
+    let summary = channel[0].thread.clone().unwrap();
+    assert_eq!(summary.reply_count, 3);
+    assert_eq!(summary.participant_ids, [mika_user.id.clone(), rin_user.id.clone()], "latest first");
+    assert!(channel[1].also_in_channel);
+
+    // The thread's own page has every reply, oldest first, and the parent.
+    let page = thread_page(&mut c, &rin, &sid, &general, &parent.id).await;
+    assert_eq!(page.messages.len(), 3);
+    assert_eq!(page.messages[0].content, "Mochi");
+    assert_eq!(page.parent.unwrap().id, parent.id);
+
+    // Live: the reply, then the thread's new summary.
+    let mut saw_summary = false;
+    while let Ok(Some(item)) =
+        tokio::time::timeout(std::time::Duration::from_secs(5), stream.message()).await.map(Result::unwrap)
+    {
+        if let Some(pb::Event { payload: Some(pb::event::Payload::ThreadUpdated(t)), .. }) = item.event
+            && t.thread.as_ref().is_some_and(|t| t.reply_count == 3)
+        {
+            assert_eq!(t.thread_id, parent.id);
+            saw_summary = true;
+            break;
+        }
+    }
+    assert!(saw_summary);
+
+    // No threads under replies, and none under messages in another channel.
+    let nested = reply(&mut c, &rin, &sid, &general, &first.id, "deeper", false).await.unwrap_err();
+    assert_eq!(nested.code(), Code::InvalidArgument);
+    let random = new_channel(&mut c, &juan, &sid, "random", pb::ChannelType::Text).await;
+    let elsewhere = reply(&mut c, &rin, &sid, &random.id, &parent.id, "hi", false).await.unwrap_err();
+    assert_eq!(elsewhere.code(), Code::NotFound);
+    let stray = send(&mut c, &rin, &sid, &general, "x").await.unwrap();
+    let alone = c
+        .messages
+        .send_message(authed(
+            &rin,
+            pb::SendMessageRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                content: "also?".into(),
+                also_send_to_channel: true,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(alone.code(), Code::InvalidArgument);
+
+    // Following: the parent's author and everyone who replied, until they unfollow.
+    assert_eq!(followed(&mut c, &juan, &sid).await, std::slice::from_ref(&parent.id));
+    assert_eq!(followed(&mut c, &mika, &sid).await, std::slice::from_ref(&parent.id));
+    c.messages
+        .follow_thread(authed(
+            &mika,
+            pb::FollowThreadRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                follow: false,
+            },
+        ))
+        .await
+        .unwrap();
+    reply(&mut c, &mika, &sid, &general, &parent.id, "ok Tofu", false).await.unwrap();
+    assert!(followed(&mut c, &mika, &sid).await.is_empty(), "replying again doesn't follow it again");
+
+    // Search finds threads by their parent or their replies.
+    assert_eq!(list_threads(&mut c, &rin, &sid, &general, "").await.threads.len(), 1);
+    assert_eq!(list_threads(&mut c, &rin, &sid, &general, "TOFU").await.threads[0].id, parent.id);
+    assert_eq!(list_threads(&mut c, &rin, &sid, &general, "cat").await.threads.len(), 1);
+    assert!(list_threads(&mut c, &rin, &sid, &general, "dog").await.threads.is_empty());
+
+    // Moderators lock a thread: only they reply then.
+    let denied = c
+        .messages
+        .update_thread(authed(
+            &rin,
+            pb::UpdateThreadRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                locked: Some(true),
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let locked = c
+        .messages
+        .update_thread(authed(
+            &juan,
+            pb::UpdateThreadRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                locked: Some(true),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .thread
+        .unwrap();
+    assert!(locked.locked);
+    let shut = reply(&mut c, &rin, &sid, &general, &parent.id, "but", false).await.unwrap_err();
+    assert_eq!(shut.code(), Code::PermissionDenied);
+    reply(&mut c, &juan, &sid, &general, &parent.id, "Tofu it is.", false).await.unwrap();
+    let log = audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    assert!(log.entries.iter().any(|e| e.action == pb::AuditAction::ThreadLock as i32));
+
+    // Starting threads takes its own permission; replying in one takes Send Messages.
+    let everyone = c
+        .roles
+        .list_roles(authed(&juan, pb::ListRolesRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .roles
+        .into_iter()
+        .find(|r| r.id == sid)
+        .unwrap();
+    assert!(everyone.permissions.contains(&(pb::Permission::CreateThreads as i32)));
+    let without = everyone.permissions.iter().copied().filter(|&p| p != pb::Permission::CreateThreads as i32).collect();
+    c.roles
+        .update_role(authed(
+            &juan,
+            pb::UpdateRoleRequest {
+                server_id: sid.clone(),
+                role_id: sid.clone(),
+                permissions: Some(pb::PermissionSet { permissions: without }),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    let cannot = reply(&mut c, &rin, &sid, &general, &stray.id, "new thread", false).await.unwrap_err();
+    assert_eq!(cannot.code(), Code::PermissionDenied);
+    let other = send(&mut c, &mika, &sid, &general, "another topic").await.unwrap();
+    let owner_reply = reply(&mut c, &juan, &sid, &general, &other.id, "started by the owner", false).await.unwrap();
+    reply(&mut c, &rin, &sid, &general, &other.id, "and I can reply", false).await.unwrap();
+
+    // The parent's author can't delete a thread others replied in; a moderator can, replies and all.
+    let refused = c
+        .messages
+        .delete_message(authed(
+            &mika,
+            pb::DeleteMessageRequest { server_id: sid.clone(), message_id: other.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    let before = usage(&mut c, &juan, &sid).await;
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest { server_id: sid.clone(), message_id: other.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    let after = usage(&mut c, &juan, &sid).await;
+    assert_eq!(before.messages - after.messages, 3, "the parent and both replies");
+    let gone = c
+        .messages
+        .get_message(authed(
+            &juan,
+            pb::GetMessageRequest { server_id: sid.clone(), message_id: owner_reply.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(gone.code(), Code::NotFound);
+    let log = audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    assert!(log.entries.iter().any(|e| e.action == pb::AuditAction::ThreadDelete as i32));
+
+    // Deleting a reply sums the thread up again.
+    let page = thread_page(&mut c, &juan, &sid, &general, &parent.id).await;
+    let count = page.parent.as_ref().unwrap().thread.as_ref().unwrap().reply_count;
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest {
+                server_id: sid.clone(),
+                message_id: page.messages[0].id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    let page = thread_page(&mut c, &juan, &sid, &general, &parent.id).await;
+    assert_eq!(page.parent.unwrap().thread.unwrap().reply_count, count - 1);
+
+    // Quiet threads are archived after the server's setting; zero never archives them.
+    let updated = c
+        .servers
+        .update_server(authed(
+            &juan,
+            pb::UpdateServerRequest { server_id: sid.clone(), thread_archive_hours: Some(0), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert_eq!(updated.thread_archive_hours, 0);
+    let archived = c
+        .messages
+        .list_threads(authed(
+            &rin,
+            pb::ListThreadsRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                archived: true,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(archived.threads.is_empty());
+    let too_long = c
+        .servers
+        .update_server(authed(
+            &juan,
+            pb::UpdateServerRequest { server_id: sid.clone(), thread_archive_hours: Some(9000), ..Default::default() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(too_long.code(), Code::InvalidArgument);
+    instance.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn threads_stay_home_when_a_channel_is_shared() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (sora, _, _) = sign_up(&mut c, "sora").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    join(&mut c, &sora, &home).await;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let parent = send(&mut c, &juan, &home, &dev.id, "movie night?").await.unwrap();
+    let kept = reply(&mut c, &sora, &home, &dev.id, &parent.id, "only in the thread", false).await.unwrap();
+    let also = reply(&mut c, &sora, &home, &dev.id, &parent.id, "in both", true).await.unwrap();
+
+    // Shared after the thread started: guests see the channel, not who replied in its threads.
+    let shared = share(&mut c, &juan, &home, &dev.id, &mika, &guest).await;
+    let seen = messages(&mut c, &mika, &guest, &shared.id).await;
+    assert!(seen.iter().all(|m| m.id != kept.id), "{seen:?}");
+    let first = seen.iter().find(|m| m.id == parent.id).unwrap();
+    assert!(first.thread.is_none());
+    let both = seen.iter().find(|m| m.id == also.id).unwrap();
+    assert!(both.thread_id.is_empty() && !both.also_in_channel);
+    let hidden = c
+        .messages
+        .get_message(authed(
+            &mika,
+            pb::GetMessageRequest {
+                server_id: guest.clone(),
+                channel_id: shared.id.clone(),
+                message_id: kept.id.clone(),
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(hidden.code(), Code::NotFound);
+    instance.stop().await;
+}
+
+/// A channel shared with a server on another instance: a code made for
+/// other instances, a preview naming the home instance and its key, the ask
+/// (which pins each instance's key at the other), approval and ending.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn channels_shared_across_instances() {
+    let federated = [("FUWA_FEDERATION", "on"), ("FUWA_FEDERATION_ALLOW_PRIVATE", "1")];
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, b) = (start(dir_a.path(), &federated).await, start(dir_b.path(), &federated).await);
+    let (mut ca, mut cb) = (clients(&a).await, clients(&b).await);
+    let (juan, _, _) = sign_up(&mut ca, "juan").await;
+    let (mika, _, _) = sign_up(&mut cb, "mika").await;
+    let (origin_a, origin_b) = (format!("http://{}", a.addr), format!("http://{}", b.addr));
+    for (c, admin, origin) in [(&mut ca, &juan, &origin_a), (&mut cb, &mika, &origin_b)] {
+        let settings = pb::InstanceSettings { public_url: origin.clone(), ..Default::default() };
+        c.admin.update_settings(authed(admin, settings_update(settings, &["public_url"], &[]))).await.unwrap();
+    }
+    let node = ca.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert!(node.federation);
+    let federation = |c: &Clients, admin: &str| {
+        let mut admin_client = c.admin.clone();
+        let request = authed(admin, pb::GetFederationRequest {});
+        async move { admin_client.get_federation(request).await.unwrap().into_inner() }
+    };
+    let (fed_a, fed_b) = (federation(&ca, &juan).await, federation(&cb, &mika).await);
+    let home = create_server(&mut ca, &juan, "Home", false).await.id;
+    let guest = create_server(&mut cb, &mika, "Guest", false).await.id;
+    let dev = new_channel(&mut ca, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let make_code = |c: &Clients, other_instances: bool| {
+        let mut shared = c.shared.clone();
+        let request = authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), other_instances },
+        );
+        async move { shared.create_share_code(request).await.unwrap().into_inner().code.unwrap().code }
+    };
+    let preview = |c: &Clients, code: &str| {
+        let mut shared = c.shared.clone();
+        let request = authed(&mika, pb::PreviewShareRequest { server_id: guest.clone(), code: code.into() });
+        async move { shared.preview_share(request).await }
+    };
+
+    // A code for this instance only can't be used from another, even with
+    // the home's host added.
+    let local = make_code(&ca, false).await;
+    assert!(!local.contains('@'));
+    let refused = preview(&cb, &format!("{local}@{origin_a}")).await.unwrap_err();
+    assert_eq!(refused.code(), Code::NotFound, "{refused:?}");
+    // Asking with it fails too, and the home pins nothing for a code that
+    // doesn't work.
+    let refused = cb
+        .shared
+        .accept_share(authed(
+            &mika,
+            pb::AcceptShareRequest {
+                server_id: guest.clone(),
+                code: format!("{local}@{origin_a}"),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::NotFound, "{refused:?}");
+    assert!(federation(&ca, &juan).await.peers.is_empty());
+    assert!(federation(&cb, &mika).await.peers.is_empty(), "the guest pins only once the home answers");
+
+    // One for other instances names this one, and the preview names the
+    // home instance and its key's fingerprint, without pinning anything.
+    let code = make_code(&ca, true).await;
+    assert!(code.ends_with(&format!("@{origin_a}")), "{code}");
+    let seen = preview(&cb, &code).await.unwrap().into_inner();
+    assert_eq!(seen.channel_name, "dev");
+    assert_eq!(seen.instance, a.addr.to_string());
+    assert_eq!(seen.fingerprint, fed_a.fingerprint);
+    // Files don't cross instances yet, so the home can't let them.
+    assert!(!seen.allowed.contains(&(pb::Permission::AttachFiles as i32)));
+    assert!(seen.allowed.contains(&(pb::Permission::SendMessages as i32)));
+    let home_server = seen.home_server.unwrap();
+    assert_eq!(home_server.name, "Home");
+    assert_eq!(home_server.id, format!("{home}@{origin_a}"));
+    assert!(federation(&ca, &juan).await.peers.is_empty());
+
+    // Asking pins each instance's key at the other.
+    let asked = cb
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    assert_eq!(asked.state, pb::SharedConnectionState::Waiting as i32);
+    assert_eq!(asked.instance, a.addr.to_string());
+    assert_eq!(asked.fingerprint, fed_a.fingerprint);
+    let (pinned_a, pinned_b) = (federation(&ca, &juan).await, federation(&cb, &mika).await);
+    assert_eq!(pinned_a.peers.len(), 1);
+    assert_eq!(pinned_a.peers[0].origin, origin_b);
+    assert_eq!(pinned_a.peers[0].fingerprint, fed_b.fingerprint);
+    assert_eq!(pinned_b.peers[0].origin, origin_a);
+
+    // The home's admins see where the request comes from before approving.
+    let request = connections(&mut ca, &juan, &home).await.connections.pop().unwrap();
+    assert_eq!(request.id, asked.id);
+    assert_eq!(request.instance, b.addr.to_string());
+    assert_eq!(request.fingerprint, fed_b.fingerprint);
+    // Nor can its admins let them later.
+    let all = [pb::Permission::SendMessages, pb::Permission::AttachFiles].map(|p| p as i32).to_vec();
+    let updated = ca
+        .shared
+        .update_connection(authed(
+            &juan,
+            pb::UpdateConnectionRequest { server_id: home.clone(), connection_id: asked.id.clone(), allowed: all },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    assert_eq!(updated.allowed, vec![pb::Permission::SendMessages as i32]);
+    let from = request.server.unwrap();
+    assert_eq!(from.id, format!("{guest}@{origin_b}"));
+    assert_eq!(from.name, "Guest");
+    ca.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id.clone(), approve: true },
+        ))
+        .await
+        .unwrap();
+    let shown = list_channels(&mut cb, &mika, &guest)
+        .await
+        .into_iter()
+        .find(|ch| ch.shared.as_ref().is_some_and(|s| !s.home))
+        .expect("the guest shows the channel once approved");
+    assert_eq!(shown.name, "dev");
+    let listed = connections(&mut cb, &mika, &guest).await.connections;
+    assert_eq!(listed[0].state, pb::SharedConnectionState::Active as i32);
+    assert_eq!(listed[0].instance, a.addr.to_string());
+
+    // Messages don't cross instances yet.
+    let not_yet = send(&mut cb, &mika, &guest, &shown.id, "hi").await.unwrap_err();
+    assert_eq!(not_yet.code(), Code::FailedPrecondition, "{not_yet:?}");
+    assert!(not_yet.message().contains("can't do that yet"), "{not_yet:?}");
+
+    // The home ends it, and the guest's channel goes.
+    ca.shared
+        .disconnect(authed(&juan, pb::DisconnectRequest { server_id: home.clone(), connection_id: asked.id.clone() }))
+        .await
+        .unwrap();
+    assert!(list_channels(&mut cb, &mika, &guest).await.iter().all(|ch| ch.id != shown.id));
+    assert!(connections(&mut cb, &mika, &guest).await.connections.is_empty());
+
+    // A guest withdrawing its request leaves nothing waiting at the home.
+    let code = make_code(&ca, true).await;
+    let asked = cb
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    assert_eq!(connections(&mut ca, &juan, &home).await.connections.len(), 1);
+    cb.shared
+        .disconnect(authed(&mika, pb::DisconnectRequest { server_id: guest.clone(), connection_id: asked.id }))
+        .await
+        .unwrap();
+    assert!(connections(&mut ca, &juan, &home).await.connections.is_empty());
+
+    // With federation off at the home, codes for other instances aren't made.
+    let off = pb::InstanceSettings { federation: false, ..Default::default() };
+    ca.admin.update_settings(authed(&juan, settings_update(off, &["federation"], &[]))).await.unwrap();
+    let refused = ca
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), other_instances: true },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::FailedPrecondition);
+
+    a.stop().await;
+    b.stop().await;
+}
+
 /// Uploads a file to attach in `server_id`, and says where it's served.
 async fn attach(c: &mut Clients, instance: &Instance, token: &str, server_id: &str, bytes: Vec<u8>) -> String {
     let reserved = c
@@ -7020,6 +7601,49 @@ async fn attachments_upload_send_serve_and_go_with_their_message() {
     assert_eq!(fetch(&instance, &zipped.url).await.0, reqwest::StatusCode::NOT_FOUND);
     assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 60_000);
 
+    // A reply's file goes with the thread when the message it's under goes.
+    let parent = send(&mut c, &juan, &server.id, &general, "a thread for files").await.unwrap();
+    let note = attach(&mut c, &instance, &juan, &server.id, b"in a thread".to_vec()).await;
+    c.messages
+        .send_message(authed(
+            &juan,
+            pb::SendMessageRequest {
+                server_id: server.id.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                attachments: vec![pb::Attachment {
+                    url: note.clone(),
+                    filename: "note.txt".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 60_011);
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest {
+                server_id: server.id.clone(),
+                message_id: parent.id.clone(),
+                channel_id: general.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    let note_id = note.rsplit('/').next().unwrap().to_string();
+    for _ in 0..50 {
+        if gone(&note_id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(gone(&note_id));
+    assert_eq!(fetch(&instance, &note).await.0, reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 60_000);
+
     // And with its channel.
     let big_id = big.rsplit('/').next().unwrap().to_string();
     c.channels
@@ -7035,189 +7659,4 @@ async fn attachments_upload_send_serve_and_go_with_their_message() {
     assert!(gone(&big_id));
     assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 0);
     instance.stop().await;
-}
-
-/// A channel shared with a server on another instance: a code made for
-/// other instances, a preview naming the home instance and its key, the ask
-/// (which pins each instance's key at the other), approval and ending.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn channels_shared_across_instances() {
-    let federated = [("FUWA_FEDERATION", "on"), ("FUWA_FEDERATION_ALLOW_PRIVATE", "1")];
-    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (a, b) = (start(dir_a.path(), &federated).await, start(dir_b.path(), &federated).await);
-    let (mut ca, mut cb) = (clients(&a).await, clients(&b).await);
-    let (juan, _, _) = sign_up(&mut ca, "juan").await;
-    let (mika, _, _) = sign_up(&mut cb, "mika").await;
-    let (origin_a, origin_b) = (format!("http://{}", a.addr), format!("http://{}", b.addr));
-    for (c, admin, origin) in [(&mut ca, &juan, &origin_a), (&mut cb, &mika, &origin_b)] {
-        let settings = pb::InstanceSettings { public_url: origin.clone(), ..Default::default() };
-        c.admin.update_settings(authed(admin, settings_update(settings, &["public_url"], &[]))).await.unwrap();
-    }
-    let node = ca.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
-    assert!(node.federation);
-    let federation = |c: &Clients, admin: &str| {
-        let mut admin_client = c.admin.clone();
-        let request = authed(admin, pb::GetFederationRequest {});
-        async move { admin_client.get_federation(request).await.unwrap().into_inner() }
-    };
-    let (fed_a, fed_b) = (federation(&ca, &juan).await, federation(&cb, &mika).await);
-    let home = create_server(&mut ca, &juan, "Home", false).await.id;
-    let guest = create_server(&mut cb, &mika, "Guest", false).await.id;
-    let dev = new_channel(&mut ca, &juan, &home, "dev", pb::ChannelType::Text).await;
-    let make_code = |c: &Clients, other_instances: bool| {
-        let mut shared = c.shared.clone();
-        let request = authed(
-            &juan,
-            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), other_instances },
-        );
-        async move { shared.create_share_code(request).await.unwrap().into_inner().code.unwrap().code }
-    };
-    let preview = |c: &Clients, code: &str| {
-        let mut shared = c.shared.clone();
-        let request = authed(&mika, pb::PreviewShareRequest { server_id: guest.clone(), code: code.into() });
-        async move { shared.preview_share(request).await }
-    };
-
-    // A code for this instance only can't be used from another, even with
-    // the home's host added.
-    let local = make_code(&ca, false).await;
-    assert!(!local.contains('@'));
-    let refused = preview(&cb, &format!("{local}@{origin_a}")).await.unwrap_err();
-    assert_eq!(refused.code(), Code::NotFound, "{refused:?}");
-    // Asking with it fails too, and the home pins nothing for a code that
-    // doesn't work.
-    let refused = cb
-        .shared
-        .accept_share(authed(
-            &mika,
-            pb::AcceptShareRequest {
-                server_id: guest.clone(),
-                code: format!("{local}@{origin_a}"),
-                ..Default::default()
-            },
-        ))
-        .await
-        .unwrap_err();
-    assert_eq!(refused.code(), Code::NotFound, "{refused:?}");
-    assert!(federation(&ca, &juan).await.peers.is_empty());
-    assert!(federation(&cb, &mika).await.peers.is_empty(), "the guest pins only once the home answers");
-
-    // One for other instances names this one, and the preview names the
-    // home instance and its key's fingerprint, without pinning anything.
-    let code = make_code(&ca, true).await;
-    assert!(code.ends_with(&format!("@{origin_a}")), "{code}");
-    let seen = preview(&cb, &code).await.unwrap().into_inner();
-    assert_eq!(seen.channel_name, "dev");
-    assert_eq!(seen.instance, a.addr.to_string());
-    assert_eq!(seen.fingerprint, fed_a.fingerprint);
-    // Files don't cross instances yet, so the home can't let them.
-    assert!(!seen.allowed.contains(&(pb::Permission::AttachFiles as i32)));
-    assert!(seen.allowed.contains(&(pb::Permission::SendMessages as i32)));
-    let home_server = seen.home_server.unwrap();
-    assert_eq!(home_server.name, "Home");
-    assert_eq!(home_server.id, format!("{home}@{origin_a}"));
-    assert!(federation(&ca, &juan).await.peers.is_empty());
-
-    // Asking pins each instance's key at the other.
-    let asked = cb
-        .shared
-        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
-        .await
-        .unwrap()
-        .into_inner()
-        .connection
-        .unwrap();
-    assert_eq!(asked.state, pb::SharedConnectionState::Waiting as i32);
-    assert_eq!(asked.instance, a.addr.to_string());
-    assert_eq!(asked.fingerprint, fed_a.fingerprint);
-    let (pinned_a, pinned_b) = (federation(&ca, &juan).await, federation(&cb, &mika).await);
-    assert_eq!(pinned_a.peers.len(), 1);
-    assert_eq!(pinned_a.peers[0].origin, origin_b);
-    assert_eq!(pinned_a.peers[0].fingerprint, fed_b.fingerprint);
-    assert_eq!(pinned_b.peers[0].origin, origin_a);
-
-    // The home's admins see where the request comes from before approving.
-    let request = connections(&mut ca, &juan, &home).await.connections.pop().unwrap();
-    assert_eq!(request.id, asked.id);
-    assert_eq!(request.instance, b.addr.to_string());
-    assert_eq!(request.fingerprint, fed_b.fingerprint);
-    // Nor can its admins let them later.
-    let all = [pb::Permission::SendMessages, pb::Permission::AttachFiles].map(|p| p as i32).to_vec();
-    let updated = ca
-        .shared
-        .update_connection(authed(
-            &juan,
-            pb::UpdateConnectionRequest { server_id: home.clone(), connection_id: asked.id.clone(), allowed: all },
-        ))
-        .await
-        .unwrap()
-        .into_inner()
-        .connection
-        .unwrap();
-    assert_eq!(updated.allowed, vec![pb::Permission::SendMessages as i32]);
-    let from = request.server.unwrap();
-    assert_eq!(from.id, format!("{guest}@{origin_b}"));
-    assert_eq!(from.name, "Guest");
-    ca.shared
-        .review_share(authed(
-            &juan,
-            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id.clone(), approve: true },
-        ))
-        .await
-        .unwrap();
-    let shown = list_channels(&mut cb, &mika, &guest)
-        .await
-        .into_iter()
-        .find(|ch| ch.shared.as_ref().is_some_and(|s| !s.home))
-        .expect("the guest shows the channel once approved");
-    assert_eq!(shown.name, "dev");
-    let listed = connections(&mut cb, &mika, &guest).await.connections;
-    assert_eq!(listed[0].state, pb::SharedConnectionState::Active as i32);
-    assert_eq!(listed[0].instance, a.addr.to_string());
-
-    // Messages don't cross instances yet.
-    let not_yet = send(&mut cb, &mika, &guest, &shown.id, "hi").await.unwrap_err();
-    assert_eq!(not_yet.code(), Code::FailedPrecondition, "{not_yet:?}");
-    assert!(not_yet.message().contains("can't do that yet"), "{not_yet:?}");
-
-    // The home ends it, and the guest's channel goes.
-    ca.shared
-        .disconnect(authed(&juan, pb::DisconnectRequest { server_id: home.clone(), connection_id: asked.id.clone() }))
-        .await
-        .unwrap();
-    assert!(list_channels(&mut cb, &mika, &guest).await.iter().all(|ch| ch.id != shown.id));
-    assert!(connections(&mut cb, &mika, &guest).await.connections.is_empty());
-
-    // A guest withdrawing its request leaves nothing waiting at the home.
-    let code = make_code(&ca, true).await;
-    let asked = cb
-        .shared
-        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
-        .await
-        .unwrap()
-        .into_inner()
-        .connection
-        .unwrap();
-    assert_eq!(connections(&mut ca, &juan, &home).await.connections.len(), 1);
-    cb.shared
-        .disconnect(authed(&mika, pb::DisconnectRequest { server_id: guest.clone(), connection_id: asked.id }))
-        .await
-        .unwrap();
-    assert!(connections(&mut ca, &juan, &home).await.connections.is_empty());
-
-    // With federation off at the home, codes for other instances aren't made.
-    let off = pb::InstanceSettings { federation: false, ..Default::default() };
-    ca.admin.update_settings(authed(&juan, settings_update(off, &["federation"], &[]))).await.unwrap();
-    let refused = ca
-        .shared
-        .create_share_code(authed(
-            &juan,
-            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), other_instances: true },
-        ))
-        .await
-        .unwrap_err();
-    assert_eq!(refused.code(), Code::FailedPrecondition);
-
-    a.stop().await;
-    b.stop().await;
 }

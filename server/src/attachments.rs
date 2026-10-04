@@ -115,12 +115,18 @@ pub async fn add(conn: &turso::Connection, message: &pb::Message, now: i64) -> R
 /// their bytes off the totals. The files themselves go after the write
 /// ([`drop_soon`]).
 pub async fn forget_message(conn: &turso::Connection, message_id: &str) -> Result<Vec<String>> {
-    forget(conn, "message_id", message_id).await
+    forget(conn, "message_id = ?1", message_id).await
 }
 
 /// [`forget_message`] for every message in a channel being deleted.
 pub async fn forget_channel(conn: &turso::Connection, channel_id: &str) -> Result<Vec<String>> {
-    forget(conn, "channel_id", channel_id).await
+    forget(conn, "channel_id = ?1", channel_id).await
+}
+
+/// [`forget_message`] for every reply in the thread under a message, before
+/// they're deleted with it.
+pub async fn forget_thread(conn: &turso::Connection, thread_id: &str) -> Result<Vec<String>> {
+    forget(conn, "message_id IN (SELECT id FROM messages WHERE thread_id = ?1)", thread_id).await
 }
 
 /// Whether `media_id` is a file uploaded for the server that no message has.
@@ -166,15 +172,15 @@ pub async fn all(conn: &turso::Connection) -> Result<Vec<String>> {
     query_all(conn, "SELECT media_id FROM attachments", (), |r| r.get::<String>(0)).await
 }
 
-async fn forget(conn: &turso::Connection, column: &str, id: &str) -> Result<Vec<String>> {
-    let files = query_all(conn, &format!("SELECT media_id, size FROM attachments WHERE {column} = ?1"), [id], |r| {
+async fn forget(conn: &turso::Connection, which: &str, id: &str) -> Result<Vec<String>> {
+    let files = query_all(conn, &format!("SELECT media_id, size FROM attachments WHERE {which}"), [id], |r| {
         Ok((r.get::<String>(0)?, r.get::<i64>(1)?))
     })
     .await?;
     if files.is_empty() {
         return Ok(vec![]);
     }
-    conn.execute(&format!("DELETE FROM attachments WHERE {column} = ?1"), [id]).await?;
+    conn.execute(&format!("DELETE FROM attachments WHERE {which}"), [id]).await?;
     // Loose until they're gone, so nothing serves them meanwhile.
     let now = crate::id::now_ms();
     for (media_id, _) in &files {

@@ -276,6 +276,12 @@ impl ChannelService for Api {
                 .unwrap_or_default();
                 conn.execute("DELETE FROM messages WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 let files = crate::attachments::forget_channel(conn, &req.channel_id).await?;
+                conn.execute(
+                    "DELETE FROM thread_follows WHERE thread_id IN (SELECT id FROM threads WHERE channel_id = ?1)",
+                    [req.channel_id.as_str()],
+                )
+                .await?;
+                conn.execute("DELETE FROM threads WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 let (secure_messages, secure_bytes) = super::secure::forget_channel(conn, &req.channel_id).await?;
                 conn.execute("DELETE FROM slowmode WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 // Its webhooks go too: they have nowhere left to post.

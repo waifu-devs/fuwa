@@ -781,11 +781,14 @@ async fn review_sent(
         .channel(channel.name.clone())
         .reason(rule.name.clone());
     store::audit(conn, author_id, entry).await?;
-    let files = super::messages::remove_message(conn, &message).await?;
+    let mut files = super::messages::remove_message(conn, &message).await?;
     events.push(Payload::MessageDeleted(pb::MessageDeleted {
         channel_id: message.channel_id.clone(),
         message_id: message.id.clone(),
     }));
+    files.extend(
+        super::threads::after_delete(conn, &message.channel_id, &message.id, &message.thread_id, events).await?,
+    );
     Ok(files)
 }
 

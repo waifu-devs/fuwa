@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Attachment, Embed, Message as Message$1, User } from "./types_pb.js";
+import type { Attachment, Embed, Message as Message$1, ThreadSummary, User } from "./types_pb.js";
 import { file_fuwa_v1_types } from "./types_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/message.proto.
  */
 export const file_fuwa_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEiqwEKElNlbmRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEigKC2F0dGFjaG1lbnRzGAQgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgFIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYBiABKAkiOAoTU2VuZE1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIk4KEUdldE1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiVgoSR2V0TWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2USHQoGYXV0aG9yGAIgASgLMg0uZnV3YS52MS5Vc2VyInAKE0xpc3RNZXNzYWdlc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFbGltaXQYAyABKAUSEQoJYmVmb3JlX2lkGAQgASgJEhAKCGFmdGVyX2lkGAUgASgJImwKFExpc3RNZXNzYWdlc1Jlc3BvbnNlEiIKCG1lc3NhZ2VzGAEgAygLMhAuZnV3YS52MS5NZXNzYWdlEh4KB2F1dGhvcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAyABKAgiYgoUVXBkYXRlTWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgpjaGFubmVsX2lkGAQgASgJIjoKFVVwZGF0ZU1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIlEKFERlbGV0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiFwoVRGVsZXRlTWVzc2FnZVJlc3BvbnNlMo4DCg5NZXNzYWdlU2VydmljZRJICgtTZW5kTWVzc2FnZRIbLmZ1d2EudjEuU2VuZE1lc3NhZ2VSZXF1ZXN0GhwuZnV3YS52MS5TZW5kTWVzc2FnZVJlc3BvbnNlEkUKCkdldE1lc3NhZ2USGi5mdXdhLnYxLkdldE1lc3NhZ2VSZXF1ZXN0GhsuZnV3YS52MS5HZXRNZXNzYWdlUmVzcG9uc2USSwoMTGlzdE1lc3NhZ2VzEhwuZnV3YS52MS5MaXN0TWVzc2FnZXNSZXF1ZXN0Gh0uZnV3YS52MS5MaXN0TWVzc2FnZXNSZXNwb25zZRJOCg1VcGRhdGVNZXNzYWdlEh0uZnV3YS52MS5VcGRhdGVNZXNzYWdlUmVxdWVzdBoeLmZ1d2EudjEuVXBkYXRlTWVzc2FnZVJlc3BvbnNlEk4KDURlbGV0ZU1lc3NhZ2USHS5mdXdhLnYxLkRlbGV0ZU1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5EZWxldGVNZXNzYWdlUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
+  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEi3AEKElNlbmRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEigKC2F0dGFjaG1lbnRzGAQgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgFIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYBiABKAkSEQoJdGhyZWFkX2lkGAggASgJEhwKFGFsc29fc2VuZF90b19jaGFubmVsGAkgASgIIjgKE1NlbmRNZXNzYWdlUmVzcG9uc2USIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZSJOChFHZXRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRISCgpjaGFubmVsX2lkGAMgASgJIlYKEkdldE1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlEh0KBmF1dGhvchgCIAEoCzINLmZ1d2EudjEuVXNlciKDAQoTTGlzdE1lc3NhZ2VzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRINCgVsaW1pdBgDIAEoBRIRCgliZWZvcmVfaWQYBCABKAkSEAoIYWZ0ZXJfaWQYBSABKAkSEQoJdGhyZWFkX2lkGAYgASgJIo4BChRMaXN0TWVzc2FnZXNSZXNwb25zZRIiCghtZXNzYWdlcxgBIAMoCzIQLmZ1d2EudjEuTWVzc2FnZRIeCgdhdXRob3JzGAIgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAMgASgIEiAKBnBhcmVudBgEIAEoCzIQLmZ1d2EudjEuTWVzc2FnZSJiChRVcGRhdGVNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEhIKCmNoYW5uZWxfaWQYBCABKAkiOgoVVXBkYXRlTWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiUQoURGVsZXRlTWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCSIXChVEZWxldGVNZXNzYWdlUmVzcG9uc2UihAEKEkxpc3RUaHJlYWRzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRINCgVxdWVyeRgDIAEoCRIQCghhcmNoaXZlZBgEIAEoCBINCgVsaW1pdBgFIAEoBRIXCg9hZnRlcl90aHJlYWRfaWQYBiABKAkiiAEKE0xpc3RUaHJlYWRzUmVzcG9uc2USIQoHdGhyZWFkcxgBIAMoCzIQLmZ1d2EudjEuTWVzc2FnZRIeCgdhdXRob3JzGAIgAygLMg0uZnV3YS52MS5Vc2VyEhAKCGhhc19tb3JlGAMgASgIEhwKFG5leHRfYWZ0ZXJfdGhyZWFkX2lkGAQgASgJIm8KE1VwZGF0ZVRocmVhZFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEQoJdGhyZWFkX2lkGAMgASgJEhMKBmxvY2tlZBgEIAEoCEgAiAEBQgkKB19sb2NrZWQiPgoUVXBkYXRlVGhyZWFkUmVzcG9uc2USJgoGdGhyZWFkGAEgASgLMhYuZnV3YS52MS5UaHJlYWRTdW1tYXJ5Il8KE0ZvbGxvd1RocmVhZFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSEQoJdGhyZWFkX2lkGAMgASgJEg4KBmZvbGxvdxgEIAEoCCIWChRGb2xsb3dUaHJlYWRSZXNwb25zZSIvChpMaXN0Rm9sbG93ZWRUaHJlYWRzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiMQobTGlzdEZvbGxvd2VkVGhyZWFkc1Jlc3BvbnNlEhIKCnRocmVhZF9pZHMYASADKAky1AUKDk1lc3NhZ2VTZXJ2aWNlEkgKC1NlbmRNZXNzYWdlEhsuZnV3YS52MS5TZW5kTWVzc2FnZVJlcXVlc3QaHC5mdXdhLnYxLlNlbmRNZXNzYWdlUmVzcG9uc2USRQoKR2V0TWVzc2FnZRIaLmZ1d2EudjEuR2V0TWVzc2FnZVJlcXVlc3QaGy5mdXdhLnYxLkdldE1lc3NhZ2VSZXNwb25zZRJLCgxMaXN0TWVzc2FnZXMSHC5mdXdhLnYxLkxpc3RNZXNzYWdlc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RNZXNzYWdlc1Jlc3BvbnNlEk4KDVVwZGF0ZU1lc3NhZ2USHS5mdXdhLnYxLlVwZGF0ZU1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVNZXNzYWdlUmVzcG9uc2USTgoNRGVsZXRlTWVzc2FnZRIdLmZ1d2EudjEuRGVsZXRlTWVzc2FnZVJlcXVlc3QaHi5mdXdhLnYxLkRlbGV0ZU1lc3NhZ2VSZXNwb25zZRJICgtMaXN0VGhyZWFkcxIbLmZ1d2EudjEuTGlzdFRocmVhZHNSZXF1ZXN0GhwuZnV3YS52MS5MaXN0VGhyZWFkc1Jlc3BvbnNlEksKDFVwZGF0ZVRocmVhZBIcLmZ1d2EudjEuVXBkYXRlVGhyZWFkUmVxdWVzdBodLmZ1d2EudjEuVXBkYXRlVGhyZWFkUmVzcG9uc2USSwoMRm9sbG93VGhyZWFkEhwuZnV3YS52MS5Gb2xsb3dUaHJlYWRSZXF1ZXN0Gh0uZnV3YS52MS5Gb2xsb3dUaHJlYWRSZXNwb25zZRJgChNMaXN0Rm9sbG93ZWRUaHJlYWRzEiMuZnV3YS52MS5MaXN0Rm9sbG93ZWRUaHJlYWRzUmVxdWVzdBokLmZ1d2EudjEuTGlzdEZvbGxvd2VkVGhyZWFkc1Jlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types]);
 
 /**
  * @generated from message fuwa.v1.SendMessageRequest
@@ -52,6 +52,21 @@ export type SendMessageRequest = Message<"fuwa.v1.SendMessageRequest"> & {
    * @generated from field: string reply_to_id = 6;
    */
   replyToId: string;
+
+  /**
+   * Reply in the thread under this message, starting it if there's none
+   * yet (that needs CREATE_THREADS).
+   *
+   * @generated from field: string thread_id = 8;
+   */
+  threadId: string;
+
+  /**
+   * With thread_id: show the reply in the channel too.
+   *
+   * @generated from field: bool also_send_to_channel = 9;
+   */
+  alsoSendToChannel: boolean;
 };
 
 /**
@@ -164,6 +179,13 @@ export type ListMessagesRequest = Message<"fuwa.v1.ListMessagesRequest"> & {
    * @generated from field: string after_id = 5;
    */
   afterId: string;
+
+  /**
+   * A page of the replies in the thread under this message instead.
+   *
+   * @generated from field: string thread_id = 6;
+   */
+  threadId: string;
 };
 
 /**
@@ -195,6 +217,13 @@ export type ListMessagesResponse = Message<"fuwa.v1.ListMessagesResponse"> & {
    * @generated from field: bool has_more = 3;
    */
   hasMore: boolean;
+
+  /**
+   * With thread_id: the message the thread is under.
+   *
+   * @generated from field: fuwa.v1.Message parent = 4;
+   */
+  parent?: Message$1 | undefined;
 };
 
 /**
@@ -300,6 +329,228 @@ export const DeleteMessageResponseSchema: GenMessage<DeleteMessageResponse> = /*
   messageDesc(file_fuwa_v1_message, 9);
 
 /**
+ * @generated from message fuwa.v1.ListThreadsRequest
+ */
+export type ListThreadsRequest = Message<"fuwa.v1.ListThreadsRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * Only threads whose parent or replies say this, ignoring case. Up to 100
+   * characters.
+   *
+   * @generated from field: string query = 3;
+   */
+  query: string;
+
+  /**
+   * Archived threads instead of open ones (Server.thread_archive_hours).
+   *
+   * @generated from field: bool archived = 4;
+   */
+  archived: boolean;
+
+  /**
+   * 1 to 50; defaults to 25.
+   *
+   * @generated from field: int32 limit = 5;
+   */
+  limit: number;
+
+  /**
+   * The page after this thread (its parent's id), from the last page.
+   *
+   * @generated from field: string after_thread_id = 6;
+   */
+  afterThreadId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ListThreadsRequest.
+ * Use `create(ListThreadsRequestSchema)` to create a new message.
+ */
+export const ListThreadsRequestSchema: GenMessage<ListThreadsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 10);
+
+/**
+ * @generated from message fuwa.v1.ListThreadsResponse
+ */
+export type ListThreadsResponse = Message<"fuwa.v1.ListThreadsResponse"> & {
+  /**
+   * The messages the threads are under, each with its summary.
+   *
+   * @generated from field: repeated fuwa.v1.Message threads = 1;
+   */
+  threads: Message$1[];
+
+  /**
+   * Profiles of their authors and the threads' participants.
+   *
+   * @generated from field: repeated fuwa.v1.User authors = 2;
+   */
+  authors: User[];
+
+  /**
+   * @generated from field: bool has_more = 3;
+   */
+  hasMore: boolean;
+
+  /**
+   * With has_more: the after_thread_id for the next page. A search can stop
+   * before it finds anything, with has_more and a place to carry on from.
+   *
+   * @generated from field: string next_after_thread_id = 4;
+   */
+  nextAfterThreadId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ListThreadsResponse.
+ * Use `create(ListThreadsResponseSchema)` to create a new message.
+ */
+export const ListThreadsResponseSchema: GenMessage<ListThreadsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 11);
+
+/**
+ * @generated from message fuwa.v1.UpdateThreadRequest
+ */
+export type UpdateThreadRequest = Message<"fuwa.v1.UpdateThreadRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * The message the thread is under.
+   *
+   * @generated from field: string thread_id = 3;
+   */
+  threadId: string;
+
+  /**
+   * @generated from field: optional bool locked = 4;
+   */
+  locked?: boolean | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateThreadRequest.
+ * Use `create(UpdateThreadRequestSchema)` to create a new message.
+ */
+export const UpdateThreadRequestSchema: GenMessage<UpdateThreadRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 12);
+
+/**
+ * @generated from message fuwa.v1.UpdateThreadResponse
+ */
+export type UpdateThreadResponse = Message<"fuwa.v1.UpdateThreadResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.ThreadSummary thread = 1;
+   */
+  thread?: ThreadSummary | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.UpdateThreadResponse.
+ * Use `create(UpdateThreadResponseSchema)` to create a new message.
+ */
+export const UpdateThreadResponseSchema: GenMessage<UpdateThreadResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 13);
+
+/**
+ * @generated from message fuwa.v1.FollowThreadRequest
+ */
+export type FollowThreadRequest = Message<"fuwa.v1.FollowThreadRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+
+  /**
+   * @generated from field: string thread_id = 3;
+   */
+  threadId: string;
+
+  /**
+   * @generated from field: bool follow = 4;
+   */
+  follow: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.FollowThreadRequest.
+ * Use `create(FollowThreadRequestSchema)` to create a new message.
+ */
+export const FollowThreadRequestSchema: GenMessage<FollowThreadRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 14);
+
+/**
+ * @generated from message fuwa.v1.FollowThreadResponse
+ */
+export type FollowThreadResponse = Message<"fuwa.v1.FollowThreadResponse"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.FollowThreadResponse.
+ * Use `create(FollowThreadResponseSchema)` to create a new message.
+ */
+export const FollowThreadResponseSchema: GenMessage<FollowThreadResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 15);
+
+/**
+ * @generated from message fuwa.v1.ListFollowedThreadsRequest
+ */
+export type ListFollowedThreadsRequest = Message<"fuwa.v1.ListFollowedThreadsRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ListFollowedThreadsRequest.
+ * Use `create(ListFollowedThreadsRequestSchema)` to create a new message.
+ */
+export const ListFollowedThreadsRequestSchema: GenMessage<ListFollowedThreadsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 16);
+
+/**
+ * @generated from message fuwa.v1.ListFollowedThreadsResponse
+ */
+export type ListFollowedThreadsResponse = Message<"fuwa.v1.ListFollowedThreadsResponse"> & {
+  /**
+   * The ids of the messages the threads are under.
+   *
+   * @generated from field: repeated string thread_ids = 1;
+   */
+  threadIds: string[];
+};
+
+/**
+ * Describes the message fuwa.v1.ListFollowedThreadsResponse.
+ * Use `create(ListFollowedThreadsResponseSchema)` to create a new message.
+ */
+export const ListFollowedThreadsResponseSchema: GenMessage<ListFollowedThreadsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 17);
+
+/**
  * Messages in a channel.
  *
  * @generated from service fuwa.v1.MessageService
@@ -345,6 +596,8 @@ export const MessageService: GenService<{
    * Authors delete their own messages; owners and admins delete any. In a
    * channel shared from another server, MANAGE_MESSAGES deletes only this
    * server's members' messages; the home server's moderators delete any.
+   * Deleting a message with a thread under it deletes the thread too: its
+   * author may when every reply is theirs, moderators always.
    *
    * @generated from rpc fuwa.v1.MessageService.DeleteMessage
    */
@@ -352,6 +605,49 @@ export const MessageService: GenService<{
     methodKind: "unary";
     input: typeof DeleteMessageRequestSchema;
     output: typeof DeleteMessageResponseSchema;
+  },
+  /**
+   * A channel's threads, the latest reply first: the messages they're under,
+   * with their summaries. Not in channels shared between servers.
+   *
+   * @generated from rpc fuwa.v1.MessageService.ListThreads
+   */
+  listThreads: {
+    methodKind: "unary";
+    input: typeof ListThreadsRequestSchema;
+    output: typeof ListThreadsResponseSchema;
+  },
+  /**
+   * People who can manage messages lock and unlock threads.
+   *
+   * @generated from rpc fuwa.v1.MessageService.UpdateThread
+   */
+  updateThread: {
+    methodKind: "unary";
+    input: typeof UpdateThreadRequestSchema;
+    output: typeof UpdateThreadResponseSchema;
+  },
+  /**
+   * Following a thread: its replies notify you. Starting a thread, replying
+   * in one or being the author of the message it's under follows it, until
+   * you unfollow it.
+   *
+   * @generated from rpc fuwa.v1.MessageService.FollowThread
+   */
+  followThread: {
+    methodKind: "unary";
+    input: typeof FollowThreadRequestSchema;
+    output: typeof FollowThreadResponseSchema;
+  },
+  /**
+   * The threads you follow in a server, the latest reply first, up to 500.
+   *
+   * @generated from rpc fuwa.v1.MessageService.ListFollowedThreads
+   */
+  listFollowedThreads: {
+    methodKind: "unary";
+    input: typeof ListFollowedThreadsRequestSchema;
+    output: typeof ListFollowedThreadsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_message, 0);
