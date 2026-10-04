@@ -1474,7 +1474,9 @@ impl FuwaApp {
             return base.child(connect.clone()).into_any_element();
         }
 
-        let announcement = self.render_announcement(window, cx);
+        // Under a full-window page the banner can't be seen, so it doesn't move there either.
+        let covered = self.server_settings.is_some() || self.instance_settings.is_some();
+        let announcement = if covered { None } else { self.render_announcement(window, cx) };
         base.child(
             div().size_full().flex().flex_col().when_some(announcement, |el, banner| el.child(banner)).child(
                 div()
