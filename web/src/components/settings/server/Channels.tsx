@@ -39,7 +39,9 @@ const slowLabel = (seconds: number) => (seconds ? formatDuration(seconds) : "Off
  * keys), into and out of categories, and the chosen one's settings beside the
  * list: name, topic, category, slow mode, or deleting it.
  */
-export function Channels({ instanceKey, serverId, initial }: { instanceKey: string; serverId: string; initial?: string | null }) {
+export function Channels({ instanceKey, serverId, initial: opened }: { instanceKey: string; serverId: string; initial?: string | null }) {
+  // "<id>:permissions" opens a channel's permissions, as its right-click menu asks.
+  const [initial, initialTab] = (opened ?? "").split(":") as [string, Tab | undefined];
   const inst = useInstance(instanceKey);
   const access = useAccess(instanceKey, serverId);
   const arrange = has(access, Permission.MANAGE_CHANNELS);
@@ -47,7 +49,7 @@ export function Channels({ instanceKey, serverId, initial }: { instanceKey: stri
   const byId = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels]);
   const layout = useMemo(() => layoutOf(channels), [channels]);
   const list = useRef<HTMLDivElement>(null);
-  const [selected, setSelected] = useState<string | null>(initial ?? layout.loose[0] ?? null);
+  const [selected, setSelected] = useState<string | null>(initial || (layout.loose[0] ?? null));
   const [creating, setCreating] = useState<string | null>(null);
   const editor = useRef<HTMLDivElement>(null);
 
@@ -133,7 +135,13 @@ export function Channels({ instanceKey, serverId, initial }: { instanceKey: stri
         <AnimatePresence mode="wait" initial={false}>
           {selected && byId.get(selected) ? (
             <motion.div key={selected} initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={SPRING}>
-              <ChannelSettings instanceKey={instanceKey} serverId={serverId} channel={byId.get(selected)!} channels={channels} />
+              <ChannelSettings
+                instanceKey={instanceKey}
+                serverId={serverId}
+                channel={byId.get(selected)!}
+                channels={channels}
+                initialTab={selected === initial ? initialTab : undefined}
+              />
             </motion.div>
           ) : (
             <motion.p key="none" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-10 text-center text-sm text-muted-foreground">
@@ -298,9 +306,21 @@ function useChannelTabs(instanceKey: string, serverId: string, channel: Channel)
 }
 
 /** One channel's settings: what it is (with Manage Channels there), and who can do what in it (with Manage Roles there). */
-function ChannelSettings({ instanceKey, serverId, channel, channels }: { instanceKey: string; serverId: string; channel: Channel; channels: Channel[] }) {
+function ChannelSettings({
+  instanceKey,
+  serverId,
+  channel,
+  channels,
+  initialTab,
+}: {
+  instanceKey: string;
+  serverId: string;
+  channel: Channel;
+  channels: Channel[];
+  initialTab?: Tab;
+}) {
   const tabs = useChannelTabs(instanceKey, serverId, channel);
-  const [tab, setTab] = useState<Tab>(tabs[0]?.value ?? "overview");
+  const [tab, setTab] = useState<Tab>(initialTab ?? tabs[0]?.value ?? "overview");
   const shown = tabs.some((t) => t.value === tab) ? tab : tabs[0]?.value;
   const Icon = channel.type === ChannelType.CATEGORY ? FolderIcon : (CHANNEL_ICON[channel.type] ?? HashIcon);
   return (

@@ -47,6 +47,12 @@ message SendMessageRequest {
   repeated Attachment attachments = 4;
   repeated Embed embeds = 5;
   string reply_to_id = 6;
+  // Emoji from other servers the caller is a member of on this instance,
+  // written in content as <:name:id>: id, server_id, name and url are read.
+  // Each is checked (the caller is in that server, and the url is one of its
+  // emoji's pictures here); ones that aren't, or that content doesn't use,
+  // are left out and show as their names. See Message.emojis.
+  repeated Emoji emojis = 7;
   // Reply in the thread under this message, starting it if there's none
   // yet (that needs CREATE_THREADS).
   string thread_id = 8;
@@ -130,6 +136,9 @@ message UpdateMessageRequest {
   // The channel it's in. Needed for a message in a channel shared from
   // another server, which this server doesn't hold.
   string channel_id = 4;
+  // As in SendMessageRequest. Emoji the message already had stay while the
+  // new text still uses them.
+  repeated Emoji emojis = 5;
 }
 
 message UpdateMessageResponse {
