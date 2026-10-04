@@ -1,6 +1,7 @@
 //! Passwords, session tokens, and working out who is calling.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use argon2::Argon2;
@@ -68,6 +69,13 @@ pub fn bearer(metadata: &MetadataMap) -> Option<&str> {
     scheme.eq_ignore_ascii_case("bearer").then(|| token.trim()).filter(|t| !t.is_empty())
 }
 
+/// The bearer token in plain HTTP headers, like [`bearer`].
+pub fn bearer_header(headers: &http::HeaderMap) -> Option<&str> {
+    let value = headers.get(http::header::AUTHORIZATION)?.to_str().ok()?;
+    let (scheme, token) = value.split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then(|| token.trim()).filter(|t| !t.is_empty())
+}
+
 pub async fn authenticate(node: &NodeDb, admin_token: Option<&str>, metadata: &MetadataMap) -> Result<Viewer> {
     authenticate_token(node, admin_token, bearer(metadata).ok_or(Error::Unauthenticated)?).await
 }
@@ -110,9 +118,64 @@ pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// Password work running and waiting at once. Each Argon2 hash holds 19 MB
+/// and a core's worth of time for a moment: 2000 wrong sign-ins at once took
+/// a 2-core instance to 2.9 GB and everyone else's messages to 14 s
+/// (docs/capacity.md). So half the cores hash (at least one) and a few
+/// hundred wait ([`HASH_WAITING`]); anyone past that is told the instance
+/// is busy.
+struct Hashing {
+    running: tokio::sync::Semaphore,
+    waiting: AtomicUsize,
+}
+
+/// Password checks that may wait at once unless FUWA_SIGN_IN_QUEUE says
+/// otherwise. A protective default, the agreed exception to caps being
+/// unlimited by default.
+pub const HASH_WAITING: usize = 256;
+
+static WAITING_ALLOWED: AtomicUsize = AtomicUsize::new(HASH_WAITING);
+
+/// Sets how many password checks may wait at once (`None` for no limit).
+pub fn set_sign_in_queue(queue: Option<usize>) {
+    WAITING_ALLOWED.store(queue.unwrap_or(usize::MAX), Ordering::Relaxed);
+}
+
+const HASH_BUSY: &str = "this instance is busy signing people in; try again in a moment";
+
+/// A turn at password work, given back on drop.
+struct HashTurn {
+    _running: tokio::sync::SemaphorePermit<'static>,
+}
+
+async fn hash_turn() -> Result<HashTurn> {
+    static HASHING: OnceLock<Hashing> = OnceLock::new();
+    let hashing = HASHING.get_or_init(|| {
+        let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
+        Hashing { running: tokio::sync::Semaphore::new((cores / 2).max(1)), waiting: AtomicUsize::new(0) }
+    });
+    struct Waiting(&'static AtomicUsize);
+    impl Drop for Waiting {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+    if hashing.waiting.fetch_add(1, Ordering::AcqRel) >= WAITING_ALLOWED.load(Ordering::Relaxed) {
+        hashing.waiting.fetch_sub(1, Ordering::AcqRel);
+        crate::reports::server_error("sign_in_busy", None);
+        return Err(Error::ResourceExhausted(HASH_BUSY.into()));
+    }
+    let waiting = Waiting(&hashing.waiting);
+    let running = hashing.running.acquire().await.map_err(|_| Error::ResourceExhausted(HASH_BUSY.into()))?;
+    drop(waiting);
+    Ok(HashTurn { _running: running })
+}
+
 /// Hashes a password with Argon2id, off the async runtime.
 pub async fn hash_password(password: String) -> Result<String> {
+    let turn = hash_turn().await?;
     tokio::task::spawn_blocking(move || {
+        let _turn = turn;
         let salt = SaltString::generate(&mut OsRng);
         Argon2::default().hash_password(password.as_bytes(), &salt).map(|hash| hash.to_string())
     })
@@ -125,7 +188,9 @@ pub async fn hash_password(password: String) -> Result<String> {
 /// (unknown username), still does the work so timing doesn't reveal which
 /// usernames exist.
 pub async fn verify_password(password: String, hash: Option<String>) -> Result<bool> {
+    let turn = hash_turn().await?;
     tokio::task::spawn_blocking(move || {
+        let _turn = turn;
         let known = hash.is_some();
         let hash = hash.unwrap_or_else(|| dummy_hash().to_string());
         let parsed = PasswordHash::new(&hash).map_err(|err| Error::internal(format!("stored password hash: {err}")))?;
