@@ -429,6 +429,7 @@ impl App {
             .add_service(crate::pb::secure_channel_service_server::SecureChannelServiceServer::new(api.clone()))
             .add_service(crate::pb::search_service_server::SearchServiceServer::new(api.clone()))
             .add_service(crate::pb::shared_channel_service_server::SharedChannelServiceServer::new(api.clone()))
+            .add_service(crate::pb::command_service_server::CommandServiceServer::new(api.clone()))
             .add_service(AdminServiceServer::new(api))
             .add_service(health)
             .add_service(reflection);

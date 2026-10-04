@@ -875,6 +875,89 @@ message Message {
   // people a client highlights it for. Up to 50; ids of anyone not in the
   // server are left out.
   repeated string mention_user_ids = 23;
+  // Buttons under it. Only agents' messages have them (CommandService).
+  repeated ComponentRow components = 24;
+  // An agent's answer to a command or a button: who used what.
+  MessageInteraction interaction = 25;
+}
+
+// A row of up to 5 buttons under an agent's message.
+message ComponentRow {
+  repeated Button buttons = 1;
+}
+
+enum ButtonStyle {
+  BUTTON_STYLE_UNSPECIFIED = 0;
+  BUTTON_STYLE_PRIMARY = 1;
+  BUTTON_STYLE_SECONDARY = 2;
+  BUTTON_STYLE_SUCCESS = 3;
+  BUTTON_STYLE_DANGER = 4;
+  // Opens `url` in the browser; nobody is told it was pressed.
+  BUTTON_STYLE_LINK = 5;
+}
+
+message Button {
+  // What the agent gets back when it's pressed: 1 to 100 characters, unique
+  // on the message. Empty for a link button.
+  string custom_id = 1;
+  // 1 to 80 characters.
+  string label = 2;
+  // Unset is SECONDARY.
+  ButtonStyle style = 3;
+  // LINK only: an https link, up to 512 characters. The instance never
+  // fetches it.
+  string url = 4;
+  bool disabled = 5;
+}
+
+// On an agent's answer: the command or button it answers.
+message MessageInteraction {
+  string id = 1;
+  InteractionKind kind = 2;
+  // COMMAND: the command's name.
+  string command = 3;
+  // Who used it.
+  string user_id = 4;
+}
+
+enum InteractionKind {
+  INTERACTION_KIND_UNSPECIFIED = 0;
+  // Someone ran one of the agent's commands (CommandService.RunCommand).
+  INTERACTION_KIND_COMMAND = 1;
+  // Someone pressed a button on one of the agent's messages.
+  INTERACTION_KIND_BUTTON = 2;
+}
+
+// Someone used one of an agent's commands or buttons. Only that agent gets
+// it, as InteractionCreated; it answers with a message whose
+// SendMessageRequest.interaction_id is `id`, within 15 minutes.
+message Interaction {
+  string id = 1;
+  string server_id = 2;
+  string channel_id = 3;
+  // The agent it's for.
+  string agent_id = 4;
+  // Who used it.
+  string user_id = 5;
+  InteractionKind kind = 6;
+  // COMMAND: its name and what was filled in, checked against its options.
+  string command = 7;
+  // Only while the interaction can be answered (15 minutes), live or caught
+  // up: the server's event log never keeps what was typed, so an event read
+  // later has none.
+  repeated CommandArgument arguments = 8;
+  // BUTTON: the message and the button's custom_id.
+  string message_id = 9;
+  string custom_id = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+// One option filled in: its name and value, as text. INTEGER is digits with
+// an optional minus, BOOLEAN is "true" or "false", USER, CHANNEL and ROLE are
+// ids.
+message CommandArgument {
+  string name = 1;
+  string value = 2;
 }
 
 // A poll and how it stands. Counts are everyone's (for an anonymous poll
@@ -1120,6 +1203,7 @@ message Event {
     SharedChannelsUpdated shared_channels_updated = 29;
     ThreadUpdated thread_updated = 30;
     PollUpdated poll_updated = 31;
+    InteractionCreated interaction_created = 32;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).
@@ -1212,6 +1296,11 @@ message MessageUpdated {
 // for an anonymous poll, its time ran out, when its counts show). The
 // event's actor is the voter only when the poll's votes are public; for an
 // anonymous poll it's empty.
+// Only the agent the interaction is for gets this, live or catching up.
+message InteractionCreated {
+  Interaction interaction = 1;
+}
+
 message PollUpdated {
   string channel_id = 1;
   string message_id = 2;

@@ -83,6 +83,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "voice_message_bytes", get: (s) => s.voiceMessageBytes },
   { path: "voice_message_bytes_per_day", get: (s) => s.voiceMessageBytesPerDay },
   { path: "poll_votes_per_minute", get: (s) => s.pollVotesPerMinute },
+  { path: "commands_per_minute", get: (s) => s.commandsPerMinute },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
@@ -736,6 +737,16 @@ export function InstanceSettingsDialog({
               >
                 <Cap label="Up to" placeholder="30" value={draft.pollVotesPerMinute} onChange={(v) => patch((d) => (d.pollVotesPerMinute = v))} />
               </Setting>
+              <Setting
+                id="commands-per-minute"
+                title="Agent commands per minute"
+                hint="How many times one account may run agents' slash commands or press their buttons in a minute. Each one wakes an agent up."
+                defaultLabel={defaults.commandsPerMinute === undefined ? "no limit" : `${defaults.commandsPerMinute.toLocaleString()} a minute`}
+                delay={0.22}
+                {...resetter("commands_per_minute")}
+              >
+                <Cap label="Up to" placeholder="20" value={draft.commandsPerMinute} onChange={(v) => patch((d) => (d.commandsPerMinute = v))} />
+              </Setting>
             </>
           )}
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
@@ -912,6 +923,9 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "poll_votes_per_minute":
         into.pollVotesPerMinute = from.pollVotesPerMinute;
+        break;
+      case "commands_per_minute":
+        into.commandsPerMinute = from.commandsPerMinute;
         break;
       default: {
         // Settings copied above by their own pages' functions.

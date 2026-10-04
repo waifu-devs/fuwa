@@ -212,6 +212,10 @@ message InstanceSettings {
   // shared from a server here; unset for no cap.
   // FUWA_LIMIT_SHARED_REMOTE_PEOPLE.
   optional int64 shared_remote_people = 47;
+  // How many agents' commands one account may run, and buttons it may press,
+  // in a minute (CommandService); unset for no cap.
+  // FUWA_LIMIT_COMMANDS_PER_MINUTE. (48 and 49 are taken.)
+  optional int64 commands_per_minute = 50;
   // GIF search in the apps' composers (GifService). Off until a provider
   // and its key are set. FUWA_GIF_PROVIDER and FUWA_GIF_API_KEY.
   GifSettings gifs = 43;

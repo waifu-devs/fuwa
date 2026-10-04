@@ -1,7 +1,7 @@
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, automod, polls, respond, shared, threads, url, users};
+use super::{Api, Seat, automod, commands, polls, respond, shared, threads, url, users};
 use crate::app::App;
 use crate::attachments;
 use crate::db::{is_unique_violation, query_all, query_one};
@@ -47,6 +47,10 @@ struct Extras {
     gif: Option<pb::MessageGif>,
     #[prost(string, repeated, tag = "10")]
     mention_user_ids: Vec<String>,
+    #[prost(message, repeated, tag = "11")]
+    components: Vec<pb::ComponentRow>,
+    #[prost(message, optional, tag = "12")]
+    interaction: Option<pb::MessageInteraction>,
 }
 
 impl Extras {
@@ -62,6 +66,8 @@ impl Extras {
             emojis: message.emojis.clone(),
             gif: message.gif.clone(),
             mention_user_ids: message.mention_user_ids.clone(),
+            components: message.components.clone(),
+            interaction: message.interaction.clone(),
         };
         (extras != Extras::default()).then(|| extras.encode_to_vec())
     }
@@ -272,6 +278,8 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 poll: None,
                 gif: None,
                 mention_user_ids: vec![],
+                components: vec![],
+                interaction: None,
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -298,6 +306,8 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
         message.emojis = extras.emojis;
         message.gif = extras.gif;
         message.mention_user_ids = extras.mention_user_ids;
+        message.components = extras.components;
+        message.interaction = extras.interaction;
     }
     Ok(message)
 }
@@ -841,7 +851,21 @@ impl MessageService for Api {
                 if req.also_send_to_channel && req.thread_id.is_empty() {
                     return Err(Error::invalid("only thread replies are also sent to the channel"));
                 }
+                // Buttons and answers to interactions are agents' (commands.rs).
+                let answering = !req.interaction_id.is_empty();
+                if (answering || !req.components.is_empty()) && account.kind != pb::AccountKind::Agent {
+                    return Err(Error::denied("only agents send buttons and answer interactions"));
+                }
+                if answering && !req.thread_id.is_empty() {
+                    return Err(Error::invalid("answer an interaction in the channel it came from"));
+                }
+                let components = commands::check_components(&req.components)?;
                 if let Some(link) = shared::link_of(&*sdb.read()?, &req.channel_id).await? {
+                    if answering || !components.is_empty() {
+                        return Err(Error::invalid(
+                            "buttons and interactions aren't in channels shared between servers yet",
+                        ));
+                    }
                     if poll.is_some() {
                         return Err(Error::invalid("polls can't go in channels shared from another server yet"));
                     }
@@ -958,6 +982,16 @@ impl MessageService for Api {
                         let (mentions_everyone, mention_role_ids) =
                             mentions(conn, &sdb.id, &access, &channel.id, &req.content).await?;
                         let mention_user_ids = mentioned_users(conn, &req.content).await?;
+                        let interaction = if answering {
+                            Some(commands::answer(conn, &account.id, &req.interaction_id, &channel.id, now).await?)
+                        } else {
+                            None
+                        };
+                        if (answering || !components.is_empty()) && polls::shared_out(conn, &channel.id).await? {
+                            return Err(Error::invalid(
+                                "buttons and interactions aren't in channels shared between servers yet",
+                            ));
+                        }
                         let message = pb::Message {
                             id: new_id(),
                             server_id: sdb.id.clone(),
@@ -982,6 +1016,8 @@ impl MessageService for Api {
                             poll: poll.clone(),
                             gif: gif.clone(),
                             mention_user_ids,
+                            components: components.clone(),
+                            interaction,
                         };
                         // Checked again here, where no other message can take the room meanwhile.
                         if file_bytes > 0

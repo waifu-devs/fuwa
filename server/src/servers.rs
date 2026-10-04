@@ -52,6 +52,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0028_banner_onboarding.sql"),
     include_str!("../migrations/server/0029_polls.sql"),
     include_str!("../migrations/server/0030_record_video.sql"),
+    include_str!("../migrations/server/0031_commands.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -1295,6 +1296,10 @@ pub async fn remove_member(
     conn.execute("UPDATE usage SET members = members - 1, updated_at = ?1 WHERE id = 1", [now_ms()]).await?;
     conn.execute("DELETE FROM member_roles WHERE user_id = ?1", [user_id]).await?;
     conn.execute("DELETE FROM sso_identities WHERE user_id = ?1", [user_id]).await?;
+    // An agent's commands go with it, and interactions it or they started
+    // can no longer be answered.
+    conn.execute("DELETE FROM commands WHERE agent_id = ?1", [user_id]).await?;
+    conn.execute("DELETE FROM interactions WHERE agent_id = ?1 OR user_id = ?1", [user_id]).await?;
     let channels = query_all(
         conn,
         "SELECT channel_id FROM channel_overwrites WHERE target_id = ?1 AND target = ?2",

@@ -11,7 +11,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, respond};
+use super::{Api, Seat, commands, respond};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
 use crate::pb::{self, event_service_server::EventService};
@@ -44,15 +44,18 @@ fn channel_of(payload: &Payload) -> Option<&str> {
         Payload::SecureRecordAdded(pb::SecureRecordAdded { record: Some(r) }) => Some(&r.channel_id),
         Payload::SecureRecordDeleted(d) => Some(&d.channel_id),
         Payload::ThreadUpdated(t) => Some(&t.channel_id),
+        Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(i) }) => Some(&i.channel_id),
         _ => None,
     }
 }
 
-/// Whether a member with `access` gets an event: not one about a channel they
-/// can't see, nor applications unless they can review them.
-fn shown_to(access: &Access, payload: &Payload) -> bool {
+/// Whether `account_id`, a member with `access`, gets an event: not one about
+/// a channel they can't see, nor applications unless they can review them,
+/// nor an interaction unless it's for them.
+fn shown_to(account_id: &str, access: &Access, payload: &Payload) -> bool {
     match payload {
         Payload::ApplicationUpdated(_) => access.has(pb::Permission::KickMembers),
+        Payload::InteractionCreated(p) => p.interaction.as_ref().is_some_and(|i| i.agent_id == account_id),
         payload => channel_of(payload).is_none_or(|channel_id| access.can_see(channel_id)),
     }
 }
@@ -94,6 +97,12 @@ impl View {
         let mut out = self.pass_unscrubbed(event).await;
         let manager = self.access.has(pb::Permission::ManageServer);
         for event in &mut out {
+            if let Some(Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(interaction) })) =
+                &mut event.payload
+                && let Ok(conn) = self.sdb.read()
+            {
+                commands::fill_arguments(&conn, interaction, now_ms()).await;
+            }
             if let Some(
                 Payload::MemberJoined(pb::MemberJoined { member: Some(member) })
                 | Payload::MemberUpdated(pb::MemberUpdated { member: Some(member) }),
@@ -108,7 +117,7 @@ impl View {
     async fn pass_unscrubbed(&mut self, event: &pb::Event) -> Vec<pb::Event> {
         let Some(payload) = &event.payload else { return vec![event.clone()] };
         if !changes_access(payload, &self.account_id) {
-            return if shown_to(&self.access, payload) { vec![event.clone()] } else { vec![] };
+            return if shown_to(&self.account_id, &self.access, payload) { vec![event.clone()] } else { vec![] };
         }
         let before = self.access.visible();
         match self.load().await {
@@ -421,8 +430,18 @@ impl EventService for Api {
                 // What they can't see now is left out, as a stream leaves it out.
                 events.retain(|e| match &e.payload {
                     Some(Payload::ChannelDeleted(_)) | None => true,
-                    Some(payload) => shown_to(&access, payload),
+                    Some(payload) => shown_to(&account.id, &access, payload),
                 });
+                if events.iter().any(|e| matches!(e.payload, Some(Payload::InteractionCreated(_)))) {
+                    let conn = sdb.read()?;
+                    for event in &mut events {
+                        if let Some(Payload::InteractionCreated(pb::InteractionCreated { interaction: Some(i) })) =
+                            &mut event.payload
+                        {
+                            commands::fill_arguments(&conn, i, now_ms()).await;
+                        }
+                    }
+                }
                 Ok(pb::ListEventsResponse { events, has_more })
             }
             .await,
