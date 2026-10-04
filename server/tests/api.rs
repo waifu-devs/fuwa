@@ -7282,6 +7282,146 @@ async fn federation_refuses_internal_addresses() {
     instance.stop().await;
 }
 
+async fn next_presence(stream: &mut tonic::Streaming<pb::WatchPresenceResponse>) -> pb::Presence {
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(5), stream.message()).await.unwrap().unwrap().unwrap();
+        if let Some(presence) = message.presence {
+            return presence;
+        }
+    }
+}
+
+/// Presence reaches only people who share a server, activities only once
+/// their person shares them, and pictures and links come back safe.
+#[tokio::test]
+async fn presence_reaches_server_mates() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_PUBLIC_URL", "https://fuwa.test")]).await;
+    let mut c = clients(&instance).await;
+    let mut presence = pb::presence_service_client::PresenceServiceClient::new(instance.channel().await);
+    let (ann, ann_user, _) = sign_up(&mut c, "ann").await;
+    let (bo, _, _) = sign_up(&mut c, "bo").await;
+    let (cy, _, _) = sign_up(&mut c, "cy").await;
+    let server = create_server(&mut c, &ann, "Games", true).await;
+    join(&mut c, &bo, &server.id).await;
+
+    let mut bo_hears = presence.watch_presence(authed(&bo, pb::WatchPresenceRequest {})).await.unwrap().into_inner();
+    assert!(bo_hears.message().await.unwrap().unwrap().ready);
+    let mut cy_hears = presence.watch_presence(authed(&cy, pb::WatchPresenceRequest {})).await.unwrap().into_inner();
+    assert!(cy_hears.message().await.unwrap().unwrap().ready);
+
+    let celeste = pb::Activity {
+        kind: pb::ActivityKind::Playing as i32,
+        name: "Celeste".into(),
+        details: "Chapter 3".into(),
+        large_image_url: "https://img.example/celeste.png".into(),
+        small_image_url: "celeste_small".into(),
+        buttons: vec![pb::ActivityButton { label: "Store".into(), url: "https://store.example/celeste".into() }],
+        application_id: "123456789".into(),
+        ..Default::default()
+    };
+    let update = |activities: Vec<pb::Activity>| {
+        authed(&ann, pb::UpdatePresenceRequest { app: "desktop".into(), idle: false, activities })
+    };
+    let renew = presence.update_presence(update(vec![celeste.clone()])).await.unwrap().into_inner().renew_seconds;
+    assert_eq!(renew, 60);
+    // "Show what I'm doing" is off until ann turns it on.
+    let seen = next_presence(&mut bo_hears).await;
+    assert_eq!((seen.user_id.as_str(), seen.status), (ann_user.id.as_str(), pb::PresenceStatus::Online as i32));
+    assert!(seen.activities.is_empty());
+
+    let settings = presence
+        .get_presence_settings(authed(&ann, pb::GetPresenceSettingsRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .settings
+        .unwrap();
+    assert!(!settings.show_activity);
+    let share = pb::PresenceSettings { show_activity: true, ..settings };
+    presence
+        .update_presence_settings(authed(&ann, pb::UpdatePresenceSettingsRequest { settings: Some(share.clone()) }))
+        .await
+        .unwrap();
+    let seen = next_presence(&mut bo_hears).await;
+    let activity = &seen.activities[0];
+    assert_eq!(activity.name, "Celeste");
+    assert!(activity.large_image_url.starts_with("https://fuwa.test/media/outside/"), "{activity:?}");
+    assert_eq!(activity.small_image_url, "", "keys we hold no picture for are dropped");
+
+    // A bad link is refused, with nothing passed on.
+    let mut bad = celeste.clone();
+    bad.buttons[0].url = "javascript:alert(1)".into();
+    let refused = presence.update_presence(update(vec![bad])).await.unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
+
+    // Hidden in the one server they share: bo sees only the status.
+    let hide = pb::PresenceSettings { hidden_server_ids: vec![server.id.clone()], ..share.clone() };
+    presence
+        .update_presence_settings(authed(&ann, pb::UpdatePresenceSettingsRequest { settings: Some(hide) }))
+        .await
+        .unwrap();
+    assert!(next_presence(&mut bo_hears).await.activities.is_empty());
+
+    // Invisible looks offline; cy, who shares no server, heard nothing at all.
+    let invisible = pb::PresenceSettings { status: pb::PresenceStatus::Invisible as i32, ..share.clone() };
+    presence
+        .update_presence_settings(authed(&ann, pb::UpdatePresenceSettingsRequest { settings: Some(invisible) }))
+        .await
+        .unwrap();
+    assert_eq!(next_presence(&mut bo_hears).await.status, pb::PresenceStatus::Offline as i32);
+    let quiet = tokio::time::timeout(Duration::from_millis(300), cy_hears.message()).await;
+    assert!(quiet.is_err(), "cy shares no server with ann: {quiet:?}");
+
+    // cy joins: they see each other from then on, and a new stream starts
+    // with everyone online.
+    presence
+        .update_presence_settings(authed(&ann, pb::UpdatePresenceSettingsRequest { settings: Some(share) }))
+        .await
+        .unwrap();
+    presence
+        .update_presence(authed(&cy, pb::UpdatePresenceRequest { app: "web".into(), ..Default::default() }))
+        .await
+        .unwrap();
+    join(&mut c, &cy, &server.id).await;
+    let mut found = next_presence(&mut cy_hears).await;
+    while found.user_id != ann_user.id {
+        found = next_presence(&mut cy_hears).await;
+    }
+    assert_eq!(found.activities[0].name, "Celeste");
+    let mut late = presence.watch_presence(authed(&bo, pb::WatchPresenceRequest {})).await.unwrap().into_inner();
+    let mut online = Vec::new();
+    loop {
+        let message = late.message().await.unwrap().unwrap();
+        if message.ready {
+            break;
+        }
+        online.push(message.presence.unwrap().user_id);
+    }
+    online.sort();
+    assert_eq!(online.len(), 2, "ann and cy: {online:?}");
+
+    // The instance's switch (ann is its first account, so its admin) drops
+    // every activity. Past 5 changes in 20 seconds this one waits its turn,
+    // but a new stream starts from what's true now.
+    let off = pb::InstanceSettings { rich_presence: false, ..Default::default() };
+    c.admin.update_settings(authed(&ann, settings_update(off, &["rich_presence"], &[]))).await.unwrap();
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert!(!node.rich_presence);
+    presence.update_presence(update(vec![celeste])).await.unwrap();
+    let mut fresh = presence.watch_presence(authed(&bo, pb::WatchPresenceRequest {})).await.unwrap().into_inner();
+    let ann_now = loop {
+        let presence = fresh.message().await.unwrap().unwrap().presence.unwrap();
+        if presence.user_id == ann_user.id {
+            break presence;
+        }
+    };
+    assert_eq!(ann_now.status, pb::PresenceStatus::Online as i32);
+    assert!(ann_now.activities.is_empty());
+
+    instance.stop().await;
+}
+
 async fn reply(
     c: &mut Clients,
     token: &str,

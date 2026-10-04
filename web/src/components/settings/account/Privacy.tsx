@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { CheckIcon, CrownIcon, DownloadIcon, FileJsonIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
+import { CheckIcon, CrownIcon, DownloadIcon, FileJsonIcon, GamepadIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type FormEvent } from "react";
 import { deleteAccount, exportData, getTwoFactor, run } from "@/fuwa/actions";
@@ -14,6 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatBytes } from "@/lib/format";
+import { Switch } from "@/components/ui/switch";
+import { savePresenceSettings, usePresenceSettings } from "@/fuwa/presence";
+import { engine } from "@/fuwa/sync";
 import { closeSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +34,7 @@ export function Privacy({ instanceKey }: { instanceKey: string }) {
 
   return (
     <div className="flex flex-col gap-8">
+      <ActivitySharing instanceKey={instanceKey} where={where} />
       <Export instanceKey={instanceKey} where={where} />
 
       <motion.section
@@ -279,5 +283,77 @@ function DeleteDialog({ instanceKey, where, open, onOpenChange }: { instanceKey:
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * "Show what I'm doing": whether people who share a server with you see
+ * the games and apps your desktop app picks up, and in which servers. Off
+ * until you turn it on; your status dot shows either way.
+ */
+function ActivitySharing({ instanceKey, where }: { instanceKey: string; where: string }) {
+  const inst = useInstance(instanceKey);
+  const settings = usePresenceSettings(instanceKey);
+  const allowed = inst?.node?.richPresence ?? false;
+  if (!settings || !inst) return null;
+  const hidden = new Set(settings.hiddenServerIds);
+  const save = (change: Parameters<typeof savePresenceSettings>[2]) =>
+    savePresenceSettings(instanceKey, engine(instanceKey).api, change).catch((err: FuwaError) => toast(`Couldn't save that: ${err.message}`));
+  return (
+    <motion.section
+      data-setting="activity-sharing"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={SPRING}
+      className="rounded-3xl border bg-card p-5"
+    >
+      <div className="flex items-start gap-4">
+        <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary">
+          <GamepadIcon className="size-6" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-extrabold">Show what I'm doing</p>
+          <p className="text-sm text-muted-foreground">
+            {allowed
+              ? "Games and apps the desktop app sees, shown to people who share a server with you. Nothing is kept: it's gone when you stop."
+              : `${where} doesn't show what people are doing. Your status still shows.`}
+          </p>
+        </div>
+        <Switch
+          className="mt-1 shrink-0"
+          checked={settings.showActivity && allowed}
+          disabled={!allowed}
+          aria-label="Show what I'm doing"
+          onCheckedChange={(on) => void save((s) => ({ ...s, showActivity: on }))}
+        />
+      </div>
+      <AnimatePresence initial={false}>
+        {settings.showActivity && allowed && inst.servers.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={SPRING}>
+            <p className="mt-5 mb-2 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">Share my activity here</p>
+            <ul className="flex flex-col gap-1">
+              {inst.servers.map((server) => (
+                <li key={server.id}>
+                  <label className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-muted/70">
+                    <ServerIcon server={server} className="size-8 rounded-xl text-xs" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-bold">{server.name}</span>
+                    <Switch
+                      checked={!hidden.has(server.id)}
+                      aria-label={`Share my activity in ${server.name}`}
+                      onCheckedChange={(on) =>
+                        void save((s) => ({
+                          ...s,
+                          hiddenServerIds: on ? s.hiddenServerIds.filter((id) => id !== server.id) : [...s.hiddenServerIds, server.id],
+                        }))
+                      }
+                    />
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.section>
   );
 }
