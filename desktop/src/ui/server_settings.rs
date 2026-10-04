@@ -1672,6 +1672,9 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::SharedChannelDisconnect => ("unplug", red),
         A::SharedChannelBlock => ("user-x", red),
         A::SharedChannelUnblock => ("undo", green),
+        A::ThreadLock => ("lock", amber),
+        A::ThreadUnlock => ("lock-open", green),
+        A::ThreadDelete => ("message-square-x", red),
         A::Unspecified => ("scroll-text", p.muted_foreground.into()),
     }
 }
@@ -1952,6 +1955,9 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         }
         A::SharedChannelBlock => format!("{actor} kept {target} out of {}", named_channel(&entry.channel_name)),
         A::SharedChannelUnblock => format!("{actor} let {target} back into {}", named_channel(&entry.channel_name)),
+        A::ThreadLock => format!("{actor} locked {target}'s thread in {}", named_channel(&entry.channel_name)),
+        A::ThreadUnlock => format!("{actor} unlocked {target}'s thread in {}", named_channel(&entry.channel_name)),
+        A::ThreadDelete => format!("{actor} deleted {target}'s thread in {}", named_channel(&entry.channel_name)),
         A::Unspecified => format!("{actor} did something"),
     }
 }

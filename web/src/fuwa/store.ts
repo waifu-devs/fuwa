@@ -115,11 +115,17 @@ export type InstanceState = {
   emojis: Record<string, Emoji[]>;
   /** Everyone this instance has shown us, by id, so authors resolve even after they leave. */
   users: Record<string, User>;
-  /** Per channel, only for channels someone opened. */
+  /** Per channel, only for channels someone opened; a thread's replies under `threadKey` of the message it's under. */
   messages: Record<string, ChannelMessages>;
   pending: Record<string, PendingMessage[]>;
   /** Per channel: messages from others that arrived while it wasn't open. */
   unread: Record<string, number>;
+  /** The messages threads opened here are under, by id, with their summaries. */
+  threadParents: Record<string, Message>;
+  /** Per server, once loaded: the threads you follow, by the id of the message each is under. */
+  followed: Record<string, Record<string, true>>;
+  /** Per thread you follow: replies from others that came while it wasn't open. */
+  threadUnread: Record<string, number>;
   /** Servers whose channels and members are loaded. */
   synced: Record<string, boolean>;
   /** Your notification settings, by `notificationKey`. Only servers and channels that have some. */
@@ -147,8 +153,8 @@ export type FuwaState = {
   instances: Record<string, InstanceState>;
   /** Instance keys, in the order they were added. */
   order: string[];
-  /** The channel (or conversation) on screen, so it doesn't collect unread counts. */
-  focus: { instance: string; channel: string } | null;
+  /** The channel (or conversation) on screen, and the thread open beside it, so they don't collect unread counts. */
+  focus: { instance: string; channel: string; thread?: string } | null;
 };
 
 let state: FuwaState = { instances: {}, order: [], focus: null };
@@ -191,6 +197,9 @@ export function emptyInstance(key: string, url: string): InstanceState {
     messages: {},
     pending: {},
     unread: {},
+    threadParents: {},
+    followed: {},
+    threadUnread: {},
     synced: {},
     notifications: {},
     profiles: {},
@@ -226,7 +235,7 @@ export function patchInstance(key: string, patch: Partial<InstanceState>) {
 
 // ───────────────────────── Pure helpers ─────────────────────────
 
-const without = <V>(record: Record<string, V>, key: string): Record<string, V> => {
+export const without = <V>(record: Record<string, V>, key: string): Record<string, V> => {
   if (!(key in record)) return record;
   const { [key]: _, ...rest } = record;
   return rest;
@@ -261,12 +270,34 @@ export function withSharedAuthors(users: Record<string, User>, messages: (Messag
   return next;
 }
 
+/** Where a thread's replies are kept in `messages` and `pending`. */
+export const threadKey = (threadId: string) => `t:${threadId}`;
+
 /** Inserts or replaces a message, keeping the list sorted by id (which is by time). */
 export function upsertMessage(items: Message[], message: Message): Message[] {
   const at = items.findIndex((m) => m.id >= message.id);
   if (at === -1) return [...items, message];
-  if (items[at]!.id === message.id) return items.map((m, i) => (i === at ? message : m));
+  if (items[at]!.id === message.id) {
+    // An edit doesn't always say how the thread under it stands; keep what we know.
+    const next = !message.thread && items[at]!.thread ? { ...message, thread: items[at]!.thread } : message;
+    return items.map((m, i) => (i === at ? next : m));
+  }
   return [...items.slice(0, at), message, ...items.slice(at)];
+}
+
+/** A thread's new summary, on the message it's under wherever that's kept. */
+export function withThreadSummary(i: InstanceState, channelId: string, threadId: string, thread: Message["thread"]): InstanceState {
+  const summary = thread && (thread.replyCount > 0 || thread.locked) ? thread : undefined;
+  let next = i;
+  const loaded = i.messages[channelId];
+  const at = loaded?.items.findIndex((m) => m.id === threadId) ?? -1;
+  if (loaded && at !== -1) {
+    const items = loaded.items.map((m, n) => (n === at ? { ...m, thread: summary } : m));
+    next = { ...next, messages: { ...next.messages, [channelId]: { ...loaded, items } } };
+  }
+  const parent = i.threadParents[threadId];
+  if (parent) next = { ...next, threadParents: { ...next.threadParents, [threadId]: { ...parent, thread: summary } } };
+  return next;
 }
 
 /** Puts a user's new look everywhere it shows: the user list, their memberships and their profile. */
@@ -312,6 +343,7 @@ export function removeServer(i: InstanceState, serverId: string): InstanceState 
     messages: keep(i.messages),
     pending: keep(i.pending),
     unread: keep(i.unread),
+    followed: without(i.followed, serverId),
   };
 }
 
@@ -360,7 +392,7 @@ export function withChannels(i: InstanceState, serverId: string, channels: Chann
 }
 
 /** Applies one event from a server's log. Applying the same event twice changes nothing. */
-export function applyEvent(i: InstanceState, event: Event, focusChannel: string | null): InstanceState {
+export function applyEvent(i: InstanceState, event: Event, focusChannel: string | null, focusThread: string | null = null): InstanceState {
   const sid = event.serverId;
   const p = event.payload;
   switch (p.case) {
@@ -396,6 +428,23 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
       const loaded = i.messages[message.channelId];
       const users = withSharedAuthors(i.users, [message]);
       let next = users === i.users ? i : { ...i, users };
+      if (message.threadId) {
+        const key = threadKey(message.threadId);
+        const replies = next.messages[key];
+        const seen = replies?.items.some((m) => m.id === message.id);
+        if (replies) next = { ...next, messages: { ...next.messages, [key]: { ...replies, items: upsertMessage(replies.items, message) } } };
+        if (
+          p.case === "messageCreated" &&
+          !seen &&
+          message.authorId !== i.me?.id &&
+          focusThread !== message.threadId &&
+          next.followed[sid]?.[message.threadId]
+        ) {
+          next = { ...next, threadUnread: { ...next.threadUnread, [message.threadId]: (next.threadUnread[message.threadId] ?? 0) + 1 } };
+        }
+        // Replies stay in their thread unless also sent to the channel.
+        if (!message.alsoInChannel) return next;
+      }
       if (loaded) {
         next = {
           ...next,
@@ -414,13 +463,33 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
       return next;
     }
     case "messageDeleted": {
-      const loaded = i.messages[p.value.channelId];
-      if (!loaded) return i;
-      const items = loaded.items.filter((m) => m.id !== p.value.messageId);
-      return items.length === loaded.items.length
-        ? i
-        : { ...i, messages: { ...i.messages, [p.value.channelId]: { ...loaded, items } } };
+      const { channelId, messageId } = p.value;
+      let next = i;
+      // A thread goes with the message it's under; a reply leaves whichever thread holds it.
+      if (next.threadParents[messageId] || next.messages[threadKey(messageId)]) {
+        next = {
+          ...next,
+          messages: without(next.messages, threadKey(messageId)),
+          pending: without(next.pending, threadKey(messageId)),
+          threadParents: without(next.threadParents, messageId),
+          threadUnread: without(next.threadUnread, messageId),
+        };
+      }
+      for (const [threadId, parent] of Object.entries(next.threadParents)) {
+        const replies = next.messages[threadKey(threadId)];
+        if (parent.channelId !== channelId || !replies?.items.some((m) => m.id === messageId)) continue;
+        next = {
+          ...next,
+          messages: { ...next.messages, [threadKey(threadId)]: { ...replies, items: replies.items.filter((m) => m.id !== messageId) } },
+        };
+      }
+      const loaded = next.messages[channelId];
+      if (!loaded) return next;
+      const items = loaded.items.filter((m) => m.id !== messageId);
+      return items.length === loaded.items.length ? next : { ...next, messages: { ...next.messages, [channelId]: { ...loaded, items } } };
     }
+    case "threadUpdated":
+      return withThreadSummary(i, p.value.channelId, p.value.threadId, p.value.thread);
     case "userUpdated": {
       const user = p.value.user;
       return user ? withUpdatedUser(i, user) : i;

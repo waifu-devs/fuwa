@@ -44,6 +44,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0017_shared_channels.sql"),
     include_str!("../migrations/server/0018_voice_video_off.sql"),
     include_str!("../migrations/server/0019_secure_history.sql"),
+    include_str!("../migrations/server/0020_threads.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -722,7 +723,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
         conn,
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
                 default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome,
-                sso, sso_required, sso_recheck_days, region
+                sso, sso_required, sso_recheck_days, region, thread_archive_hours
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -748,6 +749,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 sso_host: if r.get::<bool>(17)? { crate::sso::Provider::parse(&r.get::<String>(16)?).host() } else { String::new() },
                 sso_recheck_days: r.get(18)?,
                 region: r.get(19)?,
+                thread_archive_hours: r.get(20)?,
             })
         },
     )

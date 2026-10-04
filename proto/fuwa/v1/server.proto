@@ -92,6 +92,8 @@ message UpdateServerRequest {
   optional int32 min_account_age_seconds = 8;
   optional bool applications = 9;
   optional bool linked_only = 10;
+  // 0 to 8760 (a year); 0 never archives threads.
+  optional int32 thread_archive_hours = 11;
 }
 
 message UpdateServerResponse {
@@ -303,6 +305,11 @@ enum AuditAction {
   // they're the target.
   AUDIT_ACTION_SHARED_CHANNEL_BLOCK = 46;
   AUDIT_ACTION_SHARED_CHANNEL_UNBLOCK = 47;
+  // A moderator locked a thread, unlocked one, or deleted one with its
+  // replies. The target is the author of the message it's under.
+  AUDIT_ACTION_THREAD_LOCK = 48;
+  AUDIT_ACTION_THREAD_UNLOCK = 49;
+  AUDIT_ACTION_THREAD_DELETE = 50;
 }
 
 // One thing someone did with a moderator's or manager's permission.

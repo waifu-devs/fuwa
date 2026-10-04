@@ -867,11 +867,14 @@ async fn home_list(sdb: &ServerDb, list: cpb::GuestList) -> Result<cpb::SharedRe
         return Err(Error::denied(KEPT_OUT));
     }
     let (mut messages, has_more) =
-        messages::page(&conn, &sdb.id, &row.channel_id, list.limit, &list.before_id, &list.after_id, true).await?;
+        messages::page(&conn, &sdb.id, &row.channel_id, "", list.limit, &list.before_id, &list.after_id, true).await?;
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), &mut messages).await?;
     let authors = users(&conn, &messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>()).await?;
-    Ok(cpb::SharedReply { page: Some(pb::ListMessagesResponse { messages, authors, has_more }), ..Default::default() })
+    Ok(cpb::SharedReply {
+        page: Some(pb::ListMessagesResponse { messages, authors, has_more, parent: None }),
+        ..Default::default()
+    })
 }
 
 async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply> {
@@ -1016,6 +1019,7 @@ async fn home_delete(sdb: &ServerDb, delete: cpb::GuestDelete) -> Result<cpb::Sh
             channel_id: message.channel_id.clone(),
             message_id: message.id.clone(),
         }));
+        super::threads::after_delete(conn, &message.channel_id, &message.id, &message.thread_id, events).await?;
         Ok(())
     })
     .await?;

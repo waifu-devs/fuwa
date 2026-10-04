@@ -13,7 +13,7 @@ pub const fn bit(p: P) -> Bits {
     1 << (p as u32)
 }
 
-pub const KNOWN: [P; 25] = [
+pub const KNOWN: [P; 26] = [
     P::Administrator,
     P::ManageServer,
     P::ManageRoles,
@@ -39,6 +39,7 @@ pub const KNOWN: [P; 25] = [
     P::MoveMembers,
     P::Video,
     P::Record,
+    P::CreateThreads,
 ];
 
 pub const ALL: Bits = {
@@ -53,6 +54,7 @@ pub const ALL: Bits = {
 
 /// What a member who hasn't agreed to the rules yet can't do.
 pub const TALK: Bits = bit(P::SendMessages)
+    | bit(P::CreateThreads)
     | bit(P::EmbedLinks)
     | bit(P::AttachFiles)
     | bit(P::MentionEveryone)
@@ -89,7 +91,7 @@ pub const GROUPS: [(&str, &[P]); 5] = [
         "Membership",
         &[P::CreateInvite, P::ChangeNickname, P::ManageNicknames, P::KickMembers, P::BanMembers, P::TimeOutMembers],
     ),
-    ("Text channels", &[P::SendMessages, P::EmbedLinks, P::AttachFiles, P::MentionEveryone, P::ManageMessages]),
+    ("Text channels", &[P::SendMessages, P::CreateThreads, P::EmbedLinks, P::AttachFiles, P::MentionEveryone, P::ManageMessages]),
     ("Voice channels", &[P::Connect, P::Speak, P::Video, P::Record, P::MuteMembers, P::MoveMembers]),
     ("Advanced", &[P::Administrator]),
 ];
@@ -118,7 +120,11 @@ pub fn info(p: P) -> (&'static str, &'static str) {
         P::TimeOutMembers => ("Time out members", "Stop people ranked below them from talking for a while."),
         P::ManageChannels => ("Manage channels", "Create, edit, move and delete channels. Also skips slow mode."),
         P::ViewChannels => ("View channels", "See channels and read their messages, unless a channel says otherwise."),
-        P::SendMessages => ("Send messages", "Write in channels."),
+        P::SendMessages => ("Send messages", "Write in channels, and reply in threads."),
+        P::CreateThreads => (
+            "Start threads",
+            "Start a thread of replies under a message. Replying in a thread that's there needs Send messages.",
+        ),
         P::EmbedLinks => ("Embed links", "Post links."),
         P::AttachFiles => ("Attach files", "Upload files and pictures with their messages."),
         P::MentionEveryone => (
@@ -149,7 +155,7 @@ pub fn info(p: P) -> (&'static str, &'static str) {
 /// The permissions a channel can allow or deny, as the channel settings group them (the web's `CHANNEL_GROUPS`).
 pub const CHANNEL_GROUPS: [(&str, &[P]); 3] = [
     ("General", &[P::ViewChannels, P::ManageChannels, P::ManageRoles, P::CreateInvite]),
-    ("Text", &[P::SendMessages, P::EmbedLinks, P::AttachFiles, P::MentionEveryone, P::ManageMessages]),
+    ("Text", &[P::SendMessages, P::CreateThreads, P::EmbedLinks, P::AttachFiles, P::MentionEveryone, P::ManageMessages]),
     ("Voice", &[P::Connect, P::Speak, P::Video, P::Record, P::MuteMembers, P::MoveMembers]),
 ];
 
