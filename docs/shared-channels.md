@@ -127,5 +127,7 @@ admin disconnects them.
 - Voice in shared channels, with guests agreeing before a recording.
 - More than one guest server per channel.
 - Across instances (phase 2): the home instance relays everything, instances
-  trust each other through signed instance keys, off by default.
+  trust each other through signed instance keys, off by default. The link
+  between instances is in [federation.md](federation.md); sharing over it
+  comes next.
 - The desktop app's screens.

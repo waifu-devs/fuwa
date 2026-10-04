@@ -1483,3 +1483,31 @@ async fn servers_live_in_their_region_and_move() {
 
     cluster.stop().await;
 }
+
+/// Two split instances meet through their gateways, which pass other
+/// instances' calls to the directory, where the instance key is.
+#[tokio::test]
+async fn split_instances_meet_through_their_gateways() {
+    let vars = [("FUWA_FEDERATION", "on".to_string()), ("FUWA_FEDERATION_ALLOW_PRIVATE", "1".to_string())];
+    let (root_a, root_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let a = start_cluster(root_a.path(), &vars).await;
+    let b = start_cluster(root_b.path(), &vars).await;
+    let (mut ca, mut cb) = (clients(&a.gateway).await, clients(&b.gateway).await);
+    let (admin_a, _) = sign_up(&mut ca, "admin").await;
+    let (admin_b, _) = sign_up(&mut cb, "admin").await;
+
+    let address = format!("http://{}", b.gateway.addr);
+    let met = ca
+        .admin
+        .check_instance(authed(&admin_a, pb::CheckInstanceRequest { address: address.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    let fed_b = cb.admin.get_federation(authed(&admin_b, pb::GetFederationRequest {})).await.unwrap().into_inner();
+    assert_eq!(met.peer.unwrap().fingerprint, fed_b.fingerprint);
+    assert_eq!(fed_b.peers.len(), 1);
+    assert_eq!(fed_b.peers[0].origin, format!("http://{}", a.gateway.addr));
+
+    a.stop().await;
+    b.stop().await;
+}

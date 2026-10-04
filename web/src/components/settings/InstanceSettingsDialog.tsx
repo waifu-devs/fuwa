@@ -45,6 +45,7 @@ import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { Accounts } from "./instance/Accounts";
 import { Announcement } from "./instance/Announcement";
 import { CALL_FIELDS, CALL_SECTION, CallSettings } from "./instance/Calls";
+import { FEDERATION_FIELDS, FEDERATION_SECTION, FederationSettings } from "./instance/Federation";
 import { MODERATION_FIELDS, MODERATION_SECTION, ModerationSettings } from "./instance/Moderation";
 import { Servers } from "./instance/Servers";
 import { SettingsScreen } from "./SettingsScreen";
@@ -75,6 +76,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
   ...MODERATION_FIELDS,
+  ...FEDERATION_FIELDS,
 ];
 
 const changedPaths = (draft: InstanceSettings, saved: InstanceSettings) =>
@@ -236,6 +238,7 @@ export function InstanceSettingsDialog({
             },
             CALL_SECTION,
             MODERATION_SECTION,
+            FEDERATION_SECTION,
           ],
         },
         {
@@ -610,6 +613,9 @@ export function InstanceSettingsDialog({
           {tab === "moderation" && saved && (
             <ModerationSettings instanceKey={instanceKey} draft={draft} saved={saved} defaults={defaults} patch={patch} resetter={resetter} />
           )}
+          {tab === "federation" && saved && (
+            <FederationSettings instanceKey={instanceKey} draft={draft} saved={saved} defaults={defaults} patch={patch} resetter={resetter} />
+          )}
           {tab === "privacy" && (
             <>
               <Setting id="telemetry" title="Anonymous usage signal and reports" defaultLabel={defaults.telemetry ? "on" : "off"} {...resetter("telemetry")}>
@@ -703,6 +709,7 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
   for (const path of paths) {
     COPIED.find((f) => f.path === path)?.copy(into, from);
     MODERATION_FIELDS.find((f) => f.path === path)?.copy(into, from);
+    FEDERATION_FIELDS.find((f) => f.path === path)?.copy(into, from);
     switch (path) {
       case "name":
         into.name = from.name;
@@ -750,6 +757,8 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         into.pictureUploadBytesPerDay = from.pictureUploadBytesPerDay;
         break;
       default: {
+        // Settings copied above by their own pages' functions.
+        if (!path.startsWith("default_limits.")) break;
         const key = path.replace("default_limits.", "") as "members" | "channels" | "storage_bytes" | "attachment_bytes" | "emojis" | "recording_bytes";
         const field = key === "storage_bytes" ? "storageBytes" : key === "attachment_bytes" ? "attachmentBytes" : key === "recording_bytes" ? "recordingBytes" : key;
         into.defaultLimits ??= create(ServerLimitsSchema);

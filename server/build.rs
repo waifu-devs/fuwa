@@ -30,6 +30,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &includes,
     )?;
 
+    // How instances talk to each other: on the public port, but not part of
+    // the client API, so it stays out of reflection too.
+    let federation = out_dir.join("federation");
+    std::fs::create_dir_all(&federation)?;
+    let mut config = tonic_prost_build::Config::new();
+    config.protoc_executable(protoc_bin_vendored::protoc_bin_path()?);
+    tonic_prost_build::configure().build_client(false).out_dir(federation).compile_with_config(
+        config,
+        &[PathBuf::from("../proto/fuwa/federation/v1/federation.proto")],
+        &includes,
+    )?;
+
     println!("cargo:rerun-if-changed=../proto");
 
     // The commit this binary is built from, reported in GetNode. The Docker

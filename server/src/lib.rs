@@ -14,6 +14,7 @@ pub mod config;
 pub mod db;
 pub mod dms;
 pub mod error;
+pub mod federation;
 pub mod hub;
 pub mod id;
 pub mod linked;
@@ -46,6 +47,12 @@ pub mod proto {
                 include!(concat!(env!("OUT_DIR"), "/cluster/fuwa.cluster.v1.rs"));
             }
         }
+
+        pub mod federation {
+            pub mod v1 {
+                include!(concat!(env!("OUT_DIR"), "/federation/fuwa.federation.v1.rs"));
+            }
+        }
     }
 
     /// Every fuwa.v1 descriptor, for gRPC reflection.
@@ -54,6 +61,8 @@ pub mod proto {
 
 /// The internal protocol between the parts of a split instance.
 pub use proto::fuwa::cluster::v1 as cpb;
+/// How instances talk to each other (docs/federation.md).
+pub use proto::fuwa::federation::v1 as fpb;
 pub use proto::fuwa::v1 as pb;
 
 /// This build's version, reported to clients and in the usage signal.

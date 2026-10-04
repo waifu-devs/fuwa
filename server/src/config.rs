@@ -63,6 +63,13 @@ pub struct Config {
     /// FUWA_SHARED_CHANNELS: on (default) | off. Servers sharing channels
     /// with each other.
     pub shared_channels: bool,
+    /// FUWA_FEDERATION: on | off (default). Sharing channels with servers on
+    /// other fuwa instances (docs/federation.md).
+    pub federation: bool,
+    /// FUWA_FEDERATION_ALLOW_PRIVATE: lets this instance talk to other
+    /// instances on private, loopback or internal addresses, and over plain
+    /// http. Off by default; for tests and private deployments. Env only.
+    pub federation_allow_private: bool,
     /// FUWA_CALL_RECORDINGS_KEEP_DAYS: days a finished server recording is
     /// kept before it deletes itself. Unset (default): until someone does.
     pub call_recordings_keep_days: Option<i64>,
@@ -377,6 +384,16 @@ impl Config {
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_SHARED_CHANNELS must be on or off, got {other:?}")),
         };
+        let federation = match get("FUWA_FEDERATION").as_deref().map(str::trim) {
+            None | Some("off" | "false" | "0") => false,
+            Some("on" | "true" | "1") => true,
+            Some(other) => return Err(format!("FUWA_FEDERATION must be on or off, got {other:?}")),
+        };
+        let federation_allow_private = match get("FUWA_FEDERATION_ALLOW_PRIVATE").as_deref().map(str::trim) {
+            None | Some("off" | "false" | "0" | "") => false,
+            Some("on" | "true" | "1" | "yes") => true,
+            Some(other) => return Err(format!("FUWA_FEDERATION_ALLOW_PRIVATE must be on or off, got {other:?}")),
+        };
         let call_recordings_keep_days = match get("FUWA_CALL_RECORDINGS_KEEP_DAYS") {
             None => None,
             Some(value) => Some(value.trim().parse::<i64>().ok().filter(|n| *n >= 1).ok_or_else(|| {
@@ -472,6 +489,8 @@ impl Config {
             calls,
             call_recordings,
             shared_channels,
+            federation,
+            federation_allow_private,
             call_recordings_keep_days,
             ice_urls,
             turn_secret: get("FUWA_TURN_SECRET").map(|s| s.trim().to_string()).unwrap_or_default(),

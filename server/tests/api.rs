@@ -6536,3 +6536,100 @@ async fn instance_admins_end_any_share() {
         .expect("the disconnect is logged");
     assert!(entry.changes.iter().any(|ch| ch.field == "by" && ch.after == "an instance admin"), "{entry:?}");
 }
+
+/// Two instances meet: each pins the other's key with a signed Hello and
+/// answers a signed ping, only while federation is on and neither is blocked.
+#[tokio::test]
+async fn instances_meet_with_signed_calls() {
+    let federated = [("FUWA_FEDERATION", "on"), ("FUWA_FEDERATION_ALLOW_PRIVATE", "1")];
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let a = start(dir_a.path(), &federated).await;
+    let b = start(dir_b.path(), &[("FUWA_FEDERATION_ALLOW_PRIVATE", "1")]).await;
+    let (mut ca, mut cb) = (clients(&a).await, clients(&b).await);
+    let (admin_a, _, _) = sign_up(&mut ca, "admin").await;
+    let (admin_b, _, _) = sign_up(&mut cb, "admin").await;
+    let set = |admin: &str, settings: pb::InstanceSettings, fields: &[&str]| {
+        authed(admin, settings_update(settings, fields, &[]))
+    };
+    let (origin_a, origin_b) = (format!("http://{}", a.addr), format!("http://{}", b.addr));
+    for (c, admin, origin) in [(&mut ca, &admin_a, &origin_a), (&mut cb, &admin_b, &origin_b)] {
+        let settings = pb::InstanceSettings { public_url: origin.clone(), ..Default::default() };
+        c.admin.update_settings(set(admin, settings, &["public_url"])).await.unwrap();
+    }
+    let check = |address: &str| pb::CheckInstanceRequest { address: address.into() };
+
+    // B has federation off (the default), so it won't even hand out its key.
+    let off = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap_err();
+    assert_eq!(off.code(), Code::FailedPrecondition, "{off:?}");
+    assert!(off.message().contains("federation is off"), "{off:?}");
+    // And nobody but an admin can ask.
+    let (member, _, _) = sign_up(&mut ca, "member").await;
+    let denied = ca.admin.check_instance(authed(&member, check(&origin_b))).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+
+    let on = pb::InstanceSettings { federation: true, ..Default::default() };
+    cb.admin.update_settings(set(&admin_b, on, &["federation"])).await.unwrap();
+    let met = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap().into_inner();
+    let seen_by_a = met.peer.unwrap();
+    assert_eq!(seen_by_a.origin, origin_b);
+
+    // Each side pinned the other's real key.
+    let federation = |c: &mut Clients, admin: &str| {
+        let mut admin_client = c.admin.clone();
+        let request = authed(admin, pb::GetFederationRequest {});
+        async move { admin_client.get_federation(request).await.unwrap().into_inner() }
+    };
+    let (fed_a, fed_b) = (federation(&mut ca, &admin_a).await, federation(&mut cb, &admin_b).await);
+    assert_eq!(fed_a.origin, origin_a);
+    assert_eq!(fed_b.origin, origin_b);
+    assert_eq!(seen_by_a.fingerprint, fed_b.fingerprint);
+    assert_eq!(fed_a.peers.len(), 1);
+    assert_eq!(fed_b.peers.len(), 1);
+    assert_eq!(fed_b.peers[0].origin, origin_a);
+    assert_eq!(fed_b.peers[0].fingerprint, fed_a.fingerprint);
+    assert_eq!(fed_a.fingerprint.split(' ').count(), 8);
+
+    // Checking again uses the pinned keys; the other way works too.
+    ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap();
+    cb.admin.check_instance(authed(&admin_b, check(&origin_a))).await.unwrap();
+
+    // The key is the same after a restart.
+    let fingerprint_a = fed_a.fingerprint.clone();
+    a.stop().await;
+    let a = start(dir_a.path(), &federated).await;
+    let mut ca = clients(&a).await;
+    let restarted = federation(&mut ca, &admin_a).await;
+    assert_eq!(restarted.fingerprint, fingerprint_a);
+    // (Its port changed, so its public URL no longer reads as its address.)
+
+    // A blocked host is refused before anything is sent.
+    let block = pb::InstanceSettings { federation_blocked_hosts: vec!["127.0.0.1".into()], ..Default::default() };
+    cb.admin.update_settings(set(&admin_b, block, &["federation_blocked_hosts"])).await.unwrap();
+    let blocked = cb.admin.check_instance(authed(&admin_b, check(&origin_a))).await.unwrap_err();
+    assert!(blocked.message().contains("block list"), "{blocked:?}");
+    let listed = federation(&mut cb, &admin_b).await;
+    assert!(listed.peers[0].blocked);
+
+    a.stop().await;
+    b.stop().await;
+}
+
+/// Without FUWA_FEDERATION_ALLOW_PRIVATE, internal addresses are refused
+/// before anything is fetched.
+#[tokio::test]
+async fn federation_refuses_internal_addresses() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance =
+        start(dir.path(), &[("FUWA_FEDERATION", "on"), ("FUWA_PUBLIC_URL", "https://chat.example.com")]).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    for address in ["127.0.0.1:4000", "http://chat.example.org", "https://10.1.2.3", "fuwa.railway.internal"] {
+        let refused = c
+            .admin
+            .check_instance(authed(&admin, pb::CheckInstanceRequest { address: address.into() }))
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code(), Code::InvalidArgument, "{address}: {refused:?}");
+    }
+    instance.stop().await;
+}

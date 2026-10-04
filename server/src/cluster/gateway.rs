@@ -75,6 +75,8 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.DirectMessageService" => Target::Directory,
         "fuwa.v1.AdminService" if matches!(method, "SetServerLimits" | "ExportServer") => Target::Shard,
         "fuwa.v1.AdminService" => Target::Directory,
+        // Other instances' calls go where the instance's key is.
+        "fuwa.federation.v1.FederationService" => Target::Directory,
         "fuwa.v1.AgentService" if method == "AddAgent" => Target::Shard,
         "fuwa.v1.AgentService" => Target::Directory,
         "fuwa.v1.ServerService" if matches!(method, "CreateServer" | "ListServers" | "DiscoverServers") => {
@@ -1025,6 +1027,15 @@ mod tests {
         assert_eq!(server_id_of(&framed(pb::GetServerRequest::default())).as_deref(), Some(""));
         assert_eq!(server_id_of(&[1, 0, 0, 0, 0]), None);
         assert_eq!(server_id_of(&[0, 0, 0, 0, 9, 1]), None);
+    }
+
+    /// Other instances' calls go to the directory, which keeps the key.
+    #[test]
+    fn federation_goes_to_the_directory() {
+        for method in ["GetKey", "Hello", "Call"] {
+            let path = format!("/fuwa.federation.v1.FederationService/{method}");
+            assert!(matches!(route(&path), Target::Directory), "{path}");
+        }
     }
 
     /// Every call has somewhere to go, and each one sent to a shard names its
