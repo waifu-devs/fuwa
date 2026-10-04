@@ -191,6 +191,7 @@ impl App {
 
         let federation = crate::federation::Federation::new(config.federation_allow_private);
         let update_check = config.update_check;
+        let release_cache = config.data_path.join("release-cache");
         let shutdown = CancellationToken::new();
         let media_link = media_link(&config, &shutdown).await;
 
@@ -214,7 +215,7 @@ impl App {
             media_link,
             picture_key,
             federation,
-            releases: crate::releases::Releases::new(update_check),
+            releases: crate::releases::Releases::new(update_check, release_cache),
         });
         if app.node.is_some() {
             app.releases.spawn(app.shutdown.clone());

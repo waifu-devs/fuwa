@@ -10,6 +10,22 @@ import { reportError, reportUsage } from "@/lib/reports";
 
 /** How often the page looks for a newer app. */
 const EVERY_MS = 5 * 60 * 1000;
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+}
+
+function sameOrigin(url: string): boolean {
+  try {
+    return new URL(url).origin === location.origin;
+  } catch {
+    return false;
+  }
+}
+
 /** This page's own entry script, as a path. */
 function ownEntry(): string | null {
   const src = document.querySelector<HTMLScriptElement>('script[type="module"][src]')?.getAttribute("src");
@@ -48,10 +64,15 @@ export function UpdateReady() {
   const fresh = useRef<Freshness>(FRESH);
   // An instance with features this app doesn't know asks for a newer app too
   // (lib/compat.ts); the rest keeps working.
-  const needs = useInstances()
-    .map((i) => updateLine(i.node?.versions))
-    .find((line) => line !== null) ?? null;
+  // Reload only helps when it's this page's own instance; another instance's
+  // features need the app it serves, or a newer fuwa there.
+  const need =
+    useInstances()
+      .map((i) => ({ line: updateLine(i.node?.versions, i.node?.name || hostOf(i.url)), own: sameOrigin(i.url) }))
+      .find((n) => n.line !== null) ?? null;
+  const needs = need?.line ?? null;
   const showing = behind && behind !== later ? "updated" : needs && needs !== later ? "needs" : null;
+  const canReload = showing === "updated" || !!need?.own;
 
   useEffect(() => {
     // The dev server swaps code in place; only a built app looks.
@@ -111,14 +132,16 @@ export function UpdateReady() {
             <SparklesIcon className="size-4" />
           </span>
           <span className="min-w-0 truncate font-semibold">{showing === "updated" ? "fuwa was updated" : needs}</span>
-          <button
-            type="button"
-            onClick={reload}
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-primary px-3 text-xs font-bold text-primary-foreground transition-transform hover:scale-[1.03] active:scale-[0.97]"
-          >
-            <RefreshCwIcon className="size-3.5" />
-            Reload
-          </button>
+          {canReload && (
+            <button
+              type="button"
+              onClick={reload}
+              className="flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-primary px-3 text-xs font-bold text-primary-foreground transition-transform hover:scale-[1.03] active:scale-[0.97]"
+            >
+              <RefreshCwIcon className="size-3.5" />
+              Reload
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setLater(showing === "updated" ? behind : needs)}

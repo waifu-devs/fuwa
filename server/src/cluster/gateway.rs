@@ -216,6 +216,7 @@ impl Gateway {
             WithKey(key.clone()),
         );
         let config_update_check = config.update_check;
+        let release_cache = config.data_path.join("release-cache");
         let gateway = Arc::new(Self {
             settings: watch::Sender::new(Arc::new(Settings::defaults(&config))),
             config,
@@ -227,7 +228,7 @@ impl Gateway {
             shards: RwLock::new(HashMap::new()),
             followed: AtomicBool::new(false),
             parts: Default::default(),
-            releases: crate::releases::Releases::new(config_update_check),
+            releases: crate::releases::Releases::new(config_update_check, release_cache),
             shutdown: CancellationToken::new(),
         });
         gateway.releases.spawn(gateway.shutdown.clone());

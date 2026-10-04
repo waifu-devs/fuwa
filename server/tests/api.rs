@@ -965,7 +965,7 @@ async fn browsers_can_call_over_grpc_web() {
         assert_eq!(response.status(), 404, "{name}");
     }
     // A listed build is handed over from the copy kept after the first fetch.
-    let kept = std::env::temp_dir().join("fuwa-releases/999.0.0");
+    let kept = dir.path().join("release-cache/999.0.0");
     std::fs::create_dir_all(&kept).unwrap();
     std::fs::write(kept.join("fuwa-desktop-999.0.0-x86_64-linux"), b"abc").unwrap();
     let response = http.get(format!("{base}/updates/files/fuwa-desktop-999.0.0-x86_64-linux")).send().await.unwrap();

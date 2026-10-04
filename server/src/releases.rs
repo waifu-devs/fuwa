@@ -12,8 +12,10 @@
 //! who uses fuwa or from where: `GET /updates/latest.json` is what the
 //! instance knows, and `GET /updates/files/<name>` hands over one of the
 //! latest release's desktop builds, fetched from GitHub once, checked against
-//! `SHA256SUMS`, and kept in the temporary folder while it's the latest.
-//! Someone reading slowly is cut off, so nobody can hold every place. An instance can't slip in a
+//! `SHA256SUMS`, and kept in a private folder in the data folder
+//! (`release-cache`) while it's the latest. There's no cap on downloads at
+//! once, so nobody can hold every place; someone who stalls or reads too
+//! slowly is cut off all the same. An instance can't slip in a
 //! build of its own: apps check the signature on `SHA256SUMS` against the
 //! release key they were built with, and the file against `SHA256SUMS`,
 //! before anything runs (`desktop/src/core/updates.rs`).
@@ -32,7 +34,6 @@ use axum::routing::get;
 use futures::StreamExt;
 use http::{HeaderValue, StatusCode, header};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 use crate::pb;
@@ -65,12 +66,13 @@ const MAX_SIGNATURE_BYTES: usize = 1024;
 /// Release notes past this are cut.
 const MAX_NOTES_BYTES: usize = 20_000;
 
-/// Desktop builds handed over at once; more wait their turn, briefly.
-const MAX_PASSES: usize = 16;
-const WAIT_FOR_A_PLACE: Duration = Duration::from_secs(30);
 /// A reader that takes nothing for this long is cut off, and so is any hand-over past the whole limit.
 const READER_STALL: Duration = Duration::from_secs(30);
 const PASS_LIMIT: Duration = Duration::from_secs(30 * 60);
+/// After its first minute, a hand-over slower than this on average is cut off.
+const MIN_BYTES_PER_SEC: u64 = 32 * 1024;
+/// How long a request waits for someone else's fetch of the same release from GitHub.
+const WAIT_FOR_FETCH: Duration = Duration::from_secs(60);
 /// The largest desktop build kept.
 const MAX_FILE_BYTES: u64 = 1024 * 1024 * 1024;
 
@@ -104,11 +106,13 @@ pub struct File {
 pub struct Releases {
     on: bool,
     latest: RwLock<Option<Arc<Latest>>>,
+    /// Where fetched desktop builds are kept, a folder per version.
+    cache: std::path::PathBuf,
 }
 
 impl Releases {
-    pub fn new(on: bool) -> Arc<Self> {
-        Arc::new(Self { on, latest: RwLock::new(None) })
+    pub fn new(on: bool, cache: std::path::PathBuf) -> Arc<Self> {
+        Arc::new(Self { on, latest: RwLock::new(None), cache })
     }
 
     /// Checks at startup (after [`FIRST_CHECK`]) and then daily, until `shutdown`.
@@ -209,36 +213,41 @@ impl Releases {
         let Some(sha256) = sum_of(&latest.sums, &file.name) else {
             return plain(StatusCode::NOT_FOUND, "that isn't a file of the latest fuwa release");
         };
-        let path = cache_dir().join(&latest.version).join(&file.name);
+        let path = self.cache.join(&latest.version).join(&file.name);
         if !path.is_file() {
             // One fetch at a time: whoever comes next finds the copy.
-            let _fetching = FETCHING.lock().await;
-            if !path.is_file() && keep(&latest.version, file, sha256, &path).await.is_err() {
+            let Ok(_fetching) = tokio::time::timeout(WAIT_FOR_FETCH, FETCHING.lock()).await else {
+                return plain(StatusCode::SERVICE_UNAVAILABLE, "try again in a moment");
+            };
+            if !path.is_file() && keep(&self.cache, &latest.version, file, sha256, &path).await.is_err() {
                 tracing::warn!("couldn't fetch a fuwa desktop build from GitHub");
                 crate::reports::server_error("release_pass_failed", Some("releases::pass"));
                 return plain(StatusCode::BAD_GATEWAY, "GitHub didn't hand the file over; try again later");
             }
         }
-        let Ok(Ok(permit)) = tokio::time::timeout(WAIT_FOR_A_PLACE, PASSES.acquire()).await else {
-            return plain(StatusCode::SERVICE_UNAVAILABLE, "try again in a moment");
-        };
         let Ok(mut source) = tokio::fs::File::open(&path).await else {
             return plain(StatusCode::SERVICE_UNAVAILABLE, "try again in a moment");
         };
-        // Read on a task of its own, which holds the place; a reader that
-        // stalls (or takes too long overall) ends it, and frees the place.
+        // Read on a task of its own; a reader that stalls, reads too slowly,
+        // or takes too long overall ends it.
         let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<bytes::Bytes>>(4);
         tokio::spawn(async move {
-            let _held = permit;
-            let until = tokio::time::Instant::now() + PASS_LIMIT;
+            let started = tokio::time::Instant::now();
+            let until = started + PASS_LIMIT;
             let mut buf = vec![0u8; 64 * 1024];
+            let mut sent = 0u64;
             loop {
+                let secs = started.elapsed().as_secs();
+                if secs >= 60 && sent / secs < MIN_BYTES_PER_SEC {
+                    return;
+                }
                 let chunk = match tokio::io::AsyncReadExt::read(&mut source, &mut buf).await {
                     Ok(0) => return,
                     Ok(n) => Ok(bytes::Bytes::copy_from_slice(&buf[..n])),
                     Err(_) => Err(std::io::Error::other("cut off")),
                 };
                 let stop = chunk.is_err();
+                sent += chunk.as_ref().map_or(0, |c| c.len() as u64);
                 let wait = READER_STALL.min(until.saturating_duration_since(tokio::time::Instant::now()));
                 if tx.send_timeout(chunk, wait).await.is_err() || stop {
                     return;
@@ -254,12 +263,6 @@ impl Releases {
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=86400, immutable"));
         response
     }
-}
-
-/// Where fetched desktop builds are kept: the temporary folder, never the
-/// data volume, a folder per version.
-fn cache_dir() -> std::path::PathBuf {
-    std::env::temp_dir().join("fuwa-releases")
 }
 
 /// One fetch from GitHub at a time.
@@ -281,21 +284,28 @@ fn sum_of(sums: &str, name: &str) -> Option<[u8; 32]> {
 
 /// Fetches a desktop build into `path`, whole and matching its sum, and
 /// clears out older versions' copies.
-async fn keep(version: &str, file: &File, sha256: [u8; 32], path: &std::path::Path) -> Result<(), ()> {
+async fn keep(
+    cache: &std::path::Path,
+    version: &str,
+    file: &File,
+    sha256: [u8; 32],
+    path: &std::path::Path,
+) -> Result<(), ()> {
     use sha2::Digest as _;
     use tokio::io::AsyncWriteExt as _;
     if file.size > MAX_FILE_BYTES {
         return Err(());
     }
     let dir = path.parent().ok_or(())?;
-    if let Ok(mut old) = tokio::fs::read_dir(cache_dir()).await {
+    private_dir(cache).await?;
+    if let Ok(mut old) = tokio::fs::read_dir(cache).await {
         while let Ok(Some(entry)) = old.next_entry().await {
             if entry.file_name() != version {
                 let _ = tokio::fs::remove_dir_all(entry.path()).await;
             }
         }
     }
-    tokio::fs::create_dir_all(dir).await.map_err(|_| ())?;
+    private_dir(dir).await?;
     let url = format!("{DOWNLOAD_URL}v{version}/{}", file.name);
     let response = CLIENT.get(url).timeout(PASS_LIMIT).send().await.map_err(|_| ())?;
     if !response.status().is_success() {
@@ -303,7 +313,9 @@ async fn keep(version: &str, file: &File, sha256: [u8; 32], path: &std::path::Pa
     }
     let part = path.with_extension("part");
     let result = async {
-        let mut out = tokio::fs::File::create(&part).await.map_err(|_| ())?;
+        // Never through something already there (a link planted in its place, say).
+        let _ = tokio::fs::remove_file(&part).await;
+        let mut out = tokio::fs::OpenOptions::new().write(true).create_new(true).open(&part).await.map_err(|_| ())?;
         let mut hash = sha2::Sha256::new();
         let mut done = 0u64;
         let mut body = response.bytes_stream();
@@ -329,7 +341,20 @@ async fn keep(version: &str, file: &File, sha256: [u8; 32], path: &std::path::Pa
     result
 }
 
-static PASSES: Semaphore = Semaphore::const_new(MAX_PASSES);
+/// Makes `dir` a folder only fuwa can read (0700), refusing one that's a link.
+async fn private_dir(dir: &std::path::Path) -> Result<(), ()> {
+    match tokio::fs::symlink_metadata(dir).await {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => return Err(()),
+        Err(_) => tokio::fs::create_dir(dir).await.map_err(|_| ())?,
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        tokio::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).await.map_err(|_| ())?;
+    }
+    Ok(())
+}
 
 /// Reaches only [`HOSTS`], over https, and sends nothing but a fixed user
 /// agent (GitHub's API wants one).
@@ -593,7 +618,7 @@ mod tests {
 
     #[test]
     fn only_a_newer_release_counts() {
-        let releases = Releases::new(true);
+        let releases = Releases::new(true, std::env::temp_dir());
         assert!(releases.newer().is_none());
         let mut latest = Latest {
             version: crate::VERSION.into(),

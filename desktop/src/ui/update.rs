@@ -40,7 +40,14 @@ impl crate::ui::app::FuwaApp {
         // An instance with a feature this app is too old for (core::compat).
         let needs = self.core.shared.read(|s| {
             s.order.iter().find_map(|key| {
-                s.instance(key).and_then(|i| compat::update_line(i.node.as_ref().and_then(|n| n.versions.as_ref())))
+                s.instance(key).and_then(|i| {
+                    let name = if self.core.prefs().streamer_mode {
+                        "An instance you added".to_owned()
+                    } else {
+                        i.name().to_string()
+                    };
+                    compat::update_line(i.node.as_ref().and_then(|n| n.versions.as_ref()), &name)
+                })
             })
         });
         let (version, ready, why) = match &status {

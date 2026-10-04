@@ -42,12 +42,32 @@ export function instanceHas(versions: VersionsInfo | undefined, id: string, ours
   return !!feature && feature.date <= BASELINE;
 }
 
-/** What an app that needs updating tells people, or null when it's fine. */
-export function updateLine(versions: VersionsInfo | undefined): string | null {
+/** The most of a feature title or instance name shown. */
+const MAX_SHOWN = 40;
+
+/**
+ * A title or name from an instance, made safe to show in an update notice:
+ * letters, digits, spaces and a little punctuation, never anything that reads
+ * as a link or an address, and short.
+ */
+export function shown(text: string, fallback: string): string {
+  const plain = text.replace(/[^\p{L}\p{N} '&(),-]/gu, " ").replace(/\s+/g, " ").trim();
+  if (!plain) return fallback;
+  return plain.length > MAX_SHOWN ? `${plain.slice(0, MAX_SHOWN - 1).trimEnd()}…` : plain;
+}
+
+/**
+ * What an app that needs updating tells people, naming the instance it's
+ * about, or null when it's fine.
+ */
+export function updateLine(versions: VersionsInfo | undefined, instance: string): string | null {
+  const name = shown(instance, "An instance");
   const need = missing(versions);
   if (need.length) {
-    const first = need[0]!.title;
-    return need.length === 1 ? `Update fuwa to use ${first}` : `Update fuwa to use ${first} and ${need.length - 1} more`;
+    const first = shown(need[0]!.title, "something new");
+    return need.length === 1
+      ? `${name} has ${first}. Update fuwa to use it`
+      : `${name} has ${first} and ${need.length - 1} more. Update fuwa to use them`;
   }
-  return tooOld(versions) ? "Update fuwa so everything works" : null;
+  return tooOld(versions) ? `${name} needs a newer fuwa for everything to work` : null;
 }

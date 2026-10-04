@@ -215,10 +215,10 @@ impl SettingsView {
                 .iter()
                 .filter_map(|key| s.instance(key))
                 .filter_map(|i| {
-                    let line = compat::update_line(i.node.as_ref().and_then(|n| n.versions.as_ref()))?;
                     let name =
                         if prefs.streamer_mode { "An instance you added".to_owned() } else { i.name().to_string() };
-                    Some((name, line))
+                    let line = compat::update_line(i.node.as_ref().and_then(|n| n.versions.as_ref()), &name)?;
+                    Some((compat::shown(&name, "An instance"), line))
                 })
                 .collect()
         });
@@ -236,9 +236,7 @@ impl SettingsView {
                     .text_sm()
                     .child(icon("sparkles").size(px(16.0)).mt(px(2.0)).text_color(p.primary))
                     .child(div().flex_1().min_w_0().child(div().font_weight(FontWeight::BOLD).child(name)).child(
-                        div().text_color(p.muted_foreground).child(format!(
-                            "{line}. It has something newer than this app knows; everything else keeps working."
-                        )),
+                        div().text_color(p.muted_foreground).child(format!("{line}. Everything else keeps working.")),
                     ))
             }));
             page = page.child(section("Needs a newer app", rows, p));

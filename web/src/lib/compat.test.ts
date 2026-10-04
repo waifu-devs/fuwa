@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { CLIENT_DATE, FEATURES, instanceHas, missing, tooOld, updateLine } from "./compat.ts";
+import { CLIENT_DATE, FEATURES, instanceHas, missing, shown, tooOld, updateLine } from "./compat.ts";
 
 const ours = [
   { id: "a", date: "2026-10-04", title: "A" },
@@ -32,11 +32,18 @@ test("features show only where the instance has them", () => {
   assert.equal(instanceHas(undefined, "b", ours), false);
 });
 
-test("the line says what needs the update", () => {
+test("the line names the instance and says what needs the update", () => {
   const extra = (id: string) => ({ id, date: "2099-01-01", title: id.toUpperCase() });
   const v = (features: { id: string; date: string; title: string }[], minClientDate = "") => ({ compatibilityDate: "2099-01-01", minClientDate, features });
-  assert.equal(updateLine(v([...FEATURES])), null);
-  assert.equal(updateLine(v([...FEATURES, extra("x")])), "Update fuwa to use X");
-  assert.equal(updateLine(v([...FEATURES, extra("x"), extra("y")])), "Update fuwa to use X and 1 more");
-  assert.equal(updateLine(v([...FEATURES], "2099-01-01")), "Update fuwa so everything works");
+  assert.equal(updateLine(v([...FEATURES]), "Waifu Devs"), null);
+  assert.equal(updateLine(v([...FEATURES, extra("x")]), "Waifu Devs"), "Waifu Devs has X. Update fuwa to use it");
+  assert.equal(updateLine(v([...FEATURES, extra("x"), extra("y")]), "Waifu Devs"), "Waifu Devs has X and 1 more. Update fuwa to use them");
+  assert.equal(updateLine(v([...FEATURES], "2099-01-01"), "Waifu Devs"), "Waifu Devs needs a newer fuwa for everything to work");
+});
+
+test("what an instance says is shown short and plain", () => {
+  assert.equal(shown("Update fuwa: download the fix at evil.example/x", "?"), "Update fuwa download the fix at evil ex…");
+  assert.equal(shown("https://evil.example", "?"), "https evil example");
+  assert.equal(shown("::://", "something new"), "something new");
+  assert.equal(shown("Channels shared between servers", "?"), "Channels shared between servers");
 });

@@ -59,14 +59,44 @@ pub fn instance_has(versions: Option<&pb::Versions>, id: &str, ours: &[Feature])
     }
 }
 
-/// What an app that needs updating tells people, or None when it's fine.
-pub fn update_line(versions: Option<&pb::Versions>) -> Option<String> {
+/// The most of a feature title or instance name shown.
+const MAX_SHOWN: usize = 40;
+
+/// A title or name from an instance, made safe to show in an update notice:
+/// letters, digits, spaces and a little punctuation, never anything that
+/// reads as a link or an address, and short.
+pub fn shown(text: &str, fallback: &str) -> String {
+    let plain: String = text
+        .chars()
+        .map(|c| if c.is_alphanumeric() || " '&(),-".contains(c) { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if plain.is_empty() {
+        return fallback.to_owned();
+    }
+    if plain.chars().count() > MAX_SHOWN {
+        let cut: String = plain.chars().take(MAX_SHOWN - 1).collect();
+        return format!("{}…", cut.trim_end());
+    }
+    plain
+}
+
+/// What an app that needs updating tells people, naming the instance it's
+/// about, or None when it's fine.
+pub fn update_line(versions: Option<&pb::Versions>, instance: &str) -> Option<String> {
+    let name = shown(instance, "An instance");
     let need = missing(versions, &FEATURES);
     match need.as_slice() {
-        [] if too_old(versions, client_date()) => Some("Update fuwa so everything works".into()),
+        [] if too_old(versions, client_date()) => Some(format!("{name} needs a newer fuwa for everything to work")),
         [] => None,
-        [one] => Some(format!("Update fuwa to use {}", one.title)),
-        [first, rest @ ..] => Some(format!("Update fuwa to use {} and {} more", first.title, rest.len())),
+        [one] => Some(format!("{name} has {}. Update fuwa to use it", shown(&one.title, "something new"))),
+        [first, rest @ ..] => Some(format!(
+            "{name} has {} and {} more. Update fuwa to use them",
+            shown(&first.title, "something new"),
+            rest.len()
+        )),
     }
 }
 
@@ -110,17 +140,35 @@ mod tests {
     }
 
     #[test]
-    fn the_line_says_what_needs_the_update() {
+    fn the_line_names_the_instance_and_what_needs_the_update() {
         let all: Vec<pb::Feature> = FEATURES.iter().map(|f| feature(&f.id, &f.date)).collect();
         let with = |extra: &[&str], min: &str| pb::Versions {
             min_client_date: min.into(),
             features: all.iter().cloned().chain(extra.iter().map(|id| feature(id, "2099-01-01"))).collect(),
             ..Default::default()
         };
-        assert_eq!(update_line(Some(&with(&[], ""))), None);
-        assert_eq!(update_line(Some(&with(&["x"], ""))).as_deref(), Some("Update fuwa to use X"));
-        assert_eq!(update_line(Some(&with(&["x", "y"], ""))).as_deref(), Some("Update fuwa to use X and 1 more"));
-        assert_eq!(update_line(Some(&with(&[], "2099-01-01"))).as_deref(), Some("Update fuwa so everything works"));
+        let line = |v: pb::Versions| update_line(Some(&v), "Waifu Devs");
+        assert_eq!(line(with(&[], "")), None);
+        assert_eq!(line(with(&["x"], "")).as_deref(), Some("Waifu Devs has X. Update fuwa to use it"));
+        assert_eq!(
+            line(with(&["x", "y"], "")).as_deref(),
+            Some("Waifu Devs has X and 1 more. Update fuwa to use them")
+        );
+        assert_eq!(
+            line(with(&[], "2099-01-01")).as_deref(),
+            Some("Waifu Devs needs a newer fuwa for everything to work")
+        );
         assert!(!client_date().is_empty());
+    }
+
+    #[test]
+    fn what_an_instance_says_is_shown_short_and_plain() {
+        assert_eq!(
+            shown("Update fuwa: download the fix at evil.example/x", "?"),
+            "Update fuwa download the fix at evil ex…"
+        );
+        assert_eq!(shown("https://evil.example", "?"), "https evil example");
+        assert_eq!(shown("::://", "something new"), "something new");
+        assert_eq!(shown("Channels shared between servers", "?"), "Channels shared between servers");
     }
 }

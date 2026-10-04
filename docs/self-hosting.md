@@ -408,9 +408,10 @@ The desktop app gets updates ready, and installs them only when the person
 says so. A little after it starts and then every six hours it asks the first instance it can reach (yours, if it's first) for
 `/updates/latest.json`, and fetches a newer build through
 `/updates/files/<name>`, which your instance fetches from GitHub once per
-release, checks against `SHA256SUMS` and keeps in its temporary folder (never
-the data volume), so GitHub never sees who's updating. It hands over at most
-16 at a time and cuts off anyone who stops reading. Your instance can't
+release, checks against `SHA256SUMS` and keeps in `release-cache` in its data
+folder (only fuwa can read it; older releases are removed), so GitHub never
+sees who's updating. Anyone who stops reading, or reads very slowly, is cut
+off. Your instance can't
 change what it hands over: the app installs a build only when the release's
 `SHA256SUMS` carries a valid signature from a key the app was built with (see
 [Release signing](#release-signing)) and the file's SHA-256 matches it, and
