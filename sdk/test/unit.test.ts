@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ConnectError, createClient, createRouterTransport } from "@connectrpc/connect";
 import {
+  CallService,
   Code,
   EventFollower,
   EventService,
@@ -15,6 +16,7 @@ import {
   UnavailableError,
   createFuwa,
   instanceUrl,
+  joinVoice,
   mentions,
   opusPacketDuration,
   parseCommand,
@@ -239,4 +241,42 @@ test("Ogg Opus files round-trip", () => {
   assert.equal(head.channels, 2);
   assert.deepEqual(back, packets);
   assert.throws(() => readOggOpus(Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28)), /Ogg/);
+});
+
+test("a voice connection survives failed rejoins", async () => {
+  let listens = 0;
+  let left = 0;
+  const transport = createRouterTransport(({ service }) =>
+    service(CallService, {
+      async *listenVoice(req: { sessionId: string }, ctx: { signal: AbortSignal }) {
+        listens++;
+        if (listens === 2) throw new ConnectError("restarting", Code.Unavailable); // a failed rejoin
+        yield { event: { case: "joined", value: { sessionId: "place-1" } } };
+        if (listens === 1) {
+          yield { event: { case: "frame", value: { userId: "u", opus: Uint8Array.of(0xfc, 1, 2), timestamp: 0 } } };
+          throw new ConnectError("dropped", Code.Unavailable);
+        }
+        assert.equal(req.sessionId, "place-1", "it rejoins its own place");
+        await new Promise((resolve) => ctx.signal.addEventListener("abort", resolve));
+      },
+      async leaveVoice() {
+        left++;
+        return {};
+      },
+    } as never),
+  );
+  const fuwa = { ...createFuwa({ url: "http://localhost:1" }), calls: createClient(CallService, transport) };
+  const voice = await joinVoice(fuwa, { serverId: "s", channelId: "c" });
+  const events: string[] = [];
+  voice.on("reconnecting", () => void events.push("reconnecting"));
+  await new Promise<void>((resolve) => voice.on("rejoined", () => resolve()));
+  assert.deepEqual(events, ["reconnecting", "reconnecting"]);
+  assert.equal(listens, 3);
+  let settled = false;
+  voice.closed.then(() => (settled = true), () => (settled = true));
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(settled, false, "still in the channel");
+  await voice.leave();
+  assert.equal(left, 1);
+  await voice.closed;
 });

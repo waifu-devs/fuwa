@@ -57,6 +57,10 @@ const FINAL = new Set([Code.FailedPrecondition, Code.PermissionDenied, Code.NotF
 const BATCH = 5;
 const AHEAD = 10;
 const FRAME_MS = 20;
+/** Waits between tries to rejoin, and how long a stream must stay up before they start over. */
+const REJOIN_MIN_MS = 250;
+const REJOIN_MAX_MS = 8000;
+const STEADY_MS = 10_000;
 
 /**
  * Being in a voice channel, without WebRTC: CallService.ListenVoice keeps
@@ -92,6 +96,7 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
   #ending: FuwaError | undefined;
   #rejoined: Promise<void> = Promise.resolve();
   #reconnecting = false;
+  #unlink: (() => void) | undefined;
 
   private constructor(fuwa: Fuwa, options: JoinVoiceOptions, first: AsyncIterator<ListenVoiceResponse>) {
     this.#fuwa = fuwa;
@@ -284,7 +289,8 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
 
   async #run(first: AsyncIterator<ListenVoiceResponse>): Promise<void> {
     let iterator: AsyncIterator<ListenVoiceResponse> | undefined = first;
-    let wait = 250;
+    let wait = REJOIN_MIN_MS;
+    let upSince = Date.now();
     try {
       for (;;) {
         let error: FuwaError;
@@ -292,7 +298,6 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
           for (;;) {
             const { done, value } = await iterator!.next();
             if (done) break;
-            wait = 250;
             if (value.event.case === "frame") this.#heard(value.event.value);
           }
           error = new UnavailableError(Code.Unavailable, "the instance closed the voice stream");
@@ -301,21 +306,33 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
         }
         if (this.#stop.signal.aborted) return;
         if (FINAL.has(error.code)) throw error;
+        // Only a stream that stayed up a while starts the waits over, so one
+        // that keeps dropping right after it joins backs off.
+        if (Date.now() - upSince >= STEADY_MS) wait = REJOIN_MIN_MS;
         // A deploy or a dropped connection: join again, keeping the place.
         let rejoined!: () => void;
         this.#rejoined = new Promise((resolve) => (rejoined = resolve));
         this.#reconnecting = true;
         for (;;) {
-          this.#emit("reconnecting", { error, retryInMs: wait });
+          const retryInMs = Math.round(wait / 2 + (Math.random() * wait) / 2);
+          this.#emit("reconnecting", { error, retryInMs });
           try {
-            await sleep(wait, this.#stop.signal);
+            await sleep(retryInMs, this.#stop.signal);
           } catch {
             return;
           }
-          wait = Math.min(wait * 2, 8000);
+          wait = Math.min(wait * 2, REJOIN_MAX_MS);
+          // Each try has its own controller, which leaving aborts: a failed try
+          // aborts only itself, never the connection.
+          const attempt = new AbortController();
+          const stop = () => attempt.abort();
+          this.#unlink?.();
+          this.#stop.signal.addEventListener("abort", stop, { once: true });
+          this.#unlink = () => this.#stop.signal.removeEventListener("abort", stop);
           try {
             const out = { session: this.#session, state: this.#state };
-            const stream = await VoiceConnection.#listen(this.#fuwa, this.#opts, this.#session, out, this.#stop);
+            const stream = await VoiceConnection.#listen(this.#fuwa, this.#opts, this.#session, out, attempt);
+            upSince = Date.now();
             this.#session = out.session;
             this.#state = out.state;
             iterator = stream.iterator;
@@ -324,6 +341,7 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
             this.#emit("rejoined", this.#state);
             break;
           } catch (err) {
+            this.#stop.signal.removeEventListener("abort", stop);
             if (this.#stop.signal.aborted) return;
             error = toFuwaError(err);
             if (FINAL.has(error.code)) throw error;
