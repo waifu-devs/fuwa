@@ -18,6 +18,10 @@ service EventService {
   // ones they no longer can as ChannelDeleted, both with sequence 0. A replay
   // goes by what the caller can see now, so after one a client lists the
   // server's channels again to pick up access that changed while it was away.
+  // With `follow_new_servers`, a server the caller joins or is added to while
+  // the stream is open is followed from then on, announced by `followed`. A
+  // session that's signed out, or an agent token that's reset, ends its
+  // streams at once with UNAUTHENTICATED.
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
   // A server's log, leaving out events about channels the caller can't see now
   // (but keeping every ChannelDeleted).
@@ -31,12 +35,20 @@ message ServerCursor {
 }
 
 message SubscribeRequest {
+  // Up to 200. May be empty with `follow_new_servers`, for a stream that only
+  // waits to be added somewhere (an agent with no servers yet, say).
   repeated ServerCursor servers = 1;
+  // Also follow servers the caller joins, or is added to, while the stream is
+  // open (up to 200 in all).
+  bool follow_new_servers = 2;
 }
 
 message SubscribeResponse {
   Event event = 1;
   SubscribeReady ready = 2;
+  // A server the caller joined, or was added to, now followed: its events
+  // after this sequence come next. Only with `follow_new_servers`.
+  ServerHead followed = 3;
 }
 
 // Sent once per stream, when it is live.

@@ -10,6 +10,7 @@
     { "id": "polls", "date": "2026-10-04", "title": "Polls" },
     { "id": "rich-presence", "date": "2026-10-04", "title": "Showing what people are playing" },
     { "id": "voice-messages", "date": "2026-10-04", "title": "Voice messages" },
+    { "id": "agent-streams", "date": "2026-10-04", "title": "Agents that follow new servers and see mentions" },
     { "id": "video-recordings", "date": "2026-10-04", "title": "Video in server recordings" }
   ]
 }

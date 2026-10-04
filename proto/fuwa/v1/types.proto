@@ -871,6 +871,10 @@ message Message {
   Poll poll = 21;
   // A GIF sent with it (GifService), kept on this instance.
   MessageGif gif = 22;
+  // The members it names as <@id> (or <@!id>), once each, in order: the
+  // people a client highlights it for. Up to 50; ids of anyone not in the
+  // server are left out.
+  repeated string mention_user_ids = 23;
 }
 
 // A poll and how it stands. Counts are everyone's (for an anonymous poll

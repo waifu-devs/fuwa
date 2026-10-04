@@ -424,8 +424,9 @@ impl AuthService for Api {
     async fn sign_out(&self, request: Request<pb::SignOutRequest>) -> Result<Response<pb::SignOutResponse>, Status> {
         respond(
             async {
-                if let Viewer::Account { token_hash, .. } = self.viewer(request.metadata()).await? {
+                if let Viewer::Account { account, token_hash } = self.viewer(request.metadata()).await? {
                     self.app.node()?.delete_session(&token_hash).await?;
+                    self.app.sessions_ended(&account.id);
                 }
                 Ok(pb::SignOutResponse {})
             }
@@ -584,6 +585,7 @@ impl AuthService for Api {
                 auth::validate_password(&req.new_password)?;
                 let hash = auth::hash_password(req.new_password).await?;
                 self.app.node()?.set_password(&account.id, &hash, &token_hash).await?;
+                self.app.sessions_ended(&account.id);
                 Ok(pb::ChangePasswordResponse {})
             }
             .await,
