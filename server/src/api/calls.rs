@@ -36,6 +36,9 @@ const LISTEN_KEEP: Duration = Duration::from_secs(5);
 /// Messages a ListenVoice stream holds for a program that's behind (about
 /// two seconds of five people talking); past that it misses sound.
 const LISTEN_BUFFER: usize = 512;
+/// How long a ListenVoice stream goes without sending anything before it
+/// sends a keepalive, so a program can tell a quiet call from a dead stream.
+const LISTEN_QUIET: Duration = Duration::from_secs(15);
 /// How long a ListenVoice stream tries to reach a media part again after
 /// one went away, before it gives up and the program has to listen again.
 const LISTEN_RECONNECT: Duration = Duration::from_secs(30);
@@ -58,6 +61,11 @@ async fn listen(app: Arc<App>, server_id: String, mut place: Place, mut events: 
     let user_id = place.state.user_id.clone();
     let mut keep = tokio::time::interval(LISTEN_KEEP);
     keep.tick().await;
+    // Moved on only when it fires, not with every frame: until then it just
+    // waits out whatever's left of the quiet since the last thing sent.
+    let mut last_sent = Instant::now();
+    let quiet = tokio::time::sleep(LISTEN_QUIET);
+    tokio::pin!(quiet);
     let ended = loop {
         tokio::select! {
             _ = tx.closed() => {
@@ -75,11 +83,23 @@ async fn listen(app: Arc<App>, server_id: String, mut place: Place, mut events: 
                     _ => break moved_away().into(),
                 }
             }
+            _ = &mut quiet => {
+                let due = last_sent + LISTEN_QUIET;
+                if Instant::now() >= due {
+                    let keepalive = listened(pb::listen_voice_response::Event::Keepalive(pb::VoiceKeepalive {}));
+                    // A full buffer has plenty on its way already.
+                    let _ = tx.try_send(Ok(keepalive));
+                    last_sent = Instant::now();
+                }
+                quiet.as_mut().reset((last_sent + LISTEN_QUIET).into());
+            }
             event = events.next() => match event {
                 Some(Bridged::Frame(heard)) => {
                     let frame = pb::VoiceFrame { user_id: heard.participant, opus: heard.frame, timestamp: heard.timestamp };
                     // A program that doesn't keep up misses sound, rather than holding the call up.
-                    let _ = tx.try_send(Ok(listened(pb::listen_voice_response::Event::Frame(frame))));
+                    if tx.try_send(Ok(listened(pb::listen_voice_response::Event::Frame(frame)))).is_ok() {
+                        last_sent = Instant::now();
+                    }
                 }
                 Some(Bridged::Ended(Ending::Replaced)) => {
                     break Status::failed_precondition("you joined this call from somewhere else");
@@ -511,7 +531,7 @@ impl Api {
         if !place.may_speak() {
             return Err(Error::PermissionDenied("you can't speak in this voice channel".into()));
         }
-        let queued = self.app.media_link.speak(&place, req.frames).await?;
+        let queued = self.app.media_link.speak(&place, req.frames, req.interrupt).await?;
         Ok(pb::SpeakVoiceResponse { queued: queued as u32 })
     }
 

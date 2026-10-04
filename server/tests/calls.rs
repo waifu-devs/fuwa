@@ -672,7 +672,7 @@ async fn programs_hear_and_talk_without_webrtc() {
                 }
                 _ = speak.tick() => {
                     let frames = (0..5).map(|_| { sent += 1; format!("agent {sent}").into_bytes() }).collect();
-                    let request = pb::SpeakVoiceRequest { server_id: sid2.clone(), session_id: session2.clone(), frames };
+                    let request = pb::SpeakVoiceRequest { server_id: sid2.clone(), session_id: session2.clone(), frames, interrupt: false };
                     let queued = calls.speak_voice(authed(&bot_token, request)).await.unwrap().into_inner().queued;
                     assert!(queued <= 10, "frames go out as fast as they come: {queued} waiting");
                 }
@@ -695,7 +695,10 @@ async fn programs_hear_and_talk_without_webrtc() {
     // Only its own session speaks, and only a second at a time.
     let speak = |session: &str, frames: usize| {
         let frames = vec![b"x".to_vec(); frames];
-        authed(&bot, pb::SpeakVoiceRequest { server_id: sid.clone(), session_id: session.into(), frames })
+        authed(
+            &bot,
+            pb::SpeakVoiceRequest { server_id: sid.clone(), session_id: session.into(), frames, interrupt: false },
+        )
     };
     assert_eq!(c.calls.speak_voice(speak("nope", 1)).await.unwrap_err().code(), Code::FailedPrecondition);
     assert_eq!(c.calls.speak_voice(speak(&session, 51)).await.unwrap_err().code(), Code::InvalidArgument);
@@ -856,6 +859,50 @@ async fn programs_hear_each_other() {
     assert!(heard.iter().all(|f| f.user_id == one_id));
     assert_eq!(heard[0].opus, b"hello 0");
     assert_eq!(heard[1].timestamp.wrapping_sub(heard[0].timestamp), 960);
+
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
+}
+
+#[tokio::test]
+async fn quiet_calls_keep_programs_streams_alive() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let (bot, _) = sign_up(&mut c, "helper").await;
+    let request = pb::CreateServerRequest { name: "Bots".into(), discoverable: true, ..Default::default() };
+    let sid = c.servers.create_server(authed(&bot, request)).await.unwrap().into_inner().server.unwrap().id;
+    let request = pb::CreateChannelRequest {
+        server_id: sid.clone(),
+        name: "Lounge".into(),
+        r#type: pb::ChannelType::Voice as i32,
+        ..Default::default()
+    };
+    let voice = c.channels.create_channel(authed(&bot, request)).await.unwrap().into_inner().channel.unwrap();
+    let request = pb::ListenVoiceRequest { server_id: sid.clone(), channel_id: voice.id.clone(), ..Default::default() };
+    let mut stream = c.calls.listen_voice(authed(&bot, request)).await.unwrap().into_inner();
+    let first = stream.next().await.unwrap().unwrap().event.unwrap();
+    let pb::listen_voice_response::Event::Joined(joined) = first else { panic!("joined comes first") };
+
+    // Talking over itself: what was still waiting is dropped.
+    let speak = |frames: usize, interrupt: bool| {
+        let frames = vec![vec![0xf8, 0xff, 0xfe]; frames];
+        authed(
+            &bot,
+            pb::SpeakVoiceRequest { server_id: sid.clone(), session_id: joined.session_id.clone(), frames, interrupt },
+        )
+    };
+    c.calls.speak_voice(speak(40, false)).await.unwrap();
+    assert_eq!(c.calls.speak_voice(speak(40, false)).await.unwrap_err().code(), Code::ResourceExhausted);
+    assert_eq!(c.calls.speak_voice(speak(40, true)).await.unwrap().into_inner().queued, 40);
+    assert_eq!(c.calls.speak_voice(speak(0, true)).await.unwrap().into_inner().queued, 0);
+
+    // Alone in the channel nobody says anything, and a keepalive comes anyway.
+    let started = std::time::Instant::now();
+    let next = tokio::time::timeout(Duration::from_secs(20), stream.next()).await.expect("a keepalive within 15 s");
+    let event = next.unwrap().unwrap().event.unwrap();
+    assert!(matches!(event, pb::listen_voice_response::Event::Keepalive(_)));
+    assert!(started.elapsed() >= Duration::from_secs(13), "not sooner than needed");
 
     instance.app.shutdown.cancel();
     instance.serving.await.unwrap();
