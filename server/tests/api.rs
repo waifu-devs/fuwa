@@ -7610,4 +7610,14 @@ async fn channels_are_created_with_their_permissions() {
     let denied = c.channels.create_channel(create(&rin, "nope", vec![hidden()])).await.unwrap_err();
     assert_eq!(denied.code(), Code::PermissionDenied);
     c.channels.create_channel(create(&rin, "fine", vec![])).await.unwrap();
+
+    // Copying a channel whose overwrites name someone who has left: theirs is dropped.
+    let (kai, kai_user, _) = sign_up(&mut c, "kai").await;
+    join(&mut c, &kai, &sid).await;
+    c.servers.leave_server(authed(&kai, pb::LeaveServerRequest { server_id: sid.clone() })).await.unwrap();
+    let kai_sees = overwrite(&kai_user.id, T::Member, &[P::ViewChannels], &[]);
+    let copy = c.channels.create_channel(create(&juan, "staff-copy", vec![hidden(), kai_sees])).await.unwrap();
+    let copy = copy.into_inner().channel.unwrap();
+    assert_eq!(copy.permission_overwrites.len(), 1);
+    assert_eq!(copy.permission_overwrites[0].target_id, sid);
 }

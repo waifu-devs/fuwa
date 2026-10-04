@@ -100,7 +100,16 @@ impl ChannelService for Api {
                             return Err(Error::invalid("categories can't sit inside other channels"));
                         }
                         check_parent(conn, &sdb.id, &req.parent_id).await?;
-                        check_overwrites(conn, &sdb.id, &access, &account.id, &[], &wanted, have).await?;
+                        // A copied channel may name people who have since left:
+                        // their overwrites would do nothing, so they're dropped.
+                        let mut kept = Vec::with_capacity(wanted.len());
+                        for o in &wanted {
+                            if o.member && store::member(conn, &sdb.id, &o.target_id).await?.is_none() {
+                                continue;
+                            }
+                            kept.push(o.clone());
+                        }
+                        check_overwrites(conn, &sdb.id, &access, &account.id, &[], &kept, have).await?;
                         let position =
                             query_one(conn, "SELECT coalesce(max(position) + 1, 0) FROM channels", (), |r| {
                                 r.get::<i64>(0)
@@ -137,8 +146,8 @@ impl ChannelService for Api {
                             ),
                         )
                         .await?;
-                        if !wanted.is_empty() {
-                            write_overwrites(conn, &channel.id, &wanted).await?;
+                        if !kept.is_empty() {
+                            write_overwrites(conn, &channel.id, &kept).await?;
                             channel = load_channel(conn, &sdb.id, &channel.id).await?.ok_or(Error::NotFound("channel"))?;
                         }
                         if kind == pb::ChannelType::Secure {
@@ -569,6 +578,7 @@ async fn write_overwrites(conn: &turso::Connection, channel_id: &str, wanted: &[
     Ok(())
 }
 
+#[derive(Clone)]
 struct Overwrite {
     target_id: String,
     member: bool,
