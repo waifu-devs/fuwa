@@ -4,6 +4,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = [
         "types", "node", "auth", "account", "server", "channel", "message", "event", "admin", "media", "role",
         "invite", "join", "dm", "automod", "emoji", "webhook", "agent", "call", "sso", "secure", "presence", "gif",
+        "search",
     ]
     .map(|name| PathBuf::from(format!("../proto/fuwa/v1/{name}.proto")));
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);

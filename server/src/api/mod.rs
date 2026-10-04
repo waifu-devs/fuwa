@@ -18,6 +18,7 @@ mod messages;
 mod node;
 mod presence;
 mod roles;
+mod search;
 mod secure;
 mod servers;
 mod shared;
@@ -28,6 +29,7 @@ mod webhooks;
 pub(crate) use account::export_server;
 pub use calls::{hang_up_server, spawn_voice_guard, spawn_voice_sweeper};
 pub use media::PictureOwner;
+pub use search::spawn_search_indexer;
 pub use secure::MAX_SECURE_MEMBERS;
 pub use shared::{
     arrived as shared_arrived, returned as shared_returned, shared_call, spawn_shared_fanout, undo as shared_undo,
