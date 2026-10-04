@@ -29,7 +29,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0012_federation.sql"),
     include_str!("../migrations/node/0013_profile_effects.sql"),
     include_str!("../migrations/node/0014_server_arrangements.sql"),
-    include_str!("../migrations/node/0017_presence.sql"),
+    include_str!("../migrations/node/0018_gifs.sql"),
+    include_str!("../migrations/node/0021_presence.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
@@ -1797,6 +1798,7 @@ impl NodeDb {
                 "notification_settings",
                 "upload_days",
                 "server_arrangements",
+                "saved_gifs",
                 "presence_settings",
             ] {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
