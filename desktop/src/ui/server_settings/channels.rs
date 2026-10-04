@@ -23,6 +23,7 @@ const VIEW: Bits = bit(P::ViewChannels);
 enum Tab {
     Overview,
     Permissions,
+    Share,
 }
 
 /// Where the role-or-person picker is open: under "who can see it", or beside Advanced.
@@ -686,6 +687,15 @@ impl ServerSettingsView {
         if roles {
             options.push((Tab::Permissions, "Permissions"));
         }
+        // Sharing takes managing the server and the channel, while the instance allows it (or it's shared already).
+        let texty = matches!(kind(channel), pb::ChannelType::Text | pb::ChannelType::Announcement);
+        let sharing_on = self
+            .core
+            .shared
+            .read(|s| s.instance(&self.key).and_then(|i| i.node.as_ref()).is_some_and(|n| n.shared_channels));
+        if texty && snap.access.has(P::ManageServer) && manage && (sharing_on || channel.shared.is_some()) {
+            options.push((Tab::Share, "Share"));
+        }
         let tab =
             options.iter().map(|(t, _)| *t).find(|t| *t == self.channels.tab).or(options.first().map(|(t, _)| *t));
         let mut tabs = div().flex().gap(px(4.0)).p(px(4.0)).rounded(corner(12.0)).bg(alpha(p.muted, 0.6));
@@ -737,6 +747,7 @@ impl ServerSettingsView {
         let body = match tab {
             Some(Tab::Overview) => self.channel_overview(channel, snap, p, window, cx).into_any_element(),
             Some(Tab::Permissions) => self.channel_permissions(channel, snap, p, window, cx).into_any_element(),
+            Some(Tab::Share) => self.channel_share(channel, p, window, cx),
             None => div()
                 .py(px(40.0))
                 .text_center()
