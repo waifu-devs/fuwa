@@ -155,6 +155,11 @@ impl Person {
         shows_activity(&self.settings, servers)
     }
 
+    /// Whether others see them online (an app open, and not invisible).
+    fn looks_online(&self, user_id: &str) -> bool {
+        seen(&self.own(user_id), false).status != pb::PresenceStatus::Offline as i32
+    }
+
     /// What `servers` (the ones shared with a viewer) let that viewer see.
     fn seen_in(&self, user_id: &str, servers: &[String]) -> pb::Presence {
         seen(&self.own(user_id), self.shows_activity_in(servers))
@@ -218,7 +223,9 @@ impl Inner {
         let shared = index.shared_servers(a, b);
         for (from, to) in [(a, b), (b, a)] {
             let (Some(person), Some(streams)) = (self.people.get(from), self.watchers.get(to)) else { continue };
-            if person.apps.is_empty() {
+            // Only someone `to` was shown as online goes offline for them:
+            // nothing at all for people offline or invisible.
+            if !person.looks_online(from) {
                 continue;
             }
             let presence = if shared.is_empty() { offline(from) } else { person.seen_in(from, &shared) };
@@ -476,7 +483,7 @@ impl Presence {
         let mut behind = Vec::new();
         let watching: Vec<&String> = members.iter().filter(|id| inner.watchers.contains_key(*id)).collect();
         let online: Vec<&String> =
-            members.iter().filter(|id| inner.people.get(*id).is_some_and(|p| !p.apps.is_empty())).collect();
+            members.iter().filter(|id| inner.people.get(*id).is_some_and(|p| p.looks_online(id))).collect();
         for to in &watching {
             for from in &online {
                 if to == from || !index.shared_servers(to, from).is_empty() {
@@ -882,14 +889,30 @@ mod tests {
         let presence = Presence::default();
         presence.update(&index, "ann", "t1", "web", false, vec![], Some(default_settings()));
         presence.update(&index, "bo", "t2", "web", false, vec![], Some(default_settings()));
+        // dee is in s1 too, online but invisible.
+        index.join("dee", "s1");
+        let invisible = pb::PresenceSettings { status: pb::PresenceStatus::Invisible as i32, ..sharing(&[]) };
+        presence.update(&index, "dee", "t4", "web", false, vec![], Some(invisible));
         let mut ann = presence.watch(&index, "ann", None);
         let mut bo = presence.watch(&index, "bo", None);
+        let mut dee = presence.watch(&index, "dee", None);
+        drain(&mut dee.rx);
         index.leave("bo", "s1");
         presence.left(&index, "bo", "s1");
         let to_ann = drain(&mut ann.rx);
         assert_eq!((to_ann[0].user_id.as_str(), to_ann[0].status), ("bo", pb::PresenceStatus::Offline as i32));
         let to_bo = drain(&mut bo.rx);
+        assert_eq!(to_bo.len(), 1, "nothing about dee, who bo never saw online: {to_bo:?}");
         assert_eq!((to_bo[0].user_id.as_str(), to_bo[0].status), ("ann", pb::PresenceStatus::Offline as i32));
+        assert_eq!(drain(&mut dee.rx).len(), 1);
+
+        // The server goes: nothing about dee either.
+        let mut ann = presence.watch(&index, "ann", None);
+        drain(&mut ann.rx);
+        let members = index.members_where("s1", |_| true);
+        index.remove("s1");
+        presence.server_gone(&index, &members);
+        assert!(drain(&mut ann.rx).iter().all(|p| p.user_id != "dee"));
     }
 
     #[test]
