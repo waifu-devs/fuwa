@@ -11,8 +11,10 @@ pub mod api;
 pub mod arrange;
 pub mod backgrounds;
 pub mod calls;
+pub mod compat;
 pub mod config;
 pub mod dms;
+pub mod history;
 pub mod instance_admin;
 pub mod instance_manage;
 pub mod instance_servers;
@@ -30,6 +32,7 @@ pub mod sso;
 pub mod store;
 mod sync;
 pub mod themes;
+pub mod updates;
 pub mod vault;
 pub mod voice;
 
@@ -71,6 +74,8 @@ pub struct Shared {
     store: Arc<Mutex<Store>>,
     version: Arc<watch::Sender<u64>>,
     notices: mpsc::UnboundedSender<Notice>,
+    /// The app's settings, here so the encryption engine can tell whether a message should notify.
+    prefs: Arc<Mutex<Prefs>>,
 }
 
 impl Shared {
@@ -116,6 +121,41 @@ impl Shared {
             mention: true,
         });
     }
+
+    /// Someone else's message in a secure channel, just opened: it chimes and
+    /// notifies by the channel's settings, like any channel's. The server
+    /// can't see who it mentions, so this device works it out.
+    pub(crate) fn notify_secure(&self, key: &str, server_id: &str, channel_id: &str, item: &vault::Item) {
+        if self.is_focused(key, channel_id) || dms::now_ms() - item.at > 30_000 {
+            return;
+        }
+        let prefs = self.prefs.lock().clone();
+        let notice = self.read(|s| {
+            let i = s.instance(key)?;
+            if i.me.as_ref().is_some_and(|m| m.id == item.sender_id) {
+                return None;
+            }
+            let settings = i.effective_notifications(server_id, channel_id, dms::now_ms());
+            let message =
+                pb::Message { author_id: item.sender_id.clone(), content: item.content.clone(), ..Default::default() };
+            let mention = i.pings_me(server_id, &message, settings.suppress_everyone);
+            notifications::should_notify(settings, mention, &prefs).then(|| Notice::Message {
+                instance: key.to_owned(),
+                server_id: Some(server_id.to_owned()),
+                channel_id: channel_id.to_owned(),
+                title: format!(
+                    "{} in #{}",
+                    i.display_name(Some(server_id), &item.sender_id),
+                    i.channel(server_id, channel_id).map(|c| c.name.as_str()).unwrap_or("a channel")
+                ),
+                body: item.content.chars().take(160).collect(),
+                mention,
+            })
+        });
+        if let Some(notice) = notice {
+            self.notice(notice);
+        }
+    }
 }
 
 /// One instance the app follows.
@@ -144,7 +184,6 @@ pub struct Core {
     pub(crate) vault_key: [u8; 32],
     runtime: tokio::runtime::Runtime,
     engines: Mutex<HashMap<String, Engine>>,
-    prefs: Mutex<Prefs>,
     version: watch::Receiver<u64>,
     notices: Mutex<Option<mpsc::UnboundedReceiver<Notice>>>,
     voice: voice::Voice,
@@ -168,17 +207,18 @@ impl Core {
             .build()?;
         let (version_tx, version) = watch::channel(0u64);
         let (notices_tx, notices) = mpsc::unbounded_channel();
+        let prefs = config::load_prefs(&paths);
         let shared = Shared {
             store: Arc::new(Mutex::new(Store::default())),
             version: Arc::new(version_tx),
             notices: notices_tx,
+            prefs: Arc::new(Mutex::new(prefs.clone())),
         };
         // Only you can open the app's folders.
         vault::private_dir(&paths.config)?;
         vault::private_dir(&paths.vaults)?;
         let secrets = secrets::Secrets::open(&paths.config);
         let vault_key = secrets.vault_key();
-        let prefs = config::load_prefs(&paths);
         reports::start(&paths.config, prefs.share_reports);
         // A game asking to be allowed shows in the window.
         let games = presence::Games::new(prefs.game_answers.clone(), {
@@ -193,7 +233,6 @@ impl Core {
             vault_key,
             runtime,
             engines: Mutex::new(HashMap::new()),
-            prefs: Mutex::new(prefs),
             version,
             notices: Mutex::new(Some(notices)),
             voice: voice::Voice::default(),
@@ -215,6 +254,7 @@ impl Core {
                 tokio::time::sleep(reports::SEND_EVERY).await;
             }
         });
+        core.watch_updates();
         Ok(core)
     }
 
@@ -248,12 +288,12 @@ impl Core {
     // ───────────────────────── Settings ─────────────────────────
 
     pub fn prefs(&self) -> Prefs {
-        self.prefs.lock().clone()
+        self.shared.prefs.lock().clone()
     }
 
     pub fn set_prefs(&self, f: impl FnOnce(&mut Prefs)) {
         let prefs = {
-            let mut prefs = self.prefs.lock();
+            let mut prefs = self.shared.prefs.lock();
             f(&mut prefs);
             prefs.clone()
         };
@@ -573,7 +613,10 @@ impl Core {
             let f = focus.as_ref()?;
             let i = s.instances.get_mut(&f.instance)?;
             i.unread.remove(&f.channel);
-            i.dms.conversations.iter().any(|c| c.id == f.channel).then(|| (f.instance.clone(), f.channel.clone()))
+            // A conversation, or a secure channel: what's been read is kept with its messages.
+            let encrypted =
+                i.dms.conversations.iter().any(|c| c.id == f.channel) || i.dms.items.contains_key(&f.channel);
+            encrypted.then(|| (f.instance.clone(), f.channel.clone()))
         });
         if let Some((key, id)) = dm
             && let Some(engine) = self.dm_engine(&key)
@@ -866,6 +909,62 @@ impl Core {
     pub async fn delete_dm(&self, key: &str, id: &str, seq: i64) -> Result<(), DmError> {
         let engine = self.dm_engine(key).ok_or_else(|| DmError("Encrypted messages aren't ready yet.".into()))?;
         engine.remove(id, seq).await
+    }
+
+    /// Opens a secure channel: catches up on it and, if you may write there,
+    /// brings in the devices of everyone who can see it.
+    pub async fn prepare_secure_channel(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+        write: bool,
+    ) -> Result<(), DmError> {
+        let engine = self.dm_engine(key).ok_or_else(|| DmError("Encrypted messages aren't ready yet.".into()))?;
+        engine.open_channel(server_id, channel_id).await;
+        if write { engine.prepare(channel_id).await } else { Ok(()) }
+    }
+
+    /// Starts a secure channel's encryption over (Manage Channels), then gets it going again if you may write there.
+    pub async fn reset_secure_channel(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+        write: bool,
+    ) -> Result<(), DmError> {
+        let api = self.api(key).ok_or_else(|| DmError("That instance isn't here.".into()))?;
+        let engine = self.dm_engine(key).ok_or_else(|| DmError("Encrypted messages aren't ready yet.".into()))?;
+        let req = pb::ResetSecureChannelRequest { server_id: server_id.into(), channel_id: channel_id.into() };
+        rpc!(api.secure(), reset_secure_channel(req)).await?;
+        reports::used("secure.reset");
+        engine.open_channel(server_id, channel_id).await;
+        if write { engine.prepare(channel_id).await } else { Ok(()) }
+    }
+
+    /// Turns passing earlier messages on to people added later on or off (Manage Channels).
+    pub async fn set_secure_history(
+        &self,
+        key: &str,
+        server_id: &str,
+        channel_id: &str,
+        on: bool,
+    ) -> Result<(), DmError> {
+        let api = self.api(key).ok_or_else(|| DmError("That instance isn't here.".into()))?;
+        let req = pb::SetSecureHistoryRequest {
+            server_id: server_id.into(),
+            channel_id: channel_id.into(),
+            share_history: on,
+        };
+        rpc!(api.secure(), set_secure_history(req)).await?;
+        reports::used(if on { "secure.history_on" } else { "secure.history_off" });
+        self.shared.instance(key, |i| {
+            i.dms.secure_history.insert(channel_id.to_owned(), on);
+        });
+        if let Some(engine) = self.dm_engine(key) {
+            engine.follow_channel(server_id, channel_id);
+        }
+        Ok(())
     }
 
     pub async fn verify_conversation(&self, key: &str, id: &str, safety: &str) {

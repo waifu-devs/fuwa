@@ -16,7 +16,7 @@ use prost::Message;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{ED25519, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
 use sha2::{Digest, Sha256};
-use tokio::sync::OnceCell;
+use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::app::App;
@@ -53,6 +53,17 @@ const SHARE_PINS_PER_DOMAIN: usize = 3;
 const SHARES_PER_SERVER_PER_MINUTE: usize = 20;
 /// How often the time an instance was last heard from is written down.
 const HEARD_EVERY_MS: i64 = 60 * 1000;
+/// How often this instance looks again at the key of one it pinned, when
+/// that one's signature doesn't check out (a rotation it may follow).
+const FOLLOW_EVERY: Duration = Duration::from_secs(5 * 60);
+/// The most looks remembered at once; past it, none until some expire.
+const MAX_FOLLOWS: usize = 1024;
+/// The most looks remembered for one instance at once.
+const FOLLOWS_PER_INSTANCE: usize = 8;
+/// What a key rotation's signature starts with.
+const ROTATION_CONTEXT: &[u8] = b"fuwa-federation-v1 rotation";
+/// The most rotations read from another instance's key.
+const MAX_ROTATIONS_READ: usize = 64;
 
 /// Counts one more for `key` in the last minute, unless it already had
 /// `per_minute` (or too many keys are counted at once).
@@ -156,7 +167,10 @@ type Hellos = (Vec<Instant>, HashMap<String, Vec<Instant>>);
 pub struct Federation {
     allow_private: bool,
     client: reqwest::Client,
-    key: OnceCell<Arc<Ed25519KeyPair>>,
+    /// This instance's key pair, once read; replaced when it's rotated.
+    key: RwLock<Option<Arc<Ed25519KeyPair>>>,
+    /// When each pinned instance's key was last looked at again.
+    followed: Mutex<HashMap<String, Instant>>,
     /// Nonces seen from each instance, until they can't be replayed anyway.
     nonces: Mutex<HashMap<String, HashMap<Vec<u8>, i64>>>,
     /// When this process started: envelopes signed before it are refused, as
@@ -189,7 +203,8 @@ impl Federation {
         Self {
             allow_private,
             client,
-            key: OnceCell::new(),
+            key: RwLock::new(None),
+            followed: Mutex::default(),
             nonces: Mutex::default(),
             started_ms: crate::id::now_ms(),
             hellos: Mutex::default(),
@@ -277,6 +292,31 @@ impl Federation {
             set.insert(origin.to_string());
         } else {
             set.remove(origin);
+        }
+    }
+
+    /// Whether an instance's key may be looked at again now, for an envelope
+    /// signed with another key (`looking_for`: the instance and that key):
+    /// at most once every [`FOLLOW_EVERY`], whatever came of the last look.
+    fn take_follow(&self, origin: &str, looking_for: &str) -> bool {
+        let mut followed = self.followed.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let now = Instant::now();
+        if followed.len() >= 64 {
+            followed.retain(|_, at| now.duration_since(*at) < FOLLOW_EVERY);
+        }
+        // Envelopes each naming a new key can't make it grow without end.
+        // Nor can ones claiming one instance keep others' looks out.
+        let new = !followed.contains_key(looking_for);
+        let under = || followed.keys().filter(|key| key.split(' ').next() == Some(origin)).count();
+        if new && (followed.len() >= MAX_FOLLOWS || under() >= FOLLOWS_PER_INSTANCE) {
+            return false;
+        }
+        match followed.get(looking_for) {
+            Some(at) if now.duration_since(*at) < FOLLOW_EVERY => false,
+            _ => {
+                followed.insert(looking_for.to_string(), now);
+                true
+            }
         }
     }
 
@@ -489,18 +529,218 @@ pub fn blocked(app: &App, origin: &str) -> bool {
     host_of(origin).is_some_and(|host| app.settings().federation_blocked_hosts.contains(&host))
 }
 
-/// This instance's key pair, read (or made) once.
+/// This instance's key pair, read (or made) once, until it's rotated.
 async fn key_pair(app: &App) -> Result<Arc<Ed25519KeyPair>> {
-    app.federation
-        .key
-        .get_or_try_init(|| async {
-            let pkcs8 = app.node()?.federation_key().await?;
-            Ed25519KeyPair::from_pkcs8(&pkcs8)
-                .map(Arc::new)
-                .map_err(|_| Error::internal("the instance's federation key doesn't read"))
+    if let Some(pair) = app.federation.key.read().await.as_ref() {
+        return Ok(pair.clone());
+    }
+    let mut key = app.federation.key.write().await;
+    if let Some(pair) = key.as_ref() {
+        return Ok(pair.clone());
+    }
+    let pair = Arc::new(read_pair(app.node()?.federation_key().await?)?);
+    *key = Some(pair.clone());
+    Ok(pair)
+}
+
+/// A key pair from its PKCS#8, which is wiped once read.
+fn read_pair(mut pkcs8: Vec<u8>) -> Result<Ed25519KeyPair> {
+    let pair = Ed25519KeyPair::from_pkcs8(&pkcs8);
+    wipe(&mut pkcs8);
+    pair.map_err(|_| Error::internal("the instance's federation key doesn't read"))
+}
+
+/// Overwrites secret bytes before they're let go, so they don't linger in
+/// freed memory.
+pub fn wipe(bytes: &mut [u8]) {
+    for byte in bytes.iter_mut() {
+        // SAFETY: a valid, exclusive reference to one byte.
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
+/// What a key rotation's signature covers (federation.proto, KeyRotation).
+fn rotation_bytes(origin: &str, previous_key: &[u8], key: &[u8], rotated_at_ms: i64) -> Vec<u8> {
+    let mut bytes = ROTATION_CONTEXT.to_vec();
+    for part in [origin.as_bytes(), previous_key, key] {
+        bytes.extend_from_slice(&(part.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(part);
+    }
+    bytes.extend_from_slice(&rotated_at_ms.to_be_bytes());
+    bytes
+}
+
+/// Replaces this instance's key with a new one the old one vouches for, and
+/// tells the instances it pinned, so each moves to it now. The new key's
+/// fingerprint.
+pub async fn rotate_key(app: &Arc<App>) -> Result<String> {
+    let own = own_origin(app)?;
+    let node = app.node()?;
+    // Held throughout, so nothing signs with the old key once it's replaced.
+    let mut cached = app.federation.key.write().await;
+    let mut old_pkcs8 = node.federation_key().await?;
+    let old = read_pair(old_pkcs8.clone())?;
+    let mut new_pkcs8 = new_key()?;
+    let new = read_pair(new_pkcs8.clone())?;
+    let previous_key = old.public_key().as_ref().to_vec();
+    let key = new.public_key().as_ref().to_vec();
+    let rotated_at_ms = crate::id::now_ms();
+    let signature = old.sign(&rotation_bytes(&own, &previous_key, &key, rotated_at_ms)).as_ref().to_vec();
+    let rotation = fpb::KeyRotation { previous_key, key: key.clone(), rotated_at_ms, signature };
+    let rotated = node.rotate_federation_key(&old_pkcs8, &new_pkcs8, &rotation.encode_to_vec()).await;
+    wipe(&mut old_pkcs8);
+    wipe(&mut new_pkcs8);
+    rotated?;
+    *cached = Some(Arc::new(new));
+    drop(cached);
+    crate::reports::server_used("federation.key_rotated", 1);
+    tracing::info!("rotated this instance's federation key");
+    let app = app.clone();
+    tokio::spawn(async move {
+        let Ok(peers) = app.node().map(|node| node.federation_peers()) else { return };
+        let Ok(peers) = peers.await else { return };
+        for peer in peers.iter().filter(|peer| !peer.needs_check && !blocked(&app, &peer.origin)) {
+            let ping = fpb::Request { call: Some(fpb::request::Call::Ping(fpb::Ping {})) };
+            let _ = call(&app, &peer.origin, ping).await;
+        }
+    });
+    Ok(fingerprint(&key))
+}
+
+/// When this instance's key was last rotated, if it ever was.
+pub async fn rotated_at(app: &App) -> Result<Option<i64>> {
+    let rotations = app.node()?.federation_rotations().await?;
+    Ok(rotations.last().and_then(|last| fpb::KeyRotation::decode(last.as_slice()).ok()).map(|r| r.rotated_at_ms))
+}
+
+/// Where another instance's rotations lead from the key pinned for it.
+#[derive(Debug, PartialEq)]
+enum Followed {
+    /// Each (previous key, key) from the pinned key to the one it serves.
+    Path(Vec<(Vec<u8>, Vec<u8>)>),
+    /// Its keys signed two different next keys, or went back to one it left:
+    /// whoever holds an old key may be moving it, so an admin checks it.
+    Fork,
+    /// Nothing leads from the pinned key to the one it serves.
+    Broken,
+}
+
+/// Follows another instance's rotations from `pinned` to `served`: each one
+/// signed by the key before it, for `origin`, never back to a key it left
+/// (`left`: keys it moved away from, as noted here).
+fn followed(
+    origin: &str,
+    pinned: &[u8],
+    served: &[u8],
+    rotations: &[fpb::KeyRotation],
+    left: &HashSet<Vec<u8>>,
+) -> Followed {
+    let signed: Vec<&fpb::KeyRotation> = rotations
+        .iter()
+        .filter(|r| r.previous_key.len() == 32 && r.key.len() == 32)
+        .filter(|r| {
+            UnparsedPublicKey::new(&ED25519, &r.previous_key)
+                .verify(&rotation_bytes(origin, &r.previous_key, &r.key, r.rotated_at_ms), &r.signature)
+                .is_ok()
         })
-        .await
-        .cloned()
+        .collect();
+    // Serving a key it left: an old key back in use.
+    if left.contains(served) {
+        return Followed::Fork;
+    }
+    let mut path = Vec::new();
+    let mut seen = HashSet::from([pinned.to_vec()]);
+    let mut at = pinned.to_vec();
+    loop {
+        let mut next: Vec<&Vec<u8>> = signed.iter().filter(|r| r.previous_key == at).map(|r| &r.key).collect();
+        next.dedup();
+        match next.as_slice() {
+            [] => break,
+            [key] => {
+                if !seen.insert((*key).clone()) || left.contains(*key) {
+                    return Followed::Fork;
+                }
+                path.push((at, (*key).clone()));
+                at = (*key).clone();
+            }
+            _ => return Followed::Fork,
+        }
+    }
+    if path.is_empty() || at != served { Followed::Broken } else { Followed::Path(path) }
+}
+
+/// Looks again at the key of an instance whose signature didn't check out
+/// with the pinned one, and moves to the one it serves if its rotations
+/// lead there from the pinned key. The instance as pinned now, if it moved.
+/// An admin's check here looks whenever it's made; anything else, at most
+/// once every [`FOLLOW_EVERY`] for one instance.
+///
+/// `envelope` (what didn't check out) names the key it was signed with: only
+/// when it checks out with that key, a different one from the pinned key,
+/// is there anything to look for, and each such key gets its own look, so
+/// envelopes forged with other keys can't use up a real rotation's.
+async fn follow(
+    app: &App,
+    peer: &crate::node::FederationPeer,
+    by_admin: bool,
+    envelope: &fpb::Envelope,
+) -> Option<crate::node::FederationPeer> {
+    let looking_for = if envelope.key.is_empty() {
+        // From an instance too old to say.
+        peer.origin.clone()
+    } else {
+        let signed = envelope.key.len() == 32
+            && envelope.key != peer.public_key
+            && UnparsedPublicKey::new(&ED25519, &envelope.key)
+                .verify(&signed_bytes(envelope), &envelope.signature)
+                .is_ok();
+        if !signed {
+            return None;
+        }
+        format!("{} {}", peer.origin, to_hex(&envelope.key))
+    };
+    if peer.needs_check
+        || !(by_admin || app.federation.take_follow(&peer.origin, &looking_for))
+        || !app.federation.take_hello(&peer.origin)
+    {
+        return None;
+    }
+    let served = fetch_key(app, &peer.origin).await.ok()?;
+    if served.public_key == peer.public_key {
+        return None;
+    }
+    let node = app.node().ok()?;
+    let moves = node.federation_moves(Some(&peer.origin)).await.ok()?;
+    let left: HashSet<Vec<u8>> =
+        moves.into_iter().flat_map(|m| [m.previous_key, m.key]).filter(|key| *key != peer.public_key).collect();
+    let skip = served.rotations.len().saturating_sub(MAX_ROTATIONS_READ);
+    match followed(&peer.origin, &peer.public_key, &served.public_key, &served.rotations[skip..], &left) {
+        Followed::Path(path) => {
+            if !node.move_federation_peer(&peer.origin, &peer.public_key, &path).await.ok()? {
+                return None;
+            }
+            crate::reports::server_used("federation.repinned", 1);
+            tracing::info!("another instance's key moved to one its old key vouched for");
+            node.federation_peer(&peer.origin).await.ok()?
+        }
+        Followed::Fork => {
+            if node.federation_peer_needs_check(&peer.origin).await.is_err() {
+                crate::reports::server_error("federation_needs_check", Some("federation"));
+            }
+            crate::reports::server_error("federation_key_fork", Some("federation"));
+            tracing::warn!("another instance's key moved in a way this one can't follow; an admin has to check it");
+            None
+        }
+        Followed::Broken => None,
+    }
+}
+
+fn needs_check(origin: &str) -> Error {
+    Error::FailedPrecondition(format!(
+        "{}'s key changed in a way this instance couldn't follow: an admin here has to check it again",
+        display(origin)
+    ))
 }
 
 /// This instance's public key.
@@ -520,8 +760,11 @@ async fn seal(app: &App, own: &str, to: &str, payload: Vec<u8>, reply_to: Vec<u8
         reply_to,
         payload,
         signature: Vec::new(),
+        key: Vec::new(),
     };
-    envelope.signature = key_pair(app).await?.sign(&signed_bytes(&envelope)).as_ref().to_vec();
+    let pair = key_pair(app).await?;
+    envelope.signature = pair.sign(&signed_bytes(&envelope)).as_ref().to_vec();
+    envelope.key = pair.public_key().as_ref().to_vec();
     Ok(envelope)
 }
 
@@ -689,7 +932,7 @@ fn remote_error(shown: &str, (code, message): (i32, String)) -> Error {
 
 /// Another instance's key, fetched from it and checked to be for the
 /// address asked.
-async fn fetch_key(app: &App, origin: &str) -> Result<Vec<u8>> {
+async fn fetch_key(app: &App, origin: &str) -> Result<fpb::GetKeyResponse> {
     let shown = display(origin);
     let key: fpb::GetKeyResponse = unary(app, origin, "GetKey", &fpb::GetKeyRequest {}).await?;
     if key.origin != origin {
@@ -701,14 +944,14 @@ async fn fetch_key(app: &App, origin: &str) -> Result<Vec<u8>> {
     if key.public_key.len() != 32 {
         return Err(Error::FailedPrecondition(format!("{shown}'s key doesn't read")));
     }
-    Ok(key.public_key)
+    Ok(key)
 }
 
 /// Another instance's key, fetched from it and pinned (or checked against
 /// the one already pinned).
 async fn pin(app: &App, origin: &str) -> Result<crate::node::FederationPeer> {
-    let public_key = fetch_key(app, origin).await?;
-    app.node()?.pin_federation_peer(origin, &public_key).await
+    let key = fetch_key(app, origin).await?;
+    app.node()?.pin_federation_peer(origin, &key.public_key, true).await
 }
 
 /// Pins another instance's key for a share request: as [`pin`] does, but
@@ -725,12 +968,12 @@ async fn pin_for_share(app: &App, origin: &str, public_key: &[u8]) -> Result<cra
             )));
         }
     }
-    node.pin_federation_peer(origin, public_key).await
+    node.pin_federation_peer(origin, public_key, false).await
 }
 
 fn shares_capped() -> Error {
     crate::reports::server_error("federation_shares_capped", Some("federation"));
-    Error::ResourceExhausted("too many share codes looked up at once; try again in a minute".into())
+    Error::Limited("too many share codes looked up at once; try again in a minute".into(), 60_000)
 }
 
 /// Sends a signed envelope to another instance and checks its signed answer.
@@ -744,9 +987,10 @@ enum Method {
 async fn exchange(
     app: &App,
     own: &str,
-    peer: &crate::node::FederationPeer,
+    peer: &mut crate::node::FederationPeer,
     method: Method,
     payload: Vec<u8>,
+    by_admin: bool,
 ) -> Result<Vec<u8>> {
     let envelope = seal(app, own, &peer.origin, payload, Vec::new()).await?;
     let answer = match method {
@@ -763,8 +1007,25 @@ async fn exchange(
     if answer.from != peer.origin {
         return Err(Refusal::NotAnAnswer.error(&peer.origin));
     }
-    check(&app.federation, own, &answer, &peer.public_key, Some(&envelope.nonce))
-        .map_err(|refusal| refusal.error(&peer.origin))?;
+    match check(&app.federation, own, &answer, &peer.public_key, Some(&envelope.nonce)) {
+        Ok(()) => {}
+        // Signed with a key it may have rotated to: followed, then checked again.
+        Err(Refusal::Signature) if peer.first_seen != 0 => match follow(app, peer, by_admin, &answer).await {
+            Some(moved) => {
+                *peer = moved;
+                check(&app.federation, own, &answer, &peer.public_key, Some(&envelope.nonce))
+                    .map_err(|refusal| refusal.error(&peer.origin))?;
+            }
+            None => {
+                let now = app.node()?.federation_peer(&peer.origin).await?;
+                if now.is_some_and(|now| now.needs_check) {
+                    return Err(needs_check(&peer.origin));
+                }
+                return Err(Refusal::Signature.error(&peer.origin));
+            }
+        },
+        Err(refusal) => return Err(refusal.error(&peer.origin)),
+    }
     heard(app, &peer.origin).await;
     Ok(answer.payload)
 }
@@ -775,13 +1036,16 @@ async fn exchange(
 /// Hello once per process, or again when `hello`.
 async fn reach(app: &App, address: &str, pin_new: bool, hello: bool) -> Result<(String, crate::node::FederationPeer)> {
     let (own, origin) = allowed(app, address)?;
-    let peer = match app.node()?.federation_peer(&origin).await? {
+    let mut peer = match app.node()?.federation_peer(&origin).await? {
+        // An admin's check takes the key it has now.
+        Some(peer) if peer.needs_check && pin_new => pin(app, &origin).await?,
+        Some(peer) if peer.needs_check => return Err(needs_check(&origin)),
         Some(peer) => peer,
         None if pin_new => pin(app, &origin).await?,
         None => return Err(unknown(&origin)),
     };
     if hello || !app.federation.introduced(&origin) {
-        exchange(app, &own, &peer, Method::Hello, fpb::Hello {}.encode_to_vec()).await?;
+        exchange(app, &own, &mut peer, Method::Hello, fpb::Hello {}.encode_to_vec(), pin_new).await?;
         app.federation.set_introduced(&origin, true);
     }
     Ok((own, peer))
@@ -790,6 +1054,13 @@ async fn reach(app: &App, address: &str, pin_new: bool, hello: bool) -> Result<(
 /// This instance's origin and another's, if this one may talk to it:
 /// federation is on, and it's someone else, not on the block list.
 fn allowed(app: &App, address: &str) -> Result<(String, String)> {
+    allowed_unless_farewell(app, address, false)
+}
+
+/// As [`allowed`], but a `farewell` (telling an instance a share with it
+/// ended) still goes to one on the block list: blocking ends its shares on
+/// both sides.
+fn allowed_unless_farewell(app: &App, address: &str, farewell: bool) -> Result<(String, String)> {
     if !app.settings().federation {
         return Err(Error::FailedPrecondition("federation is off on this instance".into()));
     }
@@ -798,7 +1069,7 @@ fn allowed(app: &App, address: &str) -> Result<(String, String)> {
     if origin == own {
         return Err(Error::invalid("that's this instance's own address"));
     }
-    if blocked(app, &origin) {
+    if blocked(app, &origin) && !farewell {
         return Err(Error::FailedPrecondition(format!("{} is on this instance's block list", display(&origin))));
     }
     Ok((own, origin))
@@ -821,7 +1092,8 @@ pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedR
         .split_once('@')
         .ok_or(Error::NotFound("server"))
         .map(|(id, at)| (id.to_string(), at.to_string()))?;
-    let (own, origin) = allowed(app, &address)?;
+    let farewell = matches!(&call.call, Some(cpb::shared_call::Call::Ended(_) | cpb::shared_call::Call::Left(_)));
+    let (own, origin) = allowed_unless_farewell(app, &address, farewell)?;
     let asker = match &call.call {
         Some(cpb::shared_call::Call::Lookup(lookup)) => Some(lookup.guest_server_id.as_str()),
         Some(cpb::shared_call::Call::Ask(ask)) => ask.guest.as_ref().map(|guest| guest.id.as_str()),
@@ -834,15 +1106,17 @@ pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedR
     }
     let pinned = app.node()?.federation_peer(&origin).await?;
     let known = pinned.is_some();
-    let peer = match pinned {
+    let mut peer = match pinned {
+        Some(peer) if peer.needs_check => return Err(needs_check(&origin)),
         Some(peer) => peer,
         // Checked with its key as fetched now; an ask pins it once the
         // home's signed answer checks out.
         None if asker.is_some() => crate::node::FederationPeer {
-            public_key: fetch_key(app, &origin).await?,
+            public_key: fetch_key(app, &origin).await?.public_key,
             origin: origin.clone(),
             first_seen: 0,
             last_heard: 0,
+            needs_check: false,
         },
         None => return Err(unknown(&origin)),
     };
@@ -851,11 +1125,13 @@ pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedR
     call.from_fingerprint.clear();
     let started = Instant::now();
     let request = fpb::Request { call: Some(fpb::request::Call::Shared(Box::new(call.clone()))) };
-    let answer = call_peer(app, &own, &peer, request).await?;
+    let answer = call_peer(app, &own, &mut peer, request).await?;
     crate::reports::server_timing("federation:shared", started.elapsed());
     let reply = match answer.answer {
         Some(fpb::response::Answer::Shared(reply)) => {
-            crate::api::shared_returned(&call, *reply, &origin, &own, &fingerprint(&peer.public_key))?
+            crate::api::shared_returned(&call, *reply, &origin, &own, &fingerprint(&peer.public_key), &|url| {
+                app.picture_link_on_origin(url)
+            })?
         }
         _ => return Err(Error::Unavailable(format!("{}'s answer didn't read", display(&origin)))),
     };
@@ -865,7 +1141,7 @@ pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedR
     {
         // Take the request back: what comes after couldn't be checked.
         let request = fpb::Request { call: Some(fpb::request::Call::Shared(Box::new(undo))) };
-        let _ = call_peer(app, &own, &peer, request).await;
+        let _ = call_peer(app, &own, &mut peer, request).await;
         return Err(err);
     }
     Ok(reply)
@@ -873,17 +1149,17 @@ pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedR
 
 /// A signed call to another instance, and its answer.
 pub async fn call(app: &App, address: &str, request: fpb::Request) -> Result<fpb::Response> {
-    let (own, peer) = reach(app, address, false, false).await?;
-    call_peer(app, &own, &peer, request).await
+    let (own, mut peer) = reach(app, address, false, false).await?;
+    call_peer(app, &own, &mut peer, request).await
 }
 
 async fn call_peer(
     app: &App,
     own: &str,
-    peer: &crate::node::FederationPeer,
+    peer: &mut crate::node::FederationPeer,
     request: fpb::Request,
 ) -> Result<fpb::Response> {
-    let answer = match exchange(app, own, peer, Method::Call, request.encode_to_vec()).await {
+    let answer = match exchange(app, own, peer, Method::Call, request.encode_to_vec(), false).await {
         Ok(answer) => answer,
         Err(err) => {
             // Say Hello again next time, in case the other side forgot this one.
@@ -911,25 +1187,40 @@ pub struct Checked {
 /// Then a signed ping says whether it pinned this instance too.
 pub async fn check_instance(app: &App, address: &str) -> Result<Checked> {
     let started = Instant::now();
-    let (own, peer) = reach(app, address, true, true).await?;
+    let (own, mut peer) = reach(app, address, true, true).await?;
     let took = started.elapsed();
     let ping = fpb::Request { call: Some(fpb::request::Call::Ping(fpb::Ping {})) };
     let known_there = matches!(
-        call_peer(app, &own, &peer, ping).await,
+        call_peer(app, &own, &mut peer, ping).await,
         Ok(fpb::Response { answer: Some(fpb::response::Answer::Pong(_)) })
     );
     let peer = app.node()?.federation_peer(&peer.origin).await?.unwrap_or(peer);
     Ok(Checked { peer, took, known_there })
 }
 
-/// A peer for the admin API.
-pub fn peer_pb(app: &App, peer: &crate::node::FederationPeer) -> crate::pb::FederationPeer {
+/// A peer for the admin API, with its key's moves (anyone's: only its own
+/// are kept).
+pub fn peer_pb(
+    app: &App,
+    peer: &crate::node::FederationPeer,
+    moves: &[crate::node::FederationMove],
+) -> crate::pb::FederationPeer {
     crate::pb::FederationPeer {
         origin: peer.origin.clone(),
         fingerprint: fingerprint(&peer.public_key),
         first_seen: Some(crate::id::timestamp(peer.first_seen)),
         last_heard: Some(crate::id::timestamp(peer.last_heard)),
         blocked: blocked(app, &peer.origin),
+        needs_check: peer.needs_check,
+        moves: moves
+            .iter()
+            .filter(|m| m.origin == peer.origin)
+            .map(|m| crate::pb::FederationKeyMove {
+                previous_fingerprint: fingerprint(&m.previous_key),
+                fingerprint: fingerprint(&m.key),
+                moved_at: Some(crate::id::timestamp(m.moved_at)),
+            })
+            .collect(),
     }
 }
 
@@ -976,6 +1267,48 @@ impl Service {
         self.0.node().map_err(|_| Status::internal("this part keeps no data"))
     }
 
+    /// Checks an envelope with its sender's pinned key (followed to the one
+    /// it rotated to, if it did), or, for an instance this one hasn't
+    /// pinned, its key as fetched now. Whether it's pinned, and the key.
+    async fn checked(
+        &self,
+        own: &str,
+        from: &str,
+        envelope: &fpb::Envelope,
+    ) -> std::result::Result<(bool, Vec<u8>), Status> {
+        let pinned =
+            self.node()?.federation_peer(from).await.map_err(|_| Status::internal("couldn't read the pinned keys"))?;
+        let Some(peer) = pinned else {
+            let public_key = self.stranger_key(from).await?;
+            check(&self.0.federation, own, envelope, &public_key, None).map_err(Refusal::status)?;
+            return Ok((false, public_key));
+        };
+        let unfollowed = || {
+            Status::failed_precondition(
+                "your instance's key changed in a way this instance couldn't follow: its admins have to check your instance again",
+            )
+        };
+        if peer.needs_check {
+            return Err(unfollowed());
+        }
+        match check(&self.0.federation, own, envelope, &peer.public_key, None) {
+            Ok(()) => Ok((true, peer.public_key)),
+            Err(Refusal::Signature) => {
+                let Some(moved) = follow(&self.0, &peer, false, envelope).await else {
+                    let now = self.node()?.federation_peer(from).await.ok().flatten();
+                    return Err(if now.is_some_and(|now| now.needs_check) {
+                        unfollowed()
+                    } else {
+                        Refusal::Signature.status()
+                    });
+                };
+                check(&self.0.federation, own, envelope, &moved.public_key, None).map_err(Refusal::status)?;
+                Ok((true, moved.public_key))
+            }
+            Err(refusal) => Err(refusal.status()),
+        }
+    }
+
     /// The key of an instance this one hasn't pinned, fetched from its own
     /// address, which only whoever runs that address can answer, to check
     /// what it signed. Not pinned here. No more often than the caps, so
@@ -1004,9 +1337,17 @@ impl fpb::federation_service_server::FederationService for Service {
         _request: Request<fpb::GetKeyRequest>,
     ) -> std::result::Result<Response<fpb::GetKeyResponse>, Status> {
         let own = self.ready()?;
-        let public_key =
-            public_key(&self.0).await.map_err(|_| Status::internal("this instance's key isn't readable"))?;
-        Ok(Response::new(fpb::GetKeyResponse { origin: own, public_key }))
+        let unreadable = |_| Status::internal("this instance's key isn't readable");
+        let public_key = public_key(&self.0).await.map_err(unreadable)?;
+        let rotations = self
+            .node()?
+            .federation_rotations()
+            .await
+            .map_err(unreadable)?
+            .iter()
+            .filter_map(|r| fpb::KeyRotation::decode(r.as_slice()).ok())
+            .collect();
+        Ok(Response::new(fpb::GetKeyResponse { origin: own, public_key, rotations }))
     }
 
     async fn hello(
@@ -1017,16 +1358,9 @@ impl fpb::federation_service_server::FederationService for Service {
         let envelope = request.into_inner().envelope.ok_or_else(|| Refusal::Malformed.status())?;
         let from = self.sender(&envelope)?;
         precheck(&own, &envelope).map_err(Refusal::status)?;
-        let pinned =
-            self.node()?.federation_peer(&from).await.map_err(|_| Status::internal("couldn't read the pinned keys"))?;
-        let known = pinned.is_some();
         // Someone new isn't pinned: only an admin's check here, or a share
         // request, does that.
-        let public_key = match pinned {
-            Some(peer) => peer.public_key,
-            None => self.stranger_key(&from).await?,
-        };
-        check(&self.0.federation, &own, &envelope, &public_key, None).map_err(Refusal::status)?;
+        let (known, _) = self.checked(&own, &from, &envelope).await?;
         fpb::Hello::decode(envelope.payload.as_slice()).map_err(|_| Refusal::Malformed.status())?;
         if known {
             heard(&self.0, &from).await;
@@ -1042,16 +1376,9 @@ impl fpb::federation_service_server::FederationService for Service {
         let own = self.ready()?;
         let envelope = request.into_inner().envelope.ok_or_else(|| Refusal::Malformed.status())?;
         let from = self.sender(&envelope)?;
-        let pinned =
-            self.node()?.federation_peer(&from).await.map_err(|_| Status::internal("couldn't read the pinned keys"))?;
-        let known = pinned.is_some();
         // A share code's lookup or ask may come from an instance this one
         // doesn't know yet, checked with its key as fetched now.
-        let public_key = match pinned {
-            Some(peer) => peer.public_key,
-            None => self.stranger_key(&from).await?,
-        };
-        check(&self.0.federation, &own, &envelope, &public_key, None).map_err(Refusal::status)?;
+        let (known, public_key) = self.checked(&own, &from, &envelope).await?;
         let call = fpb::Request::decode(envelope.payload.as_slice()).map_err(|_| Refusal::Malformed.status())?;
         let first_contact = match &call.call {
             Some(fpb::request::Call::Shared(shared)) => {
@@ -1071,8 +1398,10 @@ impl fpb::federation_service_server::FederationService for Service {
                 fpb::Response { answer: Some(fpb::response::Answer::Pong(fpb::Pong {})) }
             }
             Some(fpb::request::Call::Shared(call)) => {
-                let call =
-                    crate::api::shared_arrived(*call, &from, &own, &fingerprint(&public_key)).map_err(Status::from)?;
+                let call = crate::api::shared_arrived(*call, &from, &own, &fingerprint(&public_key), &|url| {
+                    self.0.picture_link_on_origin(url)
+                })
+                .map_err(Status::from)?;
                 if first_contact && !self.0.federation.take_share(&format!("in:{}", call.server_id)) {
                     return Err(Status::from(shares_capped()));
                 }
@@ -1177,6 +1506,70 @@ mod tests {
         assert_eq!(federation.fresh_nonce("https://a.example", &[1; 16], now), Err(Refusal::Replayed));
     }
 
+    fn pair() -> Ed25519KeyPair {
+        Ed25519KeyPair::from_pkcs8(&new_key().unwrap()).unwrap()
+    }
+
+    fn rotation(origin: &str, from: &Ed25519KeyPair, to: &Ed25519KeyPair, at: i64) -> fpb::KeyRotation {
+        let (previous_key, key) = (from.public_key().as_ref().to_vec(), to.public_key().as_ref().to_vec());
+        let signature = from.sign(&rotation_bytes(origin, &previous_key, &key, at)).as_ref().to_vec();
+        fpb::KeyRotation { previous_key, key, rotated_at_ms: at, signature }
+    }
+
+    #[test]
+    fn rotations_are_followed_only_from_the_pinned_key_forward() {
+        const A: &str = "https://a.example";
+        let keys: Vec<Ed25519KeyPair> = (0..4).map(|_| pair()).collect();
+        let public = |i: usize| keys[i].public_key().as_ref().to_vec();
+        let chain = vec![rotation(A, &keys[0], &keys[1], 1), rotation(A, &keys[1], &keys[2], 2)];
+        let none = HashSet::new();
+        // From the first key, or the middle one, to the last.
+        assert_eq!(
+            followed(A, &public(0), &public(2), &chain, &none),
+            Followed::Path(vec![(public(0), public(1)), (public(1), public(2))])
+        );
+        assert_eq!(followed(A, &public(1), &public(2), &chain, &none), Followed::Path(vec![(public(1), public(2))]));
+        // Not from a key the chain doesn't start at, nor to a key it doesn't end at.
+        assert_eq!(followed(A, &public(3), &public(2), &chain, &none), Followed::Broken);
+        assert_eq!(followed(A, &public(0), &public(3), &chain, &none), Followed::Broken);
+        // Not when signed for another instance, or by the wrong key.
+        let elsewhere = vec![rotation("https://b.example", &keys[0], &keys[1], 1)];
+        assert_eq!(followed(A, &public(0), &public(1), &elsewhere, &none), Followed::Broken);
+        let mut forged = rotation(A, &keys[3], &keys[1], 1);
+        forged.previous_key = public(0);
+        assert_eq!(followed(A, &public(0), &public(1), &[forged], &none), Followed::Broken);
+        // Two next keys for one key, a loop, or a key it left: stop.
+        let split = vec![rotation(A, &keys[0], &keys[1], 1), rotation(A, &keys[0], &keys[2], 2)];
+        assert_eq!(followed(A, &public(0), &public(2), &split, &none), Followed::Fork);
+        let back = vec![rotation(A, &keys[0], &keys[1], 1), rotation(A, &keys[1], &keys[0], 2)];
+        assert_eq!(followed(A, &public(0), &public(0), &back, &none), Followed::Fork);
+        let left = HashSet::from([public(2)]);
+        assert_eq!(followed(A, &public(1), &public(2), &chain, &left), Followed::Fork);
+        // Serving a key it left, even with nothing leading there.
+        let left = HashSet::from([public(0)]);
+        assert_eq!(followed(A, &public(1), &public(0), &chain[..1], &left), Followed::Fork);
+        // Nothing at all: the key it serves isn't vouched for.
+        assert_eq!(followed(A, &public(0), &public(1), &[], &none), Followed::Broken);
+    }
+
+    #[test]
+    fn looks_for_rotations_are_capped() {
+        let federation = Federation::new(true);
+        let a = "https://a.example";
+        assert!(federation.take_follow(a, &format!("{a} k0")));
+        assert!(!federation.take_follow(a, &format!("{a} k0")));
+        for n in 1..FOLLOWS_PER_INSTANCE {
+            assert!(federation.take_follow(a, &format!("{a} k{n}")));
+        }
+        // One instance's share is used up; others still get theirs.
+        assert!(!federation.take_follow(a, &format!("{a} one more")));
+        let mut n = 0;
+        while federation.take_follow(&format!("https://{n}.example"), &format!("https://{n}.example k")) {
+            n += 1;
+        }
+        assert_eq!(n + FOLLOWS_PER_INSTANCE, MAX_FOLLOWS);
+    }
+
     #[test]
     fn fingerprints_are_eight_groups_of_four() {
         let print = fingerprint(&[7u8; 32]);
@@ -1197,6 +1590,7 @@ mod tests {
             reply_to: Vec::new(),
             payload: b"hi".to_vec(),
             signature: Vec::new(),
+            key: Vec::new(),
         };
         envelope.signature = pair.sign(&signed_bytes(&envelope)).as_ref().to_vec();
         let key = pair.public_key().as_ref().to_vec();

@@ -275,7 +275,14 @@
     `BEGIN CONCURRENT` transactions that run side by side and are retried
     when two touch the same row. An open file is a `Db`, whose gate
     (`shared` for writes, `alone` for folding the log in) lets the replica
-    hold writes for a moment.
+    hold writes for a moment. A `Db` keeps used connections (`Db::conn`,
+    statements cached per connection) and lets 4 writes run at once
+    (`WRITE_LANES`) with up to 512 waiting (`WRITE_QUEUE`), past which a
+    write is told the server is busy. Turso's own checkpoint is off for
+    every file (it deadlocked busy servers): `Db::fold_if_big` folds the log
+    in under `alone` after a write once it passes 4 MB, unless the replica
+    does it. Numbers in `docs/capacity.md`; `server/examples/load.rs` is the
+    load generator that measured them.
   - `replica/`: a split instance's continuous backup to a bucket or a folder
     (`FUWA_S3_*`, `FUWA_REPLICA_PATH`) and restoring from it (`FUWA_RESTORE`,
     `fuwa restore`): the directory's node.db, dms.db and pictures, each shard's
@@ -318,6 +325,17 @@
     in node.db's `settings` table over the environment's defaults. Read them
     through `app.settings()`, never from `config`, so changes apply at once.
   - `telemetry.rs`: the anonymous usage signal (schema `fuwa.signal.v1`).
+  - `compat.rs`: compatibility dates. `proto/fuwa/v1/features.json` is the
+    one list of features apps must know, each dated; `Node.versions` carries
+    it with the instance's date and `min_client_date` (docs/compatibility.md).
+  - `releases.rs`: whether a newer fuwa is out. A single process, the
+    directory and gateways ask GitHub (fixed addresses, https, nothing about
+    the instance) at startup and daily (`FUWA_UPDATE_CHECK`), and keep the
+    latest release's version, notes, `SHA256SUMS` and its signature. Admins
+    alone see it, as `Node.versions.newer_release`; nothing installs itself.
+    Desktop apps read `/updates/latest.json` and fetch their build through
+    `/updates/files/<name>` (only the release's listed desktop files), so
+    GitHub never sees them; they trust only the signature, not the instance.
   - `reports.rs`: the hourly anonymous health report (`fuwa.report.v1`): one
     process-wide collector of errors (panics, `Error::Internal`/`Database`/`Io`
     answers, named by the gRPC method from `time_calls`), timings in fixed
@@ -412,7 +430,11 @@
     `store.rs` (state and reducers), `sync.rs` (one task per instance:
     subscribe, snapshot, apply, reconnect), `dms.rs` and `vault.rs` (one MLS
     device per install and account, through `fuwa-e2ee`'s `client` feature,
-    kept in 0600 files under the app's data folder; signing out wipes it),
+    kept in 0600 files under the app's data folder; signing out wipes it;
+    a `Room` is a direct message or a secure channel, which share
+    everything but how they reach the server, like the web's
+    `e2ee/engine.ts`; `history.rs` checks history passed on to a new
+    device against the channel's log),
     `linked.rs` (waifu.dev sign-in through the browser and a loopback page;
     the sign-in page must be https, or http on this computer), `sso.rs`
     (single sign-on the same way: an instance's provider on the sign-in
@@ -447,7 +469,13 @@
     and a few feature counts, sent every 10 minutes through
     `NodeService.SendReport` to one signed-in instance whose telemetry is
     on, kept for next time when that fails; off with the "Help fix bugs"
-    setting, which counts nothing). It runs on its own
+    setting, which counts nothing), `compat.rs` (compatibility dates: which
+    features an instance has that this build doesn't), `updates.rs` (the app updating itself:
+    the latest release through an instance, installed only when newer, its
+    `SHA256SUMS` signed by a key in `desktop/release-keys.txt` and the file
+    matching it; the checked download waits beside the program or AppImage
+    and replaces it only when the person presses "Restart to update", never
+    by itself, and it says how to get it where it can't). It runs on its own
     Tokio runtime and knows nothing of GPUI; the window watches its version.
   - `src/ui/`: the window. `app.rs` holds what's open and the overlays;
     `rail.rs`, `sidebar.rs`, `chat.rs`, `connect.rs`, `settings.rs`,
@@ -466,7 +494,9 @@
     the profile and security pages, `settings_look.rs` the Appearance
     (themes, light and dark picks, theme files) and Background pages,
     `settings_privacy.rs` the Privacy page ("Help fix bugs", what a report
-    holds, and what's waiting to go out),
+    holds, and what's waiting to go out), `settings_updates.rs` the Updates
+    page (status, "Download updates in the background", what's new) and `update.rs` the
+    card over the sidebar's foot when a new version is ready,
     `backdrop.rs` what's drawn behind the app (picture, blurred once off the
     main thread when asked, dimming, a texture made here as a PNG or SVG
     tile and repeated), `effects.rs` the moving effects (the web's shaders
@@ -509,7 +539,9 @@
     disconnect; what each side may do; codes still out; people kept out)
     and the Share tab, with `shared_marks.rs` drawing the linked rings, the
     sidebar badge, the header pill and the other server's tag beside a name
-    (a server picture only from this instance),
+    (a server picture only from this instance), `secure.rs` a secure
+    channel's header, start, device lines and the dialog of who can read it
+    (history sharing and starting encryption over for people who manage it),
     `instance_settings.rs` an instance's settings for its admins (the gear
     by the instance's name; General, Sign-ups, Single sign-on
     (`instance_settings/sso.rs`: the identity provider, SAML metadata read
@@ -598,6 +630,12 @@
     `src/fuwa/dms.ts` are the actions; the screens are in `components/dm/`
     (`DmList`, `DmView`, `EncryptionDialog` with the safety number), routed at
     `/<instance>/dm/<conversation>`.
+  - `components/UpdateReady.tsx` notices the instance serving the page has a
+    newer web app (its index.html names another entry script, twice in a
+    row) and offers a reload, never forcing one; `lib/fresh.ts` is when. It
+    also says "Update fuwa to use ..." for features an instance has that this
+    build doesn't (`lib/compat.ts`, docs/compatibility.md). Admins see a newer fuwa
+    release in instance settings (`settings/instance/NewerRelease.tsx`).
   - `src/voice/`: voice messages on the device. `recorder.ts` records the
     microphone through an AudioWorklet (`capture.worklet.ts`) into the
     browser's Opus encoder (WebCodecs) and writes the Ogg file itself
@@ -758,11 +796,21 @@
 - Never write outside a transaction or with `BEGIN`/`BEGIN IMMEDIATE`: those
   lock out concurrent commits. Schema changes go in migrations, which run
   before anything else touches the file.
-- Every write to an open file holds its gate: `db::write`, `ServerDb::write`
-  and `write_alone` do. With a replica on, only the replica folds a tracked
-  file's log in (Turso's own checkpoint is off for it), so anything else that
-  checkpoints takes `Db::alone`, and a new database file gets
+- Every write to an open file takes its turn with `Db::writing` (queue,
+  lane, gate): `db::write`, `ServerDb::write` and `write_alone` do. Turso's
+  own checkpoint is off for every file; `Db::fold_if_big` folds the log in,
+  or with a replica on only the replica does for a tracked file, so anything
+  else that checkpoints takes `Db::alone`, and a new database file gets
   `replica.track` (servers go through `Servers::replicate`).
+- Caps default to unlimited, except the protective limits Juan agreed to
+  (2026-10-04): streams per account (32, `FUWA_STREAMS_PER_ACCOUNT` and the
+  `streams_per_account` instance setting), waiting writes per file (512,
+  `FUWA_WRITE_QUEUE`) and waiting password checks (256,
+  `FUWA_SIGN_IN_QUEUE`). Each stops a crash, and each can be set to
+  `unlimited`. Anything new that is a cap on use defaults to unlimited.
+- Live event streams take a `streams::Ticket` (per account, and in all)
+  held for as long as the stream is open; a gateway gives followers' streams
+  connections to shards apart from its calls'.
 - Permissions, not ranks, decide what someone may do: a handler takes a `Seat`
   from `Api::with(account, server_id, Permission)` (or `membership` plus
   `access.require_in(channel, ...)` for channel ones). Rank only decides who

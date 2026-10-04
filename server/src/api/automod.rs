@@ -576,9 +576,10 @@ async fn read_pictures(app: &crate::app::App, links: &[String]) -> Vec<providers
 }
 
 /// The links to a message's pictures a provider may be shown: attachments
-/// that say they're PNG, JPEG or WebP (by type or name), then embeds' images
-/// and thumbnails.
-pub(super) fn picture_links(attachments: &[pb::Attachment], embeds: &[pb::Embed]) -> Vec<String> {
+/// that say they're PNG, JPEG or WebP (by type or name), embeds' images and
+/// thumbnails, then the emoji from other servers it carries (checked uploads
+/// on this instance, read from its own files).
+pub(super) fn picture_links(attachments: &[pb::Attachment], embeds: &[pb::Embed], emojis: &[pb::Emoji]) -> Vec<String> {
     let readable = |a: &pb::Attachment| {
         let kind = a.content_type.to_ascii_lowercase();
         let name = a.filename.to_ascii_lowercase();
@@ -597,6 +598,8 @@ pub(super) fn picture_links(attachments: &[pb::Attachment], embeds: &[pb::Embed]
                 crate::media::id_in_url(link).is_none() && crate::media::server_file_in_url(link).is_none()
             }),
         )
+        // Carried emoji links are built here, after their upload was checked.
+        .chain(emojis.iter().map(|e| e.url.clone()))
         .filter(|link| !link.is_empty())
         .collect()
 }
@@ -810,7 +813,7 @@ impl AutoModService for Api {
                     .filter(|setup| setup.usable())
                     .filter_map(|setup| setup.offer())
                     .collect();
-                Ok(pb::ListAutoModRulesResponse { rules: store::load_automod(&sdb.read()?).await?, providers })
+                Ok(pb::ListAutoModRulesResponse { rules: store::load_automod(&*sdb.read()?).await?, providers })
             }
             .await,
         )
@@ -978,6 +981,24 @@ impl AutoModService for Api {
 mod tests {
     use super::*;
 
+    /// Emoji from other servers a message carries are shown to the provider
+    /// after its attachments and embeds.
+    #[test]
+    fn carried_emoji_are_pictures_too() {
+        let attachment = pb::Attachment {
+            url: "https://fuwa.test/media/a".into(),
+            content_type: "image/png".into(),
+            ..Default::default()
+        };
+        let embed = pb::Embed { image_url: "https://example.com/e.jpg".into(), ..Default::default() };
+        let emoji = pb::Emoji { url: "https://fuwa.test/media/m".into(), ..Default::default() };
+        assert_eq!(
+            picture_links(&[attachment], &[embed], std::slice::from_ref(&emoji)),
+            ["https://fuwa.test/media/a", "https://example.com/e.jpg", "https://fuwa.test/media/m"]
+        );
+        assert_eq!(picture_links(&[], &[], &[emoji]), ["https://fuwa.test/media/m"]);
+    }
+
     #[test]
     fn embeds_never_lead_to_uploads_here() {
         let file = pb::Attachment {
@@ -993,7 +1014,7 @@ mod tests {
         };
         let outside = pb::Embed { image_url: "https://fuwa.chat/media/outside/abc?url=x".into(), ..Default::default() };
         assert_eq!(
-            picture_links(std::slice::from_ref(&file), &[embed, outside.clone()]),
+            picture_links(std::slice::from_ref(&file), &[embed, outside.clone()], &[]),
             vec![file.url, outside.image_url]
         );
     }

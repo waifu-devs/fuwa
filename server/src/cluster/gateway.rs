@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -18,7 +18,7 @@ use axum::extract::{Path as UrlPath, Request};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 use futures::stream::{FuturesUnordered, SelectAll};
-use futures::{Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use http::{HeaderName, StatusCode, header};
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
@@ -172,14 +172,24 @@ pub struct Gateway {
     directory: DirectoryClient,
     settings: watch::Sender<Arc<Settings>>,
     placements: RwLock<HashMap<String, Placement>>,
-    /// Connections to shards, by URL.
+    /// Connections to shards for calls, by URL.
     shards: RwLock<HashMap<String, Channel>>,
+    /// Connections to shards for followers' streams, by URL.
+    streams: Mutex<HashMap<String, Vec<StreamLink>>>,
+    /// Followers' streams held open, per account and in all.
+    followers: Arc<crate::streams::Streams>,
     /// Whether it has heard from the directory yet: until then it isn't
     /// healthy, so a deploy keeps the gateways before it running meanwhile.
     followed: AtomicBool,
     /// The directory's last answer to /healthz/parts.
     parts: super::status::Cached,
+    /// Whether a newer fuwa is out, and desktop apps' updates (`releases.rs`).
+    releases: Arc<crate::releases::Releases>,
     shutdown: CancellationToken,
+    /// Accounts some of whose sessions just ended, as the directory says.
+    ended: tokio::sync::broadcast::Sender<Arc<str>>,
+    /// Accounts joining servers, as (account, server), as the directory says.
+    joined: tokio::sync::broadcast::Sender<(Arc<str>, Arc<str>)>,
 }
 
 impl HasSettings for Gateway {
@@ -197,7 +207,7 @@ pub async fn run(config: Config, address: SocketAddr) -> Result<(), String> {
     crate::app::spawn_signal_handler(gateway.shutdown.clone());
     let reports = crate::reports::spawn(gateway.clone(), &gateway.config, None, gateway.shutdown.clone());
     let shutdown = gateway.shutdown.clone();
-    let served = axum::serve(listener, gateway.router())
+    let served = axum::serve(crate::app::no_delay(listener), gateway.router())
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
         .await
         .map_err(|err| format!("server error: {err}"));
@@ -217,6 +227,9 @@ impl Gateway {
             directory_channel.clone(),
             WithKey(key.clone()),
         );
+        let followers = crate::streams::Streams::new(config.max_streams);
+        let config_update_check = config.update_check;
+        let release_cache = config.data_path.join("release-cache");
         let gateway = Arc::new(Self {
             settings: watch::Sender::new(Arc::new(Settings::defaults(&config))),
             config,
@@ -226,10 +239,16 @@ impl Gateway {
             directory,
             placements: RwLock::new(HashMap::new()),
             shards: RwLock::new(HashMap::new()),
+            streams: Mutex::new(HashMap::new()),
+            followers,
             followed: AtomicBool::new(false),
             parts: Default::default(),
+            releases: crate::releases::Releases::new(config_update_check, release_cache),
             shutdown: CancellationToken::new(),
+            ended: tokio::sync::broadcast::Sender::new(256),
+            joined: tokio::sync::broadcast::Sender::new(256),
         });
+        gateway.releases.spawn(gateway.shutdown.clone());
         tokio::spawn(follow_settings(gateway.clone()));
         Ok(gateway)
     }
@@ -271,8 +290,8 @@ impl Gateway {
                     let followed = health.followed.load(Ordering::Relaxed);
                     async move {
                         match followed {
-                            true => (StatusCode::OK, "ok"),
-                            false => (StatusCode::SERVICE_UNAVAILABLE, "waiting for the directory"),
+                            true => (StatusCode::OK, "ok".to_string()),
+                            false => (StatusCode::SERVICE_UNAVAILABLE, "waiting for the directory".to_string()),
                         }
                     }
                 }),
@@ -280,11 +299,13 @@ impl Gateway {
             .route(
                 // Which parts behind the gateways are up, as the directory sees them (status pages).
                 "/healthz/parts",
-                get(move || {
+                get(move |headers: http::HeaderMap| {
                     let gateway = parts.clone();
                     async move {
                         let key = gateway.key.to_str().unwrap_or_default();
-                        super::status::from_directory(&gateway.parts, &gateway.directory_url, key).await
+                        let admin = super::status::is_admin(&headers, gateway.config.admin_token.as_deref());
+                        let streams = gateway.followers.count();
+                        super::status::from_directory(&gateway.parts, &gateway.directory_url, key, streams, admin).await
                     }
                 }),
             )
@@ -331,6 +352,7 @@ impl Gateway {
                     async move { gateway.pass(gateway.directory_channel.clone(), request).await }
                 }),
             )
+            .merge(self.releases.routes())
             .fallback(crate::web::handler(self.clone()));
 
         let public = Router::new().fallback(move |request: Request| {
@@ -512,9 +534,38 @@ impl Gateway {
     }
 
     fn shard_client(&self, url: &str) -> Result<pb::event_service_client::EventServiceClient<Keyed>, Status> {
-        let channel =
-            tonic::service::interceptor::InterceptedService::new(self.shard_channel(url)?, WithKey(self.key.clone()));
-        Ok(pb::event_service_client::EventServiceClient::new(channel).max_decoding_message_size(MAX_EVENT))
+        Ok(self.event_client(self.shard_channel(url)?))
+    }
+
+    fn event_client(&self, channel: Channel) -> pb::event_service_client::EventServiceClient<Keyed> {
+        let channel = tonic::service::interceptor::InterceptedService::new(channel, WithKey(self.key.clone()));
+        pb::event_service_client::EventServiceClient::new(channel).max_decoding_message_size(MAX_EVENT)
+    }
+
+    /// A connection to a shard with room for one more follower's stream, kept
+    /// apart from the one calls use. A shard takes 200 streams at once per
+    /// connection (hyper's default): when followers filled the shared one,
+    /// every call through it waited out its deadline, so a gateway broke at
+    /// 200 people online (measured, docs/capacity.md).
+    fn stream_channel(&self, url: &str) -> Result<(Channel, StreamSlot), Status> {
+        let mut streams = self.streams.lock().unwrap_or_else(|p| p.into_inner());
+        let links = streams.entry(url.to_string()).or_default();
+        // Connections nobody follows through any more are closed, but one stays.
+        let mut kept = false;
+        links.retain(|link| {
+            let keep = !kept || link.streams.load(Ordering::Acquire) > 0;
+            kept = true;
+            keep
+        });
+        if let Some(link) = links.iter().find(|link| link.streams.load(Ordering::Acquire) < STREAMS_PER_CONNECTION) {
+            link.streams.fetch_add(1, Ordering::AcqRel);
+            return Ok((link.channel.clone(), StreamSlot(link.streams.clone())));
+        }
+        let link =
+            StreamLink { channel: super::channel(url).map_err(Status::from)?, streams: Arc::new(AtomicUsize::new(1)) };
+        let taken = (link.channel.clone(), StreamSlot(link.streams.clone()));
+        links.push(link);
+        Ok(taken)
     }
 
     /// Where these servers are: remembered, or asked of the directory (always,
@@ -616,6 +667,12 @@ async fn follow_settings(gateway: Arc<Gateway>) {
                             if let Some(settings) = message.settings {
                                 gateway.settings.send_replace(Arc::new(Settings::from_pb(&gateway.config, &settings)));
                             }
+                            for account_id in message.sessions_ended {
+                                let _ = gateway.ended.send(account_id.into());
+                            }
+                            for joined in message.joined {
+                                let _ = gateway.joined.send((joined.account_id.into(), joined.server_id.into()));
+                            }
                         }
                         Ok(None) | Err(_) => {
                             if connected {
@@ -698,7 +755,7 @@ fn gone_event(server_id: String) -> pb::SubscribeResponse {
             created_at: Some(timestamp(now_ms())),
             payload: Some(Payload::ServerDeleted(pb::ServerDeleted {})),
         }),
-        ready: None,
+        ..Default::default()
     }
 }
 
@@ -706,6 +763,25 @@ fn gone_event(server_id: String) -> pb::SubscribeResponse {
 struct Opened {
     stream: Streaming<pb::SubscribeResponse>,
     cursors: Vec<pb::ServerCursor>,
+    slot: StreamSlot,
+}
+
+/// Followers' streams carried by one connection to a shard, half of what a
+/// shard takes per connection so a burst of new ones never waits.
+const STREAMS_PER_CONNECTION: usize = 100;
+
+struct StreamLink {
+    channel: Channel,
+    streams: Arc<AtomicUsize>,
+}
+
+/// One stream's place on a [`StreamLink`], given back when the stream ends.
+struct StreamSlot(Arc<AtomicUsize>);
+
+impl Drop for StreamSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 /// Why streams couldn't be opened.
@@ -769,9 +845,11 @@ impl Events {
         }
         let mut opened = Vec::with_capacity(by_shard.len());
         for (url, cursors) in by_shard {
-            let request = forward_metadata(metadata, pb::SubscribeRequest { servers: cursors.clone() });
-            match gateway.shard_client(&url).map_err(NotOpened::Refused)?.subscribe(request).await {
-                Ok(stream) => opened.push(Opened { stream: stream.into_inner(), cursors }),
+            let request =
+                forward_metadata(metadata, pb::SubscribeRequest { servers: cursors.clone(), ..Default::default() });
+            let (channel, slot) = gateway.stream_channel(&url).map_err(NotOpened::Refused)?;
+            match gateway.event_client(channel).subscribe(request).await {
+                Ok(stream) => opened.push(Opened { stream: stream.into_inner(), cursors, slot }),
                 Err(status) if status.metadata().get(MISROUTED).is_some() || super::unreachable(&status) => {
                     return Err(NotOpened::Again(status));
                 }
@@ -786,7 +864,7 @@ impl Events {
 /// `following`: the servers it follows, each with the last sequence the
 /// client has of it.
 fn follow(opened: Opened, merged: &mut SelectAll<Tagged>, following: &mut Vec<HashMap<String, Option<i64>>>) {
-    merged.push(tag(following.len(), opened.stream));
+    merged.push(tag(following.len(), opened.stream, opened.slot));
     following.push(opened.cursors.into_iter().map(|cursor| (cursor.server_id, cursor.after_sequence)).collect());
 }
 
@@ -798,37 +876,49 @@ impl EventService for Events {
     /// early, because the shard is restarting say, the gateway follows its
     /// servers again from the last event the client got once the shard is
     /// back (waiting up to twice the ride-out), and the client's stream
-    /// carries on.
+    /// carries on. Servers the caller joins meanwhile are followed the same
+    /// way, when asked, as the directory tells of them.
     async fn subscribe(
         &self,
         request: tonic::Request<pb::SubscribeRequest>,
     ) -> Result<tonic::Response<EventStream>, Status> {
         let gateway = self.0.clone();
         let metadata = request.metadata().clone();
-        let mut cursors = request.into_inner().servers;
-        if cursors.is_empty() || cursors.len() > MAX_SERVERS {
+        let pb::SubscribeRequest { servers: mut cursors, follow_new_servers: follow_new } = request.into_inner();
+        if cursors.len() > MAX_SERVERS || (cursors.is_empty() && !follow_new) {
             return Err(Error::invalid(format!("follow 1 to {MAX_SERVERS} servers per stream")).into());
         }
         let account_id = ride_out(gateway.config.cluster.ride_out, || gateway.caller(&metadata)).await?;
         for cursor in &mut cursors {
             cursor.server_id = parse_id("server_id", &cursor.server_id).map_err(Status::from)?;
         }
-        let (opened, gone) =
-            Self::open(&gateway, &metadata, &cursors, Patience::new(gateway.config.cluster.ride_out)).await?;
+        let ticket = gateway.followers.open(
+            crate::streams::Kind::Events,
+            &account_id,
+            gateway.settings().streams_per_account(),
+        )?;
+        // Listening before opening, so nothing said in between is missed.
+        let mut ended = gateway.ended.subscribe();
+        let mut joined = gateway.joined.subscribe();
+        let (opened, gone) = match cursors.is_empty() {
+            true => (Vec::new(), Vec::new()),
+            false => Self::open(&gateway, &metadata, &cursors, Patience::new(gateway.config.cluster.ride_out)).await?,
+        };
 
         let (tx, rx) = mpsc::channel::<Result<pb::SubscribeResponse, Status>>(256);
         let shutdown = gateway.shutdown();
         tokio::spawn(async move {
+            let _ticket = ticket;
             for event in gone {
                 if tx.send(Ok(event)).await.is_err() {
                     return;
                 }
             }
             if opened.is_empty() {
-                let _ = tx
-                    .send(Ok(pb::SubscribeResponse { event: None, ready: Some(pb::SubscribeReady::default()) }))
-                    .await;
-                return;
+                let ready = pb::SubscribeResponse { ready: Some(pb::SubscribeReady::default()), ..Default::default() };
+                if tx.send(Ok(ready)).await.is_err() || !follow_new {
+                    return;
+                }
             }
             // Shards still to say they're ready, and what those that did said.
             let mut waiting = opened.len();
@@ -838,12 +928,15 @@ impl EventService for Events {
             for opened in opened {
                 follow(opened, &mut merged, &mut following);
             }
-            // Servers being followed again after their shard's stream ended.
+            // Servers being followed again after their shard's stream ended,
+            // or for the first time after the caller joined them.
             let mut resuming = FuturesUnordered::new();
+            // Servers joined while streaming, until their shard says it's ready.
+            let mut adding = std::collections::HashSet::<String>::new();
             let mut heartbeat = tokio::time::interval(HEARTBEAT_EVERY);
             heartbeat.tick().await;
             loop {
-                if merged.is_empty() && resuming.is_empty() {
+                if merged.is_empty() && resuming.is_empty() && !follow_new {
                     // Everything followed is gone.
                     return;
                 }
@@ -861,6 +954,51 @@ impl EventService for Events {
                         }
                         continue;
                     }
+                    // Some session of the caller's ended: if it was this one, so
+                    // does the stream, now rather than at a shard's heartbeat.
+                    ended = ended.recv() => {
+                        let ours = match ended {
+                            Ok(id) => *id == *account_id,
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => true,
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                        };
+                        if ours
+                            && let Err(status) = gateway.caller(&metadata).await
+                            && status.code() == tonic::Code::Unauthenticated
+                        {
+                            let _ = tx.send(Err(Status::unauthenticated("this device was signed out"))).await;
+                            return;
+                        }
+                        continue;
+                    }
+                    // Joined somewhere: follow it from now on. Waits until the
+                    // first `ready`, so shards' answers aren't mixed up.
+                    next = joined.recv(), if follow_new && waiting == 0 => {
+                        let (who, server_id) = match next {
+                            Ok(joined) => joined,
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                        };
+                        let count = following.iter().map(HashMap::len).sum::<usize>() + adding.len();
+                        if *who != *account_id
+                            || count >= MAX_SERVERS
+                            || adding.contains(&*server_id)
+                            || following.iter().any(|f| f.contains_key(&*server_id))
+                        {
+                            continue;
+                        }
+                        adding.insert(server_id.to_string());
+                        let cursors = vec![pb::ServerCursor { server_id: server_id.to_string(), after_sequence: None }];
+                        let (gateway, metadata) = (gateway.clone(), metadata.clone());
+                        resuming.push(
+                            async move {
+                                Self::open(&gateway, &metadata, &cursors, Patience::new(gateway.config.cluster.ride_out))
+                                    .await
+                            }
+                            .boxed(),
+                        );
+                        continue;
+                    }
                     Some(resumed) = resuming.next(), if !resuming.is_empty() => {
                         let (opened, gone) = match resumed {
                             Ok(resumed) => resumed,
@@ -870,6 +1008,11 @@ impl EventService for Events {
                             }
                         };
                         for event in gone {
+                            if let Some(event) = &event.event
+                                && adding.remove(&event.server_id)
+                            {
+                                continue; // left again before it was followed
+                            }
                             if tx.send(Ok(event)).await.is_err() {
                                 return;
                             }
@@ -905,10 +1048,18 @@ impl EventService for Events {
                         .collect();
                     tracing::info!(servers = cursors.len(), "lost a shard's stream; following its servers again");
                     let (gateway, metadata) = (gateway.clone(), metadata.clone());
-                    resuming.push(async move {
-                        Self::open(&gateway, &metadata, &cursors, Patience::new(gateway.config.cluster.ride_out * 2))
+                    resuming.push(
+                        async move {
+                            Self::open(
+                                &gateway,
+                                &metadata,
+                                &cursors,
+                                Patience::new(gateway.config.cluster.ride_out * 2),
+                            )
                             .await
-                    });
+                        }
+                        .boxed(),
+                    );
                     continue;
                 }
 
@@ -923,8 +1074,18 @@ impl EventService for Events {
                                 }
                             }
                             // A shard followed again has caught up; the client
-                            // was told it's ready long ago.
+                            // was told it's ready long ago. A server joined
+                            // meanwhile is announced, with where it starts.
                             if waiting == 0 {
+                                for head in ready.servers {
+                                    if adding.remove(&head.server_id) {
+                                        let followed =
+                                            pb::SubscribeResponse { followed: Some(head), ..Default::default() };
+                                        if tx.send(Ok(followed)).await.is_err() {
+                                            return;
+                                        }
+                                    }
+                                }
                                 continue;
                             }
                             heads.extend(ready.servers);
@@ -933,8 +1094,8 @@ impl EventService for Events {
                                 continue;
                             }
                             Ok(pb::SubscribeResponse {
-                                event: None,
                                 ready: Some(pb::SubscribeReady { servers: std::mem::take(&mut heads) }),
+                                ..Default::default()
                             })
                         }
                         (Some(event), None) => {
@@ -950,7 +1111,7 @@ impl EventService for Events {
                             {
                                 *at = Some(event.sequence);
                             }
-                            Ok(pb::SubscribeResponse { event: Some(event), ready: None })
+                            Ok(pb::SubscribeResponse { event: Some(event), ..Default::default() })
                         }
                         // The shard's heartbeat; the gateway sends its own.
                         (None, None) => continue,
@@ -1005,8 +1166,16 @@ impl EventService for Events {
     }
 }
 
-fn tag(index: usize, stream: Streaming<pb::SubscribeResponse>) -> Tagged {
-    Box::pin(stream.map(move |item| (index, Some(item))).chain(futures::stream::once(async move { (index, None) })))
+fn tag(index: usize, stream: Streaming<pb::SubscribeResponse>, slot: StreamSlot) -> Tagged {
+    // The slot goes with the stream, so its place is given back when it ends.
+    Box::pin(
+        stream
+            .map(move |item| {
+                let _slot = &slot;
+                (index, Some(item))
+            })
+            .chain(futures::stream::once(async move { (index, None) })),
+    )
 }
 
 #[cfg(test)]

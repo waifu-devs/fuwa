@@ -159,6 +159,9 @@ pub struct Prefs {
     pub share_reports: bool,
     /// The announcement closed on each instance, by its id, so it stays closed until a new one.
     pub closed_announcements: std::collections::BTreeMap<String, String>,
+    /// Fetches and checks new versions of the app in the background, for
+    /// "Restart to update" (see `updates.rs`); off, it only says when one is out.
+    pub auto_update: bool,
     /// Shared channels whose note at the start was closed, as `instance/channel`.
     pub shared_notes_closed: std::collections::BTreeSet<String>,
     /// Games and apps that report to Discord show what you're doing here too
@@ -197,6 +200,7 @@ impl Default for Prefs {
             custom_keybinds: Vec::new(),
             share_reports: true,
             closed_announcements: Default::default(),
+            auto_update: true,
             shared_notes_closed: Default::default(),
             game_activity: true,
             game_answers: Default::default(),
@@ -315,6 +319,10 @@ mod tests {
         assert!(old.share_reports);
         store_prefs(&paths, &Prefs { share_reports: false, ..Prefs::default() });
         assert!(!load_prefs(&paths).share_reports);
+        // Updates install by themselves unless turned off, which sticks.
+        assert!(old.auto_update);
+        store_prefs(&paths, &Prefs { auto_update: false, ..Prefs::default() });
+        assert!(!load_prefs(&paths).auto_update);
         // A made theme that's gone falls back to a built-in one.
         std::fs::write(home.path().join("config/settings.json"), r#"{"theme":"custom-gone1","follow_system":false}"#)
             .unwrap();

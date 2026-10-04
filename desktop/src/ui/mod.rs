@@ -7,7 +7,7 @@ mod arrange;
 mod assets;
 mod backdrop;
 mod call_bar;
-mod chat;
+pub(crate) mod chat;
 mod compose;
 mod connect;
 mod effects;
@@ -23,20 +23,23 @@ mod menus;
 mod moderate;
 mod motion;
 mod notify;
-mod overlay;
+pub(crate) mod overlay;
 pub mod perf;
 mod png;
 mod rail;
+mod secure;
 mod server_settings;
 mod settings;
 mod settings_account;
 mod settings_keys;
 mod settings_look;
 mod settings_privacy;
+mod settings_updates;
 mod shared_marks;
 mod sidebar;
 pub mod text;
 pub mod theme;
+mod update;
 mod widgets;
 
 use std::fs::File;
@@ -61,10 +64,18 @@ pub fn run() -> anyhow::Result<()> {
 
     // One copy at a time: two would fight over the same encrypted-message devices.
     let lock = File::create(paths.lock_file())?;
-    if lock.try_lock().is_err() {
-        eprintln!("fuwa is already open.");
-        return Ok(());
+    // Started by "Restart to update": the old app lets go of the lock as it quits.
+    let after_update = std::env::var_os(crate::core::updates::AFTER_UPDATE).is_some();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while lock.try_lock().is_err() {
+        if !after_update || std::time::Instant::now() > deadline {
+            eprintln!("fuwa is already open.");
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
+    // SAFETY: nothing else runs yet; the children this app starts shouldn't wait too.
+    unsafe { std::env::remove_var(crate::core::updates::AFTER_UPDATE) };
 
     let core = Core::start(paths)?;
     perf::mark("core started");

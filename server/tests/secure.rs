@@ -30,6 +30,7 @@ async fn start(dir: &Path) -> Instance {
     let config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         _ => None,
     })
     .unwrap();
@@ -243,7 +244,10 @@ async fn a_secure_channel_follows_its_permissions() {
     let mut rin_events = pb::event_service_client::EventServiceClient::new(channel.clone())
         .subscribe(authed(
             &rin.token,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()

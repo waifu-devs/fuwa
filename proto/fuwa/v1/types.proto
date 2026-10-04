@@ -44,6 +44,46 @@ message Node {
   // Empty, or one region, when there's no choice to make (an instance run
   // as one process, or one whose parts are all in one place).
   repeated Region regions = 10;
+  // Which fuwa features this instance has and since when, and a newer
+  // release when its check found one (docs/compatibility.md).
+  Versions versions = 16;
+}
+
+// What an app needs to know to work well with this instance. Nothing here
+// forces an update: an older app keeps working, and says "update to use
+// this" where a feature it doesn't know would be.
+message Versions {
+  // A newer fuwa than this instance runs, when its check found one
+  // (docs/self-hosting.md, "Updating"). Apps show it to instance admins;
+  // nothing is ever updated by itself.
+  Release newer_release = 1;
+  // This instance's compatibility date, such as "2026-10-04": the date of
+  // the newest feature it has (proto/fuwa/v1/features.json).
+  string compatibility_date = 2;
+  // Apps whose own compatibility date is older still work, but miss
+  // something that matters; they say so and suggest updating.
+  string min_client_date = 3;
+  // Every feature this instance has, from features.json.
+  repeated Feature features = 4;
+}
+
+// One feature, as proto/fuwa/v1/features.json declares it.
+message Feature {
+  // Stable, such as "shared-channels".
+  string id = 1;
+  // The compatibility date it arrived with.
+  string date = 2;
+  // For people, such as "Channels shared between servers".
+  string title = 3;
+}
+
+// A fuwa release, as GitHub lists it.
+message Release {
+  // Such as "0.4.2".
+  string version = 1;
+  google.protobuf.Timestamp published_at = 2;
+  // The release's page, on github.com.
+  string url = 3;
 }
 
 // A part of the world a split instance keeps servers in (docs/regions.md).
@@ -824,6 +864,10 @@ message Message {
   Poll poll = 21;
   // A GIF sent with it (GifService), kept on this instance.
   MessageGif gif = 22;
+  // The members it names as <@id> (or <@!id>), once each, in order: the
+  // people a client highlights it for. Up to 50; ids of anyone not in the
+  // server are left out.
+  repeated string mention_user_ids = 23;
 }
 
 // A poll and how it stands. Counts are everyone's (for an anonymous poll
@@ -924,6 +968,17 @@ message Attachment {
   // so apps can save its place before it loads; 0 when unknown.
   int32 width = 6;
   int32 height = 7;
+  // Set when the file is a voice message recorded in the app (Ogg Opus,
+  // the message's only file): apps show a player instead of a file.
+  VoiceNote voice = 8;
+}
+
+// What a voice message looks like before it plays, from the sending app.
+message VoiceNote {
+  // How long it plays, in milliseconds.
+  uint32 duration_ms = 1;
+  // Its loudness over time: up to 128 values, 0 (silence) to 255.
+  bytes waveform = 2;
 }
 
 message Embed {

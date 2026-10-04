@@ -30,6 +30,7 @@ async fn start(dir: &Path, vars: &[(&str, &str)]) -> Instance {
     let config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         "FUWA_ADMIN_TOKEN" => Some(ADMIN_TOKEN.into()),
         _ => vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()),
     })
@@ -234,6 +235,7 @@ async fn a_community_end_to_end() {
             &juan,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: Some(0) }],
+                ..Default::default()
             },
         ))
         .await
@@ -550,7 +552,10 @@ async fn a_community_end_to_end() {
         .events
         .subscribe(authed(
             &juan,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -911,6 +916,68 @@ async fn browsers_can_call_over_grpc_web() {
         // With the web client built in, unknown paths open the app instead (see tests/web.rs).
         assert_eq!(http.get(format!("{base}/nope")).send().await.unwrap().status(), 404);
     }
+    // Desktop apps' updates: nothing to hand out until the release check finds a release.
+    assert_eq!(http.get(format!("{base}/updates/latest.json")).send().await.unwrap().status(), 404);
+    let newer = fuwa_server::releases::Latest {
+        version: "999.0.0".into(),
+        published_at: "2026-10-04T01:00:00Z".into(),
+        notes: "## New\n* shiny".into(),
+        page: "https://github.com/waifu-devs/fuwa/releases/tag/v999.0.0".into(),
+        sums: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  fuwa-desktop-999.0.0-x86_64-linux\n"
+            .into(),
+        signature: "c2lnbmF0dXJl".into(),
+        files: vec![fuwa_server::releases::File { name: "fuwa-desktop-999.0.0-x86_64-linux".into(), size: 3 }],
+    };
+    instance.app.releases.set(newer.clone());
+    let manifest = http.get(format!("{base}/updates/latest.json")).send().await.unwrap();
+    assert_eq!(manifest.status(), 200);
+    assert_eq!(manifest.headers()["content-type"], "application/json");
+    let manifest: fuwa_server::releases::Latest = manifest.json().await.unwrap();
+    assert_eq!(manifest, newer);
+    // Only the instance's admins hear of it, in GetNode; /healthz stays "ok". Nothing updates by itself.
+    let health = http.get(format!("{base}/healthz")).send().await.unwrap().text().await.unwrap();
+    assert_eq!(health, "ok");
+    let mut c = clients(&instance).await;
+    let (admin, _, is_admin) = sign_up(&mut c, "ada").await;
+    assert!(is_admin);
+    let (member, _, _) = sign_up(&mut c, "bo").await;
+    for token in [None, Some(member.as_str())] {
+        let request = match token {
+            Some(token) => authed(token, pb::GetNodeRequest {}),
+            None => tonic::Request::new(pb::GetNodeRequest {}),
+        };
+        let versions = c.node.get_node(request).await.unwrap().into_inner().node.unwrap().versions.unwrap();
+        assert!(versions.newer_release.is_none(), "{token:?}");
+        // Everyone learns which features it has, and since when.
+        assert_eq!(versions.compatibility_date, fuwa_server::compat::date());
+        assert!(versions.features.iter().any(|f| f.id == "compatibility-dates"));
+    }
+    let versions = c
+        .node
+        .get_node(authed(&admin, pb::GetNodeRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .node
+        .unwrap()
+        .versions
+        .unwrap();
+    let told = versions.newer_release.unwrap();
+    assert_eq!((told.version.as_str(), told.url.as_str()), ("999.0.0", newer.page.as_str()));
+    // Only the release's listed desktop builds pass through; anything else is never fetched.
+    for name in ["fuwa-999.0.0-x86_64-linux", "SHA256SUMS", "..%2F..%2Fetc%2Fpasswd", "fuwa-desktop-0.1.0-x86_64-linux"]
+    {
+        let response = http.get(format!("{base}/updates/files/{name}")).send().await.unwrap();
+        assert_eq!(response.status(), 404, "{name}");
+    }
+    // A listed build is handed over from the copy kept after the first fetch.
+    let kept = dir.path().join("release-cache/999.0.0");
+    std::fs::create_dir_all(&kept).unwrap();
+    std::fs::write(kept.join("fuwa-desktop-999.0.0-x86_64-linux"), b"abc").unwrap();
+    let response = http.get(format!("{base}/updates/files/fuwa-desktop-999.0.0-x86_64-linux")).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.bytes().await.unwrap().as_ref(), b"abc");
+
     // Scanners' paths are turned away before the API or the web app sees them.
     for probe in ["/.env", "/wp-login.php", "/.git/config", "/actuator/env", "/wp-admin/"] {
         let response = http.get(format!("{base}{probe}")).send().await.unwrap();
@@ -932,6 +999,7 @@ async fn browsers_can_call_over_grpc_web() {
         .unwrap();
     let request = pb::SubscribeRequest {
         servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: Some(0) }],
+        ..Default::default()
     };
     let payload = prost::Message::encode_to_vec(&request);
     let mut framed = vec![0u8];
@@ -974,7 +1042,10 @@ async fn streams_are_told_to_reconnect_when_the_instance_stops() {
         .events
         .subscribe(authed(
             &token,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: server.id, after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: server.id, after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -1046,6 +1117,7 @@ async fn concurrent_writes_stay_ordered_and_counted() {
             &owner,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+                ..Default::default()
             },
         ))
         .await
@@ -1118,6 +1190,7 @@ async fn concurrent_writes_stay_ordered_and_counted() {
             &owner,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: Some(11) }],
+                ..Default::default()
             },
         ))
         .await
@@ -1314,6 +1387,7 @@ async fn open_error(dir: &Path, vars: &[(&str, &str)]) -> String {
     let config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         _ => vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.to_string()),
     })
     .unwrap();
@@ -1638,6 +1712,7 @@ async fn profiles_nicknames_and_notification_settings() {
             &juan,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+                ..Default::default()
             },
         ))
         .await
@@ -1894,6 +1969,7 @@ async fn data_export_and_account_deletion() {
             &juan,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+                ..Default::default()
             },
         ))
         .await
@@ -2211,7 +2287,10 @@ async fn server_settings_and_moderation() {
         .events
         .subscribe(authed(
             &aoi,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -2248,6 +2327,7 @@ async fn server_settings_and_moderation() {
             &aoi,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: Some(0) }],
+                ..Default::default()
             },
         ))
         .await
@@ -3480,7 +3560,10 @@ async fn roles_and_channel_permissions() {
         .events
         .subscribe(authed(
             &aoi,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -5130,6 +5213,7 @@ async fn custom_emoji_and_the_welcome_screen() {
             &member,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }],
+                ..Default::default()
             },
         ))
         .await
@@ -6687,7 +6771,10 @@ async fn channels_shared_between_servers() {
         .events
         .subscribe(authed(
             &rin,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: guest.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: guest.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -7210,8 +7297,39 @@ async fn instances_meet_with_signed_calls() {
     let again = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap().into_inner();
     assert!(again.known_there);
 
+    // A rotates its key (only an admin can): B moves to the new one by
+    // itself, as the old one vouched for it.
+    assert!(fed_a.rotated_at.is_none());
+    let denied = ca.admin.rotate_federation_key(authed(&member, pb::RotateFederationKeyRequest {})).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let rotated =
+        ca.admin.rotate_federation_key(authed(&admin_a, pb::RotateFederationKeyRequest {})).await.unwrap().into_inner();
+    assert_ne!(rotated.fingerprint, fed_a.fingerprint);
+    let after = federation(&mut ca, &admin_a).await;
+    assert_eq!(after.fingerprint, rotated.fingerprint);
+    assert!(after.rotated_at.is_some());
+    let mut moved = None;
+    for _ in 0..100 {
+        let seen = federation(&mut cb, &admin_b).await.peers.remove(0);
+        if seen.fingerprint == rotated.fingerprint {
+            moved = Some(seen);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let moved = moved.expect("B followed A's rotation");
+    assert!(!moved.needs_check);
+    assert_eq!(moved.moves.len(), 1);
+    assert_eq!(moved.moves[0].previous_fingerprint, fed_a.fingerprint);
+    assert_eq!(moved.moves[0].fingerprint, rotated.fingerprint);
+    // Signed calls still go both ways.
+    let again = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap().into_inner();
+    assert!(again.known_there);
+    let back = cb.admin.check_instance(authed(&admin_b, check(&origin_a))).await.unwrap().into_inner();
+    assert!(back.known_there);
+
     // The key is the same after a restart.
-    let fingerprint_a = fed_a.fingerprint.clone();
+    let fingerprint_a = rotated.fingerprint.clone();
     a.stop().await;
     let a = start(dir_a.path(), &federated).await;
     let mut ca = clients(&a).await;
@@ -7499,7 +7617,10 @@ async fn replies_start_threads_under_messages() {
         .events
         .subscribe(authed(
             &rin,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -7932,11 +8053,23 @@ async fn channels_shared_across_instances() {
         .events
         .subscribe(authed(
             &mika,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: guest.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: guest.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
         .into_inner();
+    let avatar = upload(&mut ca, &a, &juan, pb::MediaPurpose::Avatar, png(64, 64)).await;
+    assert!(avatar.starts_with(&origin_a));
+    ca.auth
+        .update_profile(authed(
+            &juan,
+            pb::UpdateProfileRequest { avatar_url: Some(avatar.clone()), ..Default::default() },
+        ))
+        .await
+        .unwrap();
     send(&mut ca, &juan, &home, &dev.id, "@everyone hello from home").await.unwrap();
     let live = next_message(&mut stream).await;
     assert_eq!(live.content, "@everyone hello from home");
@@ -7945,7 +8078,10 @@ async fn channels_shared_across_instances() {
     assert_eq!(live.author_id, format!("{}@{origin_a}", juan_user.id));
     let author = live.shared.clone().unwrap();
     assert_eq!(author.user.as_ref().unwrap().username, "juan");
-    assert!(author.user.unwrap().avatar_url.is_empty(), "nothing to fetch from the other instance");
+    // Pictures come through the reader's own instance, never straight from the other.
+    let shown_avatar = author.user.unwrap().avatar_url;
+    assert!(shown_avatar.starts_with(&format!("{origin_b}/media/outside/")), "{shown_avatar}");
+    assert!(shown_avatar.contains(&avatar.rsplit('/').next().unwrap().to_string()), "{shown_avatar}");
     let from = author.server.unwrap();
     assert_eq!((from.id, from.name, from.instance), (format!("{home}@{origin_a}"), "Home".into(), a.addr.to_string()));
 
@@ -8082,25 +8218,54 @@ async fn channels_shared_across_instances() {
         .unwrap_err();
     assert_eq!(refused.code(), Code::FailedPrecondition);
 
-    // With the home's instance down, the guest hears why.
     let on = pb::InstanceSettings { federation: true, ..Default::default() };
     ca.admin.update_settings(authed(&juan, settings_update(on, &["federation"], &[]))).await.unwrap();
-    let code = make_code(&ca, true).await;
-    let asked = cb
-        .shared
-        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
-        .await
-        .unwrap()
-        .into_inner()
-        .connection
-        .unwrap();
-    ca.shared
-        .review_share(authed(
-            &juan,
-            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
-        ))
-        .await
-        .unwrap();
+    // Blocking an instance ends its shares on both sides; then, unblocked, the
+    // channel is shared again.
+    for block in [true, false] {
+        let code = make_code(&ca, true).await;
+        let asked = cb
+            .shared
+            .accept_share(authed(
+                &mika,
+                pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() },
+            ))
+            .await
+            .unwrap()
+            .into_inner()
+            .connection
+            .unwrap();
+        ca.shared
+            .review_share(authed(
+                &juan,
+                pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
+            ))
+            .await
+            .unwrap();
+        if !block {
+            continue;
+        }
+        let blocked = |hosts: Vec<String>| {
+            let settings = pb::InstanceSettings { federation_blocked_hosts: hosts, ..Default::default() };
+            authed(&juan, settings_update(settings, &["federation_blocked_hosts"], &[]))
+        };
+        ca.admin.update_settings(blocked(vec![b.addr.ip().to_string()])).await.unwrap();
+        let mut ended = false;
+        for _ in 0..100 {
+            let at_home = connections(&mut ca, &juan, &home).await.connections;
+            let at_guest = connections(&mut cb, &mika, &guest).await.connections;
+            if !at_home.iter().any(|c| c.instance == b.addr.to_string())
+                && !at_guest.iter().any(|c| c.instance == a.addr.to_string())
+            {
+                ended = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(ended, "blocking ends the share at home and at the guest");
+        ca.admin.update_settings(blocked(vec![])).await.unwrap();
+    }
+    // With the home's instance down, the guest hears why.
     let shown = list_channels(&mut cb, &mika, &guest)
         .await
         .into_iter()
@@ -8164,7 +8329,10 @@ async fn channels_are_created_with_their_permissions() {
         .events
         .subscribe(authed(
             &rin,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -8189,6 +8357,16 @@ async fn channels_are_created_with_their_permissions() {
     let denied = c.channels.create_channel(create(&rin, "nope", vec![hidden()])).await.unwrap_err();
     assert_eq!(denied.code(), Code::PermissionDenied);
     c.channels.create_channel(create(&rin, "fine", vec![])).await.unwrap();
+
+    // Copying a channel whose overwrites name someone who has left: theirs is dropped.
+    let (kai, kai_user, _) = sign_up(&mut c, "kai").await;
+    join(&mut c, &kai, &sid).await;
+    c.servers.leave_server(authed(&kai, pb::LeaveServerRequest { server_id: sid.clone() })).await.unwrap();
+    let kai_sees = overwrite(&kai_user.id, T::Member, &[P::ViewChannels], &[]);
+    let copy = c.channels.create_channel(create(&juan, "staff-copy", vec![hidden(), kai_sees])).await.unwrap();
+    let copy = copy.into_inner().channel.unwrap();
+    assert_eq!(copy.permission_overwrites.len(), 1);
+    assert_eq!(copy.permission_overwrites[0].target_id, sid);
 }
 
 /// Uploads a file to attach in `server_id`, and says where it's served.
@@ -8451,6 +8629,71 @@ async fn attachments_upload_send_serve_and_go_with_their_message() {
     instance.stop().await;
 }
 
+#[tokio::test]
+async fn voice_messages_go_in_channels_as_their_only_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_LIMIT_VOICE_MESSAGE_SECONDS", "60")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let server = create_server(&mut c, &juan, "Voices", true).await;
+    let channels = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels;
+    let general = channels.iter().find(|ch| ch.name == "general").unwrap().id.clone();
+    // An Ogg page whose first packet is Opus's header, at byte 28.
+    let mut ogg = b"OggS".to_vec();
+    ogg.resize(28, 0);
+    ogg.extend_from_slice(b"OpusHead\x01\x01");
+    ogg.extend((0..4000u32).map(|n| (n % 241) as u8));
+    let mut vorbis = b"OggS".to_vec();
+    vorbis.extend((0..4000u32).map(|n| (n % 241) as u8));
+    let note = |ms: u32| pb::VoiceNote { duration_ms: ms, waveform: vec![10, 200, 90] };
+    let send_voice = |files: Vec<pb::Attachment>| {
+        authed(
+            &juan,
+            pb::SendMessageRequest {
+                server_id: server.id.clone(),
+                channel_id: general.clone(),
+                attachments: files,
+                ..Default::default()
+            },
+        )
+    };
+    let voice_file = |url: &str, ms: u32| pb::Attachment {
+        url: url.into(),
+        filename: "voice-message.ogg".into(),
+        voice: Some(note(ms)),
+        ..Default::default()
+    };
+
+    // Only an Ogg recording, alone, within the instance's cap.
+    let zip = attach(&mut c, &instance, &juan, &server.id, b"PK\x03\x04zip".to_vec()).await;
+    let not_ogg = c.messages.send_message(send_voice(vec![voice_file(&zip, 3000)])).await.unwrap_err();
+    assert_eq!(not_ogg.code(), Code::InvalidArgument);
+    let other = attach(&mut c, &instance, &juan, &server.id, vorbis).await;
+    let not_opus = c.messages.send_message(send_voice(vec![voice_file(&other, 3000)])).await.unwrap_err();
+    assert_eq!(not_opus.code(), Code::InvalidArgument);
+    let url = attach(&mut c, &instance, &juan, &server.id, ogg.clone()).await;
+    let with_more = pb::Attachment { url: zip.clone(), filename: "x.zip".into(), ..Default::default() };
+    let crowded = c.messages.send_message(send_voice(vec![voice_file(&url, 3000), with_more])).await.unwrap_err();
+    assert_eq!(crowded.code(), Code::InvalidArgument);
+    let long = c.messages.send_message(send_voice(vec![voice_file(&url, 61_000)])).await.unwrap_err();
+    assert_eq!(long.code(), Code::ResourceExhausted);
+
+    let sent =
+        c.messages.send_message(send_voice(vec![voice_file(&url, 3000)])).await.unwrap().into_inner().message.unwrap();
+    let [file] = &sent.attachments[..] else { panic!("{:?}", sent.attachments) };
+    assert_eq!(file.content_type, "audio/ogg; codecs=opus");
+    assert_eq!(file.voice, Some(note(3000)));
+    let listed = messages(&mut c, &juan, &server.id, &general).await;
+    assert_eq!(listed.iter().find(|m| m.id == sent.id).unwrap().attachments[0].voice, Some(note(3000)));
+    assert_eq!(fetch(&instance, &file.url).await.2, ogg);
+}
+
 fn new_poll(question: &str, answers: &[&str], anonymous: bool) -> pb::NewPoll {
     pb::NewPoll {
         question: question.into(),
@@ -8571,7 +8814,10 @@ async fn polls_count_votes_and_keep_anonymous_ones_secret() {
         .events
         .subscribe(authed(
             &juan,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()
@@ -8865,7 +9111,10 @@ async fn votes_at_once_are_all_counted_in_order() {
         .events
         .subscribe(authed(
             &owner,
-            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
         ))
         .await
         .unwrap()

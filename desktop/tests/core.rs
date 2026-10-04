@@ -11,8 +11,10 @@ use fuwa_desktop::core::moderation::{Action, timed_out_until};
 use fuwa_desktop::core::reports;
 use fuwa_desktop::core::shared;
 use fuwa_desktop::core::store::{Connection, Focus, Store};
+use fuwa_desktop::core::updates;
 use fuwa_desktop::core::vault::ItemKind;
 use fuwa_desktop::core::{Core, Notice};
+use fuwa_desktop::pb;
 use fuwa_server::app::App;
 use fuwa_server::config::Config;
 
@@ -29,6 +31,7 @@ fn start_instance(dir: &std::path::Path) -> Instance {
         let config = Config::from_lookup(|key| match key {
             "FUWA_DATA_PATH" => Some(dir.clone()),
             "FUWA_TELEMETRY" => Some("off".into()),
+            "FUWA_UPDATE_CHECK" => Some("off".into()),
             _ => None,
         })
         .unwrap();
@@ -137,7 +140,15 @@ fn two_people_talk_in_a_server_and_in_private() {
     until(&bob, "Alice's mention", |s| {
         s.instance(&key).unwrap().messages[&general].items.iter().any(|m| m.content == ping)
     });
-    let notice = notices.try_recv().expect("the mention notified");
+    // The notification goes out just after the store shows the message.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let notice = loop {
+        match notices.try_recv() {
+            Ok(notice) => break notice,
+            Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => panic!("the mention didn't notify"),
+        }
+    };
     assert!(matches!(notice, Notice::Message { ref body, mention: true, .. } if *body == ping), "{notice:?}");
 
     // Alice edits it; Bob sees the edit.
@@ -307,6 +318,52 @@ fn anonymous_reports_reach_the_instance() {
     };
     assert_eq!(again.unwrap_err().code, tonic::Code::ResourceExhausted);
     assert!(reports::pending().usage >= 1, "kept for the next report");
+
+    instance.app.shutdown.cancel();
+    drop(instance.runtime);
+}
+
+#[test]
+fn updates_are_found_through_the_instance_but_need_a_signature() {
+    // SAFETY: set before anything reads it.
+    unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
+    let data = tempfile::tempdir().unwrap();
+    let instance = start_instance(data.path());
+    let home = tempfile::tempdir().unwrap();
+    let app = Core::start(Paths::under(home.path())).unwrap();
+    app.add_instance(&instance.url, None);
+
+    // The instance knows of no release yet: nothing to show.
+    {
+        let core = app.clone();
+        wait(&app, async move { core.check_for_update(true).await });
+    }
+    assert!(matches!(updates::status(), updates::Status::Failed { .. }), "{:?}", updates::status());
+
+    // A newer release whose signature is from no key this app trusts is shown, never installed.
+    instance.app.releases.set(fuwa_server::releases::Latest {
+        version: "999.0.0".into(),
+        published_at: "2026-10-04T01:00:00Z".into(),
+        notes: "## New\n* shiny".into(),
+        page: "https://github.com/waifu-devs/fuwa/releases/tag/v999.0.0".into(),
+        sums: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  fuwa-desktop-999.0.0-x86_64-linux\n"
+            .into(),
+        signature: "JSwu6VQxqqCDKaTZYOnvyj4afvUkkLyz6FKWw8ykTUwEU39vLaUv9UT4eMqP41oL+zvvr1YWMls1pYGmlFDjDg==".into(),
+        files: vec![fuwa_server::releases::File { name: "fuwa-desktop-999.0.0-x86_64-linux".into(), size: 3 }],
+    });
+    {
+        let core = app.clone();
+        wait(&app, async move { core.check_for_update(true).await });
+    }
+    match updates::status() {
+        // No key is built in yet, or the release's signature isn't from one.
+        updates::Status::Available { release, why: updates::Manual::Unsigned } => {
+            assert_eq!(release.version, "999.0.0");
+            assert_eq!(release.notes, "## New\n* shiny");
+        }
+        updates::Status::Failed { what } => assert!(what.contains("signature"), "{what}"),
+        other => panic!("{other:?}"),
+    }
 
     instance.app.shutdown.cancel();
     drop(instance.runtime);
@@ -492,6 +549,121 @@ fn servers_share_a_channel() {
     wait(&bob, async move { core.disconnect_shared(&k, &sid, &id).await }).unwrap();
     until(&bob, "the channel gone", |s| s.instance(&key).unwrap().channels[&owls.id].iter().all(|c| c.id != shown.id));
     until(&alice, "the connection gone", |s| s.instance(&key).unwrap().shared[&tea.id].connections.is_empty());
+
+    instance.app.shutdown.cancel();
+    drop(instance.runtime);
+}
+
+#[test]
+fn secure_channels_stay_between_devices() {
+    // SAFETY: set before anything reads it.
+    unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
+    let data = tempfile::tempdir().unwrap();
+    let instance = start_instance(data.path());
+    let homes = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+    let [alice, bob, carol] = [0, 1, 2].map(|n| Core::start(Paths::under(homes[n].path())).unwrap());
+    let url = instance.url.clone();
+    let mut key = String::new();
+    for (core, name) in [(&alice, "alice"), (&bob, "bob"), (&carol, "carol")] {
+        let (c, url) = (core.clone(), url.clone());
+        key = wait(core, async move { c.sign_up(&url, name, "correct horse battery", name).await }).unwrap();
+        until(core, "signed in", |s| s.instance(&key).is_some_and(|i| i.dms.status == DmStatus::Ready));
+    }
+
+    // Alice makes a server with a secure channel; Bob joins.
+    let server = {
+        let (core, key) = (alice.clone(), key.clone());
+        wait(&alice, async move { core.create_server(&key, "Hideout").await }).unwrap()
+    };
+    let sid = server.id.clone();
+    let channel = {
+        let (core, key, sid) = (alice.clone(), key.clone(), sid.clone());
+        wait(&alice, async move { core.create_channel(&key, &sid, "plans", pb::ChannelType::Secure, "").await })
+            .unwrap()
+    };
+    let cid = channel.id.clone();
+    let join = |core: &Arc<Core>| {
+        let invite = {
+            let (a, key, sid) = (alice.clone(), key.clone(), sid.clone());
+            wait(&alice, async move { a.create_invite(&key, &sid).await }).unwrap()
+        };
+        let (c, key2) = (core.clone(), key.clone());
+        wait(core, async move { c.join_by_invite(&key2, &invite).await }).unwrap();
+        until(core, "the server's channels", |s| s.instance(&key).is_some_and(|i| i.synced.contains(&sid)));
+    };
+    join(&bob);
+    until(&alice, "Bob in the server", |s| s.instance(&key).unwrap().members[&sid].len() == 2);
+
+    // Alice opens it, which starts its group with Bob's device in it, and writes.
+    let send = |core: &Arc<Core>, text: &str| {
+        let (c, key, cid, text) = (core.clone(), key.clone(), cid.clone(), text.to_owned());
+        wait(core, async move { c.send_dm(&key, &cid, Content::Text { text, reply_to: 0 }).await }).unwrap();
+    };
+    {
+        let (c, key, sid, cid) = (alice.clone(), key.clone(), sid.clone(), cid.clone());
+        wait(&alice, async move { c.prepare_secure_channel(&key, &sid, &cid, true).await }).unwrap();
+    }
+    send(&alice, "meet at the old mill");
+    let said = |core: &Core, text: &'static str| {
+        let (key, cid) = (key.clone(), cid.clone());
+        until(core, text, move |s| {
+            s.instance(&key)
+                .unwrap()
+                .dms
+                .items
+                .get(&cid)
+                .is_some_and(|items| items.iter().any(|i| i.kind == ItemKind::Text && i.content == text))
+        });
+    };
+    said(&bob, "meet at the old mill");
+    // Signed by the device that sent it, so it can be passed on later; and counted unread with the server.
+    assert!(bob.shared.read(|s| {
+        let i = s.instance(&key).unwrap();
+        i.dms.items[&cid].iter().any(|it| it.content == "meet at the old mill" && it.signed.is_some())
+            && i.unread.get(&cid).copied() == Some(1)
+    }));
+    send(&bob, "bringing snacks");
+    said(&alice, "bringing snacks");
+
+    // With history sharing on, someone who joins later gets what was said, passed on by a member's device.
+    {
+        let (c, key, sid, cid) = (alice.clone(), key.clone(), sid.clone(), cid.clone());
+        wait(&alice, async move { c.set_secure_history(&key, &sid, &cid, true).await }).unwrap();
+    }
+    until(&bob, "history sharing turned on", |s| {
+        s.instance(&key).unwrap().dms.items[&cid].iter().any(|i| i.kind == ItemKind::Setting && i.content == "on")
+    });
+    send(&alice, "carol is coming too");
+    said(&bob, "carol is coming too");
+    join(&carol);
+    said(&carol, "carol is coming too");
+    // Only what was said since sharing was turned on is passed on.
+    assert!(carol.shared.read(|s| {
+        let texts: Vec<_> =
+            s.instance(&key).unwrap().dms.items[&cid].iter().filter(|i| i.kind == ItemKind::Text).collect();
+        texts.len() == 1 && texts.iter().all(|i| !i.shared_by.is_empty())
+    }));
+    send(&carol, "hi all");
+    said(&alice, "hi all");
+    said(&bob, "hi all");
+
+    // Starting the encryption over: everyone notes it, and writing works again.
+    {
+        let (c, key, sid, cid) = (alice.clone(), key.clone(), sid.clone(), cid.clone());
+        wait(&alice, async move { c.reset_secure_channel(&key, &sid, &cid, true).await }).unwrap();
+    }
+    until(&bob, "the reset", |s| s.instance(&key).unwrap().dms.items[&cid].iter().any(|i| i.kind == ItemKind::Reset));
+    send(&alice, "fresh keys");
+    said(&bob, "fresh keys");
+    said(&carol, "fresh keys");
+
+    // The instance only ever kept ciphertext.
+    let mut found = false;
+    for entry in walk(data.path()) {
+        let bytes = std::fs::read(&entry).unwrap_or_default();
+        found |= bytes.windows(b"old mill".len()).any(|w| w == b"old mill");
+    }
+    assert!(!found, "the instance kept a secure channel's words");
 
     instance.app.shutdown.cancel();
     drop(instance.runtime);

@@ -137,13 +137,35 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
     let attachments: Vec<Value> = m
         .attachments
         .iter()
-        .map(|a| trim(json!({ "filename": a.filename, "content_type": a.content_type, "size": a.size, "url": a.url })))
+        .map(|a| {
+            // A voice message's length, never its waveform.
+            let voice_ms = a.voice.as_ref().map(|v| v.duration_ms);
+            trim(json!({
+                "filename": a.filename,
+                "content_type": a.content_type,
+                "size": a.size,
+                "url": a.url,
+                // 0 is unknown.
+                "width": (a.width > 0).then_some(a.width),
+                "height": (a.height > 0).then_some(a.height),
+                "voice_duration_ms": voice_ms,
+            }))
+        })
         .collect();
     let embeds: Vec<Value> = m
         .embeds
         .iter()
         .map(|e| trim(json!({ "title": e.title, "description": e.description, "url": e.url })))
         .collect();
+    // As members see it: the file on this instance and its credit, never the seal.
+    let gif = m.gif.as_ref().map(|g| {
+        let provider = pb::GifProvider::try_from(g.provider).unwrap_or_default();
+        let provider = match provider {
+            pb::GifProvider::Unspecified => String::new(),
+            provider => name(provider.as_str_name(), "GIF_PROVIDER_"),
+        };
+        trim(json!({ "url": g.url, "width": g.width, "height": g.height, "title": g.title, "provider": provider }))
+    });
     trim(json!({
         "id": m.id,
         "channel_id": m.channel_id,
@@ -153,8 +175,10 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
         "reply_to_id": m.reply_to_id,
         "attachments": attachments,
         "embeds": embeds,
+        "gif": gif,
         "mentions_everyone": m.mentions_everyone,
         "mention_role_ids": m.mention_role_ids,
+        "mention_user_ids": m.mention_user_ids,
         "poll": m.poll.as_ref().map(poll),
         "created_at": time(&m.created_at),
         "edited_at": time(&m.edited_at),
@@ -287,6 +311,73 @@ mod tests {
         assert_eq!(
             event(&e),
             json!({ "sequence": 7, "type": "message_deleted", "channel_id": "c", "message_id": "m" })
+        );
+    }
+
+    #[test]
+    fn a_gif_shows_as_members_see_it() {
+        let m = pb::Message {
+            id: "m".into(),
+            gif: Some(pb::MessageGif {
+                url: "/media/g".into(),
+                width: 320,
+                height: 240,
+                provider: pb::GifProvider::Giphy as i32,
+                seal: "secret".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let shown = message(&m, &HashMap::new());
+        assert_eq!(shown["gif"], json!({ "url": "/media/g", "width": 320, "height": 240, "provider": "giphy" }));
+        assert!(!shown.to_string().contains("secret"), "never the seal");
+    }
+
+    #[test]
+    fn attachments_show_as_members_see_them() {
+        let file = |name: &str, width: i32| pb::Attachment {
+            id: "f".into(),
+            filename: name.into(),
+            content_type: "image/png".into(),
+            size: 2048,
+            url: "https://fuwa.example/media/f".into(),
+            width,
+            height: width / 2,
+            voice: None,
+        };
+        let m = pb::Message {
+            id: "m".into(),
+            attachments: vec![file("cat.png", 640), file("dog.png", 0)],
+            ..Default::default()
+        };
+        let shown = message(&m, &HashMap::new());
+        assert_eq!(
+            shown["attachments"],
+            json!([
+                {
+                    "filename": "cat.png",
+                    "content_type": "image/png",
+                    "size": 2048,
+                    "url": "https://fuwa.example/media/f",
+                    "width": 640,
+                    "height": 320,
+                },
+                { "filename": "dog.png", "content_type": "image/png", "size": 2048, "url": "https://fuwa.example/media/f" },
+            ])
+        );
+        // A voice message: its length, never its waveform.
+        let voice = pb::Attachment {
+            filename: "voice-message.ogg".into(),
+            content_type: "audio/ogg; codecs=opus".into(),
+            size: 4096,
+            voice: Some(pb::VoiceNote { duration_ms: 3000, waveform: vec![9, 200, 40] }),
+            ..Default::default()
+        };
+        let m = pb::Message { id: "v".into(), attachments: vec![voice], ..Default::default() };
+        let shown = message(&m, &HashMap::new());
+        assert_eq!(
+            shown["attachments"],
+            json!([{ "filename": "voice-message.ogg", "content_type": "audio/ogg; codecs=opus", "size": 4096, "voice_duration_ms": 3000 }])
         );
     }
 }

@@ -43,6 +43,12 @@ impl Hub {
         channels.entry(server_id.to_string()).or_insert_with(|| broadcast::channel(BUFFER).0).subscribe()
     }
 
+    /// Streams following a server on this part right now.
+    pub fn followers(&self, server_id: &str) -> usize {
+        let channels = self.channels.lock().unwrap_or_else(|p| p.into_inner());
+        channels.get(server_id).map_or(0, broadcast::Sender::receiver_count)
+    }
+
     /// Every event published from now on. One tap at a time: a new one replaces the last.
     pub fn tap(&self) -> mpsc::UnboundedReceiver<Arc<pb::Event>> {
         let (tx, rx) = mpsc::unbounded_channel();

@@ -50,6 +50,10 @@ pub struct Config {
     /// picture uploads. Unlimited by default, but for picture uploads.
     pub limits: Limits,
     pub telemetry: Telemetry,
+    /// FUWA_UPDATE_CHECK: on (default) | off. Asks GitHub daily whether a
+    /// newer fuwa is out, to tell admins and pass desktop apps their updates
+    /// (`releases.rs`). Nothing about the instance goes with it.
+    pub update_check: bool,
     /// FUWA_WEB: on (default) | off. Serves the web client on / when the binary
     /// was built with it (the Docker image and release builds are).
     pub web: bool,
@@ -108,6 +112,21 @@ pub struct Config {
     /// Where the databases and pictures are continuously copied to:
     /// FUWA_S3_* (a bucket) or FUWA_REPLICA_PATH (a directory). None is off.
     pub replica: Option<ReplicaConfig>,
+    /// FUWA_STREAMS_PER_ACCOUNT: live connections (apps and tabs) one account
+    /// may hold open at once on this part, default 32 (a protective default);
+    /// `unlimited` for none. Admins can change it in the instance settings.
+    pub streams_per_account: Option<usize>,
+    /// FUWA_MAX_STREAMS: live connections this part holds open at once, for
+    /// everyone. Unlimited by default; see docs/capacity.md for what a box holds.
+    pub max_streams: Option<usize>,
+    /// FUWA_WRITE_QUEUE: writes one server's file may have waiting at once
+    /// before that server answers busy, default 512 (a protective default);
+    /// `unlimited` for none.
+    pub write_queue: Option<usize>,
+    /// FUWA_SIGN_IN_QUEUE: password checks that may wait at once before
+    /// sign-ins answer busy, default 256 (a protective default); `unlimited`
+    /// for none.
+    pub sign_in_queue: Option<usize>,
 }
 
 impl std::fmt::Debug for Config {
@@ -128,9 +147,14 @@ impl std::fmt::Debug for Config {
             .field("admin_token", &Secret(&self.admin_token))
             .field("limits", &self.limits)
             .field("telemetry", &self.telemetry)
+            .field("update_check", &self.update_check)
             .field("web", &self.web)
             .field("cluster", &self.cluster)
             .field("replica", &self.replica)
+            .field("streams_per_account", &self.streams_per_account)
+            .field("max_streams", &self.max_streams)
+            .field("write_queue", &self.write_queue)
+            .field("sign_in_queue", &self.sign_in_queue)
             .field("automod_providers", &self.automod_providers)
             .field("gifs", &self.gifs)
             .finish()
@@ -401,6 +425,12 @@ impl Config {
             Some(other) => return Err(format!("FUWA_TELEMETRY must be on or off, got {other:?}")),
         };
 
+        let update_check = match get("FUWA_UPDATE_CHECK").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_UPDATE_CHECK must be on or off, got {other:?}")),
+        };
+
         let hosted = match get("FUWA_HOSTING").as_deref().map(str::trim) {
             None | Some("self_hosted") => false,
             Some("hosted") => true,
@@ -504,6 +534,21 @@ impl Config {
         }
         let media_urls = media_urls.into_iter().map(|u| u.trim_end_matches('/').to_string()).collect();
 
+        let count = |key: &str, default: Option<usize>| -> Result<Option<usize>, String> {
+            match get(key).as_deref().map(str::trim) {
+                None => Ok(default),
+                Some("unlimited") => Ok(None),
+                Some(value) => match value.parse::<usize>() {
+                    Ok(n) if n >= 1 => Ok(Some(n)),
+                    _ => Err(format!("{key} must be a whole number, 1 or more, or unlimited, got {value:?}")),
+                },
+            }
+        };
+        let streams_per_account = count("FUWA_STREAMS_PER_ACCOUNT", Some(crate::streams::PER_ACCOUNT))?;
+        let max_streams = count("FUWA_MAX_STREAMS", None)?;
+        let write_queue = count("FUWA_WRITE_QUEUE", Some(crate::db::WRITE_QUEUE))?;
+        let sign_in_queue = count("FUWA_SIGN_IN_QUEUE", Some(crate::auth::HASH_WAITING))?;
+
         let replica = match (replica(&get)?, cluster.role) {
             // Only the parts that keep files replicate them: a split
             // instance's directory and shards. One process keeps plain local files.
@@ -545,6 +590,7 @@ impl Config {
                 url: get("FUWA_TELEMETRY_URL").unwrap_or_else(|| DEFAULT_TELEMETRY_URL.into()),
                 hosted,
             },
+            update_check,
             web,
             cluster,
             calls,
@@ -564,6 +610,10 @@ impl Config {
             media,
             media_urls,
             replica,
+            streams_per_account,
+            max_streams,
+            write_queue,
+            sign_in_queue,
         })
     }
 }

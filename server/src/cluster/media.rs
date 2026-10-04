@@ -58,7 +58,7 @@ impl cpb::media_service_server::MediaService for Internal {
 
     async fn speak(&self, request: Request<cpb::SpeakRequest>) -> Result<Response<cpb::SpeakResponse>, Status> {
         let r = request.into_inner();
-        let queued = self.0.speak(&r.room, &r.participant, &r.session_id, r.frames).await?;
+        let queued = self.0.speak(&r.room, &r.participant, &r.session_id, r.frames, r.interrupt).await?;
         Ok(Response::new(cpb::SpeakResponse { queued: queued as u32 }))
     }
 
@@ -132,8 +132,9 @@ pub async fn run(config: Config, address: SocketAddr) -> Result<(), String> {
     );
     crate::app::spawn_signal_handler(shutdown.clone());
     let stopping = shutdown.clone();
-    let served =
-        axum::serve(listener, router).with_graceful_shutdown(async move { stopping.cancelled().await }).into_future();
+    let served = axum::serve(crate::app::no_delay(listener), router)
+        .with_graceful_shutdown(async move { stopping.cancelled().await })
+        .into_future();
     let calls = async {
         shutdown.cancelled().await;
         calls_stop.cancel();

@@ -36,6 +36,38 @@ pub enum ItemKind {
     Joined,
     /// A record this device couldn't open.
     Unreadable,
+    /// Someone started a secure channel's encryption over.
+    Reset,
+    /// Someone turned a secure channel's history sharing on ("on") or off ("off"), in `content`.
+    Setting,
+}
+
+/// A secure channel message as its sender's device signed it (a
+/// `SignedContent`'s parts and the device's signature key), kept so it can be
+/// passed on to devices added later.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Signed {
+    #[serde(with = "bytes")]
+    pub payload: Vec<u8>,
+    #[serde(with = "bytes")]
+    pub signature: Vec<u8>,
+    #[serde(with = "bytes")]
+    pub key: Vec<u8>,
+}
+
+/// Bytes as base64 in the vault's JSON.
+mod bytes {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD as B64;
+    use serde::{Deserialize as _, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&B64.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        B64.decode(String::deserialize(d)?).map_err(serde::de::Error::custom)
+    }
 }
 
 /// One thing a conversation said, as this device read it.
@@ -59,6 +91,15 @@ pub struct Item {
     pub added: Vec<DeviceRef>,
     #[serde(default)]
     pub removed: Vec<DeviceRef>,
+    /// In a secure channel: the message as its sender signed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed: Option<Signed>,
+    /// Its latest edit, signed the same way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_signed: Option<Signed>,
+    /// Who passed it on to this device, when it came as shared history rather than as it was sent.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub shared_by: String,
 }
 
 impl Item {
@@ -75,6 +116,9 @@ impl Item {
             deleted: false,
             added: Vec::new(),
             removed: Vec::new(),
+            signed: None,
+            edit_signed: None,
+            shared_by: String::new(),
         }
     }
 }
@@ -194,6 +238,25 @@ impl Vault {
             self.items.insert(conversation.to_owned(), list);
         }
         Ok(self.items.get_mut(conversation).expect("just loaded"))
+    }
+
+    /// Forgets everything kept for one conversation or channel: its note and what it said.
+    pub fn forget(&mut self, conversation: &str) -> std::io::Result<()> {
+        self.items.remove(conversation);
+        self.head.notes.remove(conversation);
+        match std::fs::remove_file(self.items_path(conversation)) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err),
+            _ => {}
+        }
+        if self.dir.exists() {
+            self.write_sealed(&self.dir.join("vault.json"), &self.head)?;
+        }
+        Ok(())
+    }
+
+    /// The conversations and channels this device has a note for.
+    pub fn noted(&self) -> impl Iterator<Item = &String> {
+        self.head.notes.keys()
     }
 
     fn items_path(&self, conversation: &str) -> PathBuf {

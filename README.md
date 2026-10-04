@@ -152,8 +152,8 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_EMOJIS` | unlimited | Custom emoji per server |
 | `FUWA_LIMIT_PICTURE_UPLOAD` | unlimited | Largest avatar, banner, server icon or emoji one upload may be, like `8MB` |
 | `FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY` | unlimited | Pictures one account may upload in a day (UTC), like `256MiB` |
-| `FUWA_LIMIT_VOICE_MESSAGE_SECONDS` | unlimited | The longest voice message in direct messages; apps stop recording there |
-| `FUWA_LIMIT_VOICE_MESSAGE_BYTES` | unlimited | The biggest voice message, encrypted and padded, like `2MiB` |
+| `FUWA_LIMIT_VOICE_MESSAGE_SECONDS` | unlimited | The longest voice message; apps stop recording there. The instance can only check the length apps report, not the audio itself |
+| `FUWA_LIMIT_VOICE_MESSAGE_BYTES` | unlimited | The biggest voice message, like `2MiB` (in direct messages, encrypted and padded) |
 | `FUWA_LIMIT_VOICE_MESSAGES_PER_DAY` | unlimited | Voice messages one account may upload in a day (UTC), apart from pictures |
 | `FUWA_LIMIT_ATTACHMENT_UPLOAD` | unlimited | Largest file one message may carry, like `100MB` |
 | `FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY` | unlimited | Files one account may send in a day (UTC), apart from pictures, like `2GiB` |
@@ -163,6 +163,7 @@ the log filter are read only from the environment.
 | `FUWA_TELEMETRY` | `on` | The anonymous usage signal and health reports; `off` turns both off (so does `DO_NOT_TRACK=1`), and apps on the instance then send no reports either |
 | `FUWA_TELEMETRY_URL` | `https://analytics.waifu.dev/v1/fuwa/signals` | Where the signal goes |
 | `FUWA_REPORTS_URL` | `FUWA_TELEMETRY_URL` with `/signals` changed to `/reports` | Where the hourly health report goes |
+| `FUWA_UPDATE_CHECK` | `on` | Asks GitHub daily whether a newer fuwa is out, to tell admins (instance settings) and pass desktop apps their updates; never installs anything ([Updating](docs/self-hosting.md#updating)) |
 | `FUWA_HOSTING` | `self_hosted` | `hosted` only on Waifu Devs' own instance; reported in the signal |
 | `FUWA_LOG` | `info,turso_core=warn` | Log filter ([syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)) |
 | `FUWA_CALLS` | `on` | Voice channels and calls in direct messages; `off` turns them off |

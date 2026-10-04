@@ -59,6 +59,8 @@ pub struct App {
     pub servers: Servers,
     pub hub: Arc<Hub>,
     pub limiter: SignInLimiter,
+    /// Live event streams held open, per account and in all.
+    pub streams: Arc<crate::streams::Streams>,
     pub started: Instant,
     /// Cancelled when the instance shuts down, ending live streams.
     pub shutdown: CancellationToken,
@@ -77,6 +79,16 @@ pub struct App {
     picture_key: crate::outside::Key,
     /// How this instance talks to other fuwa instances (docs/federation.md).
     pub federation: crate::federation::Federation,
+    /// Accounts some of whose sessions were just ended (signed out, a token
+    /// reset, an account disabled or deleted), so their live streams check
+    /// at once rather than at their next heartbeat. See [`App::sessions_ended`].
+    ended: tokio::sync::broadcast::Sender<Arc<str>>,
+    /// Accounts joining servers, as (account, server), for streams that
+    /// follow new servers. See [`App::joined_server`].
+    joined: tokio::sync::broadcast::Sender<(Arc<str>, Arc<str>)>,
+    /// Whether a newer fuwa is out (`releases.rs`); checked by a single
+    /// process and a split instance's directory, which answers GetNode.
+    pub releases: Arc<crate::releases::Releases>,
 }
 
 /// Where the parts this process doesn't run are.
@@ -192,8 +204,13 @@ impl App {
         }
 
         let federation = crate::federation::Federation::new(config.federation_allow_private);
+        let update_check = config.update_check;
+        let release_cache = config.data_path.join("release-cache");
         let shutdown = CancellationToken::new();
         let media_link = media_link(&config, &shutdown).await;
+        let streams = crate::streams::Streams::new(config.max_streams);
+        crate::db::set_write_queue(config.write_queue);
+        crate::auth::set_sign_in_queue(config.sign_in_queue);
 
         let app = Arc::new(Self {
             config,
@@ -208,6 +225,7 @@ impl App {
             servers,
             hub,
             limiter: SignInLimiter::default(),
+            streams,
             started: Instant::now(),
             shutdown,
             link,
@@ -217,7 +235,13 @@ impl App {
             media_link,
             picture_key,
             federation,
+            ended: tokio::sync::broadcast::Sender::new(256),
+            joined: tokio::sync::broadcast::Sender::new(256),
+            releases: crate::releases::Releases::new(update_check, release_cache),
         });
+        if app.node.is_some() {
+            app.releases.spawn(app.shutdown.clone());
+        }
         if app.node.is_some() {
             app.sweep_media(crate::id::now_ms()).await?;
         }
@@ -232,6 +256,28 @@ impl App {
     /// Accounts, sessions and settings. Only a single process and a split
     /// instance's directory keep them; the gateways route every call that
     /// needs them there.
+    /// Says some of an account's sessions just ended. Live streams here check
+    /// theirs at once, and a directory passes it on to its shards for theirs.
+    pub fn sessions_ended(&self, account_id: &str) {
+        let _ = self.ended.send(account_id.into());
+    }
+
+    /// The accounts whose sessions end from now on, for a live stream to follow.
+    pub fn ended_sessions(&self) -> tokio::sync::broadcast::Receiver<Arc<str>> {
+        self.ended.subscribe()
+    }
+
+    /// Says an account just joined a server, where the index of who's in what
+    /// is kept (a single process, or a directory, which passes it on to gateways).
+    pub fn joined_server(&self, account_id: &str, server_id: &str) {
+        let _ = self.joined.send((account_id.into(), server_id.into()));
+    }
+
+    /// Accounts joining servers from now on, as (account, server).
+    pub fn joined_servers(&self) -> tokio::sync::broadcast::Receiver<(Arc<str>, Arc<str>)> {
+        self.joined.subscribe()
+    }
+
     pub fn node(&self) -> Result<&NodeDb> {
         self.node.as_ref().ok_or_else(|| Error::internal("this part of the instance doesn't keep accounts"))
     }
@@ -244,6 +290,12 @@ impl App {
     /// The link to store for a picture someone gave: see [`crate::outside::link`].
     pub fn picture_link(&self, url: &str) -> String {
         crate::outside::link(&self.picture_key, &self.settings().public_url, url)
+    }
+
+    /// The link to show for a picture on another fuwa instance: see
+    /// [`crate::outside::link_on_origin`].
+    pub fn picture_link_on_origin(&self, url: &str) -> String {
+        crate::outside::link_on_origin(&self.picture_key, &self.settings().public_url, url)
     }
 
     /// Direct messages, where accounts are kept.
@@ -334,7 +386,11 @@ impl App {
     }
 
     pub fn node_info(&self) -> pb::Node {
-        pb::Node { regions: self.regions(), ..node_info(&self.settings(), self.announcement()) }
+        pb::Node {
+            regions: self.regions(),
+            versions: Some(crate::compat::versions(self.releases.newer())),
+            ..node_info(&self.settings(), self.announcement())
+        }
     }
 
     /// Every route: the gRPC services (also reachable as gRPC-Web from
@@ -400,9 +456,19 @@ impl App {
             let app = self.clone();
             router = router.route(
                 "/healthz/parts",
+                get(move |headers: http::HeaderMap| {
+                    let app = app.clone();
+                    async move { crate::cluster::status::parts(&app, &headers).await }
+                }),
+            );
+        } else {
+            // How busy a shard is, for its directory's answer (behind the cluster key).
+            let app = self.clone();
+            router = router.route(
+                "/healthz/load",
                 get(move || {
                     let app = app.clone();
-                    async move { crate::cluster::status::parts(&app).await }
+                    async move { crate::cluster::status::json_response(&crate::cluster::status::load(&app)) }
                 }),
             );
         }
@@ -420,6 +486,8 @@ impl App {
             router = router.merge(crate::sso::http::server_routes(self.clone()));
         }
         if !self.config.cluster.is_split() {
+            // Desktop apps' updates; behind gateways, they answer these.
+            router = router.merge(self.releases.routes());
             // MCP answers through every route above, as clients reach them.
             let mcp = crate::mcp::routes(router.clone(), self.clone());
             router = router.merge(mcp);
@@ -438,6 +506,18 @@ impl App {
         let key: Arc<str> = self.config.cluster.key.as_deref().unwrap_or_default().into();
         router.layer(axum::middleware::from_fn_with_state(key, crate::cluster::require_key))
     }
+}
+
+/// Sends what each answer writes straight away. Without it, the small
+/// frames a gRPC answer ends with wait for the client's acknowledgement of
+/// the ones before (Nagle), adding up to 40 ms to every call.
+pub fn no_delay(
+    listener: tokio::net::TcpListener,
+) -> impl axum::serve::Listener<Io = tokio::net::TcpStream, Addr = SocketAddr> {
+    use axum::serve::ListenerExt;
+    listener.tap_io(|stream| {
+        let _ = stream.set_nodelay(true);
+    })
 }
 
 /// Where calls' sound goes: a media part in this process (when it runs
@@ -498,6 +578,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
             source: crate::SOURCE.into(),
         }),
         regions: vec![],
+        versions: Some(crate::compat::versions(None)),
     }
 }
 
@@ -534,7 +615,13 @@ pub fn cors(source: Arc<impl HasSettings>) -> CorsLayer {
             "mcp-session-id",
             "last-event-id",
         ]))
-        .expose_headers(headers(&["grpc-status", "grpc-message", "grpc-status-details-bin", "www-authenticate"]))
+        .expose_headers(headers(&[
+            "grpc-status",
+            "grpc-message",
+            "grpc-status-details-bin",
+            "www-authenticate",
+            crate::error::RETRY_AFTER_MS,
+        ]))
         .max_age(Duration::from_secs(2 * 60 * 60))
 }
 
@@ -610,7 +697,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     }
 
     let shutdown = app.shutdown.clone();
-    let served = axum::serve(listener, app.router())
+    let served = axum::serve(crate::app::no_delay(listener), app.router())
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
         .await
         .map_err(|err| format!("server error: {err}"));

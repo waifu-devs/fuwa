@@ -295,6 +295,13 @@ impl AdminService for Api {
                 }
                 if let Some(disabled) = req.disabled {
                     self.app.node()?.set_disabled(&req.account_id, disabled, &reason).await?;
+                    if disabled {
+                        // Their agents' sessions went too.
+                        for agent in self.app.node()?.agents(&req.account_id).await? {
+                            self.app.sessions_ended(&agent.account.id);
+                        }
+                        self.app.sessions_ended(&req.account_id);
+                    }
                 }
                 if req.admin == Some(true) {
                     self.app.node()?.set_admin(&req.account_id, true).await?;
@@ -329,6 +336,7 @@ impl AdminService for Api {
                 let password = auth::temporary_password();
                 let hash = auth::hash_password(password.clone()).await?;
                 self.app.node()?.reset_password(&account.id, &hash, req.turn_off_two_factor).await?;
+                self.app.sessions_ended(&account.id);
                 tracing::info!(two_factor_off = req.turn_off_two_factor, "password reset by an admin");
                 Ok(pb::ResetAccountPasswordResponse { password })
             }
@@ -423,12 +431,15 @@ impl AdminService for Api {
                     Err(err) => (String::new(), err.to_string()),
                 };
                 let fingerprint = crate::federation::fingerprint(&crate::federation::public_key(app).await?);
-                let peers = app.node()?.federation_peers().await?;
+                let node = app.node()?;
+                let peers = node.federation_peers().await?;
+                let moves = node.federation_moves(None).await?;
                 Ok(pb::GetFederationResponse {
                     origin,
                     origin_problem,
                     fingerprint,
-                    peers: peers.iter().map(|peer| crate::federation::peer_pb(app, peer)).collect(),
+                    peers: peers.iter().map(|peer| crate::federation::peer_pb(app, peer, &moves)).collect(),
+                    rotated_at: crate::federation::rotated_at(app).await?.map(crate::id::timestamp),
                 })
             }
             .await,
@@ -444,11 +455,26 @@ impl AdminService for Api {
                 self.require_instance_admin(request.metadata()).await?;
                 let address = request.into_inner().address;
                 let checked = crate::federation::check_instance(&self.app, &address).await?;
+                let moves = self.app.node()?.federation_moves(Some(&checked.peer.origin)).await?;
                 Ok(pb::CheckInstanceResponse {
-                    peer: Some(crate::federation::peer_pb(&self.app, &checked.peer)),
+                    peer: Some(crate::federation::peer_pb(&self.app, &checked.peer, &moves)),
                     round_trip_ms: checked.took.as_millis().min(i64::MAX as u128) as i64,
                     known_there: checked.known_there,
                 })
+            }
+            .await,
+        )
+    }
+
+    async fn rotate_federation_key(
+        &self,
+        request: Request<pb::RotateFederationKeyRequest>,
+    ) -> Result<Response<pb::RotateFederationKeyResponse>, Status> {
+        respond(
+            async {
+                self.require_instance_admin(request.metadata()).await?;
+                let fingerprint = crate::federation::rotate_key(&self.app).await?;
+                Ok(pb::RotateFederationKeyResponse { fingerprint })
             }
             .await,
         )

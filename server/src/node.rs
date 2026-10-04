@@ -33,6 +33,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0019_attachment_days.sql"),
     include_str!("../migrations/node/0020_friends.sql"),
     include_str!("../migrations/node/0021_presence.sql"),
+    include_str!("../migrations/node/0022_federation_moves.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
@@ -210,12 +211,46 @@ pub struct FederationPeer {
     pub public_key: Vec<u8>,
     pub first_seen: i64,
     pub last_heard: i64,
+    /// Its key moved in a way this instance couldn't follow: an admin here
+    /// checks it again before anything goes either way.
+    pub needs_check: bool,
 }
+
+const PEER_COLUMNS: &str = "origin, public_key, first_seen, last_heard, needs_check";
 
 impl FederationPeer {
     fn from_row(r: &Row) -> turso::Result<Self> {
-        Ok(Self { origin: r.get(0)?, public_key: r.get(1)?, first_seen: r.get(2)?, last_heard: r.get(3)? })
+        Ok(Self {
+            origin: r.get(0)?,
+            public_key: r.get(1)?,
+            first_seen: r.get(2)?,
+            last_heard: r.get(3)?,
+            needs_check: r.get::<i64>(4)? != 0,
+        })
     }
+}
+
+/// Another instance's key moving to one the old key vouched for.
+pub struct FederationMove {
+    pub origin: String,
+    pub previous_key: Vec<u8>,
+    pub key: Vec<u8>,
+    pub moved_at: i64,
+}
+
+/// Rotations of this instance's own key kept for others to follow, and
+/// moves of each other instance's kept here, at most.
+pub const KEPT_ROTATIONS: usize = 16;
+
+/// Forgets all but an instance's last [`KEPT_ROTATIONS`] moves.
+async fn keep_last_moves(conn: &turso::Connection, origin: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM federation_moves WHERE origin = ?1 AND rowid NOT IN
+           (SELECT rowid FROM federation_moves WHERE origin = ?1 ORDER BY moved_at DESC, rowid DESC LIMIT ?2)",
+        (origin, KEPT_ROTATIONS as i64),
+    )
+    .await?;
+    Ok(())
 }
 
 pub struct NodeDb {
@@ -271,7 +306,7 @@ pub struct AccountCounts {
 
 impl NodeDb {
     pub async fn open(path: &Path, key: Option<&EncryptionKey>) -> Result<Self> {
-        let db = Arc::new(db::open(path, key, MIGRATIONS).await?);
+        let db = Arc::new(db::open(path, key, MIGRATIONS).await?.keep(32));
         Ok(Self { db, sign_ups: Mutex::new(()), admin_changes: Mutex::new(()) })
     }
 
@@ -280,8 +315,8 @@ impl NodeDb {
         &self.db
     }
 
-    fn read(&self) -> Result<Connection> {
-        db::connect(&self.db)
+    fn read(&self) -> Result<db::Pooled> {
+        self.db.conn()
     }
 
     /// The key links to pictures from other sites are signed with (see
@@ -329,7 +364,7 @@ impl NodeDb {
         let conn = self.read()?;
         query_one(
             &conn,
-            "SELECT origin, public_key, first_seen, last_heard FROM federation_peers WHERE origin = ?1",
+            &format!("SELECT {PEER_COLUMNS} FROM federation_peers WHERE origin = ?1"),
             [origin],
             FederationPeer::from_row,
         )
@@ -341,7 +376,7 @@ impl NodeDb {
         let conn = self.read()?;
         query_all(
             &conn,
-            "SELECT origin, public_key, first_seen, last_heard FROM federation_peers ORDER BY last_heard DESC",
+            &format!("SELECT {PEER_COLUMNS} FROM federation_peers ORDER BY last_heard DESC"),
             (),
             FederationPeer::from_row,
         )
@@ -350,11 +385,42 @@ impl NodeDb {
 
     /// Pins another instance's key the first time it's seen, up to
     /// [`crate::federation::MAX_PEERS`] instances. A different key
-    /// for an instance already pinned is refused: the pinned one stays.
-    pub async fn pin_federation_peer(&self, origin: &str, public_key: &[u8]) -> Result<FederationPeer> {
+    /// for an instance already pinned is refused: the pinned one stays,
+    /// unless `admin_check` and the instance needs checking, when an admin
+    /// here takes the key it has now.
+    pub async fn pin_federation_peer(
+        &self,
+        origin: &str,
+        public_key: &[u8],
+        admin_check: bool,
+    ) -> Result<FederationPeer> {
         let (origin, public_key) = (origin.to_string(), public_key.to_vec());
         db::write(&self.db, async |conn| {
             let now = now_ms();
+            if admin_check {
+                let checked = query_one(
+                    conn,
+                    "SELECT public_key FROM federation_peers WHERE origin = ?1 AND needs_check = 1",
+                    [origin.as_str()],
+                    |r| r.get::<Vec<u8>>(0),
+                )
+                .await?;
+                if let Some(previous) = checked {
+                    conn.execute(
+                        "UPDATE federation_peers SET public_key = ?2, needs_check = 0 WHERE origin = ?1",
+                        (origin.as_str(), public_key.clone()),
+                    )
+                    .await?;
+                    if previous != public_key {
+                        conn.execute(
+                            "INSERT INTO federation_moves (origin, previous_key, key, moved_at) VALUES (?1, ?2, ?3, ?4)",
+                            (origin.as_str(), previous, public_key.clone(), now),
+                        )
+                        .await?;
+                        keep_last_moves(conn, &origin).await?;
+                    }
+                }
+            }
             let known = query_one(conn, "SELECT 1 FROM federation_peers WHERE origin = ?1", [origin.as_str()], |r| {
                 r.get::<i64>(0)
             })
@@ -375,7 +441,7 @@ impl NodeDb {
             .await?;
             let peer = query_one(
                 conn,
-                "SELECT origin, public_key, first_seen, last_heard FROM federation_peers WHERE origin = ?1",
+                &format!("SELECT {PEER_COLUMNS} FROM federation_peers WHERE origin = ?1"),
                 [origin.as_str()],
                 FederationPeer::from_row,
             )
@@ -389,6 +455,109 @@ impl NodeDb {
             Ok(peer)
         })
         .await
+    }
+
+    /// Moves another instance from the key pinned for it (`from`) to the one
+    /// its rotations (`path`, each (previous key, key)) lead to, unless it
+    /// moved or needs checking meanwhile. Whether it moved.
+    pub async fn move_federation_peer(&self, origin: &str, from: &[u8], path: &[(Vec<u8>, Vec<u8>)]) -> Result<bool> {
+        let Some((_, to)) = path.last() else { return Ok(false) };
+        let (origin, from, to, path) = (origin.to_string(), from.to_vec(), to.clone(), path.to_vec());
+        db::write(&self.db, async |conn| {
+            let moved = conn
+                .execute(
+                    "UPDATE federation_peers SET public_key = ?3 WHERE origin = ?1 AND public_key = ?2 AND needs_check = 0",
+                    (origin.as_str(), from.clone(), to.clone()),
+                )
+                .await?;
+            if moved == 0 {
+                return Ok(false);
+            }
+            let now = now_ms();
+            for (previous_key, key) in path {
+                conn.execute(
+                    "INSERT INTO federation_moves (origin, previous_key, key, moved_at) VALUES (?1, ?2, ?3, ?4)",
+                    (origin.as_str(), previous_key, key, now),
+                )
+                .await?;
+            }
+            keep_last_moves(conn, &origin).await?;
+            Ok(true)
+        })
+        .await
+    }
+
+    /// Marks another instance as needing an admin's check.
+    pub async fn federation_peer_needs_check(&self, origin: &str) -> Result<()> {
+        let origin = origin.to_string();
+        db::write(&self.db, async |conn| {
+            conn.execute("UPDATE federation_peers SET needs_check = 1 WHERE origin = ?1", [origin.as_str()]).await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// The keys other instances moved to, oldest first (one instance's, or
+    /// everyone's).
+    pub async fn federation_moves(&self, origin: Option<&str>) -> Result<Vec<FederationMove>> {
+        let conn = self.read()?;
+        let row = |r: &Row| {
+            Ok(FederationMove { origin: r.get(0)?, previous_key: r.get(1)?, key: r.get(2)?, moved_at: r.get(3)? })
+        };
+        let columns = "SELECT origin, previous_key, key, moved_at FROM federation_moves";
+        match origin {
+            Some(origin) => {
+                query_all(&conn, &format!("{columns} WHERE origin = ?1 ORDER BY moved_at, rowid"), [origin], row).await
+            }
+            None => query_all(&conn, &format!("{columns} ORDER BY moved_at, rowid"), (), row).await,
+        }
+    }
+
+    /// Replaces this instance's federation key (`old`, PKCS#8) with `new`,
+    /// keeping `rotation` (encoded) for others to follow, unless the key
+    /// changed meanwhile.
+    pub async fn rotate_federation_key(&self, old: &[u8], new: &[u8], rotation: &[u8]) -> Result<()> {
+        let (old, new, rotation) =
+            (crate::federation::to_hex(old), crate::federation::to_hex(new), crate::federation::to_hex(rotation));
+        let rotated = db::write(&self.db, async |conn| {
+            let current =
+                query_one(conn, "SELECT value FROM meta WHERE key = 'federation_key'", (), |r| r.get::<String>(0))
+                    .await?;
+            if current.as_deref() != Some(old.as_str()) {
+                return Err(Error::FailedPrecondition("the key was just rotated; try again".into()));
+            }
+            let kept = query_one(conn, "SELECT value FROM meta WHERE key = 'federation_rotations'", (), |r| {
+                r.get::<String>(0)
+            })
+            .await?
+            .unwrap_or_default();
+            let mut rotations: Vec<&str> = kept.split(',').filter(|r| !r.is_empty()).collect();
+            rotations.push(&rotation);
+            let skip = rotations.len().saturating_sub(KEPT_ROTATIONS);
+            let rotations = rotations[skip..].join(",");
+            conn.execute("UPDATE meta SET value = ?1 WHERE key = 'federation_key'", [new.as_str()]).await?;
+            conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('federation_rotations', ?1)",
+                [rotations.as_str()],
+            )
+            .await?;
+            Ok(())
+        })
+        .await;
+        for secret in [old, new] {
+            crate::federation::wipe(&mut secret.into_bytes());
+        }
+        rotated
+    }
+
+    /// This instance's kept key rotations (each encoded), oldest first.
+    pub async fn federation_rotations(&self) -> Result<Vec<Vec<u8>>> {
+        let conn = self.read()?;
+        let kept =
+            query_one(&conn, "SELECT value FROM meta WHERE key = 'federation_rotations'", (), |r| r.get::<String>(0))
+                .await?
+                .unwrap_or_default();
+        Ok(kept.split(',').filter(|r| !r.is_empty()).filter_map(crate::federation::from_hex).collect())
     }
 
     /// Notes that a signed call from or answer by another instance checked out.
@@ -589,7 +758,7 @@ impl NodeDb {
     /// Holds a single sign-on to the instance until the provider answers.
     /// A single sign-on to the instance that hasn't run out.
     pub async fn sso_sign_in(&self, state: &str) -> Result<Option<crate::sso::SignIn>> {
-        crate::sso::load(&self.read()?, state).await
+        crate::sso::load(&*self.read()?, state).await
     }
 
     /// Records who the provider signed in, once.
@@ -1707,7 +1876,7 @@ impl NodeDb {
     }
 
     pub async fn media(&self, id: &str) -> Result<Option<MediaRow>> {
-        media_by_id(&self.read()?, id).await
+        media_by_id(&*self.read()?, id).await
     }
 
     /// Marks a picture as in use, so it isn't swept; a server's pictures

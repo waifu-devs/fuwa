@@ -175,6 +175,8 @@ message SpeakRequest {
   string participant = 2;
   string session_id = 3;
   repeated bytes frames = 4;
+  // Drops what's still waiting first.
+  bool interrupt = 5;
 }
 
 message SpeakResponse {
@@ -273,6 +275,17 @@ message WatchResponse {
   // The moderation providers with their API keys, which settings leaves out
   // and shards need to check messages.
   repeated fuwa.v1.AutoModProviderSettings automod_providers = 2;
+  // Accounts some of whose sessions just ended, sent on their own (without
+  // settings) so live streams on shards and gateways check theirs at once.
+  repeated string sessions_ended = 3;
+  // Someone joined, or was added to, a server, sent to gateways on their own
+  // so streams that follow new servers pick it up at once.
+  repeated MembershipJoined joined = 4;
+}
+
+message MembershipJoined {
+  string account_id = 1;
+  string server_id = 2;
 }
 
 // A server as a shard reports it: its profile and who's in it.

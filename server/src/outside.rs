@@ -10,7 +10,9 @@
 //! the reader, and hands it back.
 //!
 //! The signature is an HMAC of the link, so the instance only fetches links
-//! it rewrote itself and can't be used to fetch anything else. Fetches go
+//! it rewrote itself and can't be used to fetch anything else. A link to
+//! another fuwa instance's picture ([`link_on_origin`], `&only=origin`) is
+//! signed apart and never follows a redirect off that instance. Fetches go
 //! only to public addresses (never loopback, private networks or cloud
 //! metadata), follow at most a few redirects, and take only pictures of at
 //! most [`MAX_BYTES`].
@@ -94,8 +96,20 @@ impl Key {
         mac.finalize().into_bytes()[..16].iter().map(|b| format!("{b:02x}")).collect()
     }
 
+    /// The signature of a link fetched only from its own origin: of
+    /// something no plain link can be (a link has no NUL in it).
+    fn sign_on_origin(&self, url: &str) -> String {
+        self.sign(&format!("on its origin\0{url}"))
+    }
+
+    #[cfg(test)]
     fn signed(&self, signature: &str, url: &str) -> bool {
         crate::auth::constant_time_eq(signature.as_bytes(), self.sign(url).as_bytes())
+    }
+
+    fn signed_for(&self, signature: &str, wanted: &Wanted) -> bool {
+        let expected = if wanted.on_origin { self.sign_on_origin(&wanted.url) } else { self.sign(&wanted.url) };
+        crate::auth::constant_time_eq(signature.as_bytes(), expected.as_bytes())
     }
 }
 
@@ -116,6 +130,21 @@ pub fn link(key: &Key, public_url: &str, url: &str) -> String {
     format!("{}{PATH}{signature}?url={}", public_url.trim_end_matches('/'), utf8_percent_encode(url, NON_ALPHANUMERIC))
 }
 
+/// The link to show for a picture on another fuwa instance (`url`, which
+/// the caller checked is on it): fetched through `public_url` as [`link`]
+/// does, but only from that instance, never following a redirect elsewhere.
+pub fn link_on_origin(key: &Key, public_url: &str, url: &str) -> String {
+    if url.is_empty() || is_ours(key, public_url, url) {
+        return url.to_string();
+    }
+    let signature = key.sign_on_origin(url);
+    format!(
+        "{}{PATH}{signature}?url={}&only=origin",
+        public_url.trim_end_matches('/'),
+        utf8_percent_encode(url, NON_ALPHANUMERIC)
+    )
+}
+
 /// Whether a link already points at this instance: an upload at its public
 /// address, or a picture it fetches (on any of its addresses, as uploads are).
 fn is_ours(key: &Key, public_url: &str, url: &str) -> bool {
@@ -125,7 +154,7 @@ fn is_ours(key: &Key, public_url: &str, url: &str) -> bool {
         return true;
     }
     let Some(signature) = parsed.path().strip_prefix(PATH) else { return false };
-    parsed.query_pairs().find(|(name, _)| name == "url").is_some_and(|(_, inner)| key.signed(signature, &inner))
+    key.signed_for(signature, &wanted(parsed.query().map(str::to_string)))
 }
 
 /// `GET /media/outside/<signature>?url=<link>`: a picture from elsewhere.
@@ -136,20 +165,28 @@ pub fn routes(app: Arc<App>) -> Router {
     )
 }
 
-/// The `url` in a query string.
-fn wanted(query: Option<String>) -> String {
-    let query = query.unwrap_or_default();
-    url::form_urlencoded::parse(query.as_bytes())
-        .find(|(name, _)| name == "url")
-        .map(|(_, url)| url.into_owned())
-        .unwrap_or_default()
+/// What a rewritten link asks for: the picture's `url`, and whether it's
+/// fetched only from that link's own origin.
+struct Wanted {
+    url: String,
+    on_origin: bool,
 }
 
-async fn serve(app: Arc<App>, signature: String, url: String) -> Response {
-    if !app.picture_key().signed(&signature, &url) {
+/// What a query string asks for.
+fn wanted(query: Option<String>) -> Wanted {
+    let query = query.unwrap_or_default();
+    let pairs = || url::form_urlencoded::parse(query.as_bytes());
+    Wanted {
+        url: pairs().find(|(name, _)| name == "url").map(|(_, url)| url.into_owned()).unwrap_or_default(),
+        on_origin: pairs().any(|(name, value)| name == "only" && value == "origin"),
+    }
+}
+
+async fn serve(app: Arc<App>, signature: String, wanted: Wanted) -> Response {
+    if !app.picture_key().signed_for(&signature, &wanted) {
         return failed(StatusCode::NOT_FOUND, "not found");
     }
-    match cached(&url).await {
+    match cached(&wanted).await {
         Ok(picture) => picture.respond(),
         Err(Missing::ShuttingDown) => failed(StatusCode::SERVICE_UNAVAILABLE, "shutting down"),
         Err(Missing::Failed(reason)) => {
@@ -167,18 +204,21 @@ enum Missing {
     TimedOut,
 }
 
-/// The picture at `url`, from the cache or fetched (and then cached).
-async fn cached(url: &str) -> Result<Picture, Missing> {
-    if let Some(picture) = CACHE.get(url) {
+/// The picture a link asks for, from the cache or fetched (and then cached).
+async fn cached(wanted: &Wanted) -> Result<Picture, Missing> {
+    // Kept apart: the same link fetched both ways may end up elsewhere.
+    let key = if wanted.on_origin { format!("on its origin\0{}", wanted.url) } else { wanted.url.clone() };
+    if let Some(picture) = CACHE.get(&key) {
         return Ok(picture);
     }
     let Ok(_turn) = FETCHES.acquire().await else { return Err(Missing::ShuttingDown) };
-    if let Some(picture) = CACHE.get(url) {
+    if let Some(picture) = CACHE.get(&key) {
         return Ok(picture);
     }
-    match tokio::time::timeout(FETCH_TIMEOUT, fetch(url)).await {
+    let client = if wanted.on_origin { &*ON_ORIGIN } else { &*CLIENT };
+    match tokio::time::timeout(FETCH_TIMEOUT, fetch_with(client, &wanted.url, MAX_BYTES)).await {
         Ok(Ok(picture)) => {
-            CACHE.put(url, picture.clone());
+            CACHE.put(&key, picture.clone());
             Ok(picture)
         }
         Ok(Err(reason)) => Err(Missing::Failed(reason)),
@@ -189,7 +229,9 @@ async fn cached(url: &str) -> Result<Picture, Missing> {
 /// The bytes and type of the picture a message links to, for the server
 /// itself to read (AutoMod providers that look at pictures): an upload on
 /// this instance from its files (only ever one of the message's own
-/// attachments, checked as its sender's: see `automod::picture_links`), a link it rewrote or any other link
+/// attachments, checked as its sender's, or an emoji from another of their
+/// servers, checked as that server's: see `automod::picture_links`), a link
+/// it rewrote or any other link
 /// fetched like readers' pictures are (public addresses only, at most
 /// [`MAX_BYTES`], cached). `None` when it isn't a picture or can't be had.
 pub async fn picture(app: &App, url: &str) -> Option<(&'static str, Bytes)> {
@@ -210,12 +252,12 @@ pub async fn picture(app: &App, url: &str) -> Option<(&'static str, Bytes)> {
     let inner = match parsed.path().strip_prefix(PATH) {
         Some(signature) => {
             let inner = wanted(parsed.query().map(str::to_string));
-            if !app.picture_key().signed(signature, &inner) {
+            if !app.picture_key().signed_for(signature, &inner) {
                 return None;
             }
             inner
         }
-        None => url.to_string(),
+        None => Wanted { url: url.to_string(), on_origin: false },
     };
     cached(&inner).await.ok().map(|picture| (picture.content_type, picture.bytes))
 }
@@ -264,16 +306,26 @@ impl Picture {
 
 static FETCHES: Semaphore = Semaphore::const_new(MAX_FETCHES);
 
-static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| client(false));
+
+/// The fetcher for pictures on another fuwa instance: as [`CLIENT`], but a
+/// redirect may only go elsewhere on the same instance.
+static ON_ORIGIN: LazyLock<reqwest::Client> = LazyLock::new(|| client(true));
+
+fn client(on_origin: bool) -> reqwest::Client {
     reqwest::Client::builder()
         .user_agent(format!("fuwa/{} (picture fetcher; +https://github.com/waifu-devs/fuwa)", crate::VERSION))
         // Never through a proxy from the environment: it would resolve
         // names itself, past the check on where they point.
         .no_proxy()
         .dns_resolver(Arc::new(PublicOnly))
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            let elsewhere =
+                on_origin && attempt.previous().first().is_some_and(|first| first.origin() != attempt.url().origin());
             if attempt.previous().len() >= MAX_REDIRECTS {
                 attempt.error("too many redirects")
+            } else if elsewhere {
+                attempt.error("a redirect off the instance")
             } else if let Err(reason) = fetchable(attempt.url()) {
                 attempt.error(reason)
             } else {
@@ -284,19 +336,19 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .timeout(FETCH_TIMEOUT)
         .build()
         .expect("the picture fetcher's settings are valid")
-});
-
-async fn fetch(url: &str) -> Result<Picture, &'static str> {
-    fetch_up_to(url, MAX_BYTES).await
 }
 
 /// A picture at `url` of at most `max` bytes, fetched as readers' pictures
 /// are (public addresses only), without the cache: for the instance to keep
 /// (a GIF someone sends).
 pub(crate) async fn fetch_up_to(url: &str, max: usize) -> Result<Picture, &'static str> {
+    fetch_with(&CLIENT, url, max).await
+}
+
+async fn fetch_with(client: &reqwest::Client, url: &str, max: usize) -> Result<Picture, &'static str> {
     let url = Url::parse(url).map_err(|_| "not a link")?;
     fetchable(&url)?;
-    let response = CLIENT
+    let response = client
         .get(url)
         .header(header::ACCEPT, "image/avif,image/webp,image/png,image/jpeg,image/gif")
         .send()
@@ -488,6 +540,24 @@ mod tests {
         // A link pretending to be rewritten, with a made-up signature, is rewritten itself.
         let forged = format!("{PUBLIC}{PATH}{}?url=http%3A%2F%2F169.254.169.254%2F", "0".repeat(32));
         assert_ne!(link(&key(), PUBLIC, &forged), forged);
+    }
+
+    #[test]
+    fn links_fetched_only_from_their_origin_keep_to_it() {
+        let url = "https://b.example/media/abc";
+        let rewritten = link_on_origin(&key(), PUBLIC, url);
+        assert!(rewritten.ends_with("&only=origin"), "{rewritten}");
+        let parsed = Url::parse(&rewritten).unwrap();
+        let signature = parsed.path().strip_prefix(PATH).unwrap();
+        let on_origin = wanted(parsed.query().map(str::to_string));
+        assert!(on_origin.on_origin && on_origin.url == url);
+        assert!(key().signed_for(signature, &on_origin));
+        // Its signature doesn't serve the same link without the origin rule,
+        // nor a plain link's with it.
+        assert!(!key().signed_for(signature, &Wanted { url: url.into(), on_origin: false }));
+        let plain = key().sign(url);
+        assert!(!key().signed_for(&plain, &on_origin));
+        assert_eq!(link_on_origin(&key(), PUBLIC, &rewritten), rewritten);
     }
 
     #[test]

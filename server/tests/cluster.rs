@@ -69,6 +69,7 @@ fn config(dir: &Path, vars: &[(&str, String)]) -> Config {
     let mut config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         "FUWA_ADMIN_TOKEN" => Some(ADMIN_TOKEN.into()),
         "FUWA_CLUSTER_KEY" => Some(KEY.into()),
         _ => vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()),
@@ -252,7 +253,7 @@ async fn members(c: &mut Clients, token: &str, server_id: &str) -> Vec<pb::Membe
 async fn next(stream: &mut Streaming<pb::SubscribeResponse>) -> pb::SubscribeResponse {
     loop {
         let message = tokio::time::timeout(Duration::from_secs(10), stream.next()).await.unwrap().unwrap().unwrap();
-        if message.event.is_some() || message.ready.is_some() {
+        if message.event.is_some() || message.ready.is_some() || message.followed.is_some() {
             return message;
         }
     }
@@ -384,8 +385,12 @@ async fn a_split_instance_works_like_one() {
     // One live stream follows servers on both shards: replays, one ready, then live.
     let cursors =
         [&on_a, &on_b].iter().map(|s| pb::ServerCursor { server_id: s.id.clone(), after_sequence: Some(0) }).collect();
-    let mut stream =
-        c.events.subscribe(authed(&mika, pb::SubscribeRequest { servers: cursors })).await.unwrap().into_inner();
+    let mut stream = c
+        .events
+        .subscribe(authed(&mika, pb::SubscribeRequest { servers: cursors, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
     let mut replayed = HashSet::new();
     let ready = loop {
         let message = next(&mut stream).await;
@@ -619,6 +624,12 @@ async fn a_split_instance_works_like_one() {
     assert!(parts.contains(&serde_json::json!({ "part": "directory", "up": true })));
     assert_eq!(parts.iter().filter(|p| p["part"] == "shard" && p["up"] == true).count(), cluster.shards.len());
     assert!(!parts.iter().any(|p| p.to_string().contains("http")), "no addresses: {parts:?}");
+    // How busy each shard is, and this gateway's streams, but the busiest servers only for an admin.
+    assert!(parts.iter().filter(|p| p["part"] == "shard").all(|p| p["load"]["streams"].is_u64()), "{parts:?}");
+    assert!(parts.iter().any(|p| p["part"] == "gateway" && p["load"]["streams"].is_u64()), "{parts:?}");
+    assert!(!parts.iter().any(|p| p.to_string().contains("busiest")), "busiest is for admins: {parts:?}");
+    let shard_load = http.get(format!("{}/healthz/load", cluster.shards[0].url())).send().await.unwrap();
+    assert_eq!(shard_load.headers().get("grpc-status").map(|v| v.to_str().unwrap()), Some("7"));
     let direct = http.get(format!("{}/healthz/parts", cluster.directory.url())).send().await.unwrap();
     // Refused like any call without the cluster key.
     assert_eq!(direct.headers().get("grpc-status").map(|v| v.to_str().unwrap()), Some("7"));
@@ -801,6 +812,115 @@ async fn a_split_instance_works_like_one() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn agents_follow_servers_they_are_added_to_across_shards() {
+    let root = tempfile::tempdir().unwrap();
+    let cluster = start_cluster(root.path(), &[]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let first = create_server(&mut c, &juan, "First").await;
+    let second = create_server(&mut c, &juan, "Second").await;
+    let made = c
+        .agents
+        .create_agent(authed(
+            &juan,
+            pb::CreateAgentRequest { username: "helper".into(), display_name: "Helper".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let (agent, agent_id) = (made.token, made.agent.unwrap().user.unwrap().id);
+
+    // Following nothing yet, only servers to come: the gateway alone holds it.
+    let request = pb::SubscribeRequest { follow_new_servers: true, ..Default::default() };
+    let mut stream = c.events.subscribe(authed(&agent, request)).await.unwrap().into_inner();
+    assert!(next(&mut stream).await.ready.unwrap().servers.is_empty());
+
+    for server in [&first, &second] {
+        let add = pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() };
+        c.agents.add_agent(authed(&juan, add)).await.unwrap();
+        let followed = loop {
+            if let Some(followed) = next(&mut stream).await.followed {
+                break followed;
+            }
+        };
+        assert_eq!(followed.server_id, server.id);
+        let channel = general(&mut c, &juan, &server.id).await;
+        send(&mut c, &juan, &server.id, &channel.id, &format!("hi from {}", server.name)).await;
+        let said = until(&mut stream, |e| matches!(&e.payload, Some(Payload::MessageCreated(_)))).await;
+        assert_eq!(said.server_id, server.id);
+    }
+
+    // Its token reset, the stream ends at once.
+    let started = std::time::Instant::now();
+    c.agents.reset_agent_token(authed(&juan, pb::ResetAgentTokenRequest { agent_id })).await.unwrap();
+    let ended = loop {
+        match tokio::time::timeout(Duration::from_secs(10), stream.next()).await.unwrap().unwrap() {
+            Ok(_) => continue,
+            Err(status) => break status,
+        }
+    };
+    assert_eq!(ended.code(), tonic::Code::Unauthenticated);
+    assert!(started.elapsed() < Duration::from_secs(5), "ended at the reset, not a heartbeat");
+
+    cluster.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_agent_joining_many_servers_stays_within_its_stream_limit() {
+    let root = tempfile::tempdir().unwrap();
+    // Two streams per account, so a handful of joins is well past it.
+    let cluster = start_cluster(root.path(), &[("FUWA_STREAMS_PER_ACCOUNT", "2".to_string())]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let made = c
+        .agents
+        .create_agent(authed(
+            &juan,
+            pb::CreateAgentRequest { username: "helper".into(), display_name: "Helper".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let request = pb::SubscribeRequest { follow_new_servers: true, ..Default::default() };
+    let mut stream = c.events.subscribe(authed(&made.token, request)).await.unwrap().into_inner();
+    assert!(next(&mut stream).await.ready.unwrap().servers.is_empty());
+
+    // Each join opens another stream from the gateway to that server's shard;
+    // with six servers on two shards, one shard gets at least three.
+    let mut last = None;
+    for n in 0..6 {
+        let server = create_server(&mut c, &juan, &format!("Server {n}")).await;
+        let add = pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() };
+        c.agents.add_agent(authed(&juan, add)).await.unwrap();
+        let followed = loop {
+            if let Some(followed) = next(&mut stream).await.followed {
+                break followed;
+            }
+        };
+        assert_eq!(followed.server_id, server.id);
+        last = Some(server);
+    }
+
+    // The stream still carries events, and the person who added it can still
+    // open their own: the shards didn't count the agent's joins as tabs.
+    let last = last.unwrap();
+    let channel = general(&mut c, &juan, &last.id).await;
+    send(&mut c, &juan, &last.id, &channel.id, "still here").await;
+    let said = until(&mut stream, |e| matches!(&e.payload, Some(Payload::MessageCreated(_)))).await;
+    assert_eq!(said.server_id, last.id);
+    let cursors = vec![pb::ServerCursor { server_id: last.id.clone(), after_sequence: None }];
+    let mut own = c
+        .events
+        .subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(next(&mut own).await.ready.is_some());
+
+    cluster.stop().await;
+}
+
+#[tokio::test]
 async fn shards_come_and_go() {
     let root = tempfile::tempdir().unwrap();
     let mut cluster = start_cluster(root.path(), &[]).await;
@@ -818,7 +938,7 @@ async fn shards_come_and_go() {
     let cursors = vec![pb::ServerCursor { server_id: on_b.id.clone(), after_sequence: None }];
     let mut stream = c
         .events
-        .subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors.clone() }))
+        .subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors.clone(), ..Default::default() }))
         .await
         .unwrap()
         .into_inner();
@@ -920,8 +1040,12 @@ async fn restarts_go_unnoticed() {
     let on_b = on_b.unwrap();
     let channel = general(&mut c, &juan, &on_b.id).await;
     let cursors = vec![pb::ServerCursor { server_id: on_b.id.clone(), after_sequence: None }];
-    let mut stream =
-        c.events.subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors })).await.unwrap().into_inner();
+    let mut stream = c
+        .events
+        .subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
     assert!(next(&mut stream).await.ready.is_some());
 
     // Shard b restarts: a message sent meanwhile goes through once it's back,
@@ -1247,6 +1371,7 @@ async fn channels_are_shared_across_shards() {
             &rin,
             pb::SubscribeRequest {
                 servers: vec![pb::ServerCursor { server_id: guest.id.clone(), after_sequence: None }],
+                ..Default::default()
             },
         ))
         .await
@@ -1394,8 +1519,12 @@ async fn servers_live_in_their_region_and_move() {
     std::fs::create_dir_all(shard_a.join(&recording)).unwrap();
     std::fs::write(shard_a.join(&recording).join(track), b"OggS").unwrap();
     let cursors = vec![pb::ServerCursor { server_id: server.id.clone(), after_sequence: None }];
-    let mut stream =
-        c.events.subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors })).await.unwrap().into_inner();
+    let mut stream = c
+        .events
+        .subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
     assert!(next(&mut stream).await.ready.is_some());
     // The home shard's replica has it.
     let replicated = |bucket: &str| root.path().join(bucket).join("servers").join(&server.id).exists();

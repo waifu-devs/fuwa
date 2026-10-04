@@ -177,6 +177,9 @@ async fn stay_in_touch(app: Arc<App>) {
                                         .collect();
                                     app.replace_settings(settings);
                                 }
+                                for account_id in &message.sessions_ended {
+                                    app.sessions_ended(account_id);
+                                }
                                 if first {
                                     first = false;
                                     backoff.reset();
@@ -412,7 +415,7 @@ pub async fn update_user(servers: &Servers, user: &pb::User, server_ids: &[Strin
 pub async fn forget_account(servers: &Servers, account_id: &str, placeholder: &pb::User) -> Result<Vec<String>> {
     let mut left_servers = Vec::new();
     for sdb in servers.all() {
-        if store::user(&sdb.read()?, account_id).await?.is_none() {
+        if store::user(&*sdb.read()?, account_id).await?.is_none() {
             continue;
         }
         let left = sdb
@@ -473,7 +476,7 @@ pub async fn describe_servers(servers: &Servers, ids: &[String]) -> Result<Vec<c
     let mut described = Vec::with_capacity(chosen.len());
     for sdb in chosen {
         let server = sdb.server().await?;
-        let owner = store::user(&sdb.read()?, &server.owner_id).await?;
+        let owner = store::user(&*sdb.read()?, &server.owner_id).await?;
         described.push(cpb::ServerDescription {
             usage: Some(sdb.usage().await?),
             own_limits: Some(sdb.own_limits().await?),
@@ -493,7 +496,7 @@ pub async fn channel_exists(servers: &Servers, server_id: &str, channel_id: &str
 /// A server's emoji with these ids, as stored.
 pub async fn server_emojis(servers: &Servers, server_id: &str, ids: &[String]) -> Result<Vec<pb::Emoji>> {
     let sdb = servers.get(server_id).await?;
-    store::load_emojis_by_id(&sdb.read()?, &sdb.id, ids).await
+    store::load_emojis_by_id(&*sdb.read()?, &sdb.id, ids).await
 }
 
 /// Where an invite leads: the invite while it still works, its server, the

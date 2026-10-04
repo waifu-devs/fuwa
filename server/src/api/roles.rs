@@ -73,7 +73,7 @@ impl RoleService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let sdb = self.membership(&account, &request.get_ref().server_id).await?.sdb;
-                Ok(pb::ListRolesResponse { roles: permissions::roles(&sdb.read()?, &sdb.id).await? })
+                Ok(pb::ListRolesResponse { roles: permissions::roles(&*sdb.read()?, &sdb.id).await? })
             }
             .await,
         )

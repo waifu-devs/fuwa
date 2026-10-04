@@ -20,6 +20,8 @@ pub(super) const NO_SHARED_FILES: &str = "files can't be sent in a channel share
 const MAX_EMBEDS: usize = 10;
 /// Most roles one message pings.
 const MAX_ROLE_MENTIONS: usize = 50;
+/// Most members one message names that it says it mentions.
+const MAX_USER_MENTIONS: usize = 50;
 
 /// What's stored in a message's `extras` column.
 #[derive(Clone, PartialEq, prost::Message)]
@@ -43,6 +45,8 @@ struct Extras {
     emojis: Vec<pb::Emoji>,
     #[prost(message, optional, tag = "9")]
     gif: Option<pb::MessageGif>,
+    #[prost(string, repeated, tag = "10")]
+    mention_user_ids: Vec<String>,
 }
 
 impl Extras {
@@ -57,6 +61,7 @@ impl Extras {
             poll: message.poll.is_some(),
             emojis: message.emojis.clone(),
             gif: message.gif.clone(),
+            mention_user_ids: message.mention_user_ids.clone(),
         };
         (extras != Extras::default()).then(|| extras.encode_to_vec())
     }
@@ -170,6 +175,44 @@ fn kept_emojis(had: Vec<pb::Emoji>, checked: Vec<pb::Emoji>, content: &str) -> V
     kept
 }
 
+/// The ids written as `<@id>` or `<@!id>` in `content`, once each, in order.
+fn user_tokens(content: &str) -> Vec<&str> {
+    let mut ids = Vec::new();
+    for (start, _) in content.match_indices("<@") {
+        let rest = &content[start + 2..];
+        let rest = rest.strip_prefix('!').unwrap_or(rest);
+        if let Some(end) = rest.find('>')
+            && end > 0
+            && end <= 32
+            && rest[..end].bytes().all(|b| b.is_ascii_alphanumeric())
+            && !ids.contains(&&rest[..end])
+        {
+            ids.push(&rest[..end]);
+        }
+    }
+    ids
+}
+
+/// The members `content` names, for [`pb::Message::mention_user_ids`]: ids
+/// of anyone not in the server are left out, so a client can trust them.
+async fn mentioned_users(conn: &turso::Connection, content: &str) -> Result<Vec<String>> {
+    let mut ids = Vec::new();
+    // Looked up one by one, so only so many names are looked at.
+    for id in user_tokens(content).into_iter().take(2 * MAX_USER_MENTIONS) {
+        if ids.len() >= MAX_USER_MENTIONS {
+            break;
+        }
+        let member =
+            query_one(conn, "SELECT user_id FROM members WHERE user_id = ?1", [id], |r| r.get::<String>(0)).await?;
+        if let Some(id) = member
+            && !ids.contains(&id)
+        {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
 /// Who a message pings, given what its author can do in its channel: everyone
 /// if they may, and the roles it names that are mentionable or that they may
 /// mention anyway.
@@ -228,6 +271,7 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 also_in_channel: r.get(10)?,
                 poll: None,
                 gif: None,
+                mention_user_ids: vec![],
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -253,6 +297,7 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
         message.poll = extras.poll.then(pb::Poll::default);
         message.emojis = extras.emojis;
         message.gif = extras.gif;
+        message.mention_user_ids = extras.mention_user_ids;
     }
     Ok(message)
 }
@@ -360,9 +405,15 @@ impl Api {
     /// knows of each (its id, kind and size, its link where it's served, a
     /// safe name) and says how many bytes they come to.
     async fn check_attachments(&self, account_id: &str, server_id: &str, files: &mut [pb::Attachment]) -> Result<i64> {
+        let files_len = files.len();
         let mut total = 0;
         let mut seen = Vec::with_capacity(files.len());
+        let voice_caps = &self.app.settings().limits;
         for file in files.iter_mut() {
+            let voice = file.voice.take();
+            if voice.is_some() && files_len > 1 {
+                return Err(Error::invalid("a voice message is sent on its own"));
+            }
             let Some(id) = media::id_in_url(file.url.trim()) else {
                 return Err(Error::invalid("attach files by uploading them here first"));
             };
@@ -374,6 +425,9 @@ impl Api {
                 .check_upload(account_id, pb::MediaPurpose::Attachment, file.url.trim(), Some(server_id))
                 .await?
                 .ok_or(Error::NotFound("uploaded file; upload it again"))?;
+            if let Some(voice) = &voice {
+                check_voice(voice, &upload.content_type, upload.size, voice_caps)?;
+            }
             let sized = upload.content_type.starts_with("image/") || upload.content_type.starts_with("video/");
             let pixels = |n: i32| if sized { n.clamp(0, 65_535) } else { 0 };
             *file = pb::Attachment {
@@ -384,12 +438,36 @@ impl Api {
                 width: pixels(file.width),
                 height: pixels(file.height),
                 id: id.clone(),
+                voice,
             };
             total += upload.size;
             seen.push(id);
         }
         Ok(total)
     }
+}
+
+/// Checks a voice message's file against what the sending app said of it
+/// and the instance's caps on voice messages. Its length is the app's word,
+/// bounded by its size (Opus at 32 kbps is about 4 KB a second).
+fn check_voice(voice: &pb::VoiceNote, content_type: &str, size: i64, limits: &crate::config::Limits) -> Result<()> {
+    if content_type != media::OGG_OPUS {
+        return Err(Error::invalid("a voice message is an Ogg Opus recording"));
+    }
+    if voice.duration_ms == 0 || voice.waveform.len() > 128 {
+        return Err(Error::invalid("that voice message's length or waveform is off"));
+    }
+    if let Some(cap) = limits.voice_message_seconds
+        && i64::from(voice.duration_ms) > cap.saturating_mul(1000)
+    {
+        return Err(Error::ResourceExhausted(format!("voice messages can be at most {cap} seconds here")));
+    }
+    if let Some(cap) = limits.voice_message_bytes
+        && size > cap
+    {
+        return Err(Error::ResourceExhausted(format!("voice messages can be at most {} here", media::size_label(cap))));
+    }
+    Ok(())
 }
 
 /// Refuses members who are timed out.
@@ -429,7 +507,8 @@ pub(super) async fn check_slowmode(
     }
     let period = i64::from(channel.slowmode_seconds) * 1000;
     let slowed = |sent_at: i64| {
-        Error::ResourceExhausted(format!("slow mode is on; you can send again in {}", wait(sent_at + period - now)))
+        let left = sent_at + period - now;
+        Error::Limited(format!("slow mode is on; you can send again in {}", wait(left)), left)
     };
     let last = query_one(
         conn,
@@ -745,7 +824,7 @@ impl MessageService for Api {
                 if req.also_send_to_channel && req.thread_id.is_empty() {
                     return Err(Error::invalid("only thread replies are also sent to the channel"));
                 }
-                if let Some(link) = shared::link_of(&sdb.read()?, &req.channel_id).await? {
+                if let Some(link) = shared::link_of(&*sdb.read()?, &req.channel_id).await? {
                     if poll.is_some() {
                         return Err(Error::invalid("polls can't go in channels shared from another server yet"));
                     }
@@ -788,9 +867,11 @@ impl MessageService for Api {
                         media::size_label(limit)
                     )));
                 }
-                let mut pictures = automod::picture_links(&req.attachments, &req.embeds);
-                // The GIF too: providers read its first frame.
+                let mut pictures = automod::picture_links(&req.attachments, &req.embeds, &[]);
+                // The GIF too: providers read its first frame. Then emoji
+                // from other servers, the smallest.
                 pictures.extend(gif.iter().map(|gif| gif.url.clone()));
+                pictures.extend(automod::picture_links(&[], &[], &emojis));
                 // The Smart filter's provider is asked alongside: the message
                 // goes out at once, and its answer is acted on when it comes.
                 let (asked, later) = (
@@ -843,6 +924,7 @@ impl MessageService for Api {
                         }
                         let (mentions_everyone, mention_role_ids) =
                             mentions(conn, &sdb.id, &access, &channel.id, &req.content).await?;
+                        let mention_user_ids = mentioned_users(conn, &req.content).await?;
                         let message = pb::Message {
                             id: new_id(),
                             server_id: sdb.id.clone(),
@@ -866,6 +948,7 @@ impl MessageService for Api {
                             also_in_channel: parent.is_some() && req.also_send_to_channel,
                             poll: poll.clone(),
                             gif: gif.clone(),
+                            mention_user_ids,
                         };
                         // Checked again here, where no other message can take the room meanwhile.
                         if file_bytes > 0
@@ -948,7 +1031,7 @@ impl MessageService for Api {
                     if !req.thread_id.is_empty() {
                         return Err(Error::NotFound("thread"));
                     }
-                    let guest = shared::guest_of(&conn, &sdb.id, &account, &access, &link).await?;
+                    let guest = shared::guest_of(&self.app, &conn, &sdb.id, &account, &access, &link).await?;
                     return shared::guest_list(&self.app, &sdb.id, &link, guest, &req).await;
                 }
                 let mut parent = None;
@@ -994,7 +1077,7 @@ impl MessageService for Api {
                 check_not_timed_out(&member)?;
                 let located = shared::locate(
                     &self.app,
-                    &sdb.read()?,
+                    &*sdb.read()?,
                     &sdb.id,
                     &account,
                     &access,
@@ -1011,7 +1094,7 @@ impl MessageService for Api {
                 check_content(&req.content, true)?;
                 // A provider is asked about new text the author wrote, and its
                 // answer acted on when it comes.
-                let before = load_message(&sdb.read()?, &sdb.id, &req.message_id).await?;
+                let before = load_message(&*sdb.read()?, &sdb.id, &req.message_id).await?;
                 // With a poll's question and answers, which an edit leaves as they are.
                 let reviewed = before.as_ref().map(|m| {
                     reviewed_text(&pb::Message {
@@ -1030,10 +1113,19 @@ impl MessageService for Api {
                     _ => vec![],
                 };
                 let (asked, later) = match before {
-                    Some(m) if m.author_id == account.id && m.content != req.content => (
-                        None,
-                        automod::ask_after(&self.app, &sdb, &member, &access, &m.channel_id, &reviewed, &[]).await,
-                    ),
+                    Some(m) if m.author_id == account.id && m.content != req.content => {
+                        // The text is asked about with the emoji from other
+                        // servers it newly carries; the message's other
+                        // pictures can't change.
+                        let added: Vec<pb::Emoji> =
+                            checked.iter().filter(|e| !m.emojis.iter().any(|had| had.id == e.id)).cloned().collect();
+                        let pictures = automod::picture_links(&[], &[], &added);
+                        (
+                            None,
+                            automod::ask_after(&self.app, &sdb, &member, &access, &m.channel_id, &reviewed, &pictures)
+                                .await,
+                        )
+                    }
                     _ => (None, None),
                 };
                 let message = sdb
@@ -1078,6 +1170,7 @@ impl MessageService for Api {
                         let old_size = stored_size(&message);
                         (message.mentions_everyone, message.mention_role_ids) =
                             mentions(conn, &sdb.id, &access, &message.channel_id, &req.content).await?;
+                        message.mention_user_ids = mentioned_users(conn, &req.content).await?;
                         message.emojis =
                             kept_emojis(std::mem::take(&mut message.emojis), checked.clone(), &req.content);
                         message.content = req.content.clone();
@@ -1110,7 +1203,7 @@ impl MessageService for Api {
                 access.require_not_timed_out()?;
                 let located = shared::locate(
                     &self.app,
-                    &sdb.read()?,
+                    &*sdb.read()?,
                     &sdb.id,
                     &account,
                     &access,
@@ -1269,5 +1362,6 @@ mod tests {
         assert!(!says_everyone("@everyoneelse"));
         assert!(!says_everyone("@@here"));
         assert_eq!(role_tokens("<@&ABC> and <@&ABC>, <@&> <@&D-E> <@&FG>"), ["ABC", "FG"]);
+        assert_eq!(user_tokens("<@AB> <@!AB> <@!CD> <@&EF> <@> <@G-H> <@IJ"), ["AB", "CD"]);
     }
 }
