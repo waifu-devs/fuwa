@@ -103,3 +103,18 @@ pub fn follow(id: impl Into<ElementId>, target: f32, window: &mut Window, cx: &m
 pub fn follow_bouncy(id: impl Into<ElementId>, target: f32, window: &mut Window, cx: &mut App) -> f32 {
     spring(id.into(), target, Spring::new(Duration::from_millis(380)).with_damping(0.62), window, cx)
 }
+
+/// A number that rolls up from zero when it first shows, after `delay`,
+/// written by `format` (the web's `CountUp`).
+pub fn count_up(id: impl Into<ElementId>, value: f64, delay: Duration, format: fn(f64) -> String) -> AnyElement {
+    let duration = Duration::from_millis(900);
+    let total = delay + duration;
+    let start = delay.as_secs_f32() / total.as_secs_f32().max(0.001);
+    gpui_kit::div()
+        .with_animation(
+            id,
+            Animation::new(total).with_easing(delayed(start, gpui_kit::ease_out_quint())),
+            move |el, t| gpui_kit::ParentElement::child(el, format(value * f64::from(t.clamp(0.0, 1.0)))),
+        )
+        .into_any_element()
+}

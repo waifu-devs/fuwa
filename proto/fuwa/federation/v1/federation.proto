@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package fuwa.federation.v1;
 
+import "fuwa/cluster/v1/cluster.proto";
+
 // How fuwa instances talk to each other, for servers sharing channels across
 // instances (docs/federation.md). Apps never call this: only another
 // instance does, on the instance's public address, and only while the
@@ -18,8 +20,10 @@ service FederationService {
   // receiver fetches the caller's key from the caller's own address (GetKey),
   // checks the greeting with it and pins it. Its payload is a Hello.
   rpc Hello(HelloRequest) returns (HelloResponse);
-  // Everything else, from an instance whose key the receiver already pinned.
-  // Its payload is a Request, the answer's a Response.
+  // Everything else, from an instance whose key the receiver already pinned,
+  // or a share code's lookup or ask from one it doesn't know yet (whose key
+  // it fetches as for Hello, and pins when it asks). Its payload is a
+  // Request, the answer's a Response.
   rpc Call(CallRequest) returns (CallResponse);
 }
 
@@ -74,12 +78,17 @@ message Hello {}
 message Request {
   oneof call {
     Ping ping = 1;
+    // A call between the two ends of a channel shared across instances,
+    // as the parts of one instance make them (docs/federation.md). The
+    // receiver reads every id in it as the sending instance's own.
+    fuwa.cluster.v1.SharedCall shared = 2;
   }
 }
 
 message Response {
   oneof answer {
     Pong pong = 1;
+    fuwa.cluster.v1.SharedReply shared = 2;
   }
 }
 
