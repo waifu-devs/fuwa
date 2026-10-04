@@ -30,6 +30,7 @@ async fn start(dir: &Path, vars: &[(&str, &str)]) -> Instance {
     let config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         "FUWA_ADMIN_TOKEN" => Some(ADMIN_TOKEN.into()),
         _ => vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()),
     })
@@ -911,6 +912,68 @@ async fn browsers_can_call_over_grpc_web() {
         // With the web client built in, unknown paths open the app instead (see tests/web.rs).
         assert_eq!(http.get(format!("{base}/nope")).send().await.unwrap().status(), 404);
     }
+    // Desktop apps' updates: nothing to hand out until the release check finds a release.
+    assert_eq!(http.get(format!("{base}/updates/latest.json")).send().await.unwrap().status(), 404);
+    let newer = fuwa_server::releases::Latest {
+        version: "999.0.0".into(),
+        published_at: "2026-10-04T01:00:00Z".into(),
+        notes: "## New\n* shiny".into(),
+        page: "https://github.com/waifu-devs/fuwa/releases/tag/v999.0.0".into(),
+        sums: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  fuwa-desktop-999.0.0-x86_64-linux\n"
+            .into(),
+        signature: "c2lnbmF0dXJl".into(),
+        files: vec![fuwa_server::releases::File { name: "fuwa-desktop-999.0.0-x86_64-linux".into(), size: 3 }],
+    };
+    instance.app.releases.set(newer.clone());
+    let manifest = http.get(format!("{base}/updates/latest.json")).send().await.unwrap();
+    assert_eq!(manifest.status(), 200);
+    assert_eq!(manifest.headers()["content-type"], "application/json");
+    let manifest: fuwa_server::releases::Latest = manifest.json().await.unwrap();
+    assert_eq!(manifest, newer);
+    // Only the instance's admins hear of it, in GetNode; /healthz stays "ok". Nothing updates by itself.
+    let health = http.get(format!("{base}/healthz")).send().await.unwrap().text().await.unwrap();
+    assert_eq!(health, "ok");
+    let mut c = clients(&instance).await;
+    let (admin, _, is_admin) = sign_up(&mut c, "ada").await;
+    assert!(is_admin);
+    let (member, _, _) = sign_up(&mut c, "bo").await;
+    for token in [None, Some(member.as_str())] {
+        let request = match token {
+            Some(token) => authed(token, pb::GetNodeRequest {}),
+            None => tonic::Request::new(pb::GetNodeRequest {}),
+        };
+        let versions = c.node.get_node(request).await.unwrap().into_inner().node.unwrap().versions.unwrap();
+        assert!(versions.newer_release.is_none(), "{token:?}");
+        // Everyone learns which features it has, and since when.
+        assert_eq!(versions.compatibility_date, fuwa_server::compat::date());
+        assert!(versions.features.iter().any(|f| f.id == "compatibility-dates"));
+    }
+    let versions = c
+        .node
+        .get_node(authed(&admin, pb::GetNodeRequest {}))
+        .await
+        .unwrap()
+        .into_inner()
+        .node
+        .unwrap()
+        .versions
+        .unwrap();
+    let told = versions.newer_release.unwrap();
+    assert_eq!((told.version.as_str(), told.url.as_str()), ("999.0.0", newer.page.as_str()));
+    // Only the release's listed desktop builds pass through; anything else is never fetched.
+    for name in ["fuwa-999.0.0-x86_64-linux", "SHA256SUMS", "..%2F..%2Fetc%2Fpasswd", "fuwa-desktop-0.1.0-x86_64-linux"]
+    {
+        let response = http.get(format!("{base}/updates/files/{name}")).send().await.unwrap();
+        assert_eq!(response.status(), 404, "{name}");
+    }
+    // A listed build is handed over from the copy kept after the first fetch.
+    let kept = dir.path().join("release-cache/999.0.0");
+    std::fs::create_dir_all(&kept).unwrap();
+    std::fs::write(kept.join("fuwa-desktop-999.0.0-x86_64-linux"), b"abc").unwrap();
+    let response = http.get(format!("{base}/updates/files/fuwa-desktop-999.0.0-x86_64-linux")).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.bytes().await.unwrap().as_ref(), b"abc");
+
     // Scanners' paths are turned away before the API or the web app sees them.
     for probe in ["/.env", "/wp-login.php", "/.git/config", "/actuator/env", "/wp-admin/"] {
         let response = http.get(format!("{base}{probe}")).send().await.unwrap();
@@ -1314,6 +1377,7 @@ async fn open_error(dir: &Path, vars: &[(&str, &str)]) -> String {
     let config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         _ => vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.to_string()),
     })
     .unwrap();
@@ -8189,6 +8253,16 @@ async fn channels_are_created_with_their_permissions() {
     let denied = c.channels.create_channel(create(&rin, "nope", vec![hidden()])).await.unwrap_err();
     assert_eq!(denied.code(), Code::PermissionDenied);
     c.channels.create_channel(create(&rin, "fine", vec![])).await.unwrap();
+
+    // Copying a channel whose overwrites name someone who has left: theirs is dropped.
+    let (kai, kai_user, _) = sign_up(&mut c, "kai").await;
+    join(&mut c, &kai, &sid).await;
+    c.servers.leave_server(authed(&kai, pb::LeaveServerRequest { server_id: sid.clone() })).await.unwrap();
+    let kai_sees = overwrite(&kai_user.id, T::Member, &[P::ViewChannels], &[]);
+    let copy = c.channels.create_channel(create(&juan, "staff-copy", vec![hidden(), kai_sees])).await.unwrap();
+    let copy = copy.into_inner().channel.unwrap();
+    assert_eq!(copy.permission_overwrites.len(), 1);
+    assert_eq!(copy.permission_overwrites[0].target_id, sid);
 }
 
 /// Uploads a file to attach in `server_id`, and says where it's served.

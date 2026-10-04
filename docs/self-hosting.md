@@ -365,16 +365,89 @@ provider only.
 
 ## Updating
 
+fuwa never updates itself. At startup and then once a day it asks GitHub
+whether a newer release is out (`api.github.com`, a fixed address, with nothing
+about your instance or anyone on it), and when there is one it tells you:
+
+- the instance settings (General) show "fuwa 0.4.2 is out" to admins, and
+  only to them, with links to the release's notes and to this section;
+- the log says `a newer fuwa is out` once a day.
+
+`FUWA_UPDATE_CHECK=off` turns the check off. Desktop apps signed in to your
+instance then look for their own updates through another instance they use,
+or not at all.
+
 Back up first (see below). Then, with Docker Compose:
 
 ```sh
 docker compose pull && docker compose up -d
 ```
 
+The `0.1` tag in `compose.yaml` follows every 0.1.x release, so that's all a
+patch release needs; a new minor version (0.2) means changing the tag.
+
+Updating is always your call, and these docs don't suggest container updaters
+that pull and restart fuwa by themselves (Watchtower and the like): they need
+the Docker socket, which is root on the host, skip the backup, and restart fuwa
+whenever a tag moves, dropping calls and connections for a few seconds. If you
+run one anyway, that's your choice to make, knowing that.
+
 With the binary, replace `/usr/local/bin/fuwa` and run
 `sudo systemctl restart fuwa`. Changes to the data happen by themselves when the
 new version starts. Going back to an older version afterwards isn't
 supported, so restore the backup instead. Each release's notes say what's new.
+
+### The web app and the desktop app
+
+The web app comes inside the server, so it updates with it. Tabs that were
+open during the update notice the new version, show a small "fuwa was updated"
+note with a Reload button. Nothing is forced: a tab never reloads by
+itself, and "Later" hides the note until the next update.
+
+The desktop app gets updates ready, and installs them only when the person
+says so. A little after it starts and then every six hours it asks the first instance it can reach (yours, if it's first) for
+`/updates/latest.json`, and fetches a newer build through
+`/updates/files/<name>`, which your instance fetches from GitHub once per
+release, checks against `SHA256SUMS` and keeps in `release-cache` in its data
+folder (only fuwa can read it; older releases are removed), so GitHub never
+sees who's updating. Anyone who stops reading, or reads very slowly, is cut
+off. Your instance can't
+change what it hands over: the app installs a build only when the release's
+`SHA256SUMS` carries a valid signature from a key the app was built with (see
+[Release signing](#release-signing)) and the file's SHA-256 matches it, and
+only when it's newer than the app. What it can do is keep quiet about a newer
+release, holding apps on the one they have; the signature has no date, so
+that isn't caught yet. The release notes it passes on aren't signed, so the
+app shows them as plain text, saying where they came from. Only https
+instances are asked, or plain http on this computer or a local network. The
+checked download waits beside the app until the person presses "Restart to update"; quitting without pressing
+it starts the same version again. People can turn "Download updates in the
+background" off in the app's settings (Updates); it then only says a new
+version is out.
+
+Apps and instances also agree on features by date: see
+[Compatibility dates](compatibility.md). An app older than a feature your
+instance has says "Update fuwa to use ..." there, and keeps working
+everywhere else.
+
+### Release signing
+
+Each release's `SHA256SUMS` is signed with Waifu Devs' release key (Ed25519),
+as `SHA256SUMS.sig` (the signature in base64). The public keys are in
+[desktop/release-keys.txt](../desktop/release-keys.txt), one base64 line each.
+To check a release by hand with OpenSSL 3:
+
+```sh
+key=$(grep -v '^#' release-keys.txt | head -1)
+{ printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; echo "$key" | base64 -d; } > release-key.der
+openssl pkey -pubin -inform DER -in release-key.der -out release-key.pem
+base64 -d SHA256SUMS.sig > SHA256SUMS.bin
+openssl pkeyutl -verify -pubin -inkey release-key.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.bin
+```
+
+The private key is only ever in the repository's `FUWA_RELEASE_SIGNING_KEY`
+secret, which the Release workflow signs with. A release made without it
+isn't signed, so desktop apps say it's out but won't install it.
 
 ## Backups
 

@@ -357,12 +357,13 @@ impl MediaLink {
         }
     }
 
-    /// Queues frames for a place's bridge to say; how many are waiting.
-    pub async fn speak(&self, place: &Place, frames: Vec<Vec<u8>>) -> Result<usize> {
+    /// Queues frames for a place's bridge to say, dropping what was still
+    /// waiting first when `interrupt`; how many are waiting.
+    pub async fn speak(&self, place: &Place, frames: Vec<Vec<u8>>, interrupt: bool) -> Result<usize> {
         let user_id = &place.state.user_id;
         match self {
             Self::Off(_) => Err(self.off()),
-            Self::Local(sfu) => sfu.speak(&place.room, user_id, &place.session_id, frames).await,
+            Self::Local(sfu) => sfu.speak(&place.room, user_id, &place.session_id, frames, interrupt).await,
             Self::Remote(_) => {
                 let mut client = self.part(&place.room)?;
                 let request = cpb::SpeakRequest {
@@ -370,6 +371,7 @@ impl MediaLink {
                     participant: user_id.clone(),
                     session_id: place.session_id.clone(),
                     frames,
+                    interrupt,
                 };
                 let queued = client.speak(request).await.map_err(Error::retried)?.into_inner().queued;
                 Ok(queued as usize)
