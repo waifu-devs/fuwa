@@ -162,7 +162,7 @@ message InstanceSettings {
   repeated string federation_blocked_hosts = 35;
   // GIF search in the apps' composers (GifService). Off until a provider
   // and its key are set. FUWA_GIF_PROVIDER and FUWA_GIF_API_KEY.
-  GifSettings gifs = 39;
+  GifSettings gifs = 43;
 }
 
 // The GIF search provider and its caps. Every call to the provider is made
