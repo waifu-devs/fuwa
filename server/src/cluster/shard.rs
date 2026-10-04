@@ -489,6 +489,12 @@ pub async fn channel_exists(servers: &Servers, server_id: &str, channel_id: &str
     Ok(query_one(&conn, "SELECT 1 FROM channels WHERE id = ?1", [channel_id], |r| r.get::<i64>(0)).await?.is_some())
 }
 
+/// A server's emoji with these ids, as stored.
+pub async fn server_emojis(servers: &Servers, server_id: &str, ids: &[String]) -> Result<Vec<pb::Emoji>> {
+    let sdb = servers.get(server_id).await?;
+    store::load_emojis_by_id(&sdb.read()?, &sdb.id, ids).await
+}
+
 /// Where an invite leads: the invite while it still works, its server, the
 /// channel it opens if everyone can see that one, and who made it.
 pub async fn describe_invite(servers: &Servers, server_id: &str, code: &str) -> Result<pb::GetInviteResponse> {
@@ -604,6 +610,18 @@ impl ShardService for Internal {
             channel_exists(&self.app.servers, &req.server_id, &req.channel_id)
                 .await
                 .map(|exists| cpb::ChannelExistsResponse { exists }),
+        )
+    }
+
+    async fn server_emojis(
+        &self,
+        request: Request<cpb::ServerEmojisRequest>,
+    ) -> Result<Response<cpb::ServerEmojisResponse>, Status> {
+        let req = request.into_inner();
+        respond(
+            server_emojis(&self.app.servers, &req.server_id, &req.ids)
+                .await
+                .map(|emojis| cpb::ServerEmojisResponse { emojis }),
         )
     }
 

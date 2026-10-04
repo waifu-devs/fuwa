@@ -354,6 +354,10 @@ pub fn apply_event(i: &mut InstanceState, event: &pb::Event, focus: Option<&str>
         }
         Payload::MessageCreated(pb::MessageCreated { message: Some(message) })
         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(message) }) => {
+            // Thread replies live in their thread, not the channel, unless also sent to it.
+            if !message.thread_id.is_empty() && !message.also_in_channel {
+                return Outcome::Nothing;
+            }
             let created = matches!(payload, Payload::MessageCreated(_));
             add_shared_authors(&mut i.users, std::slice::from_ref(message));
             let mut known = false;

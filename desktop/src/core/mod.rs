@@ -600,6 +600,7 @@ impl Core {
                 limit: PAGE,
                 before_id: before_id.unwrap_or_default(),
                 after_id: String::new(),
+                thread_id: String::new(),
             })
         )
         .await;
@@ -699,6 +700,7 @@ impl Core {
                 content: content.into(),
                 // A channel shown from another server isn't held here, so the instance needs it named.
                 channel_id: channel_id.into(),
+                ..Default::default()
             })
         )
         .await?;

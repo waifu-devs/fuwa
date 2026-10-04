@@ -68,6 +68,24 @@ impl ChannelService for Api {
                 };
                 let name = channel_name(&req.name, kind)?;
                 let topic = text("topic", &req.topic, 0, 1024)?;
+                if !(0..=MAX_SLOWMODE).contains(&req.slowmode_seconds) {
+                    return Err(Error::invalid(format!("slow mode can be 0 to {MAX_SLOWMODE} seconds")));
+                }
+                let wanted = overwrites(&req.permission_overwrites)?;
+                // A new channel starts with what its category gives; setting who
+                // can see it needs Manage Roles there, as it would after.
+                let have = if req.parent_id.is_empty() {
+                    access.server
+                } else {
+                    access.server & access.in_channel(&req.parent_id)
+                };
+                if !wanted.is_empty() {
+                    if req.parent_id.is_empty() {
+                        access.require(Permission::ManageRoles)?;
+                    } else {
+                        access.require_in(&req.parent_id, Permission::ManageRoles)?;
+                    }
+                }
                 let limits = sdb.limits(&self.app.settings().limits).await?;
                 let channel = sdb
                     .write(&account.id, async |conn, events| {
@@ -82,6 +100,7 @@ impl ChannelService for Api {
                             return Err(Error::invalid("categories can't sit inside other channels"));
                         }
                         check_parent(conn, &sdb.id, &req.parent_id).await?;
+                        check_overwrites(conn, &sdb.id, &access, &account.id, &[], &wanted, have).await?;
                         let position =
                             query_one(conn, "SELECT coalesce(max(position) + 1, 0) FROM channels", (), |r| {
                                 r.get::<i64>(0)
@@ -89,7 +108,7 @@ impl ChannelService for Api {
                             .await?
                             .unwrap_or(0);
                         let now = now_ms();
-                        let channel = pb::Channel {
+                        let mut channel = pb::Channel {
                             id: new_id(),
                             server_id: sdb.id.clone(),
                             name: name.clone(),
@@ -99,13 +118,13 @@ impl ChannelService for Api {
                             position: position as i32,
                             created_at: Some(timestamp(now)),
                             updated_at: Some(timestamp(now)),
-                            slowmode_seconds: 0,
+                            slowmode_seconds: req.slowmode_seconds,
                             permission_overwrites: vec![],
                             shared: None,
                         };
                         conn.execute(
-                            "INSERT INTO channels (id, name, type, parent_id, topic, position, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                            "INSERT INTO channels (id, name, type, parent_id, topic, position, created_at, updated_at, slowmode_seconds)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8)",
                             (
                                 channel.id.as_str(),
                                 channel.name.as_str(),
@@ -114,9 +133,14 @@ impl ChannelService for Api {
                                 channel.topic.as_str(),
                                 position,
                                 now,
+                                i64::from(req.slowmode_seconds),
                             ),
                         )
                         .await?;
+                        if !wanted.is_empty() {
+                            write_overwrites(conn, &channel.id, &wanted).await?;
+                            channel = load_channel(conn, &sdb.id, &channel.id).await?.ok_or(Error::NotFound("channel"))?;
+                        }
                         if kind == pb::ChannelType::Secure {
                             conn.execute(
                                 "INSERT INTO secure_groups (channel_id, updated_at) VALUES (?1, ?2)",
@@ -275,6 +299,12 @@ impl ChannelService for Api {
                 .await?
                 .unwrap_or_default();
                 conn.execute("DELETE FROM messages WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
+                conn.execute(
+                    "DELETE FROM thread_follows WHERE thread_id IN (SELECT id FROM threads WHERE channel_id = ?1)",
+                    [req.channel_id.as_str()],
+                )
+                .await?;
+                conn.execute("DELETE FROM threads WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 let (secure_messages, secure_bytes) = super::secure::forget_channel(conn, &req.channel_id).await?;
                 conn.execute("DELETE FROM slowmode WHERE channel_id = ?1", [req.channel_id.as_str()]).await?;
                 // Its webhooks go too: they have nowhere left to post.
@@ -432,74 +462,27 @@ impl ChannelService for Api {
                 let have = access.in_channel(&req.channel_id);
                 let channel = sdb
                     .write(&account.id, async |conn, events| {
-                        let before = load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
-                        for o in &wanted {
-                            let exists = if o.member {
-                                store::member(conn, &sdb.id, &o.target_id).await?.is_some()
-                            } else {
-                                permissions::role(conn, &sdb.id, &o.target_id).await?.is_some()
-                            };
-                            if !exists {
-                                return Err(Error::NotFound(if o.member { "member" } else { "role" }));
-                            }
-                        }
-                        // Only permissions the caller has here can change, either way.
+                        let before =
+                            load_channel(conn, &sdb.id, &req.channel_id).await?.ok_or(Error::NotFound("channel"))?;
                         let old = overwrites(&before.permission_overwrites)?;
-                        let find = |list: &[Overwrite], id: &str| {
-                            list.iter().find(|o| o.target_id == id).map_or((0, 0), |o| (o.allow, o.deny))
-                        };
-                        let changed = old.iter().chain(&wanted).fold(0, |changed, o| {
-                            let (a, d) = find(&old, &o.target_id);
-                            let (b, e) = find(&wanted, &o.target_id);
-                            changed | (a ^ b) | (d ^ e)
-                        });
-                        if !access.may_change(changed, have) {
-                            return Err(Error::denied("you can only change permissions you have in this channel"));
-                        }
-                        // And only for roles and members below them (@everyone and
-                        // their own are always theirs to change).
-                        for o in old.iter().chain(&wanted) {
-                            if find(&old, &o.target_id) == find(&wanted, &o.target_id)
-                                || o.target_id == account.id
-                                || (!o.member && o.target_id == sdb.id)
-                            {
-                                continue;
-                            }
-                            let below = if o.member {
-                                match store::member_access(conn, &sdb.id, &o.target_id).await? {
-                                    Some((_, theirs)) => access.outranks(&theirs),
-                                    // Gone from the server: their overwrite is only clutter.
-                                    None => true,
-                                }
-                            } else {
-                                match permissions::role(conn, &sdb.id, &o.target_id).await? {
-                                    Some(role) => access.above(i64::from(role.position)),
-                                    None => true,
-                                }
-                            };
-                            if !below {
-                                return Err(Error::denied(
-                                    "you can only change permissions for roles and members below your highest role",
-                                ));
-                            }
-                        }
-                        conn.execute("DELETE FROM channel_overwrites WHERE channel_id = ?1", [before.id.as_str()]).await?;
-                        for o in &wanted {
-                            let target = if o.member { pb::OverwriteTarget::Member } else { pb::OverwriteTarget::Role };
-                            conn.execute(
-                                "INSERT INTO channel_overwrites (channel_id, target_id, target, allow, deny) VALUES (?1, ?2, ?3, ?4, ?5)",
-                                (before.id.as_str(), o.target_id.as_str(), target as i64, o.allow as i64, o.deny as i64),
-                            )
+                        let changed =
+                            check_overwrites(conn, &sdb.id, &access, &account.id, &old, &wanted, have).await?;
+                        conn.execute("DELETE FROM channel_overwrites WHERE channel_id = ?1", [before.id.as_str()])
                             .await?;
-                        }
-                        conn.execute("UPDATE channels SET updated_at = ?2 WHERE id = ?1", (before.id.as_str(), now_ms()))
-                            .await?;
-                        let channel = load_channel(conn, &sdb.id, &before.id).await?.ok_or(Error::NotFound("channel"))?;
+                        write_overwrites(conn, &before.id, &wanted).await?;
+                        conn.execute(
+                            "UPDATE channels SET updated_at = ?2 WHERE id = ?1",
+                            (before.id.as_str(), now_ms()),
+                        )
+                        .await?;
+                        let channel =
+                            load_channel(conn, &sdb.id, &before.id).await?.ok_or(Error::NotFound("channel"))?;
                         if changed != 0 {
                             store::audit(
                                 conn,
                                 &account.id,
-                                Audit::new(pb::AuditAction::ChannelPermissionsUpdate, &channel.id).channel(&channel.name),
+                                Audit::new(pb::AuditAction::ChannelPermissionsUpdate, &channel.id)
+                                    .channel(&channel.name),
                             )
                             .await?;
                         }
@@ -512,6 +495,78 @@ impl ChannelService for Api {
             .await,
         )
     }
+}
+
+/// Checks overwrites going from `old` to `wanted` on a channel where the caller
+/// has `have`: every target exists, only permissions they have change, and only
+/// for roles and members below them (@everyone and their own are always theirs
+/// to change). Returns the permission bits that change.
+async fn check_overwrites(
+    conn: &turso::Connection,
+    server_id: &str,
+    access: &permissions::Access,
+    me: &str,
+    old: &[Overwrite],
+    wanted: &[Overwrite],
+    have: Bits,
+) -> Result<Bits> {
+    for o in wanted {
+        let exists = if o.member {
+            store::member(conn, server_id, &o.target_id).await?.is_some()
+        } else {
+            permissions::role(conn, server_id, &o.target_id).await?.is_some()
+        };
+        if !exists {
+            return Err(Error::NotFound(if o.member { "member" } else { "role" }));
+        }
+    }
+    let find =
+        |list: &[Overwrite], id: &str| list.iter().find(|o| o.target_id == id).map_or((0, 0), |o| (o.allow, o.deny));
+    let changed = old.iter().chain(wanted).fold(0, |changed, o| {
+        let (a, d) = find(old, &o.target_id);
+        let (b, e) = find(wanted, &o.target_id);
+        changed | (a ^ b) | (d ^ e)
+    });
+    if !access.may_change(changed, have) {
+        return Err(Error::denied("you can only change permissions you have in this channel"));
+    }
+    for o in old.iter().chain(wanted) {
+        if find(old, &o.target_id) == find(wanted, &o.target_id)
+            || o.target_id == me
+            || (!o.member && o.target_id == server_id)
+        {
+            continue;
+        }
+        let below = if o.member {
+            match store::member_access(conn, server_id, &o.target_id).await? {
+                Some((_, theirs)) => access.outranks(&theirs),
+                // Gone from the server: their overwrite is only clutter.
+                None => true,
+            }
+        } else {
+            match permissions::role(conn, server_id, &o.target_id).await? {
+                Some(role) => access.above(i64::from(role.position)),
+                None => true,
+            }
+        };
+        if !below {
+            return Err(Error::denied("you can only change permissions for roles and members below your highest role"));
+        }
+    }
+    Ok(changed)
+}
+
+/// Writes a channel's overwrites (after its old ones are gone).
+async fn write_overwrites(conn: &turso::Connection, channel_id: &str, wanted: &[Overwrite]) -> Result<()> {
+    for o in wanted {
+        let target = if o.member { pb::OverwriteTarget::Member } else { pb::OverwriteTarget::Role };
+        conn.execute(
+            "INSERT INTO channel_overwrites (channel_id, target_id, target, allow, deny) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (channel_id, o.target_id.as_str(), target as i64, o.allow as i64, o.deny as i64),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 struct Overwrite {
