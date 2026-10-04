@@ -274,14 +274,18 @@ What's checked:
 Avatars, banners and server icons can be uploaded to the instance itself. The
 app crops them in the browser and saves them as small WebP files (GIFs go up as
 they are, so they keep moving). The file is checked to really be a PNG, JPEG,
-GIF, WebP or AVIF picture, and a JPEG, PNG or WebP loses what it says about
-where and how it was taken (EXIF with a photo's GPS position, XMP, text and
-comments; colour profiles stay), then it's served at `<FUWA_PUBLIC_URL>/media/<id>` to
+GIF, WebP or AVIF picture, and it loses what it says about where and how it
+was taken (EXIF with a photo's GPS position, XMP, text and comments; colour
+profiles and animation stay; an AVIF's are zeroed where they are), then it's
+served at `<FUWA_PUBLIC_URL>/media/<id>` to
 anyone with the link, so set `FUWA_PUBLIC_URL` to the address people use before
 anyone uploads. Pictures aren't encrypted by `FUWA_ENCRYPTION_KEY`, since
 they're public at their links. A picture that gets replaced, or that nothing
 uses a day after it was uploaded, is deleted, and so are an account's pictures
 when the account is deleted.
+Pictures kept before an update that takes out more are gone over once, in the
+background after start-up (a `.pictures-cleaned-1` file in the data folder says
+it's done), and sent to the replica again.
 
 To upload one yourself, call `MediaService.CreateUpload` with the picture's type
 and size, then `PUT` the file to the `upload_url` it returns (within ten
@@ -408,7 +412,7 @@ the cluster key, apart from `/healthz`.
 | `FUWA_INTERNAL_URL` | shards | Where gateways and the directory reach this shard, like `http://shard-1:8080` |
 | `FUWA_MEDIA_URL` | directory, shards | Where the media parts are, like `http://media:8080`, comma-separated; calls are spread over them  (`https://` for one on the internet) |
 | `FUWA_MEDIA_KEY` | directory, shards, media | Optional: a separate 32+ character key for calls to the media parts only, so a media part on a host of its own ([docs/self-hosting.md](docs/self-hosting.md#the-media-part-on-a-host-of-its-own)) needs no cluster key |
-| `FUWA_SHARD_ID` | shards | The shard's name (a-z, 0-9, `-`, `_`). Defaults to one made up on first start and kept in its data folder as `shard-id` |
+| `FUWA_SHARD_ID` | shards | The shard's name (a-z, 0-9, `-`, `_`), shown publicly by `/healthz/parts`. Defaults to one made up on first start and kept in its data folder as `shard-id` |
 | `FUWA_REGION` | any part | The region it runs in, like `eu` or `us-west` (see [docs/regions.md](docs/regions.md)). The directory's is the home region; unset is the home region |
 | `FUWA_REGION_NAME` | any part | The region's name people see, like `Europe`. Common labels have one built in |
 
@@ -418,6 +422,9 @@ and telemetry on the directory, which shares its settings with every other
 part as they change. Give the directory and each shard their own data folder.
 If you use `FUWA_ENCRYPTION_KEY`, set the same one on the directory and every
 shard, so server files can move between shards. Every part answers `/healthz`.
+The gateways also answer `/healthz/parts` for anyone (a status page, say):
+whether the directory, each shard and calls are up, with each shard named by
+its `FUWA_SHARD_ID`, so don't name shards after hosts or anything private.
 
 ```sh
 docker network create fuwa

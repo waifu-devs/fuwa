@@ -23,7 +23,16 @@ export const CALL_FIELDS: { path: string; get: (s: InstanceSettings) => unknown;
     get: (s) => s.iceUrls.map((u) => u.trim()).filter(Boolean).join("\n"),
     copy: (into, from) => (into.iceUrls = [...from.iceUrls]),
   },
-  { path: "turn_secret", get: (s) => s.turnSecret.trim(), copy: (into, from) => (into.turnSecret = from.turnSecret) },
+  // The server never sends the secret back, so an empty field keeps the saved one.
+  {
+    path: "turn_secret",
+    get: (s) => s.turnSecret.trim(),
+    copy: (into, from) => {
+      into.turnSecret = from.turnSecret;
+      into.turnSecretSet = from.turnSecretSet;
+      into.turnSecretHint = from.turnSecretHint;
+    },
+  },
 ];
 
 export const CALL_SECTION = {
@@ -138,7 +147,7 @@ export function CallSettings({
         title="TURN secret"
         hint="The shared secret your TURN server (such as coturn with use-auth-secret) checks. Apps get a new password from it for each call, good for an hour, that names no account."
         delay={0.08}
-        defaultLabel={defaults.turnSecret ? "set" : "none"}
+        defaultLabel={defaults.turnSecretSet ? "set" : "none"}
         {...resetter("turn_secret")}
       >
         <div className="relative">
@@ -148,7 +157,13 @@ export function CallSettings({
             autoComplete="off"
             value={draft.turnSecret}
             onChange={(e) => patch((d) => (d.turnSecret = e.target.value))}
-            placeholder="No TURN secret"
+            placeholder={
+              draft.turnSecretSet
+                ? draft.turnSecretHint
+                  ? `Saved, ending in ${draft.turnSecretHint}. Type to replace it`
+                  : "Saved. Type to replace it"
+                : "No TURN secret"
+            }
             className="h-10 rounded-xl pl-9"
           />
         </div>

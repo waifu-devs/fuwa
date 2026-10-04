@@ -525,8 +525,9 @@ impl MessageService for Api {
                     return Err(Error::ResourceExhausted("this server is out of storage".into()));
                 }
                 let pictures = automod::picture_links(&req.attachments, &req.embeds);
-                let asked =
-                    automod::ask(&self.app, &sdb, &member, &access, &req.channel_id, &req.content, &pictures).await;
+                let (asked, later) =
+                    automod::ask_soon(&self.app, &sdb, &member, &access, &req.channel_id, &req.content, &pictures)
+                        .await;
                 let message = sdb
                     .write(&account.id, async |conn, events| {
                         let channel =
@@ -589,6 +590,9 @@ impl MessageService for Api {
                     })
                     .await?
                     .map_err(Error::denied)?;
+                if let Some(checking) = later {
+                    checking.later(sdb.clone(), member, message.id.clone(), message.content.clone());
+                }
                 Ok(pb::SendMessageResponse { message: Some(message) })
             }
             .await,
@@ -676,11 +680,11 @@ impl MessageService for Api {
                 }
                 // A provider is asked before the write, about new text the author wrote.
                 let before = load_message(&sdb.read()?, &sdb.id, &req.message_id).await?;
-                let asked = match before {
+                let (asked, later) = match before {
                     Some(m) if m.author_id == account.id && m.content != req.content => {
-                        automod::ask(&self.app, &sdb, &member, &access, &m.channel_id, &req.content, &[]).await
+                        automod::ask_soon(&self.app, &sdb, &member, &access, &m.channel_id, &req.content, &[]).await
                     }
-                    _ => None,
+                    _ => (None, None),
                 };
                 let message = sdb
                     .write(&account.id, async |conn, events| {
@@ -737,6 +741,9 @@ impl MessageService for Api {
                     })
                     .await?
                     .map_err(Error::denied)?;
+                if let Some(checking) = later {
+                    checking.later(sdb.clone(), member, message.id.clone(), message.content.clone());
+                }
                 Ok(pb::UpdateMessageResponse { message: Some(message) })
             }
             .await,

@@ -29,11 +29,22 @@ that turns fuwa's questions into another provider's.
 - Pictures go only to providers that read them (Cloudflare Clef), and only
   when the server's Smart filter has **Check pictures too** on. See
   [Pictures](#pictures).
-- It has 3 seconds (6 with pictures). A provider that's slow, down or answers something fuwa
-  can't read lets the message through that rule; the server's other rules
-  still apply. The failure is counted in the anonymous report as its kind and
+- A message waits for the answer only as long as that provider usually
+  takes, plus a quarter, between 0.15 and 1 second. A slower answer is
+  acted on as soon as it comes: a message it blocks is taken down then,
+  with the same alert and time out. The other rules always check a message
+  before it's sent.
+- The provider has 3 seconds to answer (6 with pictures). A provider that's slow, down or
+  answers something fuwa can't read lets the message through that rule; the
+  server's other rules still apply. The failure is counted in the anonymous report as its kind and
   `typesafe-jev`, `cloudflare-clef` or `custom`, never your provider's name or
   address.
+- fuwa sends each provider as many checks at once as it keeps up with:
+  one more after each quick answer, and half as many after a timeout, a
+  refusal or an error. Other checks wait their turn. When 256 are already
+  waiting, a check isn't sent, and the message goes through that rule
+  unchecked. The same message sent over and over in one server (a raid, a
+  spammer) is asked about once while that check is out.
 - fuwa never follows a redirect, and only speaks https.
 - Your own provider has to be on the internet: loopback, private, link-local
   and other internal addresses (and names like `localhost` or `*.internal`)
@@ -47,8 +58,11 @@ that turns fuwa's questions into another provider's.
   that server's messages go through the Smart filter unchecked until
   midnight UTC, like when the provider is down, and its other rules still
   apply: a limit that blocked messages would stop a busy server talking. Each
-  server's Usage page shows the day's count. It's counted where the server
-  lives, in memory, so a restart starts the day's count again.
+  server's Usage page shows the day's count. The first time a server runs
+  out on a day, AutoMod posts one alert in its Smart filter rule's alert
+  channel (when the rule alerts) saying so; it names no message or member.
+  It's counted where the server lives, in memory, so a restart starts the
+  day's count again (and may post that day's alert again).
 
 ## The request
 

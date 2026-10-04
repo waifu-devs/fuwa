@@ -642,8 +642,8 @@ export type PreviewShareResponse = Message<"fuwa.v1.PreviewShareResponse"> & {
   channelTopic: string;
 
   /**
-   * Where the channel's messages are kept: the home server's region, when
-   * the instance has more than one. Empty otherwise.
+   * Where the channel's messages are kept: the home server's region, as in
+   * Server.region (one of Node.regions; empty for the home region).
    *
    * @generated from field: string region = 4;
    */

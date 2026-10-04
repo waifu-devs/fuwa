@@ -157,6 +157,11 @@ pub fn server_error(kind: &str, place: Option<&str>) {
     counts().error(&COLLECTOR.server, kind, &place, 1);
 }
 
+/// Counts how often the server itself did something (`count` times).
+pub fn server_used(feature: &str, count: u64) {
+    counts().used(&COLLECTOR.server, feature, count);
+}
+
 /// Counts how long something in the server took.
 pub fn server_timing(metric: &str, took: Duration) {
     let ms = took.as_millis().min(u64::MAX as u128) as u64;

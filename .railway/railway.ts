@@ -10,7 +10,19 @@ import { bucket, defineRailway, image, project, ref, service, volume } from "rai
  * them with any other key, so it must never change. Keep a copy in a password manager.
  * Before turning SPLIT on, also FUWA_CLUSTER_KEY (`openssl rand -hex 32`), the secret the
  * parts send each other; that one can change later, and every part restarts with it.
+ * And FUWA_MEDIA_KEY (`openssl rand -hex 32` again, not the same value), the only
+ * secret the media parts hold: they never get the cluster key, so one that's broken
+ * into can't reach the directory or the shards.
  * The DNS records for fuwa.chat live with its registrar.
+ *
+ * The CDN and edge rules aren't something Railway configuration can declare yet, so
+ * .railway/edge.mjs sets them through Railway's API, from the same workflow: on the `fuwa`
+ * gateways only (the service with the fuwa.chat domain), the CDN with Railway's defaults
+ * (HTML only when a page says so) and .railway/edge-rules.json, which turns scanners'
+ * guesses away at the edge. The CDN only keeps the web app's built assets: gRPC-Web calls
+ * are POSTs, which it never caches or buffers, pictures say `private`, and everything else
+ * `no-store`. fuwa turns the same paths away itself (server/src/probes.rs). The other parts
+ * have no public domain, and `fuwa-media`'s TCP proxy doesn't go through the edge.
  */
 
 /** Railway's US East (Virginia) region, where the site runs too. */
@@ -84,8 +96,8 @@ const HOME = { id: "us-east", name: "US East" };
  * `fuwa-<id>-replica` bucket, all in `railway` / `bucket`. Their servers' messages,
  * recordings and calls stay there; requests reach them through the home gateways.
  *
- * Empty, fuwa.chat is one region and runs exactly as before. Adding one deploys new
- * services, so it waits for Juan to say so. Railway can't move a service to another
+ * Empty, fuwa.chat is one region. Adding one deploys new services, so it waits for
+ * Juan to say so; Europe (Netherlands) and US West (California) run since 2026-10. Railway can't move a service to another
  * region: a region is added, never moved, and removing one deletes its volumes and
  * every server on them (move them home first, in Settings > Instance > Servers).
  *
@@ -93,7 +105,11 @@ const HOME = { id: "us-east", name: "US East" };
  * Railway regions: us-west2, us-east4-eqdc4a, europe-west4-drams3a, asia-southeast1-eqsg3a.
  * Bucket regions: sjc, iad, ams, sin.
  */
-const REGIONS: { id: string; name: string; railway: string; bucket: string; shards: number }[] = [];
+const REGIONS: { id: string; name: string; railway: string; bucket: string; shards: number }[] = [
+  // Juan 2026-10-03: "deploy the eu region to fuwa.chat", "also the us-west".
+  { id: "eu", name: "Europe", railway: "europe-west4-drams3a", bucket: "ams", shards: 1 },
+  { id: "us-west", name: "US West", railway: "us-west2", bucket: "sjc", shards: 1 },
+];
 
 export default defineRailway((ctx) => {
   // The image every merge to master publishes; the publish workflow redeploys every
@@ -183,8 +199,13 @@ export default defineRailway((ctx) => {
     FUWA_CLUSTER_KEY: ctx.shared.FUWA_CLUSTER_KEY,
   });
   const internalUrl = (name: string) => `http://\${{${name}.RAILWAY_PRIVATE_DOMAIN}}:${PORT}`;
+  // A media part holds the media key alone, never the cluster key (fuwa then accepts
+  // only the media key on it); the directory and shards send it when opening calls.
   const mediaEnv = (region: { id: string; name: string }) => ({
-    ...part("media"),
+    PORT: String(PORT),
+    FUWA_HOST: "::",
+    FUWA_ROLE: "media",
+    FUWA_MEDIA_KEY: ctx.shared.FUWA_MEDIA_KEY,
     ...label(region),
     FUWA_MEDIA_PORT: String(MEDIA_PORT),
     FUWA_MEDIA_ADDRESSES: "tcp/${{RAILWAY_TCP_PROXY_DOMAIN}}:${{RAILWAY_TCP_PROXY_PORT}}",
@@ -207,10 +228,10 @@ export default defineRailway((ctx) => {
         }),
       ];
   // Where the directory (calls in direct messages) and shards (voice channels) open calls.
-  // A media host gets its own key (shared variable FUWA_MEDIA_KEY), never the cluster key.
-  const mediaUrl = MEDIA_HOST_URL
-    ? { FUWA_MEDIA_URL: MEDIA_HOST_URL, FUWA_MEDIA_KEY: ctx.shared.FUWA_MEDIA_KEY }
-    : { FUWA_MEDIA_URL: internalUrl("fuwa-media") };
+  // Media parts, here or on a host of their own, get their own key (shared variable
+  // FUWA_MEDIA_KEY), never the cluster key.
+  const mediaKey = { FUWA_MEDIA_KEY: ctx.shared.FUWA_MEDIA_KEY };
+  const mediaUrl = { FUWA_MEDIA_URL: MEDIA_HOST_URL || internalUrl("fuwa-media"), ...mediaKey };
 
   const directory = service("fuwa-directory", {
     source: fuwaImage(),
@@ -311,6 +332,7 @@ export default defineRailway((ctx) => {
           FUWA_S3_SECRET_ACCESS_KEY: ref(regionReplica, "SECRET_ACCESS_KEY"),
           FUWA_RESTORE: "if-empty",
           FUWA_MEDIA_URL: internalUrl(regionMedia.name),
+          ...mediaKey,
         },
       });
       return [shardData, shard];

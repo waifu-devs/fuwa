@@ -158,8 +158,10 @@ this, or that couldn't be taken when it started using them (counted as an
 anonymous `server_picture_take` failure), stay at the directory and are
 served from there until the server next moves, when its new shard takes
 them. A picture belongs to whatever used it first: an account's avatar set
-as a webhook's picture stays the account's, and an emoji added to a second
-server stays with the first. One process running everything keeps every
+as a webhook's picture stays the account's. A server's picture is never
+shared with another server: setting one server's emoji or icon on a second
+server is refused (upload it there instead), since the first server's shard
+deletes it once that server stops using it. One process running everything keeps every
 picture in `media/` as before.
 
 Server **attachments** are links today (fuwa doesn't store uploaded files for

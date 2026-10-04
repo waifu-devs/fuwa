@@ -477,7 +477,7 @@ fn no_pings(message: &mut pb::Message) {
 /// Runs this server's own AutoMod over what one of its people writes in a
 /// channel it shows from another, before it goes there.
 async fn review_here(
-    app: &App,
+    app: &Arc<App>,
     sdb: &ServerDb,
     member: &pb::Member,
     access: &Access,
@@ -681,12 +681,14 @@ async fn home_lookup(app: &App, sdb: &ServerDb, lookup: cpb::ShareLookup) -> Res
     // The preview names every outside provider that would read the guest's
     // people's messages, before their admins agree.
     let checked_by = automod::readers(app, &conn, &channel).await?;
+    // Where its messages are kept, so the guest's admins know before asking.
+    let region = store::load_server(&conn).await?.region;
     Ok(cpb::SharedReply {
         preview: Some(pb::PreviewShareResponse {
             home_server: Some(this_server(&conn, &sdb.id).await?),
             channel_name: channel.name,
             channel_topic: channel.topic,
-            region: String::new(),
+            region,
             checked_by,
             allowed: permissions::to_list(SHAREABLE),
             expires_at: code.expires_at,
@@ -894,7 +896,7 @@ async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply
 /// guest's connection is gone, they're kept out, or the home doesn't let
 /// them send this; the write then turns them away.
 async fn ask_home(
-    app: &App,
+    app: &Arc<App>,
     sdb: &ServerDb,
     guest: &cpb::Guest,
     content: &str,
@@ -923,7 +925,7 @@ async fn ask_home(
     automod::ask(app, sdb, &member, &access, &channel_id, content, &pictures).await
 }
 
-async fn home_edit(app: &App, sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cpb::SharedReply> {
+async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Result<cpb::SharedReply> {
     let guest = edit.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
     let author_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
     // Only new text the author wrote goes to a provider.

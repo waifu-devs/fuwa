@@ -97,6 +97,16 @@ pub fn handler(source: Arc<impl HasSettings>) -> MethodRouter {
     .layer(CompressionLayer::new().compress_when(compress))
 }
 
+/// Middleware for every public answer: one that doesn't say how long it may
+/// be kept (health checks, SSO pages, API calls, 404s) is kept by nobody, so
+/// a shared cache in front of the instance (Railway's CDN on fuwa.chat) never
+/// stores it. Built assets and pictures say so themselves.
+pub async fn no_store_by_default(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let mut response = next.run(request).await;
+    response.headers_mut().entry(header::CACHE_CONTROL).or_insert(HeaderValue::from_static("no-store"));
+    response
+}
+
 /// Two years, as browsers' preload lists ask.
 const HSTS: &str = "max-age=63072000";
 

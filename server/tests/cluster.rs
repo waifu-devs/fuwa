@@ -542,11 +542,20 @@ async fn a_split_instance_works_like_one() {
     let fetched = http.get(&picture.url).send().await.unwrap();
     assert_eq!(fetched.status(), 200);
     assert_eq!(fetched.headers()["content-type"], "image/png");
-    assert_eq!(fetched.headers()["cache-control"], "public, max-age=31536000, immutable");
+    assert_eq!(fetched.headers()["cache-control"], "private, max-age=31536000, immutable");
     assert_eq!(fetched.bytes().await.unwrap().to_vec(), png);
     let plain = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
     let redirected = plain.get(&picture.url).send().await.unwrap();
     assert_eq!(redirected.status(), 308);
+    assert_eq!(redirected.headers()["cache-control"], "private, max-age=31536000, immutable");
+    let health = http.get(format!("{}/healthz", cluster.gateway.url())).send().await.unwrap();
+    assert_eq!(health.headers()["cache-control"], "no-store");
+    // Scanners' guesses stop at the gateway.
+    for probe in ["/.env", "/wp-login.php", "/.git/HEAD"] {
+        let response = http.get(format!("{}{probe}", cluster.gateway.url())).send().await.unwrap();
+        assert_eq!(response.status(), 404, "{probe}");
+        assert_eq!(response.text().await.unwrap(), "not found\n");
+    }
     assert_eq!(redirected.headers()["location"], format!("/media/servers/{}/{}", on_b.id, picture.id).as_str());
     let elsewhere = format!("{}/media/servers/{}/{}", cluster.gateway.url(), on_a.id, picture.id);
     assert_eq!(http.get(&elsewhere).send().await.unwrap().status(), 404, "only under its own server");
@@ -1247,6 +1256,39 @@ async fn servers_live_in_their_region_and_move() {
     assert_eq!(make("mars").await.unwrap_err().code(), Code::InvalidArgument);
     assert_eq!(make("Not A Region").await.unwrap_err().code(), Code::InvalidArgument);
 
+    // A channel shared from Europe says so before a server at home asks for it.
+    let channel = c
+        .channels
+        .clone()
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: in_eu.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .remove(0);
+    let code = c
+        .shared
+        .clone()
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: in_eu.id.clone(), channel_id: channel.id },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let asking = make("").await.unwrap();
+    let preview = c
+        .shared
+        .clone()
+        .preview_share(authed(&juan, pb::PreviewShareRequest { server_id: asking.id.clone(), code }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(preview.region, "eu");
+
     // A server at home, with a message, a recording's files, pictures and a
     // live stream.
     let server = make("").await.unwrap();
@@ -1423,6 +1465,14 @@ async fn servers_live_in_their_region_and_move() {
         ..Default::default()
     };
     c.servers.update_server(authed(&juan, request)).await.unwrap();
+    // Once used it's still that server's alone: another server reusing it
+    // would lose it when this one replaces it, or when its shard sweeps it.
+    let request = pb::UpdateServerRequest {
+        server_id: in_eu.id.clone(),
+        icon_url: Some(direct.url.clone()),
+        ..Default::default()
+    };
+    assert_eq!(c.servers.update_server(authed(&juan, request)).await.unwrap_err().code(), Code::PermissionDenied);
     // A wrong-sized upload is turned away and nothing is kept.
     let short = reserve(pb::MediaPurpose::Emoji, &server.id, &juan).await.unwrap();
     assert_eq!(http.put(&short.upload_url).body(with_text[..200].to_vec()).send().await.unwrap().status(), 400);

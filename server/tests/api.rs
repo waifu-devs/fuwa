@@ -726,6 +726,35 @@ async fn preflight_origin(instance: &Instance, origin: &str) -> Option<String> {
 }
 
 #[tokio::test]
+async fn admins_never_read_back_the_turn_secret() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_TURN_SECRET", "secret-from-the-env-aaaa")]).await;
+    let mut c = clients(&instance).await;
+    let (admin, _, _) = sign_up(&mut c, "admin").await;
+    let shown = |config: pb::InstanceConfig| {
+        let settings = config.settings.unwrap();
+        let defaults = config.defaults.unwrap();
+        assert!(settings.turn_secret.is_empty() && defaults.turn_secret.is_empty(), "the secret stays on the server");
+        (settings.turn_secret_set, settings.turn_secret_hint)
+    };
+    let config = c.admin.get_settings(authed(&admin, pb::GetSettingsRequest {})).await.unwrap().into_inner();
+    assert_eq!(shown(config.config.unwrap()), (true, "aaaa".into()));
+
+    let update = |secret: &str, update: &[&str], reset: &[&str]| {
+        let settings = pb::InstanceSettings { turn_secret: secret.into(), ..Default::default() };
+        authed(&admin, settings_update(settings, update, reset))
+    };
+    let replaced = c.admin.update_settings(update("a-new-turn-secret-bbbb", &["turn_secret"], &[])).await.unwrap();
+    assert_eq!(shown(replaced.into_inner().config.unwrap()), (true, "bbbb".into()));
+    // Saving the page as shown (the field empty) keeps the saved secret.
+    let kept = c.admin.update_settings(update("", &["turn_secret"], &[])).await.unwrap();
+    assert_eq!(shown(kept.into_inner().config.unwrap()), (true, "bbbb".into()));
+    let reset = c.admin.update_settings(update("", &[], &["turn_secret"])).await.unwrap();
+    assert_eq!(shown(reset.into_inner().config.unwrap()), (true, "aaaa".into()));
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn admins_change_settings_from_a_client() {
     let dir = tempfile::tempdir().unwrap();
     let env = [("FUWA_NODE_NAME", "From env"), ("FUWA_LIMIT_MEMBERS", "10")];
@@ -864,6 +893,7 @@ async fn browsers_can_call_over_grpc_web() {
         .unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(response.headers()["content-type"], "application/grpc-web+proto");
+    assert_eq!(response.headers()["cache-control"], "no-store");
     let body = response.bytes().await.unwrap();
     let length = u32::from_be_bytes(body[1..5].try_into().unwrap()) as usize;
     let reply = <pb::GetNodeResponse as prost::Message>::decode(&body[5..5 + length]).unwrap();
@@ -871,10 +901,20 @@ async fn browsers_can_call_over_grpc_web() {
     let trailers = String::from_utf8_lossy(&body[5 + length + 5..]).to_lowercase();
     assert!(trailers.contains("grpc-status:0"), "trailers: {trailers}");
 
-    assert_eq!(http.get(format!("{base}/healthz")).send().await.unwrap().text().await.unwrap(), "ok");
+    let health = http.get(format!("{base}/healthz")).send().await.unwrap();
+    // Nothing that doesn't say otherwise is kept by a shared cache.
+    assert_eq!(health.headers()["cache-control"], "no-store");
+    assert_eq!(health.text().await.unwrap(), "ok");
     if !fuwa_server::web::BUILT_IN {
         // With the web client built in, unknown paths open the app instead (see tests/web.rs).
         assert_eq!(http.get(format!("{base}/nope")).send().await.unwrap().status(), 404);
+    }
+    // Scanners' paths are turned away before the API or the web app sees them.
+    for probe in ["/.env", "/wp-login.php", "/.git/config", "/actuator/env", "/wp-admin/"] {
+        let response = http.get(format!("{base}{probe}")).send().await.unwrap();
+        assert_eq!(response.status(), 404, "{probe}");
+        assert_eq!(response.headers()["cache-control"], "public, max-age=86400");
+        assert_eq!(response.text().await.unwrap(), "not found\n");
     }
 
     // Live events stream to browsers too, over plain HTTP/1.1.
@@ -2715,6 +2755,45 @@ async fn fetch(instance: &Instance, url: &str) -> (reqwest::StatusCode, reqwest:
     let response = reqwest::get(on(instance, url)).await.unwrap();
     let (status, headers) = (response.status(), response.headers().clone());
     (status, headers, response.bytes().await.unwrap().to_vec())
+}
+
+#[tokio::test]
+async fn pictures_kept_from_before_lose_their_metadata_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let background = pb::MediaPurpose::Background;
+    let url = upload(&mut c, &instance, &juan, background, png(300, 1)).await;
+    let keep = |url: &str| authed(&juan, pb::KeepBackgroundRequest { url: url.into() });
+    c.media.keep_background(keep(&url)).await.unwrap();
+    instance.stop().await;
+
+    // As if it had been kept before uploads were cleaned: with a text chunk
+    // saying where it was taken.
+    let id = url.rsplit('/').next().unwrap().to_string();
+    let text = [&b"\0\0\0\x0btEXt"[..], b"GPS\0here!!!", &[0, 0, 0, 0]].concat();
+    let clean = png(300, 1);
+    let tagged = [&clean[..clean.len() - 12], &text, &clean[clean.len() - 12..]].concat();
+    std::fs::write(dir.path().join("media").join(&id), &tagged).unwrap();
+
+    // The pass runs once per data folder, in the background after start-up.
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let marker = dir.path().join(".pictures-cleaned-1");
+    assert!(!marker.exists());
+    fuwa_server::media::backfill::spawn(instance.app.clone());
+    for _ in 0..100 {
+        if marker.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(marker.exists(), "the pass finished");
+    assert_eq!(fetch(&instance, &url).await.2, clean);
+    let kept = c.media.keep_background(keep(&url)).await.unwrap().into_inner().media.unwrap();
+    assert_eq!(kept.size, 300, "its size as kept now");
+    instance.stop().await;
 }
 
 #[tokio::test]
@@ -4760,6 +4839,7 @@ async fn smart_filter_checks_stop_at_the_daily_limit() {
         ..Default::default()
     };
     let rule = save_rule(&mut c, &owner, &server.id, smart).await.unwrap();
+    let rule_id = rule.id.clone();
 
     // The limit is the instance's, shown with each server's usage.
     let shown = c
@@ -4790,6 +4870,23 @@ async fn smart_filter_checks_stop_at_the_daily_limit() {
         .into_inner();
     assert!(tried.error.contains("today's 2 Smart filter checks are used up"), "{tried:?}");
     assert_eq!(usage(&mut c, &owner, &server.id).await.automod_checks_today, 2);
+
+    // The moderators hear about it once that day, in the rule's alert
+    // channel, with no message or member named.
+    let log = c
+        .messages
+        .list_messages(authed(
+            &owner,
+            pb::ListMessagesRequest { server_id: server.id.clone(), channel_id: mods.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .messages;
+    assert_eq!(log.len(), 1, "{log:?}");
+    let alert = log[0].auto_mod.clone().unwrap();
+    assert_eq!((alert.capped_per_day, alert.rule_id.as_str()), (2, rule_id.as_str()));
+    assert!(log[0].author_id.is_empty() && alert.content.is_empty() && alert.channel_id.is_empty());
 
     // Admins raise it from the app.
     let raised = settings_update(

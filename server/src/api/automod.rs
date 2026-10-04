@@ -253,25 +253,48 @@ async fn checked_rule(
     })
 }
 
-/// What a server's provider rule's provider said about a message, asked
-/// before the write that sends it (a provider can take a while, and a write
-/// mustn't wait on one).
+/// What a server's provider rule's provider said about a message.
 pub(super) struct Asked {
     rule_id: String,
     provider: String,
     scores: providers::Scores,
 }
 
+/// A provider's answer on its way: `None` when it didn't answer (counted in
+/// the anonymous report), and the message goes through that rule unchecked.
+type Answer = futures::future::Shared<futures::future::BoxFuture<'static, Option<providers::Scores>>>;
+
+/// A message being checked by its server's provider rule.
+pub(super) struct Checking {
+    rule_id: String,
+    provider: String,
+    /// The provider's id, whose lane it waits in (see `automod::pace`).
+    lane: String,
+    answer: Answer,
+}
+
+/// Checks being asked right now, by server, provider and what they ask, so
+/// the same message sent again and again (a raid, a spammer) is asked once.
+/// The key is the whole of what's asked, compared in full, so no message
+/// can pass for another.
+type Asking = std::collections::HashMap<(String, String, String, Vec<String>), Answer>;
+
+static ASKING: std::sync::LazyLock<std::sync::Mutex<Asking>> = std::sync::LazyLock::new(Default::default);
+
+fn asking() -> std::sync::MutexGuard<'static, Asking> {
+    ASKING.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Asks the provider of the server's provider rule about a message, when the
-/// rule is on, its provider is set up and the message isn't left alone.
-/// `pictures` are the links to the message's pictures (attached ones and
-/// embeds'), read and shown only when the rule says so and the provider
-/// reads pictures. `None` when nothing was asked or the provider didn't
-/// answer (counted in the anonymous report): the message then goes through
-/// that rule unchecked.
+/// rule is on, its provider is set up and the message isn't left alone, and
+/// waits for the answer. `pictures` are the links to the message's pictures
+/// (attached ones and embeds'), read and shown only when the rule says so
+/// and the provider reads pictures. `None` when nothing was asked or the
+/// provider didn't answer: the message then goes through that rule
+/// unchecked.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn ask(
-    app: &crate::app::App,
+    app: &std::sync::Arc<crate::app::App>,
     sdb: &store::ServerDb,
     member: &pb::Member,
     access: &Access,
@@ -279,6 +302,20 @@ pub(super) async fn ask(
     content: &str,
     pictures: &[String],
 ) -> Option<Asked> {
+    start(app, sdb, member, access, channel_id, content, pictures).await?.wait().await
+}
+
+/// Starts asking, as [`ask`] does, without waiting for the answer.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn start(
+    app: &std::sync::Arc<crate::app::App>,
+    sdb: &store::ServerDb,
+    member: &pb::Member,
+    access: &Access,
+    channel_id: &str,
+    content: &str,
+    pictures: &[String],
+) -> Option<Checking> {
     if access.has(Permission::ManageServer) || (content.trim().is_empty() && pictures.is_empty()) {
         return None;
     }
@@ -297,49 +334,204 @@ pub(super) async fn ask(
     drop(conn);
     let setup = app.settings().automod_provider(&rule.provider)?.clone();
     let provider = setup.name().to_string();
-    let pictures = if rule.pictures && setup.reads_pictures() { read_pictures(app, pictures).await } else { vec![] };
+    let lane = setup.id.clone();
+    let pictures: Vec<String> = if rule.pictures && setup.reads_pictures() { pictures.to_vec() } else { vec![] };
     if content.trim().is_empty() && pictures.is_empty() {
         return None;
     }
-    if !take_check(&sdb.id, app.settings().limits.automod_checks_per_day) {
+    let key = (sdb.id.clone(), setup.id.clone(), content.to_string(), pictures.clone());
+    let checking =
+        |answer| Some(Checking { rule_id: rule.id.clone(), provider: provider.clone(), lane: lane.clone(), answer });
+    if let Some(answer) = asking().get(&key).cloned() {
+        return checking(answer);
+    }
+    if let Check::Capped { per_day, first } = take_check(&sdb.id, app.settings().limits.automod_checks_per_day) {
         crate::reports::server_error("automod_provider_capped", Some(setup.report_id()));
+        if first {
+            alert_capped(sdb, per_day).await;
+        }
         return None;
     }
-    let (answer, _) = providers::check(&setup, content, &pictures).await;
-    Some(Asked { rule_id: rule.id, provider, scores: answer.ok()? })
+    // Asked in its own task, so it finishes (and frees its turn) even when
+    // whoever sent the message goes away.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let answer: Answer = futures::FutureExt::shared(
+        Box::pin(async move { rx.await.ok().flatten() }) as futures::future::BoxFuture<'static, _>
+    );
+    asking().insert(key.clone(), answer.clone());
+    let (app, content) = (app.clone(), content.to_string());
+    tokio::spawn(async move {
+        let pictures = read_pictures(&app, &pictures).await;
+        let answer = providers::check(&setup, &content, &pictures).await.0.ok();
+        asking().remove(&key);
+        let _ = tx.send(answer);
+    });
+    checking(answer)
 }
 
-/// Smart filter checks each server asked its provider on `.0` (days since
-/// 1970, UTC). Counted where the server lives, which is the one place its
-/// messages are sent from; kept in memory, so a restart starts the day again.
-static CHECKS: std::sync::LazyLock<std::sync::Mutex<(i64, std::collections::HashMap<String, i64>)>> =
-    std::sync::LazyLock::new(Default::default);
+/// Starts asking, as [`ask`] does, and waits only as long as the provider
+/// usually takes: the answer when it came in time, or the check still going,
+/// for [`Checking::later`] once the message is sent.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn ask_soon(
+    app: &std::sync::Arc<crate::app::App>,
+    sdb: &store::ServerDb,
+    member: &pb::Member,
+    access: &Access,
+    channel_id: &str,
+    content: &str,
+    pictures: &[String],
+) -> (Option<Asked>, Option<Checking>) {
+    match start(app, sdb, member, access, channel_id, content, pictures).await {
+        Some(checking) => match checking.soon().await {
+            Soon::Answered(asked) => (asked, None),
+            Soon::Later(checking) => (None, Some(checking)),
+        },
+        None => (None, None),
+    }
+}
+
+/// What came of a check by the time its message is sent.
+pub(super) enum Soon {
+    /// The provider answered in time (or didn't, and won't).
+    Answered(Option<Asked>),
+    /// Still asking: the message is sent, and checked when the answer comes.
+    Later(Checking),
+}
+
+impl Checking {
+    /// Waits for the answer.
+    pub(super) async fn wait(self) -> Option<Asked> {
+        let scores = self.answer.await?;
+        Some(Asked { rule_id: self.rule_id, provider: self.provider, scores })
+    }
+
+    /// Waits for the answer only as long as the provider usually takes (see
+    /// `automod::pace::budget`), so a slow provider doesn't hold the message.
+    pub(super) async fn soon(self) -> Soon {
+        match tokio::time::timeout(automod::pace::budget(&self.lane), self.answer.clone()).await {
+            Ok(scores) => {
+                Soon::Answered(scores.map(|scores| Asked { rule_id: self.rule_id, provider: self.provider, scores }))
+            }
+            Err(_) => Soon::Later(self),
+        }
+    }
+
+    /// Checks a message already sent when the answer comes, in its own task:
+    /// AutoMod then does what the rule says, as it would have before the
+    /// message was sent, and takes the message down if the rule blocks it.
+    /// A message edited or deleted in the meantime is left alone (an edit
+    /// is checked again).
+    pub(super) fn later(
+        self,
+        sdb: std::sync::Arc<store::ServerDb>,
+        member: pb::Member,
+        message_id: String,
+        content: String,
+    ) {
+        crate::reports::server_error("automod_checked_after_sending", None);
+        tokio::spawn(async move {
+            let Some(asked) = self.wait().await else { return };
+            let reviewed = sdb
+                .write("", async |conn, events| {
+                    review_sent(conn, &sdb.id, &member, &message_id, &content, &asked, events).await
+                })
+                .await;
+            if reviewed.is_err() {
+                crate::reports::server_error("automod_late_review_failed", None);
+            }
+        });
+    }
+}
+
+/// Today's Smart filter checks: how many each server asked its provider,
+/// and which servers were told they're used up. Counted where the server
+/// lives, which is the one place its messages are sent from; kept in memory,
+/// so a restart starts the day again.
+#[derive(Default)]
+struct Checks {
+    /// Days since 1970, UTC.
+    day: i64,
+    used: std::collections::HashMap<String, i64>,
+    alerted: std::collections::HashSet<String>,
+}
+
+static CHECKS: std::sync::LazyLock<std::sync::Mutex<Checks>> = std::sync::LazyLock::new(Default::default);
 
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
+/// Whether a server's Smart filter may ask its provider.
+#[derive(Debug, PartialEq)]
+enum Check {
+    /// Yes, and it was counted.
+    Taken,
+    /// No: today's `per_day` checks are used up. `first` the first time
+    /// that day, when its moderators get told.
+    Capped { per_day: i64, first: bool },
+}
+
 /// Counts one of the server's checks for today, unless it already used
-/// `per_day` of them (`None` for no cap): then `false`, and nothing's asked.
-fn take_check(server_id: &str, per_day: Option<i64>) -> bool {
+/// `per_day` of them (`None` for no cap): then nothing's asked.
+fn take_check(server_id: &str, per_day: Option<i64>) -> Check {
     let today = now_ms().div_euclid(DAY_MS);
     let mut checks = CHECKS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    if checks.0 != today {
-        *checks = (today, Default::default());
+    if checks.day != today {
+        *checks = Checks { day: today, ..Default::default() };
     }
-    let used = checks.1.entry(server_id.to_string()).or_default();
-    if per_day.is_some_and(|cap| *used >= cap) {
-        return false;
+    let used = checks.used.entry(server_id.to_string()).or_default();
+    if let Some(cap) = per_day.filter(|cap| *used >= *cap) {
+        let first = checks.alerted.insert(server_id.to_string());
+        return Check::Capped { per_day: cap, first };
     }
     *used += 1;
-    true
+    Check::Taken
+}
+
+/// Tells the server's moderators that its Smart filter used up today's
+/// checks: one alert in its Smart filter rule's alert channel, when the rule
+/// alerts. It names no message and no one; a failed write only skips it.
+async fn alert_capped(sdb: &store::ServerDb, per_day: i64) {
+    let posted = sdb
+        .write("", async |conn, events| {
+            let rules = store::load_automod(conn).await?;
+            let Some(rule) = rules.into_iter().find(|r| r.enabled && r.trigger == Trigger::Provider as i32) else {
+                return Ok(());
+            };
+            let Some(alert) = rule.actions.iter().find(|a| a.kind == Kind::Alert as i32) else { return Ok(()) };
+            let Some(channel) = load_channel(conn, &sdb.id, &alert.channel_id).await? else { return Ok(()) };
+            let message = pb::Message {
+                id: new_id(),
+                server_id: sdb.id.clone(),
+                channel_id: channel.id.clone(),
+                created_at: Some(timestamp(now_ms())),
+                kind: pb::MessageKind::AutoModAlert as i32,
+                auto_mod: Some(pb::AutoModAlert {
+                    rule_id: rule.id.clone(),
+                    rule_name: rule.name.clone(),
+                    trigger: rule.trigger,
+                    capped_per_day: per_day,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            super::messages::insert_system(conn, &message).await?;
+            store::add_usage(conn, UsageChange { messages: 1, messages_sent: 1, ..Default::default() }).await?;
+            events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message) }));
+            Ok(())
+        })
+        .await;
+    if posted.is_err() {
+        crate::reports::server_error("automod_cap_alert_failed", None);
+    }
 }
 
 /// How many checks the server's Smart filter asked its provider today.
 pub(super) fn checks_today(server_id: &str) -> i64 {
     let checks = CHECKS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    if checks.0 != now_ms().div_euclid(DAY_MS) {
+    if checks.day != now_ms().div_euclid(DAY_MS) {
         return 0;
     }
-    checks.1.get(server_id).copied().unwrap_or_default()
+    checks.used.get(server_id).copied().unwrap_or_default()
 }
 
 /// Who a server's enabled provider rule sends a channel's messages to, as
@@ -475,12 +667,12 @@ pub(super) async fn review(
     asked: Option<&Asked>,
     events: &mut Vec<Payload>,
 ) -> Result<Verdict> {
-    // Managers and administrators are trusted, as on Discord.
-    if access.has(Permission::ManageServer) || content.trim().is_empty() {
+    // Managers and administrators are trusted, as on Discord. A message
+    // with no text (pictures only) is still up to its provider's answer.
+    if access.has(Permission::ManageServer) || (content.trim().is_empty() && asked.is_none()) {
         return Ok(Verdict::default());
     }
     let rules = store::load_automod(conn).await?;
-    let author_id = member.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
     let mut caught: Vec<(pb::AutoModRule, automod::Hit)> = Vec::new();
     for rule in rules {
         let exempt = !rule.enabled
@@ -498,9 +690,28 @@ pub(super) async fn review(
             caught.push((rule, hit));
         }
     }
+    let blocked = act(conn, server_id, member, channel, content, asked, &caught, events).await?;
+    Ok(Verdict { blocked })
+}
+
+/// Does what the rules that `caught` a message say: works out what its
+/// author is told when one blocks it (returned), times them out and posts
+/// the alerts.
+#[allow(clippy::too_many_arguments)]
+async fn act(
+    conn: &turso::Connection,
+    server_id: &str,
+    member: &pb::Member,
+    channel: &pb::Channel,
+    content: &str,
+    asked: Option<&Asked>,
+    caught: &[(pb::AutoModRule, automod::Hit)],
+    events: &mut Vec<Payload>,
+) -> Result<Option<String>> {
     if caught.is_empty() {
-        return Ok(Verdict::default());
+        return Ok(None);
     }
+    let author_id = member.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
     let action = |rule: &pb::AutoModRule, kind: Kind| rule.actions.iter().find(|a| a.kind == kind as i32).cloned();
     let blocked = caught.iter().find_map(|(rule, _)| action(rule, Kind::Block)).map(|block| {
         if block.message.is_empty() {
@@ -528,7 +739,7 @@ pub(super) async fn review(
             store::audit(conn, &author_id, entry).await?;
         }
     }
-    for (rule, hit) in &caught {
+    for (rule, hit) in caught {
         let Some(alert) = action(rule, Kind::Alert) else { continue };
         let Some(alert_channel) = load_channel(conn, server_id, &alert.channel_id).await? else { continue };
         let message = pb::Message {
@@ -548,6 +759,7 @@ pub(super) async fn review(
                 blocked: blocked.is_some(),
                 timed_out_seconds: action(rule, Kind::TimeOut).map_or(0, |a| a.duration_seconds),
                 provider: asked.filter(|a| a.rule_id == rule.id).map(|a| a.provider.clone()).unwrap_or_default(),
+                capped_per_day: 0,
             }),
             ..Default::default()
         };
@@ -555,7 +767,50 @@ pub(super) async fn review(
         store::add_usage(conn, UsageChange { messages: 1, messages_sent: 1, ..Default::default() }).await?;
         events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message) }));
     }
-    Ok(Verdict { blocked })
+    Ok(blocked)
+}
+
+/// [`review`] for a message already sent, with the answer its provider rule
+/// gave after it went out (see [`Checking::later`]); the other rules saw it
+/// before. Takes the message down when the rule blocks it.
+async fn review_sent(
+    conn: &turso::Connection,
+    server_id: &str,
+    member: &pb::Member,
+    message_id: &str,
+    content: &str,
+    asked: &Asked,
+    events: &mut Vec<Payload>,
+) -> Result<()> {
+    let Some(message) = super::messages::load_message(conn, server_id, message_id).await? else { return Ok(()) };
+    if message.content != content {
+        return Ok(());
+    }
+    let Some(channel) = load_channel(conn, server_id, &message.channel_id).await? else { return Ok(()) };
+    let rules = store::load_automod(conn).await?;
+    let Some(rule) = rules.into_iter().find(|r| r.id == asked.rule_id && r.enabled) else { return Ok(()) };
+    let exempt = rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id)
+        || rule.exempt_role_ids.iter().any(|id| member.role_ids.contains(id));
+    let Some((level, hit)) = automod::provider_hit(&rule, &asked.scores).filter(|_| !exempt) else { return Ok(()) };
+    let caught = [(effective(&rule, Some(level)), hit)];
+    if act(conn, server_id, member, &channel, content, Some(asked), &caught, events).await?.is_some() {
+        conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
+        store::add_usage(
+            conn,
+            UsageChange {
+                messages: -1,
+                message_bytes: -(message.content.len() as i64),
+                attachments: -(message.attachments.len() as i64),
+                ..Default::default()
+            },
+        )
+        .await?;
+        events.push(Payload::MessageDeleted(pb::MessageDeleted {
+            channel_id: message.channel_id.clone(),
+            message_id: message.id.clone(),
+        }));
+    }
+    Ok(())
 }
 
 #[tonic::async_trait]
@@ -686,7 +941,7 @@ impl AutoModService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
-                let server_id = self.with(&account, &req.server_id, Permission::ManageServer).await?.sdb.id.clone();
+                let sdb = self.with(&account, &req.server_id, Permission::ManageServer).await?.sdb;
                 if req.content.chars().count() > super::messages::MAX_MESSAGE_LENGTH {
                     return Err(Error::invalid("that's longer than a message can be"));
                 }
@@ -697,11 +952,13 @@ impl AutoModService for Api {
                         Error::FailedPrecondition("that provider isn't turned on for this instance".into())
                     })?;
                     let rule = pb::AutoModRule { labels: checked_labels(&rule.labels)?, ..rule };
-                    let cap = settings.limits.automod_checks_per_day;
-                    if !take_check(&server_id, cap)
-                        && let Some(per_day) = cap
+                    if let Check::Capped { per_day, first } =
+                        take_check(&sdb.id, settings.limits.automod_checks_per_day)
                     {
                         crate::reports::server_error("automod_provider_capped", Some(setup.report_id()));
+                        if first {
+                            alert_capped(&sdb, per_day).await;
+                        }
                         return Ok(pb::TestAutoModRuleResponse {
                             error: format!(
                                 "today's {per_day} Smart filter checks are used up, so it wasn't asked (they come back at midnight UTC)"
@@ -735,5 +992,76 @@ impl AutoModService for Api {
             }
             .await,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A provider answer that comes after the message went out still blocks
+    /// it: down it comes, with an alert and a time out, as before sending.
+    #[tokio::test]
+    async fn late_answers_take_blocked_messages_down() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = store::scratch(&dir.path().join("s.db")).await;
+        conn.execute_batch(
+            "INSERT INTO channels (id, name, type, created_at, updated_at) VALUES ('general', 'general', 1, 0, 0);
+             INSERT INTO channels (id, name, type, created_at, updated_at) VALUES ('mods', 'mods', 1, 0, 0);",
+        )
+        .await
+        .unwrap();
+        let rule = pb::AutoModRule {
+            id: "r".into(),
+            name: "Smart filter".into(),
+            enabled: true,
+            trigger: Trigger::Provider as i32,
+            labels: vec![pb::AutoModLabelRule { label: "scam".into(), level: Level::TimeOut as i32, threshold: 80 }],
+            actions: vec![
+                pb::AutoModAction { kind: Kind::Alert as i32, channel_id: "mods".into(), ..Default::default() },
+                pb::AutoModAction { kind: Kind::TimeOut as i32, duration_seconds: 600, ..Default::default() },
+            ],
+            ..Default::default()
+        };
+        conn.execute("INSERT INTO automod_rules (id, rule, created_at) VALUES ('r', ?1, 0)", [rule.encode_to_vec()])
+            .await
+            .unwrap();
+        let member = pb::Member { user: Some(pb::User { id: "u".into(), ..Default::default() }), ..Default::default() };
+        let send = async |id: &str, content: &str| {
+            let message = pb::Message {
+                id: id.into(),
+                channel_id: "general".into(),
+                author_id: "u".into(),
+                content: content.into(),
+                ..Default::default()
+            };
+            super::super::messages::insert_message(&conn, &message, now_ms()).await.unwrap();
+        };
+        let scam = Asked { rule_id: "r".into(), provider: "Cloudflare Clef".into(), scores: vec![("scam", 0.97)] };
+        let fine = Asked { rule_id: "r".into(), provider: "Cloudflare Clef".into(), scores: vec![("scam", 0.02)] };
+        let mut events = Vec::new();
+
+        // Fine: nothing happens.
+        send("m1", "hello").await;
+        review_sent(&conn, "s", &member, "m1", "hello", &fine, &mut events).await.unwrap();
+        assert!(events.is_empty());
+
+        // Edited since it was asked about: the edit is checked on its own.
+        send("m2", "free nitro").await;
+        review_sent(&conn, "s", &member, "m2", "something else", &scam, &mut events).await.unwrap();
+        assert!(events.is_empty());
+
+        // Blocked: taken down, alerted and timed out.
+        review_sent(&conn, "s", &member, "m2", "free nitro", &scam, &mut events).await.unwrap();
+        assert!(super::super::messages::load_message(&conn, "s", "m2").await.unwrap().is_none());
+        assert!(super::super::messages::load_message(&conn, "s", "m1").await.unwrap().is_some());
+        let alert = events.iter().find_map(|e| match e {
+            Payload::MessageCreated(pb::MessageCreated { message: Some(m) }) => m.auto_mod.clone(),
+            _ => None,
+        });
+        let alert = alert.unwrap();
+        assert!(alert.blocked && alert.content == "free nitro" && alert.provider == "Cloudflare Clef", "{alert:?}");
+        assert!(events.iter().any(|e| matches!(e, Payload::MessageDeleted(d) if d.message_id == "m2")));
+        assert!(events.iter().any(|e| matches!(e, Payload::MemberUpdated(_))));
     }
 }
