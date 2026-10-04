@@ -41,6 +41,7 @@ const KINDS: Partial<Record<vault.Item["kind"], BackupItemKind>> = {
   devices: BackupItemKind.DEVICES,
   reset: BackupItemKind.RESET,
   setting: BackupItemKind.SETTING,
+  thread: BackupItemKind.THREAD,
   voice: BackupItemKind.VOICE,
 };
 const FROM_KIND: Record<number, vault.Item["kind"]> = {
@@ -48,6 +49,7 @@ const FROM_KIND: Record<number, vault.Item["kind"]> = {
   [BackupItemKind.DEVICES]: "devices",
   [BackupItemKind.RESET]: "reset",
   [BackupItemKind.SETTING]: "setting",
+  [BackupItemKind.THREAD]: "thread",
   [BackupItemKind.VOICE]: "voice",
 };
 
@@ -72,9 +74,13 @@ function toBackup(i: vault.Item): BackupItem | null {
     deleted: i.deleted,
     added: i.added.map((d) => create(BackupDeviceSchema, d)),
     removed: i.removed.map((d) => create(BackupDeviceSchema, d)),
-    signed: signedForm(i.signed),
-    editSigned: signedForm(i.editSigned),
+    // A deleted line's signed copies hold its text, so they never go in the backup.
+    signed: i.deleted ? undefined : signedForm(i.signed),
+    editSigned: i.deleted ? undefined : signedForm(i.editSigned),
     sharedBy: i.sharedBy ?? "",
+    threadSequence: BigInt(i.thread ?? 0),
+    inChannel: !!i.inChannel,
+    locked: i.kind === "thread" && i.content === "locked",
     voice: i.voice ? toVoiceMessage(i.voice) : undefined,
   });
 }
@@ -82,7 +88,12 @@ function toBackup(i: vault.Item): BackupItem | null {
 function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
   const kind = FROM_KIND[b.kind];
   const seq = Number(b.sequence);
+  const thread = Number(b.threadSequence);
   if (!kind || !b.conversationId || !(seq > 0)) return null;
+  // Thread replies and locks only exist in secure channels, whose lines are signed (a deleted reply keeps its thread
+  // but not its signed copy); a device takes a lock only signed.
+  const threaded = thread > 0 && (!!b.signed || b.deleted);
+  if (kind === "thread" && !(thread > 0 && b.signed)) return null;
   const voice = kind === "voice" && !b.deleted ? voiceOf(b.voice) : null;
   if (kind === "voice" && !voice && !b.deleted) return null;
   return {
@@ -99,9 +110,11 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
     deleted: b.deleted,
     added: b.added.map((d) => ({ userId: d.userId, deviceId: d.deviceId })),
     removed: b.removed.map((d) => ({ userId: d.userId, deviceId: d.deviceId })),
-    signed: fromSigned(b.signed),
-    editSigned: fromSigned(b.editSigned),
+    signed: b.deleted ? undefined : fromSigned(b.signed),
+    editSigned: b.deleted ? undefined : fromSigned(b.editSigned),
     sharedBy: b.sharedBy || undefined,
+    ...(threaded ? { thread, inChannel: b.inChannel } : {}),
+    ...(kind === "thread" ? { content: b.locked ? "locked" : "unlocked" } : {}),
     voice: voice ?? undefined,
   };
 }

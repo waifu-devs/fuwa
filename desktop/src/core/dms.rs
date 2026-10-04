@@ -155,9 +155,11 @@ pub enum Content {
 fn content_of(content: &Content) -> pb::DirectMessageContent {
     use pb::direct_message_content::Body;
     let body = match content {
-        Content::Text { text, reply_to } => {
-            Body::Text(pb::DirectMessageText { content: text.clone(), reply_to_sequence: *reply_to })
-        }
+        Content::Text { text, reply_to } => Body::Text(pb::DirectMessageText {
+            content: text.clone(),
+            reply_to_sequence: *reply_to,
+            ..Default::default()
+        }),
         Content::Edit { sequence, text } => {
             Body::Edit(pb::DirectMessageEdit { sequence: *sequence, content: text.clone() })
         }
@@ -1064,7 +1066,7 @@ impl DmEngine {
                 change.items.push((id, item));
             }
             // Anything else is from a newer app: there's nothing to show for it here.
-            Some(Body::Signed(_) | Body::History(_)) | None => {}
+            Some(Body::Signed(_) | Body::History(_) | Body::Thread(_)) | None => {}
         }
         Ok(())
     }

@@ -13,16 +13,19 @@ import {
   UserPlusIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Permission, type Channel, type Member, type User } from "@/gen/fuwa/v1/types_pb";
-import { SECURE_BROKEN } from "@/e2ee/engine";
+import { SECURE_BROKEN, secureModerates } from "@/e2ee/engine";
+import { canHaveThread, following, organize, unreadIn } from "@/e2ee/threads";
 import type { Item } from "@/e2ee/vault";
 import { focusChannel } from "@/fuwa/actions";
 import { dmProblem, markDmRead, prepareSecureChannel, resetSecureChannel, setSecureHistory } from "@/fuwa/dms";
 import { useAccess } from "@/fuwa/hooks";
-import { useFuwa, type DmMember, type DmState } from "@/fuwa/store";
+import { useFuwa, type DmMember, type DmState, type PendingMessage } from "@/fuwa/store";
 import { NotificationBell } from "@/components/chat/NotificationBell";
-import { EncryptedComposer, EncryptedMessages, earlierFrom, Starting, Unavailable, type Earlier } from "@/components/dm/DmView";
+import { EncryptedComposer, EncryptedMessages, earlierFrom, Starting, Unavailable, type Earlier, type ThreadHooks } from "@/components/dm/DmView";
+import { SecureAlsoSent, SecureRepliesRow, SecureThreadList, SecureThreadPanel, useArchiveHours, useThreadNote } from "@/components/chat/SecureThreads";
+import { ThreadsButton } from "@/components/chat/Threads";
 import { Padlock } from "@/components/dm/Padlock";
 import { ConnDot, connectionLabel, UserAvatar } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
@@ -33,10 +36,15 @@ import { Switch } from "@/components/ui/switch";
 import { displayName, memberName } from "@/lib/format";
 import { hasIn } from "@/lib/permissions";
 import { setTitle } from "@/lib/notify";
+import type { ThreadPanelState } from "@/lib/threads";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 
 const NO_MEMBERS: DmMember[] = [];
 const NO_SERVER_MEMBERS: Member[] = [];
+const NO_ITEMS: Item[] = [];
+/** The channel's own list shows messages being sent there, not those going only to a thread. */
+const inChannel = (p: PendingMessage) => !p.thread || !!p.inChannel;
 
 /** What a secure channel can't do, said once: the server can't read it, so nothing that needs to can work. */
 const CANT = [
@@ -69,6 +77,7 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
   const { compact, setNavOpen } = useLayout();
   const [info, setInfo] = useState(false);
   const id = channel.id;
+  const docked = useMediaQuery("(min-width: 1024px)");
 
   useEffect(() => {
     focusChannel(instanceKey, id);
@@ -102,107 +111,218 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
     [byId, users, me, earlier],
   );
 
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4">
-        {compact && (
-          <button
-            type="button"
-            aria-label="Channels"
-            onClick={() => setNavOpen(true)}
-            className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted"
-          >
-            <ChevronLeftIcon className="size-5" />
-          </button>
-        )}
-        <AnimatePresence mode="popLayout" initial={false}>
-          <motion.span
-            key={id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={SPRING}
-            className="flex min-w-0 shrink items-center gap-2"
-          >
-            <ShieldCheckIcon className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            <h1 className="truncate font-extrabold">
-              <SwapText className="truncate align-bottom">{channel.name}</SwapText>
-            </h1>
-          </motion.span>
-        </AnimatePresence>
-        {channel.topic && (
-          <>
-            <span className="hidden h-5 w-px bg-border sm:block" />
-            <InlineMarkdown className="hidden min-w-0 truncate text-sm text-muted-foreground sm:block">{channel.topic}</InlineMarkdown>
-          </>
-        )}
-        <span className="flex-1" />
-        <AnimatePresence>
-          {connection !== "live" && (
-            <motion.span
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground"
-            >
-              <ConnDot state={connection} /> {connectionLabel(connection)}
-            </motion.span>
-          )}
-        </AnimatePresence>
-        <NotificationBell instanceKey={instanceKey} serverId={serverId} channel={channel} />
-        <motion.button
-          type="button"
-          onClick={() => setInfo(true)}
-          whileTap={{ scale: 0.92 }}
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={SPRING}
-          title="See who can read this channel"
-          className="group relative flex shrink-0 items-center gap-1.5 overflow-hidden rounded-full bg-emerald-500/12 px-2.5 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
-        >
-          <span aria-hidden className="shine pointer-events-none absolute inset-0" />
-          <LockKeyholeIcon className="size-3.5 transition-transform duration-300 group-hover:-rotate-12 group-hover:scale-110" />
-          <span className="hidden sm:inline">End-to-end encrypted</span>
-        </motion.button>
-      </header>
-      {me && status === "ready" ? (
-        <>
-          <EncryptedMessages
-            instanceKey={instanceKey}
-            id={id}
-            me={me}
-            userOf={userOf}
-            memberOf={memberOf}
-            describe={describe}
-            beginning={<SecureBeginning channel={channel} sharesHistory={sharesHistory} />}
-            canModerate={hasIn(access, id, Permission.MANAGE_MESSAGES)}
-            deleteQuestion="Delete for everyone?"
-            joiningText="Unlocking the channel on this device…"
-          />
-          <EncryptedComposer
-            instanceKey={instanceKey}
-            id={id}
-            placeholder={`Message #${channel.name}`}
-            promise="Only people in this channel can read this"
-            locked={canSend || broken ? "" : "You don't have permission to send messages in this channel."}
-            action={broken ? canReset ? <ResetButton instanceKey={instanceKey} serverId={serverId} channelId={id} write={canSend} /> : null : undefined}
-          />
-          <SecureChannelDialog
-            open={info}
-            onOpenChange={setInfo}
-            instanceKey={instanceKey}
-            serverId={serverId}
-            channel={channel}
-            byId={byId}
-            canReset={canReset}
-            canSend={canSend}
-          />
-        </>
-      ) : status === "unsupported" || status === "failed" ? (
-        <Unavailable text={problem ?? "Encrypted messages aren't available here."} />
+  // ── Threads, worked out from what this device opened (the server can't tell a reply from any other line).
+  const items = useFuwa((s) => s.instances[instanceKey]?.dms.items[id] ?? NO_ITEMS);
+  const roles = useFuwa((s) => s.instances[instanceKey]?.roles[serverId]);
+  const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId]);
+  // Read again whenever who has which roles, or the channel's overwrites, change.
+  const moderates = useMemo(
+    () => (members && roles && channels ? secureModerates(instanceKey, serverId, id) : () => false),
+    [instanceKey, serverId, id, members, roles, channels],
+  );
+  const org = useMemo(() => organize(items, moderates), [items, moderates]);
+  const [panel, setPanel] = useState<ThreadPanelState>(null);
+  const [panelFor, setPanelFor] = useState(id);
+  if (panelFor !== id) {
+    setPanelFor(id);
+    setPanel(null);
+  }
+  const openThread = useCallback((parent: number) => setPanel({ kind: "thread", id: String(parent) }), []);
+  const closePanel = useCallback(() => setPanel(null), []);
+  const canStart = hasIn(access, id, Permission.CREATE_THREADS);
+  const canModerate = hasIn(access, id, Permission.MANAGE_MESSAGES);
+  const note = useThreadNote(instanceKey, id);
+  const hours = useArchiveHours(instanceKey, serverId);
+  const hooks = useMemo<ThreadHooks>(() => {
+    const threadNote = { follows: note.follows, threadRead: note.read };
+    return {
+      under: (item): ReactNode => {
+        if (item.thread) return <SecureAlsoSent item={item} inThread={false} onOpen={openThread} />;
+        const t = org.threads.get(item.seq);
+        if (!t || !me) return null;
+        const unread = following(threadNote, t.parent, items, me.id) ? unreadIn(threadNote, t.parent, org.inThread.get(t.parent) ?? NO_ITEMS, me.id) : 0;
+        return <SecureRepliesRow instanceKey={instanceKey} thread={t} unread={unread} hours={hours} onOpen={openThread} />;
+      },
+      // A thread starts with Start threads; replying in one that's there takes only Send messages.
+      canStart: (item) => canHaveThread(item) && canSend && (canStart || org.threads.has(item.seq)),
+      start: (item) => openThread(item.seq),
+      has: (item) => org.threads.has(item.seq),
+      kept: (item) => (org.inThread.get(item.seq) ?? NO_ITEMS).some((r) => r.kind === "text" && !r.deleted && r.senderId !== item.senderId),
+    };
+  }, [org, items, note, me, instanceKey, hours, openThread, canSend, canStart]);
+
+  const side =
+    panel && me && status === "ready" ? (
+      panel.kind === "thread" ? (
+        <SecureThreadPanel
+          key={panel.id}
+          instanceKey={instanceKey}
+          serverId={serverId}
+          channel={channel}
+          parent={Number(panel.id)}
+          org={org}
+          me={me}
+          userOf={userOf}
+          memberOf={memberOf}
+          describe={describe}
+          canSend={canSend}
+          canModerate={canModerate}
+          onClose={closePanel}
+        />
       ) : (
-        <Starting />
-      )}
+        <SecureThreadList
+          instanceKey={instanceKey}
+          serverId={serverId}
+          channel={channel}
+          org={org}
+          me={me}
+          userOf={userOf}
+          onOpen={openThread}
+          onClose={closePanel}
+        />
+      )
+    ) : null;
+
+  return (
+    <div className="relative flex h-full min-h-0">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4">
+          {compact && (
+            <button
+              type="button"
+              aria-label="Channels"
+              onClick={() => setNavOpen(true)}
+              className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted"
+            >
+              <ChevronLeftIcon className="size-5" />
+            </button>
+          )}
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span
+              key={id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={SPRING}
+              className="flex min-w-0 shrink items-center gap-2"
+            >
+              <ShieldCheckIcon className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <h1 className="truncate font-extrabold">
+                <SwapText className="truncate align-bottom">{channel.name}</SwapText>
+              </h1>
+            </motion.span>
+          </AnimatePresence>
+          {channel.topic && (
+            <>
+              <span className="hidden h-5 w-px bg-border sm:block" />
+              <InlineMarkdown className="hidden min-w-0 truncate text-sm text-muted-foreground sm:block">{channel.topic}</InlineMarkdown>
+            </>
+          )}
+          <span className="flex-1" />
+          <AnimatePresence>
+            {connection !== "live" && (
+              <motion.span
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground"
+              >
+                <ConnDot state={connection} /> {connectionLabel(connection)}
+              </motion.span>
+            )}
+          </AnimatePresence>
+          <NotificationBell instanceKey={instanceKey} serverId={serverId} channel={channel} />
+          {status === "ready" && (
+            <ThreadsButton
+              open={panel?.kind === "threads"}
+              active={!!panel}
+              onClick={() => setPanel(panel?.kind === "threads" ? null : { kind: "threads" })}
+            />
+          )}
+          <motion.button
+            type="button"
+            onClick={() => setInfo(true)}
+            whileTap={{ scale: 0.92 }}
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={SPRING}
+            title="See who can read this channel"
+            className="group relative flex shrink-0 items-center gap-1.5 overflow-hidden rounded-full bg-emerald-500/12 px-2.5 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
+          >
+            <span aria-hidden className="shine pointer-events-none absolute inset-0" />
+            <LockKeyholeIcon className="size-3.5 transition-transform duration-300 group-hover:-rotate-12 group-hover:scale-110" />
+            <span className="hidden sm:inline">End-to-end encrypted</span>
+          </motion.button>
+        </header>
+        {me && status === "ready" ? (
+          <>
+            <EncryptedMessages
+              instanceKey={instanceKey}
+              id={id}
+              me={me}
+              userOf={userOf}
+              memberOf={memberOf}
+              describe={describe}
+              beginning={<SecureBeginning channel={channel} sharesHistory={sharesHistory} />}
+              canModerate={canModerate}
+              deleteQuestion="Delete for everyone?"
+              joiningText="Unlocking the channel on this device…"
+              lines={org.channel}
+              pendingIn={inChannel}
+              threads={hooks}
+            />
+            <EncryptedComposer
+              instanceKey={instanceKey}
+              id={id}
+              placeholder={`Message #${channel.name}`}
+              promise="Only people in this channel can read this"
+              locked={canSend || broken ? "" : "You don't have permission to send messages in this channel."}
+              action={broken ? canReset ? <ResetButton instanceKey={instanceKey} serverId={serverId} channelId={id} write={canSend} /> : null : undefined}
+            />
+            <SecureChannelDialog
+              open={info}
+              onOpenChange={setInfo}
+              instanceKey={instanceKey}
+              serverId={serverId}
+              channel={channel}
+              byId={byId}
+              canReset={canReset}
+              canSend={canSend}
+            />
+          </>
+        ) : status === "unsupported" || status === "failed" ? (
+          <Unavailable text={problem ?? "Encrypted messages aren't available here."} />
+        ) : (
+          <Starting />
+        )}
+      </div>
+      <AnimatePresence initial={false} mode="popLayout">
+        {side &&
+          (docked ? (
+            <motion.aside
+              key="threads"
+              initial={{ x: 32, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 32, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 400, damping: 40 }}
+              className="surface-side h-full w-[400px] shrink-0 overflow-hidden border-l xl:w-[440px]"
+            >
+              {side}
+            </motion.aside>
+          ) : (
+            // On a narrow screen a thread takes the whole width, sliding over the channel.
+            <motion.aside
+              key="threads-sheet"
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", stiffness: 420, damping: 40 }}
+              className="surface-side absolute inset-0 z-30 flex flex-col shadow-2xl"
+            >
+              {side}
+            </motion.aside>
+          ))}
+      </AnimatePresence>
     </div>
   );
 }
@@ -228,6 +348,9 @@ export function channelLine(item: Item, nameOf: (userId: string) => string, me: 
     return item.content === "on"
       ? `${capital(name(item.senderId))} turned on sharing earlier messages: people added from now on get recent history, passed on by members' devices.`
       : `${capital(name(item.senderId))} turned off sharing earlier messages: people added from now on only see what's sent after they join.`;
+  }
+  if (item.kind === "thread") {
+    return `${capital(name(item.senderId))} ${item.content === "locked" ? "locked this thread: only people who can manage messages can reply" : "unlocked this thread"}.`;
   }
   if (item.kind === "reset") {
     return `${capital(name(item.senderId))} started this channel's encryption over. What came before stays on the devices that already read it.`;
