@@ -32,8 +32,9 @@ that turns fuwa's questions into another provider's.
 - Messages never wait for the provider: a message goes out at once, and the
   answer is acted on when it comes. A message it blocks is taken down then,
   with the same alert and time out, and an "AutoMod took down a message"
-  entry in the audit log. The other rules always check a message before
-  it's sent.
+  entry in the audit log. Until the answer comes, a message it blocks can be
+  seen by everyone in the channel, including guests of a shared channel it
+  was relayed to. The other rules always check a message before it's sent.
 - The provider has 3 seconds to answer (6 with pictures). A provider that's slow, down or
   answers something fuwa can't read lets the message through that rule; the
   server's other rules still apply. The failure is counted in the anonymous report as its kind and
