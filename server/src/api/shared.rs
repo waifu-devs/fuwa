@@ -1162,7 +1162,7 @@ pub(super) async fn guest_send(
 ) -> Result<pb::Message> {
     let channel_id = link.channel_id.clone().unwrap_or_default();
     let guest = guest_of(&sdb.read()?, &sdb.id, account, access, link).await?;
-    let pictures = automod::picture_links(&req.attachments, &req.embeds);
+    let pictures = automod::picture_links(&req.attachments, &req.embeds, &[]);
     review_here(app, sdb, member, access, &channel_id, &req.content, &pictures).await?;
     let call = Call::Send(cpb::GuestSend {
         guest: Some(guest),
@@ -1608,7 +1608,7 @@ async fn ask_home(
     {
         return None;
     }
-    let pictures = automod::picture_links(attachments, embeds);
+    let pictures = automod::picture_links(attachments, embeds, &[]);
     let member = pb::Member { user: Some(user), ..Default::default() };
     automod::ask(app, sdb, &member, &access, &channel_id, content, &pictures).await
 }

@@ -172,6 +172,18 @@ impl Friends {
         Ok(self.link(by, whom, 0).await?.is_some_and(|link| link.state == FriendState::Blocked))
     }
 
+    /// Everyone `by` blocked, with when.
+    pub async fn blocks(&self, by: &str) -> Result<HashMap<String, i64>> {
+        let rows = query_all(
+            &self.read()?,
+            "SELECT other_id, created_at FROM friend_links WHERE account_id = ?1 AND state = ?2",
+            (by, FriendState::Blocked as i64),
+            |row| Ok((row.get::<String>(0)?, row.get::<i64>(1)?)),
+        )
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
     /// Whether the two are friends.
     pub async fn are_friends(&self, a: &str, b: &str) -> Result<bool> {
         Ok(self.link(a, b, 0).await?.is_some_and(|link| link.state == FriendState::Friend))
@@ -570,6 +582,8 @@ mod tests {
         let (_, removed) = friends.block("b", "a", 2).await.unwrap();
         assert!(removed.theirs);
         assert!(friends.blocked("b", "a").await.unwrap());
+        assert_eq!(friends.blocks("b").await.unwrap(), HashMap::from([("a".to_string(), 2)]));
+        assert!(friends.blocks("a").await.unwrap().is_empty());
         assert_eq!(
             friends.request("a", "b", 3).await.unwrap(),
             Sent::Asked {
