@@ -7029,6 +7029,7 @@ async fn votes_at_once_are_all_counted_in_order() {
     }
     drop(stream);
     instance.stop().await;
+}
 
 /// A channel shared with a server on another instance: a code made for
 /// other instances, a preview naming the home instance and its key, the ask
