@@ -328,6 +328,21 @@ pub(super) async fn forget_channel(conn: &turso::Connection, channel_id: &str) -
     Ok(())
 }
 
+/// Drops the polls and votes of a thread's replies before they're deleted.
+pub(super) async fn forget_thread(conn: &turso::Connection, thread_id: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM poll_votes WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?1)",
+        [thread_id],
+    )
+    .await?;
+    conn.execute(
+        "DELETE FROM polls WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?1)",
+        [thread_id],
+    )
+    .await?;
+    Ok(())
+}
+
 /// Whether polls can go in a channel: not one shared with other servers,
 /// whose people couldn't vote on them.
 pub(super) async fn shared_out(conn: &turso::Connection, channel_id: &str) -> Result<bool> {

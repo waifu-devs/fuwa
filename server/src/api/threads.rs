@@ -204,6 +204,7 @@ pub(super) async fn remove(
         r.get::<String>(0)
     })
     .await?;
+    super::polls::forget_thread(conn, thread_id).await?;
     conn.execute("DELETE FROM messages WHERE thread_id = ?1", [thread_id]).await?;
     conn.execute("DELETE FROM threads WHERE id = ?1", [thread_id]).await?;
     conn.execute("DELETE FROM thread_follows WHERE thread_id = ?1", [thread_id]).await?;
