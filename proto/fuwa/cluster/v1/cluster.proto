@@ -175,6 +175,8 @@ message SpeakRequest {
   string participant = 2;
   string session_id = 3;
   repeated bytes frames = 4;
+  // Drops what's still waiting first.
+  bool interrupt = 5;
 }
 
 message SpeakResponse {

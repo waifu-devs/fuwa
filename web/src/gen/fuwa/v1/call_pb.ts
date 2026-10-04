@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/call.proto.
  */
 export const file_fuwa_v1_call: GenFile = /*@__PURE__*/
-  fileDesc("ChJmdXdhL3YxL2NhbGwucHJvdG8SB2Z1d2EudjEiPwoJSWNlU2VydmVyEgwKBHVybHMYASADKAkSEAoIdXNlcm5hbWUYAiABKAkSEgoKY3JlZGVudGlhbBgDIAEoCSIYChZHZXRDYWxsU2V0dGluZ3NSZXF1ZXN0In0KF0dldENhbGxTZXR0aW5nc1Jlc3BvbnNlEg8KB2VuYWJsZWQYASABKAgSJwoLaWNlX3NlcnZlcnMYAiADKAsyEi5mdXdhLnYxLkljZVNlcnZlchISCgpyZWNvcmRpbmdzGAMgASgIEhQKDHNjcmVlbl9zb3VuZBgEIAEoCCLXAQoQSm9pblZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRINCgVvZmZlchgDIAEoCRIRCglzZWxmX211dGUYBCABKAgSEQoJc2VsZl9kZWFmGAUgASgIEhIKCnNlc3Npb25faWQYBiABKAkSEgoKc2VsZl92aWRlbxgHIAEoCBITCgtzZWxmX3N0cmVhbRgIIAEoCBITCgtzZWxmX3JlY29yZBgJIAEoCBIVCg1zZXJ2ZXJfcmVjb3JkGAogASgIInQKEUpvaW5Wb2ljZVJlc3BvbnNlEg4KBmFuc3dlchgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEiIKBXN0YXRlGAMgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlEhcKD3JlY29yZGluZ3NfZnVsbBgEIAEoCCI6ChFMZWF2ZVZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIUChJMZWF2ZVZvaWNlUmVzcG9uc2UiyAEKEEtlZXBWb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCRIRCglzZWxmX211dGUYBCABKAgSEQoJc2VsZl9kZWFmGAUgASgIEhIKCnNlbGZfdmlkZW8YBiABKAgSEwoLc2VsZl9zdHJlYW0YByABKAgSEwoLc2VsZl9yZWNvcmQYCCABKAgSFQoNc2VydmVyX3JlY29yZBgJIAEoCCJQChFLZWVwVm9pY2VSZXNwb25zZRIiCgVzdGF0ZRgBIAEoCzITLmZ1d2EudjEuVm9pY2VTdGF0ZRIXCg9yZWNvcmRpbmdzX2Z1bGwYAiABKAgiKwoWTGlzdFZvaWNlU3RhdGVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiPgoXTGlzdFZvaWNlU3RhdGVzUmVzcG9uc2USIwoGc3RhdGVzGAEgAygLMhMuZnV3YS52MS5Wb2ljZVN0YXRlItYBChRNb2RlcmF0ZVZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIYCgtzZXJ2ZXJfbXV0ZRgDIAEoCEgAiAEBEhgKC3NlcnZlcl9kZWFmGAQgASgISAGIAQESEgoKZGlzY29ubmVjdBgFIAEoCBIdChBzZXJ2ZXJfdmlkZW9fb2ZmGAYgASgISAKIAQFCDgoMX3NlcnZlcl9tdXRlQg4KDF9zZXJ2ZXJfZGVhZkITChFfc2VydmVyX3ZpZGVvX29mZiIXChVNb2RlcmF0ZVZvaWNlUmVzcG9uc2UidQoSTGlzdGVuVm9pY2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXNlbGZfbXV0ZRgDIAEoCBIRCglzZWxmX2RlYWYYBCABKAgSEgoKc2Vzc2lvbl9pZBgFIAEoCSJsChNMaXN0ZW5Wb2ljZVJlc3BvbnNlEiYKBmpvaW5lZBgBIAEoCzIULmZ1d2EudjEuVm9pY2VKb2luZWRIABIkCgVmcmFtZRgCIAEoCzITLmZ1d2EudjEuVm9pY2VGcmFtZUgAQgcKBWV2ZW50IkUKC1ZvaWNlSm9pbmVkEhIKCnNlc3Npb25faWQYASABKAkSIgoFc3RhdGUYAiABKAsyEy5mdXdhLnYxLlZvaWNlU3RhdGUiPgoKVm9pY2VGcmFtZRIPCgd1c2VyX2lkGAEgASgJEgwKBG9wdXMYAiABKAwSEQoJdGltZXN0YW1wGAMgASgNIkoKEVNwZWFrVm9pY2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBmZyYW1lcxgDIAMoDCIkChJTcGVha1ZvaWNlUmVzcG9uc2USDgoGcXVldWVkGAEgASgNIrMBChFKb2luRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSDQoFb2ZmZXIYAiABKAkSEQoJc2VsZl9tdXRlGAMgASgIEhEKCXNlbGZfZGVhZhgEIAEoCBISCgpzZXNzaW9uX2lkGAUgASgJEhIKCnNlbGZfdmlkZW8YBiABKAgSEwoLc2VsZl9zdHJlYW0YByABKAgSEwoLc2VsZl9yZWNvcmQYCCABKAgiXAoSSm9pbkRtQ2FsbFJlc3BvbnNlEg4KBmFuc3dlchgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEiIKBXN0YXRlGAMgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlIkEKEkxlYXZlRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIVChNMZWF2ZURtQ2FsbFJlc3BvbnNlIqQBChFLZWVwRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIRCglzZWxmX211dGUYAyABKAgSEQoJc2VsZl9kZWFmGAQgASgIEhIKCnNlbGZfdmlkZW8YBSABKAgSEwoLc2VsZl9zdHJlYW0YBiABKAgSEwoLc2VsZl9yZWNvcmQYByABKAgiOAoSS2VlcERtQ2FsbFJlc3BvbnNlEiIKBXN0YXRlGAEgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlIhQKEkxpc3REbUNhbGxzUmVxdWVzdCI1ChNMaXN0RG1DYWxsc1Jlc3BvbnNlEh4KBWNhbGxzGAEgAygLMg8uZnV3YS52MS5EbUNhbGwikAEKBkRtQ2FsbBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSKQoMcGFydGljaXBhbnRzGAIgAygLMhMuZnV3YS52MS5Wb2ljZVN0YXRlEi4KCnN0YXJ0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCnN0YXJ0ZWRfYnkYBCABKAki2gEKCVJlY29yZGluZxIKCgJpZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCnN0YXJ0ZWRfYnkYAyABKAkSLgoKc3RhcnRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEicKBnRyYWNrcxgGIAMoCzIXLmZ1d2EudjEuUmVjb3JkaW5nVHJhY2sSEgoKc2l6ZV9ieXRlcxgHIAEoAyJKCg5SZWNvcmRpbmdUcmFjaxIPCgd1c2VyX2lkGAEgASgJEhIKCnNpemVfYnl0ZXMYAiABKAMSEwoLZHVyYXRpb25fbXMYAyABKAMiPgoVTGlzdFJlY29yZGluZ3NSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJIqABChZMaXN0UmVjb3JkaW5nc1Jlc3BvbnNlEiYKCnJlY29yZGluZ3MYASADKAsyEi5mdXdhLnYxLlJlY29yZGluZxISCgp1c2VkX2J5dGVzGAIgASgDEhYKCWNhcF9ieXRlcxgDIAEoA0gAiAEBEhYKCWtlZXBfZGF5cxgEIAEoA0gBiAEBQgwKCl9jYXBfYnl0ZXNCDAoKX2tlZXBfZGF5cyJUChhEb3dubG9hZFJlY29yZGluZ1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhQKDHJlY29yZGluZ19pZBgCIAEoCRIPCgd1c2VyX2lkGAMgASgJIikKGURvd25sb2FkUmVjb3JkaW5nUmVzcG9uc2USDAoEZGF0YRgBIAEoDCJBChZEZWxldGVSZWNvcmRpbmdSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIUCgxyZWNvcmRpbmdfaWQYAiABKAkiGQoXRGVsZXRlUmVjb3JkaW5nUmVzcG9uc2UylAkKC0NhbGxTZXJ2aWNlElQKD0dldENhbGxTZXR0aW5ncxIfLmZ1d2EudjEuR2V0Q2FsbFNldHRpbmdzUmVxdWVzdBogLmZ1d2EudjEuR2V0Q2FsbFNldHRpbmdzUmVzcG9uc2USQgoJSm9pblZvaWNlEhkuZnV3YS52MS5Kb2luVm9pY2VSZXF1ZXN0GhouZnV3YS52MS5Kb2luVm9pY2VSZXNwb25zZRJFCgpMZWF2ZVZvaWNlEhouZnV3YS52MS5MZWF2ZVZvaWNlUmVxdWVzdBobLmZ1d2EudjEuTGVhdmVWb2ljZVJlc3BvbnNlEkIKCUtlZXBWb2ljZRIZLmZ1d2EudjEuS2VlcFZvaWNlUmVxdWVzdBoaLmZ1d2EudjEuS2VlcFZvaWNlUmVzcG9uc2USVAoPTGlzdFZvaWNlU3RhdGVzEh8uZnV3YS52MS5MaXN0Vm9pY2VTdGF0ZXNSZXF1ZXN0GiAuZnV3YS52MS5MaXN0Vm9pY2VTdGF0ZXNSZXNwb25zZRJOCg1Nb2RlcmF0ZVZvaWNlEh0uZnV3YS52MS5Nb2RlcmF0ZVZvaWNlUmVxdWVzdBoeLmZ1d2EudjEuTW9kZXJhdGVWb2ljZVJlc3BvbnNlEkoKC0xpc3RlblZvaWNlEhsuZnV3YS52MS5MaXN0ZW5Wb2ljZVJlcXVlc3QaHC5mdXdhLnYxLkxpc3RlblZvaWNlUmVzcG9uc2UwARJFCgpTcGVha1ZvaWNlEhouZnV3YS52MS5TcGVha1ZvaWNlUmVxdWVzdBobLmZ1d2EudjEuU3BlYWtWb2ljZVJlc3BvbnNlElEKDkxpc3RSZWNvcmRpbmdzEh4uZnV3YS52MS5MaXN0UmVjb3JkaW5nc1JlcXVlc3QaHy5mdXdhLnYxLkxpc3RSZWNvcmRpbmdzUmVzcG9uc2USXAoRRG93bmxvYWRSZWNvcmRpbmcSIS5mdXdhLnYxLkRvd25sb2FkUmVjb3JkaW5nUmVxdWVzdBoiLmZ1d2EudjEuRG93bmxvYWRSZWNvcmRpbmdSZXNwb25zZTABElQKD0RlbGV0ZVJlY29yZGluZxIfLmZ1d2EudjEuRGVsZXRlUmVjb3JkaW5nUmVxdWVzdBogLmZ1d2EudjEuRGVsZXRlUmVjb3JkaW5nUmVzcG9uc2USRQoKSm9pbkRtQ2FsbBIaLmZ1d2EudjEuSm9pbkRtQ2FsbFJlcXVlc3QaGy5mdXdhLnYxLkpvaW5EbUNhbGxSZXNwb25zZRJICgtMZWF2ZURtQ2FsbBIbLmZ1d2EudjEuTGVhdmVEbUNhbGxSZXF1ZXN0GhwuZnV3YS52MS5MZWF2ZURtQ2FsbFJlc3BvbnNlEkUKCktlZXBEbUNhbGwSGi5mdXdhLnYxLktlZXBEbUNhbGxSZXF1ZXN0GhsuZnV3YS52MS5LZWVwRG1DYWxsUmVzcG9uc2USSAoLTGlzdERtQ2FsbHMSGy5mdXdhLnYxLkxpc3REbUNhbGxzUmVxdWVzdBocLmZ1d2EudjEuTGlzdERtQ2FsbHNSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChJmdXdhL3YxL2NhbGwucHJvdG8SB2Z1d2EudjEiPwoJSWNlU2VydmVyEgwKBHVybHMYASADKAkSEAoIdXNlcm5hbWUYAiABKAkSEgoKY3JlZGVudGlhbBgDIAEoCSIYChZHZXRDYWxsU2V0dGluZ3NSZXF1ZXN0In0KF0dldENhbGxTZXR0aW5nc1Jlc3BvbnNlEg8KB2VuYWJsZWQYASABKAgSJwoLaWNlX3NlcnZlcnMYAiADKAsyEi5mdXdhLnYxLkljZVNlcnZlchISCgpyZWNvcmRpbmdzGAMgASgIEhQKDHNjcmVlbl9zb3VuZBgEIAEoCCLXAQoQSm9pblZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRINCgVvZmZlchgDIAEoCRIRCglzZWxmX211dGUYBCABKAgSEQoJc2VsZl9kZWFmGAUgASgIEhIKCnNlc3Npb25faWQYBiABKAkSEgoKc2VsZl92aWRlbxgHIAEoCBITCgtzZWxmX3N0cmVhbRgIIAEoCBITCgtzZWxmX3JlY29yZBgJIAEoCBIVCg1zZXJ2ZXJfcmVjb3JkGAogASgIInQKEUpvaW5Wb2ljZVJlc3BvbnNlEg4KBmFuc3dlchgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEiIKBXN0YXRlGAMgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlEhcKD3JlY29yZGluZ3NfZnVsbBgEIAEoCCI6ChFMZWF2ZVZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIUChJMZWF2ZVZvaWNlUmVzcG9uc2UiyAEKEEtlZXBWb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCRIRCglzZWxmX211dGUYBCABKAgSEQoJc2VsZl9kZWFmGAUgASgIEhIKCnNlbGZfdmlkZW8YBiABKAgSEwoLc2VsZl9zdHJlYW0YByABKAgSEwoLc2VsZl9yZWNvcmQYCCABKAgSFQoNc2VydmVyX3JlY29yZBgJIAEoCCJQChFLZWVwVm9pY2VSZXNwb25zZRIiCgVzdGF0ZRgBIAEoCzITLmZ1d2EudjEuVm9pY2VTdGF0ZRIXCg9yZWNvcmRpbmdzX2Z1bGwYAiABKAgiKwoWTGlzdFZvaWNlU3RhdGVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiPgoXTGlzdFZvaWNlU3RhdGVzUmVzcG9uc2USIwoGc3RhdGVzGAEgAygLMhMuZnV3YS52MS5Wb2ljZVN0YXRlItYBChRNb2RlcmF0ZVZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIYCgtzZXJ2ZXJfbXV0ZRgDIAEoCEgAiAEBEhgKC3NlcnZlcl9kZWFmGAQgASgISAGIAQESEgoKZGlzY29ubmVjdBgFIAEoCBIdChBzZXJ2ZXJfdmlkZW9fb2ZmGAYgASgISAKIAQFCDgoMX3NlcnZlcl9tdXRlQg4KDF9zZXJ2ZXJfZGVhZkITChFfc2VydmVyX3ZpZGVvX29mZiIXChVNb2RlcmF0ZVZvaWNlUmVzcG9uc2UidQoSTGlzdGVuVm9pY2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXNlbGZfbXV0ZRgDIAEoCBIRCglzZWxmX2RlYWYYBCABKAgSEgoKc2Vzc2lvbl9pZBgFIAEoCSKaAQoTTGlzdGVuVm9pY2VSZXNwb25zZRImCgZqb2luZWQYASABKAsyFC5mdXdhLnYxLlZvaWNlSm9pbmVkSAASJAoFZnJhbWUYAiABKAsyEy5mdXdhLnYxLlZvaWNlRnJhbWVIABIsCglrZWVwYWxpdmUYAyABKAsyFy5mdXdhLnYxLlZvaWNlS2VlcGFsaXZlSABCBwoFZXZlbnQiEAoOVm9pY2VLZWVwYWxpdmUiRQoLVm9pY2VKb2luZWQSEgoKc2Vzc2lvbl9pZBgBIAEoCRIiCgVzdGF0ZRgCIAEoCzITLmZ1d2EudjEuVm9pY2VTdGF0ZSI+CgpWb2ljZUZyYW1lEg8KB3VzZXJfaWQYASABKAkSDAoEb3B1cxgCIAEoDBIRCgl0aW1lc3RhbXAYAyABKA0iXQoRU3BlYWtWb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGZnJhbWVzGAMgAygMEhEKCWludGVycnVwdBgEIAEoCCIkChJTcGVha1ZvaWNlUmVzcG9uc2USDgoGcXVldWVkGAEgASgNIrMBChFKb2luRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSDQoFb2ZmZXIYAiABKAkSEQoJc2VsZl9tdXRlGAMgASgIEhEKCXNlbGZfZGVhZhgEIAEoCBISCgpzZXNzaW9uX2lkGAUgASgJEhIKCnNlbGZfdmlkZW8YBiABKAgSEwoLc2VsZl9zdHJlYW0YByABKAgSEwoLc2VsZl9yZWNvcmQYCCABKAgiXAoSSm9pbkRtQ2FsbFJlc3BvbnNlEg4KBmFuc3dlchgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEiIKBXN0YXRlGAMgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlIkEKEkxlYXZlRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIVChNMZWF2ZURtQ2FsbFJlc3BvbnNlIqQBChFLZWVwRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIRCglzZWxmX211dGUYAyABKAgSEQoJc2VsZl9kZWFmGAQgASgIEhIKCnNlbGZfdmlkZW8YBSABKAgSEwoLc2VsZl9zdHJlYW0YBiABKAgSEwoLc2VsZl9yZWNvcmQYByABKAgiOAoSS2VlcERtQ2FsbFJlc3BvbnNlEiIKBXN0YXRlGAEgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlIhQKEkxpc3REbUNhbGxzUmVxdWVzdCI1ChNMaXN0RG1DYWxsc1Jlc3BvbnNlEh4KBWNhbGxzGAEgAygLMg8uZnV3YS52MS5EbUNhbGwikAEKBkRtQ2FsbBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSKQoMcGFydGljaXBhbnRzGAIgAygLMhMuZnV3YS52MS5Wb2ljZVN0YXRlEi4KCnN0YXJ0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCnN0YXJ0ZWRfYnkYBCABKAki2gEKCVJlY29yZGluZxIKCgJpZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCnN0YXJ0ZWRfYnkYAyABKAkSLgoKc3RhcnRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEicKBnRyYWNrcxgGIAMoCzIXLmZ1d2EudjEuUmVjb3JkaW5nVHJhY2sSEgoKc2l6ZV9ieXRlcxgHIAEoAyJKCg5SZWNvcmRpbmdUcmFjaxIPCgd1c2VyX2lkGAEgASgJEhIKCnNpemVfYnl0ZXMYAiABKAMSEwoLZHVyYXRpb25fbXMYAyABKAMiPgoVTGlzdFJlY29yZGluZ3NSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJIqABChZMaXN0UmVjb3JkaW5nc1Jlc3BvbnNlEiYKCnJlY29yZGluZ3MYASADKAsyEi5mdXdhLnYxLlJlY29yZGluZxISCgp1c2VkX2J5dGVzGAIgASgDEhYKCWNhcF9ieXRlcxgDIAEoA0gAiAEBEhYKCWtlZXBfZGF5cxgEIAEoA0gBiAEBQgwKCl9jYXBfYnl0ZXNCDAoKX2tlZXBfZGF5cyJUChhEb3dubG9hZFJlY29yZGluZ1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhQKDHJlY29yZGluZ19pZBgCIAEoCRIPCgd1c2VyX2lkGAMgASgJIikKGURvd25sb2FkUmVjb3JkaW5nUmVzcG9uc2USDAoEZGF0YRgBIAEoDCJBChZEZWxldGVSZWNvcmRpbmdSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIUCgxyZWNvcmRpbmdfaWQYAiABKAkiGQoXRGVsZXRlUmVjb3JkaW5nUmVzcG9uc2UylAkKC0NhbGxTZXJ2aWNlElQKD0dldENhbGxTZXR0aW5ncxIfLmZ1d2EudjEuR2V0Q2FsbFNldHRpbmdzUmVxdWVzdBogLmZ1d2EudjEuR2V0Q2FsbFNldHRpbmdzUmVzcG9uc2USQgoJSm9pblZvaWNlEhkuZnV3YS52MS5Kb2luVm9pY2VSZXF1ZXN0GhouZnV3YS52MS5Kb2luVm9pY2VSZXNwb25zZRJFCgpMZWF2ZVZvaWNlEhouZnV3YS52MS5MZWF2ZVZvaWNlUmVxdWVzdBobLmZ1d2EudjEuTGVhdmVWb2ljZVJlc3BvbnNlEkIKCUtlZXBWb2ljZRIZLmZ1d2EudjEuS2VlcFZvaWNlUmVxdWVzdBoaLmZ1d2EudjEuS2VlcFZvaWNlUmVzcG9uc2USVAoPTGlzdFZvaWNlU3RhdGVzEh8uZnV3YS52MS5MaXN0Vm9pY2VTdGF0ZXNSZXF1ZXN0GiAuZnV3YS52MS5MaXN0Vm9pY2VTdGF0ZXNSZXNwb25zZRJOCg1Nb2RlcmF0ZVZvaWNlEh0uZnV3YS52MS5Nb2RlcmF0ZVZvaWNlUmVxdWVzdBoeLmZ1d2EudjEuTW9kZXJhdGVWb2ljZVJlc3BvbnNlEkoKC0xpc3RlblZvaWNlEhsuZnV3YS52MS5MaXN0ZW5Wb2ljZVJlcXVlc3QaHC5mdXdhLnYxLkxpc3RlblZvaWNlUmVzcG9uc2UwARJFCgpTcGVha1ZvaWNlEhouZnV3YS52MS5TcGVha1ZvaWNlUmVxdWVzdBobLmZ1d2EudjEuU3BlYWtWb2ljZVJlc3BvbnNlElEKDkxpc3RSZWNvcmRpbmdzEh4uZnV3YS52MS5MaXN0UmVjb3JkaW5nc1JlcXVlc3QaHy5mdXdhLnYxLkxpc3RSZWNvcmRpbmdzUmVzcG9uc2USXAoRRG93bmxvYWRSZWNvcmRpbmcSIS5mdXdhLnYxLkRvd25sb2FkUmVjb3JkaW5nUmVxdWVzdBoiLmZ1d2EudjEuRG93bmxvYWRSZWNvcmRpbmdSZXNwb25zZTABElQKD0RlbGV0ZVJlY29yZGluZxIfLmZ1d2EudjEuRGVsZXRlUmVjb3JkaW5nUmVxdWVzdBogLmZ1d2EudjEuRGVsZXRlUmVjb3JkaW5nUmVzcG9uc2USRQoKSm9pbkRtQ2FsbBIaLmZ1d2EudjEuSm9pbkRtQ2FsbFJlcXVlc3QaGy5mdXdhLnYxLkpvaW5EbUNhbGxSZXNwb25zZRJICgtMZWF2ZURtQ2FsbBIbLmZ1d2EudjEuTGVhdmVEbUNhbGxSZXF1ZXN0GhwuZnV3YS52MS5MZWF2ZURtQ2FsbFJlc3BvbnNlEkUKCktlZXBEbUNhbGwSGi5mdXdhLnYxLktlZXBEbUNhbGxSZXF1ZXN0GhsuZnV3YS52MS5LZWVwRG1DYWxsUmVzcG9uc2USSAoLTGlzdERtQ2FsbHMSGy5mdXdhLnYxLkxpc3REbUNhbGxzUmVxdWVzdBocLmZ1d2EudjEuTGlzdERtQ2FsbHNSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.IceServer
@@ -497,6 +497,15 @@ export type ListenVoiceResponse = Message<"fuwa.v1.ListenVoiceResponse"> & {
      */
     value: VoiceFrame;
     case: "frame";
+  } | {
+    /**
+     * Nothing to pass on: sent every 15 seconds while no sound came, so
+     * the program can tell a quiet call from a stream that's gone.
+     *
+     * @generated from field: fuwa.v1.VoiceKeepalive keepalive = 3;
+     */
+    value: VoiceKeepalive;
+    case: "keepalive";
   } | { case: undefined; value?: undefined };
 };
 
@@ -506,6 +515,19 @@ export type ListenVoiceResponse = Message<"fuwa.v1.ListenVoiceResponse"> & {
  */
 export const ListenVoiceResponseSchema: GenMessage<ListenVoiceResponse> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_call, 14);
+
+/**
+ * @generated from message fuwa.v1.VoiceKeepalive
+ */
+export type VoiceKeepalive = Message<"fuwa.v1.VoiceKeepalive"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.VoiceKeepalive.
+ * Use `create(VoiceKeepaliveSchema)` to create a new message.
+ */
+export const VoiceKeepaliveSchema: GenMessage<VoiceKeepalive> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_call, 15);
 
 /**
  * @generated from message fuwa.v1.VoiceJoined
@@ -527,7 +549,7 @@ export type VoiceJoined = Message<"fuwa.v1.VoiceJoined"> & {
  * Use `create(VoiceJoinedSchema)` to create a new message.
  */
 export const VoiceJoinedSchema: GenMessage<VoiceJoined> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 15);
+  messageDesc(file_fuwa_v1_call, 16);
 
 /**
  * One frame of someone's sound, as they sent it.
@@ -564,7 +586,7 @@ export type VoiceFrame = Message<"fuwa.v1.VoiceFrame"> & {
  * Use `create(VoiceFrameSchema)` to create a new message.
  */
 export const VoiceFrameSchema: GenMessage<VoiceFrame> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 16);
+  messageDesc(file_fuwa_v1_call, 17);
 
 /**
  * @generated from message fuwa.v1.SpeakVoiceRequest
@@ -586,6 +608,14 @@ export type SpeakVoiceRequest = Message<"fuwa.v1.SpeakVoiceRequest"> & {
    * @generated from field: repeated bytes frames = 3;
    */
   frames: Uint8Array[];
+
+  /**
+   * Drops the frames still waiting to go out before queueing these; with
+   * no frames, just stops talking.
+   *
+   * @generated from field: bool interrupt = 4;
+   */
+  interrupt: boolean;
 };
 
 /**
@@ -593,7 +623,7 @@ export type SpeakVoiceRequest = Message<"fuwa.v1.SpeakVoiceRequest"> & {
  * Use `create(SpeakVoiceRequestSchema)` to create a new message.
  */
 export const SpeakVoiceRequestSchema: GenMessage<SpeakVoiceRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 17);
+  messageDesc(file_fuwa_v1_call, 18);
 
 /**
  * @generated from message fuwa.v1.SpeakVoiceResponse
@@ -612,7 +642,7 @@ export type SpeakVoiceResponse = Message<"fuwa.v1.SpeakVoiceResponse"> & {
  * Use `create(SpeakVoiceResponseSchema)` to create a new message.
  */
 export const SpeakVoiceResponseSchema: GenMessage<SpeakVoiceResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 18);
+  messageDesc(file_fuwa_v1_call, 19);
 
 /**
  * @generated from message fuwa.v1.JoinDmCallRequest
@@ -664,7 +694,7 @@ export type JoinDmCallRequest = Message<"fuwa.v1.JoinDmCallRequest"> & {
  * Use `create(JoinDmCallRequestSchema)` to create a new message.
  */
 export const JoinDmCallRequestSchema: GenMessage<JoinDmCallRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 19);
+  messageDesc(file_fuwa_v1_call, 20);
 
 /**
  * @generated from message fuwa.v1.JoinDmCallResponse
@@ -691,7 +721,7 @@ export type JoinDmCallResponse = Message<"fuwa.v1.JoinDmCallResponse"> & {
  * Use `create(JoinDmCallResponseSchema)` to create a new message.
  */
 export const JoinDmCallResponseSchema: GenMessage<JoinDmCallResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 20);
+  messageDesc(file_fuwa_v1_call, 21);
 
 /**
  * @generated from message fuwa.v1.LeaveDmCallRequest
@@ -713,7 +743,7 @@ export type LeaveDmCallRequest = Message<"fuwa.v1.LeaveDmCallRequest"> & {
  * Use `create(LeaveDmCallRequestSchema)` to create a new message.
  */
 export const LeaveDmCallRequestSchema: GenMessage<LeaveDmCallRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 21);
+  messageDesc(file_fuwa_v1_call, 22);
 
 /**
  * @generated from message fuwa.v1.LeaveDmCallResponse
@@ -726,7 +756,7 @@ export type LeaveDmCallResponse = Message<"fuwa.v1.LeaveDmCallResponse"> & {
  * Use `create(LeaveDmCallResponseSchema)` to create a new message.
  */
 export const LeaveDmCallResponseSchema: GenMessage<LeaveDmCallResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 22);
+  messageDesc(file_fuwa_v1_call, 23);
 
 /**
  * @generated from message fuwa.v1.KeepDmCallRequest
@@ -773,7 +803,7 @@ export type KeepDmCallRequest = Message<"fuwa.v1.KeepDmCallRequest"> & {
  * Use `create(KeepDmCallRequestSchema)` to create a new message.
  */
 export const KeepDmCallRequestSchema: GenMessage<KeepDmCallRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 23);
+  messageDesc(file_fuwa_v1_call, 24);
 
 /**
  * @generated from message fuwa.v1.KeepDmCallResponse
@@ -790,7 +820,7 @@ export type KeepDmCallResponse = Message<"fuwa.v1.KeepDmCallResponse"> & {
  * Use `create(KeepDmCallResponseSchema)` to create a new message.
  */
 export const KeepDmCallResponseSchema: GenMessage<KeepDmCallResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 24);
+  messageDesc(file_fuwa_v1_call, 25);
 
 /**
  * @generated from message fuwa.v1.ListDmCallsRequest
@@ -803,7 +833,7 @@ export type ListDmCallsRequest = Message<"fuwa.v1.ListDmCallsRequest"> & {
  * Use `create(ListDmCallsRequestSchema)` to create a new message.
  */
 export const ListDmCallsRequestSchema: GenMessage<ListDmCallsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 25);
+  messageDesc(file_fuwa_v1_call, 26);
 
 /**
  * @generated from message fuwa.v1.ListDmCallsResponse
@@ -820,7 +850,7 @@ export type ListDmCallsResponse = Message<"fuwa.v1.ListDmCallsResponse"> & {
  * Use `create(ListDmCallsResponseSchema)` to create a new message.
  */
 export const ListDmCallsResponseSchema: GenMessage<ListDmCallsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 26);
+  messageDesc(file_fuwa_v1_call, 27);
 
 /**
  * The call going on in a direct-message conversation.
@@ -861,7 +891,7 @@ export type DmCall = Message<"fuwa.v1.DmCall"> & {
  * Use `create(DmCallSchema)` to create a new message.
  */
 export const DmCallSchema: GenMessage<DmCall> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 27);
+  messageDesc(file_fuwa_v1_call, 28);
 
 /**
  * A voice channel recorded on the server: one track per person who spoke.
@@ -916,7 +946,7 @@ export type Recording = Message<"fuwa.v1.Recording"> & {
  * Use `create(RecordingSchema)` to create a new message.
  */
 export const RecordingSchema: GenMessage<Recording> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 28);
+  messageDesc(file_fuwa_v1_call, 29);
 
 /**
  * One person's sound in a recording, from when the recording started (it's
@@ -946,7 +976,7 @@ export type RecordingTrack = Message<"fuwa.v1.RecordingTrack"> & {
  * Use `create(RecordingTrackSchema)` to create a new message.
  */
 export const RecordingTrackSchema: GenMessage<RecordingTrack> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 29);
+  messageDesc(file_fuwa_v1_call, 30);
 
 /**
  * @generated from message fuwa.v1.ListRecordingsRequest
@@ -968,7 +998,7 @@ export type ListRecordingsRequest = Message<"fuwa.v1.ListRecordingsRequest"> & {
  * Use `create(ListRecordingsRequestSchema)` to create a new message.
  */
 export const ListRecordingsRequestSchema: GenMessage<ListRecordingsRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 30);
+  messageDesc(file_fuwa_v1_call, 31);
 
 /**
  * @generated from message fuwa.v1.ListRecordingsResponse
@@ -1005,7 +1035,7 @@ export type ListRecordingsResponse = Message<"fuwa.v1.ListRecordingsResponse"> &
  * Use `create(ListRecordingsResponseSchema)` to create a new message.
  */
 export const ListRecordingsResponseSchema: GenMessage<ListRecordingsResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 31);
+  messageDesc(file_fuwa_v1_call, 32);
 
 /**
  * @generated from message fuwa.v1.DownloadRecordingRequest
@@ -1034,7 +1064,7 @@ export type DownloadRecordingRequest = Message<"fuwa.v1.DownloadRecordingRequest
  * Use `create(DownloadRecordingRequestSchema)` to create a new message.
  */
 export const DownloadRecordingRequestSchema: GenMessage<DownloadRecordingRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 32);
+  messageDesc(file_fuwa_v1_call, 33);
 
 /**
  * @generated from message fuwa.v1.DownloadRecordingResponse
@@ -1053,7 +1083,7 @@ export type DownloadRecordingResponse = Message<"fuwa.v1.DownloadRecordingRespon
  * Use `create(DownloadRecordingResponseSchema)` to create a new message.
  */
 export const DownloadRecordingResponseSchema: GenMessage<DownloadRecordingResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 33);
+  messageDesc(file_fuwa_v1_call, 34);
 
 /**
  * @generated from message fuwa.v1.DeleteRecordingRequest
@@ -1075,7 +1105,7 @@ export type DeleteRecordingRequest = Message<"fuwa.v1.DeleteRecordingRequest"> &
  * Use `create(DeleteRecordingRequestSchema)` to create a new message.
  */
 export const DeleteRecordingRequestSchema: GenMessage<DeleteRecordingRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 34);
+  messageDesc(file_fuwa_v1_call, 35);
 
 /**
  * @generated from message fuwa.v1.DeleteRecordingResponse
@@ -1088,7 +1118,7 @@ export type DeleteRecordingResponse = Message<"fuwa.v1.DeleteRecordingResponse">
  * Use `create(DeleteRecordingResponseSchema)` to create a new message.
  */
 export const DeleteRecordingResponseSchema: GenMessage<DeleteRecordingResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_call, 35);
+  messageDesc(file_fuwa_v1_call, 36);
 
 /**
  * Voice: talking in a server's voice channels, and calls in direct messages.
@@ -1203,8 +1233,10 @@ export const CallService: GenService<{
    * and closing it leaves. It ends with FAILED_PRECONDITION when you were
    * taken out of the call, or joined it from somewhere else; any other end
    * (the instance restarting) is worth opening again with the same
-   * `session_id`. The media part restarting doesn't end it. Voice channels
-   * only: calls in direct messages are end-to-end encrypted.
+   * `session_id`. The media part restarting doesn't end it. When nobody has
+   * said anything for a while a keepalive comes every 15 seconds, so a
+   * stream that stays quiet for much longer than that is gone. Voice
+   * channels only: calls in direct messages are end-to-end encrypted.
    *
    * @generated from rpc fuwa.v1.CallService.ListenVoice
    */
@@ -1217,8 +1249,9 @@ export const CallService: GenService<{
    * Says something in the voice channel ListenVoice put you in: frames of
    * Opus, 48 kHz, 20 ms each (mono or stereo), which go out to everyone one
    * every 20 ms, in order. At most a second's worth (50 frames) may be
-   * waiting; send them about as fast as they play. Needs SPEAK and not
-   * being server muted (PERMISSION_DENIED otherwise).
+   * waiting; send them about as fast as they play. `interrupt` drops what's
+   * still waiting first, to stop talking when someone talks over you. Needs
+   * SPEAK and not being server muted (PERMISSION_DENIED otherwise).
    *
    * @generated from rpc fuwa.v1.CallService.SpeakVoice
    */

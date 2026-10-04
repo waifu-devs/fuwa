@@ -292,6 +292,7 @@ enum Command {
         participant: String,
         session_id: String,
         frames: Vec<Vec<u8>>,
+        interrupt: bool,
         reply: oneshot::Sender<Result<usize>>,
     },
     Open {
@@ -424,11 +425,19 @@ impl Sfu {
     }
 
     /// Queues frames of Opus for a bridge to say, giving back how many are
-    /// waiting now. They go out one every 20 ms.
-    pub async fn speak(&self, room: &str, participant: &str, session_id: &str, frames: Vec<Vec<u8>>) -> Result<usize> {
+    /// waiting now. They go out one every 20 ms; `interrupt` drops what was
+    /// still waiting first.
+    pub async fn speak(
+        &self,
+        room: &str,
+        participant: &str,
+        session_id: &str,
+        frames: Vec<Vec<u8>>,
+        interrupt: bool,
+    ) -> Result<usize> {
         let (reply, answer) = oneshot::channel();
         let (room, participant, session_id) = (room.into(), participant.into(), session_id.into());
-        self.send(Command::Speak { room, participant, session_id, frames, reply }).await?;
+        self.send(Command::Speak { room, participant, session_id, frames, interrupt, reply }).await?;
         answer.await.map_err(|_| Error::Unavailable("calls are restarting; try again".into()))?
     }
 
@@ -1264,8 +1273,8 @@ impl Engine {
             Command::Bridge { room, participant, session_id, may, events, reply } => {
                 let _ = reply.send(self.bridge(room, participant, session_id, may, events, now));
             }
-            Command::Speak { room, participant, session_id, frames, reply } => {
-                let _ = reply.send(self.speak(&room, &participant, &session_id, frames));
+            Command::Speak { room, participant, session_id, frames, interrupt, reply } => {
+                let _ = reply.send(self.speak(&room, &participant, &session_id, frames, interrupt));
             }
             Command::Open { room, participant, session_id, offer, may, candidates, reply } => {
                 let answer = self.open(room, participant, session_id, &offer, may, candidates, now);
@@ -1482,7 +1491,14 @@ impl Engine {
         Ok(())
     }
 
-    fn speak(&mut self, room: &str, participant: &str, session_id: &str, frames: Vec<Vec<u8>>) -> Result<usize> {
+    fn speak(
+        &mut self,
+        room: &str,
+        participant: &str,
+        session_id: &str,
+        frames: Vec<Vec<u8>>,
+        interrupt: bool,
+    ) -> Result<usize> {
         let bridge = self
             .bridges
             .iter_mut()
@@ -1490,6 +1506,9 @@ impl Engine {
             .ok_or_else(|| Error::FailedPrecondition("you're not in that call any more".into()))?;
         if frames.iter().any(|f| f.is_empty() || f.len() > MAX_FRAME) {
             return Err(Error::invalid(format!("each frame is one Opus packet, 1 to {MAX_FRAME} bytes")));
+        }
+        if interrupt {
+            bridge.queue.clear();
         }
         if bridge.queue.len() + frames.len() > MAX_QUEUED {
             return Err(Error::ResourceExhausted(
@@ -1666,6 +1685,27 @@ mod tests {
         let may = May { speak: true, hear: true, video: true, screen: true };
         assert!(sfu.bridge("d/conversation", "bot", "s1", may).await.is_err());
         assert!(sfu.bridge("s/server/channel", "bot", "s1", may).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn programs_stop_talking_when_they_interrupt_themselves() {
+        let config = MediaConfig { port: 0, addresses: vec![Advertised::parse("127.0.0.1").unwrap()] };
+        let sfu = Sfu::start(config, CancellationToken::new()).await.unwrap();
+        let may = May { speak: true, hear: true, video: true, screen: true };
+        let _events = sfu.bridge("s/server/channel", "bot", "s1", may).await.unwrap();
+        let frames = |n: usize| vec![vec![0xf8, 0xff, 0xfe]; n];
+        let speak = |frames, interrupt| sfu.speak("s/server/channel", "bot", "s1", frames, interrupt);
+        assert!(speak(frames(40), false).await.unwrap() > 30);
+        // Without interrupting there's no room for another 40.
+        assert!(matches!(speak(frames(40), false).await, Err(Error::ResourceExhausted(_))));
+        // Interrupting drops what was waiting, and says the new frames instead.
+        assert_eq!(speak(frames(40), true).await.unwrap(), 40);
+        // With nothing new, it just goes quiet.
+        assert_eq!(speak(Vec::new(), true).await.unwrap(), 0);
+        // A bad frame changes nothing, interrupt or not.
+        speak(frames(10), false).await.unwrap();
+        assert!(speak(vec![Vec::new()], true).await.is_err());
+        assert!(speak(Vec::new(), false).await.unwrap() > 0);
     }
 
     #[test]

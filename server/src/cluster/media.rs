@@ -58,7 +58,7 @@ impl cpb::media_service_server::MediaService for Internal {
 
     async fn speak(&self, request: Request<cpb::SpeakRequest>) -> Result<Response<cpb::SpeakResponse>, Status> {
         let r = request.into_inner();
-        let queued = self.0.speak(&r.room, &r.participant, &r.session_id, r.frames).await?;
+        let queued = self.0.speak(&r.room, &r.participant, &r.session_id, r.frames, r.interrupt).await?;
         Ok(Response::new(cpb::SpeakResponse { queued: queued as u32 }))
     }
 

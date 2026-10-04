@@ -257,11 +257,14 @@ calls of the same API (`CallService`, gRPC):
   says it's in, with its `session_id`; then each person's sound comes as
   frames of Opus (48 kHz, 20 ms each), labelled with whose they are and
   when they were spoken. The stream keeps the place; closing it leaves.
+  While nobody says anything a keepalive comes every 15 seconds, so a
+  program can tell a quiet call from a stream that's gone.
 - **SpeakVoice** sends frames of Opus to say, which go out to everyone as
   the program's own track (stream id: its account id, as for anyone),
   one every 20 ms. At most a second's worth waits at a time, so a program
-  sends them about as fast as they play. It needs SPEAK, and not being
-  server muted.
+  sends them about as fast as they play. `interrupt` drops whatever is
+  still waiting first, so a program that's talked over stops at once (with
+  no frames, it just stops). It needs SPEAK, and not being server muted.
 
 On the media part this is a bridge (`Sfu::bridge` in `rtc.rs`): a member of
 the room with no connection, which gets the frames everyone else's apps
