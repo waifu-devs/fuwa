@@ -61,16 +61,18 @@ after numbers are from the box above.
 
 ## Settings
 
-The protective limits are on by default because they stop a crash. The
-others are features and are unlimited unless an operator sets them.
+Caps are unlimited unless an operator sets them, with one agreed exception:
+the protective limits below have finite defaults, because they stop a crash
+rather than limit what people do. Each can be raised, or turned off with
+`unlimited`.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `FUWA_STREAMS_PER_ACCOUNT` | 32 | Apps and tabs one account keeps open at once, per part. `unlimited` turns it off. A protective limit: past it the account is asked to close one. |
+| `FUWA_STREAMS_PER_ACCOUNT` | 32 (protective) | Apps and tabs one account keeps open at once, per part. Against a runaway client or script. Admins can change it live in the instance settings (`streams_per_account`; unset is no limit). Past it the account is asked to close one. |
 | `FUWA_MAX_STREAMS` | unlimited | People online at once on this part, for everyone. Set it from the table above to answer "this instance is full" instead of slowing down for everyone. |
 | `FUWA_LIMIT_*` | unlimited | Members, channels and storage per server ([self-hosting](self-hosting.md)). |
-| Write lanes and queue | 4 and 512 per server file | Built in. Past the queue, that server's writes are told it's busy. |
-| Password checks | half the cores, 256 waiting | Built in. Past that, sign-ins and sign-ups are told the instance is busy. |
+| `FUWA_WRITE_QUEUE` | 512 (protective) | Writes one server's file may have waiting. Past it, that server's writes are told it's busy. 4 run at once, built in. |
+| `FUWA_SIGN_IN_QUEUE` | 256 (protective) | Password checks that may wait. Half the cores check at once, built in. Past it, sign-ins and sign-ups are told the instance is busy. |
 | Gateway streams per shard connection | 100 | Built in. |
 
 Adding tokio worker threads (`TOKIO_WORKER_THREADS`) beyond the core count

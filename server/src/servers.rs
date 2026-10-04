@@ -272,7 +272,7 @@ impl ServerDb {
         if value.is_ok() {
             self.fold_now_and_then().await;
         }
-        self.db.fold_if_big().await;
+        self.db.fold_if_big();
         value
     }
 
@@ -290,7 +290,7 @@ impl ServerDb {
             self.writable()?;
             self.run(actor_id, f).await
         };
-        self.db.fold_if_big().await;
+        self.db.fold_if_big();
         value
     }
 

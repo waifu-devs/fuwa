@@ -191,7 +191,9 @@ impl App {
         let federation = crate::federation::Federation::new(config.federation_allow_private);
         let shutdown = CancellationToken::new();
         let media_link = media_link(&config, &shutdown).await;
-        let streams = crate::streams::Streams::new(config.streams_per_account, config.max_streams);
+        let streams = crate::streams::Streams::new(config.max_streams);
+        crate::db::set_write_queue(config.write_queue);
+        crate::auth::set_sign_in_queue(config.sign_in_queue);
 
         let app = Arc::new(Self {
             config,

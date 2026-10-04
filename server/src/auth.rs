@@ -122,14 +122,24 @@ pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 /// and a core's worth of time for a moment: 2000 wrong sign-ins at once took
 /// a 2-core instance to 2.9 GB and everyone else's messages to 14 s
 /// (docs/capacity.md). So half the cores hash (at least one) and a few
-/// hundred wait; anyone past that is told the instance is busy. This is a
-/// protective limit, on by default.
+/// hundred wait ([`HASH_WAITING`]); anyone past that is told the instance
+/// is busy.
 struct Hashing {
     running: tokio::sync::Semaphore,
     waiting: AtomicUsize,
 }
 
-const HASH_WAITING: usize = 256;
+/// Password checks that may wait at once unless FUWA_SIGN_IN_QUEUE says
+/// otherwise. A protective default, the agreed exception to caps being
+/// unlimited by default.
+pub const HASH_WAITING: usize = 256;
+
+static WAITING_ALLOWED: AtomicUsize = AtomicUsize::new(HASH_WAITING);
+
+/// Sets how many password checks may wait at once (`None` for no limit).
+pub fn set_sign_in_queue(queue: Option<usize>) {
+    WAITING_ALLOWED.store(queue.unwrap_or(usize::MAX), Ordering::Relaxed);
+}
 
 const HASH_BUSY: &str = "this instance is busy signing people in; try again in a moment";
 
@@ -150,7 +160,7 @@ async fn hash_turn() -> Result<HashTurn> {
             self.0.fetch_sub(1, Ordering::AcqRel);
         }
     }
-    if hashing.waiting.fetch_add(1, Ordering::AcqRel) >= HASH_WAITING {
+    if hashing.waiting.fetch_add(1, Ordering::AcqRel) >= WAITING_ALLOWED.load(Ordering::Relaxed) {
         hashing.waiting.fetch_sub(1, Ordering::AcqRel);
         crate::reports::server_error("sign_in_busy", None);
         return Err(Error::ResourceExhausted(HASH_BUSY.into()));

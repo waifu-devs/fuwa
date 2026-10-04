@@ -691,6 +691,12 @@
   or with a replica on only the replica does for a tracked file, so anything
   else that checkpoints takes `Db::alone`, and a new database file gets
   `replica.track` (servers go through `Servers::replicate`).
+- Caps default to unlimited, except the protective limits Juan agreed to
+  (2026-10-04): streams per account (32, `FUWA_STREAMS_PER_ACCOUNT` and the
+  `streams_per_account` instance setting), waiting writes per file (512,
+  `FUWA_WRITE_QUEUE`) and waiting password checks (256,
+  `FUWA_SIGN_IN_QUEUE`). Each stops a crash, and each can be set to
+  `unlimited`. Anything new that is a cap on use defaults to unlimited.
 - Live event streams take a `streams::Ticket` (per account, and in all)
   held for as long as the stream is open; a gateway gives followers' streams
   connections to shards apart from its calls'.

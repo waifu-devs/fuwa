@@ -42,6 +42,7 @@ pub const FIELDS: &[&str] = &[
     "federation",
     "federation_blocked_hosts",
     "call_recordings_keep_days",
+    "streams_per_account",
     "ice_urls",
     "turn_secret",
     "automod_providers",
@@ -78,6 +79,9 @@ pub struct Settings {
     /// Instances this one won't talk to, by host name.
     pub federation_blocked_hosts: Vec<String>,
     pub call_recordings_keep_days: Option<i64>,
+    /// Live streams (apps and tabs) one account may hold open at once;
+    /// `None` for no limit. A protective default (docs/capacity.md).
+    pub streams_per_account: Option<i64>,
     pub ice_urls: Vec<String>,
     pub turn_secret: String,
     /// Moderation providers servers' AutoMod can use, keys and all; only
@@ -88,6 +92,11 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// [`streams_per_account`](Self::streams_per_account) as a count.
+    pub fn streams_per_account(&self) -> Option<usize> {
+        self.streams_per_account.map(|n| usize::try_from(n).unwrap_or(usize::MAX))
+    }
+
     /// The settings with nothing changed from a client: the environment's values.
     pub fn defaults(config: &Config) -> Self {
         Self {
@@ -112,6 +121,7 @@ impl Settings {
             federation: config.federation,
             federation_blocked_hosts: Vec::new(),
             call_recordings_keep_days: config.call_recordings_keep_days,
+            streams_per_account: config.streams_per_account.map(|n| i64::try_from(n).unwrap_or(i64::MAX)),
             ice_urls: config.ice_urls.clone(),
             turn_secret: config.turn_secret.clone(),
             automod_providers: config.automod_providers.clone(),
@@ -227,6 +237,7 @@ impl Settings {
             federation: self.federation,
             federation_blocked_hosts: self.federation_blocked_hosts.clone(),
             call_recordings_keep_days: self.call_recordings_keep_days,
+            streams_per_account: self.streams_per_account,
             ice_urls: self.ice_urls.clone(),
             turn_secret: self.turn_secret.clone(),
             turn_secret_set: !self.turn_secret.is_empty(),
@@ -328,6 +339,7 @@ impl Settings {
             "federation" => Value::from(from.federation),
             "federation_blocked_hosts" => Value::from(from.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(from.call_recordings_keep_days),
+            "streams_per_account" => Value::from(from.streams_per_account),
             "ice_urls" => Value::from(from.ice_urls.clone()),
             "turn_secret" => Value::from(from.turn_secret.clone()),
             // Keys are never sent out, so an empty one keeps the saved key.
@@ -407,6 +419,7 @@ impl Settings {
             "federation" => Value::from(self.federation),
             "federation_blocked_hosts" => Value::from(self.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(self.call_recordings_keep_days),
+            "streams_per_account" => Value::from(self.streams_per_account),
             "ice_urls" => Value::from(self.ice_urls.clone()),
             "turn_secret" => Value::from(self.turn_secret.clone()),
             "automod_providers" => {
@@ -484,6 +497,14 @@ impl Settings {
                         ));
                     }
                     days => days,
+                }
+            }
+            "streams_per_account" => {
+                self.streams_per_account = match cap(field, value)? {
+                    Some(0) => {
+                        return Err(Error::invalid("streams_per_account must be 1 or more, or unset for no limit"));
+                    }
+                    streams => streams,
                 }
             }
             "ice_urls" => {
@@ -806,6 +827,12 @@ mod tests {
         assert!(s.set_json("call_recordings_keep_days", &Value::from(0)).is_err());
         assert!(s.set_json("call_recordings_keep_days", &Value::from(30)).is_ok());
         assert!(s.set_json("call_recordings_keep_days", &Value::Null).is_ok());
+        assert_eq!(s.streams_per_account(), Some(crate::streams::PER_ACCOUNT), "a protective default");
+        assert!(s.set_json("streams_per_account", &Value::from(0)).is_err());
+        assert!(s.set_json("streams_per_account", &Value::from(8)).is_ok());
+        assert_eq!(s.streams_per_account(), Some(8));
+        assert!(s.set_json("streams_per_account", &Value::Null).is_ok());
+        assert_eq!(s.streams_per_account(), None, "unset is no limit");
     }
 
     #[test]

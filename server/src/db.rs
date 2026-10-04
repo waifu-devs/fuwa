@@ -54,7 +54,7 @@ impl std::fmt::Debug for EncryptionKey {
 pub struct Db {
     database: Database,
     path: PathBuf,
-    gate: RwLock<()>,
+    gate: Arc<RwLock<()>>,
     /// Writes running at once (see [`WRITE_LANES`]).
     lanes: Semaphore,
     /// Writes running or waiting for a lane (see [`WRITE_QUEUE`]).
@@ -63,8 +63,13 @@ pub struct Db {
     writes: AtomicU64,
     /// The replica folds this file's log itself (`replica::Replica::track`).
     replicated: AtomicBool,
-    /// A fold is running.
-    folding: AtomicBool,
+    /// Folding the log in: whether a fold is running, and when to try again
+    /// after one failed.
+    fold: Arc<Fold>,
+    /// Tasks holding a turn at writing, to catch a write started inside
+    /// another on the same file (it would wait on itself for a lane).
+    #[cfg(debug_assertions)]
+    writers: Mutex<std::collections::HashSet<tokio::task::Id>>,
     /// Connections that finished their work, kept to be used again: opening
     /// one and parsing every statement afresh was most of what a write cost.
     idle: Arc<Mutex<Vec<(Connection, u32)>>>,
@@ -79,10 +84,20 @@ pub struct Db {
 /// quarter (docs/capacity.md).
 pub const WRITE_LANES: usize = 4;
 
-/// Writes to one file that may wait at once. Past this the file is busy:
-/// new writes are turned away straight away, rather than piling up until
-/// they time out and taking memory from every other server.
+/// Writes to one file that may wait at once, unless FUWA_WRITE_QUEUE says
+/// otherwise. Past this the file is busy: new writes are turned away
+/// straight away, rather than piling up until they time out and taking
+/// memory from every other server. A protective default, the agreed
+/// exception to caps being unlimited by default.
 pub const WRITE_QUEUE: usize = 512;
+
+/// The queue in force for every file in this process ([`set_write_queue`]).
+static QUEUE: AtomicUsize = AtomicUsize::new(WRITE_QUEUE);
+
+/// Sets how many writes each file may have waiting (`None` for no limit).
+pub fn set_write_queue(queue: Option<usize>) {
+    QUEUE.store(queue.unwrap_or(usize::MAX), Ordering::Relaxed);
+}
 
 /// What a write is told when its file's queue is full.
 pub const BUSY: &str = "this server is busy right now; try again in a moment";
@@ -99,6 +114,21 @@ pub struct Writing<'a> {
     _lane: SemaphorePermit<'a>,
     _gate: RwLockReadGuard<'a, ()>,
     _queued: Queued<'a>,
+    #[cfg(debug_assertions)]
+    _writer: Writer<'a>,
+}
+
+/// The task holding a turn, forgotten when the turn ends.
+#[cfg(debug_assertions)]
+struct Writer<'a>(&'a Mutex<std::collections::HashSet<tokio::task::Id>>, Option<tokio::task::Id>);
+
+#[cfg(debug_assertions)]
+impl Drop for Writer<'_> {
+    fn drop(&mut self) {
+        if let Some(id) = self.1 {
+            self.0.lock().unwrap_or_else(|p| p.into_inner()).remove(&id);
+        }
+    }
 }
 
 /// A place in a file's queue, given back however the write ends.
@@ -192,16 +222,31 @@ impl Db {
     /// A write's turn: a place in the queue (or [`BUSY`] when it's full), then
     /// one of the lanes, then the gate, shared.
     pub async fn writing(&self) -> Result<Writing<'_>> {
-        if self.queued.fetch_add(1, Ordering::AcqRel) >= WRITE_QUEUE {
+        if self.queued.fetch_add(1, Ordering::AcqRel) >= QUEUE.load(Ordering::Relaxed) {
             self.queued.fetch_sub(1, Ordering::AcqRel);
             crate::reports::server_error("server_busy", None);
             return Err(Error::ResourceExhausted(BUSY.into()));
         }
         let queued = Queued(&self.queued);
+        #[cfg(debug_assertions)]
+        let writer = {
+            let id = tokio::task::try_id();
+            if let Some(id) = id {
+                let fresh = self.writers.lock().unwrap_or_else(|p| p.into_inner()).insert(id);
+                debug_assert!(fresh, "a write started inside another write on the same file");
+            }
+            Writer(&self.writers, id)
+        };
         self.writes.fetch_add(1, Ordering::Relaxed);
         let lane = self.lanes.acquire().await.map_err(|_| Error::internal("the write lanes closed"))?;
         let gate = self.gate.read().await;
-        Ok(Writing { _lane: lane, _gate: gate, _queued: queued })
+        Ok(Writing {
+            _lane: lane,
+            _gate: gate,
+            _queued: queued,
+            #[cfg(debug_assertions)]
+            _writer: writer,
+        })
     }
 
     /// Writes running or waiting on this file right now.
@@ -219,33 +264,33 @@ impl Db {
         self.replicated.store(true, Ordering::Release);
     }
 
-    /// Folds the log into the file once it has passed [`FOLD_BYTES`], with
-    /// writes held meanwhile, unless the replica does that for this file.
-    /// Called after writes, with none of the write's own guards held.
-    pub async fn fold_if_big(&self) {
-        if self.replicated.load(Ordering::Acquire)
-            || std::fs::metadata(self.log_path()).map(|m| m.len()).unwrap_or(0) < FOLD_BYTES
-            || self.folding.swap(true, Ordering::AcqRel)
-        {
+    /// Folds the log into the file once it has passed [`FOLD_BYTES`], unless
+    /// the replica does that for this file. Called after writes, with none of
+    /// the write's own guards held. The fold runs on a task of its own, so no
+    /// request waits for it or can stop it halfway by going away; writes wait
+    /// while it runs. After a fold fails the file carries on with a longer
+    /// log, and the next try waits [`FOLD_RETRY`] or another [`FOLD_BYTES`].
+    pub fn fold_if_big(&self) {
+        if self.replicated.load(Ordering::Acquire) {
             return;
         }
-        // Given back however this ends, a caller that stops waiting included.
-        struct Folding<'a>(&'a AtomicBool);
-        impl Drop for Folding<'_> {
-            fn drop(&mut self) {
-                self.0.store(false, Ordering::Release);
+        let log = std::fs::metadata(self.log_path()).map(|m| m.len()).unwrap_or(0);
+        if log < FOLD_BYTES || !self.fold.may_start(log) {
+            return;
+        }
+        let (database, gate, fold) = (self.database.clone(), self.gate.clone(), self.fold.clone());
+        tokio::spawn(async move {
+            let started = std::time::Instant::now();
+            let folded = {
+                let _alone = gate.write_owned().await;
+                checkpoint_with(&database, FOLD_ATTEMPTS).await
+            };
+            crate::reports::server_timing("db.fold", started.elapsed());
+            if folded.is_err() {
+                tracing::warn!("couldn't fold a database's log into it; trying again later");
             }
-        }
-        let _folding = Folding(&self.folding);
-        let started = std::time::Instant::now();
-        let folded = {
-            let _alone = self.alone().await;
-            self.checkpoint().await
-        };
-        crate::reports::server_timing("db.fold", started.elapsed());
-        if folded.is_err() {
-            tracing::warn!(file = %self.path.display(), "couldn't fold a database's log into it; trying again after a later write");
-        }
+            fold.finished(folded.is_ok(), log);
+        });
     }
 
     /// Waits for the writes running now to finish and keeps new ones waiting.
@@ -257,14 +302,54 @@ impl Db {
     /// writers wait while it runs; it answers busy if a transaction is open,
     /// so it tries again a few times.
     pub async fn checkpoint(&self) -> Result<()> {
-        let conn = connect(self)?;
-        let mut attempt = 0;
-        loop {
-            match pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").await {
-                Err(err) if is_conflict(&err) => retry_after(&err, &mut attempt).await?,
-                other => return other,
-            }
+        checkpoint_with(self, ATTEMPTS).await
+    }
+}
+
+/// [`Db::checkpoint`], giving up after `attempts`.
+async fn checkpoint_with(database: &Database, attempts: u32) -> Result<()> {
+    let conn = connect(database)?;
+    let mut attempt = 0;
+    loop {
+        match pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").await {
+            Err(err) if is_conflict(&err) && attempt + 1 < attempts => retry_after(&err, &mut attempt).await?,
+            other => return other,
         }
+    }
+}
+
+/// Tries a fold of its own makes before giving up until later: writes wait
+/// while it runs, so it doesn't keep them waiting through many.
+const FOLD_ATTEMPTS: u32 = 3;
+
+/// How long a file waits after a failed fold before trying again (unless its
+/// log grows by another [`FOLD_BYTES`] first).
+pub const FOLD_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Whether a fold is running, and when the next may start after one failed.
+#[derive(Default)]
+struct Fold {
+    running: AtomicBool,
+    /// After a failed fold: when, and how long the log was then.
+    failed: Mutex<Option<(std::time::Instant, u64)>>,
+}
+
+impl Fold {
+    /// Claims the fold, unless one is running or a failed one is too recent.
+    fn may_start(&self, log: u64) -> bool {
+        let failed = *self.failed.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((at, then)) = failed
+            && at.elapsed() < FOLD_RETRY
+            && log < then.saturating_add(FOLD_BYTES)
+        {
+            return false;
+        }
+        !self.running.swap(true, Ordering::AcqRel)
+    }
+
+    fn finished(&self, ok: bool, log: u64) {
+        *self.failed.lock().unwrap_or_else(|p| p.into_inner()) = (!ok).then(|| (std::time::Instant::now(), log));
+        self.running.store(false, Ordering::Release);
     }
 }
 
@@ -289,12 +374,14 @@ pub async fn open(path: &Path, key: Option<&EncryptionKey>, migrations: &[&str])
     Ok(Db {
         database: db,
         path: path.to_path_buf(),
-        gate: RwLock::new(()),
+        gate: Arc::new(RwLock::new(())),
         lanes: Semaphore::new(WRITE_LANES),
         queued: AtomicUsize::new(0),
         writes: AtomicU64::new(0),
         replicated: AtomicBool::new(false),
-        folding: AtomicBool::new(false),
+        fold: Arc::default(),
+        #[cfg(debug_assertions)]
+        writers: Mutex::default(),
         idle: Arc::new(Mutex::new(Vec::new())),
         keep: KEEP_IDLE,
     })
@@ -406,7 +493,7 @@ pub async fn write_once<T>(db: &Db, f: impl AsyncFnOnce(&Connection) -> Result<T
         }
         result
     };
-    db.fold_if_big().await;
+    db.fold_if_big();
     result
 }
 
@@ -417,7 +504,7 @@ pub async fn write<T>(db: &Db, f: impl AsyncFnOnce(&Connection) -> Result<T> + C
         let _writing = db.writing().await?;
         transaction(&*db.conn()?, f).await
     };
-    db.fold_if_big().await;
+    db.fold_if_big();
     result
 }
 
@@ -553,8 +640,15 @@ mod tests {
             .await
             .unwrap();
         }
-        let log = std::fs::metadata(db.log_path()).map(|m| m.len()).unwrap_or(0);
-        assert!(log < FOLD_BYTES, "the log was folded in, now {log} bytes");
+        // The fold runs on a task of its own.
+        let log = || std::fs::metadata(db.log_path()).map(|m| m.len()).unwrap_or(0);
+        for _ in 0..200 {
+            if log() < FOLD_BYTES {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(log() < FOLD_BYTES, "the log was folded in, now {} bytes", log());
         let count = query_one(&db.conn().unwrap(), "SELECT count(*) FROM t", (), |r| r.get::<i64>(0)).await.unwrap();
         assert_eq!(count, Some(80));
     }
@@ -562,22 +656,30 @@ mod tests {
     #[tokio::test]
     async fn a_full_queue_says_busy_and_gives_places_back() {
         let (_dir, db) = scratch(&[]).await;
-        let mut held = Vec::new();
-        for _ in 0..WRITE_LANES {
-            held.push(db.writing().await.unwrap());
+        let db = Arc::new(db);
+        let (release, _) = tokio::sync::broadcast::channel::<()>(1);
+        // Writes from tasks of their own: 4 get lanes and hold them, the rest
+        // wait for one, holding places in the queue.
+        let held: Vec<_> = (0..WRITE_QUEUE)
+            .map(|_| {
+                let (db, mut released) = (db.clone(), release.subscribe());
+                tokio::spawn(async move {
+                    let _turn = db.writing().await.unwrap();
+                    let _ = released.recv().await;
+                })
+            })
+            .collect();
+        while db.queued() < WRITE_QUEUE {
+            tokio::task::yield_now().await;
         }
-        // The rest wait for a lane, holding places in the queue.
-        let mut waiting: Vec<_> = (0..WRITE_QUEUE - WRITE_LANES).map(|_| Box::pin(db.writing())).collect();
-        for w in &mut waiting {
-            assert!(futures::poll!(w.as_mut()).is_pending());
-        }
-        assert_eq!(db.queued(), WRITE_QUEUE);
         match db.writing().await {
             Err(Error::ResourceExhausted(message)) => assert_eq!(message, BUSY),
             other => panic!("expected busy, got {:?}", other.map(|_| ())),
         }
-        drop(waiting);
-        drop(held);
+        release.send(()).unwrap();
+        for task in held {
+            task.await.unwrap();
+        }
         assert_eq!(db.queued(), 0);
         db.writing().await.unwrap();
     }

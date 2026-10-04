@@ -413,7 +413,8 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
         // A file no message has (yet, or any more) is never served, whatever
         // its bytes look like; anything else is a picture.
         Ok(None) => {
-            match async { crate::attachments::is_loose(&*app.servers.get(&server_id).await?.read()?, &id).await }.await {
+            match async { crate::attachments::is_loose(&*app.servers.get(&server_id).await?.read()?, &id).await }.await
+            {
                 Ok(false) => {}
                 Ok(true) => return plain(StatusCode::NOT_FOUND, "not found"),
                 Err(_) => {

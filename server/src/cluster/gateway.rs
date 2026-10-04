@@ -219,7 +219,7 @@ impl Gateway {
             directory_channel.clone(),
             WithKey(key.clone()),
         );
-        let followers = crate::streams::Streams::new(config.streams_per_account, config.max_streams);
+        let followers = crate::streams::Streams::new(config.max_streams);
         let gateway = Arc::new(Self {
             settings: watch::Sender::new(Arc::new(Settings::defaults(&config))),
             config,
@@ -869,7 +869,7 @@ impl EventService for Events {
         for cursor in &mut cursors {
             cursor.server_id = parse_id("server_id", &cursor.server_id).map_err(Status::from)?;
         }
-        let ticket = gateway.followers.open(&account_id)?;
+        let ticket = gateway.followers.open(&account_id, gateway.settings().streams_per_account())?;
         let (opened, gone) =
             Self::open(&gateway, &metadata, &cursors, Patience::new(gateway.config.cluster.ride_out)).await?;
 

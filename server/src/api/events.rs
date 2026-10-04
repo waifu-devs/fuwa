@@ -179,7 +179,7 @@ impl EventService for Api {
         if cursors.is_empty() || cursors.len() > MAX_SERVERS {
             return Err(Error::invalid(format!("follow 1 to {MAX_SERVERS} servers per stream")).into());
         }
-        let ticket = self.app.streams.open(&account.id)?;
+        let ticket = self.app.streams.open(&account.id, self.app.settings().streams_per_account())?;
 
         // Start listening before replaying, so nothing committed in between is missed.
         // A server deleted, or left (or been removed from) while the client was

@@ -957,6 +957,13 @@ impl DmDb {
     /// the outbox, one write at a time so watchers get events in commit order.
     /// A clash runs `f` again (see [`db::transaction`]).
     async fn write<T>(&self, f: impl AsyncFnOnce(&Connection, &mut Outbox) -> Result<T> + Clone) -> Result<T> {
+        let result = self.write_turn(f).await;
+        // With the write's turn given back, the log is folded in once it's big.
+        self.db.fold_if_big();
+        result
+    }
+
+    async fn write_turn<T>(&self, f: impl AsyncFnOnce(&Connection, &mut Outbox) -> Result<T> + Clone) -> Result<T> {
         let _writing = self.db.writing().await?;
         let conn = self.db.conn()?;
         let mut attempt = 0;

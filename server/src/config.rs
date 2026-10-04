@@ -106,11 +106,20 @@ pub struct Config {
     /// FUWA_S3_* (a bucket) or FUWA_REPLICA_PATH (a directory). None is off.
     pub replica: Option<ReplicaConfig>,
     /// FUWA_STREAMS_PER_ACCOUNT: live connections (apps and tabs) one account
-    /// may hold open at once on this part, default 32; `unlimited` for none.
+    /// may hold open at once on this part, default 32 (a protective default);
+    /// `unlimited` for none. Admins can change it in the instance settings.
     pub streams_per_account: Option<usize>,
     /// FUWA_MAX_STREAMS: live connections this part holds open at once, for
     /// everyone. Unlimited by default; see docs/capacity.md for what a box holds.
     pub max_streams: Option<usize>,
+    /// FUWA_WRITE_QUEUE: writes one server's file may have waiting at once
+    /// before that server answers busy, default 512 (a protective default);
+    /// `unlimited` for none.
+    pub write_queue: Option<usize>,
+    /// FUWA_SIGN_IN_QUEUE: password checks that may wait at once before
+    /// sign-ins answer busy, default 256 (a protective default); `unlimited`
+    /// for none.
+    pub sign_in_queue: Option<usize>,
 }
 
 impl std::fmt::Debug for Config {
@@ -136,6 +145,8 @@ impl std::fmt::Debug for Config {
             .field("replica", &self.replica)
             .field("streams_per_account", &self.streams_per_account)
             .field("max_streams", &self.max_streams)
+            .field("write_queue", &self.write_queue)
+            .field("sign_in_queue", &self.sign_in_queue)
             .field("automod_providers", &self.automod_providers)
             .field("gifs", &self.gifs)
             .finish()
@@ -493,6 +504,8 @@ impl Config {
         };
         let streams_per_account = count("FUWA_STREAMS_PER_ACCOUNT", Some(crate::streams::PER_ACCOUNT))?;
         let max_streams = count("FUWA_MAX_STREAMS", None)?;
+        let write_queue = count("FUWA_WRITE_QUEUE", Some(crate::db::WRITE_QUEUE))?;
+        let sign_in_queue = count("FUWA_SIGN_IN_QUEUE", Some(crate::auth::HASH_WAITING))?;
 
         let replica = match (replica(&get)?, cluster.role) {
             // Only the parts that keep files replicate them: a split
@@ -555,6 +568,8 @@ impl Config {
             replica,
             streams_per_account,
             max_streams,
+            write_queue,
+            sign_in_queue,
         })
     }
 }
