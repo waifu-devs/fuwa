@@ -2,8 +2,8 @@
 // @generated from file fuwa/v1/agent.proto (package fuwa.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Member, User } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/agent.proto.
  */
 export const file_fuwa_v1_agent: GenFile = /*@__PURE__*/
-  fileDesc("ChNmdXdhL3YxL2FnZW50LnByb3RvEgdmdXdhLnYxIsgBCgVBZ2VudBIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEhAKCG93bmVyX2lkGAIgASgJEg4KBnB1YmxpYxgDIAEoCBILCgNiaW8YBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMgoObGFzdF9hY3RpdmVfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg8KB3NlcnZlcnMYByABKAUiEwoRTGlzdEFnZW50c1JlcXVlc3QiNAoSTGlzdEFnZW50c1Jlc3BvbnNlEh4KBmFnZW50cxgBIAMoCzIOLmZ1d2EudjEuQWdlbnQiPAoSQ3JlYXRlQWdlbnRSZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSJDChNDcmVhdGVBZ2VudFJlc3BvbnNlEh0KBWFnZW50GAEgASgLMg4uZnV3YS52MS5BZ2VudBINCgV0b2tlbhgCIAEoCSK0AQoSVXBkYXRlQWdlbnRSZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJEhkKDGRpc3BsYXlfbmFtZRgCIAEoCUgAiAEBEhcKCmF2YXRhcl91cmwYAyABKAlIAYgBARIQCgNiaW8YBCABKAlIAogBARITCgZwdWJsaWMYBSABKAhIA4gBAUIPCg1fZGlzcGxheV9uYW1lQg0KC19hdmF0YXJfdXJsQgYKBF9iaW9CCQoHX3B1YmxpYyI0ChNVcGRhdGVBZ2VudFJlc3BvbnNlEh0KBWFnZW50GAEgASgLMg4uZnV3YS52MS5BZ2VudCIqChZSZXNldEFnZW50VG9rZW5SZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJIigKF1Jlc2V0QWdlbnRUb2tlblJlc3BvbnNlEg0KBXRva2VuGAEgASgJIiYKEkRlbGV0ZUFnZW50UmVxdWVzdBIQCghhZ2VudF9pZBgBIAEoCSIVChNEZWxldGVBZ2VudFJlc3BvbnNlIjYKD0FkZEFnZW50UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiMwoQQWRkQWdlbnRSZXNwb25zZRIfCgZtZW1iZXIYASABKAsyDy5mdXdhLnYxLk1lbWJlcjLKAwoMQWdlbnRTZXJ2aWNlEkUKCkxpc3RBZ2VudHMSGi5mdXdhLnYxLkxpc3RBZ2VudHNSZXF1ZXN0GhsuZnV3YS52MS5MaXN0QWdlbnRzUmVzcG9uc2USSAoLQ3JlYXRlQWdlbnQSGy5mdXdhLnYxLkNyZWF0ZUFnZW50UmVxdWVzdBocLmZ1d2EudjEuQ3JlYXRlQWdlbnRSZXNwb25zZRJICgtVcGRhdGVBZ2VudBIbLmZ1d2EudjEuVXBkYXRlQWdlbnRSZXF1ZXN0GhwuZnV3YS52MS5VcGRhdGVBZ2VudFJlc3BvbnNlElQKD1Jlc2V0QWdlbnRUb2tlbhIfLmZ1d2EudjEuUmVzZXRBZ2VudFRva2VuUmVxdWVzdBogLmZ1d2EudjEuUmVzZXRBZ2VudFRva2VuUmVzcG9uc2USSAoLRGVsZXRlQWdlbnQSGy5mdXdhLnYxLkRlbGV0ZUFnZW50UmVxdWVzdBocLmZ1d2EudjEuRGVsZXRlQWdlbnRSZXNwb25zZRI/CghBZGRBZ2VudBIYLmZ1d2EudjEuQWRkQWdlbnRSZXF1ZXN0GhkuZnV3YS52MS5BZGRBZ2VudFJlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChNmdXdhL3YxL2FnZW50LnByb3RvEgdmdXdhLnYxIsgBCgVBZ2VudBIbCgR1c2VyGAEgASgLMg0uZnV3YS52MS5Vc2VyEhAKCG93bmVyX2lkGAIgASgJEg4KBnB1YmxpYxgDIAEoCBILCgNiaW8YBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMgoObGFzdF9hY3RpdmVfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg8KB3NlcnZlcnMYByABKAUiEwoRTGlzdEFnZW50c1JlcXVlc3QiNAoSTGlzdEFnZW50c1Jlc3BvbnNlEh4KBmFnZW50cxgBIAMoCzIOLmZ1d2EudjEuQWdlbnQiPAoSQ3JlYXRlQWdlbnRSZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSJDChNDcmVhdGVBZ2VudFJlc3BvbnNlEh0KBWFnZW50GAEgASgLMg4uZnV3YS52MS5BZ2VudBINCgV0b2tlbhgCIAEoCSK0AQoSVXBkYXRlQWdlbnRSZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJEhkKDGRpc3BsYXlfbmFtZRgCIAEoCUgAiAEBEhcKCmF2YXRhcl91cmwYAyABKAlIAYgBARIQCgNiaW8YBCABKAlIAogBARITCgZwdWJsaWMYBSABKAhIA4gBAUIPCg1fZGlzcGxheV9uYW1lQg0KC19hdmF0YXJfdXJsQgYKBF9iaW9CCQoHX3B1YmxpYyI0ChNVcGRhdGVBZ2VudFJlc3BvbnNlEh0KBWFnZW50GAEgASgLMg4uZnV3YS52MS5BZ2VudCIqChZSZXNldEFnZW50VG9rZW5SZXF1ZXN0EhAKCGFnZW50X2lkGAEgASgJIigKF1Jlc2V0QWdlbnRUb2tlblJlc3BvbnNlEg0KBXRva2VuGAEgASgJIiYKEkRlbGV0ZUFnZW50UmVxdWVzdBIQCghhZ2VudF9pZBgBIAEoCSIVChNEZWxldGVBZ2VudFJlc3BvbnNlIjYKD0FkZEFnZW50UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiMwoQQWRkQWdlbnRSZXNwb25zZRIfCgZtZW1iZXIYASABKAsyDy5mdXdhLnYxLk1lbWJlciJECglNY3BBY2Nlc3MSJAoEbW9kZRgBIAEoDjIWLmZ1d2EudjEuTWNwQWNjZXNzTW9kZRIRCglhZ2VudF9pZHMYAiADKAkiKAoTR2V0TWNwQWNjZXNzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiOgoUR2V0TWNwQWNjZXNzUmVzcG9uc2USIgoGYWNjZXNzGAEgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3MiTAoTU2V0TWNwQWNjZXNzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSIgoGYWNjZXNzGAIgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3MiOgoUU2V0TWNwQWNjZXNzUmVzcG9uc2USIgoGYWNjZXNzGAEgASgLMhIuZnV3YS52MS5NY3BBY2Nlc3MqfgoNTWNwQWNjZXNzTW9kZRIfChtNQ1BfQUNDRVNTX01PREVfVU5TUEVDSUZJRUQQABIXChNNQ1BfQUNDRVNTX01PREVfQUxMEAESGgoWTUNQX0FDQ0VTU19NT0RFX0NIT1NFThACEhcKE01DUF9BQ0NFU1NfTU9ERV9PRkYQAzLkBAoMQWdlbnRTZXJ2aWNlEkUKCkxpc3RBZ2VudHMSGi5mdXdhLnYxLkxpc3RBZ2VudHNSZXF1ZXN0GhsuZnV3YS52MS5MaXN0QWdlbnRzUmVzcG9uc2USSAoLQ3JlYXRlQWdlbnQSGy5mdXdhLnYxLkNyZWF0ZUFnZW50UmVxdWVzdBocLmZ1d2EudjEuQ3JlYXRlQWdlbnRSZXNwb25zZRJICgtVcGRhdGVBZ2VudBIbLmZ1d2EudjEuVXBkYXRlQWdlbnRSZXF1ZXN0GhwuZnV3YS52MS5VcGRhdGVBZ2VudFJlc3BvbnNlElQKD1Jlc2V0QWdlbnRUb2tlbhIfLmZ1d2EudjEuUmVzZXRBZ2VudFRva2VuUmVxdWVzdBogLmZ1d2EudjEuUmVzZXRBZ2VudFRva2VuUmVzcG9uc2USSAoLRGVsZXRlQWdlbnQSGy5mdXdhLnYxLkRlbGV0ZUFnZW50UmVxdWVzdBocLmZ1d2EudjEuRGVsZXRlQWdlbnRSZXNwb25zZRI/CghBZGRBZ2VudBIYLmZ1d2EudjEuQWRkQWdlbnRSZXF1ZXN0GhkuZnV3YS52MS5BZGRBZ2VudFJlc3BvbnNlEksKDEdldE1jcEFjY2VzcxIcLmZ1d2EudjEuR2V0TWNwQWNjZXNzUmVxdWVzdBodLmZ1d2EudjEuR2V0TWNwQWNjZXNzUmVzcG9uc2USSwoMU2V0TWNwQWNjZXNzEhwuZnV3YS52MS5TZXRNY3BBY2Nlc3NSZXF1ZXN0Gh0uZnV3YS52MS5TZXRNY3BBY2Nlc3NSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.Agent
@@ -317,6 +317,140 @@ export const AddAgentResponseSchema: GenMessage<AddAgentResponse> = /*@__PURE__*
   messageDesc(file_fuwa_v1_agent, 12);
 
 /**
+ * @generated from message fuwa.v1.McpAccess
+ */
+export type McpAccess = Message<"fuwa.v1.McpAccess"> & {
+  /**
+   * @generated from field: fuwa.v1.McpAccessMode mode = 1;
+   */
+  mode: McpAccessMode;
+
+  /**
+   * For MCP_ACCESS_MODE_CHOSEN: the agents' account ids, at most 100.
+   *
+   * @generated from field: repeated string agent_ids = 2;
+   */
+  agentIds: string[];
+};
+
+/**
+ * Describes the message fuwa.v1.McpAccess.
+ * Use `create(McpAccessSchema)` to create a new message.
+ */
+export const McpAccessSchema: GenMessage<McpAccess> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 13);
+
+/**
+ * @generated from message fuwa.v1.GetMcpAccessRequest
+ */
+export type GetMcpAccessRequest = Message<"fuwa.v1.GetMcpAccessRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.GetMcpAccessRequest.
+ * Use `create(GetMcpAccessRequestSchema)` to create a new message.
+ */
+export const GetMcpAccessRequestSchema: GenMessage<GetMcpAccessRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 14);
+
+/**
+ * @generated from message fuwa.v1.GetMcpAccessResponse
+ */
+export type GetMcpAccessResponse = Message<"fuwa.v1.GetMcpAccessResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.McpAccess access = 1;
+   */
+  access?: McpAccess | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.GetMcpAccessResponse.
+ * Use `create(GetMcpAccessResponseSchema)` to create a new message.
+ */
+export const GetMcpAccessResponseSchema: GenMessage<GetMcpAccessResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 15);
+
+/**
+ * @generated from message fuwa.v1.SetMcpAccessRequest
+ */
+export type SetMcpAccessRequest = Message<"fuwa.v1.SetMcpAccessRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: fuwa.v1.McpAccess access = 2;
+   */
+  access?: McpAccess | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.SetMcpAccessRequest.
+ * Use `create(SetMcpAccessRequestSchema)` to create a new message.
+ */
+export const SetMcpAccessRequestSchema: GenMessage<SetMcpAccessRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 16);
+
+/**
+ * @generated from message fuwa.v1.SetMcpAccessResponse
+ */
+export type SetMcpAccessResponse = Message<"fuwa.v1.SetMcpAccessResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.McpAccess access = 1;
+   */
+  access?: McpAccess | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.SetMcpAccessResponse.
+ * Use `create(SetMcpAccessResponseSchema)` to create a new message.
+ */
+export const SetMcpAccessResponseSchema: GenMessage<SetMcpAccessResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_agent, 17);
+
+/**
+ * @generated from enum fuwa.v1.McpAccessMode
+ */
+export enum McpAccessMode {
+  /**
+   * Every agent in the server, as MCP_ACCESS_MODE_ALL.
+   *
+   * @generated from enum value: MCP_ACCESS_MODE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: MCP_ACCESS_MODE_ALL = 1;
+   */
+  ALL = 1,
+
+  /**
+   * Only the agents in McpAccess.agent_ids.
+   *
+   * @generated from enum value: MCP_ACCESS_MODE_CHOSEN = 2;
+   */
+  CHOSEN = 2,
+
+  /**
+   * No agent: the server can't be used through MCP.
+   *
+   * @generated from enum value: MCP_ACCESS_MODE_OFF = 3;
+   */
+  OFF = 3,
+}
+
+/**
+ * Describes the enum fuwa.v1.McpAccessMode.
+ */
+export const McpAccessModeSchema: GenEnum<McpAccessMode> = /*@__PURE__*/
+  enumDesc(file_fuwa_v1_agent, 0);
+
+/**
  * Agents: accounts that programs drive (bots, assistants, integrations),
  * made and owned by a person. An agent signs in with its token as a bearer
  * token and then uses the same API people do: it reads with EventService,
@@ -396,6 +530,30 @@ export const AgentService: GenService<{
     methodKind: "unary";
     input: typeof AddAgentRequestSchema;
     output: typeof AddAgentResponseSchema;
+  },
+  /**
+   * Which of a server's agents may use the instance's MCP endpoint
+   * (docs/mcp.md). Any member may read it. What an agent can do there is
+   * still up to its roles: this only closes the MCP door, and the agent's
+   * token keeps working with this API.
+   *
+   * @generated from rpc fuwa.v1.AgentService.GetMcpAccess
+   */
+  getMcpAccess: {
+    methodKind: "unary";
+    input: typeof GetMcpAccessRequestSchema;
+    output: typeof GetMcpAccessResponseSchema;
+  },
+  /**
+   * Needs MANAGE_SERVER. Kept in the audit log as a server update of
+   * "mcp_access".
+   *
+   * @generated from rpc fuwa.v1.AgentService.SetMcpAccess
+   */
+  setMcpAccess: {
+    methodKind: "unary";
+    input: typeof SetMcpAccessRequestSchema;
+    output: typeof SetMcpAccessResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_agent, 0);

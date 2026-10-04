@@ -42,6 +42,7 @@ impl FuwaApp {
             Nav::Home { dm } => self.dm_sidebar(dm, window, cx),
             Nav::Instance { key } => self.instance_sidebar(&key, window, cx),
         };
+        let call_bar = self.call_bar(window, cx);
         div()
             .w(px(SIDEBAR))
             .h_full()
@@ -64,6 +65,7 @@ impl FuwaApp {
                     .child(header),
             )
             .child(div().id("sidebar-scroll").flex_1().overflow_y_scroll().px(px(8.0)).pb(px(12.0)).child(body))
+            .when_some(call_bar, |el, bar| el.child(bar))
             .child(self.me_panel(window, cx))
     }
 
@@ -379,6 +381,10 @@ impl FuwaApp {
                 ));
                 n += 1;
                 y += ROW;
+                if let Some((people, height)) = self.voice_people(key, server_id, &c.id, window, cx) {
+                    rows = rows.child(people);
+                    y += height;
+                }
             }
         }
         if let Some(target) = highlight {
@@ -423,11 +429,13 @@ impl FuwaApp {
         cx: &mut Context<Self>,
     ) -> gpui_kit::Stateful<gpui_kit::Div> {
         let kind = pb::ChannelType::try_from(c.r#type).unwrap_or(pb::ChannelType::Text);
-        let (glyph, openable) = (channel_glyph(c), kind != pb::ChannelType::Voice);
-        let strong = active || unread > 0;
+        let (glyph, voice) = (channel_glyph(c), kind == pb::ChannelType::Voice);
+        // The voice channel you're in reads as the one you're in.
+        let joined = voice
+            && self.core.call().is_some_and(|v| v.instance == key && v.server_id == server && v.channel_id == c.id);
+        let strong = active || unread > 0 || joined;
         let hover = alpha(p.primary, 0.08);
-        // Who's in a voice channel. Joining from the desktop app comes with
-        // its sound (src/core/calls.rs); until then the web app does it.
+        // Who's in a voice channel; they're listed under it too.
         let in_voice = if kind == pb::ChannelType::Voice {
             self.core.shared.read(|s| {
                 s.instance(key).map(|i| crate::core::calls::in_channel(&i.voice, server, &c.id).len()).unwrap_or(0)
@@ -446,13 +454,27 @@ impl FuwaApp {
             .gap(px(8.0))
             .rounded(corner(10.0))
             .text_color(if strong { p.foreground } else { p.muted_foreground })
-            .when(openable, |el| el.cursor_pointer().hover(move |s| s.bg(hover)))
-            .when(!openable, |el| el.opacity(0.55))
-            .when(openable, |el| {
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover))
+            .when(!voice, |el| {
                 let (key, server, id) = (key.to_owned(), server.to_owned(), c.id.clone());
                 el.on_click(cx.listener(move |this, _, window, cx| this.open_channel(&key, &server, &id, window, cx)))
             })
-            .child(icon(glyph).size(px(17.0)).text_color(if active { p.primary } else { p.muted_foreground }))
+            // A voice channel joins it, with sound (src/core/voice).
+            .when(voice, |el| {
+                let (key, server, id) = (key.to_owned(), server.to_owned(), c.id.clone());
+                el.on_click(cx.listener(move |this, _, _, cx| {
+                    this.core.join_voice(&key, &server, &id);
+                    cx.notify();
+                }))
+            })
+            .child(icon(glyph).size(px(17.0)).text_color(if joined {
+                p.success
+            } else if active {
+                p.primary
+            } else {
+                p.muted_foreground
+            }))
             .child(
                 div()
                     .flex_1()
@@ -467,7 +489,7 @@ impl FuwaApp {
             })
             .when(unread > 0 && !active, |el| el.child(badge(unread, p).border_color(p.sidebar)))
             .when(in_voice > 0, |el| {
-                el.opacity(1.0).child(
+                el.child(
                     div()
                         .flex()
                         .items_center()
