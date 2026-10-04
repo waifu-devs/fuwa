@@ -46,6 +46,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0019_secure_history.sql"),
     include_str!("../migrations/server/0020_federation.sql"),
     include_str!("../migrations/server/0021_mcp_access.sql"),
+    include_str!("../migrations/server/0022_threads.sql"),
     include_str!("../migrations/server/0025_banner_onboarding.sql"),
 ];
 
@@ -725,7 +726,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
         conn,
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
                 default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome,
-                sso, sso_required, sso_recheck_days, region,
+                sso, sso_required, sso_recheck_days, region, thread_archive_hours,
                 banner_url, banner_focus_x, banner_focus_y, accent_color, onboarding
          FROM server, usage WHERE usage.id = 1",
         (),
@@ -752,11 +753,12 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 sso_host: if r.get::<bool>(17)? { crate::sso::Provider::parse(&r.get::<String>(16)?).host() } else { String::new() },
                 sso_recheck_days: r.get(18)?,
                 region: r.get(19)?,
-                banner_url: r.get(20)?,
-                banner_focus_x: r.get(21)?,
-                banner_focus_y: r.get(22)?,
-                accent_color: r.get(23)?,
-                has_onboarding: decode_onboarding(&r.get::<Vec<u8>>(24)?).enabled,
+                thread_archive_hours: r.get(20)?,
+                banner_url: r.get(21)?,
+                banner_focus_x: r.get(22)?,
+                banner_focus_y: r.get(23)?,
+                accent_color: r.get(24)?,
+                has_onboarding: decode_onboarding(&r.get::<Vec<u8>>(25)?).enabled,
             })
         },
     )

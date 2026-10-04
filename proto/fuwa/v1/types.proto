@@ -272,6 +272,12 @@ enum Permission {
   // Record voice channels on their own device. Everyone in the channel
   // sees while someone records.
   PERMISSION_RECORD = 25;
+
+  // Server-wide, and per channel through overwrites.
+
+  // Start a thread under a message. Replying in a thread that's already
+  // there needs SEND_MESSAGES.
+  PERMISSION_CREATE_THREADS = 26;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -360,6 +366,10 @@ message Server {
   // The region its data is kept in (Node.regions): its messages, files,
   // recordings and calls. Empty for the home region.
   string region = 21;
+  // Threads nobody has replied in for this many hours are archived: they
+  // leave the channel's list of threads until someone replies again. Zero
+  // never archives them.
+  int32 thread_archive_hours = 22;
   // A wide picture across the top of its welcome, applying and onboarding
   // screens, its invites and its Browse card: an upload on this instance
   // (MEDIA_PURPOSE_BANNER, uploaded for this server), or empty for none.
@@ -789,6 +799,33 @@ message Message {
   MessageWebhook webhook = 15;
   // In a shared channel: who wrote it and from which server.
   SharedAuthor shared = 16;
+  // A reply in a thread: the id of the message the thread is under. Thread
+  // replies stay out of the channel's own list unless also_in_channel.
+  string thread_id = 18;
+  // On a message with a thread under it: how the thread stands.
+  ThreadSummary thread = 19;
+  // A thread reply its author also sent to the channel.
+  bool also_in_channel = 20;
+}
+
+// A thread under a message, as the channel shows it.
+message ThreadSummary {
+  int32 reply_count = 1;
+  // When the latest reply came, or the thread started if it has none.
+  google.protobuf.Timestamp last_reply_at = 2;
+  // Who replied, the latest first, up to 5.
+  repeated string participant_ids = 3;
+  // Locked by a moderator: only people who can manage messages reply.
+  bool locked = 4;
+}
+
+// A thread's replies changed, or it was locked or unlocked. A thread whose
+// parent message is deleted goes with it (MessageDeleted for the parent).
+message ThreadUpdated {
+  string channel_id = 1;
+  // The message the thread is under.
+  string thread_id = 2;
+  ThreadSummary thread = 3;
 }
 
 // The name and picture a webhook message was posted under: the webhook's
@@ -936,6 +973,7 @@ message Event {
     SecureRecordAdded secure_record_added = 27;
     SecureRecordDeleted secure_record_deleted = 28;
     SharedChannelsUpdated shared_channels_updated = 29;
+    ThreadUpdated thread_updated = 30;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).

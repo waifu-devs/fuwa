@@ -19,6 +19,8 @@ const MAX_TIME_OUT_SECONDS: i64 = 28 * 24 * 60 * 60;
 
 /// The longest minimum account age a server can ask for: a year.
 const MAX_ACCOUNT_AGE: i32 = 365 * 24 * 60 * 60;
+/// The longest a quiet thread stays open: a year, in hours.
+const MAX_THREAD_ARCHIVE_HOURS: i32 = 365 * 24;
 /// How far back a ban can take someone's messages with them: seven days.
 const MAX_DELETE_MESSAGE_SECONDS: i64 = 7 * 24 * 60 * 60;
 
@@ -284,6 +286,9 @@ impl ServerService for Api {
                 if req.min_account_age_seconds.is_some_and(|age| !(0..=MAX_ACCOUNT_AGE).contains(&age)) {
                     return Err(Error::invalid("the minimum account age is up to a year"));
                 }
+                if req.thread_archive_hours.is_some_and(|hours| !(0..=MAX_THREAD_ARCHIVE_HOURS).contains(&hours)) {
+                    return Err(Error::invalid("threads are archived after at most a year"));
+                }
                 let written = sdb
                     .write(&account.id, async |conn, events| {
                         let before = store::load_server(conn).await?;
@@ -308,9 +313,10 @@ impl ServerService for Api {
                          system_channel_id = CASE WHEN ?6 IS NULL THEN system_channel_id WHEN ?6 = '' THEN NULL ELSE ?6 END,
                          min_account_age_seconds = coalesce(?8, min_account_age_seconds),
                          applications = coalesce(?9, applications), linked_only = coalesce(?10, linked_only),
-                         banner_url = coalesce(?11, banner_url), banner_focus_x = coalesce(?12, banner_focus_x),
-                         banner_focus_y = coalesce(?13, banner_focus_y),
-                         accent_color = CASE WHEN ?14 THEN ?15 ELSE accent_color END, updated_at = ?7",
+                         thread_archive_hours = coalesce(?11, thread_archive_hours),
+                         banner_url = coalesce(?12, banner_url), banner_focus_x = coalesce(?13, banner_focus_x),
+                         banner_focus_y = coalesce(?14, banner_focus_y),
+                         accent_color = CASE WHEN ?15 THEN ?16 ELSE accent_color END, updated_at = ?7",
                             (
                                 name,
                                 description,
@@ -322,6 +328,7 @@ impl ServerService for Api {
                                 req.min_account_age_seconds,
                                 req.applications,
                                 req.linked_only,
+                                req.thread_archive_hours,
                                 banner_url.as_deref(),
                                 banner_focus_x,
                                 banner_focus_y,
@@ -345,6 +352,7 @@ impl ServerService for Api {
                             )
                             .change("applications", before.applications, server.applications)
                             .change("linked_only", before.linked_only, server.linked_only)
+                            .change("thread_archive_hours", before.thread_archive_hours, server.thread_archive_hours)
                             .change("banner_url", &before.banner_url, &server.banner_url)
                             .change(
                                 "banner_focus",
@@ -724,23 +732,37 @@ impl ServerService for Api {
                         }
                         other => other?,
                     };
-                    let was_member = remove_member(conn, &sdb.id, &req.user_id, pb::LeaveReason::Banned, events).await?;
+                    let was_member =
+                        remove_member(conn, &sdb.id, &req.user_id, pb::LeaveReason::Banned, events).await?;
                     store::drop_application(conn, &sdb.id, &req.user_id, &account.id, events).await?;
                     let mut deleted = 0;
                     if req.delete_message_seconds > 0 {
                         let messages = query_all(
                             conn,
-                            "SELECT id, channel_id, size, attachment_count FROM messages WHERE author_id = ?1 AND created_at >= ?2",
+                            "SELECT id, channel_id, size, attachment_count, coalesce(thread_id, '') FROM messages
+                             WHERE author_id = ?1 AND created_at >= ?2",
                             (req.user_id.as_str(), now - req.delete_message_seconds * 1000),
-                            |r| Ok((r.get::<String>(0)?, r.get::<String>(1)?, r.get::<i64>(2)?, r.get::<i64>(3)?)),
+                            |r| {
+                                Ok((
+                                    r.get::<String>(0)?,
+                                    r.get::<String>(1)?,
+                                    r.get::<i64>(2)?,
+                                    r.get::<i64>(3)?,
+                                    r.get::<String>(4)?,
+                                ))
+                            },
                         )
                         .await?;
                         let mut change = UsageChange::default();
-                        for (id, channel_id, size, attachments) in messages {
-                            conn.execute("DELETE FROM messages WHERE id = ?1", [id.as_str()]).await?;
+                        for (id, channel_id, size, attachments, thread_id) in messages {
+                            // A reply already gone with the thread it was in is counted there.
+                            if conn.execute("DELETE FROM messages WHERE id = ?1", [id.as_str()]).await? == 0 {
+                                continue;
+                            }
                             change.messages -= 1;
                             change.message_bytes -= size;
                             change.attachments -= attachments;
+                            super::threads::after_delete(conn, &channel_id, &id, &thread_id, events).await?;
                             events.push(Payload::MessageDeleted(pb::MessageDeleted { channel_id, message_id: id }));
                             deleted += 1;
                         }
@@ -748,9 +770,11 @@ impl ServerService for Api {
                             store::add_usage(conn, change).await?;
                         }
                     }
-                    let entry = Audit::new(pb::AuditAction::MemberBan, &req.user_id)
-                        .reason(&reason)
-                        .change("deleted_messages", 0, deleted);
+                    let entry = Audit::new(pb::AuditAction::MemberBan, &req.user_id).reason(&reason).change(
+                        "deleted_messages",
+                        0,
+                        deleted,
+                    );
                     store::audit(conn, &account.id, entry).await?;
                     let ban = pb::Ban {
                         user: Some(user),
