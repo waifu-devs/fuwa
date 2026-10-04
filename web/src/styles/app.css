@@ -651,6 +651,14 @@ body {
 /* Mentions of you. */
 .mention-me { background: color-mix(in srgb, var(--primary) 12%, transparent); box-shadow: inset 3px 0 0 var(--primary); }
 
+/* Search: the words found, and the message a result opened, which glows a moment (opacity only, on the compositor). */
+mark.search-hit { background: color-mix(in srgb, var(--primary) 26%, transparent); color: inherit; border-radius: 0.25em; padding-inline: 0.1em; box-decoration-break: clone; }
+@keyframes jumped { 0%, 35% { opacity: 1; } 100% { opacity: 0; } }
+.jumped::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: color-mix(in srgb, var(--primary) 16%, transparent); box-shadow: inset 3px 0 0 var(--primary); animation: jumped 2.2s ease-out forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .jumped::after { animation-duration: 0.01s; animation-delay: 1.5s; }
+}
+
 /* A connection dot per instance: green-ish live, amber while reconnecting, grey offline. */
 /* In the components layer so utilities like `absolute` can place it. */
 @layer components {

@@ -210,6 +210,22 @@
     message through that rule and is counted in the anonymous report by
     kind and provider id. The web pages are `settings/instance/Moderation.tsx`
     and the Smart filter in `settings/server/AutoMod.tsx`.
+  - `search.rs` and `api/search.rs`: searching a server's messages
+    (`SearchService`). Turso's own full-text search needs a new dependency
+    and doesn't run in MVCC, so the index is plain tables in the server's file
+    (`search_words`, `search_docs`, `search_postings`, `search_state`).
+    `search.rs` cuts text into words (folded case, accents and full-width
+    forms; CJK as pairs of characters; `@name` mentions; attachment names and
+    embeds) and is pure; `VERSION` going up rebuilds every index. One
+    indexer per shard (`spawn_search_indexer`) follows each server's events
+    through `Hub::search_tap` and builds servers that had messages before
+    search, newest first, in small `write_quiet` batches between other
+    writes. A search ANDs the words (the last one as a prefix), filters by
+    author, channel, mention, what a message has and dates, only in channels
+    the searcher can see, and re-reads each hit from `messages`. Searches are
+    never logged, stored or shown to AutoMod; a token bucket per account
+    limits them. Secure channels and other instances' shared messages aren't
+    indexed.
   - `permissions.rs`: roles and permissions. `Rules::access` works out what a
     member may do (an `Access`): server-wide from their roles, and per
     channel by applying the category's overwrites and then the channel's
@@ -536,6 +552,15 @@
     `src/fuwa/dms.ts` are the actions; the screens are in `components/dm/`
     (`DmList`, `DmView`, `EncryptionDialog` with the safety number), routed at
     `/<instance>/dm/<conversation>`.
+  - `src/fuwa/search.ts`, `src/lib/search-query.ts`, `components/search/`:
+    the search bar (Mod+F) and results panel. `search-query.ts` reads
+    `from:`, `in:`, `has:`, `mentions:`, `before:`, `after:` and `during:`
+    and keeps recent searches on the device only; members and channels are
+    turned into ids before asking the instance. Results mark matches with
+    private-use characters that `components/search/highlight.ts` turns into
+    `<mark>` inside the one Markdown component. Jumping to a result goes
+    through `requestJump`, which `MessageList` takes by loading older pages
+    until the message is there.
   - Right-click menus (`docs/context-menus.md` lists them for every app): one
     menu at a time, `components/ContextMenu.tsx` (`useContextMenu` on the
     element, `ContextMenuHost` draws it with the animated dropdown menu);
