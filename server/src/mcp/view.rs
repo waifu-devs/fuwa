@@ -155,6 +155,7 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
         "embeds": embeds,
         "mentions_everyone": m.mentions_everyone,
         "mention_role_ids": m.mention_role_ids,
+        "poll": m.poll.as_ref().map(poll),
         "created_at": time(&m.created_at),
         "edited_at": time(&m.edited_at),
     }))
@@ -163,6 +164,26 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
 pub fn messages(list: &[pb::Message], authors: &[pb::User]) -> Vec<Value> {
     let authors: HashMap<&str, &pb::User> = authors.iter().map(|u| (u.id.as_str(), u)).collect();
     list.iter().map(|m| message(m, &authors)).collect()
+}
+
+/// A poll: its answers with their counts (0 each while an anonymous one
+/// runs) and the reader's own picks.
+pub fn poll(p: &pb::Poll) -> Value {
+    let answers: Vec<Value> = p
+        .answers
+        .iter()
+        .map(|a| trim(json!({ "id": a.id, "text": a.text, "emoji": a.emoji, "votes": a.votes })))
+        .collect();
+    trim(json!({
+        "question": p.question,
+        "answers": answers,
+        "multiple": p.multiple,
+        "anonymous": p.anonymous,
+        "voters": p.voters,
+        "my_answer_ids": p.my_answer_ids,
+        "ends_at": time(&p.ends_at),
+        "ended_at": time(&p.ended_at),
+    }))
 }
 
 /// An event from a server's log: its type and what it carries.
@@ -200,6 +221,10 @@ pub fn event(e: &pb::Event) -> Value {
         Some(Payload::ApplicationUpdated(_)) => ("application_updated", json!({})),
         Some(Payload::SecureRecordAdded(_)) | Some(Payload::SecureRecordDeleted(_)) => ("secure_channel", json!({})),
         Some(Payload::SharedChannelsUpdated(_)) => ("shared_channels_updated", json!({})),
+        Some(Payload::PollUpdated(p)) => (
+            "poll_updated",
+            json!({ "channel_id": p.channel_id, "message_id": p.message_id, "poll": p.poll.as_ref().map(poll) }),
+        ),
         Some(Payload::VoiceStateUpdated(_)) | Some(Payload::VoiceStateRemoved(_)) => ("voice", json!({})),
         None => ("unknown", json!({})),
     };
