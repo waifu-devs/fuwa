@@ -75,6 +75,7 @@ fn route(path: &str) -> Target {
         | "fuwa.v1.GifService"
         | "fuwa.v1.DirectMessageService"
         | "fuwa.v1.FriendService" => Target::Directory,
+        "fuwa.v1.PresenceService" => Target::Directory,
         "fuwa.v1.AdminService" if matches!(method, "SetServerLimits" | "ExportServer") => Target::Shard,
         "fuwa.v1.AdminService" => Target::Directory,
         // Other instances' calls go where the instance's key is.

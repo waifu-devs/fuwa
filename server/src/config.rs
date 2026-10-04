@@ -68,6 +68,9 @@ pub struct Config {
     pub mcp: bool,
     /// People may put an effect on their profile card. FUWA_PROFILE_EFFECTS.
     pub profile_effects: bool,
+    /// People may show what they're doing (docs/presence.md). On unless
+    /// FUWA_RICH_PRESENCE turns it off.
+    pub rich_presence: bool,
     /// FUWA_FEDERATION: on | off (default). Sharing channels with servers on
     /// other fuwa instances (docs/federation.md).
     pub federation: bool,
@@ -445,6 +448,11 @@ impl Config {
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_PROFILE_EFFECTS must be on or off, got {other:?}")),
         };
+        let rich_presence = match get("FUWA_RICH_PRESENCE").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_RICH_PRESENCE must be on or off, got {other:?}")),
+        };
         let federation = match get("FUWA_FEDERATION").as_deref().map(str::trim) {
             None | Some("off" | "false" | "0") => false,
             Some("on" | "true" | "1") => true,
@@ -567,6 +575,7 @@ impl Config {
             shared_channels,
             mcp,
             profile_effects,
+            rich_presence,
             federation,
             federation_allow_private,
             call_recordings_keep_days,
