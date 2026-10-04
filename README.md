@@ -381,7 +381,8 @@ only in Turso either way.)
 
 To back up, copy the directory (or stop the server and copy single files). To
 bring back a deleted server, move its file from `deleted/` into `servers/` as
-`<id>.db` and restart. A server file dropped into `servers/` is picked up at
+`<id>.db` and restart; its pictures (icon, emoji, webhooks' pictures) were
+deleted with it and don't come back. A server file dropped into `servers/` is picked up at
 startup.
 
 ### Scaling out

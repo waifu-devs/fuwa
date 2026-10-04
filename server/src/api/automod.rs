@@ -800,6 +800,11 @@ async fn review_sent(
     if act(conn, server_id, member, &channel, content, Some(asked), &caught, events).await?.is_none() {
         return Ok(vec![]);
     }
+    let author_id = member.user.as_ref().map(|u| u.id.as_str()).unwrap_or_default();
+    let entry = Audit::new(pb::AuditAction::AutoModMessageDelete, author_id)
+        .channel(channel.name.clone())
+        .reason(rule.name.clone());
+    store::audit(conn, author_id, entry).await?;
     let files = super::messages::remove_message(conn, &message).await?;
     events.push(Payload::MessageDeleted(pb::MessageDeleted {
         channel_id: message.channel_id.clone(),
@@ -1058,5 +1063,8 @@ mod tests {
         assert!(alert.blocked && alert.content == "free nitro" && alert.provider == "Cloudflare Clef", "{alert:?}");
         assert!(events.iter().any(|e| matches!(e, Payload::MessageDeleted(d) if d.message_id == "m2")));
         assert!(events.iter().any(|e| matches!(e, Payload::MemberUpdated(_))));
+        let logged: Vec<i32> =
+            crate::db::query_all(&conn, "SELECT action FROM audit", (), |r| r.get::<i32>(0)).await.unwrap();
+        assert!(logged.contains(&(pb::AuditAction::AutoModMessageDelete as i32)), "{logged:?}");
     }
 }

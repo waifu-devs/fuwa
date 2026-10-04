@@ -46,7 +46,7 @@ enum MediaPurpose {
   MEDIA_PURPOSE_BACKGROUND = 5;
   // A file attached to a message: any kind, uploaded for the server it's
   // sent in.
-  MEDIA_PURPOSE_ATTACHMENT = 6;
+  MEDIA_PURPOSE_ATTACHMENT = 7;
 }
 
 // A stored file.

@@ -295,6 +295,17 @@ async fn wait_for(done: impl Fn() -> bool) {
     assert!(done(), "it didn't happen in time");
 }
 
+/// Waits for something done in the background that takes a call to see.
+async fn wait_for_async(done: impl AsyncFn() -> bool) {
+    for _ in 0..100 {
+        if done().await {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(done().await, "it didn't happen in time");
+}
+
 async fn eventually<T, F: Future<Output = Result<T, tonic::Status>>>(mut call: impl FnMut() -> F) -> T {
     for _ in 0..100 {
         match call().await {
@@ -705,7 +716,33 @@ async fn a_split_instance_works_like_one() {
     }
     assert_eq!(offered[0].id, "typesafe-jev");
 
-    // Deleting a server: the stream says so, and the directory forgets it.
+    // Deleting a server: the stream says so, and the directory forgets it
+    // and its pictures, as its shard does.
+    let reserved = c
+        .media
+        .create_upload(authed(
+            &juan,
+            pb::CreateUploadRequest {
+                purpose: pb::MediaPurpose::ServerIcon as i32,
+                content_type: "image/png".into(),
+                size: png.len() as i64,
+                server_id: String::new(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let put = http.put(&reserved.upload_url).body(png.clone()).send().await.unwrap();
+    assert_eq!(put.status(), reqwest::StatusCode::NO_CONTENT);
+    let a_icon = reserved.media.unwrap();
+    let icon = pb::UpdateServerRequest {
+        server_id: on_a.id.clone(),
+        icon_url: Some(a_icon.url.clone()),
+        ..Default::default()
+    };
+    c.servers.update_server(authed(&juan, icon)).await.unwrap();
+    let a_pictures = root.path().join("shard-a").join("server-pictures").join(&on_a.id);
+    wait_for(|| a_pictures.join(&a_icon.id).exists()).await;
     c.servers.delete_server(authed(&juan, pb::DeleteServerRequest { server_id: on_a.id.clone() })).await.unwrap();
     let deleted = until(&mut stream, |e| matches!(e.payload, Some(Payload::ServerDeleted(_)))).await;
     assert_eq!(deleted.server_id, on_a.id);
@@ -714,6 +751,12 @@ async fn a_split_instance_works_like_one() {
     assert_eq!(gone.unwrap_err().code(), Code::NotFound);
     let mine = c.servers.list_servers(authed(&mika, pb::ListServersRequest {})).await.unwrap().into_inner().servers;
     assert_eq!(mine.len(), 1);
+    assert!(!a_pictures.exists());
+    let directory = cluster.directory.app().node().unwrap();
+    wait_for_async(async || directory.media(&a_icon.id).await.unwrap().is_none()).await;
+    assert_eq!(http.get(&a_icon.url).send().await.unwrap().status(), 404);
+    // The other server's picture stays.
+    assert!(on_shard.exists());
 
     // A data export gathers every shard's part.
     let mut chunks = c.account.export_data(authed(&mika, pb::ExportDataRequest {})).await.unwrap().into_inner();
@@ -1488,6 +1531,15 @@ async fn servers_live_in_their_region_and_move() {
     assert!(!picture_at(&shard_b, &unused.id).exists() && !picture_at(&bucket_eu, &unused.id).exists());
     assert!(picture_at(&shard_b, &direct.id).exists(), "the icon it uses stays");
     assert!(cluster.directory.app().node().unwrap().moves().await.unwrap().is_empty(), "the move is over");
+    // Deleting the server deletes its pictures in its region and their rows.
+    let request = pb::DeleteServerRequest { server_id: server.id.clone() };
+    c.servers.delete_server(authed(&juan, request)).await.unwrap();
+    assert!(!shard_b.join("server-pictures").join(&server.id).exists());
+    let in_bucket = std::fs::read_dir(bucket_eu.join("server-pictures").join(&server.id)).map_or(0, |d| d.count());
+    assert_eq!(in_bucket, 0, "nothing is left in its bucket");
+    let node = cluster.directory.app().node().unwrap();
+    wait_for_async(async || node.media_of_server(&server.id).await.unwrap().is_empty()).await;
+    assert_eq!(http.get(&direct.url).send().await.unwrap().status(), 404);
 
     // A file attached to a message goes straight to the server's region too,
     // is served there (as a download) while the message has it, and goes
