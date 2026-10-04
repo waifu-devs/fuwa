@@ -333,6 +333,10 @@ by username. They talk with the roles they're given, show an AGENT badge,
 can't own servers or use direct messages, and go away with the person who
 made them.
 
+For JavaScript and TypeScript, the [`@waifu-devs/fuwa`](sdk/) SDK does the
+rest: typed clients, commands and mentions, and an event stream that
+reconnects and catches up by itself. See [docs/sdk.md](docs/sdk.md).
+
 Agents can be in voice channels too, hearing each person and talking back,
 without WebRTC: `CallService.ListenVoice` streams everyone's sound as Opus
 frames labelled with who said them, and `SpeakVoice` says frames back. The
@@ -650,6 +654,9 @@ someone else. Releases attach an installer for each system (`.deb` and
 AppImage, `.dmg`, `-setup.exe`) and the bare `fuwa-desktop` program; to make
 the installers yourself, `cargo install cargo-packager --locked` and then
 `cargo build --release && cargo packager --release` in `desktop/`.
+
+The TypeScript SDK lives in [`sdk/`](sdk), generated from the same protocol;
+[docs/sdk.md](docs/sdk.md#working-on-the-sdk) has its commands.
 
 See [AGENTS.md](AGENTS.md) for how the code is laid out.
 
