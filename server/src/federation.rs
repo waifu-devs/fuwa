@@ -51,9 +51,6 @@ const SHARE_PINS_PER_DOMAIN: usize = 3;
 /// Share code lookups and asks a minute, at most, from one server here and
 /// to one server here.
 const SHARES_PER_SERVER_PER_MINUTE: usize = 20;
-/// Messages a minute, at most, from all the people of one server on
-/// another instance together.
-const SENDS_PER_SERVER_PER_MINUTE: usize = 120;
 /// How often the time an instance was last heard from is written down.
 const HEARD_EVERY_MS: i64 = 60 * 1000;
 
@@ -261,9 +258,13 @@ impl Federation {
     }
 
     /// Whether another message from a server on another instance (`server_id`
-    /// under its address) may be taken now.
-    pub fn take_send(&self, server_id: &str) -> bool {
-        take(&self.sends, server_id, SENDS_PER_SERVER_PER_MINUTE)
+    /// under its address) may be taken now, with `per_minute` at most
+    /// (FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE; `None` for no cap).
+    pub fn take_send(&self, server_id: &str, per_minute: Option<i64>) -> bool {
+        match per_minute {
+            Some(per_minute) => take(&self.sends, server_id, usize::try_from(per_minute).unwrap_or(0)),
+            None => true,
+        }
     }
 
     fn introduced(&self, origin: &str) -> bool {
@@ -681,6 +682,7 @@ fn remote_error(shown: &str, (code, message): (i32, String)) -> Error {
         // What someone there may or may not do, as their own instance says.
         tonic::Code::PermissionDenied => Error::denied(text),
         tonic::Code::InvalidArgument => Error::invalid(text),
+        tonic::Code::ResourceExhausted => Error::ResourceExhausted(text),
         _ => Error::FailedPrecondition(text),
     }
 }
@@ -1158,11 +1160,12 @@ mod tests {
         }
         assert!(!federation.take_share("in:a"));
         assert!(federation.take_share("in:b"), "other servers aren't held up");
-        for _ in 0..SENDS_PER_SERVER_PER_MINUTE {
-            assert!(federation.take_send("a@night-owls.example"));
+        for _ in 0..3 {
+            assert!(federation.take_send("a@night-owls.example", Some(3)));
         }
-        assert!(!federation.take_send("a@night-owls.example"));
-        assert!(federation.take_send("b@night-owls.example"));
+        assert!(!federation.take_send("a@night-owls.example", Some(3)));
+        assert!(federation.take_send("b@night-owls.example", Some(3)));
+        assert!(federation.take_send("a@night-owls.example", None), "no cap unless set");
     }
 
     #[test]

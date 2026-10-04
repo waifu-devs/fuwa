@@ -134,9 +134,10 @@ On "Other instances" in Instance settings (`GetFederation`,
   people of the guest server, shown as their own instance has them. People
   leave an instance as their id, username, display name and kind only.
 - A guest server on another instance counts as one sender at the home: its
-  people together send at most 120 messages a minute, it brings at most 500
-  people, and once one of them is kept out of the channel no one new from
-  it joins in. A home on another instance is asked about a message only in
+  people together send at most `FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE`
+  messages a minute, it brings at most `FUWA_LIMIT_SHARED_REMOTE_PEOPLE`
+  people (both unlimited unless set, also on the Other instances page), and
+  once one of them is kept out of the channel no one new from it joins in. A home on another instance is asked about a message only in
   the channel the app named.
 - A guest server on another instance that can't be reached gets three more
   tries (after 1, 4 and 15 seconds); after that, what waited for it is

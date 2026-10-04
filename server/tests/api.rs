@@ -6699,7 +6699,8 @@ async fn federation_refuses_internal_addresses() {
 async fn channels_shared_across_instances() {
     let federated = [("FUWA_FEDERATION", "on"), ("FUWA_FEDERATION_ALLOW_PRIVATE", "1")];
     let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (a, b) = (start(dir_a.path(), &federated).await, start(dir_b.path(), &federated).await);
+    let capped = [federated[0], federated[1], ("FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE", "3")];
+    let (a, b) = (start(dir_a.path(), &capped).await, start(dir_b.path(), &federated).await);
     let (mut ca, mut cb) = (clients(&a).await, clients(&b).await);
     let (juan, juan_user, _) = sign_up(&mut ca, "juan").await;
     let (mika, mika_user, _) = sign_up(&mut cb, "mika").await;
@@ -6938,6 +6939,14 @@ async fn channels_shared_across_instances() {
         .await
         .unwrap();
     assert!(messages(&mut ca, &juan, &home, &dev.id).await.iter().all(|m| m.id != hi.id));
+
+    // The guest server's people together send no more than the home's
+    // instance takes from one server there.
+    for text in ["two", "three"] {
+        send(&mut cb, &mika, &guest, &shown.id, text).await.unwrap();
+    }
+    let too_fast = send(&mut cb, &mika, &guest, &shown.id, "four").await.unwrap_err();
+    assert_eq!(too_fast.code(), Code::ResourceExhausted, "{too_fast:?}");
 
     // The home ends it, and the guest's channel goes.
     ca.shared

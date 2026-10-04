@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { Setting, SPRING, Toggle } from "../controls";
+import { Cap, Setting, SPRING, Toggle } from "../controls";
 
 type Reset = { changed: boolean; onReset: () => void; resetting: boolean };
 
@@ -22,6 +22,12 @@ export const FEDERATION_FIELDS: { path: string; get: (s: InstanceSettings) => un
     get: (s) => hosts(s.federationBlockedHosts).join("\n"),
     copy: (into, from) => (into.federationBlockedHosts = [...from.federationBlockedHosts]),
   },
+  {
+    path: "shared_remote_sends_per_minute",
+    get: (s) => s.sharedRemoteSendsPerMinute,
+    copy: (into, from) => (into.sharedRemoteSendsPerMinute = from.sharedRemoteSendsPerMinute),
+  },
+  { path: "shared_remote_people", get: (s) => s.sharedRemotePeople, copy: (into, from) => (into.sharedRemotePeople = from.sharedRemotePeople) },
 ];
 
 export const FEDERATION_SECTION = {
@@ -36,6 +42,8 @@ export const FEDERATION_SECTION = {
     { id: "federation-check", label: "Check an instance", keywords: "test reach ping" },
     { id: "federation-peers", label: "Instances this one knows", keywords: "pinned peers" },
     { id: "federation-blocked", label: "Blocked instances", keywords: "block list deny" },
+    { id: "federation-sends", label: "Messages per server a minute", keywords: "limit cap rate flood shared remote" },
+    { id: "federation-people", label: "People per server", keywords: "limit cap shared remote guests" },
   ],
 };
 
@@ -189,6 +197,28 @@ export function FederationSettings({
           }}
           className={cn("rounded-xl font-mono text-xs", privateField)}
         />
+      </Setting>
+
+      <Setting
+        id="federation-sends"
+        title="Messages per server a minute"
+        hint="How many messages all the people of one server on another instance may send together to channels shared from here. That instance says who its people are, so a server there counts as one sender."
+        defaultLabel={defaults?.sharedRemoteSendsPerMinute === undefined ? "no limit" : `${defaults.sharedRemoteSendsPerMinute.toLocaleString()} a minute`}
+        delay={0.2}
+        {...resetter("shared_remote_sends_per_minute")}
+      >
+        <Cap label="Up to" placeholder="120" value={draft.sharedRemoteSendsPerMinute} onChange={(v) => patch((d) => (d.sharedRemoteSendsPerMinute = v))} />
+      </Setting>
+
+      <Setting
+        id="federation-people"
+        title="People per server"
+        hint="How many people one server on another instance may bring to a server's shared channels. Past it, no one new from that server can join in; those already there still can."
+        defaultLabel={defaults?.sharedRemotePeople === undefined ? "no limit" : defaults.sharedRemotePeople.toLocaleString()}
+        delay={0.24}
+        {...resetter("shared_remote_people")}
+      >
+        <Cap label="Up to" placeholder="500" value={draft.sharedRemotePeople} onChange={(v) => patch((d) => (d.sharedRemotePeople = v))} />
       </Setting>
     </>
   );
