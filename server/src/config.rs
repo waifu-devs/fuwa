@@ -63,6 +63,9 @@ pub struct Config {
     /// FUWA_SHARED_CHANNELS: on (default) | off. Servers sharing channels
     /// with each other.
     pub shared_channels: bool,
+    /// FUWA_MCP: on (default) | off. Agents using the instance through MCP
+    /// at /mcp (docs/mcp.md).
+    pub mcp: bool,
     /// People may put an effect on their profile card. FUWA_PROFILE_EFFECTS.
     pub profile_effects: bool,
     /// People may show what they're doing (docs/presence.md). On unless
@@ -389,6 +392,11 @@ impl Config {
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_SHARED_CHANNELS must be on or off, got {other:?}")),
         };
+        let mcp = match get("FUWA_MCP").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_MCP must be on or off, got {other:?}")),
+        };
         let profile_effects = match get("FUWA_PROFILE_EFFECTS").as_deref().map(str::trim) {
             None | Some("on" | "true" | "1") => true,
             Some("off" | "false" | "0") => false,
@@ -504,6 +512,7 @@ impl Config {
             calls,
             call_recordings,
             shared_channels,
+            mcp,
             profile_effects,
             rich_presence,
             federation,

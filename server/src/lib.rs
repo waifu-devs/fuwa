@@ -18,6 +18,7 @@ pub mod federation;
 pub mod hub;
 pub mod id;
 pub mod linked;
+pub mod mcp;
 pub mod media;
 pub mod node;
 pub mod outside;
