@@ -25,9 +25,12 @@ mod embedded {
     /// The client talks to any fuwa server and shows avatars from anywhere, but
     /// runs only its own scripts. 'wasm-unsafe-eval' lets it compile its own
     /// WebAssembly (the encryption direct messages use), and nothing else.
-    /// Forms only ever submit here.
+    /// Forms only ever submit here. Pictures, audio and video may come from
+    /// any instance (their origins are only known at runtime): the app's
+    /// `shownPicture` (web/src/lib/shown.ts) is what keeps every source to
+    /// fuwa instances' own uploads.
     const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; \
-        style-src 'self' 'unsafe-inline'; img-src * data: blob:; connect-src *; font-src 'self' data:; \
+        style-src 'self' 'unsafe-inline'; img-src * data: blob:; media-src * blob:; connect-src *; font-src 'self' data:; \
         object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 
     pub async fn serve(uri: Uri, headers: HeaderMap) -> Response {

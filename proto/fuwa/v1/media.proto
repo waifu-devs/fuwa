@@ -4,8 +4,8 @@ package fuwa.v1;
 
 import "google/protobuf/timestamp.proto";
 
-// Pictures people upload to this instance: profile pictures, profile banners,
-// server icons, custom emoji and app backgrounds.
+// Files people upload to this instance: profile pictures, profile banners,
+// server icons, custom emoji, app backgrounds, and files attached to messages.
 //
 // An upload takes two steps. CreateUpload checks the file and reserves a
 // place for it; then an HTTP PUT of the file's bytes to `upload_url` stores
@@ -18,6 +18,12 @@ import "google/protobuf/timestamp.proto";
 // settings that use them live on the device, so the instance keeps a small
 // list of each account's backgrounds instead: KeepBackground adds an upload
 // to it, and DeleteBackground removes one and its file.
+//
+// Attachments are any kind of file, uploaded for one server and then sent
+// with a message there (SendMessageRequest.attachments, by `media.url`).
+// They're served only while a message has them: pictures as they are (their
+// metadata taken out), audio and video as their type so apps can play them,
+// and everything else as a download (application/octet-stream).
 service MediaService {
   rpc CreateUpload(CreateUploadRequest) returns (CreateUploadResponse);
   // Keeps an uploaded background, so it isn't swept. At most 24 per account.
@@ -39,6 +45,9 @@ enum MediaPurpose {
   MEDIA_PURPOSE_EMOJI = 4;
   // A picture behind the app, kept with KeepBackground.
   MEDIA_PURPOSE_BACKGROUND = 5;
+  // A file attached to a message: any kind, uploaded for the server it's
+  // sent in.
+  MEDIA_PURPOSE_ATTACHMENT = 7;
   // A GIF of your own to send (GifService.SaveGif keeps it). Only image/gif.
   MEDIA_PURPOSE_GIF = 8;
 }
@@ -55,16 +64,18 @@ message Media {
 message CreateUploadRequest {
   MediaPurpose purpose = 1;
   // image/png, image/jpeg, image/gif, image/webp or image/avif. The bytes are
-  // checked when they arrive.
+  // checked when they arrive. For an attachment, whatever the file says it
+  // is (or empty): what it's kept as comes from its bytes.
   string content_type = 2;
   // The file's exact size in bytes, at most the instance's
-  // `picture_upload_bytes` when that's set.
+  // `picture_upload_bytes` (or for an attachment `attachment_upload_bytes`)
+  // when that's set.
   int64 size = 3;
-  // For a server's icon or banner, an emoji or a webhook's picture (and
-  // for a server's banner, needed): the server it's
-  // for (you must be in it). The picture can then only be used there, and on
-  // an instance split across regions its bytes go straight to the server's
-  // region rather than the home one.
+  // For a server's icon or banner, an emoji, a webhook's picture or an
+  // attachment (required for an attachment and a server's banner): the
+  // server it's for (you must be in it). The file can then only be used
+  // there, and on an instance split across regions its bytes go straight to
+  // the server's region rather than the home one.
   string server_id = 4;
 }
 

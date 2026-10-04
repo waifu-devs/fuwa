@@ -4775,7 +4775,7 @@ async fn automod_providers_are_set_up_once_and_picked_per_server() {
     // A 16 by 16 PNG: its header is all the server looks at before sending it.
     let mut cat = png(300, 0);
     cat[16..24].copy_from_slice(&[0, 0, 0, 16, 0, 0, 0, 16]);
-    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, cat).await;
+    let picture = attach(&mut c, &instance, &member, &server.id, cat).await;
     let sent = c
         .messages
         .send_message(authed(
@@ -7907,4 +7907,264 @@ async fn channels_are_created_with_their_permissions() {
     let denied = c.channels.create_channel(create(&rin, "nope", vec![hidden()])).await.unwrap_err();
     assert_eq!(denied.code(), Code::PermissionDenied);
     c.channels.create_channel(create(&rin, "fine", vec![])).await.unwrap();
+}
+
+/// Uploads a file to attach in `server_id`, and says where it's served.
+async fn attach(c: &mut Clients, instance: &Instance, token: &str, server_id: &str, bytes: Vec<u8>) -> String {
+    let reserved = c
+        .media
+        .create_upload(authed(
+            token,
+            pb::CreateUploadRequest {
+                purpose: pb::MediaPurpose::Attachment as i32,
+                content_type: "application/x-whatever".into(),
+                size: bytes.len() as i64,
+                server_id: server_id.into(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(put(instance, &reserved.upload_url, bytes).await, reqwest::StatusCode::NO_CONTENT);
+    reserved.media.unwrap().url
+}
+
+async fn send_files(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    files: &[(&str, &str)],
+) -> Result<pb::Message, tonic::Status> {
+    let attachments = files.iter().map(|(url, name)| pb::Attachment {
+        url: (*url).into(),
+        filename: (*name).into(),
+        ..Default::default()
+    });
+    c.messages
+        .send_message(authed(
+            token,
+            pb::SendMessageRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                attachments: attachments.collect(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().message.unwrap())
+}
+
+#[tokio::test]
+async fn attachments_upload_send_serve_and_go_with_their_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(
+        dir.path(),
+        &[
+            ("FUWA_LIMIT_ATTACHMENT_UPLOAD", "64KB"),
+            ("FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY", "150KB"),
+            ("FUWA_LIMIT_ATTACHMENT_STORAGE", "100KB"),
+            ("FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY", "4KB"),
+        ],
+    )
+    .await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (stranger, _, _) = sign_up(&mut c, "stranger").await;
+    let server = create_server(&mut c, &juan, "Files", true).await;
+    c.servers
+        .join_server(authed(&mika, pb::JoinServerRequest { server_id: server.id.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    let channels = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels;
+    let general = channels.iter().find(|ch| ch.name == "general").unwrap().id.clone();
+    let reserve = |token: &str, server_id: &str, size: i64| {
+        authed(
+            token,
+            pb::CreateUploadRequest {
+                purpose: pb::MediaPurpose::Attachment as i32,
+                content_type: String::new(),
+                size,
+                server_id: server_id.into(),
+            },
+        )
+    };
+
+    // An attachment is uploaded for a server you're in, up to the cap.
+    let nowhere = c.media.create_upload(reserve(&juan, "", 10)).await.unwrap_err();
+    assert_eq!(nowhere.code(), Code::InvalidArgument);
+    let outside = c.media.create_upload(reserve(&stranger, &server.id, 10)).await.unwrap_err();
+    assert_eq!(outside.code(), Code::NotFound);
+    let too_big = c.media.create_upload(reserve(&juan, &server.id, 64_001)).await.unwrap_err();
+    assert_eq!(too_big.code(), Code::ResourceExhausted);
+    assert!(too_big.message().contains("64 KB"), "{}", too_big.message());
+
+    // Any kind of file: what it's kept as comes from its bytes.
+    let mut zip = b"PK\x03\x04".to_vec();
+    zip.extend((0..2000u32).map(|n| (n % 251) as u8));
+    let page = b"<html><script>alert(1)</script></html>".to_vec();
+    let zip_url = attach(&mut c, &instance, &juan, &server.id, zip.clone()).await;
+    let page_url = attach(&mut c, &instance, &juan, &server.id, page.clone()).await;
+    let picture_url = attach(&mut c, &instance, &juan, &server.id, png(300, 3)).await;
+    assert_eq!(fetch(&instance, &zip_url).await.0, reqwest::StatusCode::NOT_FOUND, "served only once sent");
+
+    // Only files uploaded here, by the sender, for this server.
+    let elsewhere = send_files(&mut c, &juan, &server.id, &general, &[("https://example.com/x.zip", "x.zip")]).await;
+    assert_eq!(elsewhere.unwrap_err().code(), Code::InvalidArgument);
+    let stolen = send_files(&mut c, &mika, &server.id, &general, &[(&zip_url, "x.zip")]).await;
+    assert_eq!(stolen.unwrap_err().code(), Code::PermissionDenied);
+    let twice = send_files(&mut c, &juan, &server.id, &general, &[(&zip_url, "a"), (&zip_url, "b")]).await;
+    assert_eq!(twice.unwrap_err().code(), Code::InvalidArgument);
+
+    let sent = send_files(
+        &mut c,
+        &juan,
+        &server.id,
+        &general,
+        &[(&zip_url, "../notes\u{202e}piz.zip"), (&page_url, "page.html"), (&picture_url, "cat.png")],
+    )
+    .await
+    .unwrap();
+    let [zipped, html, cat] = &sent.attachments[..] else { panic!("{:?}", sent.attachments) };
+    assert_eq!(
+        (zipped.filename.as_str(), zipped.content_type.as_str(), zipped.size),
+        ("notespiz.zip", "application/zip", 2004)
+    );
+    assert_eq!(html.content_type, "application/octet-stream");
+    assert_eq!(cat.content_type, "image/png");
+    assert!(zip_url.ends_with(&zipped.id) && zipped.url.ends_with(&zipped.id));
+    let again = send_files(&mut c, &juan, &server.id, &general, &[(&zip_url, "again.zip")]).await;
+    assert_eq!(again.unwrap_err().code(), Code::AlreadyExists, "a file is in one message");
+    let listed = messages(&mut c, &mika, &server.id, &general).await;
+    assert_eq!(listed.iter().find(|m| m.id == sent.id).unwrap().attachments, sent.attachments);
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 2004 + page.len() as i64 + 300);
+
+    // Served from here only, never run as a page: downloads unless a picture.
+    let (status, headers, body) = fetch(&instance, &zipped.url).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(body, zip);
+    assert_eq!(headers["content-type"], "application/octet-stream");
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    assert_eq!(headers["content-security-policy"], "default-src 'none'; sandbox");
+    assert_eq!(headers["content-disposition"], "attachment; filename=\"notespiz.zip\"; filename*=UTF-8''notespiz.zip");
+    let (_, headers, body) = fetch(&instance, &html.url).await;
+    assert_eq!((headers["content-type"].to_str().unwrap(), body), ("application/octet-stream", page));
+    assert!(headers["content-disposition"].to_str().unwrap().starts_with("attachment;"));
+    let (_, headers, _) = fetch(&instance, &cat.url).await;
+    assert_eq!(headers["content-type"], "image/png");
+    assert!(headers["content-disposition"].to_str().unwrap().starts_with("inline;"));
+
+    // Players seek with ranges.
+    let part =
+        |range: &str| reqwest::Client::new().get(on(&instance, &zipped.url)).header("range", range.to_string()).send();
+    let some = part("bytes=10-19").await.unwrap();
+    assert_eq!(some.status(), reqwest::StatusCode::PARTIAL_CONTENT);
+    assert_eq!(some.headers()["content-range"], "bytes 10-19/2004");
+    assert_eq!(some.bytes().await.unwrap().to_vec(), zip[10..20].to_vec());
+    let tail = part("bytes=-4").await.unwrap();
+    assert_eq!(tail.bytes().await.unwrap().to_vec(), zip[2000..].to_vec());
+    assert_eq!(part("bytes=5000-").await.unwrap().status(), reqwest::StatusCode::RANGE_NOT_SATISFIABLE);
+
+    // The server's cap on files counts what's attached.
+    let big = attach(&mut c, &instance, &mika, &server.id, vec![7; 60_000]).await;
+    send_files(&mut c, &mika, &server.id, &general, &[(&big, "big.bin")]).await.unwrap();
+    let more = attach(&mut c, &instance, &mika, &server.id, vec![8; 50_000]).await;
+    let full = send_files(&mut c, &mika, &server.id, &general, &[(&more, "more.bin")]).await.unwrap_err();
+    assert_eq!(full.code(), Code::ResourceExhausted, "{full:?}");
+
+    // Files have their own daily cap, apart from pictures'.
+    let day = c.media.create_upload(reserve(&mika, &server.id, 60_000)).await.unwrap_err();
+    assert_eq!(day.code(), Code::ResourceExhausted);
+    assert!(day.message().contains("of files a day"), "{}", day.message());
+    let avatar = create_upload(&mut c, &mika, pb::MediaPurpose::Avatar, "image/png", 300).await;
+    assert!(avatar.is_ok(), "pictures are counted apart");
+
+    // A file goes with its message: no longer served, and gone from disk.
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest {
+                server_id: server.id.clone(),
+                message_id: sent.id.clone(),
+                channel_id: general.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    let gone = |id: &str| !dir.path().join("media").join(id).exists();
+    for _ in 0..50 {
+        if gone(&zipped.id) && gone(&html.id) && gone(&cat.id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(gone(&zipped.id) && gone(&html.id) && gone(&cat.id));
+    assert_eq!(fetch(&instance, &zipped.url).await.0, reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 60_000);
+
+    // A reply's file goes with the thread when the message it's under goes.
+    let parent = send(&mut c, &juan, &server.id, &general, "a thread for files").await.unwrap();
+    let note = attach(&mut c, &instance, &juan, &server.id, b"in a thread".to_vec()).await;
+    c.messages
+        .send_message(authed(
+            &juan,
+            pb::SendMessageRequest {
+                server_id: server.id.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                attachments: vec![pb::Attachment {
+                    url: note.clone(),
+                    filename: "note.txt".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 60_011);
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest {
+                server_id: server.id.clone(),
+                message_id: parent.id.clone(),
+                channel_id: general.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    let note_id = note.rsplit('/').next().unwrap().to_string();
+    for _ in 0..50 {
+        if gone(&note_id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(gone(&note_id));
+    assert_eq!(fetch(&instance, &note).await.0, reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 60_000);
+
+    // And with its channel.
+    let big_id = big.rsplit('/').next().unwrap().to_string();
+    c.channels
+        .delete_channel(authed(&juan, pb::DeleteChannelRequest { server_id: server.id.clone(), channel_id: general }))
+        .await
+        .unwrap();
+    for _ in 0..50 {
+        if gone(&big_id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(gone(&big_id));
+    assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 0);
+    instance.stop().await;
 }
