@@ -144,6 +144,15 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
         .iter()
         .map(|e| trim(json!({ "title": e.title, "description": e.description, "url": e.url })))
         .collect();
+    // As members see it: the file on this instance and its credit, never the seal.
+    let gif = m.gif.as_ref().map(|g| {
+        let provider = pb::GifProvider::try_from(g.provider).unwrap_or_default();
+        let provider = match provider {
+            pb::GifProvider::Unspecified => String::new(),
+            provider => name(provider.as_str_name(), "GIF_PROVIDER_"),
+        };
+        trim(json!({ "url": g.url, "width": g.width, "height": g.height, "title": g.title, "provider": provider }))
+    });
     trim(json!({
         "id": m.id,
         "channel_id": m.channel_id,
@@ -153,6 +162,7 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
         "reply_to_id": m.reply_to_id,
         "attachments": attachments,
         "embeds": embeds,
+        "gif": gif,
         "mentions_everyone": m.mentions_everyone,
         "mention_role_ids": m.mention_role_ids,
         "mention_user_ids": m.mention_user_ids,
@@ -264,5 +274,24 @@ mod tests {
             event(&e),
             json!({ "sequence": 7, "type": "message_deleted", "channel_id": "c", "message_id": "m" })
         );
+    }
+
+    #[test]
+    fn a_gif_shows_as_members_see_it() {
+        let m = pb::Message {
+            id: "m".into(),
+            gif: Some(pb::MessageGif {
+                url: "/media/g".into(),
+                width: 320,
+                height: 240,
+                provider: pb::GifProvider::Giphy as i32,
+                seal: "secret".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let shown = message(&m, &HashMap::new());
+        assert_eq!(shown["gif"], json!({ "url": "/media/g", "width": 320, "height": 240, "provider": "giphy" }));
+        assert!(!shown.to_string().contains("secret"), "never the seal");
     }
 }

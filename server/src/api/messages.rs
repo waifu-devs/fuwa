@@ -36,6 +36,8 @@ struct Extras {
     webhook: Option<pb::MessageWebhook>,
     #[prost(message, repeated, tag = "7")]
     emojis: Vec<pb::Emoji>,
+    #[prost(message, optional, tag = "9")]
+    gif: Option<pb::MessageGif>,
     #[prost(string, repeated, tag = "10")]
     mention_user_ids: Vec<String>,
 }
@@ -50,6 +52,7 @@ impl Extras {
             auto_mod: message.auto_mod.clone(),
             webhook: message.webhook.clone(),
             emojis: message.emojis.clone(),
+            gif: message.gif.clone(),
             mention_user_ids: message.mention_user_ids.clone(),
         };
         (extras != Extras::default()).then(|| extras.encode_to_vec())
@@ -258,6 +261,7 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 thread_id: r.get::<Option<String>>(9)?.unwrap_or_default(),
                 thread: None,
                 also_in_channel: r.get(10)?,
+                gif: None,
                 mention_user_ids: vec![],
             },
             r.get::<Option<Vec<u8>>>(4)?,
@@ -281,6 +285,7 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
         message.auto_mod = extras.auto_mod;
         message.webhook = extras.webhook;
         message.emojis = extras.emojis;
+        message.gif = extras.gif;
         message.mention_user_ids = extras.mention_user_ids;
     }
     Ok(message)
@@ -304,7 +309,7 @@ pub(super) async fn load_message(
 
 pub(super) fn check_content(content: &str, has_extras: bool) -> Result<()> {
     if content.trim().is_empty() && !has_extras {
-        return Err(Error::invalid("a message needs text, an attachment or an embed"));
+        return Err(Error::invalid("a message needs text, an attachment, an embed or a GIF"));
     }
     if content.chars().count() > MAX_MESSAGE_LENGTH {
         return Err(Error::invalid(format!("messages can be at most {MAX_MESSAGE_LENGTH} characters")));
@@ -646,13 +651,15 @@ impl MessageService for Api {
                 let Seat { sdb, member, access } = self.membership(&account, &req.server_id).await?;
                 check_not_timed_out(&member)?;
                 access.require_in(&req.channel_id, Permission::SendMessages)?;
-                if !req.attachments.is_empty() {
+                if !req.attachments.is_empty() || req.gif.is_some() {
                     access.require_in(&req.channel_id, Permission::AttachFiles)?;
                 }
                 if !req.embeds.is_empty() {
                     access.require_in(&req.channel_id, Permission::EmbedLinks)?;
                 }
-                check_content(&req.content, !req.attachments.is_empty() || !req.embeds.is_empty())?;
+                // Only GIFs this instance stored and sealed.
+                let gif = req.gif.take().map(|gif| crate::gifs::open_seal(&self.app, &gif)).transpose()?;
+                check_content(&req.content, !req.attachments.is_empty() || !req.embeds.is_empty() || gif.is_some())?;
                 check_extras(&mut req.attachments, &req.embeds)?;
                 check_embed_links(&self.app, &mut req.embeds)?;
                 if req.also_send_to_channel && req.thread_id.is_empty() {
@@ -661,6 +668,11 @@ impl MessageService for Api {
                 if let Some(link) = shared::link_of(&sdb.read()?, &req.channel_id).await? {
                     if !req.thread_id.is_empty() {
                         return Err(Error::invalid("threads aren't in channels shared between servers yet"));
+                    }
+                    if gif.is_some() {
+                        return Err(Error::FailedPrecondition(
+                            "GIFs can't be sent in channels shared from another server yet".into(),
+                        ));
                     }
                     let message = shared::guest_send(&self.app, &sdb, &account, &member, &access, &link, req).await?;
                     return Ok(pb::SendMessageResponse { message: Some(message) });
@@ -674,7 +686,9 @@ impl MessageService for Api {
                 {
                     return Err(Error::ResourceExhausted("this server is out of storage".into()));
                 }
-                let pictures = automod::picture_links(&req.attachments, &req.embeds);
+                let mut pictures = automod::picture_links(&req.attachments, &req.embeds);
+                // The GIF too: providers read its first frame.
+                pictures.extend(gif.iter().map(|gif| gif.url.clone()));
                 // The Smart filter's provider is asked alongside: the message
                 // goes out at once, and its answer is acted on when it comes.
                 let (asked, later) = (
@@ -747,6 +761,7 @@ impl MessageService for Api {
                             thread_id: req.thread_id.clone(),
                             thread: None,
                             also_in_channel: parent.is_some() && req.also_send_to_channel,
+                            gif: gif.clone(),
                             mention_user_ids,
                         };
                         insert_message(conn, &message, now).await?;
@@ -905,7 +920,10 @@ impl MessageService for Api {
                         if message.kind != pb::MessageKind::Unspecified as i32 {
                             return Err(Error::invalid("system messages can't be edited"));
                         }
-                        check_content(&req.content, !message.attachments.is_empty() || !message.embeds.is_empty())?;
+                        check_content(
+                            &req.content,
+                            !message.attachments.is_empty() || !message.embeds.is_empty() || message.gif.is_some(),
+                        )?;
                         if message.content != req.content {
                             let channel = load_channel(conn, &sdb.id, &message.channel_id)
                                 .await?
