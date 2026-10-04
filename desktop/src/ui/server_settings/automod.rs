@@ -566,8 +566,10 @@ impl ServerSettingsView {
                     )),
             )
             .child(div().flex_1().min_w_0().text_sm().text_color(p.muted_foreground).child(
-                "AutoMod reads each message as it's sent or edited, before anyone sees it. People who can manage \
-                 the server are never caught, so try a rule with the box under it rather than in chat.",
+                "AutoMod reads each message as it's sent or edited. Blocked words, mention spam and links are \
+                 caught before anyone sees them; the Smart filter answers a moment after, and takes blocked \
+                 messages down then. People who can manage the server are never caught, so try a rule with the \
+                 box under it rather than in chat.",
             ));
         let mut page =
             div().flex().flex_col().gap(px(24.0)).child(motion::rise(intro, "automod-intro", Duration::ZERO, 8.0));

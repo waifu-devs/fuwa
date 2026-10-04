@@ -670,6 +670,11 @@ message SharedCall {
     AdminShares admin_list = 15;
     AdminEnd admin_end = 16;
   }
+  // Set only by the instance that received the call from another instance
+  // (whatever the other instance sent there): that instance's origin and
+  // its key's fingerprint. Empty for calls made inside this instance.
+  string from_instance = 17;
+  string from_fingerprint = 18;
 }
 
 message SharedReply {

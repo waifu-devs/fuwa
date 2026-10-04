@@ -15,6 +15,7 @@ pub mod config;
 pub mod dms;
 pub mod instance_admin;
 pub mod instance_manage;
+pub mod instance_servers;
 pub mod keybinds;
 pub mod linked;
 pub mod moderation;
