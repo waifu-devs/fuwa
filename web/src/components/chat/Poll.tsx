@@ -220,7 +220,7 @@ function PollFooter({
       </span>
       <span aria-hidden>·</span>
       <span>{status}</span>
-      <span className="ml-auto flex items-center gap-1">
+      <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
         {busy && <LoaderCircleIcon aria-label="Voting" className="size-3.5 animate-spin" />}
         {canPeek && (
           <FooterButton onClick={onPeek}>
@@ -303,7 +303,7 @@ function FooterButton({ onClick, danger, label, children }: { onClick: () => voi
       title={label}
       whileTap={{ scale: 0.92 }}
       className={cn(
-        "inline-flex items-center gap-1 rounded-lg px-2 py-1 font-bold transition-colors",
+        "inline-flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1 font-bold transition-colors",
         danger ? "text-destructive hover:bg-destructive/10" : "hover:bg-muted hover:text-foreground",
       )}
     >
