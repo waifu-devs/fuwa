@@ -6,3 +6,5 @@
 #
 # To rotate: add the new key here and ship a release signed with the old one,
 # then sign with the new one and remove the old line.
+
+4AcpEV4vcLlII3lWX0ZaUeK4VRMA0gBEjyt3E5eFtTQ=

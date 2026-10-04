@@ -771,8 +771,10 @@ mod tests {
         let line = base64::engine::general_purpose::STANDARD.encode(public(&pair));
         let text = format!("# the release key\n\n{line}\nnot base64!\nAAAA\n");
         assert_eq!(release_keys(&text), vec![public(&pair)]);
-        // The file the app is built with reads cleanly, whatever it holds.
-        let _ = release_keys(RELEASE_KEYS);
+        // Every key line in the file the app is built with reads cleanly.
+        let lines = RELEASE_KEYS.lines().filter(|l| !l.trim().is_empty() && !l.trim().starts_with('#')).count();
+        assert!(lines > 0);
+        assert_eq!(release_keys(RELEASE_KEYS).len(), lines);
     }
 
     #[test]
