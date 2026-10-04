@@ -268,8 +268,6 @@ type Answer = futures::future::Shared<futures::future::BoxFuture<'static, Option
 pub(super) struct Checking {
     rule_id: String,
     provider: String,
-    /// The provider's id, whose lane it waits in (see `automod::pace`).
-    lane: String,
     answer: Answer,
 }
 
@@ -334,14 +332,12 @@ pub(super) async fn start(
     drop(conn);
     let setup = app.settings().automod_provider(&rule.provider)?.clone();
     let provider = setup.name().to_string();
-    let lane = setup.id.clone();
     let pictures: Vec<String> = if rule.pictures && setup.reads_pictures() { pictures.to_vec() } else { vec![] };
     if content.trim().is_empty() && pictures.is_empty() {
         return None;
     }
     let key = (sdb.id.clone(), setup.id.clone(), content.to_string(), pictures.clone());
-    let checking =
-        |answer| Some(Checking { rule_id: rule.id.clone(), provider: provider.clone(), lane: lane.clone(), answer });
+    let checking = |answer| Some(Checking { rule_id: rule.id.clone(), provider: provider.clone(), answer });
     if let Some(answer) = asking().get(&key).cloned() {
         return checking(answer);
     }
@@ -369,11 +365,10 @@ pub(super) async fn start(
     checking(answer)
 }
 
-/// Starts asking, as [`ask`] does, and waits only as long as the provider
-/// usually takes: the answer when it came in time, or the check still going,
-/// for [`Checking::later`] once the message is sent.
+/// Starts asking, as [`ask`] does, without waiting: the message is sent at
+/// once, and [`Checking::later`] acts on the answer when it comes.
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn ask_soon(
+pub(super) async fn ask_after(
     app: &std::sync::Arc<crate::app::App>,
     sdb: &store::ServerDb,
     member: &pb::Member,
@@ -381,22 +376,8 @@ pub(super) async fn ask_soon(
     channel_id: &str,
     content: &str,
     pictures: &[String],
-) -> (Option<Asked>, Option<Checking>) {
-    match start(app, sdb, member, access, channel_id, content, pictures).await {
-        Some(checking) => match checking.soon().await {
-            Soon::Answered(asked) => (asked, None),
-            Soon::Later(checking) => (None, Some(checking)),
-        },
-        None => (None, None),
-    }
-}
-
-/// What came of a check by the time its message is sent.
-pub(super) enum Soon {
-    /// The provider answered in time (or didn't, and won't).
-    Answered(Option<Asked>),
-    /// Still asking: the message is sent, and checked when the answer comes.
-    Later(Checking),
+) -> Option<Checking> {
+    start(app, sdb, member, access, channel_id, content, pictures).await
 }
 
 impl Checking {
@@ -404,17 +385,6 @@ impl Checking {
     pub(super) async fn wait(self) -> Option<Asked> {
         let scores = self.answer.await?;
         Some(Asked { rule_id: self.rule_id, provider: self.provider, scores })
-    }
-
-    /// Waits for the answer only as long as the provider usually takes (see
-    /// `automod::pace::budget`), so a slow provider doesn't hold the message.
-    pub(super) async fn soon(self) -> Soon {
-        match tokio::time::timeout(automod::pace::budget(&self.lane), self.answer.clone()).await {
-            Ok(scores) => {
-                Soon::Answered(scores.map(|scores| Asked { rule_id: self.rule_id, provider: self.provider, scores }))
-            }
-            Err(_) => Soon::Later(self),
-        }
     }
 
     /// Checks a message already sent when the answer comes, in its own task:
@@ -429,7 +399,6 @@ impl Checking {
         message_id: String,
         content: String,
     ) {
-        crate::reports::server_error("automod_checked_after_sending", None);
         tokio::spawn(async move {
             let Some(asked) = self.wait().await else { return };
             let reviewed = sdb
@@ -795,6 +764,11 @@ async fn review_sent(
     let caught = [(effective(&rule, Some(level)), hit)];
     if act(conn, server_id, member, &channel, content, Some(asked), &caught, events).await?.is_some() {
         conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
+        let author_id = member.user.as_ref().map(|u| u.id.as_str()).unwrap_or_default();
+        let entry = Audit::new(pb::AuditAction::AutoModMessageDelete, author_id)
+            .channel(channel.name.clone())
+            .reason(rule.name.clone());
+        store::audit(conn, author_id, entry).await?;
         store::add_usage(
             conn,
             UsageChange {
@@ -1063,5 +1037,8 @@ mod tests {
         assert!(alert.blocked && alert.content == "free nitro" && alert.provider == "Cloudflare Clef", "{alert:?}");
         assert!(events.iter().any(|e| matches!(e, Payload::MessageDeleted(d) if d.message_id == "m2")));
         assert!(events.iter().any(|e| matches!(e, Payload::MemberUpdated(_))));
+        let logged: Vec<i32> =
+            crate::db::query_all(&conn, "SELECT action FROM audit", (), |r| r.get::<i32>(0)).await.unwrap();
+        assert!(logged.contains(&(pb::AuditAction::AutoModMessageDelete as i32)), "{logged:?}");
     }
 }

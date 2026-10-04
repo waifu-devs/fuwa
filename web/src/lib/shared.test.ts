@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { codeLeft, findShareCode, foreignServer, listNames, sharedLabel } from "./shared.ts";
+import { codeLeft, findShareCode, foreignServer, listNames, shareCodeInstance, sharedLabel } from "./shared.ts";
 
 // Run with `pnpm test` (node's own test runner; no extra dependencies).
 
@@ -12,6 +12,16 @@ test("a share code is found in whatever was pasted around it", () => {
   assert.equal(findShareCode("not a code"), "");
   // Too short after the dash.
   assert.equal(findShareCode("01JABCDEFGHJKMNPQRSTVWXYZ0-short"), "");
+});
+
+test("a code for other instances keeps the instance it names", () => {
+  const remote = `${CODE}@chat.example.com`;
+  assert.equal(findShareCode(`join us: ${remote}.`), remote);
+  assert.equal(findShareCode(`${CODE}@chat.example.com:8443 thanks`), `${CODE}@chat.example.com:8443`);
+  assert.equal(findShareCode(`${CODE}@http://127.0.0.1:4000`), `${CODE}@http://127.0.0.1:4000`);
+  assert.equal(shareCodeInstance(remote), "chat.example.com");
+  assert.equal(shareCodeInstance(`${CODE}@http://127.0.0.1:4000`), "http://127.0.0.1:4000");
+  assert.equal(shareCodeInstance(CODE), "");
 });
 
 test("names read like a sentence", () => {
