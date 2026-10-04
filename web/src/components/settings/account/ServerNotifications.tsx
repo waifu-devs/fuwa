@@ -320,8 +320,13 @@ function MuteControl({
             <Button type="button" variant="outline" size="sm" onClick={() => onMute(false)} className="group rounded-xl border-amber-500/40 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400" title="Unmute">
               <BellOffIcon className="size-4 group-hover:hidden" />
               <BellIcon className="hidden size-4 group-hover:block" />
-              <span className="group-hover:hidden">{label}</span>
-              <span className="hidden group-hover:inline">Unmute</span>
+              {/* Both labels share one grid cell, so the button keeps its width and never shrinks out from under the pointer. */}
+              <span className="grid text-center">
+                <span className="transition-opacity [grid-area:1/1] group-hover:opacity-0">{label}</span>
+                <span aria-hidden className="opacity-0 transition-opacity [grid-area:1/1] group-hover:opacity-100">
+                  Unmute
+                </span>
+              </span>
             </Button>
           </motion.div>
         ) : (
