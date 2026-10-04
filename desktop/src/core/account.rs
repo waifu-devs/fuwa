@@ -274,6 +274,18 @@ impl Core {
         content_type: &str,
         bytes: Vec<u8>,
     ) -> Result<String, Problem> {
+        self.upload_picture_for(key, "", purpose, content_type, bytes).await
+    }
+
+    /// [`Core::upload_picture`] for one server (a server's banner must be), so it can only be used there.
+    pub async fn upload_picture_for(
+        self: &Arc<Self>,
+        key: &str,
+        server_id: &str,
+        purpose: pb::MediaPurpose,
+        content_type: &str,
+        bytes: Vec<u8>,
+    ) -> Result<String, Problem> {
         let api = self.api(key).ok_or_else(missing)?;
         let res = rpc!(
             api.media(),
@@ -281,7 +293,7 @@ impl Core {
                 purpose: purpose as i32,
                 content_type: content_type.into(),
                 size: bytes.len() as i64,
-                server_id: String::new(),
+                server_id: server_id.into(),
             })
         )
         .await?;

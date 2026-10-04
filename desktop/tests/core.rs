@@ -1140,6 +1140,115 @@ fn friends_follow_live_and_blocks_hide_conversations() {
     drop(instance.runtime);
 }
 
+#[test]
+fn banners_and_onboarding_greet_new_members() {
+    use fuwa_desktop::core::onboarding::{self, PICK, SAY_HELLO};
+    use fuwa_desktop::core::server_admin::ServerPatch;
+    // SAFETY: set before anything reads it.
+    unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
+    let data = tempfile::tempdir().unwrap();
+    let instance = start_instance(data.path());
+    let (home_a, home_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let alice = Core::start(Paths::under(home_a.path())).unwrap();
+    let bob = Core::start(Paths::under(home_b.path())).unwrap();
+    let key = {
+        let (core, url) = (alice.clone(), instance.url.clone());
+        wait(&alice, async move { core.sign_up(&url, "alice", "correct horse battery", "Alice").await }).unwrap()
+    };
+    {
+        let (core, url) = (bob.clone(), instance.url.clone());
+        wait(&bob, async move { core.sign_up(&url, "bob", "correct horse battery", "Bob").await }).unwrap();
+    }
+    for core in [&alice, &bob] {
+        until(core, "signed in and live", |s| {
+            s.instance(&key).is_some_and(|i| i.me.is_some() && i.connection == Connection::Live)
+        });
+    }
+    let server = {
+        let (core, key) = (alice.clone(), key.clone());
+        wait(&alice, async move { core.create_server(&key, "Tea house").await }).unwrap()
+    };
+    until(&alice, "the server's channels", |s| s.instance(&key).is_some_and(|i| i.synced.contains(&server.id)));
+    let general = alice
+        .shared
+        .read(|s| s.instance(&key).unwrap().channels[&server.id].iter().find(|c| c.r#type == 1).unwrap().id.clone());
+
+    // A banner is uploaded for the server, then set with its focus and accent.
+    let saved = {
+        let (core, key, sid) = (alice.clone(), key.clone(), server.id.clone());
+        wait(&alice, async move {
+            let url =
+                core.upload_picture_for(&key, &sid, pb::MediaPurpose::Banner, "image/png", TINY_PNG.to_vec()).await?;
+            let patch = ServerPatch {
+                banner_url: Some(url),
+                banner_focus: Some((20, 80)),
+                accent_color: Some(0xff88aa),
+                ..ServerPatch::default()
+            };
+            core.update_server(&key, &sid, patch).await
+        })
+        .unwrap()
+    };
+    assert!(saved.banner_url.contains("/media/"));
+    assert_eq!((saved.banner_focus_x, saved.banner_focus_y, saved.accent_color), (20, 80, Some(0xff88aa)));
+
+    // Alice makes a role and an onboarding that hands it out.
+    let role = {
+        let (core, key, sid) = (alice.clone(), key.clone(), server.id.clone());
+        wait(&alice, async move { core.create_role(&key, &sid, "Artist").await }).unwrap()
+    };
+    let mut pick = onboarding::new_step(PICK, None);
+    pick.options[0].label = "  Art ".into();
+    pick.options[0].role_ids = vec![role.id.clone()];
+    pick.options[0].channel_ids = vec![general.clone()];
+    let hello = onboarding::new_step(SAY_HELLO, Some(&general));
+    let set = {
+        let (core, key, sid) = (alice.clone(), key.clone(), server.id.clone());
+        let onb = pb::Onboarding { enabled: true, steps: vec![pick, hello], set_by: String::new() };
+        wait(&alice, async move { core.set_onboarding(&key, &sid, onb).await }).unwrap()
+    };
+    assert_eq!(set.steps.len(), 2);
+    assert_eq!(set.steps[0].options[0].label, "Art", "trimmed before it's sent");
+    let option = set.steps[0].options[0].id.clone();
+    assert!(!option.is_empty());
+    assert!(alice.shared.read(|s| s.instance(&key).unwrap().server(&server.id).unwrap().has_onboarding));
+
+    // Bob joins: the banner comes along, and the onboarding is due for him (not for Alice, who manages it).
+    let invite = {
+        let (core, key, id) = (alice.clone(), key.clone(), server.id.clone());
+        wait(&alice, async move { core.create_invite(&key, &id).await }).unwrap()
+    };
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move { core.join_by_invite(&key, &invite).await }).unwrap();
+    }
+    until(&bob, "his member", |s| s.instance(&key).is_some_and(|i| i.my_member(&server.id).is_some()));
+    let shown = bob.shared.read(|s| s.instance(&key).unwrap().server(&server.id).unwrap().clone());
+    assert_eq!((shown.banner_url, shown.accent_color), (saved.banner_url.clone(), Some(0xff88aa)));
+    let due = |core: &Core| core.shared.read(|s| onboarding::due(s.instance(&key).unwrap(), &server.id, now_ms()));
+    assert_eq!(due(&bob), Some(true));
+    until(&alice, "Bob in her list", |s| s.instance(&key).unwrap().members[&server.id].len() == 2);
+    assert_eq!(due(&alice), Some(false));
+
+    // He goes through it: the steps he sees, then his pick gives him the role.
+    let seen = {
+        let (core, key, sid) = (bob.clone(), key.clone(), server.id.clone());
+        wait(&bob, async move { core.onboarding(&key, &sid).await }).unwrap()
+    };
+    let steps = onboarding::steps_for(&seen, false, |c| c == general);
+    assert_eq!(steps.iter().map(|s| s.kind).collect::<Vec<_>>(), vec![PICK, SAY_HELLO]);
+    let go = onboarding::go_here_first(&steps, std::slice::from_ref(&option), None, |c| c == general);
+    assert_eq!(go[0].note, "Because you picked Art");
+    {
+        let (core, key, sid) = (bob.clone(), key.clone(), server.id.clone());
+        wait(&bob, async move { core.finish_onboarding(&key, &sid, vec![option]).await }).unwrap();
+    }
+    let me = bob.shared.read(|s| s.instance(&key).unwrap().my_member(&server.id).cloned().unwrap());
+    assert!(me.role_ids.contains(&role.id));
+    assert!(me.onboarded_at.is_some());
+    assert_eq!(due(&bob), Some(false));
+}
+
 fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
     for entry in std::fs::read_dir(dir).unwrap().flatten() {

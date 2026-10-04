@@ -507,6 +507,11 @@
     makes them links, `menus.rs` the bell menus, `context_menu.rs` the
     right-click menus (docs/context-menus.md; what's in each is
     `menu_items.rs`, from the same actions and checks as the buttons),
+    `banner.rs` a server's banner (cover at its focal point, a slow
+    pan, a gradient in its colors without one) and the accent that tints
+    the welcome and onboarding screens, `onboarding.rs` a server's
+    onboarding for new members (over `core/onboarding.rs`, the web's
+    `join/Onboarding.tsx`; it takes the welcome screen's place once done),
     `friends.rs` the Friends screen under Home and the friend buttons on
     profile cards (over `core/friends.rs`, which follows `WatchFriends`
     beside the event stream), `settings_friends.rs` Friends and privacy,
@@ -545,8 +550,11 @@
     the webhooks on the Integrations page (a test post goes to the webhook's
     own instance only), under the agents in `server_settings/agents.rs`
     (added by username, removed by kicking), `server_settings/welcome.rs`
-    the Welcome screen editor beside a preview drawn like the welcome
-    dialog, `server_settings/automod.rs` the AutoMod rules (each tried with
+    the Welcome & onboarding page (the welcome screen editor beside a
+    preview drawn like the welcome dialog, with `server_settings/onboarding.rs`
+    for the banner, its focal point and accent color and the onboarding
+    steps, all saved from one bar in the web's order: the server, the
+    welcome screen, the onboarding), `server_settings/automod.rs` the AutoMod rules (each tried with
     `TestAutoModRule` as it's edited, before it's saved; the Smart filter
     picks one of the instance's providers, a level and "how sure" per label,
     and pictures where the provider reads them),

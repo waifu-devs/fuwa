@@ -78,7 +78,10 @@ impl FuwaApp {
             return Some(self.render_profile(key, user_id, server.as_deref(), cx));
         }
         if let Dialog::Welcome { key, server } = &dialog {
-            return Some(self.render_welcome(key, server, cx));
+            return Some(self.render_welcome(key, server, window, cx));
+        }
+        if let Dialog::Onboarding { .. } = &dialog {
+            return self.render_onboarding(window, cx);
         }
         if let Dialog::Secure { key, server, channel } = &dialog {
             return Some(self.render_secure(key, server, channel, window, cx));
@@ -382,6 +385,7 @@ impl FuwaApp {
             ),
             Dialog::Profile { .. }
             | Dialog::Welcome { .. }
+            | Dialog::Onboarding { .. }
             | Dialog::Secure { .. }
             | Dialog::Poll { .. }
             | Dialog::PollVoters { .. }
@@ -468,6 +472,7 @@ impl FuwaApp {
             Dialog::Rules { .. } => "rules",
             Dialog::Profile { .. } => "profile",
             Dialog::Welcome { .. } => "welcome",
+            Dialog::Onboarding { .. } => "onboarding",
             Dialog::Secure { .. } => "secure",
             Dialog::Moderate { .. } => "moderate",
             Dialog::SsoJoin { .. } => "sso",
@@ -665,7 +670,13 @@ impl FuwaApp {
 
     /// A server's welcome screen: its icon and name, a few words, and the
     /// channels it suggests, each a card that rises after the one before.
-    fn render_welcome(&mut self, key: &str, server_id: &str, cx: &mut Context<Self>) -> AnyElement {
+    fn render_welcome(
+        &mut self,
+        key: &str,
+        server_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let p = pal(cx);
         let (server, channels, look) = self.core.shared.read(|s| {
             let i = s.instance(key);
@@ -676,23 +687,8 @@ impl FuwaApp {
             )
         });
         let Some(server) = server else { return div().into_any_element() };
-        let mut body = div().flex().flex_col().items_center().gap(px(12.0)).child(motion::rise(
-            div()
-                .relative()
-                .child(crate::ui::widgets::server_icon(&server, 64.0, 20.0, &p))
-                .child(div().absolute().top(px(-10.0)).right(px(-14.0)).text_size(px(22.0)).child("👋")),
-            "welcome-icon",
-            Duration::ZERO,
-            14.0,
-        ));
-        body = body.child(
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .child(section_title("WELCOME TO", &p))
-                .child(div().text_xl().font_weight(FontWeight::EXTRA_BOLD).child(server.name.clone())),
-        );
+        let tint = crate::ui::banner::accent(&server);
+        let mut body = div().flex().flex_col().gap(px(12.0));
         match &self.welcome {
             None => {
                 body = body.child(
@@ -726,10 +722,10 @@ impl FuwaApp {
                 if !suggested.is_empty() {
                     let mut list = div().w_full().flex().flex_col().gap(px(8.0)).child(section_title("START HERE", &p));
                     for (n, (w, channel)) in suggested.into_iter().enumerate() {
-                        let hover = alpha(p.primary, 0.08);
-                        let border = p.primary;
+                        let hover = gpui_kit::Hsla { a: 0.08, ..tint };
+                        let border = tint;
                         let (k, sid, cid) = (key.to_owned(), server_id.to_owned(), channel.id.clone());
-                        let lead = welcome_emoji(&w.emoji, &look, &p);
+                        let lead = emoji_tile(&w.emoji, &look, tint, "hash");
                         list = list.child(motion::rise(
                             div()
                                 .id(SharedString::from(format!("welcome-{}", channel.id)))
@@ -781,31 +777,34 @@ impl FuwaApp {
             }
         }
         body = body.child(
-            div()
-                .id("welcome-skip")
-                .mt(px(4.0))
-                .text_sm()
-                .font_weight(FontWeight::BOLD)
-                .text_color(p.muted_foreground)
-                .cursor_pointer()
-                .hover({
-                    let fg = p.foreground;
-                    move |s| s.text_color(fg)
-                })
-                .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
-                .child("I'll look around myself"),
+            div().flex().justify_center().child(
+                div()
+                    .id("welcome-skip")
+                    .mt(px(4.0))
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(p.muted_foreground)
+                    .cursor_pointer()
+                    .hover({
+                        let fg = p.foreground;
+                        move |s| s.text_color(fg)
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx)))
+                    .child("I'll look around myself"),
+            ),
         );
-        let glow = alpha(p.primary, 0.18);
-        let panel = card(&p)
-            .w(px(440.0))
-            .overflow_hidden()
-            .relative()
-            .child(div().absolute().top_0().left_0().right_0().h(px(120.0)).bg(gpui_kit::linear_gradient(
-                180.0,
-                gpui_kit::linear_color_stop(glow, 0.0),
-                gpui_kit::linear_color_stop(alpha(p.primary, 0.0), 1.0),
-            )))
-            .child(div().relative().p(px(24.0)).child(body));
+        const WIDTH: f32 = 480.0;
+        let hero = crate::ui::banner::banner_hero(&server, "Welcome to 👋", WIDTH, &p, window, cx);
+        let panel = card(&p).w(px(WIDTH)).overflow_hidden().child(hero).child(
+            div()
+                .id("welcome-body")
+                .max_h(px(460.0))
+                .overflow_y_scroll()
+                .px(px(24.0))
+                .pt(px(12.0))
+                .pb(px(22.0))
+                .child(body),
+        );
         motion::fade_in(
             scrim("dialog-scrim", &p).on_click(cx.listener(|this, _, _, cx| this.close_dialog(cx))).child(
                 motion::rise(
@@ -886,7 +885,7 @@ impl FuwaApp {
     }
 }
 
-fn section_title(text: &str, p: &Palette) -> Div {
+pub(crate) fn section_title(text: &str, p: &Palette) -> Div {
     div()
         .text_size(px(11.0))
         .font_weight(FontWeight::EXTRA_BOLD)
@@ -913,6 +912,16 @@ impl LeaveExt for Div {
 
 /// A suggested channel's emoji: a Unicode one, one of the server's own, or a #.
 pub(crate) fn welcome_emoji(emoji: &str, look: &crate::ui::mentions::Look, p: &Palette) -> AnyElement {
+    emoji_tile(emoji, look, p.primary.into(), "hash")
+}
+
+/// An emoji (Unicode or the server's own) on a tile tinted `tint`, or `fallback`'s icon without one.
+pub(crate) fn emoji_tile(
+    emoji: &str,
+    look: &crate::ui::mentions::Look,
+    tint: gpui_kit::Hsla,
+    fallback: &str,
+) -> AnyElement {
     let base = div()
         .size(px(36.0))
         .flex_none()
@@ -920,8 +929,8 @@ pub(crate) fn welcome_emoji(emoji: &str, look: &crate::ui::mentions::Look, p: &P
         .flex()
         .items_center()
         .justify_center()
-        .bg(alpha(p.primary, 0.12))
-        .text_color(p.primary);
+        .bg(gpui_kit::Hsla { a: 0.14, ..tint })
+        .text_color(tint);
     let own = emoji
         .strip_prefix('<')
         .and_then(|e| e.strip_suffix('>'))
@@ -938,6 +947,6 @@ pub(crate) fn welcome_emoji(emoji: &str, look: &crate::ui::mentions::Look, p: &P
         None if !emoji.is_empty() && !emoji.starts_with('<') => {
             base.text_size(px(20.0)).child(emoji.to_owned()).into_any_element()
         }
-        None => base.child(icon("hash").size(px(18.0))).into_any_element(),
+        None => base.child(icon(fallback).size(px(18.0))).into_any_element(),
     }
 }
