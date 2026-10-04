@@ -35,6 +35,10 @@ export type Note = {
   read: number;
   /** The safety number you checked with the other person, if you did. */
   verified: string;
+  /** Threads in a secure channel you followed (true) or unfollowed (false) by hand, by their message's record. */
+  follows?: Record<number, boolean>;
+  /** The last reply you saw in each thread, by the thread's message's record. */
+  threadRead?: Record<number, number>;
 };
 
 /** A device being added to or leaving a conversation, by whose it is. */
@@ -58,9 +62,10 @@ export type Item = {
    * came in here (what came before, it can't read). unreadable: a record it
    * couldn't open. reset: someone started a secure channel's encryption over.
    * setting: someone turned a secure channel's history sharing on ("on") or
-   * off ("off"), in content.
+   * off ("off"), in content. thread: someone locked ("locked") or unlocked
+   * ("unlocked") the thread under the message `thread` names.
    */
-  kind: "text" | "devices" | "joined" | "unreadable" | "reset" | "setting";
+  kind: "text" | "devices" | "joined" | "unreadable" | "reset" | "setting" | "thread";
   content: string;
   replyTo: number;
   /** Unix ms of the last edit, or 0. */
@@ -74,6 +79,10 @@ export type Item = {
   editSigned?: Signed;
   /** Who passed it on to this device, when it came as shared history rather than as it was sent. */
   sharedBy?: string;
+  /** In a secure channel: the record of the message this replies under, as a thread (0 or absent: none). */
+  thread?: number;
+  /** A thread reply its author also sent to the channel. */
+  inChannel?: boolean;
 };
 
 /** This device's hold on the account's message backup: the recovery key, which never leaves the browser. */

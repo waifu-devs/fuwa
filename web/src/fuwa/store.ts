@@ -41,7 +41,15 @@ export type ChannelMessages = {
 };
 
 /** A message this browser sent that the server hasn't confirmed yet. */
-export type PendingMessage = { nonce: string; content: string; createdAt: number; failed: string | null };
+export type PendingMessage = {
+  nonce: string;
+  content: string;
+  createdAt: number;
+  failed: string | null;
+  /** In a secure channel: the thread it's going to, and whether it's also going to the channel. */
+  thread?: number;
+  inChannel?: boolean;
+};
 
 /** A device in an encrypted conversation, as its group says. */
 export type DmMember = { userId: string; deviceId: string; signatureKey: Uint8Array };
@@ -107,7 +115,12 @@ export type DmState = {
   /** Calls going on in conversations, by conversation id. */
   calls: Record<string, DmCall>;
   backup: BackupState;
+  /** Per secure channel: threads followed or unfollowed by hand, and the last reply seen in each (this device only). */
+  threadNotes: Record<string, ThreadNote>;
 };
+
+/** What this device notes about a secure channel's threads, by their message's record. */
+export type ThreadNote = { follows: Record<number, boolean>; read: Record<number, number> };
 
 export const emptyDms = (): DmState => ({
   status: "off",
@@ -125,6 +138,7 @@ export const emptyDms = (): DmState => ({
   secureHistory: {},
   calls: {},
   backup: emptyBackup(),
+  threadNotes: {},
 });
 
 export type InstanceState = {

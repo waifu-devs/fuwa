@@ -126,10 +126,59 @@ channel says so once, at its top:
   when it opens it, and chimes and notifies by the channel's notification
   settings.
 - **Voice and server recordings**: secure channels are text.
+- **Threads** work, worked out on each device rather than by the server; see
+  [Threads](#threads) for what that changes.
 
 Moderation that doesn't need to read still works: moderators (Manage
 Messages) delete anyone's message there (its ciphertext goes, and the audit
 log notes it), and time-outs, kicks and bans apply.
+
+## Threads
+
+Replying in a thread works in a secure channel too, the same way to look at
+as in any channel ([threads.md](threads.md)), but the server takes no part
+in it: it can't read the channel, so it can't tell a reply from any other
+line.
+
+- **The thread is inside the encryption.** A reply is an ordinary text whose
+  encrypted content names the record of the message it's under
+  (`DirectMessageText.thread_sequence`) and whether it was also sent to the
+  channel (`in_channel`). To the server it's the same padded, encrypted
+  record as any other line. Replies don't nest, and a thread can only start
+  under text someone wrote; a reply that names anything else shows as an
+  ordinary line.
+- **Each device sums threads up itself**, from the lines it opened: how many
+  replies, the last one, the latest people to reply, archived (by the
+  server's `thread_archive_hours`, as for other threads), what you follow and
+  what you haven't read. Following is per device and stays on it: replying
+  in a thread, or writing its message, follows it, and following or
+  unfollowing by hand sticks. Replies kept to their thread don't count as
+  unread in the channel, and only notify you in threads you follow.
+- **Nothing is fetched to fill a thread in.** The thread panel and list show
+  only what this device already has from reading the channel; the app never
+  asks the server for particular older records, so the server can't learn
+  which records make up a thread. A thread whose message this device never
+  had says so. Searching threads searches what's on the device.
+- **Start threads and locks are kept by the apps, not enforced.** The apps
+  offer "Reply in thread" on a message with no thread only to people with
+  Start threads, and a locked thread's composer only to people with Manage
+  messages. A lock is a signed line in the channel (`ThreadChange`) that
+  every device counts only if its sender has Manage messages there by the
+  device's own view of the channel's permissions; the latest one wins. The
+  server can't check either (it can't see which records are replies), so a
+  modified app could still reply where the apps wouldn't let it; such a
+  reply still shows.
+- **Deleting a thread's message** drops its thread from every device: they
+  stop showing the replies and never pass them on as shared history. The
+  replies' ciphertext stays on the server, unreadable to it. Apps don't
+  delete the replies one by one, because a burst of deletes right after the
+  message's would tell the server which records were its replies, and how
+  many. Anyone can still delete their own replies one at a time.
+- **Shared history and backups carry threads.** A thread reply is signed
+  like any message, so its thread can't be changed when it's passed on, and
+  locks are passed on the same way. A message backup keeps each reply's
+  thread and every lock (see [e2ee.md](e2ee.md#message-backup)).
+- **Old apps** that don't know threads show replies as ordinary lines.
 
 ## History and devices
 

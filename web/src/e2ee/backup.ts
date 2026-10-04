@@ -40,12 +40,14 @@ const KINDS: Partial<Record<vault.Item["kind"], BackupItemKind>> = {
   devices: BackupItemKind.DEVICES,
   reset: BackupItemKind.RESET,
   setting: BackupItemKind.SETTING,
+  thread: BackupItemKind.THREAD,
 };
 const FROM_KIND: Record<number, vault.Item["kind"]> = {
   [BackupItemKind.TEXT]: "text",
   [BackupItemKind.DEVICES]: "devices",
   [BackupItemKind.RESET]: "reset",
   [BackupItemKind.SETTING]: "setting",
+  [BackupItemKind.THREAD]: "thread",
 };
 
 const signedForm = (s: vault.Signed | undefined) =>
@@ -72,13 +74,18 @@ function toBackup(i: vault.Item): BackupItem | null {
     signed: signedForm(i.signed),
     editSigned: signedForm(i.editSigned),
     sharedBy: i.sharedBy ?? "",
+    threadSequence: BigInt(i.thread ?? 0),
+    inChannel: !!i.inChannel,
+    locked: i.kind === "thread" && i.content === "locked",
   });
 }
 
 function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
   const kind = FROM_KIND[b.kind];
   const seq = Number(b.sequence);
+  const thread = Number(b.threadSequence);
   if (!kind || !b.conversationId || !(seq > 0)) return null;
+  if (kind === "thread" && !(thread > 0)) return null;
   return {
     vault: vaultKey,
     conversation: b.conversationId,
@@ -96,6 +103,8 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
     signed: fromSigned(b.signed),
     editSigned: fromSigned(b.editSigned),
     sharedBy: b.sharedBy || undefined,
+    ...(thread > 0 ? { thread, inChannel: b.inChannel } : {}),
+    ...(kind === "thread" ? { content: b.locked ? "locked" : "unlocked" } : {}),
   };
 }
 

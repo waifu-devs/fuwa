@@ -5,7 +5,9 @@ import {
   ChevronLeftIcon,
   CopyIcon,
   HistoryIcon,
+  MessageSquareReplyIcon,
   KeyRoundIcon,
+  LockIcon,
   RotateCcwKeyIcon,
   LockKeyholeIcon,
   PencilIcon,
@@ -24,7 +26,7 @@ import type { Member, User } from "@/gen/fuwa/v1/types_pb";
 import type { Item } from "@/e2ee/vault";
 import { MAX_DM } from "@/e2ee/engine";
 import { focusChannel } from "@/fuwa/actions";
-import { deleteDm, dismissDm, dmProblem, editDm, markDmRead, prepareConversation, retryDm, sendDm } from "@/fuwa/dms";
+import { deleteDm, dismissDm, dmProblem, editDm, markDmRead, prepareConversation, retryDm, sendDm, type ThreadTarget } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage } from "@/fuwa/store";
 import { sendsMessage } from "@/components/chat/Composer";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
@@ -257,6 +259,9 @@ export function EncryptedMessages({
   canModerate = false,
   deleteQuestion,
   joiningText,
+  lines,
+  pendingIn,
+  threads,
 }: {
   instanceKey: string;
   id: string;
@@ -270,9 +275,17 @@ export function EncryptedMessages({
   canModerate?: boolean;
   deleteQuestion: string;
   joiningText: string;
+  /** The lines to show, when not all of them (a secure channel without its threads' replies, or one thread). */
+  lines?: Item[];
+  /** Which messages being sent belong in this list. */
+  pendingIn?: (p: PendingMessage) => boolean;
+  /** A secure channel's threads: what shows under a line, and starting a thread on one. */
+  threads?: ThreadHooks;
 }) {
-  const items = useFuwa((s) => s.instances[instanceKey]?.dms.items[id]);
-  const pending = useFuwa((s) => s.instances[instanceKey]?.dms.pending[id] ?? NO_PENDING);
+  const stored = useFuwa((s) => s.instances[instanceKey]?.dms.items[id]);
+  const items = stored && (lines ?? stored);
+  const allPending = useFuwa((s) => s.instances[instanceKey]?.dms.pending[id] ?? NO_PENDING);
+  const pending = useMemo(() => (pendingIn ? allPending.filter(pendingIn) : allPending), [allPending, pendingIn]);
   const joining = useFuwa((s) => !!s.instances[instanceKey]?.dms.joining[id]);
   const display = usePrefs((p) => p.messageDisplay);
   usePrefs((p) => p.clock);
@@ -396,12 +409,13 @@ export function EncryptedMessages({
                   member={memberOf?.(item.senderId)}
                   display={display}
                   mine={mine}
-                  deletable={mine || canModerate}
+                  deletable={canModerate || (mine && !threads?.kept(item))}
                   deleteQuestion={deleteQuestion}
                   instanceKey={instanceKey}
                   animate={animate}
                   editing={editing === item.seq}
                   actions={actions}
+                  threads={threads}
                 />
               );
             })}
@@ -498,6 +512,21 @@ type DmActions = {
   remove: (seq: number) => Promise<void>;
 };
 
+/**
+ * What a secure channel's list asks about threads, the same object while
+ * its threads don't change: the row under a line (its replies, or that it
+ * came from a thread), and whether a thread can start on it.
+ */
+export type ThreadHooks = {
+  under: (item: Item) => ReactNode;
+  canStart: (item: Item) => boolean;
+  /** Opens the line's thread, starting it if it has none yet. */
+  start: (item: Item) => void;
+  has: (item: Item) => boolean;
+  /** Whether its author can't delete it any more: someone else replied in its thread (moderators still can). */
+  kept: (item: Item) => boolean;
+};
+
 const DmRow = memo(function DmRow({
   item,
   first,
@@ -512,6 +541,7 @@ const DmRow = memo(function DmRow({
   animate,
   editing,
   actions,
+  threads,
 }: {
   item: Item;
   first: boolean;
@@ -526,6 +556,7 @@ const DmRow = memo(function DmRow({
   animate: boolean;
   editing: boolean;
   actions: DmActions;
+  threads?: ThreadHooks;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -561,6 +592,7 @@ const DmRow = memo(function DmRow({
             )}
           </>
         )}
+        {!editing && threads?.under(item)}
       </MessageLine>
       {!editing && !item.deleted && (
         <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
@@ -602,6 +634,11 @@ const DmRow = memo(function DmRow({
                   </motion.span>
                 </AnimatePresence>
               </ToolButton>
+              {threads?.canStart(item) && (
+                <ToolButton label={threads.has(item) ? "Open thread" : "Reply in thread"} onClick={() => threads.start(item)}>
+                  <MessageSquareReplyIcon />
+                </ToolButton>
+              )}
               {mine && (
                 <ToolButton label="Edit" onClick={() => actions.edit(item.seq)}>
                   <PencilIcon />
@@ -659,7 +696,15 @@ function deviceLine(item: Item, users: Map<string, User>, me: User, earlier: Ear
 
 function SystemLine({ item, text, animate }: { item: Item; text: string; animate: boolean }) {
   const Icon =
-    item.kind === "unreadable" ? ShieldAlertIcon : item.kind === "reset" ? RotateCcwKeyIcon : item.kind === "setting" ? HistoryIcon : KeyRoundIcon;
+    item.kind === "unreadable"
+      ? ShieldAlertIcon
+      : item.kind === "reset"
+        ? RotateCcwKeyIcon
+        : item.kind === "setting"
+          ? HistoryIcon
+          : item.kind === "thread"
+            ? LockIcon
+            : KeyRoundIcon;
   return (
     <motion.div
       {...(animate ? enter : {})}
@@ -736,6 +781,7 @@ export function EncryptedComposer({
   promise,
   locked = "",
   action,
+  thread,
 }: {
   instanceKey: string;
   id: string;
@@ -744,11 +790,15 @@ export function EncryptedComposer({
   locked?: string;
   /** Shown where "Try again" is when you can't write; null for nothing. */
   action?: ReactNode;
+  /** In a secure channel's thread: the thread's message, and the channel's name for "Also send to #channel". */
+  thread?: { parent: number; channelName: string };
 }) {
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
   const stuck = useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] ?? "");
   const blocked = locked || stuck;
-  const [text, setText] = useState(() => drafts.get(id) ?? "");
+  const draft = thread ? `${id}#${thread.parent}` : id;
+  const [text, setText] = useState(() => drafts.get(draft) ?? "");
+  const [alsoChannel, setAlsoChannel] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
   const plane = useAnimationControls();
   const seal = useAnimationControls();
@@ -756,12 +806,12 @@ export function EncryptedComposer({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setText(drafts.get(id) ?? "");
+    setText(drafts.get(draft) ?? "");
     if (window.matchMedia("(pointer: fine)").matches) box.current?.focus();
-  }, [id]);
+  }, [draft]);
   useEffect(() => {
-    drafts.set(id, text);
-  }, [id, text]);
+    drafts.set(draft, text);
+  }, [draft, text]);
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -776,7 +826,7 @@ export function EncryptedComposer({
   function send() {
     if (!ready) return;
     setText("");
-    drafts.delete(id);
+    drafts.delete(draft);
     setError(null);
     void seal.start({ rotate: [0, -16, 10, 0], scale: [1, 1.3, 1], transition: { duration: 0.45 } });
     void plane.start({
@@ -786,7 +836,9 @@ export function EncryptedComposer({
       rotate: [0, -20, 0, 0],
       transition: { duration: 0.55, times: [0, 0.45, 0.5, 1], ease: "easeOut" },
     });
-    sendDm(instanceKey, id, content).catch((err: unknown) => setError(dmProblem(err)));
+    const target: ThreadTarget | undefined = thread && { thread: thread.parent, inChannel: alsoChannel };
+    setAlsoChannel(false);
+    sendDm(instanceKey, id, content, target).catch((err: unknown) => setError(dmProblem(err)));
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -896,7 +948,18 @@ export function EncryptedComposer({
         )}
       </AnimatePresence>
       <div className={cn("mt-1 flex items-center gap-3 px-1 text-[0.7rem] text-muted-foreground transition-opacity", blocked && "invisible opacity-0")}>
-        <p className="hidden min-w-0 flex-1 truncate sm:block">
+        {thread && (
+          <label className="flex min-w-0 shrink cursor-pointer items-center gap-1.5 font-bold">
+            <input
+              type="checkbox"
+              checked={alsoChannel}
+              onChange={(e) => setAlsoChannel(e.target.checked)}
+              className="size-3.5 accent-[var(--primary)]"
+            />
+            <span className="truncate">Also send to #{thread.channelName}</span>
+          </label>
+        )}
+        <p className={cn("hidden min-w-0 flex-1 truncate", !thread && "sm:block")}>
           <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
           <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
         </p>

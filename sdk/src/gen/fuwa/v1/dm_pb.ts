@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/dm.proto.
  */
 export const file_fuwa_v1_dm: GenFile = /*@__PURE__*/
-  fileDesc("ChBmdXdhL3YxL2RtLnByb3RvEgdmdXdhLnYxInsKBkRldmljZRIKCgJpZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhUKDXNpZ25hdHVyZV9rZXkYAyABKAwSDQoFbGFiZWwYBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiZQoVUmVnaXN0ZXJEZXZpY2VSZXF1ZXN0EhUKDXNpZ25hdHVyZV9rZXkYASABKAwSFAoMa2V5X3BhY2thZ2VzGAIgAygMEh8KF2xhc3RfcmVzb3J0X2tleV9wYWNrYWdlGAMgASgMIk8KFlJlZ2lzdGVyRGV2aWNlUmVzcG9uc2USHwoGZGV2aWNlGAEgASgLMg8uZnV3YS52MS5EZXZpY2USFAoMa2V5X3BhY2thZ2VzGAIgASgFIi0KFUFkZEtleVBhY2thZ2VzUmVxdWVzdBIUCgxrZXlfcGFja2FnZXMYASADKAwiLgoWQWRkS2V5UGFja2FnZXNSZXNwb25zZRIUCgxrZXlfcGFja2FnZXMYASABKAUiJgoSTGlzdERldmljZXNSZXF1ZXN0EhAKCHVzZXJfaWRzGAEgAygJIjcKE0xpc3REZXZpY2VzUmVzcG9uc2USIAoHZGV2aWNlcxgBIAMoCzIPLmZ1d2EudjEuRGV2aWNlIi0KF0NsYWltS2V5UGFja2FnZXNSZXF1ZXN0EhIKCmRldmljZV9pZHMYASADKAkiTAoYQ2xhaW1LZXlQYWNrYWdlc1Jlc3BvbnNlEjAKDGtleV9wYWNrYWdlcxgBIAMoCzIaLmZ1d2EudjEuQ2xhaW1lZEtleVBhY2thZ2UiOwoRQ2xhaW1lZEtleVBhY2thZ2USEQoJZGV2aWNlX2lkGAEgASgJEhMKC2tleV9wYWNrYWdlGAIgASgMIr4BCgxDb252ZXJzYXRpb24SCgoCaWQYASABKAkSHAoFdXNlcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISDQoFZXBvY2gYAyABKAMSFQoNbGFzdF9zZXF1ZW5jZRgEIAEoAxIuCgpjcmVhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIqChdPcGVuQ29udmVyc2F0aW9uUmVxdWVzdBIPCgd1c2VyX2lkGAEgASgJIlgKGE9wZW5Db252ZXJzYXRpb25SZXNwb25zZRIrCgxjb252ZXJzYXRpb24YASABKAsyFS5mdXdhLnYxLkNvbnZlcnNhdGlvbhIPCgdjcmVhdGVkGAIgASgIIhoKGExpc3RDb252ZXJzYXRpb25zUmVxdWVzdCJJChlMaXN0Q29udmVyc2F0aW9uc1Jlc3BvbnNlEiwKDWNvbnZlcnNhdGlvbnMYASADKAsyFS5mdXdhLnYxLkNvbnZlcnNhdGlvbiIuChNHZXRHcm91cEluZm9SZXF1ZXN0EhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCSI5ChRHZXRHcm91cEluZm9SZXNwb25zZRINCgVlcG9jaBgBIAEoAxISCgpncm91cF9pbmZvGAIgASgMIpgCChJDb252ZXJzYXRpb25SZWNvcmQSFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgDEi0KBGtpbmQYAyABKA4yHy5mdXdhLnYxLkNvbnZlcnNhdGlvblJlY29yZEtpbmQSDQoFZXBvY2gYBCABKAMSEQoJc2VuZGVyX2lkGAUgASgJEhgKEHNlbmRlcl9kZXZpY2VfaWQYBiABKAkSDAoEZGF0YRgHIAEoDBIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpkZWxldGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJUChJMaXN0UmVjb3Jkc1JlcXVlc3QSFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEhYKDmFmdGVyX3NlcXVlbmNlGAIgASgDEg0KBWxpbWl0GAMgASgFIlUKE0xpc3RSZWNvcmRzUmVzcG9uc2USLAoHcmVjb3JkcxgBIAMoCzIbLmZ1d2EudjEuQ29udmVyc2F0aW9uUmVjb3JkEhAKCGhhc19tb3JlGAIgASgIIhUKE0xpc3RXZWxjb21lc1JlcXVlc3QiRgoUTGlzdFdlbGNvbWVzUmVzcG9uc2USLgoId2VsY29tZXMYASADKAsyHC5mdXdhLnYxLkNvbnZlcnNhdGlvbldlbGNvbWUiTgoTQ29udmVyc2F0aW9uV2VsY29tZRIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEAoIc2VxdWVuY2UYAiABKAMSDAoEZGF0YRgDIAEoDCJ9ChFQb3N0Q29tbWl0UmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSDgoGY29tbWl0GAIgASgMEhIKCmdyb3VwX2luZm8YAyABKAwSDwoHd2VsY29tZRgEIAEoDBIaChJ3ZWxjb21lX2RldmljZV9pZHMYBSADKAkiQQoSUG9zdENvbW1pdFJlc3BvbnNlEisKBnJlY29yZBgBIAEoCzIbLmZ1d2EudjEuQ29udmVyc2F0aW9uUmVjb3JkIj4KElBvc3RNZXNzYWdlUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSDwoHbWVzc2FnZRgCIAEoDCJCChNQb3N0TWVzc2FnZVJlc3BvbnNlEisKBnJlY29yZBgBIAEoCzIbLmZ1d2EudjEuQ29udmVyc2F0aW9uUmVjb3JkIkAKE0RlbGV0ZVJlY29yZFJlcXVlc3QSFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgDIhYKFERlbGV0ZVJlY29yZFJlc3BvbnNlIg4KDFdhdGNoUmVxdWVzdCJKCg1XYXRjaFJlc3BvbnNlEg0KBXJlYWR5GAEgASgIEioKBWV2ZW50GAIgASgLMhsuZnV3YS52MS5EaXJlY3RNZXNzYWdlRXZlbnQi6gEKEkRpcmVjdE1lc3NhZ2VFdmVudBI0ChNjb252ZXJzYXRpb25fb3BlbmVkGAEgASgLMhUuZnV3YS52MS5Db252ZXJzYXRpb25IABIzCgxyZWNvcmRfYWRkZWQYAiABKAsyGy5mdXdhLnYxLkNvbnZlcnNhdGlvblJlY29yZEgAEjUKDnJlY29yZF9kZWxldGVkGAMgASgLMhsuZnV3YS52MS5Db252ZXJzYXRpb25SZWNvcmRIABInCgxjYWxsX3VwZGF0ZWQYBCABKAsyDy5mdXdhLnYxLkRtQ2FsbEgAQgkKB3BheWxvYWQiywEKFERpcmVjdE1lc3NhZ2VDb250ZW50EioKBHRleHQYASABKAsyGi5mdXdhLnYxLkRpcmVjdE1lc3NhZ2VUZXh0SAASKgoEZWRpdBgCIAEoCzIaLmZ1d2EudjEuRGlyZWN0TWVzc2FnZUVkaXRIABIoCgZzaWduZWQYAyABKAsyFi5mdXdhLnYxLlNpZ25lZENvbnRlbnRIABIpCgdoaXN0b3J5GAQgASgLMhYuZnV3YS52MS5TaGFyZWRIaXN0b3J5SABCBgoEYm9keSIzCg1TaWduZWRDb250ZW50Eg8KB3BheWxvYWQYASABKAwSEQoJc2lnbmF0dXJlGAIgASgMIn8KDVNpZ25lZFBheWxvYWQSFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEhEKCXNlbmRlcl9pZBgCIAEoCRISCgpzZW50X2F0X21zGAMgASgDEi4KB2NvbnRlbnQYBCABKAsyHS5mdXdhLnYxLkRpcmVjdE1lc3NhZ2VDb250ZW50IjYKDVNoYXJlZEhpc3RvcnkSJQoHZW50cmllcxgBIAMoCzIULmZ1d2EudjEuU2hhcmVkRW50cnkiWgoLU2hhcmVkRW50cnkSEAoIc2VxdWVuY2UYASABKAMSDwoHcGF5bG9hZBgCIAEoDBIRCglzaWduYXR1cmUYAyABKAwSFQoNc2lnbmF0dXJlX2tleRgEIAEoDCI/ChFEaXJlY3RNZXNzYWdlVGV4dBIPCgdjb250ZW50GAEgASgJEhkKEXJlcGx5X3RvX3NlcXVlbmNlGAIgASgDIjYKEURpcmVjdE1lc3NhZ2VFZGl0EhAKCHNlcXVlbmNlGAEgASgDEg8KB2NvbnRlbnQYAiABKAkqjQEKFkNvbnZlcnNhdGlvblJlY29yZEtpbmQSKAokQ09OVkVSU0FUSU9OX1JFQ09SRF9LSU5EX1VOU1BFQ0lGSUVEEAASIwofQ09OVkVSU0FUSU9OX1JFQ09SRF9LSU5EX0NPTU1JVBABEiQKIENPTlZFUlNBVElPTl9SRUNPUkRfS0lORF9NRVNTQUdFEAIykAgKFERpcmVjdE1lc3NhZ2VTZXJ2aWNlElEKDlJlZ2lzdGVyRGV2aWNlEh4uZnV3YS52MS5SZWdpc3RlckRldmljZVJlcXVlc3QaHy5mdXdhLnYxLlJlZ2lzdGVyRGV2aWNlUmVzcG9uc2USUQoOQWRkS2V5UGFja2FnZXMSHi5mdXdhLnYxLkFkZEtleVBhY2thZ2VzUmVxdWVzdBofLmZ1d2EudjEuQWRkS2V5UGFja2FnZXNSZXNwb25zZRJICgtMaXN0RGV2aWNlcxIbLmZ1d2EudjEuTGlzdERldmljZXNSZXF1ZXN0GhwuZnV3YS52MS5MaXN0RGV2aWNlc1Jlc3BvbnNlElcKEENsYWltS2V5UGFja2FnZXMSIC5mdXdhLnYxLkNsYWltS2V5UGFja2FnZXNSZXF1ZXN0GiEuZnV3YS52MS5DbGFpbUtleVBhY2thZ2VzUmVzcG9uc2USVwoQT3BlbkNvbnZlcnNhdGlvbhIgLmZ1d2EudjEuT3BlbkNvbnZlcnNhdGlvblJlcXVlc3QaIS5mdXdhLnYxLk9wZW5Db252ZXJzYXRpb25SZXNwb25zZRJaChFMaXN0Q29udmVyc2F0aW9ucxIhLmZ1d2EudjEuTGlzdENvbnZlcnNhdGlvbnNSZXF1ZXN0GiIuZnV3YS52MS5MaXN0Q29udmVyc2F0aW9uc1Jlc3BvbnNlEksKDEdldEdyb3VwSW5mbxIcLmZ1d2EudjEuR2V0R3JvdXBJbmZvUmVxdWVzdBodLmZ1d2EudjEuR2V0R3JvdXBJbmZvUmVzcG9uc2USSAoLTGlzdFJlY29yZHMSGy5mdXdhLnYxLkxpc3RSZWNvcmRzUmVxdWVzdBocLmZ1d2EudjEuTGlzdFJlY29yZHNSZXNwb25zZRJLCgxMaXN0V2VsY29tZXMSHC5mdXdhLnYxLkxpc3RXZWxjb21lc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RXZWxjb21lc1Jlc3BvbnNlEkUKClBvc3RDb21taXQSGi5mdXdhLnYxLlBvc3RDb21taXRSZXF1ZXN0GhsuZnV3YS52MS5Qb3N0Q29tbWl0UmVzcG9uc2USSAoLUG9zdE1lc3NhZ2USGy5mdXdhLnYxLlBvc3RNZXNzYWdlUmVxdWVzdBocLmZ1d2EudjEuUG9zdE1lc3NhZ2VSZXNwb25zZRJLCgxEZWxldGVSZWNvcmQSHC5mdXdhLnYxLkRlbGV0ZVJlY29yZFJlcXVlc3QaHS5mdXdhLnYxLkRlbGV0ZVJlY29yZFJlc3BvbnNlEjgKBVdhdGNoEhUuZnV3YS52MS5XYXRjaFJlcXVlc3QaFi5mdXdhLnYxLldhdGNoUmVzcG9uc2UwAWIGcHJvdG8z", [file_fuwa_v1_call, file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChBmdXdhL3YxL2RtLnByb3RvEgdmdXdhLnYxInsKBkRldmljZRIKCgJpZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhUKDXNpZ25hdHVyZV9rZXkYAyABKAwSDQoFbGFiZWwYBCABKAkSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiZQoVUmVnaXN0ZXJEZXZpY2VSZXF1ZXN0EhUKDXNpZ25hdHVyZV9rZXkYASABKAwSFAoMa2V5X3BhY2thZ2VzGAIgAygMEh8KF2xhc3RfcmVzb3J0X2tleV9wYWNrYWdlGAMgASgMIk8KFlJlZ2lzdGVyRGV2aWNlUmVzcG9uc2USHwoGZGV2aWNlGAEgASgLMg8uZnV3YS52MS5EZXZpY2USFAoMa2V5X3BhY2thZ2VzGAIgASgFIi0KFUFkZEtleVBhY2thZ2VzUmVxdWVzdBIUCgxrZXlfcGFja2FnZXMYASADKAwiLgoWQWRkS2V5UGFja2FnZXNSZXNwb25zZRIUCgxrZXlfcGFja2FnZXMYASABKAUiJgoSTGlzdERldmljZXNSZXF1ZXN0EhAKCHVzZXJfaWRzGAEgAygJIjcKE0xpc3REZXZpY2VzUmVzcG9uc2USIAoHZGV2aWNlcxgBIAMoCzIPLmZ1d2EudjEuRGV2aWNlIi0KF0NsYWltS2V5UGFja2FnZXNSZXF1ZXN0EhIKCmRldmljZV9pZHMYASADKAkiTAoYQ2xhaW1LZXlQYWNrYWdlc1Jlc3BvbnNlEjAKDGtleV9wYWNrYWdlcxgBIAMoCzIaLmZ1d2EudjEuQ2xhaW1lZEtleVBhY2thZ2UiOwoRQ2xhaW1lZEtleVBhY2thZ2USEQoJZGV2aWNlX2lkGAEgASgJEhMKC2tleV9wYWNrYWdlGAIgASgMIr4BCgxDb252ZXJzYXRpb24SCgoCaWQYASABKAkSHAoFdXNlcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISDQoFZXBvY2gYAyABKAMSFQoNbGFzdF9zZXF1ZW5jZRgEIAEoAxIuCgpjcmVhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIqChdPcGVuQ29udmVyc2F0aW9uUmVxdWVzdBIPCgd1c2VyX2lkGAEgASgJIlgKGE9wZW5Db252ZXJzYXRpb25SZXNwb25zZRIrCgxjb252ZXJzYXRpb24YASABKAsyFS5mdXdhLnYxLkNvbnZlcnNhdGlvbhIPCgdjcmVhdGVkGAIgASgIIhoKGExpc3RDb252ZXJzYXRpb25zUmVxdWVzdCJJChlMaXN0Q29udmVyc2F0aW9uc1Jlc3BvbnNlEiwKDWNvbnZlcnNhdGlvbnMYASADKAsyFS5mdXdhLnYxLkNvbnZlcnNhdGlvbiIuChNHZXRHcm91cEluZm9SZXF1ZXN0EhcKD2NvbnZlcnNhdGlvbl9pZBgBIAEoCSI5ChRHZXRHcm91cEluZm9SZXNwb25zZRINCgVlcG9jaBgBIAEoAxISCgpncm91cF9pbmZvGAIgASgMIpgCChJDb252ZXJzYXRpb25SZWNvcmQSFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgDEi0KBGtpbmQYAyABKA4yHy5mdXdhLnYxLkNvbnZlcnNhdGlvblJlY29yZEtpbmQSDQoFZXBvY2gYBCABKAMSEQoJc2VuZGVyX2lkGAUgASgJEhgKEHNlbmRlcl9kZXZpY2VfaWQYBiABKAkSDAoEZGF0YRgHIAEoDBIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpkZWxldGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJUChJMaXN0UmVjb3Jkc1JlcXVlc3QSFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEhYKDmFmdGVyX3NlcXVlbmNlGAIgASgDEg0KBWxpbWl0GAMgASgFIlUKE0xpc3RSZWNvcmRzUmVzcG9uc2USLAoHcmVjb3JkcxgBIAMoCzIbLmZ1d2EudjEuQ29udmVyc2F0aW9uUmVjb3JkEhAKCGhhc19tb3JlGAIgASgIIhUKE0xpc3RXZWxjb21lc1JlcXVlc3QiRgoUTGlzdFdlbGNvbWVzUmVzcG9uc2USLgoId2VsY29tZXMYASADKAsyHC5mdXdhLnYxLkNvbnZlcnNhdGlvbldlbGNvbWUiTgoTQ29udmVyc2F0aW9uV2VsY29tZRIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEAoIc2VxdWVuY2UYAiABKAMSDAoEZGF0YRgDIAEoDCJ9ChFQb3N0Q29tbWl0UmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSDgoGY29tbWl0GAIgASgMEhIKCmdyb3VwX2luZm8YAyABKAwSDwoHd2VsY29tZRgEIAEoDBIaChJ3ZWxjb21lX2RldmljZV9pZHMYBSADKAkiQQoSUG9zdENvbW1pdFJlc3BvbnNlEisKBnJlY29yZBgBIAEoCzIbLmZ1d2EudjEuQ29udmVyc2F0aW9uUmVjb3JkIj4KElBvc3RNZXNzYWdlUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSDwoHbWVzc2FnZRgCIAEoDCJCChNQb3N0TWVzc2FnZVJlc3BvbnNlEisKBnJlY29yZBgBIAEoCzIbLmZ1d2EudjEuQ29udmVyc2F0aW9uUmVjb3JkIkAKE0RlbGV0ZVJlY29yZFJlcXVlc3QSFwoPY29udmVyc2F0aW9uX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgDIhYKFERlbGV0ZVJlY29yZFJlc3BvbnNlIg4KDFdhdGNoUmVxdWVzdCJKCg1XYXRjaFJlc3BvbnNlEg0KBXJlYWR5GAEgASgIEioKBWV2ZW50GAIgASgLMhsuZnV3YS52MS5EaXJlY3RNZXNzYWdlRXZlbnQi6gEKEkRpcmVjdE1lc3NhZ2VFdmVudBI0ChNjb252ZXJzYXRpb25fb3BlbmVkGAEgASgLMhUuZnV3YS52MS5Db252ZXJzYXRpb25IABIzCgxyZWNvcmRfYWRkZWQYAiABKAsyGy5mdXdhLnYxLkNvbnZlcnNhdGlvblJlY29yZEgAEjUKDnJlY29yZF9kZWxldGVkGAMgASgLMhsuZnV3YS52MS5Db252ZXJzYXRpb25SZWNvcmRIABInCgxjYWxsX3VwZGF0ZWQYBCABKAsyDy5mdXdhLnYxLkRtQ2FsbEgAQgkKB3BheWxvYWQi9AEKFERpcmVjdE1lc3NhZ2VDb250ZW50EioKBHRleHQYASABKAsyGi5mdXdhLnYxLkRpcmVjdE1lc3NhZ2VUZXh0SAASKgoEZWRpdBgCIAEoCzIaLmZ1d2EudjEuRGlyZWN0TWVzc2FnZUVkaXRIABIoCgZzaWduZWQYAyABKAsyFi5mdXdhLnYxLlNpZ25lZENvbnRlbnRIABIpCgdoaXN0b3J5GAQgASgLMhYuZnV3YS52MS5TaGFyZWRIaXN0b3J5SAASJwoGdGhyZWFkGAYgASgLMhUuZnV3YS52MS5UaHJlYWRDaGFuZ2VIAEIGCgRib2R5IjMKDVNpZ25lZENvbnRlbnQSDwoHcGF5bG9hZBgBIAEoDBIRCglzaWduYXR1cmUYAiABKAwifwoNU2lnbmVkUGF5bG9hZBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEQoJc2VuZGVyX2lkGAIgASgJEhIKCnNlbnRfYXRfbXMYAyABKAMSLgoHY29udGVudBgEIAEoCzIdLmZ1d2EudjEuRGlyZWN0TWVzc2FnZUNvbnRlbnQiNgoNU2hhcmVkSGlzdG9yeRIlCgdlbnRyaWVzGAEgAygLMhQuZnV3YS52MS5TaGFyZWRFbnRyeSJaCgtTaGFyZWRFbnRyeRIQCghzZXF1ZW5jZRgBIAEoAxIPCgdwYXlsb2FkGAIgASgMEhEKCXNpZ25hdHVyZRgDIAEoDBIVCg1zaWduYXR1cmVfa2V5GAQgASgMImwKEURpcmVjdE1lc3NhZ2VUZXh0Eg8KB2NvbnRlbnQYASABKAkSGQoRcmVwbHlfdG9fc2VxdWVuY2UYAiABKAMSFwoPdGhyZWFkX3NlcXVlbmNlGAMgASgDEhIKCmluX2NoYW5uZWwYBCABKAgiNwoMVGhyZWFkQ2hhbmdlEhcKD3BhcmVudF9zZXF1ZW5jZRgBIAEoAxIOCgZsb2NrZWQYAiABKAgiNgoRRGlyZWN0TWVzc2FnZUVkaXQSEAoIc2VxdWVuY2UYASABKAMSDwoHY29udGVudBgCIAEoCSLBAQoGQmFja3VwEhEKCWtleV9jaGVjaxgBIAEoDBIMCgRzaXplGAIgASgDEg0KBXBhcnRzGAMgASgDEhAKCG1heF9zaXplGAQgASgDEi4KCmNyZWF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDW5leHRfc2VxdWVuY2UYByABKAMiEgoQR2V0QmFja3VwUmVxdWVzdCI0ChFHZXRCYWNrdXBSZXNwb25zZRIfCgZiYWNrdXAYASABKAsyDy5mdXdhLnYxLkJhY2t1cCI4ChJTdGFydEJhY2t1cFJlcXVlc3QSEQoJa2V5X2NoZWNrGAEgASgMEg8KB3JlcGxhY2UYAiABKAgiNgoTU3RhcnRCYWNrdXBSZXNwb25zZRIfCgZiYWNrdXAYASABKAsyDy5mdXdhLnYxLkJhY2t1cCJJChRBZGRCYWNrdXBQYXJ0UmVxdWVzdBIRCglrZXlfY2hlY2sYASABKAwSDAoEZGF0YRgCIAEoDBIQCghzZXF1ZW5jZRgDIAEoAyJKChVBZGRCYWNrdXBQYXJ0UmVzcG9uc2USEAoIc2VxdWVuY2UYASABKAMSHwoGYmFja3VwGAIgASgLMg8uZnV3YS52MS5CYWNrdXAiPwoWTGlzdEJhY2t1cFBhcnRzUmVxdWVzdBIWCg5hZnRlcl9zZXF1ZW5jZRgBIAEoAxINCgVsaW1pdBgCIAEoBSJTChdMaXN0QmFja3VwUGFydHNSZXNwb25zZRImCgVwYXJ0cxgBIAMoCzIXLmZ1d2EudjEuQmFja3VwUGFydERhdGESEAoIaGFzX21vcmUYAiABKAgiMAoOQmFja3VwUGFydERhdGESEAoIc2VxdWVuY2UYASABKAMSDAoEZGF0YRgCIAEoDCIVChNEZWxldGVCYWNrdXBSZXF1ZXN0IhYKFERlbGV0ZUJhY2t1cFJlc3BvbnNlIkEKCkJhY2t1cFBhcnQSIgoFaXRlbXMYASADKAsyEy5mdXdhLnYxLkJhY2t1cEl0ZW0SDwoHcGFkZGluZxgPIAEoDCLTAwoKQmFja3VwSXRlbRIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEAoIc2VxdWVuY2UYAiABKAMSDQoFYXRfbXMYAyABKAMSEQoJc2VuZGVyX2lkGAQgASgJEhEKCWRldmljZV9pZBgFIAEoCRIlCgRraW5kGAYgASgOMhcuZnV3YS52MS5CYWNrdXBJdGVtS2luZBIPCgdjb250ZW50GAcgASgJEhkKEXJlcGx5X3RvX3NlcXVlbmNlGAggASgDEhQKDGVkaXRlZF9hdF9tcxgJIAEoAxIPCgdkZWxldGVkGAogASgIEiQKBWFkZGVkGAsgAygLMhUuZnV3YS52MS5CYWNrdXBEZXZpY2USJgoHcmVtb3ZlZBgMIAMoCzIVLmZ1d2EudjEuQmFja3VwRGV2aWNlEiMKBnNpZ25lZBgNIAEoCzITLmZ1d2EudjEuU2lnbmVkRm9ybRIoCgtlZGl0X3NpZ25lZBgOIAEoCzITLmZ1d2EudjEuU2lnbmVkRm9ybRIRCglzaGFyZWRfYnkYDyABKAkSFwoPdGhyZWFkX3NlcXVlbmNlGBAgASgDEhIKCmluX2NoYW5uZWwYESABKAgSDgoGbG9ja2VkGBIgASgIIjIKDEJhY2t1cERldmljZRIPCgd1c2VyX2lkGAEgASgJEhEKCWRldmljZV9pZBgCIAEoCSJHCgpTaWduZWRGb3JtEg8KB3BheWxvYWQYASABKAwSEQoJc2lnbmF0dXJlGAIgASgMEhUKDXNpZ25hdHVyZV9rZXkYAyABKAwqjQEKFkNvbnZlcnNhdGlvblJlY29yZEtpbmQSKAokQ09OVkVSU0FUSU9OX1JFQ09SRF9LSU5EX1VOU1BFQ0lGSUVEEAASIwofQ09OVkVSU0FUSU9OX1JFQ09SRF9LSU5EX0NPTU1JVBABEiQKIENPTlZFUlNBVElPTl9SRUNPUkRfS0lORF9NRVNTQUdFEAIqwgEKDkJhY2t1cEl0ZW1LaW5kEiAKHEJBQ0tVUF9JVEVNX0tJTkRfVU5TUEVDSUZJRUQQABIZChVCQUNLVVBfSVRFTV9LSU5EX1RFWFQQARIcChhCQUNLVVBfSVRFTV9LSU5EX0RFVklDRVMQAhIaChZCQUNLVVBfSVRFTV9LSU5EX1JFU0VUEAMSHAoYQkFDS1VQX0lURU1fS0lORF9TRVRUSU5HEAQSGwoXQkFDS1VQX0lURU1fS0lORF9USFJFQUQQBTKRCwoURGlyZWN0TWVzc2FnZVNlcnZpY2USUQoOUmVnaXN0ZXJEZXZpY2USHi5mdXdhLnYxLlJlZ2lzdGVyRGV2aWNlUmVxdWVzdBofLmZ1d2EudjEuUmVnaXN0ZXJEZXZpY2VSZXNwb25zZRJRCg5BZGRLZXlQYWNrYWdlcxIeLmZ1d2EudjEuQWRkS2V5UGFja2FnZXNSZXF1ZXN0Gh8uZnV3YS52MS5BZGRLZXlQYWNrYWdlc1Jlc3BvbnNlEkgKC0xpc3REZXZpY2VzEhsuZnV3YS52MS5MaXN0RGV2aWNlc1JlcXVlc3QaHC5mdXdhLnYxLkxpc3REZXZpY2VzUmVzcG9uc2USVwoQQ2xhaW1LZXlQYWNrYWdlcxIgLmZ1d2EudjEuQ2xhaW1LZXlQYWNrYWdlc1JlcXVlc3QaIS5mdXdhLnYxLkNsYWltS2V5UGFja2FnZXNSZXNwb25zZRJXChBPcGVuQ29udmVyc2F0aW9uEiAuZnV3YS52MS5PcGVuQ29udmVyc2F0aW9uUmVxdWVzdBohLmZ1d2EudjEuT3BlbkNvbnZlcnNhdGlvblJlc3BvbnNlEloKEUxpc3RDb252ZXJzYXRpb25zEiEuZnV3YS52MS5MaXN0Q29udmVyc2F0aW9uc1JlcXVlc3QaIi5mdXdhLnYxLkxpc3RDb252ZXJzYXRpb25zUmVzcG9uc2USSwoMR2V0R3JvdXBJbmZvEhwuZnV3YS52MS5HZXRHcm91cEluZm9SZXF1ZXN0Gh0uZnV3YS52MS5HZXRHcm91cEluZm9SZXNwb25zZRJICgtMaXN0UmVjb3JkcxIbLmZ1d2EudjEuTGlzdFJlY29yZHNSZXF1ZXN0GhwuZnV3YS52MS5MaXN0UmVjb3Jkc1Jlc3BvbnNlEksKDExpc3RXZWxjb21lcxIcLmZ1d2EudjEuTGlzdFdlbGNvbWVzUmVxdWVzdBodLmZ1d2EudjEuTGlzdFdlbGNvbWVzUmVzcG9uc2USRQoKUG9zdENvbW1pdBIaLmZ1d2EudjEuUG9zdENvbW1pdFJlcXVlc3QaGy5mdXdhLnYxLlBvc3RDb21taXRSZXNwb25zZRJICgtQb3N0TWVzc2FnZRIbLmZ1d2EudjEuUG9zdE1lc3NhZ2VSZXF1ZXN0GhwuZnV3YS52MS5Qb3N0TWVzc2FnZVJlc3BvbnNlEksKDERlbGV0ZVJlY29yZBIcLmZ1d2EudjEuRGVsZXRlUmVjb3JkUmVxdWVzdBodLmZ1d2EudjEuRGVsZXRlUmVjb3JkUmVzcG9uc2USOAoFV2F0Y2gSFS5mdXdhLnYxLldhdGNoUmVxdWVzdBoWLmZ1d2EudjEuV2F0Y2hSZXNwb25zZTABEkIKCUdldEJhY2t1cBIZLmZ1d2EudjEuR2V0QmFja3VwUmVxdWVzdBoaLmZ1d2EudjEuR2V0QmFja3VwUmVzcG9uc2USSAoLU3RhcnRCYWNrdXASGy5mdXdhLnYxLlN0YXJ0QmFja3VwUmVxdWVzdBocLmZ1d2EudjEuU3RhcnRCYWNrdXBSZXNwb25zZRJOCg1BZGRCYWNrdXBQYXJ0Eh0uZnV3YS52MS5BZGRCYWNrdXBQYXJ0UmVxdWVzdBoeLmZ1d2EudjEuQWRkQmFja3VwUGFydFJlc3BvbnNlElQKD0xpc3RCYWNrdXBQYXJ0cxIfLmZ1d2EudjEuTGlzdEJhY2t1cFBhcnRzUmVxdWVzdBogLmZ1d2EudjEuTGlzdEJhY2t1cFBhcnRzUmVzcG9uc2USSwoMRGVsZXRlQmFja3VwEhwuZnV3YS52MS5EZWxldGVCYWNrdXBSZXF1ZXN0Gh0uZnV3YS52MS5EZWxldGVCYWNrdXBSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_call, file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * A device that takes part in encrypted conversations: one per signed-in
@@ -869,6 +869,15 @@ export type DirectMessageContent = Message<"fuwa.v1.DirectMessageContent"> & {
      */
     value: SharedHistory;
     case: "history";
+  } | {
+    /**
+     * A moderator locking or unlocking a thread in a secure channel; sent
+     * signed (inside `signed`), like a text.
+     *
+     * @generated from field: fuwa.v1.ThreadChange thread = 6;
+     */
+    value: ThreadChange;
+    case: "thread";
   } | { case: undefined; value?: undefined };
 };
 
@@ -1021,6 +1030,22 @@ export type DirectMessageText = Message<"fuwa.v1.DirectMessageText"> & {
    * @generated from field: int64 reply_to_sequence = 2;
    */
   replyToSequence: bigint;
+
+  /**
+   * In a secure channel: the record of the message it replies under, as a
+   * thread (docs/threads.md), or 0. Only the channel's devices see it; the
+   * server can't tell a thread reply from any other line.
+   *
+   * @generated from field: int64 thread_sequence = 3;
+   */
+  threadSequence: bigint;
+
+  /**
+   * A thread reply its author also sent to the channel.
+   *
+   * @generated from field: bool in_channel = 4;
+   */
+  inChannel: boolean;
 };
 
 /**
@@ -1029,6 +1054,32 @@ export type DirectMessageText = Message<"fuwa.v1.DirectMessageText"> & {
  */
 export const DirectMessageTextSchema: GenMessage<DirectMessageText> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_dm, 37);
+
+/**
+ * Locks or unlocks the thread under a secure channel's message. Devices take
+ * it only from someone with Manage Messages in the channel, by their own view
+ * of the channel's permissions; the latest one wins.
+ *
+ * @generated from message fuwa.v1.ThreadChange
+ */
+export type ThreadChange = Message<"fuwa.v1.ThreadChange"> & {
+  /**
+   * @generated from field: int64 parent_sequence = 1;
+   */
+  parentSequence: bigint;
+
+  /**
+   * @generated from field: bool locked = 2;
+   */
+  locked: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.ThreadChange.
+ * Use `create(ThreadChangeSchema)` to create a new message.
+ */
+export const ThreadChangeSchema: GenMessage<ThreadChange> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 38);
 
 /**
  * New text for one of the sender's own earlier messages.
@@ -1052,7 +1103,487 @@ export type DirectMessageEdit = Message<"fuwa.v1.DirectMessageEdit"> & {
  * Use `create(DirectMessageEditSchema)` to create a new message.
  */
 export const DirectMessageEditSchema: GenMessage<DirectMessageEdit> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_dm, 38);
+  messageDesc(file_fuwa_v1_dm, 39);
+
+/**
+ * @generated from message fuwa.v1.Backup
+ */
+export type Backup = Message<"fuwa.v1.Backup"> & {
+  /**
+   * HKDF-SHA256 of the recovery key (salt "fuwa backup v1", info "check"):
+   * lets a device tell it has the right key without the instance learning it.
+   *
+   * @generated from field: bytes key_check = 1;
+   */
+  keyCheck: Uint8Array;
+
+  /**
+   * Bytes in its parts, and how many there are.
+   *
+   * @generated from field: int64 size = 2;
+   */
+  size: bigint;
+
+  /**
+   * @generated from field: int64 parts = 3;
+   */
+  parts: bigint;
+
+  /**
+   * The most it may hold, in bytes.
+   *
+   * @generated from field: int64 max_size = 4;
+   */
+  maxSize: bigint;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 5;
+   */
+  createdAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp updated_at = 6;
+   */
+  updatedAt?: Timestamp | undefined;
+
+  /**
+   * The place the next part takes: parts are numbered from 1, one after
+   * another, and each is sealed for its place.
+   *
+   * @generated from field: int64 next_sequence = 7;
+   */
+  nextSequence: bigint;
+};
+
+/**
+ * Describes the message fuwa.v1.Backup.
+ * Use `create(BackupSchema)` to create a new message.
+ */
+export const BackupSchema: GenMessage<Backup> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 40);
+
+/**
+ * @generated from message fuwa.v1.GetBackupRequest
+ */
+export type GetBackupRequest = Message<"fuwa.v1.GetBackupRequest"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.GetBackupRequest.
+ * Use `create(GetBackupRequestSchema)` to create a new message.
+ */
+export const GetBackupRequestSchema: GenMessage<GetBackupRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 41);
+
+/**
+ * @generated from message fuwa.v1.GetBackupResponse
+ */
+export type GetBackupResponse = Message<"fuwa.v1.GetBackupResponse"> & {
+  /**
+   * Unset if the account has no backup.
+   *
+   * @generated from field: fuwa.v1.Backup backup = 1;
+   */
+  backup?: Backup | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.GetBackupResponse.
+ * Use `create(GetBackupResponseSchema)` to create a new message.
+ */
+export const GetBackupResponseSchema: GenMessage<GetBackupResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 42);
+
+/**
+ * @generated from message fuwa.v1.StartBackupRequest
+ */
+export type StartBackupRequest = Message<"fuwa.v1.StartBackupRequest"> & {
+  /**
+   * 32 bytes.
+   *
+   * @generated from field: bytes key_check = 1;
+   */
+  keyCheck: Uint8Array;
+
+  /**
+   * Delete a backup the account already has and start over. An account can
+   * start a backup at most 6 times an hour.
+   *
+   * @generated from field: bool replace = 2;
+   */
+  replace: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.StartBackupRequest.
+ * Use `create(StartBackupRequestSchema)` to create a new message.
+ */
+export const StartBackupRequestSchema: GenMessage<StartBackupRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 43);
+
+/**
+ * @generated from message fuwa.v1.StartBackupResponse
+ */
+export type StartBackupResponse = Message<"fuwa.v1.StartBackupResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.Backup backup = 1;
+   */
+  backup?: Backup | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.StartBackupResponse.
+ * Use `create(StartBackupResponseSchema)` to create a new message.
+ */
+export const StartBackupResponseSchema: GenMessage<StartBackupResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 44);
+
+/**
+ * @generated from message fuwa.v1.AddBackupPartRequest
+ */
+export type AddBackupPartRequest = Message<"fuwa.v1.AddBackupPartRequest"> & {
+  /**
+   * The key check of the backup this part is for.
+   *
+   * @generated from field: bytes key_check = 1;
+   */
+  keyCheck: Uint8Array;
+
+  /**
+   * At most 256 KiB: a 12-byte nonce, then AES-256-GCM of a BackupPart.
+   *
+   * @generated from field: bytes data = 2;
+   */
+  data: Uint8Array;
+
+  /**
+   * Its place: the backup's next_sequence.
+   *
+   * @generated from field: int64 sequence = 3;
+   */
+  sequence: bigint;
+};
+
+/**
+ * Describes the message fuwa.v1.AddBackupPartRequest.
+ * Use `create(AddBackupPartRequestSchema)` to create a new message.
+ */
+export const AddBackupPartRequestSchema: GenMessage<AddBackupPartRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 45);
+
+/**
+ * @generated from message fuwa.v1.AddBackupPartResponse
+ */
+export type AddBackupPartResponse = Message<"fuwa.v1.AddBackupPartResponse"> & {
+  /**
+   * @generated from field: int64 sequence = 1;
+   */
+  sequence: bigint;
+
+  /**
+   * @generated from field: fuwa.v1.Backup backup = 2;
+   */
+  backup?: Backup | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.AddBackupPartResponse.
+ * Use `create(AddBackupPartResponseSchema)` to create a new message.
+ */
+export const AddBackupPartResponseSchema: GenMessage<AddBackupPartResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 46);
+
+/**
+ * @generated from message fuwa.v1.ListBackupPartsRequest
+ */
+export type ListBackupPartsRequest = Message<"fuwa.v1.ListBackupPartsRequest"> & {
+  /**
+   * @generated from field: int64 after_sequence = 1;
+   */
+  afterSequence: bigint;
+
+  /**
+   * 1 to 100; defaults to 50. Fewer come back if they'd pass 3 MiB.
+   *
+   * @generated from field: int32 limit = 2;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message fuwa.v1.ListBackupPartsRequest.
+ * Use `create(ListBackupPartsRequestSchema)` to create a new message.
+ */
+export const ListBackupPartsRequestSchema: GenMessage<ListBackupPartsRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 47);
+
+/**
+ * @generated from message fuwa.v1.ListBackupPartsResponse
+ */
+export type ListBackupPartsResponse = Message<"fuwa.v1.ListBackupPartsResponse"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.BackupPartData parts = 1;
+   */
+  parts: BackupPartData[];
+
+  /**
+   * @generated from field: bool has_more = 2;
+   */
+  hasMore: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.ListBackupPartsResponse.
+ * Use `create(ListBackupPartsResponseSchema)` to create a new message.
+ */
+export const ListBackupPartsResponseSchema: GenMessage<ListBackupPartsResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 48);
+
+/**
+ * @generated from message fuwa.v1.BackupPartData
+ */
+export type BackupPartData = Message<"fuwa.v1.BackupPartData"> & {
+  /**
+   * @generated from field: int64 sequence = 1;
+   */
+  sequence: bigint;
+
+  /**
+   * @generated from field: bytes data = 2;
+   */
+  data: Uint8Array;
+};
+
+/**
+ * Describes the message fuwa.v1.BackupPartData.
+ * Use `create(BackupPartDataSchema)` to create a new message.
+ */
+export const BackupPartDataSchema: GenMessage<BackupPartData> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 49);
+
+/**
+ * @generated from message fuwa.v1.DeleteBackupRequest
+ */
+export type DeleteBackupRequest = Message<"fuwa.v1.DeleteBackupRequest"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.DeleteBackupRequest.
+ * Use `create(DeleteBackupRequestSchema)` to create a new message.
+ */
+export const DeleteBackupRequestSchema: GenMessage<DeleteBackupRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 50);
+
+/**
+ * @generated from message fuwa.v1.DeleteBackupResponse
+ */
+export type DeleteBackupResponse = Message<"fuwa.v1.DeleteBackupResponse"> & {
+};
+
+/**
+ * Describes the message fuwa.v1.DeleteBackupResponse.
+ * Use `create(DeleteBackupResponseSchema)` to create a new message.
+ */
+export const DeleteBackupResponseSchema: GenMessage<DeleteBackupResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 51);
+
+/**
+ * What a backup part holds once a device opens it; never sent unencrypted.
+ * Encrypted with AES-256-GCM under HKDF-SHA256 of the recovery key (salt
+ * "fuwa backup v1", info "encrypt"), with "fuwa backup v1|<account id>|<its
+ * sequence>" as associated data, so the instance can't move a part to
+ * another place or account without it failing to open.
+ *
+ * @generated from message fuwa.v1.BackupPart
+ */
+export type BackupPart = Message<"fuwa.v1.BackupPart"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.BackupItem items = 1;
+   */
+  items: BackupItem[];
+
+  /**
+   * Zeros, so parts come in a few sizes and say little about what's in them.
+   *
+   * @generated from field: bytes padding = 15;
+   */
+  padding: Uint8Array;
+};
+
+/**
+ * Describes the message fuwa.v1.BackupPart.
+ * Use `create(BackupPartSchema)` to create a new message.
+ */
+export const BackupPartSchema: GenMessage<BackupPart> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 52);
+
+/**
+ * One line of a direct message or secure channel, as the device that read it
+ * kept it. A later copy of the same line (same conversation and sequence)
+ * replaces an earlier one if it was edited later or deleted.
+ *
+ * @generated from message fuwa.v1.BackupItem
+ */
+export type BackupItem = Message<"fuwa.v1.BackupItem"> & {
+  /**
+   * The direct message's or secure channel's id.
+   *
+   * @generated from field: string conversation_id = 1;
+   */
+  conversationId: string;
+
+  /**
+   * @generated from field: int64 sequence = 2;
+   */
+  sequence: bigint;
+
+  /**
+   * Unix ms, as the instance stamped the record.
+   *
+   * @generated from field: int64 at_ms = 3;
+   */
+  atMs: bigint;
+
+  /**
+   * @generated from field: string sender_id = 4;
+   */
+  senderId: string;
+
+  /**
+   * @generated from field: string device_id = 5;
+   */
+  deviceId: string;
+
+  /**
+   * @generated from field: fuwa.v1.BackupItemKind kind = 6;
+   */
+  kind: BackupItemKind;
+
+  /**
+   * @generated from field: string content = 7;
+   */
+  content: string;
+
+  /**
+   * @generated from field: int64 reply_to_sequence = 8;
+   */
+  replyToSequence: bigint;
+
+  /**
+   * @generated from field: int64 edited_at_ms = 9;
+   */
+  editedAtMs: bigint;
+
+  /**
+   * @generated from field: bool deleted = 10;
+   */
+  deleted: boolean;
+
+  /**
+   * @generated from field: repeated fuwa.v1.BackupDevice added = 11;
+   */
+  added: BackupDevice[];
+
+  /**
+   * @generated from field: repeated fuwa.v1.BackupDevice removed = 12;
+   */
+  removed: BackupDevice[];
+
+  /**
+   * A secure channel message's signed form, for sharing history later.
+   *
+   * @generated from field: fuwa.v1.SignedForm signed = 13;
+   */
+  signed?: SignedForm | undefined;
+
+  /**
+   * @generated from field: fuwa.v1.SignedForm edit_signed = 14;
+   */
+  editSigned?: SignedForm | undefined;
+
+  /**
+   * Who passed it on, if it came as shared history.
+   *
+   * @generated from field: string shared_by = 15;
+   */
+  sharedBy: string;
+
+  /**
+   * A secure channel's thread reply: the message it's under, and whether it
+   * was also sent to the channel. For a THREAD item, the thread it changes.
+   *
+   * @generated from field: int64 thread_sequence = 16;
+   */
+  threadSequence: bigint;
+
+  /**
+   * @generated from field: bool in_channel = 17;
+   */
+  inChannel: boolean;
+
+  /**
+   * For a THREAD item: whether it locked the thread or unlocked it.
+   *
+   * @generated from field: bool locked = 18;
+   */
+  locked: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.BackupItem.
+ * Use `create(BackupItemSchema)` to create a new message.
+ */
+export const BackupItemSchema: GenMessage<BackupItem> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 53);
+
+/**
+ * @generated from message fuwa.v1.BackupDevice
+ */
+export type BackupDevice = Message<"fuwa.v1.BackupDevice"> & {
+  /**
+   * @generated from field: string user_id = 1;
+   */
+  userId: string;
+
+  /**
+   * @generated from field: string device_id = 2;
+   */
+  deviceId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.BackupDevice.
+ * Use `create(BackupDeviceSchema)` to create a new message.
+ */
+export const BackupDeviceSchema: GenMessage<BackupDevice> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 54);
+
+/**
+ * @generated from message fuwa.v1.SignedForm
+ */
+export type SignedForm = Message<"fuwa.v1.SignedForm"> & {
+  /**
+   * @generated from field: bytes payload = 1;
+   */
+  payload: Uint8Array;
+
+  /**
+   * @generated from field: bytes signature = 2;
+   */
+  signature: Uint8Array;
+
+  /**
+   * @generated from field: bytes signature_key = 3;
+   */
+  signatureKey: Uint8Array;
+};
+
+/**
+ * Describes the message fuwa.v1.SignedForm.
+ * Use `create(SignedFormSchema)` to create a new message.
+ */
+export const SignedFormSchema: GenMessage<SignedForm> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_dm, 55);
 
 /**
  * @generated from enum fuwa.v1.ConversationRecordKind
@@ -1083,6 +1614,49 @@ export enum ConversationRecordKind {
  */
 export const ConversationRecordKindSchema: GenEnum<ConversationRecordKind> = /*@__PURE__*/
   enumDesc(file_fuwa_v1_dm, 0);
+
+/**
+ * @generated from enum fuwa.v1.BackupItemKind
+ */
+export enum BackupItemKind {
+  /**
+   * @generated from enum value: BACKUP_ITEM_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: BACKUP_ITEM_KIND_TEXT = 1;
+   */
+  TEXT = 1,
+
+  /**
+   * @generated from enum value: BACKUP_ITEM_KIND_DEVICES = 2;
+   */
+  DEVICES = 2,
+
+  /**
+   * @generated from enum value: BACKUP_ITEM_KIND_RESET = 3;
+   */
+  RESET = 3,
+
+  /**
+   * @generated from enum value: BACKUP_ITEM_KIND_SETTING = 4;
+   */
+  SETTING = 4,
+
+  /**
+   * A moderator locked or unlocked a thread in a secure channel.
+   *
+   * @generated from enum value: BACKUP_ITEM_KIND_THREAD = 5;
+   */
+  THREAD = 5,
+}
+
+/**
+ * Describes the enum fuwa.v1.BackupItemKind.
+ */
+export const BackupItemKindSchema: GenEnum<BackupItemKind> = /*@__PURE__*/
+  enumDesc(file_fuwa_v1_dm, 1);
 
 /**
  * Direct messages: conversations between two people, end-to-end encrypted
@@ -1244,6 +1818,65 @@ export const DirectMessageService: GenService<{
     methodKind: "server_streaming";
     input: typeof WatchRequestSchema;
     output: typeof WatchResponseSchema;
+  },
+  /**
+   * Message backup: what the account's devices read here and in secure
+   * channels, encrypted on the device with a recovery key the instance never
+   * sees, kept as parts in order so a new device can read what came before
+   * it. See docs/e2ee.md.
+   *
+   * Whether the account has one, and its key check.
+   *
+   * @generated from rpc fuwa.v1.DirectMessageService.GetBackup
+   */
+  getBackup: {
+    methodKind: "unary";
+    input: typeof GetBackupRequestSchema;
+    output: typeof GetBackupResponseSchema;
+  },
+  /**
+   * Starts a backup with a new recovery key. One the account already has is
+   * only replaced (its parts deleted) when the request says so.
+   *
+   * @generated from rpc fuwa.v1.DirectMessageService.StartBackup
+   */
+  startBackup: {
+    methodKind: "unary";
+    input: typeof StartBackupRequestSchema;
+    output: typeof StartBackupResponseSchema;
+  },
+  /**
+   * Adds a part at the backup's next place. Refused with FAILED_PRECONDITION
+   * if the key check isn't the backup's current one (another device started
+   * it over), ALREADY_EXISTS if that place was taken (get the backup and seal
+   * the part again for the next one), RESOURCE_EXHAUSTED if it's full.
+   *
+   * @generated from rpc fuwa.v1.DirectMessageService.AddBackupPart
+   */
+  addBackupPart: {
+    methodKind: "unary";
+    input: typeof AddBackupPartRequestSchema;
+    output: typeof AddBackupPartResponseSchema;
+  },
+  /**
+   * Parts after a sequence, oldest first.
+   *
+   * @generated from rpc fuwa.v1.DirectMessageService.ListBackupParts
+   */
+  listBackupParts: {
+    methodKind: "unary";
+    input: typeof ListBackupPartsRequestSchema;
+    output: typeof ListBackupPartsResponseSchema;
+  },
+  /**
+   * Deletes the backup and every part of it.
+   *
+   * @generated from rpc fuwa.v1.DirectMessageService.DeleteBackup
+   */
+  deleteBackup: {
+    methodKind: "unary";
+    input: typeof DeleteBackupRequestSchema;
+    output: typeof DeleteBackupResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_dm, 0);

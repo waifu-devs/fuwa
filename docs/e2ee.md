@@ -154,7 +154,8 @@ in Settings, under Devices.
   right key. Nobody can get a lost key back; starting over makes a new one.
 - **What's backed up**: every line a device keeps for a conversation or secure
   channel (messages with their edits and deletions, device lines, history
-  settings and resets), each with its conversation and place, and a secure
+  settings and resets, and a secure channel's thread replies and thread
+  locks), each with its conversation and place, and a secure
   channel message's signed form so it can still be passed on as shared
   history. Not lines a device couldn't read, nor its own "joined" marker.
 - **Parts.** A few seconds after a device writes lines, it seals them in a

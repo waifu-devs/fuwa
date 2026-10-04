@@ -308,6 +308,9 @@ message DirectMessageContent {
     // A secure channel's earlier messages, for devices that joined after
     // them (only while the channel shares history).
     SharedHistory history = 4;
+    // A moderator locking or unlocking a thread in a secure channel; sent
+    // signed (inside `signed`), like a text.
+    ThreadChange thread = 6;
   }
 }
 
@@ -352,6 +355,20 @@ message DirectMessageText {
   string content = 1;
   // The record it answers, if any.
   int64 reply_to_sequence = 2;
+  // In a secure channel: the record of the message it replies under, as a
+  // thread (docs/threads.md), or 0. Only the channel's devices see it; the
+  // server can't tell a thread reply from any other line.
+  int64 thread_sequence = 3;
+  // A thread reply its author also sent to the channel.
+  bool in_channel = 4;
+}
+
+// Locks or unlocks the thread under a secure channel's message. Devices take
+// it only from someone with Manage Messages in the channel, by their own view
+// of the channel's permissions; the latest one wins.
+message ThreadChange {
+  int64 parent_sequence = 1;
+  bool locked = 2;
 }
 
 // New text for one of the sender's own earlier messages.
@@ -465,6 +482,12 @@ message BackupItem {
   SignedForm edit_signed = 14;
   // Who passed it on, if it came as shared history.
   string shared_by = 15;
+  // A secure channel's thread reply: the message it's under, and whether it
+  // was also sent to the channel. For a THREAD item, the thread it changes.
+  int64 thread_sequence = 16;
+  bool in_channel = 17;
+  // For a THREAD item: whether it locked the thread or unlocked it.
+  bool locked = 18;
 }
 
 enum BackupItemKind {
@@ -473,6 +496,8 @@ enum BackupItemKind {
   BACKUP_ITEM_KIND_DEVICES = 2;
   BACKUP_ITEM_KIND_RESET = 3;
   BACKUP_ITEM_KIND_SETTING = 4;
+  // A moderator locked or unlocked a thread in a secure channel.
+  BACKUP_ITEM_KIND_THREAD = 5;
 }
 
 message BackupDevice {
