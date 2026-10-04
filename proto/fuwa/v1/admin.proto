@@ -184,6 +184,10 @@ message InstanceSettings {
   // hides everyone's (their picks are kept for when it's back on).
   // FUWA_PROFILE_EFFECTS, on unless set.
   bool profile_effects = 42;
+  // How many votes (picks, changes and take-backs) one account may make in
+  // polls in a minute; unset for no cap. FUWA_LIMIT_POLL_VOTES_PER_MINUTE.
+  // (36 to 38 are voice messages', 39 and 40 attachments'.)
+  optional int64 poll_votes_per_minute = 44;
   // How many messages a minute all the people of one server on another
   // instance may send together to a channel shared from here; unset for no
   // cap. FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE.

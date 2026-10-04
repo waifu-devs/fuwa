@@ -50,6 +50,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0023_attachments.sql"),
     include_str!("../migrations/server/0026_search.sql"),
     include_str!("../migrations/server/0028_banner_onboarding.sql"),
+    include_str!("../migrations/server/0029_polls.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -454,33 +455,56 @@ impl ServerDb {
     /// tool opens it. Writes to the server wait while it's copied, so the copy
     /// is one moment.
     pub async fn export_to(&self, dest: &Path) -> Result<()> {
-        let path = dest
-            .to_str()
-            .filter(|p| !p.contains('\''))
-            .ok_or_else(|| Error::internal(format!("can't export to {}", dest.display())))?;
+        // A first copy is touched up, then copied again into `dest`: what's
+        // deleted from the first stays in its free pages, which a second
+        // VACUUM INTO leaves behind.
+        let draft = sidecar(dest, ".draft");
+        let result = self.export_through(&draft, dest).await;
+        for path in [&draft, dest] {
+            for suffix in ["-wal", "-log", ".db-log"] {
+                let _ = std::fs::remove_file(sidecar(path, suffix));
+            }
+        }
+        let _ = std::fs::remove_file(&draft);
+        result
+    }
+
+    async fn export_through(&self, draft: &Path, dest: &Path) -> Result<()> {
+        let quoted = |path: &Path| {
+            path.to_str()
+                .filter(|p| !p.contains('\''))
+                .map(str::to_string)
+                .ok_or_else(|| Error::internal(format!("can't export to {}", path.display())))
+        };
+        let (draft_path, dest_path) = (quoted(draft)?, quoted(dest)?);
         {
             let _alone = self.db.alone().await;
             let conn = self.read()?;
-            conn.execute(&format!("VACUUM INTO '{path}'"), ()).await?;
+            conn.execute(&format!("VACUUM INTO '{draft_path}'"), ()).await?;
         }
-        db::to_sqlite(dest, None).await?;
+        db::to_sqlite(draft, None).await?;
         {
             // Secrets stay on the instance: the provider's client secret and
             // sign-ins under way.
-            let (_db, conn) = db::open_plain(dest).await?;
+            let (_db, conn) = db::open_plain(draft).await?;
             let mut sso = load_sso(&conn).await?.provider;
             if !sso.oidc_client_secret.is_empty() {
                 sso.oidc_client_secret.clear();
                 conn.execute("UPDATE server SET sso = ?1", [sso.stored()]).await?;
             }
             conn.execute("DELETE FROM sso_sign_ins", ()).await?;
+            // Who voted in anonymous polls stays here too: their votes and
+            // keys are left out (their counts are in `polls.tally`).
+            conn.execute(
+                "DELETE FROM poll_votes WHERE message_id IN (SELECT message_id FROM polls WHERE anonymous = 1)",
+                (),
+            )
+            .await?;
+            conn.execute("UPDATE polls SET voter_key = NULL", ()).await?;
             db::pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").await?;
+            conn.execute(&format!("VACUUM INTO '{dest_path}'"), ()).await?;
         }
-        for suffix in ["-wal", "-log"] {
-            let mut side = dest.as_os_str().to_owned();
-            side.push(suffix);
-            let _ = std::fs::remove_file(side);
-        }
+        db::to_sqlite(dest, None).await?;
         Ok(())
     }
 
