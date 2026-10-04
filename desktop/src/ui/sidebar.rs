@@ -726,13 +726,26 @@ impl FuwaApp {
             Nav::Server { key, .. } | Nav::Instance { key } | Nav::Home { dm: Some((key, _)) } => Some(key.clone()),
             Nav::Home { dm: None } => self.core.shared.read(|s| s.order.first().cloned()),
         };
-        let (me, instance, connection) = key
+        let (me, instance, connection, status, presence) = key
             .as_ref()
-            .and_then(|k| self.core.shared.read(|s| s.instance(k).map(|i| (i.me.clone(), i.name(), i.connection))))
-            .unwrap_or((None, String::new(), crate::core::store::Connection::Offline));
+            .and_then(|k| {
+                self.core.shared.read(|s| {
+                    s.instance(k).map(|i| (i.me.clone(), i.name(), i.connection, i.status(), i.has("rich-presence")))
+                })
+            })
+            .unwrap_or((
+                None,
+                String::new(),
+                crate::core::store::Connection::Offline,
+                pb::PresenceStatus::Online,
+                false,
+            ));
         let name = me.as_ref().map(crate::core::store::user_name).unwrap_or_else(|| "Not signed in".into());
+        let live = connection == crate::core::store::Connection::Live;
         let sub = if self.prefs.streamer_mode {
             "Streamer mode".to_owned()
+        } else if live && status != pb::PresenceStatus::Online {
+            crate::ui::menus::status_label(status).to_owned()
         } else {
             me.as_ref().map(|m| format!("@{} · {instance}", m.username)).unwrap_or(instance)
         };
@@ -746,25 +759,70 @@ impl FuwaApp {
             .bg(alpha(p.rail, 0.6))
             .border_t_1()
             .border_color(p.border)
-            .child(
+            .child({
+                // Signed in and live, the dot is your status; otherwise it's the connection.
+                let dot = if live {
+                    crate::ui::menus::status_dot(status, 12.0, true, p.rail, &p)
+                } else {
+                    conn_dot(connection, &p)
+                };
+                // An instance without presence has no status to pick.
+                let menu = key.clone().filter(|_| me.is_some() && presence).map(|key| Menu::Status { key });
+                let open = menu.is_some() && self.menu == menu;
+                let hover = alpha(p.primary, 0.08);
                 div()
-                    .relative()
-                    .child(avatar(me.as_ref(), 36.0, &p))
-                    .child(div().absolute().right(px(-2.0)).bottom(px(-2.0)).child(conn_dot(connection, &p))),
-            )
-            .child(
-                div()
+                    .id("me-status")
                     .flex_1()
-                    .overflow_hidden()
+                    .min_w_0()
                     .flex()
-                    .flex_col()
+                    .items_center()
+                    .gap(px(10.0))
+                    .p(px(4.0))
+                    .ml(px(-4.0))
+                    .rounded(corner(12.0))
+                    .when(open, |el| el.bg(hover))
+                    .when_some(menu, |el, menu| {
+                        el.cursor_pointer()
+                            .hover(move |s| s.bg(hover))
+                            .tooltip(|window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new("Set your status").build(window, cx)
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.menu = if this.menu.as_ref() == Some(&menu) { None } else { Some(menu.clone()) };
+                                cx.notify();
+                            }))
+                    })
                     .child(
-                        div().text_sm().font_weight(FontWeight::BOLD).whitespace_nowrap().text_ellipsis().child(name),
+                        div()
+                            .relative()
+                            .child(avatar(me.as_ref(), 36.0, &p))
+                            .child(div().absolute().right(px(-2.0)).bottom(px(-2.0)).child(dot)),
                     )
                     .child(
-                        div().text_xs().text_color(p.muted_foreground).whitespace_nowrap().text_ellipsis().child(sub),
-                    ),
-            )
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::BOLD)
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .child(name),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(p.muted_foreground)
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .child(sub),
+                            ),
+                    )
+            })
             .child(
                 icon_button("me-settings", "settings", &p)
                     .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),

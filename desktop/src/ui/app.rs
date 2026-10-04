@@ -156,11 +156,22 @@ pub enum Dialog {
     },
 }
 
-/// A small menu hanging under a bell.
+/// A small menu hanging under a bell, or over your name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Menu {
-    Channel { key: String, server: String, channel: String },
-    Server { key: String, server: String },
+    Channel {
+        key: String,
+        server: String,
+        channel: String,
+    },
+    Server {
+        key: String,
+        server: String,
+    },
+    /// Your status on an instance, from your name at the bottom of the sidebar.
+    Status {
+        key: String,
+    },
 }
 
 /// The @ list while someone types a mention.
@@ -480,7 +491,11 @@ impl FuwaApp {
     fn on_notice(&mut self, notice: Notice, window: &mut Window, cx: &mut Context<Self>) {
         match notice {
             Notice::Message { instance, server_id, channel_id, title, body, mention } => {
-                if !self.prefs.notifications {
+                // Do not disturb is quiet everywhere, on every app.
+                let busy = self.core.shared.read(|s| {
+                    s.instance(&instance).is_some_and(|i| i.status() == crate::pb::PresenceStatus::DoNotDisturb)
+                });
+                if !self.prefs.notifications || busy {
                     return;
                 }
                 let streamer = self.prefs.streamer_mode;
@@ -1631,6 +1646,7 @@ impl FuwaApp {
         .when_some(
             match self.menu.clone() {
                 Some(Menu::Server { key, server }) => Some(self.server_bell_menu(&key, &server, cx)),
+                Some(Menu::Status { key }) => Some(self.status_menu(&key, cx)),
                 _ => None,
             },
             |el, menu| el.child(menu),

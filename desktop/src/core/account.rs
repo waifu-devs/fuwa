@@ -63,6 +63,35 @@ impl Core {
         }
     }
 
+    /// Reads your status again: another app may have changed it, and that
+    /// sends no event. An older instance without presence just has none.
+    pub async fn refresh_presence(&self, key: &str) {
+        let Some(api) = self.api(key) else { return };
+        if let Ok(res) = rpc!(api.presence(), get_presence_settings(pb::GetPresenceSettingsRequest {})).await {
+            self.shared.instance(key, |i| i.presence = res.settings);
+        }
+    }
+
+    /// Picks your status on an instance, for every app you're signed in with there.
+    pub async fn set_status(&self, key: &str, status: pb::PresenceStatus) -> Result<(), Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        // The update replaces every setting, so the rest are read fresh, never
+        // from what this app last saw: sharing turned off in another app since
+        // then must stay off.
+        let mut settings = rpc!(api.presence(), get_presence_settings(pb::GetPresenceSettingsRequest {}))
+            .await?
+            .settings
+            .unwrap_or_default();
+        settings.status = status as i32;
+        let res = rpc!(
+            api.presence(),
+            update_presence_settings(pb::UpdatePresenceSettingsRequest { settings: Some(settings) })
+        )
+        .await?;
+        self.shared.instance(key, |i| i.presence = res.settings);
+        Ok(())
+    }
+
     /// Changes how a server (or one of its channels) notifies you, on every device.
     pub async fn update_notifications(
         &self,
