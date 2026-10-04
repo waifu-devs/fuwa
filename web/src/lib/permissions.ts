@@ -46,6 +46,7 @@ export const KNOWN: P[] = [
   P.VIDEO,
   P.RECORD,
   P.CREATE_THREADS,
+  P.CREATE_POLLS,
 ];
 
 export const ALL: Bits = KNOWN.reduce((bits, p) => bits | bit(p), 0);
@@ -66,6 +67,7 @@ export const CHANNEL: Bits = [
   P.SPEAK,
   P.VIDEO,
   P.RECORD,
+  P.CREATE_POLLS,
   P.MUTE_MEMBERS,
   P.MOVE_MEMBERS,
 ].reduce((bits, p) => bits | bit(p), 0);
@@ -74,6 +76,7 @@ export const CHANNEL: Bits = [
 export const TALK: Bits = [
   P.SEND_MESSAGES,
   P.CREATE_THREADS,
+  P.CREATE_POLLS,
   P.EMBED_LINKS,
   P.ATTACH_FILES,
   P.MENTION_EVERYONE,
@@ -128,6 +131,11 @@ export const PERMISSIONS: Record<Exclude<P, P.UNSPECIFIED>, PermissionInfo> = {
     label: "Start threads",
     about: "Start a thread of replies under a message. Replying in a thread that's there needs Send messages.",
     channel: "Start a thread of replies under a message in this channel.",
+  },
+  [P.CREATE_POLLS]: {
+    label: "Create polls",
+    about: "Ask a question with answers people vote on. Anyone who can see the channel can vote.",
+    channel: "Ask a question in this channel with answers people vote on.",
   },
   [P.EMBED_LINKS]: { label: "Embed links", about: "Post links." },
   [P.ATTACH_FILES]: { label: "Attach files", about: "Upload files and pictures with their messages." },
@@ -191,7 +199,7 @@ export const PERMISSION_GROUPS: { title: string; permissions: P[] }[] = [
   },
   {
     title: "Text channels",
-    permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
+    permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
   { title: "Voice channels", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
   { title: "Advanced", permissions: [P.ADMINISTRATOR] },
@@ -202,7 +210,7 @@ export const CHANNEL_GROUPS: { title: string; permissions: P[] }[] = [
   { title: "General", permissions: [P.VIEW_CHANNELS, P.MANAGE_CHANNELS, P.MANAGE_ROLES, P.CREATE_INVITE] },
   {
     title: "Text",
-    permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
+    permissions: [P.SEND_MESSAGES, P.CREATE_THREADS, P.CREATE_POLLS, P.EMBED_LINKS, P.ATTACH_FILES, P.MENTION_EVERYONE, P.MANAGE_MESSAGES],
   },
   { title: "Voice", permissions: [P.CONNECT, P.SPEAK, P.VIDEO, P.RECORD, P.MUTE_MEMBERS, P.MOVE_MEMBERS] },
 ];

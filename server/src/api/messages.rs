@@ -1,7 +1,7 @@
 use prost::Message as _;
 use tonic::{Request, Response, Status};
 
-use super::{Api, Seat, automod, respond, shared, threads, url, users};
+use super::{Api, Seat, automod, polls, respond, shared, threads, url, users};
 use crate::app::App;
 use crate::attachments;
 use crate::db::{is_unique_violation, query_all, query_one};
@@ -36,6 +36,9 @@ struct Extras {
     auto_mod: Option<pb::AutoModAlert>,
     #[prost(message, optional, tag = "6")]
     webhook: Option<pb::MessageWebhook>,
+    /// It's a poll, kept in the `polls` table. (7 is the emoji picker's.)
+    #[prost(bool, tag = "8")]
+    poll: bool,
     #[prost(message, repeated, tag = "7")]
     emojis: Vec<pb::Emoji>,
     #[prost(message, optional, tag = "9")]
@@ -51,6 +54,7 @@ impl Extras {
             mention_role_ids: message.mention_role_ids.clone(),
             auto_mod: message.auto_mod.clone(),
             webhook: message.webhook.clone(),
+            poll: message.poll.is_some(),
             emojis: message.emojis.clone(),
             gif: message.gif.clone(),
         };
@@ -222,6 +226,7 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 thread_id: r.get::<Option<String>>(9)?.unwrap_or_default(),
                 thread: None,
                 also_in_channel: r.get(10)?,
+                poll: None,
                 gif: None,
             },
             r.get::<Option<Vec<u8>>>(4)?,
@@ -244,10 +249,26 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
         message.mention_role_ids = extras.mention_role_ids;
         message.auto_mod = extras.auto_mod;
         message.webhook = extras.webhook;
+        // Marked for `polls::attach`, which reads the poll itself.
+        message.poll = extras.poll.then(pb::Poll::default);
         message.emojis = extras.emojis;
         message.gif = extras.gif;
     }
     Ok(message)
+}
+
+/// The bytes a message takes in the server's storage: its text and its poll.
+pub(super) fn stored_size(message: &pb::Message) -> i64 {
+    message.content.len() as i64 + message.poll.as_ref().map_or(0, polls::bytes)
+}
+
+/// What AutoMod reads of a message: its text, and its poll's question and answers.
+pub(super) fn reviewed_text(message: &pb::Message) -> std::borrow::Cow<'_, str> {
+    match &message.poll {
+        Some(poll) if message.content.is_empty() => polls::words(poll).into(),
+        Some(poll) => format!("{}\n{}", message.content, polls::words(poll)).into(),
+        None => message.content.as_str().into(),
+    }
 }
 
 pub(super) async fn load_message(
@@ -255,7 +276,7 @@ pub(super) async fn load_message(
     server_id: &str,
     message_id: &str,
 ) -> Result<Option<pb::Message>> {
-    query_one(
+    let Some(mut message) = query_one(
         conn,
         &format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE id = ?1"),
         [message_id],
@@ -263,7 +284,12 @@ pub(super) async fn load_message(
     )
     .await?
     .map(with_extras)
-    .transpose()
+    .transpose()?
+    else {
+        return Ok(None);
+    };
+    polls::attach(conn, std::slice::from_mut(&mut message)).await?;
+    Ok(Some(message))
 }
 
 /// Messages in any channel with ids below `before_id`, newest first: for
@@ -557,7 +583,7 @@ pub(super) async fn post_join(
 /// Stores a member's message, inside a write, and counts it. The caller
 /// sends its event.
 pub(super) async fn insert_message(conn: &turso::Connection, message: &pb::Message, now: i64) -> Result<()> {
-    let size = message.content.len() as i64;
+    let size = stored_size(message);
     let attachment_count = message.attachments.len() as i64;
     conn.execute(
         "INSERT INTO messages (id, channel_id, author_id, content, size, extras, attachment_count, reply_to_id, created_at,
@@ -578,6 +604,7 @@ pub(super) async fn insert_message(conn: &turso::Connection, message: &pb::Messa
         ),
     )
     .await?;
+    polls::insert(conn, message).await?;
     attachments::add(conn, message, now).await.map_err(|err| match err {
         err if is_unique_violation(&err) => Error::AlreadyExists("that file is already in a message".into()),
         err => err,
@@ -601,11 +628,10 @@ pub(super) async fn save_edit(conn: &turso::Connection, message: &pb::Message, o
     let now = message.edited_at.as_ref().map_or_else(now_ms, crate::id::millis);
     conn.execute(
         "UPDATE messages SET content = ?2, size = ?3, edited_at = ?4, extras = ?5 WHERE id = ?1",
-        (message.id.as_str(), message.content.as_str(), message.content.len() as i64, now, Extras::of(message)),
+        (message.id.as_str(), message.content.as_str(), stored_size(message), now, Extras::of(message)),
     )
     .await?;
-    store::add_usage(conn, UsageChange { message_bytes: message.content.len() as i64 - old_size, ..Default::default() })
-        .await
+    store::add_usage(conn, UsageChange { message_bytes: stored_size(message) - old_size, ..Default::default() }).await
 }
 
 /// Deletes a message, inside a write, and takes it off the totals. The
@@ -613,12 +639,13 @@ pub(super) async fn save_edit(conn: &turso::Connection, message: &pb::Message, o
 /// once the write is done.
 pub(super) async fn remove_message(conn: &turso::Connection, message: &pb::Message) -> Result<Vec<String>> {
     conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
+    polls::forget(conn, &message.id).await?;
     let files = attachments::forget_message(conn, &message.id).await?;
     store::add_usage(
         conn,
         UsageChange {
             messages: -1,
-            message_bytes: -(message.content.len() as i64),
+            message_bytes: -stored_size(message),
             attachments: -(message.attachments.len() as i64),
             ..Default::default()
         },
@@ -670,6 +697,7 @@ pub(super) async fn page(
     if newest_first {
         messages.reverse();
     }
+    polls::attach(conn, &mut messages).await?;
     Ok((messages, has_more))
 }
 
@@ -696,15 +724,31 @@ impl MessageService for Api {
                 if !req.embeds.is_empty() {
                     access.require_in(&req.channel_id, Permission::EmbedLinks)?;
                 }
+                let poll = match &req.poll {
+                    Some(new) => {
+                        access.require_in(&req.channel_id, Permission::CreatePolls)?;
+                        Some(polls::check(new, now_ms())?)
+                    }
+                    None => None,
+                };
+                if poll.is_some() && req.gif.is_some() {
+                    return Err(Error::invalid("a poll can't carry a GIF"));
+                }
                 // Only GIFs this instance stored and sealed.
                 let gif = req.gif.take().map(|gif| crate::gifs::open_seal(&self.app, &gif)).transpose()?;
-                check_content(&req.content, !req.attachments.is_empty() || !req.embeds.is_empty() || gif.is_some())?;
+                check_content(
+                    &req.content,
+                    !req.attachments.is_empty() || !req.embeds.is_empty() || poll.is_some() || gif.is_some(),
+                )?;
                 check_extras(&mut req.attachments, &req.embeds)?;
                 check_embed_links(&self.app, &mut req.embeds)?;
                 if req.also_send_to_channel && req.thread_id.is_empty() {
                     return Err(Error::invalid("only thread replies are also sent to the channel"));
                 }
-                if let Some(link) = shared::link_of(&*sdb.read()?, &req.channel_id).await? {
+                if let Some(link) = shared::link_of(&sdb.read()?, &req.channel_id).await? {
+                    if poll.is_some() {
+                        return Err(Error::invalid("polls can't go in channels shared from another server yet"));
+                    }
                     if !req.attachments.is_empty() {
                         return Err(Error::invalid(NO_SHARED_FILES));
                     }
@@ -731,6 +775,9 @@ impl MessageService for Api {
                 {
                     return Err(Error::ResourceExhausted("this server is out of storage".into()));
                 }
+                // AutoMod reads a poll's question and answers along with the text.
+                let draft = pb::Message { content: req.content.clone(), poll: poll.clone(), ..Default::default() };
+                let reviewed = reviewed_text(&draft).into_owned();
                 let file_bytes = self.check_attachments(&account.id, &sdb.id, &mut req.attachments).await?;
                 if file_bytes > 0
                     && let Some(limit) = limits.attachment_bytes
@@ -748,8 +795,7 @@ impl MessageService for Api {
                 // goes out at once, and its answer is acted on when it comes.
                 let (asked, later) = (
                     None,
-                    automod::ask_after(&self.app, &sdb, &member, &access, &req.channel_id, &req.content, &pictures)
-                        .await,
+                    automod::ask_after(&self.app, &sdb, &member, &access, &req.channel_id, &reviewed, &pictures).await,
                 );
                 let message = sdb
                     .write(&account.id, async |conn, events| {
@@ -760,6 +806,9 @@ impl MessageService for Api {
                             Ok(pb::ChannelType::Text | pb::ChannelType::Announcement | pb::ChannelType::Thread)
                         ) {
                             return Err(Error::invalid("messages can only go in text channels"));
+                        }
+                        if poll.is_some() && polls::shared_out(conn, &channel.id).await? {
+                            return Err(Error::invalid("polls can't go in channels shared with other servers yet"));
                         }
                         let parent = if req.thread_id.is_empty() {
                             None
@@ -778,7 +827,7 @@ impl MessageService for Api {
                             &member,
                             &access,
                             &channel,
-                            &req.content,
+                            &reviewed,
                             asked.as_ref(),
                             events,
                         )
@@ -815,6 +864,7 @@ impl MessageService for Api {
                             thread_id: req.thread_id.clone(),
                             thread: None,
                             also_in_channel: parent.is_some() && req.also_send_to_channel,
+                            poll: poll.clone(),
                             gif: gif.clone(),
                         };
                         // Checked again here, where no other message can take the room meanwhile.
@@ -844,7 +894,7 @@ impl MessageService for Api {
                     self.app.keep_picture(Some(&file.id), Some(&sdb.id)).await;
                 }
                 if let Some(checking) = later {
-                    checking.later(self.app.clone(), sdb.clone(), member, message.id.clone(), message.content.clone());
+                    checking.later(self.app.clone(), sdb.clone(), member, message.id.clone(), reviewed);
                 }
                 Ok(pb::SendMessageResponse { message: Some(message) })
             }
@@ -873,6 +923,7 @@ impl MessageService for Api {
                     .filter(|m| access.can_see(&m.channel_id))
                     .ok_or(Error::NotFound("message"))?;
                 shared::mark_guests(&conn, std::slice::from_mut(&mut message)).await?;
+                polls::mark_mine(&conn, &account.id, std::slice::from_mut(&mut message)).await?;
                 threads::attach(&conn, std::slice::from_mut(&mut message)).await?;
                 let author = authors(&conn, std::slice::from_ref(&message)).await?.into_iter().next();
                 Ok(pb::GetMessageResponse { message: Some(message), author })
@@ -922,6 +973,7 @@ impl MessageService for Api {
                 )
                 .await?;
                 shared::mark_guests(&conn, &mut messages).await?;
+                polls::mark_mine(&conn, &account.id, &mut messages).await?;
                 threads::attach(&conn, &mut messages).await?;
                 let authors = authors(&conn, &[messages.as_slice(), parent.as_slice()].concat()).await?;
                 Ok(pb::ListMessagesResponse { messages, authors, has_more, parent })
@@ -959,7 +1011,17 @@ impl MessageService for Api {
                 check_content(&req.content, true)?;
                 // A provider is asked about new text the author wrote, and its
                 // answer acted on when it comes.
-                let before = load_message(&*sdb.read()?, &sdb.id, &req.message_id).await?;
+                let before = load_message(&sdb.read()?, &sdb.id, &req.message_id).await?;
+                // With a poll's question and answers, which an edit leaves as they are.
+                let reviewed = before.as_ref().map(|m| {
+                    reviewed_text(&pb::Message {
+                        content: req.content.clone(),
+                        poll: m.poll.clone(),
+                        ..Default::default()
+                    })
+                    .into_owned()
+                });
+                let reviewed = reviewed.unwrap_or_else(|| req.content.clone());
                 let sent = std::mem::take(&mut req.emojis);
                 let checked = match &before {
                     Some(m) if m.author_id == account.id => {
@@ -970,7 +1032,7 @@ impl MessageService for Api {
                 let (asked, later) = match before {
                     Some(m) if m.author_id == account.id && m.content != req.content => (
                         None,
-                        automod::ask_after(&self.app, &sdb, &member, &access, &m.channel_id, &req.content, &[]).await,
+                        automod::ask_after(&self.app, &sdb, &member, &access, &m.channel_id, &reviewed, &[]).await,
                     ),
                     _ => (None, None),
                 };
@@ -988,7 +1050,10 @@ impl MessageService for Api {
                         }
                         check_content(
                             &req.content,
-                            !message.attachments.is_empty() || !message.embeds.is_empty() || message.gif.is_some(),
+                            !message.attachments.is_empty()
+                                || !message.embeds.is_empty()
+                                || message.poll.is_some()
+                                || message.gif.is_some(),
                         )?;
                         if message.content != req.content {
                             let channel = load_channel(conn, &sdb.id, &message.channel_id)
@@ -1000,7 +1065,7 @@ impl MessageService for Api {
                                 &member,
                                 &access,
                                 &channel,
-                                &req.content,
+                                &reviewed,
                                 asked.as_ref(),
                                 events,
                             )
@@ -1010,25 +1075,14 @@ impl MessageService for Api {
                             }
                         }
                         let now = now_ms();
-                        let growth = req.content.len() as i64 - message.content.len() as i64;
+                        let old_size = stored_size(&message);
                         (message.mentions_everyone, message.mention_role_ids) =
                             mentions(conn, &sdb.id, &access, &message.channel_id, &req.content).await?;
                         message.emojis =
                             kept_emojis(std::mem::take(&mut message.emojis), checked.clone(), &req.content);
                         message.content = req.content.clone();
                         message.edited_at = Some(timestamp(now));
-                        conn.execute(
-                            "UPDATE messages SET content = ?2, size = ?3, edited_at = ?4, extras = ?5 WHERE id = ?1",
-                            (
-                                message.id.as_str(),
-                                req.content.as_str(),
-                                req.content.len() as i64,
-                                now,
-                                Extras::of(&message),
-                            ),
-                        )
-                        .await?;
-                        store::add_usage(conn, UsageChange { message_bytes: growth, ..Default::default() }).await?;
+                        save_edit(conn, &message, old_size).await?;
                         threads::attach(conn, std::slice::from_mut(&mut message)).await?;
                         events.push(Payload::MessageUpdated(pb::MessageUpdated { message: Some(message.clone()) }));
                         Ok(Ok(message))
@@ -1036,7 +1090,7 @@ impl MessageService for Api {
                     .await?
                     .map_err(Error::denied)?;
                 if let Some(checking) = later {
-                    checking.later(self.app.clone(), sdb.clone(), member, message.id.clone(), message.content.clone());
+                    checking.later(self.app.clone(), sdb.clone(), member, message.id.clone(), reviewed);
                 }
                 Ok(pb::UpdateMessageResponse { message: Some(message) })
             }
@@ -1081,6 +1135,7 @@ impl MessageService for Api {
                         }
                         let with_thread = threads::may_delete_with_thread(conn, &access, &account.id, &message).await?;
                         conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
+                        polls::forget(conn, &message.id).await?;
                         let mut files = attachments::forget_message(conn, &message.id).await?;
                         if with_thread && threads::others_replied(conn, &message.id, &account.id).await? {
                             let channel = load_channel(conn, &sdb.id, &message.channel_id)
@@ -1114,7 +1169,7 @@ impl MessageService for Api {
                             conn,
                             UsageChange {
                                 messages: -1,
-                                message_bytes: -(message.content.len() as i64),
+                                message_bytes: -stored_size(&message),
                                 attachments: -(message.attachments.len() as i64),
                                 ..Default::default()
                             },
@@ -1132,6 +1187,21 @@ impl MessageService for Api {
             }
             .await,
         )
+    }
+
+    async fn vote_poll(&self, request: Request<pb::VotePollRequest>) -> Result<Response<pb::VotePollResponse>, Status> {
+        polls::vote_poll(self, request).await
+    }
+
+    async fn end_poll(&self, request: Request<pb::EndPollRequest>) -> Result<Response<pb::EndPollResponse>, Status> {
+        polls::end_poll(self, request).await
+    }
+
+    async fn list_poll_voters(
+        &self,
+        request: Request<pb::ListPollVotersRequest>,
+    ) -> Result<Response<pb::ListPollVotersResponse>, Status> {
+        polls::list_poll_voters(self, request).await
     }
 
     async fn list_threads(

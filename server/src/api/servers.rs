@@ -762,6 +762,7 @@ impl ServerService for Api {
                             if conn.execute("DELETE FROM messages WHERE id = ?1", [id.as_str()]).await? == 0 {
                                 continue;
                             }
+                            super::polls::forget(conn, &id).await?;
                             files.extend(crate::attachments::forget_message(conn, &id).await?);
                             change.messages -= 1;
                             change.message_bytes -= size;
