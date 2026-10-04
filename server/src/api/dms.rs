@@ -344,7 +344,13 @@ impl Api {
             .collect();
         let allowed = dms.take_stranger_claims(&account.id, &others, now_ms());
         let last_resort_only: HashSet<&str> = others.into_iter().filter(|id| !allowed.contains(id)).collect();
-        let claimed = dms.claim_key_packages(&claimable, &last_resort_only).await?;
+        let claimed = match dms.claim_key_packages(&claimable, &last_resort_only).await {
+            Ok(claimed) => claimed,
+            Err(err) => {
+                dms.refund_stranger_claims(&account.id, &allowed);
+                return Err(err);
+            }
+        };
         Ok(pb::ClaimKeyPackagesResponse {
             key_packages: claimed
                 .into_iter()
