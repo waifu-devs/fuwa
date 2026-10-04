@@ -2,7 +2,10 @@ import { BarChart3Icon, HourglassIcon, LockIcon, ScrollTextIcon, SendHorizontalI
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MessageKind, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
-import { run, sendMessage } from "@/fuwa/actions";
+import { run, sendMessage, uploadVoice } from "@/fuwa/actions";
+import { voiceLimits } from "@/fuwa/dms";
+import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
+import type { Clip } from "@/voice/recorder";
 import { useAccess } from "@/fuwa/hooks";
 import { AttachButton, DropOverlay, StagedTray, UploadRing } from "@/components/chat/ComposerFiles";
 import { addFiles, takeFiles, useStaged } from "@/components/chat/staged";
@@ -123,6 +126,7 @@ export function Composer({
   const draftKey = thread ? `thread:${thread.id}` : channelId;
   const [text, setText] = useState(() => drafts.get(draftKey) ?? "");
   const [alsoToChannel, setAlsoToChannel] = useState(false);
+  const [voiceProblem, setVoiceProblem] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const plane = useAnimationControls();
   const nudge = useAnimationControls();
@@ -192,6 +196,7 @@ export function Composer({
 
   useEffect(() => {
     setText(drafts.get(draftKey) ?? "");
+    setVoiceProblem(null);
     if (window.matchMedia("(pointer: fine)").matches) box.current?.focus();
   }, [draftKey]);
   useEffect(() => {
@@ -240,6 +245,19 @@ export function Composer({
     ).catch(() => {
       // The message stays in the list, marked as failed, with a retry.
     });
+  }
+
+  /** A recorded voice message goes up as its message's only file, then the message is sent. */
+  function sendVoice(clip: Clip) {
+    if (timedOut) return;
+    const target = thread ? { threadId: thread.id, alsoToChannel } : undefined;
+    run(uploadVoice(instanceKey, serverId, clip)).then(
+      (file) =>
+        run(sendMessage(instanceKey, serverId, channelId, "", [file], target)).catch(() => {
+          // The message stays in the list, marked as failed, with a retry.
+        }),
+      (err: Error) => setVoiceProblem(`Your voice message didn't upload: ${err.message || "try again"}`),
+    );
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -352,6 +370,13 @@ export function Composer({
             <BarChart3Icon className="size-[18px]" />
           </motion.button>
         )}
+        {gate.canAttach && !text && !staged.length && !cooling ? (
+          <VoiceRecorder
+            maxMs={() => voiceLimits(instanceKey).then((l) => l.maxMs)}
+            onSend={sendVoice}
+            onProblem={setVoiceProblem}
+          />
+        ) : (
         <motion.button
           type="button"
           onClick={send}
@@ -388,6 +413,7 @@ export function Composer({
             )}
           </AnimatePresence>
         </motion.button>
+        )}
         </div>
       </motion.div>
           </motion.div>
@@ -406,10 +432,16 @@ export function Composer({
             Also send to #{channel.name}
           </label>
         )}
+        {voiceProblem ? (
+          <p role="alert" className="min-w-0 flex-1 truncate font-bold text-destructive">
+            {voiceProblem}
+          </p>
+        ) : (
         <p className={cn("hidden min-w-0 flex-1 truncate", !thread && "sm:block")}>
           <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
           <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
         </p>
+        )}
         <AnimatePresence initial={false}>
           {(gate.slowmode > 0 || gate.exempt) && !timedOut && gate.canSend && !gate.pending && (
             <motion.p

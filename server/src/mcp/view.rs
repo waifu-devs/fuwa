@@ -137,7 +137,11 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
     let attachments: Vec<Value> = m
         .attachments
         .iter()
-        .map(|a| trim(json!({ "filename": a.filename, "content_type": a.content_type, "size": a.size, "url": a.url })))
+        .map(|a| {
+            // A voice message's length, never its waveform.
+            let voice_ms = a.voice.as_ref().map(|v| v.duration_ms);
+            trim(json!({ "filename": a.filename, "content_type": a.content_type, "size": a.size, "url": a.url, "voice_duration_ms": voice_ms }))
+        })
         .collect();
     let embeds: Vec<Value> = m
         .embeds
