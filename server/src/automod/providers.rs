@@ -608,9 +608,13 @@ pub struct Picture {
 
 impl Picture {
     /// The picture in `bytes`, when it's a PNG, JPEG or WebP of at most
-    /// [`MAX_PICTURE_BYTES`] and [`MAX_PICTURE_PIXELS`]; anything else is
-    /// left out (a GIF, a huge photo).
+    /// [`MAX_PICTURE_BYTES`] and [`MAX_PICTURE_PIXELS`]; a GIF is read as
+    /// its first frame. Anything else is left out (a huge photo).
     pub fn read(bytes: bytes::Bytes) -> Option<Self> {
+        let bytes = match crate::media::sniff(&bytes[..bytes.len().min(16)])? {
+            "image/gif" => crate::media::still::first_frame_png(&bytes)?.into(),
+            _ => bytes,
+        };
         if bytes.len() > MAX_PICTURE_BYTES {
             return None;
         }
@@ -1135,7 +1139,7 @@ mod tests {
         let mut webp = b"RIFF\0\0\0\0WEBPVP8X\x0a\0\0\0\0\0\0\0".to_vec();
         webp.extend_from_slice(&[0xff, 0x07, 0, 0x37, 0x04, 0]);
         assert_eq!(dimensions(&webp), Some((2048, 1080)));
-        // Clef doesn't read GIFs, and nothing goes over 4 MiB.
+        // A GIF that doesn't read is left out, and nothing goes over 4 MiB.
         assert!(Picture::read(bytes::Bytes::from_static(b"GIF89a\x10\0\x10\0")).is_none());
         let mut big = png(100, 100).to_vec();
         big.resize(MAX_PICTURE_BYTES + 1, 0);

@@ -20,7 +20,7 @@ use crate::settings::{self, Settings};
 const EXPORT_CHUNK: usize = 256 * 1024;
 
 impl Api {
-    async fn require_instance_admin(&self, metadata: &tonic::metadata::MetadataMap) -> Result<Viewer> {
+    pub(super) async fn require_instance_admin(&self, metadata: &tonic::metadata::MetadataMap) -> Result<Viewer> {
         let viewer = self.viewer(metadata).await?;
         if !viewer.is_instance_admin() {
             return Err(Error::denied("only this instance's admins can do that"));

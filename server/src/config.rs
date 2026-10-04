@@ -83,6 +83,12 @@ pub struct Config {
     /// FUWA_JEV_API_KEY turns TypeSafe Jev on; FUWA_CLEF_API_TOKEN and
     /// FUWA_CLEF_ACCOUNT_ID turn Cloudflare Clef on. None by default.
     pub automod_providers: Vec<crate::automod::providers::Setup>,
+    /// GIF search: FUWA_GIF_PROVIDER (giphy or klipy) with FUWA_GIF_API_KEY
+    /// turns it on from the start. Off by default.
+    pub gifs: crate::gifs::Setup,
+    /// FUWA_GIF_API_URL: where the GIF provider's API is instead of its own
+    /// address, reached without the public-address check. For tests only.
+    pub gif_api_url: Option<String>,
     /// Where this process carries calls itself (one process, or a media
     /// part): FUWA_MEDIA_PORT (default 50000, UDP and TCP; `off` for no
     /// calls here) and FUWA_MEDIA_ADDRESSES. None when it's off, or this
@@ -118,6 +124,7 @@ impl std::fmt::Debug for Config {
             .field("cluster", &self.cluster)
             .field("replica", &self.replica)
             .field("automod_providers", &self.automod_providers)
+            .field("gifs", &self.gifs)
             .finish()
     }
 }
@@ -495,6 +502,10 @@ impl Config {
             ice_urls,
             turn_secret: get("FUWA_TURN_SECRET").map(|s| s.trim().to_string()).unwrap_or_default(),
             automod_providers: automod_providers(&get)?,
+            gifs: gifs(&get)?,
+            gif_api_url: get("FUWA_GIF_API_URL")
+                .map(|v| v.trim().trim_end_matches('/').to_string())
+                .filter(|v| !v.is_empty()),
             media,
             media_urls,
             replica,
@@ -630,6 +641,25 @@ fn automod_providers(get: &impl Fn(&str) -> Option<String>) -> Result<Vec<crate:
         _ => return Err("FUWA_CLEF_API_TOKEN and FUWA_CLEF_ACCOUNT_ID go together".into()),
     }
     Ok(setups)
+}
+
+/// GIF search from FUWA_GIF_PROVIDER and FUWA_GIF_API_KEY, checked like a
+/// change from the app.
+fn gifs(get: &impl Fn(&str) -> Option<String>) -> Result<crate::gifs::Setup, String> {
+    let value = |name: &str| get(name).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let provider = match value("FUWA_GIF_PROVIDER").as_deref().map(str::to_ascii_lowercase).as_deref() {
+        None | Some("off") => pb::GifProvider::Unspecified,
+        Some("giphy") => pb::GifProvider::Giphy,
+        Some("klipy") => pb::GifProvider::Klipy,
+        Some(other) => return Err(format!("FUWA_GIF_PROVIDER must be giphy, klipy or off, got {other:?}")),
+    };
+    let given = pb::GifSettings {
+        provider: provider as i32,
+        api_key: value("FUWA_GIF_API_KEY").unwrap_or_default(),
+        ..Default::default()
+    };
+    crate::gifs::Setup::from_pb(&given, &crate::gifs::Setup::default())
+        .map_err(|err| format!("FUWA_GIF_PROVIDER or FUWA_GIF_API_KEY: {err}"))
 }
 
 /// Whether an `http://` URL's host is on a private network: a name with no
