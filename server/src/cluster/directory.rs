@@ -716,6 +716,15 @@ impl DirectoryService for Internal {
         }))
     }
 
+    async fn check_emojis(
+        &self,
+        request: Request<cpb::CheckEmojisRequest>,
+    ) -> Result<Response<cpb::CheckEmojisResponse>, Status> {
+        let req = request.into_inner();
+        let emojis = self.app.check_emojis(&req.account_id, req.emojis).await?;
+        Ok(Response::new(cpb::CheckEmojisResponse { emojis }))
+    }
+
     async fn secure_devices(
         &self,
         request: Request<cpb::SecureDevicesRequest>,

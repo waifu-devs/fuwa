@@ -613,7 +613,8 @@ body {
 .markdown.chat pre { margin-block: 0.4em; }
 
 /* A server's own emoji sit in the line like a letter; a message of only emoji draws them big, and they pop in. */
-.markdown .emoji { height: 1.375em; width: auto; max-width: 2.75em; vertical-align: -0.3em; margin-inline: 0.05em; }
+.markdown .emoji { height: 1.375em; width: auto; max-width: 2.75em; vertical-align: -0.3em; margin-inline: 0.05em; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.markdown .emoji:hover { transform: scale(1.35) rotate(-6deg); }
 .markdown.chat.jumbo { font-size: 2.25em; line-height: 1.25; }
 .markdown.chat.jumbo .emoji { height: 1.2em; max-width: 2.4em; vertical-align: -0.2em; }
 @keyframes jumbo-pop {
@@ -705,6 +706,14 @@ body[data-settings-open] #root { scale: 0.94; filter: blur(3px); opacity: 0.4; }
 .message-row.first { margin-top: calc(0.75rem * var(--density)); padding-top: calc(0.25rem * var(--density)); }
 .message-row.compact { padding-block: calc(0.0625rem * var(--density)); }
 .message-row.compact.first { margin-top: calc(0.375rem * var(--density)); padding-top: calc(0.125rem * var(--density)); }
+
+/* The emoji picker: each emoji lifts under the pointer (transform only), and the first rows pop in as it opens. */
+.emoji-cell > * { transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.emoji-cell:hover > *, .emoji-cell[aria-selected="true"] > * { transform: scale(1.22) rotate(-6deg); }
+.emoji-cell:active > * { transform: scale(0.88); transition-duration: 0.08s; }
+.emoji-cell-in { animation: emoji-in 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@keyframes emoji-in { from { opacity: 0; transform: scale(0.6) translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .emoji-cell > * { transition: none; } .emoji-cell-in { animation: none; } }
 
 /* Accessibility: calmer colors, links always underlined, motion off everywhere. */
 :root[data-desaturated] { filter: saturate(var(--saturation)); }
