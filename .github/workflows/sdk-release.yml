@@ -6,17 +6,12 @@ name: Release SDK
 # built it. The SDK's version follows the server's, so an app can tell which
 # server release it was made against.
 #
-# It needs the NPM_TOKEN repository secret (an npm automation token that can
-# publish @waifu-devs/fuwa). Without it, the job says so and publishes nothing.
+# It needs the NPM_TOKEN secret (an npm automation token that can publish
+# @waifu-devs/fuwa), kept in the "npm" environment, limited to v* tags.
+# Without it, the job says so and publishes nothing.
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Build and pack, but don't publish
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -25,6 +20,8 @@ jobs:
   publish:
     name: Publish @waifu-devs/fuwa
     runs-on: ubuntu-latest
+    # Holds NPM_TOKEN; its deployment rule lets only v* tags in.
+    environment: npm
     permissions:
       contents: read
       # For npm provenance.
@@ -45,7 +42,6 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - name: Version from the tag
-        if: github.event_name == 'push'
         run: |
           version="${GITHUB_REF_NAME#v}"
           if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
@@ -57,16 +53,17 @@ jobs:
         run: |
           pnpm run generate
           git diff --exit-code -- src/gen
+          test -z "$(git status --porcelain -- src/gen)"
       - run: pnpm run build
       - run: pnpm test
       - run: npm pack --dry-run
       - name: Publish
-        if: github.event_name == 'push' || !inputs.dry_run
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::warning::NPM_TOKEN isn't set, so the SDK wasn't published. Add it under Settings > Secrets and variables > Actions, then run this workflow again."
+            echo "::warning::NPM_TOKEN isn't set, so the SDK wasn't published. Add it to the npm environment (Settings > Environments), then re-run this run."
             exit 0
           fi
           npm publish --provenance --access public

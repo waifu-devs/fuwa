@@ -213,6 +213,8 @@ jobs:
       - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm test
+      - name: Packs as it would publish
+        run: npm pack --dry-run
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

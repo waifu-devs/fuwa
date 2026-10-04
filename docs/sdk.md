@@ -279,5 +279,5 @@ CI runs all of it when `sdk/` or `proto/` change.
 
 Releases: pushing a `v*` tag (the server's release tag) runs
 `.github/workflows/sdk-release.yml`, which publishes the SDK to npm at the
-tag's version with provenance. It needs the `NPM_TOKEN` repository secret;
-without it the workflow says so and publishes nothing.
+tag's version with provenance. It needs the `NPM_TOKEN` secret in a GitHub environment named `npm`,
+limited to `v*` tags; without it the workflow says so and publishes nothing.
