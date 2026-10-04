@@ -298,7 +298,8 @@ impl AdminService for Api {
                 }
                 // No account ids: these logs can be public.
                 tracing::info!(admin = ?req.admin, disabled = ?req.disabled, "account updated by an admin");
-                let summary = self.app.node()?.account_summary(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
+                let summary =
+                    self.app.node()?.account_summary(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
                 Ok(pb::UpdateAccountResponse { account: Some(self.account_summary_pb(summary)) })
             }
             .await,
@@ -314,7 +315,9 @@ impl AdminService for Api {
                 let viewer = self.require_instance_admin(request.metadata()).await?;
                 let req = request.into_inner();
                 if viewer.account().is_ok_and(|me| me.id == req.account_id) {
-                    return Err(Error::FailedPrecondition("change your own password from your account settings".into()));
+                    return Err(Error::FailedPrecondition(
+                        "change your own password from your account settings".into(),
+                    ));
                 }
                 let account = self.app.node()?.account(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
                 if !account.has_password() {
