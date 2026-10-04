@@ -7,6 +7,7 @@
 
 pub mod api;
 pub mod app;
+pub mod attachments;
 pub mod auth;
 pub mod automod;
 pub mod cluster;
