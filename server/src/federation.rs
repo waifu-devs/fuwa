@@ -322,17 +322,23 @@ impl Refusal {
     }
 }
 
-/// The domain an origin's host is under, roughly: its last two labels (three
-/// when the second-to-last is short, as in example.co.uk), or the address
-/// itself. Only for capping greetings, so rough is enough.
+/// The domain an origin's host is under, roughly: its last two labels, or
+/// three under a two-letter country's well-known second level (example.co.uk),
+/// an IPv4 address itself, or an IPv6 address's /48. Only for capping
+/// greetings, so rough is enough, but never finer than a registered domain.
 fn domain_of(origin: &str) -> String {
     let host = host_of(origin).unwrap_or_default();
-    if host.parse::<IpAddr>().is_ok() || host.starts_with('[') {
-        return host;
+    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+        return ip.to_string();
     }
+    if let Ok(ip) = host.trim_start_matches('[').trim_end_matches(']').parse::<std::net::Ipv6Addr>() {
+        let s = ip.segments();
+        return format!("{:x}:{:x}:{:x}::/48", s[0], s[1], s[2]);
+    }
+    const SECOND_LEVELS: [&str; 10] = ["co", "com", "net", "org", "ac", "gov", "edu", "ne", "or", "go"];
     let labels: Vec<&str> = host.split('.').collect();
     let keep = match labels.as_slice() {
-        [.., second, _] if second.len() <= 3 && labels.len() >= 3 => 3,
+        [.., _, second, tld] if tld.len() == 2 && SECOND_LEVELS.contains(second) => 3,
         _ => 2,
     };
     labels[labels.len().saturating_sub(keep)..].join(".")
@@ -923,6 +929,11 @@ mod tests {
         assert_eq!(domain_of("https://a.b.example.com"), "example.com");
         assert_eq!(domain_of("https://chat.example.co.uk"), "example.co.uk");
         assert_eq!(domain_of("http://127.0.0.1:4000"), "127.0.0.1");
+        assert_eq!(domain_of("https://n1.abc.xyz"), "abc.xyz", "a short name isn't a public suffix");
+        assert_eq!(domain_of("https://a.b.abc.io"), "abc.io");
+        assert_eq!(domain_of("https://x.example.com.au"), "example.com.au");
+        assert_eq!(domain_of("https://[2001:db8:1:2::5]"), "2001:db8:1::/48");
+        assert_eq!(domain_of("https://[2001:db8:1:ffff::9]:8443"), "2001:db8:1::/48");
         let federation = Federation::new(false);
         for n in 0..HELLOS_PER_DOMAIN_PER_MINUTE {
             assert!(federation.take_hello(&format!("https://x{n}.wild.example")));
