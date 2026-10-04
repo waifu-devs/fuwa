@@ -35,6 +35,9 @@ const GRACE: Duration = Duration::from_millis(2500);
 const FIRST_CONNECT: Duration = Duration::from_secs(15);
 /// The longest wait between tries to get back into the call.
 const MOST_BACKOFF: Duration = Duration::from_secs(8);
+/// How long a connection must last before the next drop starts the waits
+/// between tries afresh.
+const STAYED_UP: Duration = Duration::from_secs(30);
 
 /// Where a call is at, for the call bar.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -166,7 +169,7 @@ impl Core {
             Some((microphone, speakers)) => Sound { microphone, speakers, devices: None },
             None => {
                 let (microphone, speakers) = (Arc::new(Pipe::microphone()), Arc::new(Pipe::speakers()));
-                let devices = Devices::open(microphone.clone(), speakers.clone());
+                let devices = Devices::open(microphone.clone(), speakers.clone(), !selves.mute && !selves.deaf);
                 Sound { microphone, speakers, devices: Some(devices) }
             }
         };
@@ -286,6 +289,9 @@ async fn run(
     };
     let mut session = String::new();
     let mut backoff = Duration::from_millis(500);
+    // Rejoins straight after a restart without a connection that lasted in
+    // between: only the first is quick.
+    let mut quick_rejoins = 0u32;
     let started = Instant::now();
     let mut ever_connected = false;
     let ended = loop {
@@ -307,19 +313,26 @@ async fn run(
         let soon = match joined {
             Ok(joined) => {
                 session = joined.session_id;
-                let (outcome, connected) = match link.connect(&joined.answer).await {
+                let connecting = tokio::select! {
+                    connected = link.connect(&joined.answer) => connected,
+                    Some(Command::Leave) = commands.recv() => break None,
+                };
+                let (outcome, connected) = match connecting {
                     Ok(()) => {
                         drive(&mut link, &api, &target, &session, &mut sound, &mut commands, selves.clone(), &view)
                             .await
                     }
                     Err(_) => {
                         reports::error("call_connect", "address");
-                        (Outcome::Rejoin { soon: false }, false)
+                        (Outcome::Rejoin { soon: false }, None)
                     }
                 };
-                if connected {
+                if let Some(at) = connected {
                     ever_connected = true;
-                    backoff = Duration::from_millis(500);
+                    if at.elapsed() >= STAYED_UP {
+                        backoff = Duration::from_millis(500);
+                        quick_rejoins = 0;
+                    }
                 }
                 match outcome {
                     Outcome::Left => break None,
@@ -347,11 +360,14 @@ async fn run(
             v.speaking.clear();
         });
         // Jitter keeps everyone from arriving at the next media part at once.
-        let wait = if soon {
+        let wait = if soon && quick_rejoins == 0 {
             Duration::from_millis(150 + (rand_unit() * 450.0) as u64)
         } else {
             backoff.mul_f64(0.75 + rand_unit() / 2.0)
         };
+        if soon {
+            quick_rejoins += 1;
+        }
         backoff = (backoff * 2).min(MOST_BACKOFF);
         tokio::select! {
             _ = tokio::time::sleep(wait) => {}
@@ -384,8 +400,8 @@ async fn drive(
     commands: &mut mpsc::UnboundedReceiver<Command>,
     selves: watch::Receiver<Selves>,
     view: &ViewFn<'_>,
-) -> (Outcome, bool) {
-    let mut connected = false;
+) -> (Outcome, Option<Instant>) {
+    let mut connected = None;
     let outcome = drive_until(link, api, target, session, sound, commands, selves, view, &mut connected).await;
     (outcome, connected)
 }
@@ -400,7 +416,7 @@ async fn drive_until(
     commands: &mut mpsc::UnboundedReceiver<Command>,
     selves: watch::Receiver<Selves>,
     view: &ViewFn<'_>,
-    connected: &mut bool,
+    connected: &mut Option<Instant>,
 ) -> Outcome {
     let started = Instant::now();
     let Ok(mut microphone) = Microphone::new() else {
@@ -435,8 +451,8 @@ async fn drive_until(
                 Happened::Gone(who) => mixer.forget(&who),
                 Happened::Connected => {
                     broken_since = None;
-                    if !*connected {
-                        *connected = true;
+                    if connected.is_none() {
+                        *connected = Some(Instant::now());
                         reports::timing("call.connect", started.elapsed());
                         view(&|v| v.status = Status::Connected);
                     }
@@ -454,7 +470,7 @@ async fn drive_until(
         if broken_since.is_some_and(|at| at.elapsed() > GRACE) {
             return Outcome::Rejoin { soon: false };
         }
-        if !*connected && started.elapsed() > FIRST_CONNECT {
+        if connected.is_none() && started.elapsed() > FIRST_CONNECT {
             return Outcome::Rejoin { soon: false };
         }
         let sleep = tokio::time::sleep_until(tokio::time::Instant::from_std(wake));
@@ -463,6 +479,10 @@ async fn drive_until(
             _ = sleep => link.tick(),
             _ = tick.tick() => {
                 let now = *selves.borrow();
+                // The microphone is closed while muted or deafened, not just ignored.
+                if let Some(devices) = &sound.devices {
+                    devices.listen(!now.mute && !now.deaf);
+                }
                 let mut speaking = HashSet::new();
                 // A microphone running a touch faster than this clock would
                 // pile up delay: past 160 ms behind (more than a device hands

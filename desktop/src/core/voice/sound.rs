@@ -222,6 +222,9 @@ impl Mixer {
     /// A packet of someone's sound arrived.
     pub fn hear(&mut self, who: &str, packet: &[u8]) {
         if !self.voices.contains_key(who) {
+            if self.voices.len() >= super::link::MOST_STREAMS {
+                return;
+            }
             // Decoded to mono whatever was sent: a stereo screen's sound too.
             let Ok(decoder) = opus::Decoder::new(RATE, opus::Channels::Mono) else { return };
             let voice = Voice { decoder, waiting: VecDeque::new(), playing: false, speaking: Speaking::default() };

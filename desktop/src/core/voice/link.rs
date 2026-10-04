@@ -27,6 +27,8 @@ use tokio::task::JoinHandle;
 
 /// The largest packet read or framed.
 const MOST_PACKET: usize = 2000;
+/// The most people's sound a call keeps track of.
+pub const MOST_STREAMS: usize = 64;
 /// How long reaching the media part over TCP may take.
 const TCP_CONNECT: Duration = Duration::from_secs(4);
 
@@ -74,6 +76,8 @@ pub struct Link {
     channel: Option<ChannelId>,
     pending: Option<SdpPendingOffer>,
     udp: Option<Arc<UdpSocket>>,
+    /// The media part's UDP addresses: the only places UDP goes.
+    udp_remotes: Vec<SocketAddr>,
     tcp: Vec<TcpPath>,
     packets: mpsc::Receiver<Packet>,
     packets_in: mpsc::Sender<Packet>,
@@ -115,6 +119,17 @@ pub fn candidates(sdp: &str) -> Vec<(Protocol, SocketAddr)> {
     out
 }
 
+/// An SDP without its candidate lines.
+fn without_candidates(sdp: &str) -> String {
+    let mut out = String::with_capacity(sdp.len());
+    for line in sdp.split_inclusive('\n') {
+        if !line.starts_with("a=candidate:") {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
 /// The address this computer would reach `remote` from (no packet is sent).
 fn route_to(remote: SocketAddr) -> Option<IpAddr> {
     let any: SocketAddr = if remote.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" }.parse().ok()?;
@@ -139,6 +154,7 @@ impl Link {
             channel: None,
             pending: Some(pending),
             udp: None,
+            udp_remotes: Vec::new(),
             tcp: Vec::new(),
             packets,
             packets_in,
@@ -176,6 +192,7 @@ impl Link {
                 if !added.is_empty() {
                     self.tasks.push(tokio::spawn(read_udp(socket.clone(), self.packets_in.clone())));
                     self.udp = Some(socket);
+                    self.udp_remotes = udp_remotes.clone();
                 }
             }
         }
@@ -226,7 +243,9 @@ impl Link {
     async fn transmit(&self, proto: Protocol, source: SocketAddr, destination: SocketAddr, contents: &[u8]) {
         match proto {
             Protocol::Udp => {
-                if let Some(udp) = &self.udp {
+                if let Some(udp) = &self.udp
+                    && self.udp_remotes.contains(&destination)
+                {
                     let _ = udp.send_to(contents, destination).await;
                 }
             }
@@ -307,11 +326,11 @@ impl Link {
                         let Some(offer) = value["sdp"].as_str().and_then(|s| SdpOffer::from_sdp_string(s).ok()) else {
                             return;
                         };
-                        let Ok(answer) = self.rtc.sdp_api().accept_offer(offer) else {
+                        let Some(answer) = self.answer_offer(offer) else {
                             happened.push(Happened::Broken { for_good: true });
                             return;
                         };
-                        self.say(&serde_json::json!({ "type": "answer", "sdp": answer.to_sdp_string() }));
+                        self.say(&serde_json::json!({ "type": "answer", "sdp": answer }));
                         self.forget_inactive(happened);
                     }
                     Some("restarting") => happened.push(Happened::Signal(Signal::Restarting)),
@@ -321,6 +340,9 @@ impl Link {
                 }
             }
             Event::MediaAdded(added) if added.kind == MediaKind::Audio && added.mid != self.microphone => {
+                if self.streams.len() >= MOST_STREAMS {
+                    return;
+                }
                 if let Some(media) = self.rtc.media(added.mid) {
                     self.streams.insert(added.mid, media.stream_id().to_string());
                 }
@@ -328,6 +350,7 @@ impl Link {
             Event::MediaData(data) if data.mid != self.microphone => {
                 let who = match self.streams.get(&data.mid) {
                     Some(who) => who.clone(),
+                    None if self.streams.len() >= MOST_STREAMS => return,
                     None => match self.rtc.media(data.mid) {
                         Some(media) => {
                             let who = media.stream_id().to_string();
@@ -341,6 +364,14 @@ impl Link {
             }
             _ => {}
         }
+    }
+
+    /// The answer to one of the media part's offers, without this
+    /// computer's addresses: str0m would list them, and the media part
+    /// learns the one it needs from the connectivity checks anyway.
+    fn answer_offer(&mut self, offer: SdpOffer) -> Option<String> {
+        let answer = self.rtc.sdp_api().accept_offer(offer).ok()?;
+        Some(without_candidates(&answer.to_sdp_string()))
     }
 
     /// After a renegotiation: tracks the media part stopped sending on are
@@ -450,6 +481,34 @@ mod tests {
                 (Protocol::Udp, "[2001:db8::1]:50000".parse().unwrap()),
             ]
         );
+    }
+
+    /// The media part leads with offers as people come and go; the app's
+    /// answers to them name none of its addresses, not even the ones it
+    /// connects from.
+    #[test]
+    fn answers_to_the_media_parts_offers_keep_this_computers_addresses_out() {
+        let (mut link, offer) = Link::offer();
+        let mut media = Rtc::builder().set_ice_lite(true).build(Instant::now());
+        media.add_local_candidate(Candidate::host("203.0.113.7:50000".parse().unwrap(), "udp").unwrap());
+        let answer = media.sdp_api().accept_offer(SdpOffer::from_sdp_string(&offer).unwrap()).unwrap();
+        link.rtc.add_local_candidate(Candidate::host("192.168.1.23:40000".parse().unwrap(), "udp").unwrap());
+        let pending = link.pending.take().unwrap();
+        link.rtc.sdp_api().accept_answer(pending, answer).unwrap();
+
+        let mut change = media.sdp_api();
+        change.add_media(MediaKind::Audio, Direction::SendOnly, Some("someone".into()), None, None);
+        let (offer, pending) = change.apply().unwrap();
+        let raw = link.rtc.sdp_api().accept_offer(SdpOffer::from_sdp_string(&offer.to_sdp_string()).unwrap()).unwrap();
+        assert!(raw.to_sdp_string().contains("192.168.1.23"), "str0m would have said it");
+        media.sdp_api().accept_answer(pending, raw).unwrap();
+
+        let mut change = media.sdp_api();
+        change.add_media(MediaKind::Audio, Direction::SendOnly, Some("someone-else".into()), None, None);
+        let (offer, _) = change.apply().unwrap();
+        let answer = link.answer_offer(SdpOffer::from_sdp_string(&offer.to_sdp_string()).unwrap()).unwrap();
+        assert!(!answer.contains("a=candidate") && !answer.contains("192.168.1.23"), "{answer}");
+        assert!(SdpAnswer::from_sdp_string(&answer).is_ok(), "still an answer");
     }
 
     #[test]

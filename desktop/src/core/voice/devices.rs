@@ -24,24 +24,43 @@ pub enum Trouble {
 /// The devices a call uses, open until this is dropped.
 pub struct Devices {
     stop: Arc<AtomicBool>,
+    /// Whether the microphone should be open: closed while muted or
+    /// deafened, so the system's "microphone in use" light goes off too.
+    listening: Arc<AtomicBool>,
+    /// What the call last asked for, so asking again changes nothing.
+    wanted: AtomicBool,
     thread: Option<JoinHandle<()>>,
     trouble: Arc<Mutex<Vec<Trouble>>>,
 }
 
 impl Devices {
-    /// Opens the default microphone into `microphone` and plays `speakers`.
-    /// A device that can't open is reported, and the call goes on without it.
-    pub fn open(microphone: Arc<Pipe>, speakers: Arc<Pipe>) -> Self {
+    /// Plays `speakers`, and opens the default microphone into `microphone`
+    /// when `listening`. A device that can't open is reported, and the call
+    /// goes on without it.
+    pub fn open(microphone: Arc<Pipe>, speakers: Arc<Pipe>, listening: bool) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
+        let listening = Arc::new(AtomicBool::new(listening));
         let trouble = Arc::new(Mutex::new(Vec::new()));
         let thread = {
-            let (stop, trouble) = (stop.clone(), trouble.clone());
+            let (stop, listening, trouble) = (stop.clone(), listening.clone(), trouble.clone());
             std::thread::Builder::new()
                 .name("fuwa-sound".into())
-                .spawn(move || run(microphone, speakers, stop, trouble))
+                .spawn(move || run(microphone, speakers, stop, listening, trouble))
                 .ok()
         };
-        Self { stop, thread, trouble }
+        let wanted = AtomicBool::new(listening.load(Ordering::Relaxed));
+        Self { stop, listening, wanted, thread, trouble }
+    }
+
+    /// Opens or closes the microphone.
+    pub fn listen(&self, on: bool) {
+        if self.wanted.swap(on, Ordering::Relaxed) == on {
+            return;
+        }
+        self.listening.store(on, Ordering::Relaxed);
+        if let Some(thread) = &self.thread {
+            thread.thread().unpark();
+        }
     }
 
     /// What isn't working, if anything.
@@ -60,15 +79,23 @@ impl Drop for Devices {
     }
 }
 
-fn run(microphone: Arc<Pipe>, speakers: Arc<Pipe>, stop: Arc<AtomicBool>, trouble: Arc<Mutex<Vec<Trouble>>>) {
+fn run(
+    microphone: Arc<Pipe>,
+    speakers: Arc<Pipe>,
+    stop: Arc<AtomicBool>,
+    listening: Arc<AtomicBool>,
+    trouble: Arc<Mutex<Vec<Trouble>>>,
+) {
     let host = cpal::default_host();
-    let report = |what: Trouble| {
+    let report = |what: Trouble, on: bool| {
         let mut list = trouble.lock();
-        if !list.contains(&what) {
+        list.retain(|t| *t != what);
+        if on {
             list.push(what);
         }
     };
-    let input = host.default_input_device().and_then(|device| {
+    let open_input = || {
+        let device = host.default_input_device()?;
         let config = device.default_input_config().ok()?;
         let stream = match config.sample_format() {
             SampleFormat::F32 => input_stream::<f32>(&device, config.config(), microphone.clone()),
@@ -79,10 +106,7 @@ fn run(microphone: Arc<Pipe>, speakers: Arc<Pipe>, stop: Arc<AtomicBool>, troubl
         }?;
         stream.play().ok()?;
         Some(stream)
-    });
-    if input.is_none() {
-        report(Trouble::NoMicrophone);
-    }
+    };
     let output = host.default_output_device().and_then(|device| {
         let config = device.default_output_config().ok()?;
         let stream = match config.sample_format() {
@@ -95,10 +119,22 @@ fn run(microphone: Arc<Pipe>, speakers: Arc<Pipe>, stop: Arc<AtomicBool>, troubl
         stream.play().ok()?;
         Some(stream)
     });
-    if output.is_none() {
-        report(Trouble::NoSpeakers);
-    }
+    report(Trouble::NoSpeakers, output.is_none());
+    let mut input = None;
     while !stop.load(Ordering::Relaxed) {
+        let want = listening.load(Ordering::Relaxed);
+        if want && input.is_none() {
+            // Nothing stale from before a mute goes out after it.
+            microphone.clear();
+            input = open_input();
+            report(Trouble::NoMicrophone, input.is_none());
+            if input.is_none() {
+                // Tried once per unmute; not again every few moments.
+                listening.store(false, Ordering::Relaxed);
+            }
+        } else if !want && input.is_some() {
+            input = None;
+        }
         std::thread::park_timeout(Duration::from_millis(250));
     }
     drop((input, output));
