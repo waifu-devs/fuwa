@@ -671,7 +671,11 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
       // rather than a fraction of a second later (older instances ignore it).
       if (sent > 0 && (speech.stopped || signal?.aborted) && !this.#done) {
         await this.#fuwa.calls
-          .speakVoice({ serverId: this.serverId, sessionId: this.#session, frames: [], interrupt: true })
+          .speakVoice(
+            { serverId: this.serverId, sessionId: this.#session, frames: [], interrupt: true },
+            // An instance that never answers mustn't hold up what's said next.
+            { timeoutMs: 2000 },
+          )
           .catch(() => {});
       }
     }
