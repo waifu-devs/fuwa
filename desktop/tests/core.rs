@@ -242,6 +242,16 @@ fn two_people_talk_in_a_server_and_in_private() {
     assert_eq!(saved.status(), PresenceStatus::Idle);
     assert!(!saved.show_activity, "a status picked here turned sharing back on");
     assert_eq!(saved.hidden_server_ids, vec![server.id.clone()]);
+    // Who may use the server through MCP: the owner picks only the chosen agents.
+    {
+        let (core, key, sid) = (alice.clone(), key.clone(), server.id.clone());
+        let saved = wait(&alice, async move {
+            let access = pb::McpAccess { mode: pb::McpAccessMode::Chosen as i32, agent_ids: vec![] };
+            core.set_mcp_access(&key, &sid, access).await.unwrap();
+            core.mcp_access(&key, &sid).await.unwrap()
+        });
+        assert_eq!(saved.mode(), pb::McpAccessMode::Chosen);
+    }
     // It's kept on the instance, so it follows Bob to his other devices.
     bob.shared.instance(&key, |i| i.notifications.clear());
     {

@@ -135,7 +135,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 31] = [
+pub const PATHS: [&str; 32] = [
     "name",
     "public_url",
     "allowed_origins",
@@ -147,6 +147,7 @@ pub const PATHS: [&str; 31] = [
     "server_creation",
     "agent_creation",
     "shared_channels",
+    "mcp",
     "servers_per_account",
     "default_limits.members",
     "default_limits.channels",
@@ -238,6 +239,7 @@ fn differs(a: &pb::InstanceSettings, b: &pb::InstanceSettings, path: &str) -> bo
         "server_creation" => a.server_creation != b.server_creation,
         "agent_creation" => a.agent_creation != b.agent_creation,
         "shared_channels" => a.shared_channels != b.shared_channels,
+        "mcp" => a.mcp != b.mcp,
         "telemetry" => a.telemetry != b.telemetry,
         "web" => a.web != b.web,
         "calls" => a.calls != b.calls,
@@ -277,6 +279,7 @@ pub fn copy_field(into: &mut pb::InstanceSettings, from: &pb::InstanceSettings, 
         "server_creation" => into.server_creation = from.server_creation,
         "agent_creation" => into.agent_creation = from.agent_creation,
         "shared_channels" => into.shared_channels = from.shared_channels,
+        "mcp" => into.mcp = from.mcp,
         "telemetry" => into.telemetry = from.telemetry,
         "web" => into.web = from.web,
         "calls" => into.calls = from.calls,

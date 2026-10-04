@@ -1,6 +1,7 @@
 //! The agents in a server, at the top of the Integrations page, for people
 //! who manage it: who's here, adding one by username (or one of your own with
-//! a tap), and taking one out. The web's `settings/server/ServerAgents.tsx`.
+//! a tap), and taking one out. Where the instance offers MCP, also which of
+//! them may use the server through it. The web's `settings/server/ServerAgents.tsx`.
 
 use gpui_kit::AnimationExt as _;
 
@@ -18,6 +19,9 @@ pub(super) struct Agents {
     added: Option<(String, Instant)>,
     /// When adding didn't work, so the box shakes.
     shook: Option<Instant>,
+    /// Which agents may use the server through MCP, once read.
+    mcp: Option<pb::McpAccess>,
+    mcp_loading: bool,
 }
 
 impl Agents {
@@ -33,11 +37,27 @@ impl Agents {
                     _ => cx.notify(),
                 }
             })];
-        let agents =
-            Self { mine: None, loading: false, username, busy: None, confirming: None, added: None, shook: None };
+        let agents = Self {
+            mine: None,
+            loading: false,
+            username,
+            busy: None,
+            confirming: None,
+            added: None,
+            shook: None,
+            mcp: None,
+            mcp_loading: false,
+        };
         (agents, subscriptions)
     }
 }
+
+/// Who may use the server through MCP, as the web's choices name them.
+const MCP_CHOICES: [(pb::McpAccessMode, &str); 3] = [
+    (pb::McpAccessMode::All, "Every agent"),
+    (pb::McpAccessMode::Chosen, "Only chosen"),
+    (pb::McpAccessMode::Off, "None"),
+];
 
 /// What someone typed as a username: no @, no spaces, lowercase.
 fn clean(name: &str) -> String {
@@ -56,6 +76,134 @@ impl ServerSettingsView {
             this.agents.mine = Some(result.unwrap_or_default());
             cx.notify();
         });
+    }
+
+    fn load_mcp(&mut self, cx: &mut Context<Self>) {
+        if self.agents.mcp_loading || self.agents.mcp.is_some() {
+            return;
+        }
+        self.agents.mcp_loading = true;
+        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
+        self.run(cx, async move { core.mcp_access(&key, &sid).await }, |this, result, cx| {
+            // Left unread when it fails, so the choice just doesn't show.
+            if let Ok(access) = result {
+                this.agents.mcp = Some(access);
+            }
+            cx.notify();
+        });
+    }
+
+    /// Shown at once, put back if the instance says no.
+    fn save_mcp(&mut self, mode: pb::McpAccessMode, agent_ids: Vec<String>, cx: &mut Context<Self>) {
+        let before = self.agents.mcp.clone();
+        let access = pb::McpAccess { mode: mode as i32, agent_ids };
+        self.agents.mcp = Some(access.clone());
+        self.error = None;
+        let (core, key, sid) = (self.core.clone(), self.key.clone(), self.server.clone());
+        self.run(cx, async move { core.set_mcp_access(&key, &sid, access).await }, move |this, result, cx| {
+            match result {
+                Ok(saved) => this.agents.mcp = Some(saved),
+                Err(err) => {
+                    this.agents.mcp = before.clone();
+                    this.error = Some(err.message);
+                }
+            }
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    /// "Through MCP": every agent, only the chosen ones, or none.
+    fn mcp_choice(
+        &self,
+        access: &pb::McpAccess,
+        p: &Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let current = match access.mode() {
+            pb::McpAccessMode::Unspecified => pb::McpAccessMode::All,
+            mode => mode,
+        };
+        let width = 112.0;
+        let chosen = MCP_CHOICES.iter().position(|(m, _)| *m == current).unwrap_or(0);
+        let pill = gpui_kit::base::motion::spring(
+            "mcp-choice",
+            chosen as f32 * width,
+            gpui_kit::base::motion::Spring::new(Duration::from_millis(340)).with_damping(0.75),
+            window,
+            cx,
+        );
+        let mut row = div()
+            .relative()
+            .flex()
+            .p(px(4.0))
+            .rounded(corner(12.0))
+            .bg(alpha(p.muted_foreground, 0.1))
+            .w(px(width * 3.0 + 8.0))
+            .child(
+                div()
+                    .absolute()
+                    .top(px(4.0))
+                    .left(px(4.0 + pill))
+                    .w(px(width))
+                    .h(px(30.0))
+                    .rounded(corner(9.0))
+                    .bg(p.card),
+            );
+        for (mode, label) in MCP_CHOICES {
+            let on = mode == current;
+            let kept = access.agent_ids.clone();
+            row = row.child(
+                div()
+                    .id(SharedString::from(format!("mcp-{}", mode as i32)))
+                    .relative()
+                    .w(px(width))
+                    .h(px(30.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(if on { p.foreground } else { p.muted_foreground })
+                    .when(!on, |el| {
+                        el.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
+                            // Chosen agents are kept for "Only chosen"; the others need none.
+                            let ids = if mode == pb::McpAccessMode::Chosen { kept.clone() } else { Vec::new() };
+                            this.save_mcp(mode, ids, cx);
+                        }))
+                    })
+                    .child(label),
+            );
+        }
+        motion::rise(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .p(px(12.0))
+                .rounded(corner(16.0))
+                .border_1()
+                .border_color(p.border)
+                .bg(alpha(p.background, 0.4))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(icon("plug-zap").size(px(16.0)).text_color(hsla(0.73, 0.7, 0.62, 1.0)))
+                        .child(div().text_sm().font_weight(FontWeight::BOLD).child("Through MCP")),
+                )
+                .child(div().text_xs().text_color(p.muted_foreground).child(
+                    "AI apps such as Claude can use this server through the instance's MCP endpoint with an agent's \
+                     token. This only decides MCP: what an agent can do here is still up to its roles.",
+                ))
+                .child(row),
+            "mcp-choice-in",
+            Duration::ZERO,
+            6.0,
+        )
+        .into_any_element()
     }
 
     fn add_agent(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -123,6 +271,11 @@ impl ServerSettingsView {
 
     pub(super) fn agents_page(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.load_my_agents(cx);
+        let mcp_on =
+            self.core.shared.read(|s| s.instance(&self.key).and_then(|i| i.node.as_ref()).is_some_and(|n| n.mcp));
+        if mcp_on {
+            self.load_mcp(cx);
+        }
         let here: Vec<pb::Member> = self.core.shared.read(|s| {
             s.instance(&self.key)
                 .and_then(|i| i.members.get(&self.server))
@@ -246,6 +399,10 @@ impl ServerSettingsView {
             section = section.child(row);
         }
 
+        if let Some(access) = self.agents.mcp.clone().filter(|_| mcp_on) {
+            section = section.child(self.mcp_choice(&access, p, window, cx));
+        }
+
         if here.is_empty() {
             section = section.child(motion::rise(
                 div()
@@ -366,6 +523,43 @@ impl ServerSettingsView {
                 .into_any_element()
         };
 
+        // With "Only chosen", each agent has its own switch.
+        let mcp_on =
+            self.core.shared.read(|s| s.instance(&self.key).and_then(|i| i.node.as_ref()).is_some_and(|n| n.mcp));
+        let mcp_switch =
+            self.agents.mcp.as_ref().filter(|a| mcp_on && a.mode() == pb::McpAccessMode::Chosen).map(|access| {
+                let ids = access.agent_ids.clone();
+                let on = ids.contains(&id);
+                let who = id.clone();
+                motion::rise(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.muted_foreground)
+                        .child("MCP")
+                        .child(switch(
+                            SharedString::from(format!("agent-mcp-{id}")),
+                            on,
+                            false,
+                            cx,
+                            move |this: &mut Self, on, cx| {
+                                let mut ids = ids.clone();
+                                ids.retain(|i| *i != who);
+                                if on {
+                                    ids.push(who.clone());
+                                }
+                                this.save_mcp(pb::McpAccessMode::Chosen, ids, cx);
+                            },
+                        )),
+                    SharedString::from(format!("agent-mcp-in-{id}")),
+                    Duration::ZERO,
+                    4.0,
+                )
+            });
+
         let hover = alpha(p.primary, 0.3);
         motion::rise(
             div()
@@ -412,6 +606,7 @@ impl ServerSettingsView {
                                 .child(format!("@{}{added}", user.username)),
                         ),
                 )
+                .children(mcp_switch)
                 .child(end),
             SharedString::from(format!("agent-in-{id}")),
             Duration::from_millis(30 * n.min(8) as u64),
