@@ -51,8 +51,31 @@ const SHARE_PINS_PER_DOMAIN: usize = 3;
 /// Share code lookups and asks a minute, at most, from one server here and
 /// to one server here.
 const SHARES_PER_SERVER_PER_MINUTE: usize = 20;
+/// Messages a minute, at most, from all the people of one server on
+/// another instance together.
+const SENDS_PER_SERVER_PER_MINUTE: usize = 120;
 /// How often the time an instance was last heard from is written down.
 const HEARD_EVERY_MS: i64 = 60 * 1000;
+
+/// Counts one more for `key` in the last minute, unless it already had
+/// `per_minute` (or too many keys are counted at once).
+fn take(counts: &Mutex<HashMap<String, Vec<Instant>>>, key: &str, per_minute: usize) -> bool {
+    let mut counts = counts.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let now = Instant::now();
+    counts.retain(|_, times| {
+        times.retain(|at| now.duration_since(*at) < Duration::from_secs(60));
+        !times.is_empty()
+    });
+    if counts.len() >= 10_000 && !counts.contains_key(key) {
+        return false;
+    }
+    let times = counts.entry(key.to_string()).or_default();
+    if times.len() >= per_minute {
+        return false;
+    }
+    times.push(now);
+    true
+}
 
 /// A new Ed25519 key, as PKCS#8.
 pub fn new_key() -> Result<Vec<u8>> {
@@ -151,6 +174,7 @@ pub struct Federation {
     introduced: Mutex<HashSet<String>>,
     /// When the last share code lookups and asks were, by server, for the cap.
     shares: Mutex<HashMap<String, Vec<Instant>>>,
+    sends: Mutex<HashMap<String, Vec<Instant>>>,
 }
 
 impl Federation {
@@ -175,6 +199,7 @@ impl Federation {
             heard: Mutex::default(),
             introduced: Mutex::default(),
             shares: Mutex::default(),
+            sends: Mutex::default(),
         }
     }
 
@@ -232,21 +257,13 @@ impl Federation {
     /// Whether another share code lookup or ask for `key` (a server, coming
     /// or going) may go now.
     fn take_share(&self, key: &str) -> bool {
-        let mut shares = self.shares.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let now = Instant::now();
-        shares.retain(|_, times| {
-            times.retain(|at| now.duration_since(*at) < Duration::from_secs(60));
-            !times.is_empty()
-        });
-        if shares.len() >= 10_000 && !shares.contains_key(key) {
-            return false;
-        }
-        let times = shares.entry(key.to_string()).or_default();
-        if times.len() >= SHARES_PER_SERVER_PER_MINUTE {
-            return false;
-        }
-        times.push(now);
-        true
+        take(&self.shares, key, SHARES_PER_SERVER_PER_MINUTE)
+    }
+
+    /// Whether another message from a server on another instance (`server_id`
+    /// under its address) may be taken now.
+    pub fn take_send(&self, server_id: &str) -> bool {
+        take(&self.sends, server_id, SENDS_PER_SERVER_PER_MINUTE)
     }
 
     fn introduced(&self, origin: &str) -> bool {
@@ -1141,6 +1158,11 @@ mod tests {
         }
         assert!(!federation.take_share("in:a"));
         assert!(federation.take_share("in:b"), "other servers aren't held up");
+        for _ in 0..SENDS_PER_SERVER_PER_MINUTE {
+            assert!(federation.take_send("a@night-owls.example"));
+        }
+        assert!(!federation.take_send("a@night-owls.example"));
+        assert!(federation.take_send("b@night-owls.example"));
     }
 
     #[test]

@@ -129,10 +129,19 @@ On "Other instances" in Instance settings (`GetFederation`,
   home's, which keeps them. What's said reaches the guest's instance live,
   each message naming its author and server under the home's host; the
   guest's own people read back as its own. People's names show with their
-  instance's host ("Home · chat.example.com").
+  instance's host ("Home · chat.example.com"). How this instance's own
+  people look is never taken from the other: a home there can only name
+  people of the guest server, shown as their own instance has them. People
+  leave an instance as their id, username, display name and kind only.
+- A guest server on another instance counts as one sender at the home: its
+  people together send at most 120 messages a minute, it brings at most 500
+  people, and once one of them is kept out of the channel no one new from
+  it joins in. A home on another instance is asked about a message only in
+  the channel the app named.
 - A guest server on another instance that can't be reached gets three more
   tries (after 1, 4 and 15 seconds); after that, what waited for it is
-  dropped, and its people see it when they next open the channel. When the
+  dropped, and its people see it when they next open the channel. At most
+  512 events wait for one guest server, none longer than a minute. When the
   home's instance can't be reached, the guest's people are told "can't
   reach <host> right now" and nothing is sent.
 - Nothing from the other instance is fetched by apps: its servers' icons,

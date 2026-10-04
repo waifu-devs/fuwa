@@ -6872,6 +6872,11 @@ async fn channels_shared_across_instances() {
     );
     assert_eq!(at_guest[1].author_id, mika_user.id);
     assert_eq!(at_guest[1].shared.as_ref().unwrap().server.as_ref().unwrap().id, guest);
+    assert_eq!(
+        at_guest[1].shared.as_ref().unwrap().user.as_ref().unwrap().username,
+        "mika",
+        "the guest's own people show as their instance has them"
+    );
 
     // Files don't cross yet; editing and deleting their own does, and the
     // home's messages aren't theirs to touch.
