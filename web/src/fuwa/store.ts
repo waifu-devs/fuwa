@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type {
   Application,
+  Attachment,
   Channel,
   Emoji,
   Event,
@@ -44,6 +45,8 @@ export type ChannelMessages = {
 export type PendingMessage = {
   nonce: string;
   content: string;
+  /** Files sent with it, already uploaded. */
+  files?: Attachment[];
   createdAt: number;
   failed: string | null;
   /** In a secure channel: the thread it's going to, and whether it's also going to the channel. */
