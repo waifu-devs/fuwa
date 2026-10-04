@@ -80,7 +80,9 @@ export function organize(items: readonly Item[], moderates: (userId: string) => 
   for (const i of items) {
     const parent = threadOf(i, bySeq);
     if (i.kind === "thread") {
-      if (!parent || !moderates(i.senderId)) continue;
+      // A lock on a message that's gone, or that this device never had, makes no thread of its own.
+      const p = bySeq.get(parent);
+      if (!parent || !moderates(i.senderId) || !p || p.deleted) continue;
       const t = thread(parent);
       t.locked = i.content === "locked";
       inThread.set(parent, [...(inThread.get(parent) ?? []), i]);
@@ -101,7 +103,7 @@ export function organize(items: readonly Item[], moderates: (userId: string) => 
     t.lastSeq = i.seq;
     t.participants = [i.senderId, ...t.participants.filter((p) => p !== i.senderId)].slice(0, PARTICIPANTS);
   }
-  for (const [parent, t] of threads) if (!t.replies && !t.locked) threads.delete(parent);
+  for (const [parent, t] of threads) if (!t.replies && (!t.locked || !canHaveThread(bySeq.get(parent)))) threads.delete(parent);
   return { channel, threads, inThread };
 }
 
@@ -144,4 +146,35 @@ export function search(org: Organized, bySeq: ReadonlyMap<number, Item>, query: 
   if (!q) return all;
   const says = (i: Item | undefined) => !!i && !i.deleted && i.content.toLowerCase().includes(q);
   return all.filter((t) => says(bySeq.get(t.parent)) || (org.inThread.get(t.parent) ?? []).some(says));
+}
+
+/** What deleting a line needs: the server's delete, and this device's copy, read and written under its lock. */
+export type Deleting = {
+  remove: (seq: number) => Promise<void>;
+  locked: (fn: () => Promise<void>) => Promise<void>;
+  load: () => Promise<Item[]>;
+  write: (items: Item[]) => Promise<void>;
+};
+
+/**
+ * Deletes one line: a single delete on the server, for that line alone, then
+ * this device's copy. In a secure channel the line's thread goes with it on
+ * this device (see `orphaned`); its replies are never deleted on the server.
+ */
+export async function deleteLine(io: Deleting, seq: number, secure: boolean) {
+  await io.remove(seq);
+  await forgetLine(io, seq, secure);
+}
+
+/** Marks a line deleted on this device (someone deleted it), and in a secure channel drops its thread here too. Asks the server nothing. */
+export async function forgetLine(io: Omit<Deleting, "remove">, seq: number, secure: boolean) {
+  await io.locked(async () => {
+    const all = await io.load();
+    const before = all.find((i) => i.seq === seq);
+    if (!before || before.deleted) return;
+    const gone = { ...before, deleted: true, content: "" };
+    const bySeq = new Map(all.map((i) => [i.seq, i]));
+    bySeq.set(seq, gone);
+    await io.write([gone, ...(secure ? orphaned(all, bySeq) : [])]);
+  });
 }

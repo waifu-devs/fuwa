@@ -49,7 +49,9 @@ const setPending = (key: string, id: string, fn: (list: PendingMessage[]) => Pen
 export type ThreadTarget = { thread: number; inChannel: boolean };
 
 export async function sendDm(key: string, id: string, text: string, target?: ThreadTarget) {
-  reportUsage(target ? "e2ee.thread_reply" : "dm.send");
+  // Every send counts the same: the instance that keeps the records also gets these counts, so a separate one for
+  // thread replies would let it match them against records by time.
+  reportUsage("dm.send");
   const nonce = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
   setPending(key, id, (list) => [...list, { nonce, content: text, createdAt: Date.now(), failed: null, ...target }]);
   try {

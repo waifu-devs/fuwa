@@ -85,7 +85,9 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
   const seq = Number(b.sequence);
   const thread = Number(b.threadSequence);
   if (!kind || !b.conversationId || !(seq > 0)) return null;
-  if (kind === "thread" && !(thread > 0)) return null;
+  // Thread replies and locks only exist in secure channels, whose lines are signed; a device takes a lock only signed.
+  const threaded = thread > 0 && !!b.signed;
+  if (kind === "thread" && !threaded) return null;
   return {
     vault: vaultKey,
     conversation: b.conversationId,
@@ -103,7 +105,7 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
     signed: fromSigned(b.signed),
     editSigned: fromSigned(b.editSigned),
     sharedBy: b.sharedBy || undefined,
-    ...(thread > 0 ? { thread, inChannel: b.inChannel } : {}),
+    ...(threaded ? { thread, inChannel: b.inChannel } : {}),
     ...(kind === "thread" ? { content: b.locked ? "locked" : "unlocked" } : {}),
   };
 }

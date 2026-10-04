@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { archived, following, organize, orphaned, search, threadOf, unreadIn } from "./threads.ts";
+import { archived, deleteLine, following, forgetLine, organize, orphaned, search, threadOf, unreadIn } from "./threads.ts";
 import type { Item } from "./vault.ts";
 
 function line(seq: number, senderId: string, content: string, extra: Partial<Item> = {}): Item {
@@ -159,4 +159,74 @@ test("threads never ask the server for anything: no record is fetched to fill a 
       assert.ok(!source.includes(call), `${file} mentions ${call}`);
     }
   }
+});
+
+/** A stand-in for the server and the vault that counts what's asked of the server. */
+function mockChannel(items: Item[]) {
+  const asked = { removed: [] as number[], listed: 0 };
+  let stored = items;
+  const io = {
+    remove: async (seq: number) => {
+      asked.removed.push(seq);
+    },
+    // Anything that lists records would come through here; nothing should.
+    records: async () => {
+      asked.listed++;
+      return [];
+    },
+    locked: async (fn: () => Promise<void>) => fn(),
+    load: async () => stored,
+    write: async (changed: Item[]) => {
+      const bySeq = new Map(stored.map((i) => [i.seq, i]));
+      for (const i of changed) bySeq.set(i.seq, i);
+      stored = [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+    },
+  };
+  return { io, asked, lines: () => stored };
+}
+
+test("deleting a thread's message makes one delete on the server and lists nothing", async () => {
+  const items = [
+    line(1, "aoi", "parent"),
+    line(2, "mika", "a", { thread: 1 }),
+    line(3, "juan", "b", { thread: 1, inChannel: true }),
+    line(4, "aoi", "other"),
+  ];
+  const { io, asked, lines } = mockChannel(items);
+  await deleteLine(io, 1, true);
+  assert.deepEqual(asked.removed, [1]);
+  assert.equal(asked.listed, 0);
+  assert.deepEqual(
+    lines().map((i) => [i.seq, i.deleted]),
+    [
+      [1, true],
+      [2, true],
+      [3, true],
+      [4, false],
+    ],
+  );
+});
+
+test("someone else deleting a thread's message asks the server nothing", async () => {
+  const items = [line(1, "aoi", "parent"), line(2, "mika", "a", { thread: 1 })];
+  const { io, asked, lines } = mockChannel(items);
+  await forgetLine(io, 1, true);
+  assert.deepEqual(asked.removed, []);
+  assert.equal(asked.listed, 0);
+  assert.ok(lines().every((i) => i.deleted));
+});
+
+test("opening a thread whose message isn't on this device works from what's here", () => {
+  const { asked } = mockChannel([]);
+  const items = [line(7, "mika", "reply to something older", { thread: 3 })];
+  const org = organize(items, mods);
+  assert.equal(org.inThread.get(3)?.length, 1);
+  assert.equal(search(org, new Map(items.map((i) => [i.seq, i])), "older").length, 1);
+  assert.equal(asked.listed, 0);
+});
+
+test("a lock on a deleted or missing message makes no thread", () => {
+  assert.equal(organize([line(1, "aoi", "", { deleted: true }), lock(2, "mod", 1)], mods).threads.size, 0);
+  assert.equal(organize([lock(5, "mod", 3)], mods).threads.size, 0);
+  assert.equal(organize([line(1, "aoi", "parent"), lock(2, "mod", 1)], mods).threads.get(1)?.locked, true);
 });

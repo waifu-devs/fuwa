@@ -1165,24 +1165,25 @@ export class DmEngine {
   async remove(id: string, seq: number) {
     const c = this.room(id);
     if (!c) throw new DmError("that conversation isn't here");
-    await c.remove(seq);
-    await this.forgetDeleted(id, seq);
+    await threads.deleteLine({ ...this.lines(id), remove: (s) => c.remove(s) }, seq, this.secure.has(id));
+    await this.refresh(id);
   }
 
   private async forgetDeleted(id: string, seq: number) {
-    await exclusive(this.lock, async () => {
-      const all = await vault.loadItems(this.vaultKey, id);
-      const before = all.find((i) => i.seq === seq);
-      if (before && !before.deleted) {
-        const gone = { ...before, deleted: true, content: "" };
-        const bySeq = new Map(all.map((i) => [i.seq, i]));
-        bySeq.set(seq, gone);
-        const orphans = this.secure.has(id) ? threads.orphaned(all, bySeq) : [];
-        await vault.write(this.vaultKey, { items: [gone, ...orphans] });
-      }
-      this.tell(id);
-    });
+    await threads.forgetLine(this.lines(id), seq, this.secure.has(id));
     await this.refresh(id);
+  }
+
+  /** One conversation's lines on this device, read and written under the device's lock. */
+  private lines(id: string) {
+    return {
+      locked: (fn: () => Promise<void>) => exclusive(this.lock, fn),
+      load: () => vault.loadItems(this.vaultKey, id),
+      write: async (items: vault.Item[]) => {
+        await vault.write(this.vaultKey, { items });
+        this.tell(id);
+      },
+    };
   }
 
   /** Notes that you've seen everything in a conversation so far. */
