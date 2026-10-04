@@ -783,6 +783,7 @@ async fn review_sent(
             channel_id: message.channel_id.clone(),
             message_id: message.id.clone(),
         }));
+        super::threads::after_delete(conn, &message.channel_id, &message.id, &message.thread_id, events).await?;
     }
     Ok(())
 }

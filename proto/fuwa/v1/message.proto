@@ -15,7 +15,20 @@ service MessageService {
   // Authors delete their own messages; owners and admins delete any. In a
   // channel shared from another server, MANAGE_MESSAGES deletes only this
   // server's members' messages; the home server's moderators delete any.
+  // Deleting a message with a thread under it deletes the thread too: its
+  // author may when every reply is theirs, moderators always.
   rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
+  // A channel's threads, the latest reply first: the messages they're under,
+  // with their summaries. Not in channels shared between servers.
+  rpc ListThreads(ListThreadsRequest) returns (ListThreadsResponse);
+  // People who can manage messages lock and unlock threads.
+  rpc UpdateThread(UpdateThreadRequest) returns (UpdateThreadResponse);
+  // Following a thread: its replies notify you. Starting a thread, replying
+  // in one or being the author of the message it's under follows it, until
+  // you unfollow it.
+  rpc FollowThread(FollowThreadRequest) returns (FollowThreadResponse);
+  // The threads you follow in a server, the latest reply first, up to 500.
+  rpc ListFollowedThreads(ListFollowedThreadsRequest) returns (ListFollowedThreadsResponse);
 }
 
 message SendMessageRequest {
@@ -25,6 +38,11 @@ message SendMessageRequest {
   repeated Attachment attachments = 4;
   repeated Embed embeds = 5;
   string reply_to_id = 6;
+  // Reply in the thread under this message, starting it if there's none
+  // yet (that needs CREATE_THREADS).
+  string thread_id = 8;
+  // With thread_id: show the reply in the channel too.
+  bool also_send_to_channel = 9;
 }
 
 message SendMessageResponse {
@@ -53,6 +71,8 @@ message ListMessagesRequest {
   string before_id = 4;
   // The page right after this message.
   string after_id = 5;
+  // A page of the replies in the thread under this message instead.
+  string thread_id = 6;
 }
 
 message ListMessagesResponse {
@@ -61,6 +81,8 @@ message ListMessagesResponse {
   repeated User authors = 2;
   // Whether there are more messages beyond this page, in the direction paged.
   bool has_more = 3;
+  // With thread_id: the message the thread is under.
+  Message parent = 4;
 }
 
 message UpdateMessageRequest {
@@ -85,3 +107,58 @@ message DeleteMessageRequest {
 }
 
 message DeleteMessageResponse {}
+
+message ListThreadsRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // Only threads whose parent or replies say this, ignoring case. Up to 100
+  // characters.
+  string query = 3;
+  // Archived threads instead of open ones (Server.thread_archive_hours).
+  bool archived = 4;
+  // 1 to 50; defaults to 25.
+  int32 limit = 5;
+  // The page after this thread (its parent's id), from the last page.
+  string after_thread_id = 6;
+}
+
+message ListThreadsResponse {
+  // The messages the threads are under, each with its summary.
+  repeated Message threads = 1;
+  // Profiles of their authors and the threads' participants.
+  repeated User authors = 2;
+  bool has_more = 3;
+  // With has_more: the after_thread_id for the next page. A search can stop
+  // before it finds anything, with has_more and a place to carry on from.
+  string next_after_thread_id = 4;
+}
+
+message UpdateThreadRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  // The message the thread is under.
+  string thread_id = 3;
+  optional bool locked = 4;
+}
+
+message UpdateThreadResponse {
+  ThreadSummary thread = 1;
+}
+
+message FollowThreadRequest {
+  string server_id = 1;
+  string channel_id = 2;
+  string thread_id = 3;
+  bool follow = 4;
+}
+
+message FollowThreadResponse {}
+
+message ListFollowedThreadsRequest {
+  string server_id = 1;
+}
+
+message ListFollowedThreadsResponse {
+  // The ids of the messages the threads are under.
+  repeated string thread_ids = 1;
+}

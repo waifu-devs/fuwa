@@ -6,6 +6,7 @@ pub mod app;
 mod arrange;
 mod assets;
 mod backdrop;
+mod call_bar;
 mod chat;
 mod compose;
 mod connect;
