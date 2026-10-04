@@ -368,6 +368,7 @@ async fn a_community_end_to_end() {
                 server_id: sid.clone(),
                 message_id: sent[0].id.clone(),
                 content: "hijacked".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -382,6 +383,7 @@ async fn a_community_end_to_end() {
                 server_id: sid.clone(),
                 message_id: sent[0].id.clone(),
                 content: "message zero".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -2064,6 +2066,7 @@ async fn server_settings_and_moderation() {
                 server_id: sid.clone(),
                 message_id: welcomed[0].id.clone(),
                 content: "hi".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -4606,6 +4609,7 @@ async fn automod_catches_messages() {
                 server_id: server.id.clone(),
                 message_id: sent.id.clone(),
                 content: "a scammer!".into(),
+                emojis: vec![],
             },
         ))
         .await
@@ -5003,6 +5007,134 @@ async fn smart_filter_checks_stop_at_the_daily_limit() {
 }
 
 #[tokio::test]
+async fn emoji_from_other_servers_go_with_the_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let (friend, _, _) = sign_up(&mut c, "friend").await;
+    let emotes = create_server(&mut c, &owner, "Emotes", true).await;
+    let lounge = create_server(&mut c, &owner, "Lounge", true).await;
+    join(&mut c, &friend, &lounge.id).await;
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: lounge.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.r#type == pb::ChannelType::Text as i32)
+        .unwrap();
+
+    let picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, png(300, 1)).await;
+    let wave = c
+        .emojis
+        .create_emoji(authed(
+            &owner,
+            pb::CreateEmojiRequest { server_id: emotes.id.clone(), name: "wave".into(), url: picture.clone() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .emoji
+        .unwrap();
+    let lounge_picture = upload(&mut c, &instance, &owner, pb::MediaPurpose::Emoji, png(200, 2)).await;
+    let local = c
+        .emojis
+        .create_emoji(authed(
+            &owner,
+            pb::CreateEmojiRequest { server_id: lounge.id.clone(), name: "home".into(), url: lounge_picture },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .emoji
+        .unwrap();
+    let token = format!("<:wave:{}>", wave.id);
+    let icon = upload(&mut c, &instance, &owner, pb::MediaPurpose::ServerIcon, png(100, 3)).await;
+    let client = c.messages.clone();
+    let sent = |who: &str, content: String, emojis: Vec<pb::Emoji>| {
+        let mut messages = client.clone();
+        let request = authed(
+            who,
+            pb::SendMessageRequest {
+                server_id: lounge.id.clone(),
+                channel_id: general.id.clone(),
+                content,
+                emojis,
+                ..Default::default()
+            },
+        );
+        async move { messages.send_message(request).await.unwrap().into_inner().message.unwrap() }
+    };
+
+    // Someone in both servers brings the emoji along; it's stored as the
+    // instance has it, without who made it or its size.
+    let message = sent(&owner, format!("hi {token} <:home:{}>", local.id), vec![wave.clone(), local.clone()]).await;
+    assert_eq!(message.emojis.len(), 1, "{:?}", message.emojis);
+    let carried = &message.emojis[0];
+    assert_eq!(
+        (carried.id.as_str(), carried.server_id.as_str(), carried.name.as_str(), carried.url.as_str()),
+        (wave.id.as_str(), emotes.id.as_str(), "wave", picture.as_str())
+    );
+    assert!(carried.creator_id.is_empty() && carried.size == 0 && !carried.animated);
+
+    // Someone who isn't in the emoji's server can't. Only the id sent counts:
+    // the name and picture come from the server, whatever was sent, and an
+    // id it has no emoji for is left out.
+    assert!(sent(&friend, format!("hi {token}"), vec![wave.clone()]).await.emojis.is_empty());
+    let forged = pb::Emoji { url: icon, name: "renamed".into(), ..wave.clone() };
+    let back = sent(&owner, format!("hi {token}"), vec![forged]).await.emojis;
+    assert_eq!((back[0].name.as_str(), back[0].url.as_str()), ("wave", picture.as_str()));
+    let made_up = pb::Emoji { id: "madeup0000000000".into(), ..wave.clone() };
+    assert!(sent(&owner, "hi <:wave:madeup0000000000>".into(), vec![made_up]).await.emojis.is_empty());
+    let elsewhere = pb::Emoji {
+        url: format!("https://evil.example{}", &picture[picture.find("/media/").unwrap()..]),
+        ..wave.clone()
+    };
+    assert_eq!(sent(&owner, format!("hi {token}"), vec![elsewhere]).await.emojis[0].url, picture);
+    // One the text doesn't use is left out.
+    assert!(sent(&owner, "no emoji here".into(), vec![wave.clone()]).await.emojis.is_empty());
+
+    // Others read it back with the emoji.
+    let listed = c
+        .messages
+        .list_messages(authed(
+            &friend,
+            pb::ListMessagesRequest {
+                server_id: lounge.id.clone(),
+                channel_id: general.id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .messages;
+    let first = listed.iter().find(|m| m.id == message.id).unwrap();
+    assert_eq!(first.emojis, message.emojis);
+
+    // Edits keep the ones the text still uses and drop the rest.
+    let edit = |content: String| pb::UpdateMessageRequest {
+        server_id: lounge.id.clone(),
+        message_id: message.id.clone(),
+        content,
+        ..Default::default()
+    };
+    let kept = c.messages.update_message(authed(&owner, edit(format!("still {token}")))).await.unwrap();
+    assert_eq!(kept.into_inner().message.unwrap().emojis.len(), 1);
+    let dropped = c.messages.update_message(authed(&owner, edit("gone".into()))).await.unwrap();
+    assert!(dropped.into_inner().message.unwrap().emojis.is_empty());
+    // Too long an edit is refused before anything reads it, even of a
+    // message that isn't there.
+    let long = pb::UpdateMessageRequest { message_id: "nothere000000000".into(), ..edit("<:a".repeat(5000)) };
+    let refused = c.messages.update_message(authed(&friend, long)).await.unwrap_err();
+    assert_eq!(refused.code(), Code::InvalidArgument);
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn custom_emoji_and_the_welcome_screen() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[("FUWA_LIMIT_EMOJIS", "2")]).await;
@@ -5317,7 +5449,8 @@ async fn webhooks_post_into_channels() {
                     channel_id: String::new(),
                     server_id: server.id.clone(),
                     message_id: message.id.clone(),
-                    content: "mine now".into()
+                    content: "mine now".into(),
+                    emojis: vec![],
                 }
             ))
             .await
@@ -6323,6 +6456,7 @@ async fn channels_shared_between_servers() {
                 message_id: hi.id.clone(),
                 content: "hi from guest".into(),
                 channel_id: String::new(),
+                emojis: vec![],
             },
         ))
         .await
@@ -6843,6 +6977,405 @@ async fn federation_refuses_internal_addresses() {
     instance.stop().await;
 }
 
+async fn reply(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    thread_id: &str,
+    content: &str,
+    also: bool,
+) -> Result<pb::Message, tonic::Status> {
+    c.messages
+        .send_message(authed(
+            token,
+            pb::SendMessageRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                content: content.into(),
+                thread_id: thread_id.into(),
+                also_send_to_channel: also,
+                ..Default::default()
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().message.unwrap())
+}
+
+async fn thread_page(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    thread_id: &str,
+) -> pb::ListMessagesResponse {
+    c.messages
+        .list_messages(authed(
+            token,
+            pb::ListMessagesRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                thread_id: thread_id.into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+}
+
+async fn list_threads(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    query: &str,
+) -> pb::ListThreadsResponse {
+    c.messages
+        .list_threads(authed(
+            token,
+            pb::ListThreadsRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                query: query.into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+}
+
+async fn followed(c: &mut Clients, token: &str, server_id: &str) -> Vec<String> {
+    c.messages
+        .list_followed_threads(authed(token, pb::ListFollowedThreadsRequest { server_id: server_id.into() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .thread_ids
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn replies_start_threads_under_messages() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let server = create_server(&mut c, &juan, "Threads", true).await;
+    let sid = server.id.clone();
+    assert_eq!(server.thread_archive_hours, 168, "a week by default");
+    for token in [&mika, &rin] {
+        c.servers
+            .join_server(authed(token, pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() }))
+            .await
+            .unwrap();
+    }
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels[0]
+        .id
+        .clone();
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let parent = send(&mut c, &juan, &sid, &general, "what should we name the cat?").await.unwrap();
+    let first = reply(&mut c, &mika, &sid, &general, &parent.id, "Mochi", false).await.unwrap();
+    assert_eq!(first.thread_id, parent.id);
+    reply(&mut c, &rin, &sid, &general, &parent.id, "Tofu, and I mean it", true).await.unwrap();
+    reply(&mut c, &mika, &sid, &general, &parent.id, "Mochi again", false).await.unwrap();
+
+    // The channel shows the parent with its summary, and only the reply also sent to it.
+    let mut channel = messages(&mut c, &juan, &sid, &general).await;
+    channel.retain(|m| m.kind == pb::MessageKind::Unspecified as i32);
+    let contents = channel.iter().map(|m| m.content.as_str()).collect::<Vec<_>>();
+    assert_eq!(contents, ["what should we name the cat?", "Tofu, and I mean it"]);
+    let summary = channel[0].thread.clone().unwrap();
+    assert_eq!(summary.reply_count, 3);
+    assert_eq!(summary.participant_ids, [mika_user.id.clone(), rin_user.id.clone()], "latest first");
+    assert!(channel[1].also_in_channel);
+
+    // The thread's own page has every reply, oldest first, and the parent.
+    let page = thread_page(&mut c, &rin, &sid, &general, &parent.id).await;
+    assert_eq!(page.messages.len(), 3);
+    assert_eq!(page.messages[0].content, "Mochi");
+    assert_eq!(page.parent.unwrap().id, parent.id);
+
+    // Live: the reply, then the thread's new summary.
+    let mut saw_summary = false;
+    while let Ok(Some(item)) =
+        tokio::time::timeout(std::time::Duration::from_secs(5), stream.message()).await.map(Result::unwrap)
+    {
+        if let Some(pb::Event { payload: Some(pb::event::Payload::ThreadUpdated(t)), .. }) = item.event
+            && t.thread.as_ref().is_some_and(|t| t.reply_count == 3)
+        {
+            assert_eq!(t.thread_id, parent.id);
+            saw_summary = true;
+            break;
+        }
+    }
+    assert!(saw_summary);
+
+    // No threads under replies, and none under messages in another channel.
+    let nested = reply(&mut c, &rin, &sid, &general, &first.id, "deeper", false).await.unwrap_err();
+    assert_eq!(nested.code(), Code::InvalidArgument);
+    let random = new_channel(&mut c, &juan, &sid, "random", pb::ChannelType::Text).await;
+    let elsewhere = reply(&mut c, &rin, &sid, &random.id, &parent.id, "hi", false).await.unwrap_err();
+    assert_eq!(elsewhere.code(), Code::NotFound);
+    let stray = send(&mut c, &rin, &sid, &general, "x").await.unwrap();
+    let alone = c
+        .messages
+        .send_message(authed(
+            &rin,
+            pb::SendMessageRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                content: "also?".into(),
+                also_send_to_channel: true,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(alone.code(), Code::InvalidArgument);
+
+    // Following: the parent's author and everyone who replied, until they unfollow.
+    assert_eq!(followed(&mut c, &juan, &sid).await, std::slice::from_ref(&parent.id));
+    assert_eq!(followed(&mut c, &mika, &sid).await, std::slice::from_ref(&parent.id));
+    c.messages
+        .follow_thread(authed(
+            &mika,
+            pb::FollowThreadRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                follow: false,
+            },
+        ))
+        .await
+        .unwrap();
+    reply(&mut c, &mika, &sid, &general, &parent.id, "ok Tofu", false).await.unwrap();
+    assert!(followed(&mut c, &mika, &sid).await.is_empty(), "replying again doesn't follow it again");
+
+    // Search finds threads by their parent or their replies.
+    assert_eq!(list_threads(&mut c, &rin, &sid, &general, "").await.threads.len(), 1);
+    assert_eq!(list_threads(&mut c, &rin, &sid, &general, "TOFU").await.threads[0].id, parent.id);
+    assert_eq!(list_threads(&mut c, &rin, &sid, &general, "cat").await.threads.len(), 1);
+    assert!(list_threads(&mut c, &rin, &sid, &general, "dog").await.threads.is_empty());
+
+    // Moderators lock a thread: only they reply then.
+    let denied = c
+        .messages
+        .update_thread(authed(
+            &rin,
+            pb::UpdateThreadRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                locked: Some(true),
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let locked = c
+        .messages
+        .update_thread(authed(
+            &juan,
+            pb::UpdateThreadRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                thread_id: parent.id.clone(),
+                locked: Some(true),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .thread
+        .unwrap();
+    assert!(locked.locked);
+    let shut = reply(&mut c, &rin, &sid, &general, &parent.id, "but", false).await.unwrap_err();
+    assert_eq!(shut.code(), Code::PermissionDenied);
+    reply(&mut c, &juan, &sid, &general, &parent.id, "Tofu it is.", false).await.unwrap();
+    let log = audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    assert!(log.entries.iter().any(|e| e.action == pb::AuditAction::ThreadLock as i32));
+
+    // Starting threads takes its own permission; replying in one takes Send Messages.
+    let everyone = c
+        .roles
+        .list_roles(authed(&juan, pb::ListRolesRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .roles
+        .into_iter()
+        .find(|r| r.id == sid)
+        .unwrap();
+    assert!(everyone.permissions.contains(&(pb::Permission::CreateThreads as i32)));
+    let without = everyone.permissions.iter().copied().filter(|&p| p != pb::Permission::CreateThreads as i32).collect();
+    c.roles
+        .update_role(authed(
+            &juan,
+            pb::UpdateRoleRequest {
+                server_id: sid.clone(),
+                role_id: sid.clone(),
+                permissions: Some(pb::PermissionSet { permissions: without }),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    let cannot = reply(&mut c, &rin, &sid, &general, &stray.id, "new thread", false).await.unwrap_err();
+    assert_eq!(cannot.code(), Code::PermissionDenied);
+    let other = send(&mut c, &mika, &sid, &general, "another topic").await.unwrap();
+    let owner_reply = reply(&mut c, &juan, &sid, &general, &other.id, "started by the owner", false).await.unwrap();
+    reply(&mut c, &rin, &sid, &general, &other.id, "and I can reply", false).await.unwrap();
+
+    // The parent's author can't delete a thread others replied in; a moderator can, replies and all.
+    let refused = c
+        .messages
+        .delete_message(authed(
+            &mika,
+            pb::DeleteMessageRequest { server_id: sid.clone(), message_id: other.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    let before = usage(&mut c, &juan, &sid).await;
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest { server_id: sid.clone(), message_id: other.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    let after = usage(&mut c, &juan, &sid).await;
+    assert_eq!(before.messages - after.messages, 3, "the parent and both replies");
+    let gone = c
+        .messages
+        .get_message(authed(
+            &juan,
+            pb::GetMessageRequest { server_id: sid.clone(), message_id: owner_reply.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(gone.code(), Code::NotFound);
+    let log = audit_log(&mut c, &juan, pb::ListAuditLogRequest { server_id: sid.clone(), ..Default::default() }).await;
+    assert!(log.entries.iter().any(|e| e.action == pb::AuditAction::ThreadDelete as i32));
+
+    // Deleting a reply sums the thread up again.
+    let page = thread_page(&mut c, &juan, &sid, &general, &parent.id).await;
+    let count = page.parent.as_ref().unwrap().thread.as_ref().unwrap().reply_count;
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest {
+                server_id: sid.clone(),
+                message_id: page.messages[0].id.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    let page = thread_page(&mut c, &juan, &sid, &general, &parent.id).await;
+    assert_eq!(page.parent.unwrap().thread.unwrap().reply_count, count - 1);
+
+    // Quiet threads are archived after the server's setting; zero never archives them.
+    let updated = c
+        .servers
+        .update_server(authed(
+            &juan,
+            pb::UpdateServerRequest { server_id: sid.clone(), thread_archive_hours: Some(0), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .server
+        .unwrap();
+    assert_eq!(updated.thread_archive_hours, 0);
+    let archived = c
+        .messages
+        .list_threads(authed(
+            &rin,
+            pb::ListThreadsRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                archived: true,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(archived.threads.is_empty());
+    let too_long = c
+        .servers
+        .update_server(authed(
+            &juan,
+            pb::UpdateServerRequest { server_id: sid.clone(), thread_archive_hours: Some(9000), ..Default::default() },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(too_long.code(), Code::InvalidArgument);
+    instance.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn threads_stay_home_when_a_channel_is_shared() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (sora, _, _) = sign_up(&mut c, "sora").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    join(&mut c, &sora, &home).await;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let parent = send(&mut c, &juan, &home, &dev.id, "movie night?").await.unwrap();
+    let kept = reply(&mut c, &sora, &home, &dev.id, &parent.id, "only in the thread", false).await.unwrap();
+    let also = reply(&mut c, &sora, &home, &dev.id, &parent.id, "in both", true).await.unwrap();
+
+    // Shared after the thread started: guests see the channel, not who replied in its threads.
+    let shared = share(&mut c, &juan, &home, &dev.id, &mika, &guest).await;
+    let seen = messages(&mut c, &mika, &guest, &shared.id).await;
+    assert!(seen.iter().all(|m| m.id != kept.id), "{seen:?}");
+    let first = seen.iter().find(|m| m.id == parent.id).unwrap();
+    assert!(first.thread.is_none());
+    let both = seen.iter().find(|m| m.id == also.id).unwrap();
+    assert!(both.thread_id.is_empty() && !both.also_in_channel);
+    let hidden = c
+        .messages
+        .get_message(authed(
+            &mika,
+            pb::GetMessageRequest {
+                server_id: guest.clone(),
+                channel_id: shared.id.clone(),
+                message_id: kept.id.clone(),
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(hidden.code(), Code::NotFound);
+    instance.stop().await;
+}
+
 /// A channel shared with a server on another instance: a code made for
 /// other instances, a preview naming the home instance and its key, the ask
 /// (which pins each instance's key at the other), approval and ending.
@@ -7026,4 +7559,84 @@ async fn channels_shared_across_instances() {
 
     a.stop().await;
     b.stop().await;
+}
+
+#[tokio::test]
+async fn channels_are_created_with_their_permissions() {
+    use pb::OverwriteTarget as T;
+    use pb::Permission as P;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let (rin, rin_user, _) = sign_up(&mut c, "rin").await;
+    let sid = create_server(&mut c, &juan, "Copies", true).await.id;
+    join(&mut c, &mika, &sid).await;
+    join(&mut c, &rin, &sid).await;
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels[0]
+        .id
+        .clone();
+    // A new role goes in at the bottom: Admins above Mods above Builders.
+    let admins = create_role(&mut c, &juan, &sid, "Admins", &[]).await.unwrap();
+    let mods =
+        create_role(&mut c, &juan, &sid, "Mods", &[P::ManageChannels, P::ManageRoles, P::ViewChannels]).await.unwrap();
+    let builders = create_role(&mut c, &juan, &sid, "Builders", &[P::ManageChannels]).await.unwrap();
+    give_role(&mut c, &juan, &sid, &mika_user.id, &mods.id).await.unwrap();
+    give_role(&mut c, &juan, &sid, &rin_user.id, &builders.id).await.unwrap();
+    let create = |token: &str, name: &str, overwrites: Vec<pb::PermissionOverwrite>| {
+        authed(
+            token,
+            pb::CreateChannelRequest {
+                server_id: sid.clone(),
+                name: name.into(),
+                topic: "only staff".into(),
+                slowmode_seconds: 30,
+                permission_overwrites: overwrites,
+                ..Default::default()
+            },
+        )
+    };
+    let hidden = || overwrite(&sid, T::Role, &[], &[P::ViewChannels]);
+    let mika_sees = overwrite(&mika_user.id, T::Member, &[P::ViewChannels], &[]);
+
+    // Made private in one step: Rin never hears of it, and it keeps its topic and slow mode.
+    let mut rin_stream = c
+        .events
+        .subscribe(authed(
+            &rin,
+            pb::SubscribeRequest {
+                servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }],
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let made = c.channels.create_channel(create(&mika, "staff", vec![hidden(), mika_sees])).await.unwrap();
+    let made = made.into_inner().channel.unwrap();
+    assert_eq!(made.permission_overwrites.len(), 2);
+    assert_eq!((made.topic.as_str(), made.slowmode_seconds), ("only staff", 30));
+    let public = send(&mut c, &juan, &sid, &general, "hello").await.unwrap();
+    let next = next_event(&mut rin_stream).await;
+    assert!(matches!(&next.payload, Some(Payload::MessageCreated(e)) if e.message.as_ref().unwrap().id == public.id));
+    drop(rin_stream);
+    assert!(!channel_names(&mut c, &rin, &sid).await.contains(&"staff".to_string()));
+
+    // An overwrite for a role at or above Mika's is refused, and no channel is left behind.
+    let admin_sees = overwrite(&admins.id, T::Role, &[P::ViewChannels], &[]);
+    let refused = c.channels.create_channel(create(&mika, "over", vec![hidden(), admin_sees])).await.unwrap_err();
+    assert_eq!(refused.code(), Code::PermissionDenied);
+    assert!(!channel_names(&mut c, &juan, &sid).await.contains(&"over".to_string()));
+
+    // Without Manage Roles, a channel can be made, but not with permissions.
+    let denied = c.channels.create_channel(create(&rin, "nope", vec![hidden()])).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    c.channels.create_channel(create(&rin, "fine", vec![])).await.unwrap();
 }

@@ -1,6 +1,7 @@
 import { motion } from "motion/react";
 import { createContext, use, useMemo, type ReactNode } from "react";
 import type { Emoji, Member, Role, User } from "@/gen/fuwa/v1/types_pb";
+import { EmojiImage } from "@/components/EmojiImage";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { memberName } from "@/lib/format";
 import { colorOf, cssColor } from "@/lib/permissions";
@@ -11,8 +12,10 @@ import { cn } from "@/lib/utils";
  * Mentions in messages: `@username`, `@everyone`, `@here` and roles written
  * `<@&role id>` (the composer writes those for you). Pinging is decided by
  * the server; this only draws them as chips, colored like the role and
- * brighter when they're about you. A server's own emoji (`<:name:id>`) go
- * through here too, drawn as their pictures.
+ * brighter when they're about you. Server emoji (`<:name:id>`) go through
+ * here too, drawn as their pictures: the server's own, ones from other
+ * servers the message brought along (`Message.emojis`), or ones from your
+ * other servers while it's still on its way.
  */
 
 /** What a server's messages need to draw names and mentions. */
@@ -24,6 +27,8 @@ export type ServerLook = {
   members: Member[];
   /** The server's own emoji. */
   emojis?: Emoji[];
+  /** Your other servers' emoji, by id. */
+  otherEmojis?: Map<string, Emoji>;
   /** Your id and roles, to light up mentions of you. */
   me?: { id: string; username: string; roleIds: string[] };
 };
@@ -36,6 +41,15 @@ export function ServerLookProvider({ value, children }: { value: ServerLook; chi
 }
 
 export const useServerLook = () => use(LookContext);
+
+const NO_EMOJI: Emoji[] = [];
+const MessageEmojiContext = createContext<Emoji[]>(NO_EMOJI);
+
+/** The emoji from other servers one message brought along. */
+export function MessageEmojis({ value, children }: { value: Emoji[] | undefined; children: ReactNode }) {
+  if (!value?.length) return children;
+  return <MessageEmojiContext value={value}>{children}</MessageEmojiContext>;
+}
 
 /** A member's name color, from their highest colored role (when there's a server around). */
 export function useRoleColor(member: Member | undefined): number | undefined {
@@ -113,20 +127,12 @@ export function Mention(props: MentionProps) {
   const target = props["data-target"] ?? "";
   const look = useServerLook();
   const mode = usePrefs((p) => p.roleColors);
+  const carried = use(MessageEmojiContext);
   if (kind === "emoji") {
-    const emoji = look.emojis?.find((e) => e.id === target);
+    const emoji =
+      look.emojis?.find((e) => e.id === target) ?? carried.find((e) => e.id === target) ?? look.otherEmojis?.get(target);
     if (!emoji) return <span className="text-muted-foreground">{props.children}</span>;
-    return (
-      <motion.img
-        src={emoji.url}
-        alt={`:${emoji.name}:`}
-        title={`:${emoji.name}:`}
-        draggable={false}
-        whileHover={{ scale: 1.35, rotate: -6 }}
-        transition={{ type: "spring", stiffness: 600, damping: 12 }}
-        className="emoji inline-block object-contain"
-      />
-    );
+    return <EmojiImage emoji={emoji} className="emoji" />;
   }
   if (kind === "role") {
     const role = look.roles.find((r) => r.id === target);
