@@ -10,8 +10,6 @@ import {
   DirectMessageContentSchema,
   DirectMessageEditSchema,
   DirectMessageTextSchema,
-  DirectMessageVoiceSchema,
-  SealedFileSchema,
   SharedEntrySchema,
   SharedHistorySchema,
   SignedContentSchema,
@@ -29,8 +27,10 @@ import { Permission, type Event, type User } from "@/gen/fuwa/v1/types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { accessOf, hasIn } from "@/lib/permissions";
 import { reportError } from "@/lib/reports";
+import { BackupSync } from "./backup";
 import * as history from "./history";
 import * as vault from "./vault";
+import { toVoiceMessage, voiceLength, voiceOf } from "./voice";
 import { loadE2ee, type Commit, type Device, type E2ee, type Processed, type WasmMember } from "./wasm";
 
 /**
@@ -181,54 +181,14 @@ export type Content =
 function contentOf(content: Content): DirectMessageContent {
   const body: DirectMessageContent["body"] =
     "voice" in content
-      ? {
-          case: "voice",
-          value: create(DirectMessageVoiceSchema, {
-            file: create(SealedFileSchema, {
-              mediaId: content.voice.mediaId,
-              key: content.voice.key,
-              sha256: content.voice.sha256,
-              size: BigInt(content.voice.size),
-              contentType: VOICE_TYPE,
-            }),
-            durationMs: content.voice.durationMs,
-            waveform: content.voice.waveform,
-            replyToSequence: BigInt(content.replyTo ?? 0),
-          }),
-        }
+      ? { case: "voice", value: toVoiceMessage(content.voice, content.replyTo) }
       : "edit" in content
         ? { case: "edit", value: create(DirectMessageEditSchema, { sequence: BigInt(content.edit), content: content.text }) }
         : { case: "text", value: create(DirectMessageTextSchema, { content: content.text, replyToSequence: BigInt(content.replyTo ?? 0) }) };
   return create(DirectMessageContentSchema, { body });
 }
 
-/** What a voice message is once opened. */
-const VOICE_TYPE = "audio/ogg; codecs=opus";
-/** The biggest sealed voice message a device fetches. */
-const MAX_VOICE_BYTES = 256 * 1024 * 1024;
-
-/** "1:05": how long a voice message plays, for previews and notifications. */
-export function voiceLength(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
-/** A voice message's file and sound, if what came in is one this app can fetch and open. */
-function voiceOf(body: Extract<DirectMessageContent["body"], { case: "voice" }>["value"]): vault.Voice | null {
-  const file = body.file;
-  if (!file || !/^[0-9a-z]{26}$/i.test(file.mediaId) || file.key.length !== 32 || file.sha256.length !== 32) return null;
-  const size = Number(file.size);
-  if (!(size > 0 && size <= MAX_VOICE_BYTES)) return null;
-  return {
-    // Fetched from this instance by id, never from a link the message names.
-    mediaId: file.mediaId.toLowerCase(),
-    key: file.key,
-    sha256: file.sha256,
-    size,
-    durationMs: Math.min(body.durationMs, 24 * 60 * 60 * 1000),
-    waveform: body.waveform.slice(0, 128),
-  };
-}
+export { voiceLength };
 
 const encode = (content: Content): Uint8Array => toBinary(DirectMessageContentSchema, contentOf(content));
 
@@ -251,6 +211,8 @@ export class DmEngine {
   /** Catch-ups waiting their turn, so a burst of records reads each conversation once. */
   private queued = new Set<string>();
   private work: Promise<void> = Promise.resolve();
+  /** The account's message backup, as this device takes part in it. */
+  readonly backup: BackupSync;
 
   private constructor(
     readonly key: string,
@@ -263,6 +225,17 @@ export class DmEngine {
     private version: number,
   ) {
     this.lock = lockName(vaultKey);
+    this.backup = new BackupSync(
+      key,
+      api,
+      vaultKey,
+      me.id,
+      (fn) => exclusive(`${this.lock}:backup`, fn),
+      async (ids) => {
+        await Promise.all(ids.map((id) => this.refresh(id).catch(() => {})));
+        for (const id of ids) this.tell(id);
+      },
+    );
     this.tabs = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("fuwa-e2ee");
     if (this.tabs) {
       this.tabs.onmessage = (e: MessageEvent<{ vault: string; conversation?: string; list?: boolean }>) => {
@@ -318,6 +291,7 @@ export class DmEngine {
   stop() {
     if (this.stopped) return;
     this.controller.abort();
+    this.backup.stop();
     this.tabs?.close();
     for (const timer of this.settling.values()) clearTimeout(timer);
     try {
@@ -1392,6 +1366,10 @@ export function startDms(key: string, api: Api, me: User, token: string) {
       engines.set(key, engine);
       updateDms(key, (d) => ({ ...d, status: "ready", deviceId: engine.deviceId }));
       void engine.follow((problem) => updateDms(key, (d) => ({ ...d, problem })));
+      engine.backup.start().catch((err: unknown) => {
+        console.warn("fuwa: couldn't check the message backup", err);
+        updateDms(key, (d) => ({ ...d, backup: { ...d.backup, problem: toFuwaError(err).message } }));
+      });
     })
     .catch((err: unknown) => {
       if (starting.get(key) !== attempt) return;

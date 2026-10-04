@@ -33,6 +33,14 @@ service AccountService {
   // to say are forgotten.
   rpc UpdateNotificationSettings(UpdateNotificationSettingsRequest) returns (UpdateNotificationSettingsResponse);
 
+  // How you arranged your servers on this instance: their order and your
+  // folders. Only servers you're in come back; ones you joined since are
+  // missing, and apps show them after the rest.
+  rpc GetServerArrangement(GetServerArrangementRequest) returns (GetServerArrangementResponse);
+  // Replaces the arrangement. Servers you aren't in are dropped, a server
+  // named twice keeps its first place and empty folders are forgotten.
+  rpc SetServerArrangement(SetServerArrangementRequest) returns (SetServerArrangementResponse);
+
   // Everything this instance keeps about you, as one JSON document sent in
   // pieces: your account, sessions, settings, servers and every message you
   // wrote.
@@ -134,6 +142,47 @@ message UpdateNotificationSettingsRequest {
 
 message UpdateNotificationSettingsResponse {
   NotificationSettings settings = 1;
+}
+
+// A folder of servers on the rail. Only its owner sees it.
+message ServerFolder {
+  // Made by the app: 1 to 32 letters, digits, '-' or '_', unique in the
+  // arrangement.
+  string id = 1;
+  // Up to 32 characters; empty shows the servers' names instead.
+  string name = 2;
+  // 0xRRGGBB, or 0 for the theme's accent.
+  uint32 color = 3;
+  // In order, at least one.
+  repeated string server_ids = 4;
+}
+
+// One place on the rail: a server, or a folder of them.
+message ServerRailItem {
+  oneof item {
+    string server_id = 1;
+    ServerFolder folder = 2;
+  }
+}
+
+message GetServerArrangementRequest {}
+
+message GetServerArrangementResponse {
+  // Top to bottom. Empty until you arrange anything.
+  repeated ServerRailItem items = 1;
+  // When it last changed, unset if never.
+  google.protobuf.Timestamp updated_at = 2;
+}
+
+message SetServerArrangementRequest {
+  // Top to bottom: at most 1000 servers in all and 200 folders.
+  repeated ServerRailItem items = 1;
+}
+
+message SetServerArrangementResponse {
+  // As stored, after dropping what doesn't apply.
+  repeated ServerRailItem items = 1;
+  google.protobuf.Timestamp updated_at = 2;
 }
 
 message ExportDataRequest {}

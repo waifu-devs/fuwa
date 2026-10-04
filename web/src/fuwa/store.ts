@@ -21,6 +21,7 @@ import type { ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import type { Item } from "@/e2ee/vault";
 import { loadApplied, type Applied } from "@/lib/applied";
+import type { RailLayout } from "@/lib/rail";
 import { sortRoles } from "@/lib/permissions";
 
 /**
@@ -51,6 +52,35 @@ export type PendingMessage = {
 
 /** A device in an encrypted conversation, as its group says. */
 export type DmMember = { userId: string; deviceId: string; signatureKey: Uint8Array };
+
+/** The account's message backup, as this device takes part in it. */
+export type BackupState = {
+  /**
+   * unknown: not heard yet. unsupported: the instance has no backups. off:
+   * the account has none. locked: it has one this device has no key for
+   * (enter the recovery key to restore it). on: this device adds to it.
+   * restoring: reading it back. full: it reached its size limit.
+   */
+  status: "unknown" | "unsupported" | "off" | "locked" | "on" | "restoring" | "full";
+  problem: string | null;
+  size: number;
+  maxSize: number;
+  /** Unix ms of its last part. */
+  updatedAt: number;
+  /** While restoring: parts read, of how many. */
+  restored: number;
+  total: number;
+};
+
+export const emptyBackup = (): BackupState => ({
+  status: "unknown",
+  problem: null,
+  size: 0,
+  maxSize: 0,
+  updatedAt: 0,
+  restored: 0,
+  total: 0,
+});
 
 /** Encrypted direct messages on one instance, as this browser's device sees them. */
 export type DmState = {
@@ -83,6 +113,7 @@ export type DmState = {
   secureHistory: Record<string, boolean>;
   /** Calls going on in conversations, by conversation id. */
   calls: Record<string, DmCall>;
+  backup: BackupState;
 };
 
 export const emptyDms = (): DmState => ({
@@ -100,6 +131,7 @@ export const emptyDms = (): DmState => ({
   joining: {},
   secureHistory: {},
   calls: {},
+  backup: emptyBackup(),
 });
 
 export type InstanceState = {
@@ -131,6 +163,8 @@ export type InstanceState = {
   synced: Record<string, boolean>;
   /** Your notification settings, by `notificationKey`. Only servers and channels that have some. */
   notifications: Record<string, NotificationSettings>;
+  /** How you arranged your servers on the rail (kept on your account); null until you do. */
+  rail: RailLayout | null;
   /** Profiles looked at, by user id. */
   profiles: Record<string, Profile>;
   /** Per server you can review applications for, once loaded: the ones waiting, oldest first. */
@@ -200,6 +234,7 @@ export function emptyInstance(key: string, url: string): InstanceState {
     unread: {},
     synced: {},
     notifications: {},
+    rail: null,
     profiles: {},
     applications: {},
     applied: loadApplied(key),

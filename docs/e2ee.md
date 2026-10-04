@@ -140,7 +140,62 @@ instance is forgotten, or when the account is deleted. One tab works at a time
 and tells the others (Web Locks and a BroadcastChannel).
 
 A device can't read messages sent before it joined a conversation. A new
-browser starts from when it signs in.
+browser starts from when it signs in, unless the account has a message backup
+(below).
+
+## Message backup
+
+A message backup lets a new device or browser read what came before it, in
+direct messages and secure channels alike. It's off until someone turns it on
+in Settings, under Devices.
+
+- **The recovery key** is 32 random bytes made on the device, shown once as 56
+  letters and digits in groups of four (Crockford's base 32, with a 3-byte
+  SHA-256 checksum so a typo is caught on the device). It never leaves the
+  person's devices: the instance only ever sees a key check, HKDF-SHA256 of the
+  key (salt `fuwa backup v1`, info `check`), so a device can tell it has the
+  right key. Nobody can get a lost key back; starting over makes a new one.
+- **What's backed up**: every line a device keeps for a conversation or secure
+  channel (messages with their edits and deletions, device lines, history
+  settings and resets), each with its conversation and place, and a secure
+  channel message's signed form so it can still be passed on as shared
+  history. A voice message's line carries its file's id, key, hash and
+  waveform (`BackupItem.voice`), so a restored device can still play it; the
+  sealed file itself stays on the instance, and goes when the message is
+  deleted. Not lines a device couldn't read, nor its own "joined" marker.
+- **Parts.** A few seconds after a device writes lines, it seals them in a
+  part: a `BackupPart` (padded with zeros to an exact multiple of 4 KiB)
+  encrypted with AES-256-GCM under HKDF-SHA256 of the key (info `encrypt`), a
+  random 12-byte nonce, and `fuwa backup v1|<account id>|<sequence>` as
+  associated data. Parts are numbered 1, 2, 3… with no gaps; a device seals
+  each one for the next number and the instance takes it only at that place
+  (if another device got there first, it seals the part again for the next
+  one). So a part can't be moved to another place or passed off as another
+  account's. The instance keeps the parts in order in `dms.db` (`backups`,
+  `backup_parts`), up to 64 MiB per account, and refuses a part whose key
+  check isn't the backup's current one, so a device still on an old key stops
+  adding once someone starts over elsewhere. An account can start (or start
+  over) a backup 6 times an hour.
+- **Restoring** on a new device: the person types the key; the device checks it
+  against the key check, reads every part, and keeps each line unless it has
+  a newer copy (one deleted, or edited later, wins). What came back counts as
+  read. A gap in the numbers, or fewer parts than the instance says the
+  backup has, means a part didn't come back: the device says some messages,
+  edits or deletions may be missing (a held-back part that recorded a
+  deletion would bring that message back). From then on that device adds to
+  the backup too.
+- **What the instance sees**: that the account has a backup, when each part
+  was added, and its size, in 4 KiB steps. Not what's in it, or which
+  conversations it covers.
+- **Limits.** A deleted message stays in the older parts that held it
+  (readable only with the recovery key) until the backup starts over. Lines
+  from a secure channel someone has since lost access to come back on restore
+  too. A device that loses its key (signing out wipes it) has to be given it
+  again. The instance can't change, add, reorder or move parts, and a part it
+  holds back from the middle shows. A lowered end doesn't: a hostile instance
+  can drop the newest parts and lower its count to match, and nothing a new
+  device has says how many there should be (only a device's own memory of
+  how far the backup had got could catch that).
 
 ## Where it lives
 
@@ -150,9 +205,11 @@ browser starts from when it signs in.
 - `e2ee-wasm/`: the same for the web app, built with `pnpm wasm`.
 - `proto/fuwa/v1/dm.proto`: `DirectMessageService`, and
   `DirectMessageContent`, the plaintext inside the encryption.
-- `server/src/dms.rs`, `server/src/api/dms.rs`: `dms.db` and the service.
+- `server/src/dms.rs`, `server/src/api/dms.rs`: `dms.db` and the service,
+  message backups included.
 - `web/src/e2ee/`, `web/src/fuwa/dms.ts`, `web/src/components/dm/`: the web
-  app's device, vault and screens.
+  app's device, vault and screens; `backup.ts` and `backupkey.ts` for the
+  message backup, shown in `components/settings/account/MessageBackup.tsx`.
 
 ## Voice messages
 
@@ -208,7 +265,7 @@ devices of everyone the channel's permissions let see it. See
   says so, and the safety number is how people check. Cross-signing (a device
   you already trust vouching for a new one) would let a new device in without
   changing what you need to compare.
-- **History on new devices.** A backup of message keys, encrypted with a key
-  only you hold, would let a new device read what came before it.
+- **Backup cleanup.** A backup only grows until someone starts it over;
+  rewriting it without deleted lines would keep it small and forget them.
 - **Group DMs**, search (it can only ever happen on the device), and
   attachments other than voice messages (sealed files are the way in).
