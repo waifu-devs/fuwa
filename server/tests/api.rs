@@ -7701,6 +7701,22 @@ async fn polls_count_votes_and_keep_anonymous_ones_secret() {
     // Polls are checked: two to ten answers.
     let err = send_poll(&mut c, &mika, &sid, &general, new_poll("Lunch?", &["Pizza"], false)).await.unwrap_err();
     assert_eq!(err.code(), Code::InvalidArgument);
+    // And never come with a GIF.
+    let err = c
+        .messages
+        .send_message(authed(
+            &mika,
+            pb::SendMessageRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                poll: Some(new_poll("Lunch?", &["Pizza", "Sushi"], false)),
+                gif: Some(pb::MessageGif { seal: "x".into(), ..Default::default() }),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Code::InvalidArgument);
 
     // A member can make one: no text needed.
     let before = usage(&mut c, &juan, &sid).await.message_bytes;

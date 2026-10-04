@@ -646,6 +646,9 @@ impl MessageService for Api {
                     }
                     None => None,
                 };
+                if poll.is_some() && req.gif.is_some() {
+                    return Err(Error::invalid("a poll can't carry a GIF"));
+                }
                 // Only GIFs this instance stored and sealed.
                 let gif = req.gif.take().map(|gif| crate::gifs::open_seal(&self.app, &gif)).transpose()?;
                 check_content(
