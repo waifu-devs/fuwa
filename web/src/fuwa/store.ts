@@ -51,6 +51,8 @@ export type PendingMessage = {
   files?: Attachment[];
   createdAt: number;
   failed: string | null;
+  /** A voice message on its way: how it looks until it's sent. */
+  voice?: { durationMs: number; waveform: Uint8Array };
 };
 
 /** A device in an encrypted conversation, as its group says. */

@@ -32,6 +32,7 @@ pub mod recordings;
 pub mod replica;
 pub mod reports;
 pub mod rtc;
+pub mod sealed;
 pub mod search;
 pub mod servers;
 pub mod settings;

@@ -275,7 +275,21 @@ impl App {
 
     /// Deletes uploads that never arrived and pictures nothing used, as of `now`.
     pub async fn sweep_media(&self, now: i64) -> Result<usize> {
-        let ids = self.node()?.sweepable_media(now).await?;
+        let node = self.node()?;
+        let mut ids = node.sweepable_media(now).await?;
+        // A sealed file a message carries stays, even if it was never marked
+        // used (the server stopped between the two); it's marked now.
+        if let Ok(dms) = self.dms() {
+            let mut swept = Vec::with_capacity(ids.len());
+            for id in ids {
+                if dms.carries(&id).await? {
+                    node.use_media(&id, None).await?;
+                } else {
+                    swept.push(id);
+                }
+            }
+            ids = swept;
+        }
         self.delete_media(&ids).await?;
         Ok(ids.len())
     }
