@@ -865,6 +865,61 @@ async fn agents_follow_servers_they_are_added_to_across_shards() {
     cluster.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_agent_joining_many_servers_stays_within_its_stream_limit() {
+    let root = tempfile::tempdir().unwrap();
+    // Two streams per account, so a handful of joins is well past it.
+    let cluster = start_cluster(root.path(), &[("FUWA_STREAMS_PER_ACCOUNT", "2".to_string())]).await;
+    let mut c = clients(&cluster.gateway).await;
+    let (juan, _) = sign_up(&mut c, "juan").await;
+    let made = c
+        .agents
+        .create_agent(authed(
+            &juan,
+            pb::CreateAgentRequest { username: "helper".into(), display_name: "Helper".into() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let request = pb::SubscribeRequest { follow_new_servers: true, ..Default::default() };
+    let mut stream = c.events.subscribe(authed(&made.token, request)).await.unwrap().into_inner();
+    assert!(next(&mut stream).await.ready.unwrap().servers.is_empty());
+
+    // Each join opens another stream from the gateway to that server's shard;
+    // with six servers on two shards, one shard gets at least three.
+    let mut last = None;
+    for n in 0..6 {
+        let server = create_server(&mut c, &juan, &format!("Server {n}")).await;
+        let add = pb::AddAgentRequest { server_id: server.id.clone(), username: "helper".into() };
+        c.agents.add_agent(authed(&juan, add)).await.unwrap();
+        let followed = loop {
+            if let Some(followed) = next(&mut stream).await.followed {
+                break followed;
+            }
+        };
+        assert_eq!(followed.server_id, server.id);
+        last = Some(server);
+    }
+
+    // The stream still carries events, and the person who added it can still
+    // open their own: the shards didn't count the agent's joins as tabs.
+    let last = last.unwrap();
+    let channel = general(&mut c, &juan, &last.id).await;
+    send(&mut c, &juan, &last.id, &channel.id, "still here").await;
+    let said = until(&mut stream, |e| matches!(&e.payload, Some(Payload::MessageCreated(_)))).await;
+    assert_eq!(said.server_id, last.id);
+    let cursors = vec![pb::ServerCursor { server_id: last.id.clone(), after_sequence: None }];
+    let mut own = c
+        .events
+        .subscribe(authed(&juan, pb::SubscribeRequest { servers: cursors, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(next(&mut own).await.ready.is_some());
+
+    cluster.stop().await;
+}
+
 #[tokio::test]
 async fn shards_come_and_go() {
     let root = tempfile::tempdir().unwrap();
