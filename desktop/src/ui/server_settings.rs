@@ -1672,6 +1672,7 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::SharedChannelDisconnect => ("unplug", red),
         A::SharedChannelBlock => ("user-x", red),
         A::SharedChannelUnblock => ("undo", green),
+        A::PollEnd => ("check", amber),
         A::Unspecified => ("scroll-text", p.muted_foreground.into()),
     }
 }
@@ -1952,6 +1953,7 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         }
         A::SharedChannelBlock => format!("{actor} kept {target} out of {}", named_channel(&entry.channel_name)),
         A::SharedChannelUnblock => format!("{actor} let {target} back into {}", named_channel(&entry.channel_name)),
+        A::PollEnd => format!("{actor} ended {target}'s poll in {}", named_channel(&entry.channel_name)),
         A::Unspecified => format!("{actor} did something"),
     }
 }

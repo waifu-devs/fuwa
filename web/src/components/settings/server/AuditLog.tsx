@@ -1,5 +1,6 @@
 import {
   ArrowDownUpIcon,
+  BarChart3Icon,
   BotIcon,
   FrownIcon,
   PartyPopperIcon,
@@ -109,6 +110,7 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.SHARED_CHANNEL_UPDATE]: { label: "Shared channel changes", icon: SlidersHorizontalIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.SHARED_CHANNEL_BLOCK]: { label: "Kept out of shared channels", icon: BanIcon, tint: "bg-orange-500/15 text-orange-500" },
   [AuditAction.SHARED_CHANNEL_UNBLOCK]: { label: "Let back into shared channels", icon: UndoIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.POLL_END]: { label: "Ended polls", icon: BarChart3Icon, tint: "bg-amber-500/15 text-amber-500" },
 };
 
 const FIELD: Record<string, string> = {
@@ -670,6 +672,18 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
       return (
         <>
           {actor} let {target} back into <b>#{entry.channelName}</b>
+        </>
+      );
+    case AuditAction.POLL_END:
+      return (
+        <>
+          {actor} ended {target}'s poll
+          {entry.channelName && (
+            <>
+              {" "}
+              in <b>#{entry.channelName}</b>
+            </>
+          )}
         </>
       );
     default:

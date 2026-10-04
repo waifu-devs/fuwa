@@ -126,6 +126,15 @@
     `spawn_shared_fanout` passes message events back, published at the guest
     as sequence 0. Message calls on a channel check `shared::link_of` first;
     new channel kinds or message paths must too.
+    Polls (`api/polls.rs`): a message can carry a poll (`Message.poll`),
+    kept in the server file's `polls` (question, answers and the tally, which
+    every vote rewrites, so votes at once clash and run again and the counts
+    in `PollUpdated` events follow each other) and `poll_votes` (one row per
+    account and answer). Anonymous polls never say who voted: their events
+    have no actor, `ListPollVoters` refuses them, and votes are read back only
+    for the voter (`my_answer_ids`, never in events). Not in shared or secure
+    channels, nor direct messages. Deleting a message, a channel or a banned
+    member's messages takes their polls and votes along (`polls::forget`).
   - `webhooks.rs`: posting through a webhook over plain HTTP
     (`POST /webhooks/<server id>/<webhook id>/<token>`, a Discord-shaped JSON
     body), with each webhook's 30-a-minute limit (counted only for posts

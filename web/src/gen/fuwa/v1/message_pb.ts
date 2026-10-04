@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Attachment, Embed, Message as Message$1, User } from "./types_pb";
+import type { Attachment, Embed, Message as Message$1, Poll, User } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/message.proto.
  */
 export const file_fuwa_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEiqwEKElNlbmRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEigKC2F0dGFjaG1lbnRzGAQgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgFIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYBiABKAkiOAoTU2VuZE1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIk4KEUdldE1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiVgoSR2V0TWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2USHQoGYXV0aG9yGAIgASgLMg0uZnV3YS52MS5Vc2VyInAKE0xpc3RNZXNzYWdlc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFbGltaXQYAyABKAUSEQoJYmVmb3JlX2lkGAQgASgJEhAKCGFmdGVyX2lkGAUgASgJImwKFExpc3RNZXNzYWdlc1Jlc3BvbnNlEiIKCG1lc3NhZ2VzGAEgAygLMhAuZnV3YS52MS5NZXNzYWdlEh4KB2F1dGhvcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAyABKAgiYgoUVXBkYXRlTWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgpjaGFubmVsX2lkGAQgASgJIjoKFVVwZGF0ZU1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIlEKFERlbGV0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiFwoVRGVsZXRlTWVzc2FnZVJlc3BvbnNlMo4DCg5NZXNzYWdlU2VydmljZRJICgtTZW5kTWVzc2FnZRIbLmZ1d2EudjEuU2VuZE1lc3NhZ2VSZXF1ZXN0GhwuZnV3YS52MS5TZW5kTWVzc2FnZVJlc3BvbnNlEkUKCkdldE1lc3NhZ2USGi5mdXdhLnYxLkdldE1lc3NhZ2VSZXF1ZXN0GhsuZnV3YS52MS5HZXRNZXNzYWdlUmVzcG9uc2USSwoMTGlzdE1lc3NhZ2VzEhwuZnV3YS52MS5MaXN0TWVzc2FnZXNSZXF1ZXN0Gh0uZnV3YS52MS5MaXN0TWVzc2FnZXNSZXNwb25zZRJOCg1VcGRhdGVNZXNzYWdlEh0uZnV3YS52MS5VcGRhdGVNZXNzYWdlUmVxdWVzdBoeLmZ1d2EudjEuVXBkYXRlTWVzc2FnZVJlc3BvbnNlEk4KDURlbGV0ZU1lc3NhZ2USHS5mdXdhLnYxLkRlbGV0ZU1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5EZWxldGVNZXNzYWdlUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
+  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEiywEKElNlbmRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEigKC2F0dGFjaG1lbnRzGAQgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgFIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYBiABKAkSHgoEcG9sbBgHIAEoCzIQLmZ1d2EudjEuTmV3UG9sbCKBAQoHTmV3UG9sbBIQCghxdWVzdGlvbhgBIAEoCRInCgdhbnN3ZXJzGAIgAygLMhYuZnV3YS52MS5OZXdQb2xsQW5zd2VyEhAKCG11bHRpcGxlGAMgASgIEhEKCWFub255bW91cxgEIAEoCBIWCg5kdXJhdGlvbl9ob3VycxgFIAEoBSIsCg1OZXdQb2xsQW5zd2VyEgwKBHRleHQYASABKAkSDQoFZW1vamkYAiABKAkiOAoTU2VuZE1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIk4KEUdldE1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiVgoSR2V0TWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2USHQoGYXV0aG9yGAIgASgLMg0uZnV3YS52MS5Vc2VyInAKE0xpc3RNZXNzYWdlc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFbGltaXQYAyABKAUSEQoJYmVmb3JlX2lkGAQgASgJEhAKCGFmdGVyX2lkGAUgASgJImwKFExpc3RNZXNzYWdlc1Jlc3BvbnNlEiIKCG1lc3NhZ2VzGAEgAygLMhAuZnV3YS52MS5NZXNzYWdlEh4KB2F1dGhvcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAyABKAgiYgoUVXBkYXRlTWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgpjaGFubmVsX2lkGAQgASgJIjoKFVVwZGF0ZU1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIlEKFERlbGV0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiFwoVRGVsZXRlTWVzc2FnZVJlc3BvbnNlIkwKD1ZvdGVQb2xsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCRISCgphbnN3ZXJfaWRzGAMgAygNIi8KEFZvdGVQb2xsUmVzcG9uc2USGwoEcG9sbBgBIAEoCzINLmZ1d2EudjEuUG9sbCI3Cg5FbmRQb2xsUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKbWVzc2FnZV9pZBgCIAEoCSIuCg9FbmRQb2xsUmVzcG9uc2USGwoEcG9sbBgBIAEoCzINLmZ1d2EudjEuUG9sbCJyChVMaXN0UG9sbFZvdGVyc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEQoJYW5zd2VyX2lkGAMgASgNEg0KBWxpbWl0GAQgASgFEhAKCGFmdGVyX2lkGAUgASgJIkgKFkxpc3RQb2xsVm90ZXJzUmVzcG9uc2USHAoFdXNlcnMYASADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAiABKAgy4AQKDk1lc3NhZ2VTZXJ2aWNlEkgKC1NlbmRNZXNzYWdlEhsuZnV3YS52MS5TZW5kTWVzc2FnZVJlcXVlc3QaHC5mdXdhLnYxLlNlbmRNZXNzYWdlUmVzcG9uc2USRQoKR2V0TWVzc2FnZRIaLmZ1d2EudjEuR2V0TWVzc2FnZVJlcXVlc3QaGy5mdXdhLnYxLkdldE1lc3NhZ2VSZXNwb25zZRJLCgxMaXN0TWVzc2FnZXMSHC5mdXdhLnYxLkxpc3RNZXNzYWdlc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RNZXNzYWdlc1Jlc3BvbnNlEk4KDVVwZGF0ZU1lc3NhZ2USHS5mdXdhLnYxLlVwZGF0ZU1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVNZXNzYWdlUmVzcG9uc2USTgoNRGVsZXRlTWVzc2FnZRIdLmZ1d2EudjEuRGVsZXRlTWVzc2FnZVJlcXVlc3QaHi5mdXdhLnYxLkRlbGV0ZU1lc3NhZ2VSZXNwb25zZRI/CghWb3RlUG9sbBIYLmZ1d2EudjEuVm90ZVBvbGxSZXF1ZXN0GhkuZnV3YS52MS5Wb3RlUG9sbFJlc3BvbnNlEjwKB0VuZFBvbGwSFy5mdXdhLnYxLkVuZFBvbGxSZXF1ZXN0GhguZnV3YS52MS5FbmRQb2xsUmVzcG9uc2USUQoOTGlzdFBvbGxWb3RlcnMSHi5mdXdhLnYxLkxpc3RQb2xsVm90ZXJzUmVxdWVzdBofLmZ1d2EudjEuTGlzdFBvbGxWb3RlcnNSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types]);
 
 /**
  * @generated from message fuwa.v1.SendMessageRequest
@@ -47,6 +47,15 @@ export type SendMessageRequest = Message<"fuwa.v1.SendMessageRequest"> & {
    * @generated from field: string reply_to_id = 6;
    */
   replyToId: string;
+
+  /**
+   * Makes the message a poll; its text may then be empty. Needs
+   * CREATE_POLLS. Not in direct messages, secure channels or channels
+   * shared with other servers.
+   *
+   * @generated from field: fuwa.v1.NewPoll poll = 7;
+   */
+  poll?: NewPoll | undefined;
 };
 
 /**
@@ -55,6 +64,79 @@ export type SendMessageRequest = Message<"fuwa.v1.SendMessageRequest"> & {
  */
 export const SendMessageRequestSchema: GenMessage<SendMessageRequest> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_message, 0);
+
+/**
+ * A poll as its creator writes it.
+ *
+ * @generated from message fuwa.v1.NewPoll
+ */
+export type NewPoll = Message<"fuwa.v1.NewPoll"> & {
+  /**
+   * 1 to 300 characters.
+   *
+   * @generated from field: string question = 1;
+   */
+  question: string;
+
+  /**
+   * 2 to 10, each 1 to 55 characters.
+   *
+   * @generated from field: repeated fuwa.v1.NewPollAnswer answers = 2;
+   */
+  answers: NewPollAnswer[];
+
+  /**
+   * People may pick more than one answer.
+   *
+   * @generated from field: bool multiple = 3;
+   */
+  multiple: boolean;
+
+  /**
+   * Nobody can see who voted for what, not even admins.
+   *
+   * @generated from field: bool anonymous = 4;
+   */
+  anonymous: boolean;
+
+  /**
+   * How long it runs, 1 to 336 hours (two weeks). 0 runs until it's ended.
+   *
+   * @generated from field: int32 duration_hours = 5;
+   */
+  durationHours: number;
+};
+
+/**
+ * Describes the message fuwa.v1.NewPoll.
+ * Use `create(NewPollSchema)` to create a new message.
+ */
+export const NewPollSchema: GenMessage<NewPoll> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 1);
+
+/**
+ * @generated from message fuwa.v1.NewPollAnswer
+ */
+export type NewPollAnswer = Message<"fuwa.v1.NewPollAnswer"> & {
+  /**
+   * @generated from field: string text = 1;
+   */
+  text: string;
+
+  /**
+   * One emoji: the character itself, or a server emoji as <:name:id>.
+   *
+   * @generated from field: string emoji = 2;
+   */
+  emoji: string;
+};
+
+/**
+ * Describes the message fuwa.v1.NewPollAnswer.
+ * Use `create(NewPollAnswerSchema)` to create a new message.
+ */
+export const NewPollAnswerSchema: GenMessage<NewPollAnswer> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 2);
 
 /**
  * @generated from message fuwa.v1.SendMessageResponse
@@ -71,7 +153,7 @@ export type SendMessageResponse = Message<"fuwa.v1.SendMessageResponse"> & {
  * Use `create(SendMessageResponseSchema)` to create a new message.
  */
 export const SendMessageResponseSchema: GenMessage<SendMessageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 1);
+  messageDesc(file_fuwa_v1_message, 3);
 
 /**
  * @generated from message fuwa.v1.GetMessageRequest
@@ -101,7 +183,7 @@ export type GetMessageRequest = Message<"fuwa.v1.GetMessageRequest"> & {
  * Use `create(GetMessageRequestSchema)` to create a new message.
  */
 export const GetMessageRequestSchema: GenMessage<GetMessageRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 2);
+  messageDesc(file_fuwa_v1_message, 4);
 
 /**
  * @generated from message fuwa.v1.GetMessageResponse
@@ -123,7 +205,7 @@ export type GetMessageResponse = Message<"fuwa.v1.GetMessageResponse"> & {
  * Use `create(GetMessageResponseSchema)` to create a new message.
  */
 export const GetMessageResponseSchema: GenMessage<GetMessageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 3);
+  messageDesc(file_fuwa_v1_message, 5);
 
 /**
  * @generated from message fuwa.v1.ListMessagesRequest
@@ -166,7 +248,7 @@ export type ListMessagesRequest = Message<"fuwa.v1.ListMessagesRequest"> & {
  * Use `create(ListMessagesRequestSchema)` to create a new message.
  */
 export const ListMessagesRequestSchema: GenMessage<ListMessagesRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 4);
+  messageDesc(file_fuwa_v1_message, 6);
 
 /**
  * @generated from message fuwa.v1.ListMessagesResponse
@@ -197,7 +279,7 @@ export type ListMessagesResponse = Message<"fuwa.v1.ListMessagesResponse"> & {
  * Use `create(ListMessagesResponseSchema)` to create a new message.
  */
 export const ListMessagesResponseSchema: GenMessage<ListMessagesResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 5);
+  messageDesc(file_fuwa_v1_message, 7);
 
 /**
  * @generated from message fuwa.v1.UpdateMessageRequest
@@ -232,7 +314,7 @@ export type UpdateMessageRequest = Message<"fuwa.v1.UpdateMessageRequest"> & {
  * Use `create(UpdateMessageRequestSchema)` to create a new message.
  */
 export const UpdateMessageRequestSchema: GenMessage<UpdateMessageRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 6);
+  messageDesc(file_fuwa_v1_message, 8);
 
 /**
  * @generated from message fuwa.v1.UpdateMessageResponse
@@ -249,7 +331,7 @@ export type UpdateMessageResponse = Message<"fuwa.v1.UpdateMessageResponse"> & {
  * Use `create(UpdateMessageResponseSchema)` to create a new message.
  */
 export const UpdateMessageResponseSchema: GenMessage<UpdateMessageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 7);
+  messageDesc(file_fuwa_v1_message, 9);
 
 /**
  * @generated from message fuwa.v1.DeleteMessageRequest
@@ -279,7 +361,7 @@ export type DeleteMessageRequest = Message<"fuwa.v1.DeleteMessageRequest"> & {
  * Use `create(DeleteMessageRequestSchema)` to create a new message.
  */
 export const DeleteMessageRequestSchema: GenMessage<DeleteMessageRequest> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 8);
+  messageDesc(file_fuwa_v1_message, 10);
 
 /**
  * @generated from message fuwa.v1.DeleteMessageResponse
@@ -292,7 +374,158 @@ export type DeleteMessageResponse = Message<"fuwa.v1.DeleteMessageResponse"> & {
  * Use `create(DeleteMessageResponseSchema)` to create a new message.
  */
 export const DeleteMessageResponseSchema: GenMessage<DeleteMessageResponse> = /*@__PURE__*/
-  messageDesc(file_fuwa_v1_message, 9);
+  messageDesc(file_fuwa_v1_message, 11);
+
+/**
+ * @generated from message fuwa.v1.VotePollRequest
+ */
+export type VotePollRequest = Message<"fuwa.v1.VotePollRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string message_id = 2;
+   */
+  messageId: string;
+
+  /**
+   * The answers picked: one, or several in a multiple-choice poll. Empty
+   * takes the vote back.
+   *
+   * @generated from field: repeated uint32 answer_ids = 3;
+   */
+  answerIds: number[];
+};
+
+/**
+ * Describes the message fuwa.v1.VotePollRequest.
+ * Use `create(VotePollRequestSchema)` to create a new message.
+ */
+export const VotePollRequestSchema: GenMessage<VotePollRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 12);
+
+/**
+ * @generated from message fuwa.v1.VotePollResponse
+ */
+export type VotePollResponse = Message<"fuwa.v1.VotePollResponse"> & {
+  /**
+   * With the caller's own answers in my_answer_ids.
+   *
+   * @generated from field: fuwa.v1.Poll poll = 1;
+   */
+  poll?: Poll | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.VotePollResponse.
+ * Use `create(VotePollResponseSchema)` to create a new message.
+ */
+export const VotePollResponseSchema: GenMessage<VotePollResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 13);
+
+/**
+ * @generated from message fuwa.v1.EndPollRequest
+ */
+export type EndPollRequest = Message<"fuwa.v1.EndPollRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string message_id = 2;
+   */
+  messageId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.EndPollRequest.
+ * Use `create(EndPollRequestSchema)` to create a new message.
+ */
+export const EndPollRequestSchema: GenMessage<EndPollRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 14);
+
+/**
+ * @generated from message fuwa.v1.EndPollResponse
+ */
+export type EndPollResponse = Message<"fuwa.v1.EndPollResponse"> & {
+  /**
+   * @generated from field: fuwa.v1.Poll poll = 1;
+   */
+  poll?: Poll | undefined;
+};
+
+/**
+ * Describes the message fuwa.v1.EndPollResponse.
+ * Use `create(EndPollResponseSchema)` to create a new message.
+ */
+export const EndPollResponseSchema: GenMessage<EndPollResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 15);
+
+/**
+ * @generated from message fuwa.v1.ListPollVotersRequest
+ */
+export type ListPollVotersRequest = Message<"fuwa.v1.ListPollVotersRequest"> & {
+  /**
+   * @generated from field: string server_id = 1;
+   */
+  serverId: string;
+
+  /**
+   * @generated from field: string message_id = 2;
+   */
+  messageId: string;
+
+  /**
+   * @generated from field: uint32 answer_id = 3;
+   */
+  answerId: number;
+
+  /**
+   * 1 to 100; defaults to 50.
+   *
+   * @generated from field: int32 limit = 4;
+   */
+  limit: number;
+
+  /**
+   * The page after this voter (a user id), in the order they're listed.
+   *
+   * @generated from field: string after_id = 5;
+   */
+  afterId: string;
+};
+
+/**
+ * Describes the message fuwa.v1.ListPollVotersRequest.
+ * Use `create(ListPollVotersRequestSchema)` to create a new message.
+ */
+export const ListPollVotersRequestSchema: GenMessage<ListPollVotersRequest> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 16);
+
+/**
+ * @generated from message fuwa.v1.ListPollVotersResponse
+ */
+export type ListPollVotersResponse = Message<"fuwa.v1.ListPollVotersResponse"> & {
+  /**
+   * @generated from field: repeated fuwa.v1.User users = 1;
+   */
+  users: User[];
+
+  /**
+   * @generated from field: bool has_more = 2;
+   */
+  hasMore: boolean;
+};
+
+/**
+ * Describes the message fuwa.v1.ListPollVotersResponse.
+ * Use `create(ListPollVotersResponseSchema)` to create a new message.
+ */
+export const ListPollVotersResponseSchema: GenMessage<ListPollVotersResponse> = /*@__PURE__*/
+  messageDesc(file_fuwa_v1_message, 17);
 
 /**
  * Messages in a channel.
@@ -347,6 +580,39 @@ export const MessageService: GenService<{
     methodKind: "unary";
     input: typeof DeleteMessageRequestSchema;
     output: typeof DeleteMessageResponseSchema;
+  },
+  /**
+   * Votes in a poll, replacing the caller's earlier vote: no answers takes
+   * it back. Needs to see the channel; refused once the poll has ended.
+   *
+   * @generated from rpc fuwa.v1.MessageService.VotePoll
+   */
+  votePoll: {
+    methodKind: "unary";
+    input: typeof VotePollRequestSchema;
+    output: typeof VotePollResponseSchema;
+  },
+  /**
+   * Ends a poll before its time. Its creator, or someone with
+   * MANAGE_MESSAGES in its channel.
+   *
+   * @generated from rpc fuwa.v1.MessageService.EndPoll
+   */
+  endPoll: {
+    methodKind: "unary";
+    input: typeof EndPollRequestSchema;
+    output: typeof EndPollResponseSchema;
+  },
+  /**
+   * Who voted for one answer of a poll whose votes are public. Refused for
+   * anonymous polls, whoever asks.
+   *
+   * @generated from rpc fuwa.v1.MessageService.ListPollVoters
+   */
+  listPollVoters: {
+    methodKind: "unary";
+    input: typeof ListPollVotersRequestSchema;
+    output: typeof ListPollVotersResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fuwa_v1_message, 0);

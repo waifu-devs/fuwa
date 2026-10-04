@@ -6678,3 +6678,342 @@ async fn federation_refuses_internal_addresses() {
     }
     instance.stop().await;
 }
+
+fn new_poll(question: &str, answers: &[&str], anonymous: bool) -> pb::NewPoll {
+    pb::NewPoll {
+        question: question.into(),
+        answers: answers.iter().map(|a| pb::NewPollAnswer { text: (*a).into(), emoji: "🍙".into() }).collect(),
+        anonymous,
+        duration_hours: 24,
+        ..Default::default()
+    }
+}
+
+async fn send_poll(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    channel_id: &str,
+    poll: pb::NewPoll,
+) -> Result<pb::Message, tonic::Status> {
+    c.messages
+        .send_message(authed(
+            token,
+            pb::SendMessageRequest {
+                server_id: server_id.into(),
+                channel_id: channel_id.into(),
+                poll: Some(poll),
+                ..Default::default()
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().message.unwrap())
+}
+
+async fn vote(
+    c: &mut Clients,
+    token: &str,
+    server_id: &str,
+    message_id: &str,
+    answer_ids: &[u32],
+) -> Result<pb::Poll, tonic::Status> {
+    c.messages
+        .vote_poll(authed(
+            token,
+            pb::VotePollRequest {
+                server_id: server_id.into(),
+                message_id: message_id.into(),
+                answer_ids: answer_ids.to_vec(),
+            },
+        ))
+        .await
+        .map(|r| r.into_inner().poll.unwrap())
+}
+
+/// The next PollUpdated on a stream, with the event's actor.
+async fn next_poll_update(stream: &mut tonic::Streaming<pb::SubscribeResponse>) -> (String, pb::PollUpdated) {
+    loop {
+        let item = tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap();
+        if let Some(pb::Event { actor_id, payload: Some(Payload::PollUpdated(update)), .. }) = item.event {
+            return (actor_id, update);
+        }
+    }
+}
+
+#[tokio::test]
+async fn polls_count_votes_and_keep_anonymous_ones_secret() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, mika_user, _) = sign_up(&mut c, "mika").await;
+    let server = create_server(&mut c, &juan, "Polls", true).await;
+    let sid = server.id.clone();
+    c.servers
+        .join_server(authed(&mika, pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    let general = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels
+        .into_iter()
+        .find(|ch| ch.name == "general")
+        .unwrap()
+        .id;
+
+    // Polls are checked: two to ten answers.
+    let err = send_poll(&mut c, &mika, &sid, &general, new_poll("Lunch?", &["Pizza"], false)).await.unwrap_err();
+    assert_eq!(err.code(), Code::InvalidArgument);
+
+    // A member can make one: no text needed.
+    let before = usage(&mut c, &juan, &sid).await.message_bytes;
+    let message = send_poll(&mut c, &mika, &sid, &general, new_poll("Lunch?", &["Pizza", "Ramen", "Onigiri"], false))
+        .await
+        .unwrap();
+    let poll = message.poll.clone().unwrap();
+    assert_eq!(poll.answers.iter().map(|a| a.id).collect::<Vec<_>>(), [1, 2, 3]);
+    assert!(poll.ends_at.is_some() && !poll.anonymous && !poll.multiple);
+    assert!(usage(&mut c, &juan, &sid).await.message_bytes > before);
+
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &juan,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let ready = tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap();
+    assert!(ready.ready.is_some());
+
+    // Votes count, and public ones say who.
+    let voted = vote(&mut c, &mika, &sid, &message.id, &[2]).await.unwrap();
+    assert_eq!((voted.voters, voted.answers[1].votes, voted.my_answer_ids.clone()), (1, 1, vec![2]));
+    let (actor, update) = next_poll_update(&mut stream).await;
+    assert_eq!((actor.as_str(), update.voter_id.as_str()), (mika_user.id.as_str(), mika_user.id.as_str()));
+    assert_eq!(update.voter_answer_ids, [2]);
+    assert!(update.poll.as_ref().unwrap().my_answer_ids.is_empty());
+    assert_eq!(vote(&mut c, &mika, &sid, &message.id, &[1, 2]).await.unwrap_err().code(), Code::InvalidArgument);
+    assert_eq!(vote(&mut c, &mika, &sid, &message.id, &[9]).await.unwrap_err().code(), Code::InvalidArgument);
+
+    // Changing a vote moves it; everyone reads the counts, only the voter their own.
+    let changed = vote(&mut c, &mika, &sid, &message.id, &[3]).await.unwrap();
+    assert_eq!((changed.voters, changed.answers[1].votes, changed.answers[2].votes), (1, 0, 1));
+    let listed = messages(&mut c, &mika, &sid, &general).await;
+    assert_eq!(listed.last().unwrap().poll.as_ref().unwrap().my_answer_ids, [3]);
+    let listed = messages(&mut c, &juan, &sid, &general).await;
+    let seen = listed.last().unwrap().poll.clone().unwrap();
+    assert!(seen.my_answer_ids.is_empty());
+    assert_eq!(seen.answers[2].votes, 1);
+    let voters = c
+        .messages
+        .list_poll_voters(authed(
+            &juan,
+            pb::ListPollVotersRequest {
+                server_id: sid.clone(),
+                message_id: message.id.clone(),
+                answer_id: 3,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(voters.users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), [mika_user.id.as_str()]);
+
+    // Taking it back.
+    let taken = vote(&mut c, &mika, &sid, &message.id, &[]).await.unwrap();
+    assert_eq!((taken.voters, taken.answers[2].votes), (0, 0));
+
+    // Anonymous: nobody learns who, not even the owner.
+    let secret = send_poll(&mut c, &juan, &sid, &general, new_poll("Secret?", &["Yes", "No"], true)).await.unwrap();
+    vote(&mut c, &mika, &sid, &secret.id, &[1]).await.unwrap();
+    let (actor, update) = loop {
+        let (actor, update) = next_poll_update(&mut stream).await;
+        if update.message_id == secret.id {
+            break (actor, update);
+        }
+    };
+    assert!(actor.is_empty() && update.voter_id.is_empty() && update.voter_answer_ids.is_empty());
+    assert_eq!(update.poll.unwrap().answers[0].votes, 1);
+    let err = c
+        .messages
+        .list_poll_voters(authed(
+            &juan,
+            pb::ListPollVotersRequest {
+                server_id: sid.clone(),
+                message_id: secret.id.clone(),
+                answer_id: 1,
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Code::PermissionDenied);
+    let events = c
+        .events
+        .list_events(authed(&juan, pb::ListEventsRequest { server_id: sid.clone(), ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .events;
+    let stored = events
+        .iter()
+        .find(|e| matches!(&e.payload, Some(Payload::PollUpdated(u)) if u.message_id == secret.id))
+        .unwrap();
+    assert!(stored.actor_id.is_empty());
+
+    // Only its creator or a moderator ends a poll; a moderator ending
+    // someone else's is in the audit log, and then nobody can vote.
+    let err = c
+        .messages
+        .end_poll(authed(&mika, pb::EndPollRequest { server_id: sid.clone(), message_id: secret.id.clone() }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Code::PermissionDenied);
+    let ended = c
+        .messages
+        .end_poll(authed(&juan, pb::EndPollRequest { server_id: sid.clone(), message_id: message.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .poll
+        .unwrap();
+    assert!(ended.ended_at.is_some());
+    assert_eq!(vote(&mut c, &mika, &sid, &message.id, &[1]).await.unwrap_err().code(), Code::FailedPrecondition);
+    let log = audit_log(
+        &mut c,
+        &juan,
+        pb::ListAuditLogRequest {
+            server_id: sid.clone(),
+            action: pb::AuditAction::PollEnd as i32,
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(log.entries.len(), 1);
+    assert_eq!(log.entries[0].target_id, mika_user.id);
+    assert_eq!(log.entries[0].channel_name, "general");
+
+    // Text can still be edited; the poll stays.
+    let edited = c
+        .messages
+        .update_message(authed(
+            &mika,
+            pb::UpdateMessageRequest {
+                server_id: sid.clone(),
+                message_id: message.id.clone(),
+                content: "Results!".into(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .message
+        .unwrap();
+    assert_eq!(edited.poll.unwrap().question, "Lunch?");
+
+    // Without CREATE_POLLS in a channel, no polls there.
+    c.channels
+        .set_channel_permissions(authed(
+            &juan,
+            pb::SetChannelPermissionsRequest {
+                server_id: sid.clone(),
+                channel_id: general.clone(),
+                overwrites: vec![pb::PermissionOverwrite {
+                    target_id: sid.clone(),
+                    target: pb::OverwriteTarget::Role as i32,
+                    allow: vec![],
+                    deny: vec![pb::Permission::CreatePolls as i32],
+                }],
+            },
+        ))
+        .await
+        .unwrap();
+    let err = send_poll(&mut c, &mika, &sid, &general, new_poll("Again?", &["a", "b"], false)).await.unwrap_err();
+    assert_eq!(err.code(), Code::PermissionDenied);
+
+    // Deleting the message takes its poll and votes with it.
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest { server_id: sid.clone(), message_id: secret.id.clone(), ..Default::default() },
+        ))
+        .await
+        .unwrap();
+    assert_eq!(vote(&mut c, &mika, &sid, &secret.id, &[2]).await.unwrap_err().code(), Code::NotFound);
+
+    drop(stream);
+    instance.stop().await;
+}
+
+// Several worker threads, so votes really land at once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn votes_at_once_are_all_counted_in_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (owner, _, _) = sign_up(&mut c, "owner").await;
+    let server = create_server(&mut c, &owner, "Busy", true).await;
+    let sid = server.id.clone();
+    let general = c
+        .channels
+        .list_channels(authed(&owner, pb::ListChannelsRequest { server_id: sid.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels[0]
+        .id
+        .clone();
+    let poll = send_poll(&mut c, &owner, &sid, &general, new_poll("Best?", &["A", "B"], true)).await.unwrap();
+    let mut voters = Vec::new();
+    for n in 0..12 {
+        let (token, _, _) = sign_up(&mut c, &format!("voter{n}")).await;
+        c.servers
+            .join_server(authed(&token, pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() }))
+            .await
+            .unwrap();
+        voters.push(token);
+    }
+    let mut stream = c
+        .events
+        .subscribe(authed(
+            &owner,
+            pb::SubscribeRequest { servers: vec![pb::ServerCursor { server_id: sid.clone(), after_sequence: None }] },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap().unwrap().unwrap();
+    let mut tasks = Vec::new();
+    for (n, token) in voters.into_iter().enumerate() {
+        let mut messages = c.messages.clone();
+        let (sid, id) = (sid.clone(), poll.id.clone());
+        tasks.push(tokio::spawn(async move {
+            messages
+                .vote_poll(authed(
+                    &token,
+                    pb::VotePollRequest { server_id: sid, message_id: id, answer_ids: vec![1 + n as u32 % 2] },
+                ))
+                .await
+        }));
+    }
+    for task in tasks {
+        task.await.unwrap().unwrap();
+    }
+    // Each event counts one more voter than the one before.
+    for n in 1..=12 {
+        let (_, update) = next_poll_update(&mut stream).await;
+        let poll = update.poll.unwrap();
+        assert_eq!(poll.voters, n);
+        assert_eq!(poll.answers.iter().map(|a| a.votes).sum::<i64>(), n);
+    }
+    drop(stream);
+    instance.stop().await;
+}

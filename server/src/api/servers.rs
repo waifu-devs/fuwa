@@ -664,6 +664,7 @@ impl ServerService for Api {
                         let mut change = UsageChange::default();
                         for (id, channel_id, size, attachments) in messages {
                             conn.execute("DELETE FROM messages WHERE id = ?1", [id.as_str()]).await?;
+                            super::polls::forget(conn, &id).await?;
                             change.messages -= 1;
                             change.message_bytes -= size;
                             change.attachments -= attachments;

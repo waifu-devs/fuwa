@@ -783,7 +783,7 @@ async fn review_sent(
     events: &mut Vec<Payload>,
 ) -> Result<()> {
     let Some(message) = super::messages::load_message(conn, server_id, message_id).await? else { return Ok(()) };
-    if message.content != content {
+    if super::messages::reviewed_text(&message) != content {
         return Ok(());
     }
     let Some(channel) = load_channel(conn, server_id, &message.channel_id).await? else { return Ok(()) };
@@ -794,17 +794,7 @@ async fn review_sent(
     let Some((level, hit)) = automod::provider_hit(&rule, &asked.scores).filter(|_| !exempt) else { return Ok(()) };
     let caught = [(effective(&rule, Some(level)), hit)];
     if act(conn, server_id, member, &channel, content, Some(asked), &caught, events).await?.is_some() {
-        conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
-        store::add_usage(
-            conn,
-            UsageChange {
-                messages: -1,
-                message_bytes: -(message.content.len() as i64),
-                attachments: -(message.attachments.len() as i64),
-                ..Default::default()
-            },
-        )
-        .await?;
+        super::messages::remove_message(conn, &message).await?;
         events.push(Payload::MessageDeleted(pb::MessageDeleted {
             channel_id: message.channel_id.clone(),
             message_id: message.id.clone(),

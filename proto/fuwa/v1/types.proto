@@ -255,6 +255,9 @@ enum Permission {
   // Record voice channels on their own device. Everyone in the channel
   // sees while someone records.
   PERMISSION_RECORD = 25;
+  // Send polls (SendMessageRequest.poll). Voting needs only to see the
+  // channel.
+  PERMISSION_CREATE_POLLS = 26;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -693,6 +696,34 @@ message Message {
   MessageWebhook webhook = 15;
   // In a shared channel: who wrote it and from which server.
   SharedAuthor shared = 16;
+  // The message is a poll. (17 is the emoji picker's.)
+  Poll poll = 18;
+}
+
+// A poll and how it stands. Counts are everyone's; my_answer_ids is the
+// reader's own vote, filled only in answers to them (never in events).
+message Poll {
+  string question = 1;
+  repeated PollAnswer answers = 2;
+  bool multiple = 3;
+  // Votes are secret: ListPollVoters refuses, and events never say who.
+  bool anonymous = 4;
+  // When it closes by itself. Unset: it runs until it's ended.
+  google.protobuf.Timestamp ends_at = 5;
+  // Set when someone ended it early.
+  google.protobuf.Timestamp ended_at = 6;
+  string ended_by_id = 7;
+  // How many people have voted.
+  int64 voters = 8;
+  repeated uint32 my_answer_ids = 9;
+}
+
+message PollAnswer {
+  // Stable within the poll: 1, 2, 3...
+  uint32 id = 1;
+  string text = 2;
+  string emoji = 3;
+  int64 votes = 4;
 }
 
 // The name and picture a webhook message was posted under: the webhook's
@@ -840,6 +871,7 @@ message Event {
     SecureRecordAdded secure_record_added = 27;
     SecureRecordDeleted secure_record_deleted = 28;
     SharedChannelsUpdated shared_channels_updated = 29;
+    PollUpdated poll_updated = 30;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).
@@ -926,6 +958,20 @@ message MessageCreated {
 
 message MessageUpdated {
   Message message = 1;
+}
+
+// Someone voted in a poll, took a vote back, or the poll was ended. The
+// event's actor is the voter only when the poll's votes are public; for an
+// anonymous poll it's empty.
+message PollUpdated {
+  string channel_id = 1;
+  string message_id = 2;
+  // The counts now; my_answer_ids is empty.
+  Poll poll = 3;
+  // Public polls only: who voted and what they picked now (empty when they
+  // took it back). Empty for an end, and always for anonymous polls.
+  string voter_id = 4;
+  repeated uint32 voter_answer_ids = 5;
 }
 
 message MessageDeleted {

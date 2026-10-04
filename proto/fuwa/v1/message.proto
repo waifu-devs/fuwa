@@ -16,6 +16,15 @@ service MessageService {
   // channel shared from another server, MANAGE_MESSAGES deletes only this
   // server's members' messages; the home server's moderators delete any.
   rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
+  // Votes in a poll, replacing the caller's earlier vote: no answers takes
+  // it back. Needs to see the channel; refused once the poll has ended.
+  rpc VotePoll(VotePollRequest) returns (VotePollResponse);
+  // Ends a poll before its time. Its creator, or someone with
+  // MANAGE_MESSAGES in its channel.
+  rpc EndPoll(EndPollRequest) returns (EndPollResponse);
+  // Who voted for one answer of a poll whose votes are public. Refused for
+  // anonymous polls, whoever asks.
+  rpc ListPollVoters(ListPollVotersRequest) returns (ListPollVotersResponse);
 }
 
 message SendMessageRequest {
@@ -25,6 +34,31 @@ message SendMessageRequest {
   repeated Attachment attachments = 4;
   repeated Embed embeds = 5;
   string reply_to_id = 6;
+  // Makes the message a poll; its text may then be empty. Needs
+  // CREATE_POLLS. Not in direct messages, secure channels or channels
+  // shared with other servers.
+  // (7 is the emoji picker's.)
+  NewPoll poll = 8;
+}
+
+// A poll as its creator writes it.
+message NewPoll {
+  // 1 to 300 characters.
+  string question = 1;
+  // 2 to 10, each 1 to 55 characters.
+  repeated NewPollAnswer answers = 2;
+  // People may pick more than one answer.
+  bool multiple = 3;
+  // Nobody can see who voted for what, not even admins.
+  bool anonymous = 4;
+  // How long it runs, 1 to 336 hours (two weeks). 0 runs until it's ended.
+  int32 duration_hours = 5;
+}
+
+message NewPollAnswer {
+  string text = 1;
+  // One emoji: the character itself, or a server emoji as <:name:id>.
+  string emoji = 2;
 }
 
 message SendMessageResponse {
@@ -85,3 +119,40 @@ message DeleteMessageRequest {
 }
 
 message DeleteMessageResponse {}
+
+message VotePollRequest {
+  string server_id = 1;
+  string message_id = 2;
+  // The answers picked: one, or several in a multiple-choice poll. Empty
+  // takes the vote back.
+  repeated uint32 answer_ids = 3;
+}
+
+message VotePollResponse {
+  // With the caller's own answers in my_answer_ids.
+  Poll poll = 1;
+}
+
+message EndPollRequest {
+  string server_id = 1;
+  string message_id = 2;
+}
+
+message EndPollResponse {
+  Poll poll = 1;
+}
+
+message ListPollVotersRequest {
+  string server_id = 1;
+  string message_id = 2;
+  uint32 answer_id = 3;
+  // 1 to 100; defaults to 50.
+  int32 limit = 4;
+  // The page after this voter (a user id), in the order they're listed.
+  string after_id = 5;
+}
+
+message ListPollVotersResponse {
+  repeated User users = 1;
+  bool has_more = 2;
+}

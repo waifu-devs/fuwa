@@ -52,6 +52,8 @@ import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { Embeds } from "@/components/chat/Embeds";
+import { PollCard } from "@/components/chat/Poll";
+import { PollPlace, type PollPlaceValue } from "@/components/chat/pollPlace";
 import { AppBadge } from "@/components/AppBadge";
 import { ServerTag, SharedNote } from "@/components/chat/Shared";
 import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
@@ -154,6 +156,17 @@ export const MessageList = forwardRef<
 
   const memberById = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
   const myRoleIds = memberById.get(me?.id ?? "")?.roleIds;
+  const pollPlace = useMemo<PollPlaceValue>(
+    () => ({
+      instanceKey,
+      serverId,
+      channelId: channel.id,
+      canVote: !guestSide && !access.pending,
+      moderator: manager && !guestSide,
+      emojis,
+    }),
+    [instanceKey, serverId, channel.id, guestSide, access.pending, manager, emojis],
+  );
   const look = useMemo<ServerLook>(
     () => ({
       instanceKey,
@@ -294,6 +307,7 @@ export const MessageList = forwardRef<
 
   return (
     <ServerLookProvider value={look}>
+    <PollPlace.Provider value={pollPlace}>
     <div className="relative min-h-0 flex-1">
       <div ref={scroller} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">
         <motion.div
@@ -402,6 +416,7 @@ export const MessageList = forwardRef<
         )}
       </AnimatePresence>
     </div>
+    </PollPlace.Provider>
     </ServerLookProvider>
   );
 });
@@ -654,6 +669,7 @@ const MessageRow = memo(function MessageRow({
               </span>
             )}
             <Embeds embeds={message.embeds} animate={animate} />
+            {message.poll && <PollCard message={message} mine={mine} animate={animate} />}
           </>
         )}
       </MessageLine>

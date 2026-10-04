@@ -8,6 +8,7 @@ import type {
   Message,
   Node,
   NotificationSettings,
+  Poll,
   Profile,
   Role,
   Server,
@@ -265,8 +266,32 @@ export function withSharedAuthors(users: Record<string, User>, messages: (Messag
 export function upsertMessage(items: Message[], message: Message): Message[] {
   const at = items.findIndex((m) => m.id >= message.id);
   if (at === -1) return [...items, message];
-  if (items[at]!.id === message.id) return items.map((m, i) => (i === at ? message : m));
+  if (items[at]!.id === message.id) return items.map((m, i) => (i === at ? keepMyVote(m, message) : m));
   return [...items.slice(0, at), message, ...items.slice(at)];
+}
+
+/**
+ * A poll message as it comes again: events and most answers carry everyone's
+ * counts but never your own vote, so the vote you had stays.
+ */
+function keepMyVote(before: Message, after: Message): Message {
+  if (!before.poll || !after.poll || after.poll.myAnswerIds.length || !before.poll.myAnswerIds.length) return after;
+  return { ...after, poll: { ...after.poll, myAnswerIds: before.poll.myAnswerIds } };
+}
+
+/**
+ * A poll's new counts on its message, if the channel is loaded. `mine` is your
+ * own vote when it's known (your vote's answer, or an event naming you);
+ * otherwise the one you had stays.
+ */
+export function withPoll(i: InstanceState, channelId: string, messageId: string, poll: Poll, mine?: number[]): InstanceState {
+  const loaded = i.messages[channelId];
+  const at = loaded?.items.findIndex((m) => m.id === messageId) ?? -1;
+  if (!loaded || at === -1) return i;
+  const message = loaded.items[at]!;
+  const next = { ...poll, myAnswerIds: mine ?? message.poll?.myAnswerIds ?? [] };
+  const items = loaded.items.map((m, n) => (n === at ? { ...m, poll: next } : m));
+  return { ...i, messages: { ...i.messages, [channelId]: { ...loaded, items } } };
 }
 
 /** Puts a user's new look everywhere it shows: the user list, their memberships and their profile. */
@@ -412,6 +437,11 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
         next = { ...next, unread: { ...next.unread, [message.channelId]: (next.unread[message.channelId] ?? 0) + 1 } };
       }
       return next;
+    }
+    case "pollUpdated": {
+      const { channelId, messageId, poll, voterId, voterAnswerIds } = p.value;
+      if (!poll) return i;
+      return withPoll(i, channelId, messageId, poll, voterId && voterId === i.me?.id ? voterAnswerIds : undefined);
     }
     case "messageDeleted": {
       const loaded = i.messages[p.value.channelId];

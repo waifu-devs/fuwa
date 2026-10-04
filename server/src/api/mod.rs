@@ -15,6 +15,7 @@ mod join;
 mod media;
 mod messages;
 mod node;
+mod polls;
 mod roles;
 mod secure;
 mod servers;

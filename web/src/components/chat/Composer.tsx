@@ -1,4 +1,4 @@
-import { HourglassIcon, LockIcon, ScrollTextIcon, SendHorizontalIcon, SmileIcon, SnailIcon } from "lucide-react";
+import { BarChart3Icon, HourglassIcon, LockIcon, ScrollTextIcon, SendHorizontalIcon, SmileIcon, SnailIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MessageKind, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
@@ -7,6 +7,7 @@ import { useAccess } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { MentionPicker, useMentionPicker } from "@/components/chat/MentionPicker";
 import { EmojiPicker } from "@/components/EmojiPicker";
+import { PollEditor } from "@/components/chat/PollEditor";
 import { RulesDialog } from "@/components/join/Rules";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
@@ -112,6 +113,10 @@ export function Composer({
   const server = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId));
   const [rules, setRules] = useState(false);
   const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[serverId]);
+  const access = useAccess(instanceKey, serverId);
+  // Polls are counted where a channel lives, so none in channels shared between servers.
+  const canPoll = hasIn(access, channelId, Permission.CREATE_POLLS) && !channel.shared;
+  const [polling, setPolling] = useState(false);
 
   /** Puts text at the caret, with a space before it when it would touch a word. */
   function insert(piece: string) {
@@ -242,6 +247,19 @@ export function Composer({
             </motion.button>
           )}
         </EmojiPicker>
+        {canPoll && (
+          <motion.button
+            type="button"
+            aria-label="Make a poll"
+            title="Make a poll"
+            onClick={() => setPolling(true)}
+            whileHover={{ scale: 1.12, y: -1 }}
+            whileTap={{ scale: 0.85 }}
+            className={cn("mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition-colors hover:text-primary", polling && "bg-primary/10 text-primary")}
+          >
+            <BarChart3Icon className="size-[18px]" />
+          </motion.button>
+        )}
         <motion.button
           type="button"
           onClick={send}
@@ -303,6 +321,7 @@ export function Composer({
           )}
         </AnimatePresence>
       </div>
+      {canPoll && <PollEditor open={polling} onOpenChange={setPolling} instanceKey={instanceKey} serverId={serverId} channel={channel} />}
       {server && <RulesDialog open={rules} onOpenChange={setRules} instanceKey={instanceKey} server={server} agree={gate.pending} />}
     </div>
   );

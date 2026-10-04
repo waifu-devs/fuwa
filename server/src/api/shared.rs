@@ -952,7 +952,10 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
             if message.kind != pb::MessageKind::Unspecified as i32 {
                 return Err(Error::invalid("system messages can't be edited"));
             }
-            messages::check_content(&edit.content, !message.attachments.is_empty() || !message.embeds.is_empty())?;
+            messages::check_content(
+                &edit.content,
+                !message.attachments.is_empty() || !message.embeds.is_empty() || message.poll.is_some(),
+            )?;
             let channel = load_channel(conn, &sdb.id, &row.channel_id).await?.ok_or(Error::NotFound(GONE))?;
             remember(conn, &user, &server).await?;
             if message.content != edit.content {
@@ -973,7 +976,7 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
                     return Ok(Err(why));
                 }
             }
-            let old_size = message.content.len() as i64;
+            let old_size = messages::stored_size(&message);
             message.content = edit.content.clone();
             message.edited_at = Some(timestamp(now_ms()));
             messages::save_edit(conn, &message, old_size).await?;

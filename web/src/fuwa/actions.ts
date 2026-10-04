@@ -49,6 +49,7 @@ import {
   updateInstance,
   upsertMessage,
   withSharedAuthors,
+  withPoll,
   withUpdatedUser,
   withUsers,
   type PendingMessage,
@@ -1149,6 +1150,65 @@ export const sendMessage = (key: string, serverId: string, channelId: string, co
       };
     });
   });
+
+/** What the poll editor makes: a question, its answers and how it runs. */
+export type PollDraft = {
+  question: string;
+  answers: { text: string; emoji: string }[];
+  multiple: boolean;
+  anonymous: boolean;
+  /** 1 to 336, or 0 to run until someone ends it. */
+  hours: number;
+};
+
+/** Sends a poll as a message of its own. */
+export const sendPoll = (key: string, serverId: string, channelId: string, draft: PollDraft) =>
+  Effect.gen(function* () {
+    reportUsage("poll.create");
+    const { message } = yield* call((signal) =>
+      api(key).messages.sendMessage(
+        {
+          serverId,
+          channelId,
+          poll: {
+            question: draft.question.trim(),
+            answers: draft.answers.map((a) => ({ text: a.text.trim(), emoji: a.emoji })),
+            multiple: draft.multiple,
+            anonymous: draft.anonymous,
+            durationHours: draft.hours,
+          },
+        },
+        { signal },
+      ),
+    );
+    updateInstance(key, (i) => {
+      const loaded = i.messages[channelId];
+      return loaded && message ? { ...i, messages: { ...i.messages, [channelId]: { ...loaded, items: upsertMessage(loaded.items, message) } } } : i;
+    });
+    return message!;
+  });
+
+/** Votes in a poll, replacing your vote; no answers takes it back. */
+export const votePoll = (key: string, serverId: string, channelId: string, messageId: string, answerIds: number[]) =>
+  Effect.gen(function* () {
+    reportUsage(answerIds.length ? "poll.vote" : "poll.unvote");
+    const { poll } = yield* call((signal) => api(key).messages.votePoll({ serverId, messageId, answerIds }, { signal }));
+    if (poll) updateInstance(key, (i) => withPoll(i, channelId, messageId, poll, poll.myAnswerIds));
+    return poll!;
+  });
+
+/** Ends a poll before its time: its creator, or a moderator. */
+export const endPoll = (key: string, serverId: string, channelId: string, messageId: string) =>
+  Effect.gen(function* () {
+    reportUsage("poll.end");
+    const { poll } = yield* call((signal) => api(key).messages.endPoll({ serverId, messageId }, { signal }));
+    if (poll) updateInstance(key, (i) => withPoll(i, channelId, messageId, poll, poll.myAnswerIds));
+    return poll!;
+  });
+
+/** Who voted for one answer of a public poll, a page at a time. */
+export const listPollVoters = (key: string, serverId: string, messageId: string, answerId: number, afterId = "") =>
+  call((signal) => api(key).messages.listPollVoters({ serverId, messageId, answerId, afterId, limit: 50 }, { signal }));
 
 export const dismissPending = (key: string, channelId: string, pendingNonce: string) =>
   updateInstance(key, (i) => ({
