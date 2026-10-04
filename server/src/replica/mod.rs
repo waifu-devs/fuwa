@@ -176,6 +176,9 @@ pub struct Replica {
     fence_every_ms: std::sync::atomic::AtomicU64,
     stop: CancellationToken,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Held while a release deletes, and by [`track`](Self::track), so a
+    /// server coming back here never has its replica deleted under it.
+    releasing: tokio::sync::Mutex<()>,
 }
 
 impl Replica {
@@ -212,6 +215,7 @@ impl Replica {
             files: Mutex::new(BTreeMap::new()),
             media: Mutex::new(None),
             media_copied: tokio::sync::Mutex::new(None),
+            releasing: tokio::sync::Mutex::new(()),
             checkpoint_bytes,
             rebase_bytes,
             fence_every_ms: (FENCE_EVERY.as_millis() as u64).into(),
@@ -228,6 +232,8 @@ impl Replica {
     /// its log into it.
     pub async fn track(&self, name: &str, db: Arc<Db>) -> Result<()> {
         db::pragma(&db::connect(&db)?, "PRAGMA mvcc_checkpoint_threshold = -1").await?;
+        // Waits out a release of it that's under way.
+        let _released = self.releasing.lock().await;
         let position = self.load_position(name);
         let tracked = Arc::new(Tracked {
             name: name.to_string(),
@@ -296,6 +302,12 @@ impl Replica {
     /// Deletes what's in the replica of a file this process let go of, and
     /// clears the note that it's owed. On failure the note stays.
     async fn try_release(&self, name: &str) -> bool {
+        let _alone = self.releasing.lock().await;
+        if self.lock_files().contains_key(name) {
+            // It came back here: what's in the replica is its own again.
+            let _ = std::fs::remove_file(self.release_path(name));
+            return false;
+        }
         let released = async {
             let current = current(&self.store, name).await?;
             let ours = current.as_ref().and_then(|c| c.writer.as_deref()).is_none_or(|writer| writer == self.writer);
@@ -336,10 +348,6 @@ impl Replica {
                 continue;
             }
             let name = format!("servers/{id}");
-            if self.lock_files().contains_key(&name) {
-                let _ = std::fs::remove_file(entry.path());
-                continue;
-            }
             done += usize::from(self.try_release(&name).await);
         }
         done
@@ -397,8 +405,8 @@ impl Replica {
                 replica.sync_files().await;
                 if media_synced.is_none_or(|at| at.elapsed() >= MEDIA_EVERY) {
                     media_synced = Some(Instant::now());
-                    if let Err(err) = replica.sync_media().await {
-                        tracing::warn!(error = %err, "couldn't copy new pictures to the replica");
+                    if replica.sync_media().await.is_err() {
+                        tracing::warn!("couldn't copy new pictures to the replica");
                     }
                 }
                 if released.is_none_or(|at| at.elapsed() >= RETRY_RELEASES) {
