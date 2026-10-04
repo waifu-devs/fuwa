@@ -60,6 +60,8 @@ export function ServerBanner({
           <Gradient moving={pan && !still} />
         )}
       </Parallax>
+      {/* Keeps a dialog's close button readable over a bright picture. */}
+      <div aria-hidden className="absolute inset-x-0 top-0 h-14 bg-gradient-to-b from-black/35 to-transparent" />
       {fade && <div aria-hidden className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-card via-card/40 to-transparent" />}
       {children}
     </div>

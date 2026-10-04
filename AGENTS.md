@@ -509,7 +509,14 @@
     only), `ApplyDialog.tsx` the application, `Rules.tsx` the rules sheet a
     new member agrees to (the composer shows it until they do), and
     `Applied.tsx` the applications waiting in the rail. `Welcome.tsx` greets
-    new members once with the welcome screen (remembered in this browser). Those are kept in
+    new members once with the welcome screen (remembered in this browser), or
+    with `Onboarding.tsx` when the server has onboarding steps (picks that
+    give harmless roles and channels, the rules, a hello; `JoinService`'s
+    Get/Set/FinishOnboarding, `server.onboarding` as protobuf, a member's
+    `onboarded_at`). All of them, `ApplicationStatus.tsx` and invite pages
+    sit under the server's banner (`join/Banner.tsx`, `lib/banner.ts`: a
+    focal point and an optional accent color); admins set it all on one page
+    with a live preview, `settings/server/WelcomeAndOnboarding.tsx`. Those are kept in
     this browser (`src/lib/applied.ts`) and `AppliedWatcher` asks the
     instance how they went. Reviewers use `settings/server/Applications.tsx`;
     owners write rules and questions in `settings/server/JoinFormEditor.tsx`.

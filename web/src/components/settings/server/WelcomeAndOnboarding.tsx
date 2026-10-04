@@ -176,6 +176,7 @@ function Section({ id, title, hint, children }: { id: string; title: string; hin
 function BannerFields({ instanceKey, server, look, onChange }: { instanceKey: string; server: Server; look: Look; onChange: (look: Look) => void }) {
   const [colors, setColors] = useState<number[]>([]);
   const shown = { ...server, ...look };
+  const custom = look.accentColor !== undefined && !colors.includes(look.accentColor);
   useEffect(() => {
     let cancelled = false;
     if (!look.bannerUrl) {
@@ -230,7 +231,7 @@ function BannerFields({ instanceKey, server, look, onChange }: { instanceKey: st
                 </motion.span>
               ))}
             </AnimatePresence>
-            <label className="relative flex h-9 items-center gap-1.5 rounded-full border px-2 text-xs font-bold text-muted-foreground transition hover:border-primary/40">
+            <label className={cn("relative flex h-9 items-center gap-1.5 rounded-full border px-2 text-xs font-bold text-muted-foreground transition hover:border-primary/40", custom && "border-foreground ring-1 ring-foreground")}>
               <span className="size-5 rounded-full border" style={{ background: look.accentColor !== undefined ? hex(look.accentColor) : "transparent" }} />
               <Input
                 aria-label="Accent color as hex"

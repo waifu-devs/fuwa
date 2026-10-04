@@ -354,7 +354,7 @@ function Picks({
             aria-checked={on}
             onClick={() => onToggle(o.id)}
             initial={{ opacity: 0, y: 14, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: on ? 1.02 : 1 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ ...SPRING, delay: Math.min(n, 8) * 0.04 }}
             whileTap={{ scale: 0.97 }}
             className={cn(

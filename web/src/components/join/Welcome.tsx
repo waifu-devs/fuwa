@@ -124,8 +124,14 @@ export function WelcomeGate({
   const channels = inst?.channels[server.id] ?? [];
 
   const fresh = !!me && !has(access, Permission.MANAGE_SERVER) && Date.now() - toDate(me.joinedAt).getTime() < NEW_FOR;
-  const onboarding = server.hasOnboarding && (asked || (fresh && !me?.onboardedAt && !dismissed));
-  const newcomer = fresh && !seen(instanceKey, server.id);
+  const due = server.hasOnboarding && (asked || (fresh && !me?.onboardedAt && !dismissed));
+  // Once it opens it stays until it's closed: finishing sets onboardedAt
+  // before its last step (where to start) has been seen.
+  const [started, setStarted] = useState(false);
+  if (due && !started) setStarted(true);
+  const onboarding = due || started;
+  // Onboarding ends with the welcome screen's channels, so it isn't shown again after.
+  const newcomer = fresh && !seen(instanceKey, server.id) && !(server.hasOnboarding && me?.onboardedAt);
   const wanted = !onboarding && (asked || (server.hasWelcomeScreen && newcomer));
 
   useEffect(() => {
@@ -159,6 +165,7 @@ export function WelcomeGate({
         open
         onOpenChange={(o) => {
           if (!o) {
+            setStarted(false);
             setDismissed(true);
             markSeen(instanceKey, server.id);
             onOpenChange(false);
