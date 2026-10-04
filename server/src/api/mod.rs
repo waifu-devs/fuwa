@@ -10,6 +10,7 @@ mod channels;
 mod dms;
 mod emoji;
 mod events;
+mod friends;
 mod gifs;
 mod invites;
 mod join;
