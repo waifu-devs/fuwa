@@ -197,20 +197,6 @@ impl Api {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stored_access_fails_closed() {
-        assert_eq!(StoredMcpAccess::parse("").mode, pb::McpAccessMode::All as i32);
-        assert_eq!(StoredMcpAccess::parse("not json").mode, pb::McpAccessMode::Off as i32);
-        assert_eq!(StoredMcpAccess::parse(r#"{"mode":99}"#).mode, pb::McpAccessMode::Off as i32);
-        let chosen = StoredMcpAccess::parse(r#"{"mode":2,"agents":["a"]}"#);
-        assert_eq!((chosen.mode, chosen.agent_ids), (pb::McpAccessMode::Chosen as i32, vec!["a".to_string()]));
-    }
-}
-
 #[tonic::async_trait]
 impl AgentService for Api {
     async fn get_mcp_access(
@@ -345,5 +331,19 @@ impl AgentService for Api {
             }
             .await,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_access_fails_closed() {
+        assert_eq!(StoredMcpAccess::parse("").mode, pb::McpAccessMode::All as i32);
+        assert_eq!(StoredMcpAccess::parse("not json").mode, pb::McpAccessMode::Off as i32);
+        assert_eq!(StoredMcpAccess::parse(r#"{"mode":99}"#).mode, pb::McpAccessMode::Off as i32);
+        let chosen = StoredMcpAccess::parse(r#"{"mode":2,"agents":["a"]}"#);
+        assert_eq!((chosen.mode, chosen.agent_ids), (pb::McpAccessMode::Chosen as i32, vec!["a".to_string()]));
     }
 }
