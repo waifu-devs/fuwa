@@ -52,6 +52,7 @@ import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { Embeds } from "@/components/chat/Embeds";
+import { GifMessage } from "@/components/chat/GifMessage";
 import { AppBadge } from "@/components/AppBadge";
 import { ServerTag, SharedNote } from "@/components/chat/Shared";
 import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
@@ -654,6 +655,7 @@ const MessageRow = memo(function MessageRow({
               </span>
             )}
             <Embeds embeds={message.embeds} animate={animate} />
+            <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
           </>
         )}
       </MessageLine>

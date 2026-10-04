@@ -27,7 +27,7 @@ message SendMessageRequest {
   string reply_to_id = 6;
   // A GIF, as GifService.PrepareGif or ListSavedGifs gave it (sealed).
   // Needs ATTACH_FILES. Not in channels shared from another server yet.
-  MessageGif gif = 7;
+  MessageGif gif = 11;
 }
 
 message SendMessageResponse {

@@ -32,7 +32,7 @@ struct Extras {
     auto_mod: Option<pb::AutoModAlert>,
     #[prost(message, optional, tag = "6")]
     webhook: Option<pb::MessageWebhook>,
-    #[prost(message, optional, tag = "7")]
+    #[prost(message, optional, tag = "9")]
     gif: Option<pb::MessageGif>,
 }
 

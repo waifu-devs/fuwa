@@ -694,7 +694,7 @@ message Message {
   // In a shared channel: who wrote it and from which server.
   SharedAuthor shared = 16;
   // A GIF sent with it (GifService), kept on this instance.
-  MessageGif gif = 17;
+  MessageGif gif = 22;
 }
 
 // Where a GIF came from: a search provider the instance's admins set up,
