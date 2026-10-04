@@ -57,6 +57,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "@webgpu/types": "^0.1.74",
+    "emojibase-data": "17.0.0",
     "react-doctor": "0.9.14",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
