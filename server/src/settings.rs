@@ -45,6 +45,7 @@ pub const FIELDS: &[&str] = &[
     "shared_channels",
     "mcp",
     "profile_effects",
+    "rich_presence",
     "federation",
     "federation_blocked_hosts",
     "call_recordings_keep_days",
@@ -79,6 +80,8 @@ pub struct Settings {
     pub mcp: bool,
     /// People may put an effect on their profile card.
     pub profile_effects: bool,
+    /// People may show what they're doing (docs/presence.md).
+    pub rich_presence: bool,
     /// Sharing channels with other fuwa instances (docs/federation.md).
     pub federation: bool,
     /// Instances this one won't talk to, by host name.
@@ -115,6 +118,7 @@ impl Settings {
             shared_channels: config.shared_channels,
             mcp: config.mcp,
             profile_effects: config.profile_effects,
+            rich_presence: config.rich_presence,
             federation: config.federation,
             federation_blocked_hosts: Vec::new(),
             call_recordings_keep_days: config.call_recordings_keep_days,
@@ -236,6 +240,7 @@ impl Settings {
             shared_channels: self.shared_channels,
             mcp: self.mcp,
             profile_effects: self.profile_effects,
+            rich_presence: self.rich_presence,
             federation: self.federation,
             federation_blocked_hosts: self.federation_blocked_hosts.clone(),
             call_recordings_keep_days: self.call_recordings_keep_days,
@@ -343,6 +348,7 @@ impl Settings {
             "shared_channels" => Value::from(from.shared_channels),
             "mcp" => Value::from(from.mcp),
             "profile_effects" => Value::from(from.profile_effects),
+            "rich_presence" => Value::from(from.rich_presence),
             "federation" => Value::from(from.federation),
             "federation_blocked_hosts" => Value::from(from.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(from.call_recordings_keep_days),
@@ -428,6 +434,7 @@ impl Settings {
             "shared_channels" => Value::from(self.shared_channels),
             "mcp" => Value::from(self.mcp),
             "profile_effects" => Value::from(self.profile_effects),
+            "rich_presence" => Value::from(self.rich_presence),
             "federation" => Value::from(self.federation),
             "federation_blocked_hosts" => Value::from(self.federation_blocked_hosts.clone()),
             "call_recordings_keep_days" => Value::from(self.call_recordings_keep_days),
@@ -504,6 +511,7 @@ impl Settings {
             "shared_channels" => self.shared_channels = flag(field, value)?,
             "mcp" => self.mcp = flag(field, value)?,
             "profile_effects" => self.profile_effects = flag(field, value)?,
+            "rich_presence" => self.rich_presence = flag(field, value)?,
             "federation" => self.federation = flag(field, value)?,
             "federation_blocked_hosts" => self.federation_blocked_hosts = blocked_hosts(value)?,
             "call_recordings_keep_days" => {

@@ -18,6 +18,7 @@ mod media;
 mod messages;
 mod node;
 mod polls;
+mod presence;
 mod roles;
 mod search;
 mod secure;

@@ -66,6 +66,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "shared_channels", get: (s) => s.sharedChannels },
   { path: "mcp", get: (s) => s.mcp },
   { path: "profile_effects", get: (s) => s.profileEffects },
+  { path: "rich_presence", get: (s) => s.richPresence },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
   { path: "default_limits.channels", get: (s) => s.defaultLimits?.channels },
@@ -216,6 +217,7 @@ export function InstanceSettingsDialog({
                 { id: "mcp", label: "Agents through MCP", keywords: "mcp claude ai model context protocol" },
                 { id: "shared-channels", label: "Shared channels", keywords: "share connect servers slack connect" },
                 { id: "profile-effects", label: "Profile effects", keywords: "sparkles petals animation card decoration" },
+                { id: "rich-presence", label: "Rich presence", keywords: "activity playing game status discord presence" },
               ],
             },
             {
@@ -528,6 +530,20 @@ export function InstanceSettingsDialog({
                   hint="Petals, stars and the like, drawn by the app from your theme's colors. Turned off, nobody's shows, and everyone's pick comes back when it's on again."
                 />
               </Setting>
+              <Setting
+                id="rich-presence"
+                title="Rich presence"
+                defaultLabel={defaults.richPresence ? "on" : "off"}
+                delay={0.32}
+                {...resetter("rich_presence")}
+              >
+                <Toggle
+                  checked={draft.richPresence}
+                  onChange={(on) => patch((d) => (d.richPresence = on))}
+                  label="People can show what they're doing"
+                  hint="Games and apps people's desktop apps see, shown to people they share a server with, once each person turns it on. Kept in memory only. Turned off, nobody's activity shows; statuses still do."
+                />
+              </Setting>
             </>
           )}
           {tab === "sso" && (
@@ -821,6 +837,7 @@ const COPIED = [
   { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) },
   { path: "mcp", copy: (into: InstanceSettings, from: InstanceSettings) => (into.mcp = from.mcp) },
   { path: "profile_effects", copy: (into: InstanceSettings, from: InstanceSettings) => (into.profileEffects = from.profileEffects) },
+  { path: "rich_presence", copy: (into: InstanceSettings, from: InstanceSettings) => (into.richPresence = from.richPresence) },
 ];
 
 /** Copies the named settings from one draft into another. */
