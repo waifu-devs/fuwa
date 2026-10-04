@@ -716,6 +716,11 @@ message Message {
   MessageWebhook webhook = 15;
   // In a shared channel: who wrote it and from which server.
   SharedAuthor shared = 16;
+  // Emoji from the author's other servers on this instance that the text
+  // writes as <:name:id>, so everyone can draw them: their id, server_id,
+  // name, url (on this instance) and animated. The server's own emoji aren't
+  // here; they're in ListEmojis.
+  repeated Emoji emojis = 17;
   // A reply in a thread: the id of the message the thread is under. Thread
   // replies stay out of the channel's own list unless also_in_channel.
   string thread_id = 18;
