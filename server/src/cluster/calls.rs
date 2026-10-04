@@ -108,11 +108,26 @@ impl App {
                     tracing::warn!(server = %server_id, error = %err, "couldn't forget where a deleted server was");
                 }
                 self.forget_notifications(server_id, None, None).await;
+                self.drop_server_media(server_id).await;
             }
             Link::Alone => {
                 self.index.remove(server_id);
                 self.forget_notifications(server_id, None, None).await;
+                self.drop_server_media(server_id).await;
             }
+        }
+    }
+
+    /// Deletes the pictures kept here that were made for or used by a server
+    /// that's gone, and their rows. A failure is logged and reported.
+    async fn drop_server_media(&self, server_id: &str) {
+        let dropped = async {
+            let ids = self.node()?.media_of_server(server_id).await?;
+            self.delete_media(&ids).await
+        };
+        if dropped.await.is_err() {
+            tracing::warn!(server = %server_id, "couldn't delete a deleted server's pictures");
+            crate::reports::server_error("server_media_drop", Some("cluster::calls"));
         }
     }
 
