@@ -39,6 +39,47 @@ service JoinService {
   rpc GetWelcomeScreen(GetWelcomeScreenRequest) returns (GetWelcomeScreenResponse);
   // Changes the welcome screen. MANAGE_SERVER.
   rpc SetWelcomeScreen(SetWelcomeScreenRequest) returns (SetWelcomeScreenResponse);
+
+  // The server's onboarding, for members: empty while it's off. Channels the
+  // caller can't see are left out; managers (MANAGE_SERVER) get it whole,
+  // turned on or not.
+  rpc GetOnboarding(GetOnboardingRequest) returns (GetOnboardingResponse);
+  // Changes the onboarding. MANAGE_SERVER, and each role it hands out must
+  // be ranked below the caller's highest.
+  rpc SetOnboarding(SetOnboardingRequest) returns (SetOnboardingResponse);
+  // The caller went through the onboarding, picking these options (or
+  // skipped it, picking none). The roles of options picked are handed out
+  // and those of options not picked taken back, so going through it again
+  // changes them. Options that are gone, and roles that have since gained
+  // moderating or managing permissions, are passed over.
+  rpc FinishOnboarding(FinishOnboardingRequest) returns (FinishOnboardingResponse);
+}
+
+message GetOnboardingRequest {
+  string server_id = 1;
+}
+
+message GetOnboardingResponse {
+  Onboarding onboarding = 1;
+}
+
+message SetOnboardingRequest {
+  string server_id = 1;
+  Onboarding onboarding = 2;
+}
+
+message SetOnboardingResponse {
+  Onboarding onboarding = 1;
+}
+
+message FinishOnboardingRequest {
+  string server_id = 1;
+  // Up to 72 option ids (every option of every step).
+  repeated string option_ids = 2;
+}
+
+message FinishOnboardingResponse {
+  Member member = 1;
 }
 
 message GetWelcomeScreenRequest {

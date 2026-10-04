@@ -49,6 +49,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0022_threads.sql"),
     include_str!("../migrations/server/0023_attachments.sql"),
     include_str!("../migrations/server/0026_search.sql"),
+    include_str!("../migrations/server/0028_banner_onboarding.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -737,7 +738,8 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
         conn,
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
                 default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome,
-                sso, sso_required, sso_recheck_days, region, thread_archive_hours
+                sso, sso_required, sso_recheck_days, region, thread_archive_hours,
+                banner_url, banner_focus_x, banner_focus_y, accent_color, onboarding
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -764,6 +766,11 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 sso_recheck_days: r.get(18)?,
                 region: r.get(19)?,
                 thread_archive_hours: r.get(20)?,
+                banner_url: r.get(21)?,
+                banner_focus_x: r.get(22)?,
+                banner_focus_y: r.get(23)?,
+                accent_color: r.get(24)?,
+                has_onboarding: decode_onboarding(&r.get::<Vec<u8>>(25)?).enabled,
             })
         },
     )
@@ -804,10 +811,12 @@ pub async fn load_sso(conn: &Connection) -> Result<ServerSso> {
 /// When someone last signed in through the server's single sign-on.
 /// Leaves out when a member last signed in through the server's provider,
 /// unless `viewer` is that member or a manager: it's nobody else's business
-/// when they're online with their organization.
+/// when they're online with their organization. When they went through the
+/// onboarding is left out the same way.
 pub fn scrub_sso(member: &mut pb::Member, viewer: &str, manager: bool) {
     if !manager && member.user.as_ref().is_none_or(|u| u.id != viewer) {
         member.sso_signed_in_at = None;
+        member.onboarded_at = None;
     }
 }
 
@@ -1221,6 +1230,7 @@ pub async fn add_member(
         role_ids: vec![],
         pending,
         sso_signed_in_at: sso_signed_in_at(conn, &user.id).await?.map(timestamp),
+        onboarded_at: None,
     })
 }
 
@@ -1431,7 +1441,7 @@ pub async fn user(conn: &Connection, user_id: &str) -> Result<Option<pb::User>> 
 }
 
 pub const MEMBER_COLUMNS: &str = "users.id, users.username, users.display_name, users.avatar_url, users.kind, users.status, users.status_expires_at, members.nickname, members.joined_at, members.timed_out_until, members.pending,
-     (SELECT signed_in_at FROM sso_identities WHERE sso_identities.user_id = members.user_id)";
+     (SELECT signed_in_at FROM sso_identities WHERE sso_identities.user_id = members.user_id), members.onboarded_at";
 
 /// Reads a member row; their roles come from [`permissions::attach_roles`].
 pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member> + '_ {
@@ -1445,6 +1455,7 @@ pub fn member_row(server_id: &str) -> impl Fn(&Row) -> turso::Result<pb::Member>
             role_ids: vec![],
             pending: r.get(10)?,
             sso_signed_in_at: r.get::<Option<i64>>(11)?.map(timestamp),
+            onboarded_at: r.get::<Option<i64>>(12)?.map(timestamp),
         })
     }
 }
@@ -1614,6 +1625,25 @@ pub async fn save_welcome(conn: &Connection, welcome: &pb::WelcomeScreen) -> Res
             .collect(),
     };
     conn.execute("UPDATE server SET welcome = ?1, updated_at = ?2", (to_json(&stored)?, now_ms())).await?;
+    Ok(())
+}
+
+/// An onboarding as the server's file keeps it; none if it can't be read.
+fn decode_onboarding(bytes: &[u8]) -> pb::Onboarding {
+    pb::Onboarding::decode(bytes).unwrap_or_default()
+}
+
+/// The server's onboarding, whole.
+pub async fn load_onboarding(conn: &Connection) -> Result<pb::Onboarding> {
+    let bytes = query_one(conn, "SELECT onboarding FROM server", (), |r| r.get::<Vec<u8>>(0))
+        .await?
+        .ok_or_else(|| Error::internal("server row missing"))?;
+    Ok(decode_onboarding(&bytes))
+}
+
+/// Replaces the onboarding, inside a write.
+pub async fn save_onboarding(conn: &Connection, onboarding: &pb::Onboarding) -> Result<()> {
+    conn.execute("UPDATE server SET onboarding = ?1, updated_at = ?2", (onboarding.encode_to_vec(), now_ms())).await?;
     Ok(())
 }
 

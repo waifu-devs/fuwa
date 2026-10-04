@@ -10,7 +10,9 @@ import { Connect } from "@/components/Connect";
 import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
 import { JoinButton } from "@/components/join/JoinButton";
+import { ServerBanner } from "@/components/join/Banner";
 import { ServerDoor } from "@/components/join/ServerDoor";
+import { accentVars } from "@/lib/banner";
 import { InlineMarkdown } from "@/components/Markdown";
 import { Count, SwapText, Tilt } from "@/components/motion";
 import { Private, useAddress, usePrivateField } from "@/components/Private";
@@ -228,10 +230,11 @@ function HaveInvite({ instanceKey }: { instanceKey: string }) {
 function ServerCard({ instanceKey, server }: { instanceKey: string; server: Server }) {
   const navigate = useNavigate();
   return (
-    <Tilt className="card-pop tilt h-full rounded-3xl border bg-card">
-      <div className="flex h-full flex-col gap-3 p-5">
-        <div className="flex items-center gap-3">
-          <ServerIcon server={server} active className="size-14 text-lg" />
+    <Tilt className="card-pop tilt h-full overflow-hidden rounded-3xl border bg-card">
+      <ServerBanner server={server} pan={false} className="h-20" />
+      <div style={accentVars(server)} className="relative -mt-9 flex h-[calc(100%-2.75rem)] flex-col gap-3 p-5 pt-0">
+        <div className="flex items-end gap-3">
+          <ServerIcon server={server} active className="size-14 text-lg ring-4 ring-card" />
           <div className="min-w-0">
             <p className="truncate text-lg font-extrabold">{server.name}</p>
             <p className="flex items-center gap-1 text-xs text-muted-foreground">

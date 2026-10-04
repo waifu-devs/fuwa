@@ -15,6 +15,7 @@ use hmac::{Hmac, Mac};
 use tonic::metadata::MetadataMap;
 use tonic::{Request, Response, Status};
 
+use super::friends::blocks_any;
 use super::{Api, Seat, respond};
 use crate::app::App;
 use crate::error::{Error, Result};
@@ -283,7 +284,7 @@ async fn gone(app: &App, scope: &str, place: &Place) {
             if let Ok(dms) = app.dms()
                 && let Ok(Some(conversation)) = dms.conversation(conversation_id).await
             {
-                publish_dm_call(app, conversation_id, &conversation.participants);
+                publish_dm_call(app, conversation_id, &conversation.participants).await;
             }
         }
         None => publish_voice(
@@ -313,12 +314,20 @@ fn publish_voice(app: &App, server_id: &str, actor_id: &str, payload: Payload) {
 }
 
 /// Sends a conversation's call as it is now to both people in it.
-fn publish_dm_call(app: &App, conversation_id: &str, participants: &[String]) {
+/// Tells a conversation's people about its call, except anyone who blocked
+/// someone in it: a blocked person's call never rings.
+async fn publish_dm_call(app: &App, conversation_id: &str, participants: &[String]) {
     let call = voice::dm_call(&app.voice, conversation_id);
     let event = pb::DirectMessageEvent { payload: Some(pb::direct_message_event::Payload::CallUpdated(call)) };
-    if let Ok(dms) = app.dms() {
-        dms.publish(participants, event);
+    let Ok(dms) = app.dms() else { return };
+    let mut told = Vec::with_capacity(participants.len());
+    for id in participants {
+        // Told nothing rather than too much when it can't be read.
+        if !blocks_any(app, id, participants).await.unwrap_or(true) {
+            told.push(id.clone());
+        }
     }
+    dms.publish(&told, event);
 }
 
 /// A coturn-style credential (its REST API): the username says until when,
@@ -764,6 +773,11 @@ impl Api {
         self.calls_on()?;
         check_session(&req.session_id)?;
         let conversation = self.app.dms()?.conversation_of(&account.id, &req.conversation_id).await?;
+        // Your own block stops you calling; someone who blocked you never
+        // hears the call ring (`publish_dm_call`).
+        for other in conversation.participants.iter().filter(|id| **id != account.id) {
+            self.may_message(&account.id, other, true).await?;
+        }
         let scope = voice::dm_scope(&conversation.id);
         let before = self.app.voice.get(&scope, &account.id);
         let session_id = match &before {
@@ -785,7 +799,7 @@ impl Api {
         let place = Place { session_id, room: voice::dm_room(&conversation.id), state, expires: lease() };
         let answer = self.app.media_link.open(&place, &req.offer).await?;
         self.app.voice.put(&scope, place.clone());
-        publish_dm_call(&self.app, &conversation.id, &conversation.participants);
+        publish_dm_call(&self.app, &conversation.id, &conversation.participants).await;
         Ok(pb::JoinDmCallResponse { answer, session_id: place.session_id, state: Some(place.state) })
     }
 
@@ -799,7 +813,7 @@ impl Api {
         let scope = voice::dm_scope(&conversation.id);
         if let Some(place) = self.app.voice.remove(&scope, &account.id, Some(&req.session_id)) {
             self.app.media_link.close(&place.room, Some(&account.id), Some(&place.session_id)).await;
-            publish_dm_call(&self.app, &conversation.id, &conversation.participants);
+            publish_dm_call(&self.app, &conversation.id, &conversation.participants).await;
         }
         Ok(pb::LeaveDmCallResponse {})
     }
@@ -812,10 +826,11 @@ impl Api {
         }
         let conversation = self.app.dms()?.conversation_of(&account.id, &req.conversation_id).await?;
         let scope = voice::dm_scope(&conversation.id);
-        if !self.app.settings().calls {
+        // Calls turned off, or you blocked someone in it since joining: out you go.
+        if !self.app.settings().calls || blocks_any(&self.app, &account.id, &conversation.participants).await? {
             if let Some(place) = self.app.voice.remove(&scope, &account.id, None) {
                 self.app.media_link.close(&place.room, Some(&account.id), Some(&place.session_id)).await;
-                publish_dm_call(&self.app, &conversation.id, &conversation.participants);
+                publish_dm_call(&self.app, &conversation.id, &conversation.participants).await;
             }
             return Err(moved_away());
         }
@@ -859,7 +874,7 @@ impl Api {
         }
         self.app.voice.put(&scope, place.clone());
         if changed {
-            publish_dm_call(&self.app, &conversation.id, &conversation.participants);
+            publish_dm_call(&self.app, &conversation.id, &conversation.participants).await;
         }
         Ok(pb::KeepDmCallResponse { state: Some(place.state) })
     }
@@ -870,7 +885,9 @@ impl Api {
         let mut calls = Vec::new();
         for scope in self.app.voice.scopes("dm:") {
             let conversation_id = scope.trim_start_matches("dm:");
-            if dms.conversation_of(&account.id, conversation_id).await.is_ok() {
+            if let Ok(conversation) = dms.conversation_of(&account.id, conversation_id).await
+                && !blocks_any(&self.app, &account.id, &conversation.participants).await.unwrap_or(true)
+            {
                 calls.push(voice::dm_call(&self.app.voice, conversation_id));
             }
         }
