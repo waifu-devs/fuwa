@@ -2,7 +2,7 @@ import { Effect, Fiber } from "effect";
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
-import type { AccountFilter, AutoModProviderSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
+import type { AccountFilter, AutoModProviderSettings, GifSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { McpAccessMode } from "@/gen/fuwa/v1/agent_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
 import type { ChannelPlacement, CreateChannelRequest, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
@@ -994,6 +994,10 @@ export const endServerShare = (key: string, serverId: string, connectionId: stri
 /** Runs some text through a moderation provider as the form has it (an empty key uses the saved one). */
 export const testAutoModProvider = (key: string, provider: AutoModProviderSettings, content: string) =>
   call((signal) => api(key).admin.testAutoModProvider({ provider, content }, { signal }));
+
+/** Asks a GIF provider for a few trending GIFs with settings not saved yet. */
+export const testGifProvider = (key: string, settings: GifSettings) =>
+  call((signal) => api(key).gifs.testGifProvider({ settings }, { signal }));
 
 /** This instance as other instances see it, and the instances it knows. */
 export const getFederation = (key: string) => call((signal) => api(key).admin.getFederation({}, { signal }));

@@ -26,11 +26,12 @@ impl MediaService for Api {
                         | pb::MediaPurpose::ServerIcon
                         | pb::MediaPurpose::Emoji
                         | pb::MediaPurpose::Background
-                        | pb::MediaPurpose::Attachment),
+                        | pb::MediaPurpose::Attachment
+                        | pb::MediaPurpose::Gif),
                     ) => purpose,
                     _ => {
                         return Err(Error::invalid(
-                            "an upload is an avatar, a banner, a server icon, an emoji, a background or an attachment",
+                            "an upload is an avatar, a banner, a server icon, an emoji, a background, a GIF or an attachment",
                         ));
                     }
                 };
@@ -43,6 +44,9 @@ impl MediaService for Api {
                 } else {
                     return Err(Error::invalid("pictures can be PNG, JPEG, GIF, WebP or AVIF"));
                 };
+                if purpose == pb::MediaPurpose::Gif && content_type != "image/gif" {
+                    return Err(Error::invalid("a GIF upload is a GIF"));
+                }
                 if req.size <= 0 {
                     return Err(Error::invalid("that file is empty"));
                 }

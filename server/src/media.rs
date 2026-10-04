@@ -42,6 +42,7 @@ use crate::id::now_ms;
 use crate::pb;
 
 pub mod backfill;
+pub mod still;
 mod strip;
 
 /// How long an upload link works.
@@ -121,6 +122,11 @@ impl Store {
 
     pub fn path(&self, id: &str) -> PathBuf {
         self.dir.join(id)
+    }
+
+    /// Where a file is written before it's checked and moved in.
+    pub fn incoming(&self, id: &str) -> PathBuf {
+        self.incoming.join(id)
     }
 
     /// Deletes a file; one that's already gone is fine.

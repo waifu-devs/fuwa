@@ -47,6 +47,8 @@ enum MediaPurpose {
   // A file attached to a message: any kind, uploaded for the server it's
   // sent in.
   MEDIA_PURPOSE_ATTACHMENT = 7;
+  // A GIF of your own to send (GifService.SaveGif keeps it). Only image/gif.
+  MEDIA_PURPOSE_GIF = 8;
 }
 
 // A stored file.

@@ -53,6 +53,9 @@ message SendMessageRequest {
   string thread_id = 8;
   // With thread_id: show the reply in the channel too.
   bool also_send_to_channel = 9;
+  // A GIF, as GifService.PrepareGif or ListSavedGifs gave it (sealed).
+  // Needs ATTACH_FILES. Not in channels shared from another server yet.
+  MessageGif gif = 11;
 }
 
 message SendMessageResponse {

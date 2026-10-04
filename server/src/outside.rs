@@ -242,9 +242,9 @@ fn failed(status: StatusCode, message: &str) -> Response {
 
 /// A fetched picture: its bytes and the type they turned out to be.
 #[derive(Clone)]
-struct Picture {
-    content_type: &'static str,
-    bytes: Bytes,
+pub(crate) struct Picture {
+    pub content_type: &'static str,
+    pub bytes: Bytes,
 }
 
 impl Picture {
@@ -287,6 +287,13 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 });
 
 async fn fetch(url: &str) -> Result<Picture, &'static str> {
+    fetch_up_to(url, MAX_BYTES).await
+}
+
+/// A picture at `url` of at most `max` bytes, fetched as readers' pictures
+/// are (public addresses only), without the cache: for the instance to keep
+/// (a GIF someone sends).
+pub(crate) async fn fetch_up_to(url: &str, max: usize) -> Result<Picture, &'static str> {
     let url = Url::parse(url).map_err(|_| "not a link")?;
     fetchable(&url)?;
     let response = CLIENT
@@ -298,14 +305,14 @@ async fn fetch(url: &str) -> Result<Picture, &'static str> {
     if !response.status().is_success() {
         return Err("the site said no");
     }
-    if response.content_length().is_some_and(|length| length > MAX_BYTES as u64) {
+    if response.content_length().is_some_and(|length| length > max as u64) {
         return Err("too big");
     }
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|_| "cut off")?;
-        if body.len() + chunk.len() > MAX_BYTES {
+        if body.len() + chunk.len() > max {
             return Err("too big");
         }
         body.extend_from_slice(&chunk);
