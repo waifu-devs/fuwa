@@ -7297,8 +7297,39 @@ async fn instances_meet_with_signed_calls() {
     let again = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap().into_inner();
     assert!(again.known_there);
 
+    // A rotates its key (only an admin can): B moves to the new one by
+    // itself, as the old one vouched for it.
+    assert!(fed_a.rotated_at.is_none());
+    let denied = ca.admin.rotate_federation_key(authed(&member, pb::RotateFederationKeyRequest {})).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let rotated =
+        ca.admin.rotate_federation_key(authed(&admin_a, pb::RotateFederationKeyRequest {})).await.unwrap().into_inner();
+    assert_ne!(rotated.fingerprint, fed_a.fingerprint);
+    let after = federation(&mut ca, &admin_a).await;
+    assert_eq!(after.fingerprint, rotated.fingerprint);
+    assert!(after.rotated_at.is_some());
+    let mut moved = None;
+    for _ in 0..100 {
+        let seen = federation(&mut cb, &admin_b).await.peers.remove(0);
+        if seen.fingerprint == rotated.fingerprint {
+            moved = Some(seen);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let moved = moved.expect("B followed A's rotation");
+    assert!(!moved.needs_check);
+    assert_eq!(moved.moves.len(), 1);
+    assert_eq!(moved.moves[0].previous_fingerprint, fed_a.fingerprint);
+    assert_eq!(moved.moves[0].fingerprint, rotated.fingerprint);
+    // Signed calls still go both ways.
+    let again = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap().into_inner();
+    assert!(again.known_there);
+    let back = cb.admin.check_instance(authed(&admin_b, check(&origin_a))).await.unwrap().into_inner();
+    assert!(back.known_there);
+
     // The key is the same after a restart.
-    let fingerprint_a = fed_a.fingerprint.clone();
+    let fingerprint_a = rotated.fingerprint.clone();
     a.stop().await;
     let a = start(dir_a.path(), &federated).await;
     let mut ca = clients(&a).await;
@@ -8030,6 +8061,15 @@ async fn channels_shared_across_instances() {
         .await
         .unwrap()
         .into_inner();
+    let avatar = upload(&mut ca, &a, &juan, pb::MediaPurpose::Avatar, png(64, 64)).await;
+    assert!(avatar.starts_with(&origin_a));
+    ca.auth
+        .update_profile(authed(
+            &juan,
+            pb::UpdateProfileRequest { avatar_url: Some(avatar.clone()), ..Default::default() },
+        ))
+        .await
+        .unwrap();
     send(&mut ca, &juan, &home, &dev.id, "@everyone hello from home").await.unwrap();
     let live = next_message(&mut stream).await;
     assert_eq!(live.content, "@everyone hello from home");
@@ -8038,7 +8078,10 @@ async fn channels_shared_across_instances() {
     assert_eq!(live.author_id, format!("{}@{origin_a}", juan_user.id));
     let author = live.shared.clone().unwrap();
     assert_eq!(author.user.as_ref().unwrap().username, "juan");
-    assert!(author.user.unwrap().avatar_url.is_empty(), "nothing to fetch from the other instance");
+    // Pictures come through the reader's own instance, never straight from the other.
+    let shown_avatar = author.user.unwrap().avatar_url;
+    assert!(shown_avatar.starts_with(&format!("{origin_b}/media/outside/")), "{shown_avatar}");
+    assert!(shown_avatar.contains(&avatar.rsplit('/').next().unwrap().to_string()), "{shown_avatar}");
     let from = author.server.unwrap();
     assert_eq!((from.id, from.name, from.instance), (format!("{home}@{origin_a}"), "Home".into(), a.addr.to_string()));
 
@@ -8175,25 +8218,54 @@ async fn channels_shared_across_instances() {
         .unwrap_err();
     assert_eq!(refused.code(), Code::FailedPrecondition);
 
-    // With the home's instance down, the guest hears why.
     let on = pb::InstanceSettings { federation: true, ..Default::default() };
     ca.admin.update_settings(authed(&juan, settings_update(on, &["federation"], &[]))).await.unwrap();
-    let code = make_code(&ca, true).await;
-    let asked = cb
-        .shared
-        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
-        .await
-        .unwrap()
-        .into_inner()
-        .connection
-        .unwrap();
-    ca.shared
-        .review_share(authed(
-            &juan,
-            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
-        ))
-        .await
-        .unwrap();
+    // Blocking an instance ends its shares on both sides; then, unblocked, the
+    // channel is shared again.
+    for block in [true, false] {
+        let code = make_code(&ca, true).await;
+        let asked = cb
+            .shared
+            .accept_share(authed(
+                &mika,
+                pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() },
+            ))
+            .await
+            .unwrap()
+            .into_inner()
+            .connection
+            .unwrap();
+        ca.shared
+            .review_share(authed(
+                &juan,
+                pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
+            ))
+            .await
+            .unwrap();
+        if !block {
+            continue;
+        }
+        let blocked = |hosts: Vec<String>| {
+            let settings = pb::InstanceSettings { federation_blocked_hosts: hosts, ..Default::default() };
+            authed(&juan, settings_update(settings, &["federation_blocked_hosts"], &[]))
+        };
+        ca.admin.update_settings(blocked(vec![b.addr.ip().to_string()])).await.unwrap();
+        let mut ended = false;
+        for _ in 0..100 {
+            let at_home = connections(&mut ca, &juan, &home).await.connections;
+            let at_guest = connections(&mut cb, &mika, &guest).await.connections;
+            if !at_home.iter().any(|c| c.instance == b.addr.to_string())
+                && !at_guest.iter().any(|c| c.instance == a.addr.to_string())
+            {
+                ended = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(ended, "blocking ends the share at home and at the guest");
+        ca.admin.update_settings(blocked(vec![])).await.unwrap();
+    }
+    // With the home's instance down, the guest hears why.
     let shown = list_channels(&mut cb, &mika, &guest)
         .await
         .into_iter()
@@ -8555,6 +8627,71 @@ async fn attachments_upload_send_serve_and_go_with_their_message() {
     assert!(gone(&big_id));
     assert_eq!(usage(&mut c, &juan, &server.id).await.attachment_bytes, 0);
     instance.stop().await;
+}
+
+#[tokio::test]
+async fn voice_messages_go_in_channels_as_their_only_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_LIMIT_VOICE_MESSAGE_SECONDS", "60")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let server = create_server(&mut c, &juan, "Voices", true).await;
+    let channels = c
+        .channels
+        .list_channels(authed(&juan, pb::ListChannelsRequest { server_id: server.id.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels;
+    let general = channels.iter().find(|ch| ch.name == "general").unwrap().id.clone();
+    // An Ogg page whose first packet is Opus's header, at byte 28.
+    let mut ogg = b"OggS".to_vec();
+    ogg.resize(28, 0);
+    ogg.extend_from_slice(b"OpusHead\x01\x01");
+    ogg.extend((0..4000u32).map(|n| (n % 241) as u8));
+    let mut vorbis = b"OggS".to_vec();
+    vorbis.extend((0..4000u32).map(|n| (n % 241) as u8));
+    let note = |ms: u32| pb::VoiceNote { duration_ms: ms, waveform: vec![10, 200, 90] };
+    let send_voice = |files: Vec<pb::Attachment>| {
+        authed(
+            &juan,
+            pb::SendMessageRequest {
+                server_id: server.id.clone(),
+                channel_id: general.clone(),
+                attachments: files,
+                ..Default::default()
+            },
+        )
+    };
+    let voice_file = |url: &str, ms: u32| pb::Attachment {
+        url: url.into(),
+        filename: "voice-message.ogg".into(),
+        voice: Some(note(ms)),
+        ..Default::default()
+    };
+
+    // Only an Ogg recording, alone, within the instance's cap.
+    let zip = attach(&mut c, &instance, &juan, &server.id, b"PK\x03\x04zip".to_vec()).await;
+    let not_ogg = c.messages.send_message(send_voice(vec![voice_file(&zip, 3000)])).await.unwrap_err();
+    assert_eq!(not_ogg.code(), Code::InvalidArgument);
+    let other = attach(&mut c, &instance, &juan, &server.id, vorbis).await;
+    let not_opus = c.messages.send_message(send_voice(vec![voice_file(&other, 3000)])).await.unwrap_err();
+    assert_eq!(not_opus.code(), Code::InvalidArgument);
+    let url = attach(&mut c, &instance, &juan, &server.id, ogg.clone()).await;
+    let with_more = pb::Attachment { url: zip.clone(), filename: "x.zip".into(), ..Default::default() };
+    let crowded = c.messages.send_message(send_voice(vec![voice_file(&url, 3000), with_more])).await.unwrap_err();
+    assert_eq!(crowded.code(), Code::InvalidArgument);
+    let long = c.messages.send_message(send_voice(vec![voice_file(&url, 61_000)])).await.unwrap_err();
+    assert_eq!(long.code(), Code::ResourceExhausted);
+
+    let sent =
+        c.messages.send_message(send_voice(vec![voice_file(&url, 3000)])).await.unwrap().into_inner().message.unwrap();
+    let [file] = &sent.attachments[..] else { panic!("{:?}", sent.attachments) };
+    assert_eq!(file.content_type, "audio/ogg; codecs=opus");
+    assert_eq!(file.voice, Some(note(3000)));
+    let listed = messages(&mut c, &juan, &server.id, &general).await;
+    assert_eq!(listed.iter().find(|m| m.id == sent.id).unwrap().attachments[0].voice, Some(note(3000)));
+    assert_eq!(fetch(&instance, &file.url).await.2, ogg);
 }
 
 fn new_poll(question: &str, answers: &[&str], anonymous: bool) -> pb::NewPoll {

@@ -248,6 +248,17 @@ nothing behind for good; the app sends it again with the same file. The server s
 `web/src/components/voice/`, written so a server channel's composer and
 messages can use the same recorder and player.
 
+In server channels a voice message is an ordinary attachment, not sealed:
+the only file of its message, an Ogg file whose first stream is Opus (the
+instance checks for `OpusHead` in the first page), with
+`Attachment.voice` giving how long it plays and its waveform. The waveform
+is worked out on the sender's device from the sound alone; apps only ever
+draw it as bars, it isn't searched, and the MCP server gives agents the
+length only. The same caps apply (the length only as far as the app
+reports it, since the instance doesn't decode the sound), on top of the
+server's attachment caps, and it goes when its message is deleted. Channels
+shared between servers refuse files, voice messages included.
+
 ## Files
 
 Any file can go in an encrypted message (up to ten with one message, with an

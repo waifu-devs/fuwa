@@ -67,6 +67,9 @@ pub const PICTURE_TYPES: &[&str] = &["image/png", "image/jpeg", "image/gif", "im
 /// named for apps' icons is kept and served as.
 pub const OCTET_STREAM: &str = "application/octet-stream";
 
+/// An Ogg file whose first stream is Opus: what voice messages are.
+pub const OGG_OPUS: &str = "audio/ogg; codecs=opus";
+
 /// What an attachment can be kept as: [`kind_of`]'s answers.
 pub const ATTACHMENT_TYPES: &[&str] = &[
     "image/png",
@@ -77,6 +80,7 @@ pub const ATTACHMENT_TYPES: &[&str] = &[
     "audio/mpeg",
     "audio/aac",
     "audio/ogg",
+    OGG_OPUS,
     "audio/flac",
     "audio/wav",
     "audio/mp4",
@@ -227,6 +231,9 @@ pub fn kind_of(head: &[u8]) -> &'static str {
     } else if sync(0xe0, 0xe0) {
         // An MPEG audio frame: eleven set bits.
         "audio/mpeg"
+    } else if at(0, b"OggS") && at(28, b"OpusHead") {
+        // The first page holds the stream's header packet alone.
+        OGG_OPUS
     } else if at(0, b"OggS") {
         "audio/ogg"
     } else if at(0, b"fLaC") {
@@ -684,6 +691,10 @@ mod tests {
         assert_eq!(kind_of(b"\xff\xfb\x90\x00"), "audio/mpeg");
         assert_eq!(kind_of(b"\xff\xf1\x50\x80"), "audio/aac");
         assert_eq!(kind_of(b"OggS\0\x02"), "audio/ogg");
+        let mut opus = b"OggS".to_vec();
+        opus.resize(28, 0);
+        opus.extend_from_slice(b"OpusHead\x01\x01");
+        assert_eq!(kind_of(&opus), OGG_OPUS);
         assert_eq!(kind_of(b"fLaC\0\0"), "audio/flac");
         assert_eq!(kind_of(b"RIFF\x24\0\0\0WAVEfmt "), "audio/wav");
         assert_eq!(kind_of(b"\0\0\0\x20ftypM4A \0\0"), "audio/mp4");
