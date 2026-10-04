@@ -321,6 +321,9 @@ enum AuditAction {
   AUDIT_ACTION_THREAD_LOCK = 49;
   AUDIT_ACTION_THREAD_UNLOCK = 50;
   AUDIT_ACTION_THREAD_DELETE = 51;
+  // Someone else's poll, ended early by a moderator: its creator is the
+  // target. Votes are never recorded.
+  AUDIT_ACTION_POLL_END = 52;
   // Someone changed the server's onboarding steps.
   AUDIT_ACTION_ONBOARDING_UPDATE = 53;
 }

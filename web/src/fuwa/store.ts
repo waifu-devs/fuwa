@@ -9,6 +9,7 @@ import type {
   Message,
   Node,
   NotificationSettings,
+  Poll,
   Profile,
   Role,
   Server,
@@ -336,7 +337,7 @@ export function upsertMessage(items: Message[], message: Message): Message[] {
   if (items[at]!.id === message.id) {
     // An edit doesn't always say how the thread under it stands; keep what we know.
     const next = !message.thread && items[at]!.thread ? { ...message, thread: items[at]!.thread } : message;
-    return items.map((m, i) => (i === at ? next : m));
+    return items.map((m, i) => (i === at ? keepMyVote(m, next) : m));
   }
   return [...items.slice(0, at), message, ...items.slice(at)];
 }
@@ -354,6 +355,30 @@ export function withThreadSummary(i: InstanceState, channelId: string, threadId:
   const parent = i.threadParents[threadId];
   if (parent) next = { ...next, threadParents: { ...next.threadParents, [threadId]: { ...parent, thread: summary } } };
   return next;
+}
+
+/**
+ * A poll message as it comes again: events and most answers carry everyone's
+ * counts but never your own vote, so the vote you had stays.
+ */
+function keepMyVote(before: Message, after: Message): Message {
+  if (!before.poll || !after.poll || after.poll.myAnswerIds.length || !before.poll.myAnswerIds.length) return after;
+  return { ...after, poll: { ...after.poll, myAnswerIds: before.poll.myAnswerIds } };
+}
+
+/**
+ * A poll's new counts on its message, if the channel is loaded. `mine` is your
+ * own vote when it's known (your vote's answer, or an event naming you);
+ * otherwise the one you had stays.
+ */
+export function withPoll(i: InstanceState, channelId: string, messageId: string, poll: Poll, mine?: number[]): InstanceState {
+  const loaded = i.messages[channelId];
+  const at = loaded?.items.findIndex((m) => m.id === messageId) ?? -1;
+  if (!loaded || at === -1) return i;
+  const message = loaded.items[at]!;
+  const next = { ...poll, myAnswerIds: mine ?? message.poll?.myAnswerIds ?? [] };
+  const items = loaded.items.map((m, n) => (n === at ? { ...m, poll: next } : m));
+  return { ...i, messages: { ...i.messages, [channelId]: { ...loaded, items } } };
 }
 
 /** Puts a user's new look everywhere it shows: the user list, their memberships and their profile. */
@@ -517,6 +542,11 @@ export function applyEvent(i: InstanceState, event: Event, focusChannel: string 
         next = { ...next, unread: { ...next.unread, [message.channelId]: (next.unread[message.channelId] ?? 0) + 1 } };
       }
       return next;
+    }
+    case "pollUpdated": {
+      const { channelId, messageId, poll, voterId, voterAnswerIds } = p.value;
+      if (!poll) return i;
+      return withPoll(i, channelId, messageId, poll, voterId && voterId === i.me?.id ? voterAnswerIds : undefined);
     }
     case "messageDeleted": {
       const { channelId, messageId } = p.value;
