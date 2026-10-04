@@ -1488,7 +1488,7 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
             }
             if !send.reply_to_id.is_empty() {
                 let replied = load_message(conn, &sdb.id, &send.reply_to_id).await?;
-                if replied.is_none_or(|m| m.channel_id != channel.id) {
+                if replied.is_none_or(|m| m.channel_id != channel.id || !in_channel(&m)) {
                     return Err(Error::NotFound("message being replied to"));
                 }
             }
