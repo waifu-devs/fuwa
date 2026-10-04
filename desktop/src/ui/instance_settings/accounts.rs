@@ -216,7 +216,7 @@ impl InstanceSettingsView {
         cx.notify();
     }
 
-    fn toast(&self, icon: &'static str, title: String, cx: &mut Context<Self>) {
+    pub(super) fn toast(&self, icon: &'static str, title: String, cx: &mut Context<Self>) {
         cx.emit(InstanceSettingsEvent::Toast { icon, title });
     }
 

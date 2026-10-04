@@ -15,6 +15,7 @@ mod calls;
 mod controls;
 mod general;
 mod limits;
+mod servers;
 mod signups;
 mod sso;
 
@@ -45,6 +46,8 @@ pub enum InstanceSettingsEvent {
         icon: &'static str,
         title: String,
     },
+    /// Close settings and go to this server.
+    OpenServer(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -57,6 +60,7 @@ enum Page {
     Calls,
     Moderation,
     Accounts,
+    Servers,
     Announcement,
 }
 
@@ -71,6 +75,7 @@ impl Page {
             Page::Calls => "Calls",
             Page::Moderation => "Moderation",
             Page::Accounts => "Accounts",
+            Page::Servers => "Servers",
             Page::Announcement => "Announcement",
         }
     }
@@ -85,6 +90,7 @@ impl Page {
             Page::Calls => "audio-lines",
             Page::Moderation => "shield-alert",
             Page::Accounts => "users",
+            Page::Servers => "server",
             Page::Announcement => "megaphone",
         }
     }
@@ -99,13 +105,14 @@ impl Page {
             Page::Calls => "Voice channels and calls in direct messages.",
             Page::Moderation => "Services servers' AutoMod can ask about messages.",
             Page::Accounts => "Everyone with an account here. Make admins, reset passwords, or turn an account off.",
+            Page::Servers => "Every community server here. Change one's caps, move it, save its file, or delete it.",
             Page::Announcement => "A banner at the top of the app for everyone on this instance.",
         }
     }
 
     /// Pages that look after the instance rather than change its settings.
     fn manages(self) -> bool {
-        matches!(self, Page::Accounts | Page::Announcement)
+        matches!(self, Page::Accounts | Page::Servers | Page::Announcement)
     }
 }
 
@@ -115,7 +122,7 @@ const GROUPS: [(&str, &[Page]); 2] = [
         "INSTANCE",
         &[Page::General, Page::SignUps, Page::Sso, Page::Limits, Page::Privacy, Page::Calls, Page::Moderation],
     ),
-    ("MANAGE", &[Page::Accounts, Page::Announcement]),
+    ("MANAGE", &[Page::Accounts, Page::Servers, Page::Announcement]),
 ];
 
 type GetText = fn(&pb::InstanceSettings) -> String;
@@ -200,6 +207,7 @@ pub struct InstanceSettingsView {
     announce: announcement::Announce,
     sso: sso::Sso,
     accounts: accounts::Accounts,
+    servers: servers::Servers,
     _subscriptions: Vec<Subscription>,
     _boxes: Vec<Subscription>,
 }
@@ -223,6 +231,8 @@ impl InstanceSettingsView {
         boxes.push(announce_sub);
         let (sso, sso_subs) = sso::Sso::new(window, cx);
         boxes.extend(sso_subs);
+        let (servers, servers_subs) = servers::Servers::new(window, cx);
+        boxes.extend(servers_subs);
         let mut view = Self {
             core,
             key,
@@ -243,6 +253,7 @@ impl InstanceSettingsView {
             announce,
             sso,
             accounts,
+            servers,
             _subscriptions: Vec::new(),
             _boxes: boxes,
         };
@@ -609,10 +620,16 @@ impl InstanceSettingsView {
 
     /// Esc closes a dialog over the page first; false when there was none.
     pub fn escape(&mut self, cx: &mut Context<Self>) -> bool {
-        self.close_account_dialog(cx)
+        match self.page {
+            Page::Servers => self.escape_servers(cx),
+            _ => self.close_account_dialog(cx),
+        }
     }
 
     fn open(&mut self, page: Page, cx: &mut Context<Self>) {
+        if page == Page::Servers && self.page == Page::Servers {
+            self.servers_back(cx);
+        }
         self.page = page;
         self.error = None;
         cx.notify();
@@ -1393,6 +1410,7 @@ impl Render for InstanceSettingsView {
         let body = if page.manages() {
             match page {
                 Page::Accounts => self.accounts_page(&p, window, cx),
+                Page::Servers => self.servers_page(&p, window, cx),
                 Page::Announcement => self.announcement_page(&p, window, cx),
                 _ => div().into_any_element(),
             }
@@ -1409,7 +1427,7 @@ impl Render for InstanceSettingsView {
                 Page::Calls => self.calls_page(&p, window, cx),
                 Page::Privacy => self.privacy_page(&p, cx),
                 Page::Moderation => self.moderation_page(&p, window, cx),
-                Page::Accounts | Page::Announcement => div().into_any_element(),
+                Page::Accounts | Page::Servers | Page::Announcement => div().into_any_element(),
             }
         };
         let changed = self.changed();
@@ -1424,8 +1442,8 @@ impl Render for InstanceSettingsView {
                 |this: &mut Self, window, cx| this.commit(this.changed(), Vec::new(), window, cx),
             ));
         }
-        // The accounts list scrolls on its own, drawing only the rows in sight.
-        let fills = page == Page::Accounts;
+        // The accounts and servers lists scroll on their own, drawing only the rows in sight.
+        let fills = page == Page::Accounts || (page == Page::Servers && self.servers_fill());
         let content = div()
             .w(px(720.0))
             .when(fills, |el| el.h_full())
@@ -1439,7 +1457,10 @@ impl Render for InstanceSettingsView {
             .child(body)
             .child(div().h(px(if self.bar.is_some() { 90.0 } else { 0.0 })));
 
-        let dialog = self.account_dialog(&p, window, cx);
+        let dialog = match page {
+            Page::Servers => self.share_dialog(&p, cx),
+            _ => self.account_dialog(&p, window, cx),
+        };
         motion::fade_in(
             div()
                 .id("instance-settings")
