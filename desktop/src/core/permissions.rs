@@ -91,7 +91,10 @@ pub const GROUPS: [(&str, &[P]); 5] = [
         "Membership",
         &[P::CreateInvite, P::ChangeNickname, P::ManageNicknames, P::KickMembers, P::BanMembers, P::TimeOutMembers],
     ),
-    ("Text channels", &[P::SendMessages, P::CreateThreads, P::EmbedLinks, P::AttachFiles, P::MentionEveryone, P::ManageMessages]),
+    (
+        "Text channels",
+        &[P::SendMessages, P::CreateThreads, P::EmbedLinks, P::AttachFiles, P::MentionEveryone, P::ManageMessages],
+    ),
     ("Voice channels", &[P::Connect, P::Speak, P::Video, P::Record, P::MuteMembers, P::MoveMembers]),
     ("Advanced", &[P::Administrator]),
 ];
@@ -155,7 +158,10 @@ pub fn info(p: P) -> (&'static str, &'static str) {
 /// The permissions a channel can allow or deny, as the channel settings group them (the web's `CHANNEL_GROUPS`).
 pub const CHANNEL_GROUPS: [(&str, &[P]); 3] = [
     ("General", &[P::ViewChannels, P::ManageChannels, P::ManageRoles, P::CreateInvite]),
-    ("Text", &[P::SendMessages, P::CreateThreads, P::EmbedLinks, P::AttachFiles, P::MentionEveryone, P::ManageMessages]),
+    (
+        "Text",
+        &[P::SendMessages, P::CreateThreads, P::EmbedLinks, P::AttachFiles, P::MentionEveryone, P::ManageMessages],
+    ),
     ("Voice", &[P::Connect, P::Speak, P::Video, P::Record, P::MuteMembers, P::MoveMembers]),
 ];
 
