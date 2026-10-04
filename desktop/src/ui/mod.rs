@@ -33,6 +33,7 @@ mod settings_account;
 mod settings_keys;
 mod settings_look;
 mod settings_privacy;
+mod shared_marks;
 mod sidebar;
 pub mod text;
 pub mod theme;

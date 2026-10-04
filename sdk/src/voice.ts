@@ -2,7 +2,8 @@ import type { Fuwa } from "./client.js";
 import { CanceledError, Code, FailedPreconditionError, FuwaError, UnavailableError, toFuwaError } from "./errors.js";
 import type { ListenVoiceResponse } from "./gen/fuwa/v1/call_pb.js";
 import type { VoiceState } from "./gen/fuwa/v1/types_pb.js";
-import { opusPacketDuration, readOggOpus } from "./ogg.js";
+import { OggOpusWriter, chunks, oggOpusPackets, opusPacketDuration, readOggOpus, splitOpusPacket } from "./ogg.js";
+import { pcmFrames, type OpusDecoder, type OpusEncoder, type PcmFormat } from "./pcm.js";
 import { sleep } from "./retry.js";
 
 /** One frame of someone's sound. */
@@ -27,6 +28,13 @@ export interface JoinVoiceOptions {
    * stopped speaking. Default 300 ms.
    */
   silenceMs?: number;
+  /**
+   * How long someone stays quiet before what they said counts as finished
+   * (the end of an utterance, the cue to answer). Default 600 ms.
+   */
+  utteranceGapMs?: number;
+  /** The longest an utterance runs before it ends and the next begins. Default 60 s. */
+  maxUtteranceMs?: number;
   /** Leaves when it aborts. */
   signal?: AbortSignal;
 }
@@ -40,6 +48,11 @@ export interface VoiceEvents {
   speaking: Listener<[string]>;
   /** Someone stopped (no sound for `silenceMs`). */
   silent: Listener<[string]>;
+  /**
+   * Someone started saying something: its frames arrive on the utterance as
+   * they're spoken, and it ends when they pause for `utteranceGapMs`.
+   */
+  utterance: Listener<[Utterance]>;
   /** The connection broke; it joins again after `retryInMs`, keeping the same place. */
   reconnecting: Listener<[{ error: FuwaError; retryInMs: number }]>;
   /** Back in after reconnecting. */
@@ -61,6 +74,173 @@ const FRAME_MS = 20;
 const REJOIN_MIN_MS = 250;
 const REJOIN_MAX_MS = 8000;
 const STEADY_MS = 10_000;
+/** Frames a speech source may run ahead of what's been sent (a second). */
+const PULL_AHEAD = 50;
+
+export interface SpeakOptions {
+  /** Stops speaking when it aborts, rejecting with CanceledError. */
+  signal?: AbortSignal;
+  /**
+   * Stops when someone starts talking over it (barge-in), resolving with
+   * `interrupted`: true for anyone, or a test of who may cut in. What the
+   * instance already has queued still plays, a fraction of a second.
+   */
+  interruptible?: boolean | ((userId: string) => boolean);
+}
+
+export interface SpeakResult {
+  /** It stopped early: someone talked over it, or `stopSpeaking()` was called. */
+  interrupted: boolean;
+  /** Who talked over it. */
+  by?: string;
+  /** How much sound went out, in milliseconds. */
+  sentMs: number;
+}
+
+/** Sound to play: Ogg Opus bytes, or a stream of them (a fetch body, a speech service's reply). */
+export type OggSource =
+  | Uint8Array
+  | ArrayBuffer
+  | Blob
+  | ReadableStream<Uint8Array>
+  | AsyncIterable<Uint8Array>
+  | Iterable<Uint8Array>
+  | { body: ReadableStream<Uint8Array> | null };
+
+interface Speech {
+  interruptible: SpeakOptions["interruptible"];
+  playing: boolean;
+  stopped: boolean;
+  by?: string;
+  wake: () => void;
+}
+
+/**
+ * What one person said, from when they start talking until they pause:
+ * the unit an agent answers. Its frames come as they're spoken, so a
+ * speech-to-text service can start before they've finished. Read it as many
+ * times as you like; it keeps its frames (at most `maxUtteranceMs`).
+ */
+export class Utterance implements AsyncIterable<VoiceFrame> {
+  /** Who's talking: their account id. */
+  readonly userId: string;
+  readonly startedAt: Date;
+  #frames: VoiceFrame[] = [];
+  #done = false;
+  #waiters: (() => void)[] = [];
+  #ended: Promise<void>;
+  #end!: () => void;
+
+  /** @internal */
+  constructor(userId: string) {
+    this.userId = userId;
+    this.startedAt = new Date();
+    this.#ended = new Promise((resolve) => (this.#end = resolve));
+  }
+
+  /** Resolves when they pause, leave, or the agent leaves. */
+  get ended(): Promise<void> {
+    return this.#ended;
+  }
+
+  /** Whether it has ended. */
+  get done(): boolean {
+    return this.#done;
+  }
+
+  /** How much has been heard so far, in milliseconds. */
+  get durationMs(): number {
+    return this.#frames.length * FRAME_MS;
+  }
+
+  /** @internal */
+  add(frame: VoiceFrame): void {
+    if (this.#done) return;
+    this.#frames.push(frame);
+    this.#wakeAll();
+  }
+
+  /** @internal */
+  finish(): void {
+    if (this.#done) return;
+    this.#done = true;
+    this.#wakeAll();
+    this.#end();
+  }
+
+  #wakeAll(): void {
+    const waiters = this.#waiters;
+    this.#waiters = [];
+    for (const wake of waiters) wake();
+  }
+
+  /** Its frames from the start, then each as it's spoken, until it ends. */
+  async *[Symbol.asyncIterator](): AsyncGenerator<VoiceFrame> {
+    for (let i = 0; ; ) {
+      if (i < this.#frames.length) {
+        yield this.#frames[i++]!;
+        continue;
+      }
+      if (this.#done) return;
+      await new Promise<void>((resolve) => this.#waiters.push(resolve));
+    }
+  }
+
+  /** Its Opus packets as they come. */
+  async *opus(): AsyncGenerator<Uint8Array> {
+    for await (const frame of this) yield frame.opus;
+  }
+
+  /**
+   * It as an Ogg Opus file, sent while it's spoken: bytes come every
+   * `pageMs` (default 100 ms), and the last when it ends. Speech services
+   * that take a stream of Ogg Opus can start on it straight away.
+   */
+  async *ogg(options: { pageMs?: number } = {}): AsyncGenerator<Uint8Array> {
+    const every = Math.max(1, Math.round((options.pageMs ?? 100) / FRAME_MS));
+    const writer = new OggOpusWriter();
+    let n = 0;
+    for await (const frame of this) {
+      writer.add(frame.opus);
+      if (++n % every === 0) {
+        writer.flush();
+        yield writer.take();
+      }
+    }
+    yield writer.finish();
+  }
+
+  /** The whole utterance as an Ogg Opus file, once it ends. */
+  async toOgg(): Promise<Uint8Array<ArrayBuffer>> {
+    await this.#ended;
+    const writer = new OggOpusWriter();
+    for (const frame of this.#frames) writer.add(frame.opus);
+    return writer.finish();
+  }
+
+  /**
+   * It as PCM, through your Opus decoder, as it's spoken. Sound that was
+   * lost or not sent (silence) comes as zeros, so the timing stays true.
+   */
+  async *pcm(decoder: OpusDecoder): AsyncGenerator<Int16Array> {
+    let last: number | undefined;
+    let size = 0;
+    for await (const frame of this) {
+      if (last !== undefined && size > 0) {
+        const missing = Math.round(((frame.timestamp - last) >>> 0) / 960) - 1;
+        if (missing > 0 && missing <= 50) yield new Int16Array(size * missing);
+      }
+      last = frame.timestamp;
+      if (frame.opus.length === 0) {
+        if (size > 0) yield new Int16Array(size);
+        continue;
+      }
+      const pcm = decoder.decode(frame.opus);
+      size = pcm.length;
+      yield pcm;
+    }
+  }
+}
 
 /**
  * Being in a voice channel, without WebRTC: CallService.ListenVoice keeps
@@ -97,6 +277,10 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
   #rejoined: Promise<void> = Promise.resolve();
   #reconnecting = false;
   #unlink: (() => void) | undefined;
+  #open = new Map<string, { utterance: Utterance; lastSound: number }>();
+  #utteranceReaders = new Set<{ queue: Utterance[]; wake?: () => void }>();
+  #speeches = new Set<Speech>();
+  #turn: Promise<unknown> = Promise.resolve();
 
   private constructor(fuwa: Fuwa, options: JoinVoiceOptions, first: AsyncIterator<ListenVoiceResponse>) {
     this.#fuwa = fuwa;
@@ -105,6 +289,7 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
     this.channelId = options.channelId;
     options.signal?.addEventListener("abort", () => void this.leave(), { once: true });
     const silenceMs = options.silenceMs ?? 300;
+    const gapMs = options.utteranceGapMs ?? 600;
     this.#sweeper = setInterval(() => {
       const now = Date.now();
       for (const [userId, at] of this.#lastHeard) {
@@ -113,7 +298,13 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
           this.#emit("silent", userId);
         }
       }
-    }, Math.min(100, silenceMs));
+      for (const [userId, open] of this.#open) {
+        if (now - open.lastSound >= gapMs) {
+          this.#open.delete(userId);
+          open.utterance.finish();
+        }
+      }
+    }, Math.min(100, silenceMs, gapMs));
     this.#closed = this.#run(first);
     this.#closed.catch(() => {});
   }
@@ -209,40 +400,107 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
   }
 
   /**
-   * Says Opus frames (48 kHz, 20 ms each, mono or stereo), from a list or as
-   * an encoder makes them, sending them about as fast as they play. Resolves
-   * about when the last one is heard. Needs SPEAK and not being server muted.
+   * Each utterance as someone starts it (see the `utterance` event). Only
+   * utterances begun after the loop starts come; a loop more than 100
+   * behind loses the oldest.
    */
-  async speak(frames: Iterable<Uint8Array> | AsyncIterable<Uint8Array>, options: { signal?: AbortSignal } = {}): Promise<void> {
-    let batch: Uint8Array[] = [];
-    let queued = 0;
-    for await (const frame of frames) {
-      if (options.signal?.aborted) throw new CanceledError(Code.Canceled, "stopped speaking");
-      batch.push(frame);
-      if (batch.length === BATCH) {
-        queued = await this.#say(batch, options.signal);
-        batch = [];
+  async *utterances(): AsyncGenerator<Utterance> {
+    const reader: { queue: Utterance[]; wake?: () => void } = { queue: [] };
+    this.#utteranceReaders.add(reader);
+    try {
+      for (;;) {
+        const next = reader.queue.shift();
+        if (next) {
+          yield next;
+          continue;
+        }
+        if (this.#done) {
+          if (this.#ending) throw this.#ending;
+          return;
+        }
+        await new Promise<void>((resolve) => (reader.wake = resolve));
       }
+    } finally {
+      this.#utteranceReaders.delete(reader);
     }
-    if (batch.length) queued = await this.#say(batch, options.signal);
-    if (queued > 0) await sleep(queued * FRAME_MS, options.signal);
+  }
+
+  /** Whether the account is saying something now (or has things waiting to be said). */
+  get talking(): boolean {
+    return this.#speeches.size > 0;
   }
 
   /**
-   * Plays an Ogg Opus file (.ogg or .opus, as ffmpeg makes with
-   * `-c:a libopus -frame_duration 20`). Its packets must be 20 ms each.
+   * Says Opus frames (48 kHz, 20 ms each, mono or stereo), from a list or as
+   * an encoder or speech service makes them: each goes out as soon as it
+   * comes, and a source faster than real time is paced to about how fast it
+   * plays. Resolves about when the last one is heard. Things said one after
+   * another wait their turn. Needs SPEAK and not being server muted.
    */
-  async play(file: Uint8Array | ArrayBuffer | Blob, options: { signal?: AbortSignal } = {}): Promise<void> {
-    const bytes =
-      file instanceof Uint8Array ? file : new Uint8Array(file instanceof Blob ? await file.arrayBuffer() : file);
-    const { packets } = readOggOpus(bytes);
-    const wrong = packets.find((p) => opusPacketDuration(p) !== FRAME_MS);
-    if (wrong) {
-      throw new TypeError(
-        `voice channels take 20 ms Opus frames, and this file has ${opusPacketDuration(wrong)} ms ones (re-encode with -frame_duration 20)`,
-      );
+  speak(frames: Iterable<Uint8Array> | AsyncIterable<Uint8Array>, options: SpeakOptions = {}): Promise<SpeakResult> {
+    const speech: Speech = { interruptible: options.interruptible, playing: false, stopped: false, wake: () => {} };
+    this.#speeches.add(speech);
+    const run = this.#turn.then(() => this.#speakNow(frames, speech, options.signal));
+    this.#turn = run.catch(() => {});
+    return run.finally(() => this.#speeches.delete(speech));
+  }
+
+  /**
+   * Plays Ogg Opus (.ogg or .opus, as ffmpeg makes with `-c:a libopus
+   * -frame_duration 20`): a whole file, or a stream such as a speech
+   * service's reply, which starts playing as soon as its first page comes.
+   * Its sound must be in 20 ms frames (packets of two or three are split).
+   */
+  async play(source: OggSource, options: SpeakOptions = {}): Promise<SpeakResult> {
+    if (source instanceof Uint8Array || source instanceof ArrayBuffer || (typeof Blob !== "undefined" && source instanceof Blob)) {
+      const bytes =
+        source instanceof Uint8Array ? source : new Uint8Array(source instanceof Blob ? await source.arrayBuffer() : source);
+      const frames = readOggOpus(bytes).packets.flatMap((p) => twentyMs(p));
+      return this.speak(frames, options);
     }
-    await this.speak(packets, options);
+    const stream =
+      "body" in source && !(Symbol.asyncIterator in source) && !("getReader" in source)
+        ? source.body
+        : (source as ReadableStream<Uint8Array> | AsyncIterable<Uint8Array> | Iterable<Uint8Array>);
+    if (!stream) throw new TypeError("there's no sound to play: the response has no body");
+    try {
+      return await this.speak(
+        (async function* () {
+          for await (const packet of oggOpusPackets(chunks(stream))) yield* twentyMs(packet);
+        })(),
+        options,
+      );
+    } finally {
+      // Stopped before its turn, or part way: let the download go. (After
+      // reading it all, this does nothing.)
+      if ("getReader" in stream) {
+        if (!stream.locked) void stream.cancel().catch(() => {});
+      } else if (Symbol.asyncIterator in stream) {
+        void Promise.resolve(stream[Symbol.asyncIterator]().return?.()).catch(() => {});
+      }
+    }
+  }
+
+  /**
+   * Says raw sound (16-bit PCM, interleaved when stereo), as a speech
+   * service makes it, through your Opus encoder: see OpusEncoder.
+   */
+  speakPcm(
+    pcm: Iterable<Int16Array> | AsyncIterable<Int16Array>,
+    options: SpeakOptions & PcmFormat & { encoder: OpusEncoder },
+  ): Promise<SpeakResult> {
+    const { encoder } = options;
+    return this.speak(
+      (async function* () {
+        for await (const frame of pcmFrames(pcm, options)) yield encoder.encode(frame);
+      })(),
+      options,
+    );
+  }
+
+  /** Stops saying anything: what's being said now and everything waiting its turn. */
+  stopSpeaking(): void {
+    for (const speech of this.#speeches) this.#interrupt(speech);
   }
 
   /** Changes the account's own mute and deafen, as people do. */
@@ -283,8 +541,116 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
       await Promise.race([this.#rejoined, sleep(5000, signal)]);
       res = await send();
     }
-    if (res.queued > AHEAD) await sleep((res.queued - AHEAD) * FRAME_MS, signal);
-    return Math.min(res.queued, AHEAD);
+    return res.queued;
+  }
+
+  async #speakNow(
+    source: Iterable<Uint8Array> | AsyncIterable<Uint8Array>,
+    speech: Speech,
+    signal?: AbortSignal,
+  ): Promise<SpeakResult> {
+    if (signal?.aborted) throw new CanceledError(Code.Canceled, "stopped speaking");
+    if (speech.stopped) return { interrupted: true, by: speech.by, sentMs: 0 };
+    const iterator =
+      Symbol.asyncIterator in source
+        ? (source as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+        : (source as Iterable<Uint8Array>)[Symbol.iterator]();
+    const pending: Uint8Array[] = [];
+    let ended = false;
+    let failed = false;
+    let failure: unknown;
+    // One wake-up for everything this waits on: a frame, room, stopping.
+    let wake: (() => void) | undefined;
+    speech.wake = () => {
+      const w = wake;
+      wake = undefined;
+      w?.();
+    };
+    const nap = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(() => speech.wake(), Math.max(0, ms));
+        wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+    const onAbort = () => speech.wake();
+    signal?.addEventListener("abort", onAbort);
+    speech.playing = true;
+    let room: (() => void) | undefined;
+    void (async () => {
+      try {
+        for (;;) {
+          if (speech.stopped || signal?.aborted) return;
+          if (pending.length >= PULL_AHEAD) {
+            await new Promise<void>((resolve) => (room = resolve));
+            continue;
+          }
+          const { done, value } = await iterator.next();
+          if (done) return;
+          pending.push(value);
+          speech.wake();
+        }
+      } catch (err) {
+        failed = true;
+        failure = err;
+      } finally {
+        ended = true;
+        speech.wake();
+      }
+    })();
+    let queued = 0;
+    let at = Date.now();
+    let sent = 0;
+    const ahead = () => Math.max(0, queued - (Date.now() - at) / FRAME_MS);
+    try {
+      for (;;) {
+        if (signal?.aborted) throw new CanceledError(Code.Canceled, "stopped speaking");
+        if (speech.stopped) break;
+        if (failed) throw failure;
+        if (this.#done) {
+          throw this.#ending ?? new FailedPreconditionError(Code.FailedPrecondition, "not in the voice channel any more");
+        }
+        if (ended && pending.length === 0) {
+          // Let what's queued play out.
+          const left = ahead();
+          if (left <= 0) break;
+          await nap(left * FRAME_MS);
+          continue;
+        }
+        const left = ahead();
+        if (left > AHEAD) {
+          await nap((left - AHEAD) * FRAME_MS);
+          continue;
+        }
+        // Send a batch, or whatever there is when the instance is about to run dry.
+        if (pending.length >= BATCH || (pending.length > 0 && (left <= 1 || ended))) {
+          const batch = pending.splice(0, BATCH);
+          room?.();
+          room = undefined;
+          queued = await this.#say(batch, signal);
+          at = Date.now();
+          sent += batch.length;
+          continue;
+        }
+        await nap(pending.length > 0 ? (left - 1) * FRAME_MS : 60_000);
+      }
+    } finally {
+      speech.playing = false;
+      signal?.removeEventListener("abort", onAbort);
+      if (!ended) {
+        room?.();
+        void Promise.resolve(iterator.return?.()).catch(() => {});
+      }
+    }
+    return { interrupted: speech.stopped, by: speech.by, sentMs: sent * FRAME_MS };
+  }
+
+  #interrupt(speech: Speech, by?: string): void {
+    if (speech.stopped) return;
+    speech.stopped = true;
+    speech.by = by;
+    speech.wake();
   }
 
   async #run(first: AsyncIterator<ListenVoiceResponse>): Promise<void> {
@@ -356,6 +722,10 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
       clearInterval(this.#sweeper);
       for (const userId of this.#lastHeard.keys()) this.#emit("silent", userId);
       this.#lastHeard.clear();
+      for (const open of this.#open.values()) open.utterance.finish();
+      this.#open.clear();
+      for (const speech of this.#speeches) speech.wake();
+      for (const reader of this.#utteranceReaders) reader.wake?.();
       this.#wake?.();
       this.#emit("closed", this.#ending);
     }
@@ -364,9 +734,43 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
   #heard(f: { userId: string; opus: Uint8Array; timestamp: number }): void {
     const frame: VoiceFrame = { userId: f.userId, opus: f.opus, timestamp: f.timestamp };
     // Opus sends a packet of a byte or two for silence (DTX): that's not speaking.
-    if (frame.opus.length > 2) {
-      if (!this.#lastHeard.has(frame.userId)) this.#emit("speaking", frame.userId);
-      this.#lastHeard.set(frame.userId, Date.now());
+    const loud = frame.opus.length > 2;
+    const now = Date.now();
+    if (loud) {
+      if (!this.#lastHeard.has(frame.userId)) {
+        this.#emit("speaking", frame.userId);
+        for (const speech of this.#speeches) {
+          const may = speech.interruptible;
+          if (!speech.playing || !may) continue;
+          try {
+            if (may === true || may(frame.userId)) this.#interrupt(speech, frame.userId);
+          } catch (err) {
+            this.#fail("interruptible", err);
+          }
+        }
+      }
+      this.#lastHeard.set(frame.userId, now);
+    }
+    let open = this.#open.get(frame.userId);
+    if (open && open.utterance.durationMs >= (this.#opts.maxUtteranceMs ?? 60_000)) {
+      this.#open.delete(frame.userId);
+      open.utterance.finish();
+      open = undefined;
+    }
+    if (!open && loud && (this.#utteranceReaders.size > 0 || this.#listeners.get("utterance")?.size)) {
+      open = { utterance: new Utterance(frame.userId), lastSound: now };
+      this.#open.set(frame.userId, open);
+      for (const reader of this.#utteranceReaders) {
+        reader.queue.push(open.utterance);
+        if (reader.queue.length > 100) reader.queue.shift(); // a reader far behind loses the oldest
+        reader.wake?.();
+        reader.wake = undefined;
+      }
+      this.#emit("utterance", open.utterance);
+    }
+    if (open) {
+      open.utterance.add(frame);
+      if (loud) open.lastSound = now;
     }
     this.#emit("frame", frame);
     this.#queue.push(frame);
@@ -396,6 +800,18 @@ export class VoiceConnection implements AsyncIterable<VoiceFrame> {
       console.error(`[fuwa voice] ${e.name}: ${e.message}`);
     }
   }
+}
+
+/** A packet as the 20 ms frames a voice channel takes, or a TypeError saying why it can't be. */
+function twentyMs(packet: Uint8Array): Uint8Array[] {
+  const frames = splitOpusPacket(packet);
+  const wrong = frames.find((f) => opusPacketDuration(f) !== FRAME_MS);
+  if (wrong) {
+    throw new TypeError(
+      `voice channels take 20 ms Opus frames, and this sound has ${opusPacketDuration(wrong)} ms ones (re-encode with -frame_duration 20)`,
+    );
+  }
+  return frames;
 }
 
 /** Joins a voice channel (see VoiceConnection). */

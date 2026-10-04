@@ -178,6 +178,14 @@ message InstanceSettings {
   // every activity; statuses still show. On unless changed.
   // FUWA_RICH_PRESENCE.
   bool rich_presence = 41;
+  // How many messages a minute all the people of one server on another
+  // instance may send together to a channel shared from here; unset for no
+  // cap. FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE.
+  optional int64 shared_remote_sends_per_minute = 46;
+  // How many people one server on another instance may bring to channels
+  // shared from a server here; unset for no cap.
+  // FUWA_LIMIT_SHARED_REMOTE_PEOPLE.
+  optional int64 shared_remote_people = 47;
   // GIF search in the apps' composers (GifService). Off until a provider
   // and its key are set. FUWA_GIF_PROVIDER and FUWA_GIF_API_KEY.
   GifSettings gifs = 43;

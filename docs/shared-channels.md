@@ -129,5 +129,5 @@ admin disconnects them.
 - Across instances (phase 2): the home instance relays everything, instances
   trust each other through signed instance keys, off by default. The link
   between instances, and asking for and approving a share across it, are in
-  [federation.md](federation.md); messages across instances come next.
+  [federation.md](federation.md), with messages and live events across it.
 - The desktop app's screens.
