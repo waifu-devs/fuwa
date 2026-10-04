@@ -7,6 +7,7 @@ import { onLiveEvent, onRemoved } from "@/lib/notify";
 import { fromItems } from "@/lib/rail";
 import { reportStartup, reportTiming, type ReportTarget } from "@/lib/reports";
 import { makeApi, type Api } from "./client";
+import { followFriends } from "./friends";
 import { startPresence } from "./presence";
 import { FuwaError, call, toFuwaError } from "./errors";
 import { instanceKey, loadSaved, storeSaved, type SavedInstance } from "./saved";
@@ -164,6 +165,8 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
         () => Effect.sync(() => stopDms(key)),
       );
     }
+    // Friends too: listening is also what shows you online to them.
+    if (me.user) yield* Effect.forkScoped(followFriends(key, api));
     // Presence (who's online, what they're doing) runs alongside too.
     yield* Effect.acquireRelease(
       Effect.sync(() => startPresence(key, api)),

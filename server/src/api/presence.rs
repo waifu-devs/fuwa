@@ -177,8 +177,17 @@ impl PresenceService for Api {
                 let account = self.account(request.metadata()).await?;
                 let settings = request.into_inner().settings.ok_or_else(|| Error::invalid("settings are required"))?;
                 let settings = presence::check_settings(settings)?;
-                self.app.node()?.set_presence_settings(&account.id, &settings).await?;
+                let node = self.app.node()?;
+                let before = node.presence_settings(&account.id).await?;
+                node.set_presence_settings(&account.id, &settings).await?;
                 self.app.presence.settings_changed(&self.app.index, &account.id, settings.clone());
+                // Friends see invisible people offline too.
+                let invisible = pb::PresenceStatus::Invisible as i32;
+                if (before.status == invisible) != (settings.status == invisible)
+                    && self.app.friends().is_ok_and(|friends| friends.is_online(&account.id))
+                {
+                    super::friends::announce(self.app.clone(), account.id.clone());
+                }
                 Ok(pb::UpdatePresenceSettingsResponse { settings: Some(settings) })
             }
             .await,

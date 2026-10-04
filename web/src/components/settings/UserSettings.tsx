@@ -5,6 +5,7 @@ import {
   BellRingIcon,
   BotIcon,
   CodeXmlIcon,
+  HeartHandshakeIcon,
   DatabaseIcon,
   Flower2Icon,
   IdCardIcon,
@@ -37,6 +38,7 @@ import { hasPassword, LinkedSignIn, Password, Session } from "@/components/setti
 import { Agents } from "@/components/settings/account/Agents";
 import { Devices } from "@/components/settings/account/Devices";
 import { Privacy } from "@/components/settings/account/Privacy";
+import { FriendPrivacy } from "@/components/settings/account/FriendPrivacy";
 import { Profile } from "@/components/settings/account/Profile";
 import { Security } from "@/components/settings/account/Security";
 import { ServerNotifications } from "@/components/settings/account/ServerNotifications";
@@ -255,6 +257,18 @@ export function UserSettings() {
           keywords: "bot bots token api key automation integration developer",
         },
         {
+          id: "friends",
+          label: "Friends and privacy",
+          icon: HeartHandshakeIcon,
+          description: "Who can ask to be friends or message you, and what friends see.",
+          keywords: "friend requests direct messages dm online status mutual block",
+          settings: [
+            { id: "friend-requests", label: "Who can send you friend requests", keywords: "requests add" },
+            { id: "direct-messages", label: "Who can start a conversation with you", keywords: "dm messages" },
+            { id: "friends-see", label: "What your friends see", keywords: "online mutual" },
+          ],
+        },
+        {
           id: "privacy",
           label: "Data and privacy",
           icon: DatabaseIcon,
@@ -302,6 +316,7 @@ export function UserSettings() {
       {key && section === "linked" && <LinkedSignIn instanceKey={key} />}
       {key && section === "server-notifications" && <ServerNotifications instanceKey={key} />}
       {key && section === "agents" && <Agents instanceKey={key} />}
+      {key && section === "friends" && <FriendPrivacy instanceKey={key} />}
       {key && section === "privacy" && <Privacy instanceKey={key} />}
       {key && section === "session" && <Session instanceKey={key} />}
     </SettingsScreen>

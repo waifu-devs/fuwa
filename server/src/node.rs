@@ -31,6 +31,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0014_server_arrangements.sql"),
     include_str!("../migrations/node/0018_gifs.sql"),
     include_str!("../migrations/node/0019_attachment_days.sql"),
+    include_str!("../migrations/node/0020_friends.sql"),
     include_str!("../migrations/node/0021_presence.sql"),
 ];
 
@@ -618,6 +619,13 @@ impl NodeDb {
         .await
     }
 
+    /// Any kind of account, by username (lowercase).
+    pub async fn account_by_username(&self, username: &str) -> Result<Option<Account>> {
+        let conn = self.read()?;
+        query_one(&conn, &format!("SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE username = ?1"), [username], account)
+            .await
+    }
+
     pub async fn account(&self, id: &str) -> Result<Option<Account>> {
         let conn = self.read()?;
         query_one(&conn, &format!("SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE id = ?1"), [id], account).await
@@ -1067,6 +1075,25 @@ impl NodeDb {
             },
             None => pb::PresenceSettings { status: pb::PresenceStatus::Online as i32, ..Default::default() },
         })
+    }
+
+    /// Which of `ids` picked invisible: they show offline everywhere, to
+    /// friends too.
+    pub async fn invisible_of(&self, ids: &[&str]) -> Result<HashSet<String>> {
+        if ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let placeholders = (2..=ids.len() + 1).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        let mut params = vec![turso::Value::from(pb::PresenceStatus::Invisible as i64)];
+        params.extend(ids.iter().map(|id| turso::Value::from(*id)));
+        let rows = query_all(
+            &self.read()?,
+            &format!("SELECT account_id FROM presence_settings WHERE status = ?1 AND account_id IN ({placeholders})"),
+            params,
+            |r| r.get::<String>(0),
+        )
+        .await?;
+        Ok(rows.into_iter().collect())
     }
 
     pub async fn set_presence_settings(&self, account_id: &str, settings: &pb::PresenceSettings) -> Result<()> {
@@ -1689,20 +1716,21 @@ impl NodeDb {
         .await
     }
 
-    /// A server's files in use: its icon, emoji, webhooks' pictures and
-    /// messages' attachments.
+    /// A server's files in use: its icon, banner, emoji, webhooks' pictures
+    /// and messages' attachments.
     pub async fn server_media(&self, server_id: &str) -> Result<Vec<String>> {
         let conn = self.read()?;
         query_all(
             &conn,
             "SELECT id FROM media WHERE server_id = ?1 AND stored_at IS NOT NULL AND used_at IS NOT NULL
-             AND purpose IN (?2, ?3, ?4, ?5) ORDER BY id",
+             AND purpose IN (?2, ?3, ?4, ?5, ?6) ORDER BY id",
             (
                 server_id,
                 pb::MediaPurpose::ServerIcon as i64,
                 pb::MediaPurpose::Emoji as i64,
                 pb::MediaPurpose::Avatar as i64,
                 pb::MediaPurpose::Attachment as i64,
+                pb::MediaPurpose::Banner as i64,
             ),
             |r| r.get::<String>(0),
         )
