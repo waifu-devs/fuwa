@@ -63,6 +63,9 @@ message SendMessageRequest {
   // shared with other servers.
   // (7 is the emoji picker's, 8 and 9 are threads'.)
   NewPoll poll = 10;
+  // A GIF, as GifService.PrepareGif or ListSavedGifs gave it (sealed).
+  // Needs ATTACH_FILES. Not in channels shared from another server yet.
+  MessageGif gif = 11;
 }
 
 // A poll as its creator writes it.

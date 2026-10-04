@@ -171,6 +171,33 @@ message InstanceSettings {
   // polls in a minute; unset for no cap. FUWA_LIMIT_POLL_VOTES_PER_MINUTE.
   // (36 to 38 are voice messages', 39 and 40 attachments'.)
   optional int64 poll_votes_per_minute = 44;
+  // GIF search in the apps' composers (GifService). Off until a provider
+  // and its key are set. FUWA_GIF_PROVIDER and FUWA_GIF_API_KEY.
+  GifSettings gifs = 43;
+}
+
+// The GIF search provider and its caps. Every call to the provider is made
+// by the instance, never by apps, with nothing about who asked.
+message GifSettings {
+  // GIPHY or Klipy; unspecified is off.
+  GifProvider provider = 1;
+  // Only ever sent in: empty keeps the saved key.
+  string api_key = 2;
+  // Whether a key is saved. Read-only.
+  bool api_key_set = 3;
+  // The saved key's last four characters. Read-only.
+  string api_key_hint = 4;
+  // The most a result may be rated: "g", "pg", "pg-13" (default) or "r".
+  string rating = 5;
+  // The biggest GIF stored when someone sends one, in bytes; unset for no
+  // cap. Bigger ones are sent at the provider's smaller size, or refused.
+  optional int64 gif_bytes = 6;
+  // Searches (trending and categories included) one account may make a
+  // minute; unset for no cap.
+  optional int64 searches_per_minute = 7;
+  // Calls the instance makes to the provider a day (UTC), for everyone
+  // together; unset for no cap. Answers kept from earlier don't count.
+  optional int64 provider_calls_per_day = 8;
 }
 
 // One moderation provider, as the instance's admins set it up: one fuwa

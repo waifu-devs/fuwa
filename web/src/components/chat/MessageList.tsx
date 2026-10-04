@@ -64,6 +64,7 @@ import { items } from "@/lib/context-menu";
 import { Embeds } from "@/components/chat/Embeds";
 import { PollCard } from "@/components/chat/Poll";
 import { PollPlace, type PollPlaceValue } from "@/components/chat/pollPlace";
+import { GifMessage } from "@/components/chat/GifMessage";
 import { AppBadge } from "@/components/AppBadge";
 import { ServerTag, SharedNote } from "@/components/chat/Shared";
 import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
@@ -773,6 +774,7 @@ const MessageRow = memo(function MessageRow({
               </span>
             )}
             <Embeds embeds={message.embeds} animate={animate} />
+            <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
             {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
             {message.poll && <PollCard message={message} mine={mine} animate={animate} />}
           </>
