@@ -106,8 +106,7 @@ export function TimeChip({ ms, children }: { ms: number; children: ReactNode }) 
         onKeyDown={(e) => {
           if (e.key !== "Enter" && e.key !== " ") return;
           e.preventDefault();
-          const el = e.currentTarget;
-          setAnchor((open) => (open ? null : el));
+          setAnchor(e.currentTarget);
         }}
         onPointerEnter={(e) => e.pointerType === "mouse" && setAnchor(e.currentTarget)}
         onPointerLeave={(e) => e.pointerType === "mouse" && setAnchor(null)}

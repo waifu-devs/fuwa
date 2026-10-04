@@ -20,6 +20,7 @@ import { actionById, bindingOf, comboLabel } from "@/lib/keybinds";
 import { usePrefs } from "@/lib/prefs";
 import { formatTimestamp, STYLES, toToken, type TimestampStyle } from "@/lib/timestamps";
 import { onCommand } from "@/lib/ui";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 
 /*
@@ -89,6 +90,9 @@ export function TimestampPicker({ onPick }: { onPick: (token: string) => void })
     return action ? bindingOf(action, p) : null;
   });
 
+  // On a phone, focusing the date field would throw up the keyboard over the picker.
+  const coarse = useMediaQuery("(pointer: coarse)");
+
   useEffect(() => onCommand("insertTimestamp", () => setOpen((o) => !o)), []);
 
   return (
@@ -111,7 +115,7 @@ export function TimestampPicker({ onPick }: { onPick: (token: string) => void })
       <FloatingPortal>
         <AnimatePresence>
           {open && (
-            <FloatingFocusManager context={context} initialFocus={0} modal={false} returnFocus={false}>
+            <FloatingFocusManager context={context} initialFocus={coarse ? -1 : 0} modal={false} returnFocus={false}>
               <div ref={refs.setFloating} style={floatingStyles} className="z-50" {...getFloatingProps()}>
                 <Panel
                   onPick={(token) => {
@@ -130,14 +134,15 @@ export function TimestampPicker({ onPick }: { onPick: (token: string) => void })
 
 function Panel({ onPick }: { onPick: (token: string) => void }) {
   const now = useNow(1000);
-  const [start] = useState(() => nextHour(Date.now()));
+  const [opened] = useState(Date.now);
+  const start = useMemo(() => nextHour(opened), [opened]);
   const [date, setDate] = useState(() => dateValue(start));
   const [time, setTime] = useState(() => timeValue(start));
   const [style, setStyle] = useState<TimestampStyle>(lastStyle);
   const id = useId();
   const at = fromFields(date, time);
   const token = at ? toToken(at, style) : "";
-  const picks = useMemo(() => quickPicks(start.getTime() - 3_600_000), [start]);
+  const picks = useMemo(() => quickPicks(opened), [opened]);
 
   function choose(next: TimestampStyle) {
     setStyle(next);
