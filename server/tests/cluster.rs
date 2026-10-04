@@ -1527,7 +1527,13 @@ async fn servers_live_in_their_region_and_move() {
     };
     assert_eq!(c.servers.update_server(authed(&juan, request)).await.unwrap_err().code(), Code::PermissionDenied);
     assert_eq!(reserve(pb::MediaPurpose::Emoji, &server.id, &mika).await.unwrap_err().code(), Code::NotFound);
-    assert_eq!(reserve(pb::MediaPurpose::Banner, &server.id, &juan).await.unwrap_err().code(), Code::InvalidArgument);
+    assert_eq!(
+        reserve(pb::MediaPurpose::Background, &server.id, &juan).await.unwrap_err().code(),
+        Code::InvalidArgument
+    );
+    // A server's banner goes to its region too.
+    let banner = reserve(pb::MediaPurpose::Banner, &server.id, &juan).await.unwrap();
+    assert!(banner.upload_url.contains(&format!("/media/servers/{}/upload/", server.id)));
     let request = pb::UpdateServerRequest {
         server_id: server.id.clone(),
         icon_url: Some(direct.url.clone()),

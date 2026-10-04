@@ -524,13 +524,14 @@ fn plain(status: StatusCode, message: &str) -> Response {
 
 // ─────────────── The directory ───────────────
 
-/// Whether the picture is the server's to take: an icon, emoji or webhook
-/// picture it uses, still kept here.
+/// Whether the picture is the server's to take: an icon, banner, emoji or
+/// webhook picture it uses, still kept here.
 async fn takeable(app: &App, server_id: &str, media_id: &str) -> Result<crate::media::MediaRow> {
     let row = app.node()?.media(media_id).await?.ok_or(Error::NotFound("picture"))?;
     let purpose = matches!(
         row.purpose,
         pb::MediaPurpose::ServerIcon
+            | pb::MediaPurpose::Banner
             | pb::MediaPurpose::Emoji
             | pb::MediaPurpose::Avatar
             | pb::MediaPurpose::Attachment

@@ -14,7 +14,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataMap;
 use tonic::{Request, Response, Status};
 
+use super::friends::Reach;
 use super::{Api, respond};
+use crate::app::App;
 use crate::dms::{ConversationRow, DeviceRow, KeyPackage, MAX_KEY_PACKAGES, NewRecord};
 use crate::error::{Error, Result};
 use crate::id::{now_ms, timestamp};
@@ -54,6 +56,48 @@ struct OnDevice {
 /// Direct messages are end-to-end encrypted between people's devices; an
 /// agent has none.
 const AGENTS_HAVE_NO_DMS: &str = "agents can't use direct messages";
+
+/// When `viewer` blocked someone in this conversation, the block's time if
+/// the conversation is from before it; `Err(())` inside when it was opened
+/// after (it's kept from them altogether).
+async fn blocked_at(
+    friends: &crate::friends::Friends,
+    viewer: &str,
+    conversation: &ConversationRow,
+) -> Result<Option<std::result::Result<i64, ()>>> {
+    let mut at: Option<i64> = None;
+    for other in conversation.participants.iter().filter(|id| *id != viewer) {
+        if let Some(link) = friends.link(viewer, other, 0).await?
+            && link.state == pb::FriendState::Blocked
+        {
+            at = Some(at.map_or(link.created_at, |at| at.min(link.created_at)));
+        }
+    }
+    Ok(at.map(|at| if conversation.created_at > at { Err(()) } else { Ok(at) }))
+}
+
+/// Keeps what someone `viewer` blocked sent out of what they read: a
+/// message's ciphertext goes, as if deleted before they read it; the group's
+/// commits still reach them, so the conversation works again once they
+/// unblock. A conversation that person opened after the block isn't there
+/// for `viewer` at all: false means leave the record out.
+async fn shown_to(app: &App, viewer: &str, record: &mut pb::ConversationRecord) -> Result<bool> {
+    if record.sender_id == viewer {
+        return Ok(true);
+    }
+    let friends = app.friends()?;
+    if !friends.blocked(viewer, &record.sender_id).await? {
+        return Ok(true);
+    }
+    let Some(conversation) = app.dms()?.conversation(&record.conversation_id).await? else { return Ok(false) };
+    if matches!(blocked_at(friends, viewer, &conversation).await?, Some(Err(()))) {
+        return Ok(false);
+    }
+    if record.kind == pb::ConversationRecordKind::Message as i32 {
+        record.data.clear();
+    }
+    Ok(true)
+}
 
 fn malformed(err: wire::Malformed) -> Error {
     Error::invalid(err.to_string())
@@ -125,6 +169,30 @@ impl Api {
             .await?
             .ok_or_else(|| Error::FailedPrecondition("register this device for direct messages first".into()))?;
         Ok(OnDevice { account: caller.account, device })
+    }
+
+    /// Someone's friends, who may open conversations with them without a
+    /// server in common.
+    async fn friend_set(&self, account_id: &str) -> Result<HashSet<String>> {
+        Ok(self.app.friends()?.friend_ids(account_id).await?.into_iter().collect())
+    }
+
+    /// Someone's conversations as they see them: one with a person they
+    /// blocked stays where it was when they blocked them (what's sent since
+    /// is kept from them), and one that person opened since isn't there.
+    async fn as_seen_by(&self, account_id: &str, mut rows: Vec<ConversationRow>) -> Result<Vec<ConversationRow>> {
+        let friends = self.app.friends()?;
+        let mut kept = Vec::with_capacity(rows.len());
+        for mut row in rows.drain(..) {
+            match blocked_at(friends, account_id, &row).await? {
+                Some(Err(())) => continue,
+                Some(Ok(at)) => row.updated_at = row.updated_at.min(at),
+                None => {}
+            }
+            kept.push(row);
+        }
+        kept.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then_with(|| b.id.cmp(&a.id)));
+        Ok(kept)
     }
 
     /// The devices of these accounts whose sessions are still signed in.
@@ -230,12 +298,19 @@ impl Api {
             return Err(Error::invalid(format!("ask about at most {MAX_LOOKUPS} people at once")));
         }
         let partners = self.app.dms()?.partners(&account.id).await?;
+        let friends = self.friend_set(&account.id).await?;
         let mut ids: Vec<&str> = req.user_ids.iter().map(String::as_str).collect();
         ids.sort_unstable();
         ids.dedup();
         for &id in &ids {
-            if id != account.id && !partners.contains(id) && !self.app.index.share_a_server(&account.id, id) {
-                return Err(Error::denied("you can only see the devices of people you share a server with"));
+            if id != account.id
+                && !partners.contains(id)
+                && !friends.contains(id)
+                && !self.app.index.share_a_server(&account.id, id)
+            {
+                return Err(Error::denied(
+                    "you can only see the devices of friends and people you share a server with",
+                ));
             }
         }
         let devices = self.live_devices(&ids).await?;
@@ -253,18 +328,20 @@ impl Api {
         }
         let dms = self.app.dms()?;
         let partners = dms.partners(&account.id).await?;
+        let friends = self.friend_set(&account.id).await?;
         let mut ids: Vec<&str> = req.device_ids.iter().map(String::as_str).collect();
         ids.sort_unstable();
         ids.dedup();
         let devices = dms.devices(&ids).await?;
         // Secure channels add the devices of people who share a server with
-        // you, the same people you could open a conversation with.
+        // you; those and your friends are who you could open a conversation with.
         if devices.iter().any(|device| {
             device.account_id != account.id
                 && !partners.contains(&device.account_id)
+                && !friends.contains(&device.account_id)
                 && !self.app.index.share_a_server(&account.id, &device.account_id)
         }) {
-            return Err(Error::denied("you can only add the devices of people you share a server with"));
+            return Err(Error::denied("you can only add the devices of friends and people you share a server with"));
         }
         let mut owners: Vec<&str> = devices.iter().map(|device| device.account_id.as_str()).collect();
         owners.sort_unstable();
@@ -275,20 +352,23 @@ impl Api {
             .filter(|device| live.contains(&device.session_id))
             .map(|device| device.id.as_str())
             .collect();
-        // Strangers' devices (people you share only a server with) give up a
-        // limited number of single-use key packages an hour.
-        let strangers: Vec<&str> = devices
+        // Everyone else's devices give up a limited number of single-use key
+        // packages an hour, whatever they are to you: partners too, so a
+        // partner who blocked you answers as one who didn't.
+        let others: Vec<&str> = devices
             .iter()
-            .filter(|device| {
-                device.account_id != account.id
-                    && !partners.contains(&device.account_id)
-                    && claimable.contains(&device.id.as_str())
-            })
+            .filter(|device| device.account_id != account.id && claimable.contains(&device.id.as_str()))
             .map(|device| device.id.as_str())
             .collect();
-        let allowed = dms.take_stranger_claims(&account.id, &strangers, now_ms());
-        let last_resort_only: HashSet<&str> = strangers.into_iter().filter(|id| !allowed.contains(id)).collect();
-        let claimed = dms.claim_key_packages(&claimable, &last_resort_only).await?;
+        let allowed = dms.take_stranger_claims(&account.id, &others, now_ms());
+        let last_resort_only: HashSet<&str> = others.into_iter().filter(|id| !allowed.contains(id)).collect();
+        let claimed = match dms.claim_key_packages(&claimable, &last_resort_only).await {
+            Ok(claimed) => claimed,
+            Err(err) => {
+                dms.refund_stranger_claims(&account.id, &allowed);
+                return Err(err);
+            }
+        };
         Ok(pb::ClaimKeyPackagesResponse {
             key_packages: claimed
                 .into_iter()
@@ -308,9 +388,11 @@ impl Api {
             return Err(Error::invalid("you can't start a conversation with yourself"));
         }
         let dms = self.app.dms()?;
-        if !self.app.index.share_a_server(&account.id, with) && !dms.partners(&account.id).await?.contains(with) {
-            return Err(Error::denied("you can only message people you share a server with"));
-        }
+        let existing = dms.partners(&account.id).await?.contains(with);
+        // Who may start one is theirs to say (friends, people in a server
+        // with them, nobody new). Someone they blocked gets one as usual,
+        // but they aren't told of it.
+        let reach = self.may_message(&account.id, with, existing).await?;
         let other = self.app.node()?.account(with).await?.ok_or(Error::NotFound("user"))?;
         if account.kind == pb::AccountKind::Agent || other.kind == pb::AccountKind::Agent {
             return Err(Error::FailedPrecondition(AGENTS_HAVE_NO_DMS.into()));
@@ -321,7 +403,8 @@ impl Api {
             let event = pb::DirectMessageEvent {
                 payload: Some(pb::direct_message_event::Payload::ConversationOpened(conversation.clone())),
             };
-            dms.publish(&row.participants, event);
+            let told = if reach == Reach::Hidden { vec![account.id.clone()] } else { row.participants.clone() };
+            dms.publish(&told, event);
         }
         Ok(pb::OpenConversationResponse { conversation: Some(conversation), created })
     }
@@ -409,6 +492,11 @@ impl Api {
         if conversation.epoch == 0 {
             return Err(Error::FailedPrecondition("add the conversation's devices before sending".into()));
         }
+        // Taken even from someone the other blocked; it's kept from them
+        // when they read (`shown_to`).
+        for other in conversation.participants.iter().filter(|id| **id != account.id) {
+            self.may_message(&account.id, other, true).await?;
+        }
         let record = dms
             .append(&NewRecord {
                 conversation_id: &conversation.id,
@@ -475,6 +563,7 @@ impl DirectMessageService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let rows = self.app.dms()?.conversations(&account.id).await?;
+                let rows = self.as_seen_by(&account.id, rows).await?;
                 Ok(pb::ListConversationsResponse { conversations: self.conversations_pb(&rows).await? })
             }
             .await,
@@ -512,7 +601,16 @@ impl DirectMessageService for Api {
                     limit @ 1..=500 => i64::from(limit),
                     _ => return Err(Error::invalid("limit must be 1 to 500")),
                 };
-                let (records, has_more) = dms.records(&conversation.id, req.after_sequence.max(0), limit).await?;
+                let (mut records, has_more) = dms.records(&conversation.id, req.after_sequence.max(0), limit).await?;
+                match blocked_at(self.app.friends()?, &account.id, &conversation).await? {
+                    Some(Err(())) => return Err(Error::NotFound("conversation")),
+                    Some(Ok(_)) => {
+                        for record in &mut records {
+                            shown_to(&self.app, &account.id, record).await?;
+                        }
+                    }
+                    None => {}
+                }
                 Ok(pb::ListRecordsResponse { records, has_more })
             }
             .await,
@@ -525,8 +623,22 @@ impl DirectMessageService for Api {
     ) -> Result<Response<pb::ListWelcomesResponse>, Status> {
         respond(
             async {
-                let OnDevice { device, .. } = self.on_device(request.metadata()).await?;
-                Ok(pb::ListWelcomesResponse { welcomes: self.app.dms()?.welcomes(&device.id).await? })
+                let OnDevice { account, device } = self.on_device(request.metadata()).await?;
+                let dms = self.app.dms()?;
+                let mut welcomes = Vec::new();
+                // None into a conversation someone they blocked opened since.
+                for welcome in dms.welcomes(&device.id).await? {
+                    let hidden = match dms.conversation(&welcome.conversation_id).await? {
+                        Some(conversation) => {
+                            matches!(blocked_at(self.app.friends()?, &account.id, &conversation).await?, Some(Err(())))
+                        }
+                        None => true,
+                    };
+                    if !hidden {
+                        welcomes.push(welcome);
+                    }
+                }
+                Ok(pb::ListWelcomesResponse { welcomes })
             }
             .await,
         )
@@ -694,7 +806,24 @@ impl DirectMessageService for Api {
                     }
                     event = events.recv() => match event {
                         Ok(event) => {
-                            let response = pb::WatchResponse { ready: false, event: Some((*event).clone()) };
+                            let mut event = (*event).clone();
+                            if let Some(
+                                pb::direct_message_event::Payload::RecordAdded(record)
+                                | pb::direct_message_event::Payload::RecordDeleted(record),
+                            ) = &mut event.payload
+                            {
+                                match shown_to(&app, &caller.account.id, record).await {
+                                    Ok(true) => {}
+                                    Ok(false) => continue,
+                                    Err(_) => {
+                                        // Can't tell whether it's from someone they blocked:
+                                        // they watch again and catch up by listing.
+                                        let _ = tx.send(Err(Status::unavailable("watch again"))).await;
+                                        return;
+                                    }
+                                }
+                            }
+                            let response = pb::WatchResponse { ready: false, event: Some(event) };
                             if !send(Ok(response)).await {
                                 return;
                             }
