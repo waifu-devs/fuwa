@@ -197,6 +197,40 @@ test("the follower picks up new servers at once", async () => {
   assert.deepEqual(asked, [["a"], ["a", "b"]]);
 });
 
+test("the follower can follow servers joined while it runs, from none", async () => {
+  const asked: { servers: string[]; follow: boolean }[] = [];
+  let calls = 0;
+  const fuwa = fakeEvents({
+    async *subscribe(req: { servers: { serverId: string; afterSequence?: bigint }[]; followNewServers: boolean }) {
+      asked.push({ servers: req.servers.map((s) => `${s.serverId}@${s.afterSequence}`), follow: req.followNewServers });
+      calls++;
+      if (calls === 1) {
+        yield { ready: { servers: [] } };
+        yield { followed: { serverId: "n", sequence: 3n } };
+        yield event("n", 4n, "hi");
+        throw new ConnectError("restarting", Code.Unavailable);
+      }
+      yield { ready: { servers: [{ serverId: "n", sequence: 4n }] } };
+    },
+  });
+  const stop = new AbortController();
+  const follower = new EventFollower(fuwa, { servers: [], followNewServers: true, signal: stop.signal, baseDelayMs: 1, maxDelayMs: 2 });
+  const seen: string[] = [];
+  for await (const u of follower) {
+    if (u.type === "followed") seen.push(`followed:${u.head.serverId}`);
+    else if (u.type === "event") seen.push(String(u.event.sequence));
+    else seen.push(u.type);
+    if (seen.length === 5) stop.abort();
+  }
+  assert.deepEqual(seen, ["ready", "followed:n", "4", "disconnected", "ready"]);
+  // Followed without a restart, and resumed with the rest after one.
+  assert.deepEqual(asked, [
+    { servers: [], follow: true },
+    { servers: ["n@4"], follow: true },
+  ]);
+  assert.deepEqual([...follower.servers], ["n"]);
+});
+
 test("unary calls retry what's worth retrying, and only that", async () => {
   let tries = 0;
   const fuwa = createFuwa({

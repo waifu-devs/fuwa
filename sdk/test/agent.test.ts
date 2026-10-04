@@ -106,14 +106,15 @@ test("an agent answers commands, mentions and messages", async () => {
   const { message: asked } = await say("/echo hello there");
   await say("@helper roll");
   await say("hey @helper, you there?");
-  const replies = await until("three replies... or two and a mention", async () => {
+  await say(`ping <@${agent.me.id}>`); // by id, as the apps write it
+  const replies = await until("two replies and three mentions", async () => {
     const list = await agentMessages(agent);
-    return list.length >= 2 && mentioned.length >= 2 ? list : undefined;
+    return list.length >= 2 && mentioned.length >= 3 ? list : undefined;
   });
   assert.equal(replies[0]!.content, "hello there");
   assert.equal(replies[0]!.replyToId, asked!.id);
   assert.match(replies[1]!.content, /^rolled [1-6]$/);
-  assert.deepEqual(mentioned, ["@helper roll", "hey @helper, you there?"]);
+  assert.deepEqual(mentioned, ["@helper roll", "hey @helper, you there?", `ping <@${agent.me.id}>`]);
   // Its own replies reach the typed handler, but not "message".
   assert.ok(seen.every((s) => !s.startsWith("rolled")));
   await until("its own messages as events", () => created.some((c) => c.startsWith("rolled")) || undefined);
@@ -159,8 +160,9 @@ test("an agent reconnects when the instance restarts, and misses nothing", async
   await agent.stop();
 });
 
-test("an agent notices servers it's added to", async () => {
-  const agent = newAgent({ serverRefreshMs: 100 });
+test("an agent follows servers it's added to straight away", async () => {
+  // No polling: the instance announces the new server on the stream.
+  const agent = newAgent({ serverRefreshMs: 60_000 });
   const added: string[] = [];
   agent.on("serverAdded", (id) => void added.push(id));
   agent.command("echo", (ctx) => ctx.reply(ctx.rest));
@@ -169,9 +171,7 @@ test("an agent notices servers it's added to", async () => {
   const { channel } = await person.channels.createChannel({ serverId: server!.id, name: "general", type: ChannelType.TEXT });
   await person.agents.addAgent({ serverId: server!.id, username: "helper" });
   await until("serverAdded", () => added.includes(server!.id) || undefined);
-  await until("the stream following it", () => agent.servers.has(server!.id) || undefined);
-  // Give the new stream a moment to be live, then talk there.
-  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(agent.servers.has(server!.id), "followed on the same stream");
   await say("/echo in the second server", channel!.id, server!.id);
   await until("the answer there", async () =>
     (await agentMessages(agent, channel!.id, server!.id)).some((m) => m.content === "in the second server") || undefined,
