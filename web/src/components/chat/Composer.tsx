@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { MessageKind, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { run, sendMessage, uploadVoice } from "@/fuwa/actions";
 import { voiceLimits } from "@/fuwa/dms";
+import { instanceHas } from "@/lib/compat";
 import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
 import type { Clip } from "@/voice/recorder";
 import { useAccess } from "@/fuwa/hooks";
@@ -127,6 +128,8 @@ export function Composer({
   const [text, setText] = useState(() => drafts.get(draftKey) ?? "");
   const [alsoToChannel, setAlsoToChannel] = useState(false);
   const [voiceProblem, setVoiceProblem] = useState<string | null>(null);
+  // Only where the instance takes voice messages in channels.
+  const voiceHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "voice-messages-in-channels"));
   const box = useRef<HTMLTextAreaElement>(null);
   const plane = useAnimationControls();
   const nudge = useAnimationControls();
@@ -370,7 +373,7 @@ export function Composer({
             <BarChart3Icon className="size-[18px]" />
           </motion.button>
         )}
-        {gate.canAttach && !text && !staged.length && !cooling ? (
+        {voiceHere && gate.canAttach && !text && !staged.length && !cooling ? (
           <VoiceRecorder
             maxMs={() => voiceLimits(instanceKey).then((l) => l.maxMs)}
             onSend={sendVoice}
