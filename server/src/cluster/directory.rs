@@ -464,6 +464,8 @@ impl DirectoryService for Internal {
         let is_shard = !shard.is_empty();
         tokio::spawn(async move {
             let _following = is_shard.then(|| Following::new(app.clone(), shard));
+            let mut ended = app.ended_sessions();
+            let mut joined = app.joined_servers();
             loop {
                 let (current, automod_providers) = {
                     let settings = settings.borrow_and_update();
@@ -474,14 +476,43 @@ impl DirectoryService for Internal {
                     };
                     (settings.to_pb(), providers)
                 };
-                let response = cpb::WatchResponse { settings: Some(current), automod_providers };
+                let response = cpb::WatchResponse { settings: Some(current), automod_providers, ..Default::default() };
                 if tx.send(Ok(response)).await.is_err() {
                     return;
                 }
-                tokio::select! {
-                    _ = app.shutdown.cancelled() => return,
-                    _ = tx.closed() => return,
-                    changed = settings.changed() => if changed.is_err() { return },
+                // Then what happens to accounts, between changes to settings. One
+                // missed (the watcher fell behind) waits for the stream's own
+                // heartbeat check, or its next subscribe.
+                loop {
+                    use tokio::sync::broadcast::error::RecvError;
+                    let response = tokio::select! {
+                        _ = app.shutdown.cancelled() => return,
+                        _ = tx.closed() => return,
+                        changed = settings.changed() => if changed.is_err() { return } else { break },
+                        ended = ended.recv() => match ended {
+                            Ok(account_id) => cpb::WatchResponse {
+                                sessions_ended: vec![account_id.to_string()],
+                                ..Default::default()
+                            },
+                            Err(RecvError::Lagged(_)) => continue,
+                            Err(RecvError::Closed) => return,
+                        },
+                        // Only gateways follow new servers for streams.
+                        next = joined.recv(), if !is_shard => match next {
+                            Ok((account_id, server_id)) => cpb::WatchResponse {
+                                joined: vec![cpb::MembershipJoined {
+                                    account_id: account_id.to_string(),
+                                    server_id: server_id.to_string(),
+                                }],
+                                ..Default::default()
+                            },
+                            Err(RecvError::Lagged(_)) => continue,
+                            Err(RecvError::Closed) => return,
+                        },
+                    };
+                    if tx.send(Ok(response)).await.is_err() {
+                        return;
+                    }
                 }
             }
         });
@@ -574,6 +605,7 @@ impl DirectoryService for Internal {
         let req = request.into_inner();
         if req.joined {
             self.app.index.join(&req.account_id, &req.server_id);
+            self.app.joined_server(&req.account_id, &req.server_id);
             self.app.presence.joined(&self.app.index, &req.account_id, &req.server_id);
         } else {
             self.app.index.leave(&req.account_id, &req.server_id);

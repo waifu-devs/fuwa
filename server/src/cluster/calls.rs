@@ -79,6 +79,7 @@ impl App {
             }
             _ if joined => {
                 self.index.join(account_id, server_id);
+                self.joined_server(account_id, server_id);
                 self.presence.joined(&self.index, account_id, server_id);
             }
             _ => {

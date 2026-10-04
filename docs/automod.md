@@ -138,13 +138,14 @@ Anything else is a failure, and the admins' **Test connection** shows it:
 ## Pictures
 
 With **Check pictures too** on, Clef also gets up to 4 of a message's
-pictures: attached ones (by their type or name), then embeds' images and
-thumbnails. The instance fetches them itself, the way it fetches every
-picture from elsewhere for readers: public addresses only, at most 8 MB, 2
-seconds in all. Uploads on the instance are read from its own files. It keeps
-PNG, JPEG and WebP of at most 4 MiB and 16 megapixels each, 8 MiB in all,
-and leaves out the rest (a GIF, a huge photo, one that didn't arrive in
-time). They go in the request as data URIs, the way Clef takes them:
+pictures: attached ones (by their type or name), embeds' images and
+thumbnails, a sent GIF, then the emoji from the author's other servers it
+carries. The instance fetches them itself, the way it fetches every picture
+from elsewhere for readers: public addresses only, at most 8 MB, 2 seconds in
+all. Uploads on the instance (sent GIFs and emoji among them) are read from
+its own files. It keeps PNG, JPEG and WebP of at most 4 MiB and 16
+megapixels each, 8 MiB in all, reads a GIF as its first frame, and leaves
+out the rest (a huge photo, one that didn't arrive in time). They go in the request as data URIs, the way Clef takes them:
 
 ```json
 {
@@ -156,7 +157,8 @@ time). They go in the request as data URIs, the way Clef takes them:
 
 and each question then also says to count the pictures as part of the
 message. A message that's only pictures is asked about too. Edits are asked
-about by their text alone, since their pictures can't change. The admins' own
+about by their text and the emoji from other servers it newly carries, since
+their other pictures can't change. The admins' own
 providers get text only.
 
 ## In Rust
