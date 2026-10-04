@@ -1137,7 +1137,7 @@ async fn channels_are_shared_across_shards() {
         .shared
         .create_share_code(authed(
             &juan,
-            pb::CreateShareCodeRequest { server_id: home.id.clone(), channel_id: dev.id.clone() },
+            pb::CreateShareCodeRequest { server_id: home.id.clone(), channel_id: dev.id.clone(), ..Default::default() },
         ))
         .await
         .unwrap()
@@ -1271,7 +1271,7 @@ async fn servers_live_in_their_region_and_move() {
         .clone()
         .create_share_code(authed(
             &juan,
-            pb::CreateShareCodeRequest { server_id: in_eu.id.clone(), channel_id: channel.id },
+            pb::CreateShareCodeRequest { server_id: in_eu.id.clone(), channel_id: channel.id, ..Default::default() },
         ))
         .await
         .unwrap()
@@ -1524,6 +1524,64 @@ async fn split_instances_meet_through_their_gateways() {
     assert_eq!(fed_b.peers.len(), 1);
     assert_eq!(fed_b.peers[0].origin, format!("http://{}", a.gateway.addr));
 
+    // A channel on one of A's shards is shared into a server on one of B's:
+    // each shard's call goes out through its directory, and comes in
+    // through the other's gateway and directory to the server's shard.
+    let home = create_server(&mut ca, &admin_a, "Home").await.id;
+    let guest = create_server(&mut cb, &admin_b, "Guest").await.id;
+    let channel = general(&mut ca, &admin_a, &home).await;
+    let code = ca
+        .shared
+        .create_share_code(authed(
+            &admin_a,
+            pb::CreateShareCodeRequest {
+                server_id: home.clone(),
+                channel_id: channel.id.clone(),
+                other_instances: true,
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let preview = cb
+        .shared
+        .preview_share(authed(&admin_b, pb::PreviewShareRequest { server_id: guest.clone(), code: code.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(preview.instance, a.gateway.addr.to_string());
+    assert_eq!(preview.fingerprint, fed_a_fingerprint(&mut ca, &admin_a).await);
+    let asked = cb
+        .shared
+        .accept_share(authed(&admin_b, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    ca.shared
+        .review_share(authed(
+            &admin_a,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
+        ))
+        .await
+        .unwrap();
+    let shown = cb
+        .channels
+        .list_channels(authed(&admin_b, pb::ListChannelsRequest { server_id: guest.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels;
+    assert!(shown.iter().any(|ch| ch.shared.as_ref().is_some_and(|s| !s.home)), "{shown:?}");
+
     a.stop().await;
     b.stop().await;
+}
+
+async fn fed_a_fingerprint(c: &mut Clients, admin: &str) -> String {
+    c.admin.get_federation(authed(admin, pb::GetFederationRequest {})).await.unwrap().into_inner().fingerprint
 }
