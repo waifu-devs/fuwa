@@ -2,6 +2,7 @@ import { CrownIcon, HourglassIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Member, Role } from "@/gen/fuwa/v1/types_pb";
+import type { Activity } from "@/gen/fuwa/v1/presence_pb";
 import { useRoles } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { RoleDot } from "@/components/chat/mentions";
@@ -13,6 +14,8 @@ import { Private } from "@/components/Private";
 import { InlineMarkdown } from "@/components/Markdown";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { AppBadge } from "@/components/AppBadge";
+import { ActivityLine, PresenceDot } from "@/components/Presence";
+import { useOnline, usePresence } from "@/fuwa/presence";
 import { useMemberMenu } from "@/components/menus/member";
 import { displayName, formatStamp, isAgent, memberName, shownStatus, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
@@ -20,7 +23,7 @@ import { colorOf, hoistedRole } from "@/lib/permissions";
 
 const EMPTY: Member[] = [];
 
-type Section = { id: string; role: Role | null; members: Member[] };
+type Section = { id: string; role: Role | null; label?: string; members: Member[] };
 
 /** One line of the list: a section's heading or a member, at its place from the top. */
 type Item =
@@ -34,8 +37,9 @@ const SECTION_GAP = 16;
 
 /**
  * Everyone in the server, under their highest role that's shown apart
- * (hoisted), then everyone else. Someone given or losing a role glides to
- * their new place.
+ * (hoisted), then everyone else. Where the instance keeps presence, those
+ * are the people online, and everyone offline comes last, faded. Someone
+ * given or losing a role, or coming online, glides to their new place.
  *
  * Servers can have thousands of members, so only the lines in view are
  * drawn: every line has the same height (measured from the first one drawn,
@@ -48,10 +52,17 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
   const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id);
   const ownerId = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.ownerId);
   const roles = useRoles(instanceKey, serverId);
+  // Who's online changes at most a few times a second, as one new Set.
+  const online = useOnline(instanceKey);
   const sections = useMemo(() => {
     const byRole = new Map<string, Member[]>();
     const rest: Member[] = [];
+    const offline: Member[] = [];
     for (const m of members) {
+      if (online && !online.has(m.user?.id ?? "")) {
+        offline.push(m);
+        continue;
+      }
       const role = hoistedRole(roles, m);
       if (role) {
         const list = byRole.get(role.id);
@@ -60,9 +71,10 @@ export function MemberList({ instanceKey, serverId }: { instanceKey: string; ser
       } else rest.push(m);
     }
     const out: Section[] = roles.filter((r) => byRole.has(r.id)).map((r) => ({ id: r.id, role: r, members: byRole.get(r.id)! }));
-    if (rest.length) out.push({ id: "members", role: null, members: rest });
+    if (rest.length) out.push({ id: "members", role: null, label: online ? "Online" : "Members", members: rest });
+    if (offline.length) out.push({ id: "offline", role: null, label: "Offline", members: offline });
     return out;
-  }, [members, roles]);
+  }, [members, roles, online]);
 
   // Line heights, measured once drawn (and again if the density or text size changes).
   const [heights, setHeights] = useState({ heading: 20, member: 48 });
@@ -159,7 +171,7 @@ function SectionHeading({ section }: { section: Section }) {
   return (
     <h3 className="flex items-center gap-1.5 px-2 text-xs font-bold tracking-wide text-muted-foreground uppercase">
       {section.role && <RoleDot role={section.role} className="size-2" />}
-      <span className="truncate">{section.role?.name ?? "Members"}</span> — <Count value={section.members.length} />
+      <span className="truncate">{section.role?.name ?? section.label ?? "Members"}</span> — <Count value={section.members.length} />
     </h3>
   );
 }
@@ -181,6 +193,9 @@ const MemberRow = memo(function MemberRow({
   now: number;
   enter: boolean;
 }) {
+  // Only this row redraws when this person's presence changes.
+  const presence = usePresence(instanceKey, m.user?.id);
+  const tracked = useOnline(instanceKey) !== null;
   const menu = useMemberMenu(instanceKey, m.serverId, m.user, m);
   return (
     <motion.div
@@ -195,9 +210,13 @@ const MemberRow = memo(function MemberRow({
       transition={{ type: "spring", stiffness: 500, damping: 36 }}
       className="row-y group flex items-center gap-1 rounded-lg px-2 transition hover:bg-muted/70 has-[[data-menu-open]]:bg-muted/70"
     >
+      <span className={tracked && !presence ? "flex min-w-0 flex-1 items-center opacity-45 transition-opacity duration-300 group-hover:opacity-100" : "flex min-w-0 flex-1 items-center transition-opacity duration-300"}>
       <ProfilePopover instanceKey={instanceKey} user={m.user} member={m} side="left">
         <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" {...menu}>
-          <UserAvatar user={m.user} className="size-8 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:scale-105 group-active:scale-95" />
+          <span className="relative shrink-0 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:scale-105 group-active:scale-95">
+            <UserAvatar user={m.user} className="size-8" />
+            {tracked && <PresenceDot instanceKey={instanceKey} userId={m.user?.id} hideOffline className="absolute -right-0.5 -bottom-0.5" />}
+          </span>
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1">
               <RoleName id={m.user?.id ?? ""} name={memberName(m)} color={colorOf(roles, m)} className="text-sm" />
@@ -205,10 +224,11 @@ const MemberRow = memo(function MemberRow({
               {isAgent(m.user) && <AppBadge agent />}
               <TimedOutMark member={m} now={now} />
             </span>
-            <MemberSubtitle member={m} me={me} now={now} />
+            <MemberSubtitle member={m} me={me} now={now} activity={presence?.activities[0]} />
           </span>
         </button>
       </ProfilePopover>
+      </span>
       {m.user && (
         <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <CopyId id={m.user.id} what="user ID" />
@@ -239,21 +259,23 @@ function TimedOutMark({ member, now }: { member: Member; now: number }) {
   );
 }
 
-/** Under a member's name: their custom status, else their username. */
-function MemberSubtitle({ member, me, now }: { member: Member; me: boolean; now: number }) {
+/** Under a member's name: what they're doing, else their custom status, else their username. */
+function MemberSubtitle({ member, me, now, activity }: { member: Member; me: boolean; now: number; activity?: Activity }) {
   const status = shownStatus(member.user, now);
   return (
     <span className="relative block h-4 overflow-hidden text-xs text-muted-foreground">
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.span
-          key={status ? `s:${status}` : "username"}
+          key={activity ? `a:${activity.kind}:${activity.name}` : status ? `s:${status}` : "username"}
           initial={{ y: 12, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -12, opacity: 0 }}
           transition={{ type: "spring", stiffness: 500, damping: 32 }}
           className="block truncate"
         >
-          {status ? (
+          {activity ? (
+            <ActivityLine activity={activity} />
+          ) : status ? (
             <InlineMarkdown links={false}>{status}</InlineMarkdown>
           ) : (
             <>

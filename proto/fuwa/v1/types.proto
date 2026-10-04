@@ -37,6 +37,9 @@ message Node {
   // People may put an effect on their profile card (Profile.effect). While
   // it's off, profiles come back without one and apps hide the picker.
   bool profile_effects = 18;
+  // People may show what they're doing (PresenceService). Their status shows
+  // either way.
+  bool rich_presence = 15;
   // Where this instance keeps community servers, the home region first.
   // Empty, or one region, when there's no choice to make (an instance run
   // as one process, or one whose parts are all in one place).

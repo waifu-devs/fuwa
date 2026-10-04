@@ -17,6 +17,7 @@ import { JoinService } from "@/gen/fuwa/v1/join_pb";
 import { MediaService } from "@/gen/fuwa/v1/media_pb";
 import { MessageService } from "@/gen/fuwa/v1/message_pb";
 import { NodeService } from "@/gen/fuwa/v1/node_pb";
+import { PresenceService } from "@/gen/fuwa/v1/presence_pb";
 import { RoleService } from "@/gen/fuwa/v1/role_pb";
 import { SearchService } from "@/gen/fuwa/v1/search_pb";
 import { SecureChannelService } from "@/gen/fuwa/v1/secure_pb";
@@ -42,6 +43,7 @@ export type Api = {
   join: Client<typeof JoinService>;
   dms: Client<typeof DirectMessageService>;
   friends: Client<typeof FriendService>;
+  presence: Client<typeof PresenceService>;
   secure: Client<typeof SecureChannelService>;
   automod: Client<typeof AutoModService>;
   emojis: Client<typeof EmojiService>;
@@ -81,6 +83,7 @@ export function makeApi(url: string, token: () => string | null): Api {
     join: createClient(JoinService, transport),
     dms: createClient(DirectMessageService, transport),
     friends: createClient(FriendService, transport),
+    presence: createClient(PresenceService, transport),
     secure: createClient(SecureChannelService, transport),
     automod: createClient(AutoModService, transport),
     emojis: createClient(EmojiService, transport),
