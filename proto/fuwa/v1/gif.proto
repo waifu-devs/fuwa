@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "fuwa/v1/admin.proto";
+import "fuwa/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+// GIFs: searching the provider the instance's admins set up (GIPHY or
+// Klipy), and the GIFs each person keeps.
+//
+// The instance makes every call to the provider itself, with nothing about
+// who asked (no address, no account, no headers of theirs), and every
+// picture in an answer is a link back to the instance, which fetches it. So
+// apps never load anything from the provider, and the provider never learns
+// who searched or looked.
+//
+// To send a GIF, PrepareGif stores it on the instance (once, however many
+// people send it) and hands back a sealed MessageGif to put in
+// SendMessageRequest.gif. Saved GIFs come back sealed already.
+service GifService {
+  // Whether GIFs are on here, and whose they are.
+  rpc GetGifSettings(GetGifSettingsRequest) returns (GetGifSettingsResponse);
+  // Search; an empty query is what's trending.
+  rpc SearchGifs(SearchGifsRequest) returns (SearchGifsResponse);
+  // Moods to browse, each with a GIF to show.
+  rpc ListGifCategories(ListGifCategoriesRequest) returns (ListGifCategoriesResponse);
+  // Stores a search result, or checks a GIF you uploaded, ready to send.
+  rpc PrepareGif(PrepareGifRequest) returns (PrepareGifResponse);
+  // Your saved GIFs (favorites and uploads), newest first. At most 200.
+  rpc ListSavedGifs(ListSavedGifsRequest) returns (ListSavedGifsResponse);
+  rpc SaveGif(SaveGifRequest) returns (SaveGifResponse);
+  rpc DeleteSavedGif(DeleteSavedGifRequest) returns (DeleteSavedGifResponse);
+  // Instance admins: tries a provider and key before they're saved.
+  rpc TestGifProvider(TestGifProviderRequest) returns (TestGifProviderResponse);
+}
+
+message GetGifSettingsRequest {}
+
+message GetGifSettingsResponse {
+  // GIF search works here. Saved GIFs can be sent even when it's off.
+  bool enabled = 1;
+  GifProvider provider = 2;
+}
+
+// One GIF in search results.
+message GifResult {
+  // What PrepareGif takes. Means nothing outside this instance.
+  string id = 1;
+  string title = 2;
+  // A small moving version, through this instance.
+  string preview_url = 3;
+  // A still frame, through this instance; may be empty.
+  string still_url = 4;
+  // The preview's size, for laying out before it loads.
+  int32 width = 5;
+  int32 height = 6;
+}
+
+message SearchGifsRequest {
+  // Up to 100 characters; empty for trending.
+  string query = 1;
+  // From the last page's next_cursor; empty for the first.
+  string cursor = 2;
+  // 1 to 50; 24 unless set.
+  int32 limit = 3;
+}
+
+message SearchGifsResponse {
+  repeated GifResult results = 1;
+  // Empty when there's nothing more.
+  string next_cursor = 2;
+}
+
+message GifCategory {
+  string name = 1;
+  // What to search for it.
+  string query = 2;
+  GifResult preview = 3;
+}
+
+message ListGifCategoriesRequest {}
+
+message ListGifCategoriesResponse {
+  repeated GifCategory categories = 1;
+}
+
+message PrepareGifRequest {
+  oneof from {
+    // A GifResult's id.
+    string result_id = 1;
+    // The media.url of a GIF you uploaded (MEDIA_PURPOSE_GIF).
+    string upload_url = 2;
+  }
+}
+
+message PrepareGifResponse {
+  MessageGif gif = 1;
+}
+
+message SavedGif {
+  // Sealed, ready to send.
+  MessageGif gif = 1;
+  google.protobuf.Timestamp saved_at = 2;
+  // One you uploaded rather than found.
+  bool uploaded = 3;
+}
+
+message ListSavedGifsRequest {}
+
+message ListSavedGifsResponse {
+  repeated SavedGif gifs = 1;
+}
+
+message SaveGifRequest {
+  // A GIF's url: one in a message or from PrepareGif, or the media.url of a
+  // GIF you uploaded (MEDIA_PURPOSE_GIF).
+  string url = 1;
+}
+
+message SaveGifResponse {
+  SavedGif gif = 1;
+}
+
+message DeleteSavedGifRequest {
+  string url = 1;
+}
+
+message DeleteSavedGifResponse {}
+
+message TestGifProviderRequest {
+  // An empty key tries the saved one.
+  GifSettings settings = 1;
+}
+
+message TestGifProviderResponse {
+  bool ok = 1;
+  // What went wrong, in a few words.
+  string error = 2;
+  int32 elapsed_ms = 3;
+  // A few trending GIFs, through this instance.
+  repeated GifResult results = 4;
+}

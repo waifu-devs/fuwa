@@ -22,6 +22,8 @@ import { CallPanel } from "@/components/calls/CallPanel";
 import { SharedBadge } from "@/components/chat/Shared";
 import { VoiceUsers } from "@/components/calls/VoiceUsers";
 import { joinCall } from "@/calls/engine";
+import { useContextMenu } from "@/components/ContextMenu";
+import { categoryMenu, channelMenu, type ChannelMenuActions } from "@/components/menus/channel";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -150,6 +152,8 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
   useEffect(() => {
     if (reviews) run(listApplications(instanceKey, serverId)).catch(() => {});
   }, [reviews, instanceKey, serverId]);
+
+  const edit = (id: string, focus?: "permissions") => setSettings({ tab: "channels", target: focus ? `${id}:${focus}` : id });
 
   if (!known) return null;
   return (
@@ -320,6 +324,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                             : undefined
                         }
                         onInvite={c.type !== ChannelType.VOICE && c.type !== ChannelType.SECURE && hasIn(access, c.id, Permission.CREATE_INVITE) ? () => setInviting(c.id) : undefined}
+                        onMenuEdit={edit}
                       />
                     ));
                 if (!group.category) return rows;
@@ -331,6 +336,8 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
                     count={group.channels.length}
                     onToggle={() => setCollapsed((c) => ({ ...c, [id]: !closed }))}
                     onAdd={hasIn(access, id, Permission.MANAGE_CHANNELS) ? () => setCreating({ parentId: id }) : undefined}
+                    instanceKey={instanceKey}
+                    onMenuEdit={edit}
                   />,
                   ...rows,
                 ];
@@ -374,20 +381,31 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
 
 /** A category's header: folds its channels away, and (with Manage Channels) adds one or drags the whole category. */
 function CategoryRow({
+  instanceKey,
   category,
   closed,
   count,
   onToggle,
   onAdd,
+  onMenuEdit,
   ref,
 }: {
+  instanceKey: string;
   category: Channel;
   closed: boolean;
   count: number;
   onToggle: () => void;
   onAdd?: () => void;
+  /** Opens its settings from its right-click menu. */
+  onMenuEdit: ChannelMenuActions["edit"];
   ref?: Ref<HTMLLIElement>;
 }) {
+  const menu = useContextMenu("category", () =>
+    categoryMenu(
+      { instanceKey, serverId: category.serverId, category },
+      { edit: onMenuEdit, toggle: onToggle, collapsed: closed, create: onAdd && (() => onAdd()) },
+    ),
+  );
   return (
     <motion.li
       ref={ref}
@@ -405,7 +423,8 @@ function CategoryRow({
         type="button"
         onClick={onToggle}
         aria-expanded={!closed}
-        className="flex min-w-0 flex-1 items-center gap-1 px-1 py-1 text-xs font-bold tracking-wide text-muted-foreground uppercase transition group-data-[drop-into]:text-primary hover:text-foreground"
+        {...menu}
+        className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-xs font-bold tracking-wide text-muted-foreground uppercase transition group-data-[drop-into]:text-primary hover:text-foreground data-[menu-open]:bg-muted/70 data-[menu-open]:text-foreground"
       >
         <ChevronDownIcon className={cn("size-3 shrink-0 transition-transform duration-200", closed && "-rotate-90")} />
         <span className="truncate">{category.name}</span>
@@ -447,6 +466,7 @@ function ChannelRow({
   ref,
   onEdit,
   onInvite,
+  onMenuEdit,
   canConnect,
 }: {
   instanceKey: string;
@@ -462,6 +482,8 @@ function ChannelRow({
   onEdit?: () => void;
   /** With Create Invite there: invites people straight into it. */
   onInvite?: () => void;
+  /** Opens its settings (or its permissions) from its right-click menu. */
+  onMenuEdit: ChannelMenuActions["edit"];
 }) {
   const muted = useMuted(instanceKey, channel.serverId, channel.id);
   const unread = useFuwa((s) => (muted ? 0 : (s.instances[instanceKey]?.unread[channel.id] ?? 0)));
@@ -470,6 +492,7 @@ function ChannelRow({
   const dot = unread > 0 && !active;
   const locked = isPrivate(channel, channel.serverId);
   const voice = channel.type === ChannelType.VOICE;
+  const menu = useContextMenu("channel", () => channelMenu({ instanceKey, serverId: channel.serverId, channel }, { invite: onInvite, edit: onMenuEdit }));
   return (
     <motion.li
       ref={ref}
@@ -498,8 +521,9 @@ function ChannelRow({
           // A voice channel joins as it opens, as Discord's do, when you may connect there.
           if (voice && canConnect) void joinCall({ kind: "voice", instance: instanceKey, serverId: channel.serverId, channelId: channel.id });
         }}
+        {...menu}
         className={cn(
-          "row-y group relative flex items-center gap-1.5 rounded-lg px-2 text-[0.94rem] transition-colors",
+          "row-y group relative flex items-center gap-1.5 rounded-lg px-2 text-[0.94rem] transition-colors data-[menu-open]:bg-muted/70 data-[menu-open]:text-foreground",
           active ? "font-bold text-primary" : unread ? "font-bold text-foreground" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
           muted && !active && "opacity-55 hover:opacity-100",
         )}
