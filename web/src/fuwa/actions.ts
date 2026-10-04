@@ -42,6 +42,7 @@ import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
 import { instanceKey, normalizeUrl } from "./saved";
 import { wipeDms } from "@/e2ee/engine";
+import { outsideEmojis } from "@/lib/emoji-catalog";
 import { reportUsage } from "@/lib/reports";
 import { addInstance, engine, follow, removeInstance } from "./sync";
 import {
@@ -1220,6 +1221,8 @@ export const sendMessage = (
       updateInstance(key, (i) => ({ ...i, pending: { ...i.pending, [at]: fn(i.pending[at] ?? []) } }));
     setPending((list) => [...list, pending]);
     const attachments = files.map((f) => ({ url: f.url, filename: f.filename, width: f.width, height: f.height }));
+    // Other servers' emoji go along so the instance can check them and keep their pictures with the message.
+    const emojis = outsideEmojis(store.get().instances[key]?.emojis, serverId, content);
     const res = yield* call((signal) =>
       api(key).messages.sendMessage(
         {
@@ -1227,6 +1230,7 @@ export const sendMessage = (
           channelId,
           content,
           attachments,
+          emojis,
           threadId: thread?.threadId ?? "",
           alsoSendToChannel: !!thread?.alsoToChannel,
         },
@@ -1270,7 +1274,7 @@ export const editMessage = (key: string, serverId: string, channelId: string, me
   Effect.gen(function* () {
     reportUsage("message.edit");
     const { message } = yield* call((signal) =>
-      api(key).messages.updateMessage({ serverId, messageId, content, channelId }, { signal }),
+      api(key).messages.updateMessage({ serverId, messageId, content, channelId, emojis: outsideEmojis(store.get().instances[key]?.emojis, serverId, content) }, { signal }),
     );
     if (!message) return;
     updateInstance(key, (i) => {

@@ -10,6 +10,7 @@ import { useFuwa } from "@/fuwa/store";
 import { MentionPicker, useMentionPicker } from "@/components/chat/MentionPicker";
 import { TimestampPicker } from "@/components/chat/TimestampPicker";
 import { EmojiPicker } from "@/components/EmojiPicker";
+import { useCatalog } from "@/lib/emoji-catalog";
 import { RulesDialog } from "@/components/join/Rules";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
@@ -126,7 +127,7 @@ export function Composer({
   const picker = useMentionPicker(instanceKey, serverId, channel, box, text, setText);
   const server = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId));
   const [rules, setRules] = useState(false);
-  const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[serverId]);
+  const catalog = useCatalog(instanceKey, serverId);
   const staged = useStaged(channelId);
   const where = { instanceKey, serverId, channelId };
 
@@ -271,8 +272,7 @@ export function Composer({
         </AnimatePresence>
         <TimestampPicker onPick={insert} />
         <EmojiPicker
-          emojis={emojis}
-          server={server}
+          catalog={catalog}
           closeOnPick={false}
           onPick={(emoji) => insert(emoji.text.startsWith("<") ? `:${emoji.name}:` : emoji.text)}
         >
