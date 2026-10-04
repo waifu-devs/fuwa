@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   clearRecentSearches,
+  forgetRecentSearches,
   hasValue,
   markRanges,
   MARK_CLOSE,
@@ -71,6 +72,18 @@ test("recent searches stay on the device, newest first", () => {
   assert.deepEqual(recentSearches("here", store), []);
   kept.set("fuwa:search:recent:v1", "not json");
   assert.deepEqual(recentSearches("here", store), []);
+});
+
+test("signing out forgets an instance's recent searches, and only that instance's", () => {
+  const kept = new Map<string, string>();
+  const store = { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v) };
+  rememberSearch("fuwa.chat/juan/s1", "shader", false, store);
+  rememberSearch("fuwa.chat/mika/s1", "palette", false, store);
+  rememberSearch("fuwa.chatx/ren/s1", "bloom", false, store);
+  forgetRecentSearches("fuwa.chat", store);
+  assert.deepEqual(recentSearches("fuwa.chat/juan/s1", store), []);
+  assert.deepEqual(recentSearches("fuwa.chat/mika/s1", store), []);
+  assert.deepEqual(recentSearches("fuwa.chatx/ren/s1", store), ["bloom"]);
 });
 
 test("highlights are marked by UTF-16 ranges", () => {

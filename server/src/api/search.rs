@@ -53,6 +53,10 @@ const LOOKUP_CHUNK: usize = 400;
 /// and over.
 type Known = HashMap<String, i64>;
 
+/// Word ids a write took out of the index (no message has them any more), so
+/// no cache hands them out again.
+type Gone = HashSet<i64>;
+
 /// Where a server's index is.
 #[derive(Debug, Clone, PartialEq)]
 struct State {
@@ -72,10 +76,16 @@ async fn state(conn: &turso::Connection) -> Result<State> {
 
 /// The ids of `list`, adding words the index hasn't seen. Words added go in
 /// `added`, to be remembered only once the write commits.
-async fn word_ids(conn: &turso::Connection, known: &Known, added: &mut Known, list: &[String]) -> Result<Vec<i64>> {
+async fn word_ids(
+    conn: &turso::Connection,
+    known: &Known,
+    added: &mut Known,
+    gone: &Gone,
+    list: &[String],
+) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(list.len());
     for word in list {
-        if let Some(&id) = known.get(word).or_else(|| added.get(word)) {
+        if let Some(&id) = added.get(word).or_else(|| known.get(word)).filter(|id| !gone.contains(id)) {
             ids.push(id);
             continue;
         }
@@ -99,14 +109,20 @@ async fn word_ids(conn: &turso::Connection, known: &Known, added: &mut Known, li
 }
 
 /// Puts a message in the index as it is now, in place of how it was.
-async fn put(conn: &turso::Connection, known: &Known, added: &mut Known, message: &pb::Message) -> Result<()> {
-    remove(conn, &message.id).await?;
+async fn put(
+    conn: &turso::Connection,
+    known: &Known,
+    added: &mut Known,
+    gone: &mut Gone,
+    message: &pb::Message,
+) -> Result<()> {
+    remove(conn, gone, &message.id).await?;
     // Join messages and AutoMod alerts aren't anyone's words.
     if message.kind != pb::MessageKind::Unspecified as i32 {
         return Ok(());
     }
     let list = words::message_words(message);
-    let ids = word_ids(conn, known, added, &list).await?;
+    let ids = word_ids(conn, known, added, gone, &list).await?;
     let sent = message.created_at.as_ref().map_or(0, millis);
     let mut doc = words::doc_of(&message.id, sent);
     while query_one(conn, "SELECT 1 FROM search_docs WHERE doc = ?1", [doc], |r| r.get::<i64>(0)).await?.is_some() {
@@ -134,7 +150,7 @@ async fn put(conn: &turso::Connection, known: &Known, added: &mut Known, message
 }
 
 /// Takes a message out of the index, if it's in it.
-async fn remove(conn: &turso::Connection, message_id: &str) -> Result<()> {
+async fn remove(conn: &turso::Connection, gone: &mut Gone, message_id: &str) -> Result<()> {
     let Some((doc, packed)) =
         query_one(conn, "SELECT doc, words FROM search_docs WHERE message_id = ?1", [message_id], |r| {
             Ok((r.get::<i64>(0)?, r.get::<Vec<u8>>(1)?))
@@ -143,28 +159,45 @@ async fn remove(conn: &turso::Connection, message_id: &str) -> Result<()> {
     else {
         return Ok(());
     };
-    unlist(conn, doc, &packed).await
+    unlist(conn, gone, doc, &packed).await
 }
 
-/// Takes one doc out: its postings, then itself.
-async fn unlist(conn: &turso::Connection, doc: i64, packed: &[u8]) -> Result<()> {
+/// Takes one doc out: its postings, any word no other message has (so
+/// deleted text doesn't linger in the file, its backups or exports), then
+/// itself.
+async fn unlist(conn: &turso::Connection, gone: &mut Gone, doc: i64, packed: &[u8]) -> Result<()> {
     for word in words::unpack(packed) {
         conn.execute("DELETE FROM search_postings WHERE word = ?1 AND doc = ?2", (word, doc)).await?;
+        let used =
+            query_one(conn, "SELECT 1 FROM search_postings WHERE word = ?1 LIMIT 1", [word], |r| r.get::<i64>(0))
+                .await?;
+        if used.is_none() {
+            conn.execute("DELETE FROM search_words WHERE id = ?1", [word]).await?;
+            gone.insert(word);
+        }
     }
     conn.execute("DELETE FROM search_docs WHERE doc = ?1", [doc]).await?;
     Ok(())
 }
 
 /// Takes a deleted channel's messages out of the index.
-async fn remove_channel(conn: &turso::Connection, channel_id: &str) -> Result<()> {
+async fn remove_channel(conn: &turso::Connection, gone: &mut Gone, channel_id: &str) -> Result<()> {
     let docs = query_all(conn, "SELECT doc, words FROM search_docs WHERE channel_id = ?1", [channel_id], |r| {
         Ok((r.get::<i64>(0)?, r.get::<Vec<u8>>(1)?))
     })
     .await?;
     for (doc, packed) in docs {
-        unlist(conn, doc, &packed).await?;
+        unlist(conn, gone, doc, &packed).await?;
     }
     Ok(())
+}
+
+/// Takes a committed write's words into a cache, and forgets the ones it took out.
+fn remember(known: &mut Known, added: Known, gone: &Gone) {
+    if !gone.is_empty() {
+        known.retain(|_, id| !gone.contains(id));
+    }
+    known.extend(added.into_iter().filter(|(_, id)| !gone.contains(id)));
 }
 
 // ── The indexer ─────────────────────────────────────────────────────────────
@@ -299,26 +332,30 @@ impl Indexer {
             let known = self.building.get(id).map(|b| &b.known);
             let empty = Known::new();
             let known = known.unwrap_or(&empty);
-            let added = sdb
+            let (added, gone) = sdb
                 .write_quiet(async |conn| {
-                    let mut added = Known::new();
+                    let (mut added, mut gone) = (Known::new(), Gone::new());
                     for event in &events {
                         match &event.payload {
                             Some(Payload::MessageCreated(pb::MessageCreated { message: Some(message) }))
                             | Some(Payload::MessageUpdated(pb::MessageUpdated { message: Some(message) })) => {
-                                put(conn, known, &mut added, message).await?
+                                put(conn, known, &mut added, &mut gone, message).await?
                             }
-                            Some(Payload::MessageDeleted(deleted)) => remove(conn, &deleted.message_id).await?,
-                            Some(Payload::ChannelDeleted(deleted)) => remove_channel(conn, &deleted.channel_id).await?,
+                            Some(Payload::MessageDeleted(deleted)) => {
+                                remove(conn, &mut gone, &deleted.message_id).await?
+                            }
+                            Some(Payload::ChannelDeleted(deleted)) => {
+                                remove_channel(conn, &mut gone, &deleted.channel_id).await?
+                            }
                             _ => {}
                         }
                     }
                     conn.execute("UPDATE search_state SET sequence = ?1 WHERE id = 1", [last]).await?;
-                    Ok(added)
+                    Ok((added, gone))
                 })
                 .await?;
             if let Some(building) = self.building.get_mut(id) {
-                building.known.extend(added);
+                remember(&mut building.known, added, &gone);
             }
             current.sequence = last;
             if (events.len() as i64) < EVENT_BATCH {
@@ -353,17 +390,17 @@ impl Indexer {
         let known = &building.known;
         let added = sdb
             .write_quiet(async |conn| {
-                let mut added = Known::new();
+                let (mut added, mut gone) = (Known::new(), Gone::new());
                 for message in &batch {
-                    put(conn, known, &mut added, message).await?;
+                    put(conn, known, &mut added, &mut gone, message).await?;
                 }
                 conn.execute("UPDATE search_state SET backfill = ?1 WHERE id = 1", [next.as_deref()]).await?;
-                Ok(added)
+                Ok((added, gone))
             })
             .await?;
         crate::reports::server_timing("search.backfill_batch", started.elapsed());
         let building = self.building.get_mut(id).expect("checked above");
-        building.known.extend(added);
+        remember(&mut building.known, added.0, &added.1);
         building.added += batch.len() as u64;
         if next.is_none() {
             let done = self.building.remove(id).expect("checked above");
@@ -433,28 +470,16 @@ struct Find {
 struct Found {
     page: Vec<(i64, String)>,
     total: i64,
-    more: bool,
+    /// The count stopped at the read budget: there are at least `total`.
+    total_at_least: bool,
+    /// Where the next page starts (exclusive), if anything is left to look at.
+    next: Option<i64>,
 }
 
-/// The docs having a word (any of `ids`), newest first.
-async fn postings(conn: &turso::Connection, ids: &[i64], lo: i64, hi: i64) -> Result<Vec<i64>> {
-    let mut docs = Vec::new();
-    for &id in ids {
-        docs.extend(
-            query_all(
-                conn,
-                "SELECT doc FROM search_postings WHERE word = ?1 AND doc >= ?2 AND doc < ?3 ORDER BY doc DESC",
-                (id, lo, hi),
-                |r| r.get::<i64>(0),
-            )
-            .await?,
-        );
+impl Found {
+    fn none() -> Self {
+        Self { page: vec![], total: 0, total_at_least: false, next: None }
     }
-    if ids.len() > 1 {
-        docs.sort_unstable_by(|a, b| b.cmp(a));
-        docs.dedup();
-    }
-    Ok(docs)
 }
 
 /// The ids of the words a term stands for.
@@ -475,154 +500,306 @@ async fn term_ids(conn: &turso::Connection, term: &Term) -> Result<Vec<i64>> {
     }
 }
 
-/// What's in both lists, both newest first.
-fn intersect(a: Vec<i64>, b: &[i64]) -> Vec<i64> {
-    a.into_iter().filter(|doc| b.binary_search_by(|x| doc.cmp(x)).is_ok()).collect()
-}
-
 fn placeholders(from: usize, count: usize) -> String {
     (from..from + count).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ")
 }
 
+/// Index rows one search may read, all queries together. Past it the search
+/// stops where it got to and hands back a cursor, so no search costs more
+/// than this however common its words or big the server.
+const READ_BUDGET: usize = 50_000;
+/// Postings counted per lookup when choosing the rarest one to walk.
+const RARITY_CAP: i64 = 1_000;
+/// Postings read per step of the walk, shared between a prefix's words.
+const WALK_STEP: usize = 2_000;
+/// Docs read per step of a search with filters and no words.
+const SCAN_STEP: i64 = 1_000;
+
+/// Counts what a search reads against `READ_BUDGET`.
+struct Budget(usize);
+
+impl Budget {
+    fn spend(&mut self, rows: usize) {
+        self.0 = self.0.saturating_sub(rows);
+    }
+    fn spent(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// About how many docs in range have any of `ids`, counting no further than
+/// `RARITY_CAP`.
+async fn rarity(conn: &turso::Connection, ids: &[i64], lo: i64, hi: i64, budget: &mut Budget) -> Result<i64> {
+    let mut seen = 0;
+    for &id in ids {
+        let n = query_one(
+            conn,
+            "SELECT count(*) FROM (SELECT 1 FROM search_postings WHERE word = ?1 AND doc >= ?2 AND doc < ?3 LIMIT ?4)",
+            (id, lo, hi, RARITY_CAP - seen),
+            |r| r.get::<i64>(0),
+        )
+        .await?
+        .unwrap_or(0);
+        budget.spend(n as usize);
+        seen += n;
+        if seen >= RARITY_CAP {
+            break;
+        }
+    }
+    Ok(seen)
+}
+
+/// The next docs below `cursor` having any of `ids`, newest first, and where
+/// they reach down to: every such doc from there up to `cursor` is in the
+/// list (`lo` once there are no more).
+async fn walk(
+    conn: &turso::Connection,
+    ids: &[i64],
+    lo: i64,
+    cursor: i64,
+    budget: &mut Budget,
+) -> Result<(Vec<i64>, i64)> {
+    let step = (WALK_STEP / ids.len()).max(50) as i64;
+    let mut docs = Vec::new();
+    let mut boundary = lo;
+    for &id in ids {
+        let got = query_all(
+            conn,
+            "SELECT doc FROM search_postings WHERE word = ?1 AND doc >= ?2 AND doc < ?3 ORDER BY doc DESC LIMIT ?4",
+            (id, lo, cursor, step),
+            |r| r.get::<i64>(0),
+        )
+        .await?;
+        budget.spend(got.len());
+        // A word with more below: only docs down to its last one are known.
+        if got.len() as i64 == step
+            && let Some(&last) = got.last()
+        {
+            boundary = boundary.max(last);
+        }
+        docs.extend(got);
+    }
+    docs.retain(|&doc| doc >= boundary);
+    docs.sort_unstable_by(|a, b| b.cmp(a));
+    docs.dedup();
+    Ok((docs, boundary))
+}
+
+/// A doc's row, for the checks words can't do.
+struct DocRow {
+    message_id: String,
+    channel_id: String,
+    author_id: String,
+    has: i64,
+    words: Vec<u8>,
+}
+
+async fn doc_rows(conn: &turso::Connection, docs: &[i64]) -> Result<HashMap<i64, DocRow>> {
+    Ok(query_all(
+        conn,
+        &format!(
+            "SELECT doc, message_id, channel_id, author_id, has, words FROM search_docs WHERE doc IN ({})",
+            placeholders(1, docs.len())
+        ),
+        docs.iter().map(|&d| turso::Value::Integer(d)).collect::<Vec<_>>(),
+        |r| {
+            Ok((
+                r.get::<i64>(0)?,
+                DocRow {
+                    message_id: r.get(1)?,
+                    channel_id: r.get(2)?,
+                    author_id: r.get(3)?,
+                    has: r.get(4)?,
+                    words: r.get(5)?,
+                },
+            ))
+        },
+    )
+    .await?
+    .into_iter()
+    .collect())
+}
+
+/// Collects a search's matches in order, counting them on the first page.
+struct Collect<'a> {
+    find: &'a Find,
+    channels: Option<HashSet<&'a str>>,
+    authors: HashSet<&'a str>,
+    page: Vec<(i64, String)>,
+    total: i64,
+    /// Found one past the page.
+    more: bool,
+}
+
+impl<'a> Collect<'a> {
+    fn new(find: &'a Find) -> Self {
+        Self {
+            find,
+            channels: find.channels.as_ref().map(|c| c.iter().map(String::as_str).collect()),
+            authors: find.authors.iter().map(String::as_str).collect(),
+            page: vec![],
+            total: 0,
+            more: false,
+        }
+    }
+
+    fn passes(&self, row: &DocRow) -> bool {
+        self.channels.as_ref().is_none_or(|c| c.contains(row.channel_id.as_str()))
+            && (self.authors.is_empty() || self.authors.contains(row.author_id.as_str()))
+            && row.has & self.find.has == self.find.has
+    }
+
+    fn take(&mut self, doc: i64, message_id: &str) {
+        self.total += 1;
+        if self.page.len() < self.find.limit {
+            self.page.push((doc, message_id.to_string()));
+        } else {
+            self.more = true;
+        }
+    }
+
+    /// Nothing more to look for: the page is full, and no count is wanted
+    /// (or one past it was found).
+    fn done(&self) -> bool {
+        self.more && !self.find.count
+    }
+
+    /// The result, having looked at everything from `reached` up.
+    fn finish(self, reached: i64, out_of_budget: bool) -> Found {
+        let lo = self.find.lo;
+        let next = if self.more {
+            self.page.last().map(|(doc, _)| *doc)
+        } else if out_of_budget && reached > lo {
+            Some(reached)
+        } else {
+            None
+        };
+        Found {
+            total: if self.find.count { self.total } else { 0 },
+            total_at_least: self.find.count && out_of_budget && reached > lo,
+            page: self.page,
+            next,
+        }
+    }
+}
+
+/// Finds a page: walks the rarest word's postings newest first and checks
+/// each doc's own word list for the others, so the work goes with the page
+/// and the budget, never with how common the words are.
 async fn find(conn: &turso::Connection, find: &Find) -> Result<Found> {
-    let mut lookups: Vec<(Vec<i64>, bool)> = Vec::new();
+    let mut lookups: Vec<Vec<i64>> = Vec::new();
     for term in &find.terms {
-        lookups.push((term_ids(conn, term).await?, true));
+        lookups.push(term_ids(conn, term).await?);
     }
     for names in &find.mentions {
         let mut ids = Vec::new();
         for name in names {
             ids.extend(term_ids(conn, &Term { word: words::mention_word(name), prefix: false }).await?);
         }
-        lookups.push((ids, true));
+        lookups.push(ids);
     }
     if lookups.is_empty() {
         return find_by_filters(conn, find).await;
     }
-    if lookups.iter().any(|(ids, _)| ids.is_empty()) {
-        return Ok(Found { page: vec![], total: 0, more: false });
+    if lookups.iter().any(Vec::is_empty) {
+        return Ok(Found::none());
     }
-    let mut lists = Vec::with_capacity(lookups.len());
-    for (ids, _) in &lookups {
-        lists.push(postings(conn, ids, find.lo, find.hi).await?);
-    }
-    lists.sort_by_key(Vec::len);
-    let mut lists = lists.into_iter();
-    let mut candidates = lists.next().unwrap_or_default();
-    for list in lists {
-        if candidates.is_empty() {
-            break;
+    let mut budget = Budget(READ_BUDGET);
+    let mut rarest = (0, i64::MAX);
+    for (i, ids) in lookups.iter().enumerate() {
+        let n = rarity(conn, ids, find.lo, find.hi, &mut budget).await?;
+        if n < rarest.1 {
+            rarest = (i, n);
         }
-        candidates = intersect(candidates, &list);
     }
+    let driver = lookups.swap_remove(rarest.0);
+    let others: Vec<HashSet<i64>> = lookups.into_iter().map(|ids| ids.into_iter().collect()).collect();
 
-    let filtered = find.channels.is_some() || !find.authors.is_empty() || find.has != 0;
-    if !filtered {
-        let more = candidates.len() > find.limit;
-        let total = if find.count { candidates.len() as i64 } else { 0 };
-        candidates.truncate(find.limit);
-        let page = message_ids(conn, &candidates).await?;
-        return Ok(Found { page, total, more });
-    }
-
-    let channels: Option<HashSet<&str>> = find.channels.as_ref().map(|c| c.iter().map(String::as_str).collect());
-    let authors: HashSet<&str> = find.authors.iter().map(String::as_str).collect();
-    let mut page = Vec::new();
-    let mut total = 0i64;
-    let mut more = false;
-    for chunk in candidates.chunks(LOOKUP_CHUNK) {
-        let rows = query_all(
-            conn,
-            &format!(
-                "SELECT doc, message_id, channel_id, author_id, has FROM search_docs WHERE doc IN ({})",
-                placeholders(1, chunk.len())
-            ),
-            chunk.iter().map(|&d| turso::Value::Integer(d)).collect::<Vec<_>>(),
-            |r| {
-                Ok((
-                    r.get::<i64>(0)?,
-                    (r.get::<String>(1)?, r.get::<String>(2)?, r.get::<String>(3)?, r.get::<i64>(4)?),
-                ))
-            },
-        )
-        .await?;
-        let rows: HashMap<i64, (String, String, String, i64)> = rows.into_iter().collect();
-        for doc in chunk {
-            let Some((message_id, channel_id, author_id, has)) = rows.get(doc) else { continue };
-            let passes = channels.as_ref().is_none_or(|c| c.contains(channel_id.as_str()))
-                && (authors.is_empty() || authors.contains(author_id.as_str()))
-                && has & find.has == find.has;
-            if !passes {
-                continue;
-            }
-            total += 1;
-            if page.len() < find.limit {
-                page.push((*doc, message_id.clone()));
-            } else {
-                more = true;
+    let mut collect = Collect::new(find);
+    let mut cursor = find.hi;
+    loop {
+        let (docs, boundary) = walk(conn, &driver, find.lo, cursor, &mut budget).await?;
+        for chunk in docs.chunks(LOOKUP_CHUNK) {
+            let rows = doc_rows(conn, chunk).await?;
+            budget.spend(chunk.len());
+            for doc in chunk {
+                let Some(row) = rows.get(doc) else { continue };
+                if !collect.passes(row) {
+                    continue;
+                }
+                if !others.is_empty() {
+                    let has: HashSet<i64> = words::unpack(&row.words).into_iter().collect();
+                    if !others.iter().all(|ids| ids.iter().any(|id| has.contains(id))) {
+                        continue;
+                    }
+                }
+                collect.take(*doc, &row.message_id);
+                if collect.done() {
+                    return Ok(collect.finish(*doc, false));
+                }
             }
         }
-        if more && !find.count {
-            break;
+        cursor = boundary;
+        if boundary <= find.lo {
+            return Ok(collect.finish(find.lo, false));
+        }
+        if budget.spent() {
+            return Ok(collect.finish(boundary, true));
         }
     }
-    Ok(Found { page, total: if find.count { total } else { 0 }, more })
 }
 
-/// The message ids of these docs, in the same order.
-async fn message_ids(conn: &turso::Connection, docs: &[i64]) -> Result<Vec<(i64, String)>> {
-    if docs.is_empty() {
-        return Ok(vec![]);
-    }
-    let rows: HashMap<i64, String> = query_all(
-        conn,
-        &format!("SELECT doc, message_id FROM search_docs WHERE doc IN ({})", placeholders(1, docs.len())),
-        docs.iter().map(|&d| turso::Value::Integer(d)).collect::<Vec<_>>(),
-        |r| Ok((r.get::<i64>(0)?, r.get::<String>(1)?)),
-    )
-    .await?
-    .into_iter()
-    .collect();
-    Ok(docs.iter().filter_map(|doc| rows.get(doc).map(|id| (*doc, id.clone()))).collect())
-}
-
-/// A search with filters and no words: straight from the docs.
+/// A search with filters and no words: through the docs, newest first, a
+/// step at a time. One channel or one author narrows the read to theirs.
 async fn find_by_filters(conn: &turso::Connection, find: &Find) -> Result<Found> {
-    let mut clauses = vec!["doc >= ?1".to_string(), "doc < ?2".to_string()];
-    let mut params = vec![turso::Value::Integer(find.lo), turso::Value::Integer(find.hi)];
-    if let Some(channels) = &find.channels {
-        clauses.push(format!("channel_id IN ({})", placeholders(params.len() + 1, channels.len())));
-        params.extend(channels.iter().map(|c| turso::Value::from(c.as_str())));
-    }
-    if !find.authors.is_empty() {
-        clauses.push(format!("author_id IN ({})", placeholders(params.len() + 1, find.authors.len())));
-        params.extend(find.authors.iter().map(|a| turso::Value::from(a.as_str())));
-    }
-    if find.has != 0 {
-        clauses.push(format!("(has & ?{n}) = ?{n}", n = params.len() + 1));
-        params.push(turso::Value::Integer(find.has));
-    }
-    let condition = clauses.join(" AND ");
-    let mut page = query_all(
-        conn,
-        &format!(
-            "SELECT doc, message_id FROM search_docs WHERE {condition} ORDER BY doc DESC LIMIT {}",
-            find.limit + 1
-        ),
-        params.clone(),
-        |r| Ok((r.get::<i64>(0)?, r.get::<String>(1)?)),
-    )
-    .await?;
-    let more = page.len() > find.limit;
-    page.truncate(find.limit);
-    let total = if find.count {
-        query_one(conn, &format!("SELECT count(*) FROM search_docs WHERE {condition}"), params, |r| r.get::<i64>(0))
-            .await?
-            .unwrap_or(0)
-    } else {
-        0
+    let (narrow, value) = match (&find.channels, find.authors.as_slice()) {
+        (Some(channels), _) if channels.len() == 1 => (" AND channel_id = ?4", channels[0].clone()),
+        (_, [author]) => (" AND author_id = ?4", author.clone()),
+        _ => ("", String::new()),
     };
-    Ok(Found { page, total, more })
+    let sql = format!(
+        "SELECT doc, message_id, channel_id, author_id, has FROM search_docs
+         WHERE doc >= ?1 AND doc < ?2{narrow} ORDER BY doc DESC LIMIT ?3"
+    );
+    let mut budget = Budget(READ_BUDGET);
+    let mut collect = Collect::new(find);
+    let mut cursor = find.hi;
+    loop {
+        let mut params =
+            vec![turso::Value::Integer(find.lo), turso::Value::Integer(cursor), turso::Value::Integer(SCAN_STEP)];
+        if !narrow.is_empty() {
+            params.push(turso::Value::from(value.as_str()));
+        }
+        let rows = query_all(conn, &sql, params, |r| {
+            Ok((
+                r.get::<i64>(0)?,
+                DocRow {
+                    message_id: r.get(1)?,
+                    channel_id: r.get(2)?,
+                    author_id: r.get(3)?,
+                    has: r.get(4)?,
+                    words: vec![],
+                },
+            ))
+        })
+        .await?;
+        budget.spend(rows.len());
+        for (doc, row) in &rows {
+            if collect.passes(row) {
+                collect.take(*doc, &row.message_id);
+                if collect.done() {
+                    return Ok(collect.finish(*doc, false));
+                }
+            }
+        }
+        let Some(&(last, _)) = rows.last().filter(|_| rows.len() as i64 == SCAN_STEP) else {
+            return Ok(collect.finish(find.lo, false));
+        };
+        cursor = last;
+        if budget.spent() {
+            return Ok(collect.finish(last, true));
+        }
+    }
 }
 
 /// How far along a server's backfill is, 0 to 100, by time: from its newest
@@ -820,11 +997,8 @@ impl SearchService for Api {
                     results,
                     authors,
                     total: found.total,
-                    next_cursor: if found.more {
-                        found.page.last().map(|(doc, _)| doc.to_string()).unwrap_or_default()
-                    } else {
-                        String::new()
-                    },
+                    next_cursor: found.next.map(|doc| doc.to_string()).unwrap_or_default(),
+                    total_at_least: found.total_at_least,
                     indexing: current.backfill.is_some() || current.version != words::VERSION,
                     indexed_percent,
                 })
@@ -837,12 +1011,6 @@ impl SearchService for Api {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn intersects_newest_first_lists() {
-        assert_eq!(intersect(vec![9, 7, 5, 3], &[8, 7, 4, 3, 1]), [7, 3]);
-        assert!(intersect(vec![2], &[]).is_empty());
-    }
 
     #[test]
     fn limits_each_account() {

@@ -72,6 +72,10 @@ message SearchMessagesResponse {
   bool indexing = 5;
   // While indexing, about how far along it is, 0 to 100.
   int32 indexed_percent = 6;
+  // Each search reads only so much of the index, so on a big server the
+  // count can stop early: then there are at least `total` matches (show
+  // "10,000+"), and next_cursor may be set even when this page isn't full.
+  bool total_at_least = 7;
 }
 
 message SearchResult {

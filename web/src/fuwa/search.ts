@@ -25,6 +25,8 @@ export type SearchState = {
   query: string;
   results: SearchResult[];
   total: number;
+  /** The count stopped early: there are at least `total`. */
+  totalAtLeast: boolean;
   cursor: string;
   loading: boolean;
   /** Loading the next page, not a new search. */
@@ -43,6 +45,7 @@ const CLOSED: SearchState = {
   query: "",
   results: [],
   total: 0,
+  totalAtLeast: false,
   cursor: "",
   loading: false,
   more: false,
@@ -76,8 +79,8 @@ export function openSearch(instanceKey: string, serverId: string) {
 
 export const closeSearch = () => set({ ...CLOSED, run: state.run });
 
-/** Where recent searches are kept on this device: one list per server. */
-export const searchPlace = (instanceKey: string, serverId: string) => `${instanceKey}/${serverId}`;
+/** Where recent searches are kept on this device: one list per account and server, so the next person to sign in here doesn't see them. */
+export const searchPlace = (instanceKey: string, accountId: string, serverId: string) => `${instanceKey}/${accountId}/${serverId}`;
 
 /** Channels whose messages can be searched. */
 export const searchableChannel = (c: Channel) =>
@@ -128,7 +131,7 @@ export async function runSearch(instanceKey: string, serverId: string, query: st
   const channelIds: string[] = [];
   const has: SearchHas[] = [];
   for (const f of filters) {
-    const fail = () => set({ open: true, instanceKey, serverId, query, results: [], total: 0, cursor: "", loading: false, error: problem(f), run: state.run + 1 });
+    const fail = () => set({ open: true, instanceKey, serverId, query, results: [], total: 0, totalAtLeast: false, cursor: "", loading: false, error: problem(f), run: state.run + 1 });
     if (f.key === "from" || f.key === "mentions") {
       const id = findMember(members, f.value)?.user?.id;
       if (!id) return fail();
@@ -145,11 +148,12 @@ export async function runSearch(instanceKey: string, serverId: string, query: st
   }
   const range = timeRange(filters, new Date());
   if (range.bad) {
-    set({ open: true, instanceKey, serverId, query, results: [], total: 0, cursor: "", loading: false, error: problem(range.bad), run: state.run + 1 });
+    set({ open: true, instanceKey, serverId, query, results: [], total: 0, totalAtLeast: false, cursor: "", loading: false, error: problem(range.bad), run: state.run + 1 });
     return;
   }
   if (!text.trim() && !filters.length) return;
-  rememberSearch(searchPlace(instanceKey, serverId), query);
+  const me = s?.me?.id;
+  if (me) rememberSearch(searchPlace(instanceKey, me, serverId), query);
   reportUsage("search.run");
   const request = {
     serverId,
@@ -162,7 +166,7 @@ export async function runSearch(instanceKey: string, serverId: string, query: st
     before: range.before ? timestampFromDate(range.before) : undefined,
   };
   lastRequest = request;
-  set({ open: true, instanceKey, serverId, query, results: [], total: 0, cursor: "", loading: true, more: false, error: null, run: state.run + 1 });
+  set({ open: true, instanceKey, serverId, query, results: [], total: 0, totalAtLeast: false, cursor: "", loading: true, more: false, error: null, run: state.run + 1 });
   await fetchPage(instanceKey, "");
 }
 
@@ -188,6 +192,7 @@ async function fetchPage(instanceKey: string, cursor: string) {
     set({
       results: cursor ? [...state.results, ...res.results] : res.results,
       total: cursor ? state.total : Number(res.total),
+      totalAtLeast: cursor ? state.totalAtLeast : res.totalAtLeast,
       cursor: res.nextCursor,
       loading: false,
       more: false,

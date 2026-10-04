@@ -160,7 +160,8 @@ export function SearchField({
   const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? EMPTY);
   const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId] ?? EMPTY);
   const channelNames = useMemo(() => channels.filter(searchableChannel).map((c) => c.name), [channels]);
-  const place = searchPlace(instanceKey, serverId);
+  const meId = useFuwa((s) => s.instances[instanceKey]?.me?.id ?? "");
+  const place = searchPlace(instanceKey, meId, serverId);
   const combo = usePrefs((p) => bindingOf(actionById("searchServer")!, p));
 
   // A search started elsewhere (a recent one, the phone's button) shows its words here.
@@ -173,7 +174,7 @@ export function SearchField({
   useEffect(() => onCommand("focusSearch", () => field.current?.focus()), []);
 
   // recentVersion re-reads the list after it changes.
-  const recent = useMemo(() => (recentVersion >= 0 ? recentSearches(place) : []), [place, recentVersion]);
+  const recent = useMemo(() => (meId && recentVersion >= 0 ? recentSearches(place) : []), [meId, place, recentVersion]);
   const token = tokenAt(input, caret).text;
   const groups = useMemo(
     () => (focused ? suggestionsFor(token, input, members, channelNames, recent) : []),

@@ -175,6 +175,18 @@ export function clearRecentSearches(place: string, to: Storage | null = storage(
   }
 }
 
+/** Forgets every recent search made on an instance, whoever made them (signing out). */
+export function forgetRecentSearches(instanceKey: string, to: Storage | null = storage()) {
+  if (!to) return;
+  const all = readAll(to);
+  for (const place of Object.keys(all)) if (place.startsWith(`${instanceKey}/`)) delete all[place];
+  try {
+    to.setItem(RECENT_KEY, JSON.stringify(all));
+  } catch {
+    // Nothing kept, nothing to clear.
+  }
+}
+
 // ── Highlights ──────────────────────────────────────────────────────────────
 
 /** Marks put around matches in a message's text before it's drawn; the Markdown plugin turns them into highlights. */

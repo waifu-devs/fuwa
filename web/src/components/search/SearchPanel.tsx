@@ -45,6 +45,7 @@ type Row =
 export function SearchPanel({ instanceKey, serverId, sheet = false }: { instanceKey: string; serverId: string; sheet?: boolean }) {
   const results = useSearch((s) => s.results);
   const total = useSearch((s) => s.total);
+  const atLeast = useSearch((s) => s.totalAtLeast);
   const loading = useSearch((s) => s.loading);
   const loadingMore = useSearch((s) => s.more);
   const cursor = useSearch((s) => s.cursor);
@@ -125,7 +126,8 @@ export function SearchPanel({ instanceKey, serverId, sheet = false }: { instance
         <PanelHeader instanceKey={instanceKey} serverId={serverId} sheet={sheet} />
         {sheet && query && !loading && !error && (
           <p className="px-4 pt-2 text-sm font-bold">
-            <Count value={total} /> {total === 1 ? "result" : "results"}
+            <Count value={total} />
+            {atLeast && "+"} {total === 1 && !atLeast ? "result" : "results"}
           </p>
         )}
         <AnimatePresence initial={false}>
@@ -168,6 +170,7 @@ export function SearchPanel({ instanceKey, serverId, sheet = false }: { instance
             ))}
           </div>
           {loadingMore && <Skeleton rows={2} />}
+          <LookFurther />
         </div>
       </div>
     </ServerLookProvider>
@@ -217,6 +220,7 @@ function useWindowedRows(rows: Row[], run: number) {
 
 function PanelHeader({ instanceKey, serverId, sheet }: { instanceKey: string; serverId: string; sheet: boolean }) {
   const total = useSearch((s) => s.total);
+  const atLeast = useSearch((s) => s.totalAtLeast);
   const loading = useSearch((s) => s.loading);
   const loadingMore = useSearch((s) => s.more);
   const query = useSearch((s) => s.query);
@@ -231,7 +235,8 @@ function PanelHeader({ instanceKey, serverId, sheet }: { instanceKey: string; se
           ) : (
             <>
               <Count value={total} />
-              <span>{total === 1 ? "result" : "results"}</span>
+              {atLeast && <span className="-ml-1.5">+</span>}
+              <span>{total === 1 && !atLeast ? "result" : "results"}</span>
             </>
           )}
         </h2>
@@ -249,18 +254,44 @@ function PanelHeader({ instanceKey, serverId, sheet }: { instanceKey: string; se
   );
 }
 
+/**
+ * On a big server one search reads only so far back; this carries on from
+ * there. Scrolling down does the same once there are results to scroll.
+ */
+function LookFurther() {
+  const show = useSearch((s) => !!s.cursor && !s.loading && !s.error && s.results.length < 12);
+  if (!show) return null;
+  return (
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center px-4 py-3">
+      <button
+        type="button"
+        onClick={() => void loadMoreResults()}
+        className="rounded-full bg-muted px-4 py-1.5 text-sm font-bold text-muted-foreground transition hover:bg-primary/10 hover:text-primary active:scale-95"
+      >
+        Look further back
+      </button>
+    </motion.div>
+  );
+}
+
 /** What the list shows besides results: loading, an error, nothing found, or how to start. */
 function PanelState({ sheet }: { sheet: boolean }) {
   const loading = useSearch((s) => s.loading && !s.more);
   const error = useSearch((s) => s.error);
   const query = useSearch((s) => s.query);
   const empty = useSearch((s) => s.results.length === 0);
+  const further = useSearch((s) => !!s.cursor);
   const nothing = !loading && !error && empty && !!query;
   return (
     <>
       {loading && <Skeleton />}
       {error && <Empty icon={<SearchXIcon className="size-6" />} title="Couldn't search" text={error} />}
-      {nothing && <Empty icon={<SearchXIcon className="size-6" />} title="Nothing found" text="Try other words, or fewer filters." />}
+      {nothing &&
+        (further ? (
+          <Empty icon={<SearchXIcon className="size-6" />} title="Nothing in the newest messages" text="Older ones haven't been searched yet." />
+        ) : (
+          <Empty icon={<SearchXIcon className="size-6" />} title="Nothing found" text="Try other words, or fewer filters." />
+        ))}
       {!sheet && !query && !loading && !error && (
         <Empty icon={<HashIcon className="size-6" />} title="Search this server" text="Type words, or filters like from:, in: and has:, then press Enter." />
       )}

@@ -302,6 +302,16 @@ async fn searching_a_server() {
         .await
         .unwrap();
     assert_eq!(rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 0);
+    // Words no message has any more leave the file too: the deleted channel's,
+    // and the one edited away.
+    for word in ["plans", "wonderful"] {
+        let mut rows =
+            sdb.read().unwrap().query("SELECT count(*) FROM search_words WHERE word = ?1", [word]).await.unwrap();
+        assert_eq!(rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 0, "{word} is still in the index");
+    }
+    let mut rows =
+        sdb.read().unwrap().query("SELECT count(*) FROM search_words WHERE word = 'look'", ()).await.unwrap();
+    assert_eq!(rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 1, "words others still have stay");
 
     // An empty search is refused, and strangers can't search.
     let err = c.search.search_messages(authed(&juan, q("  "))).await.unwrap_err();
@@ -572,12 +582,12 @@ async fn hundred_thousand_messages() {
     for (name, mut req) in queries {
         req.server_id = sid.clone();
         let mut times = vec![];
-        let mut total = 0;
+        let mut total = String::new();
         for _ in 0..5 {
             let started = Instant::now();
             let res = search(&mut c, &juan, req.clone()).await;
             times.push(started.elapsed());
-            total = res.total;
+            total = format!("{}{}", res.total, if res.total_at_least { "+" } else { "" });
             tokio::time::sleep(Duration::from_millis(600)).await;
         }
         times.sort();

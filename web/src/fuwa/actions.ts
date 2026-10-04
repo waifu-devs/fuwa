@@ -37,6 +37,7 @@ import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
 import { instanceKey, normalizeUrl } from "./saved";
 import { wipeDms } from "@/e2ee/engine";
+import { forgetRecentSearches } from "@/lib/search-query";
 import { reportUsage } from "@/lib/reports";
 import { addInstance, engine, follow, removeInstance } from "./sync";
 import {
@@ -263,6 +264,7 @@ export const signOut = (key: string) =>
   Effect.gen(function* () {
     yield* call((signal) => api(key).auth.signOut({}, { signal })).pipe(Effect.ignore);
     addInstance(engine(key).url, null);
+    forgetRecentSearches(key);
     // The session's device is gone; what it kept here goes too.
     yield* Effect.promise(() => wipeDms(key));
   });
@@ -271,6 +273,7 @@ export const forget = (key: string) =>
   Effect.gen(function* () {
     if (engine(key).token) yield* call((signal) => api(key).auth.signOut({}, { signal })).pipe(Effect.ignore);
     removeInstance(key);
+    forgetRecentSearches(key);
     yield* Effect.promise(() => wipeDms(key));
   });
 
@@ -467,6 +470,7 @@ export const deleteAccount = (key: string, confirm: { password?: string; code?: 
   Effect.gen(function* () {
     yield* call((signal) => api(key).account.deleteAccount(confirm, { signal }));
     removeInstance(key);
+    forgetRecentSearches(key);
     yield* Effect.promise(() => wipeDms(key));
     return true;
   });
