@@ -1,6 +1,6 @@
 //! Searching a server's messages (`SearchService`), and the word index each
 //! server keeps for it in its own file (`search_*` tables,
-//! migrations/server/0021_search.sql; how text becomes words is
+//! migrations/server/0026_search.sql; how text becomes words is
 //! `crate::search`).
 //!
 //! The index is written only by the indexer, one task per process, which

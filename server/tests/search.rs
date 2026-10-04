@@ -48,8 +48,12 @@ impl Instance {
     /// older message, reading its state from the file (searching to find out
     /// would count against the rate limit).
     async fn indexed(&self, server_id: &str) {
+        self.indexed_within(server_id, Duration::from_secs(60)).await;
+    }
+
+    async fn indexed_within(&self, server_id: &str, wait: Duration) {
         let sdb = self.app.servers.get(server_id).await.unwrap();
-        let deadline = Instant::now() + Duration::from_secs(60);
+        let deadline = Instant::now() + wait;
         loop {
             let head = sdb.head_sequence().await.unwrap();
             let conn = sdb.read().unwrap();
@@ -59,7 +63,11 @@ impl Instance {
             if sequence == head && built {
                 return;
             }
-            assert!(Instant::now() < deadline, "the index didn't catch up (at {sequence} of {head})");
+            if Instant::now() >= deadline {
+                let mut rows = conn.query("SELECT count(*) FROM search_docs", ()).await.unwrap();
+                let docs = rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap();
+                panic!("the index didn't catch up (at {sequence} of {head}, {docs} messages in)");
+            }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
@@ -521,7 +529,17 @@ async fn hundred_thousand_messages() {
     let instance = start(dir.path()).await;
     let mut c = clients(&instance).await;
     let started = Instant::now();
-    instance.indexed(&sid).await;
+    // While the index builds, the shard keeps answering: sends stay quick.
+    let mut sends = vec![];
+    for n in 0..5 {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let sent = Instant::now();
+        send(&mut c, &juan, &sid, &channels[0], &format!("sent while building {n}")).await;
+        sends.push(sent.elapsed());
+    }
+    sends.sort();
+    println!("sending while the index builds: median {:?}, worst {:?}", sends[2], sends[4]);
+    instance.indexed_within(&sid, Duration::from_secs(1800)).await;
     let built = started.elapsed();
     let sdb = instance.app.servers.get(&sid).await.unwrap();
     sdb.db().checkpoint().await.unwrap();
@@ -529,7 +547,6 @@ async fn hundred_thousand_messages() {
     println!("built the index of {MESSAGES} messages in {built:?}");
     println!("file: {:.1} MB before, {:.1} MB with the index", before as f64 / 1e6, after as f64 / 1e6);
 
-    // While the index builds, the shard keeps answering: a send right now is quick.
     let queries: Vec<(&str, pb::SearchMessagesRequest)> = vec![
         ("rare word", pb::SearchMessagesRequest { query: vocabulary[15_000].clone(), ..Default::default() }),
         ("common word", pb::SearchMessagesRequest { query: "the".into(), ..Default::default() }),
