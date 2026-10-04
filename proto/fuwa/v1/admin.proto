@@ -160,6 +160,9 @@ message InstanceSettings {
   bool federation = 34;
   // Instances this one never talks to, by host name (chat.example.com).
   repeated string federation_blocked_hosts = 35;
+  // Agents may use this instance through MCP, at /mcp (docs/mcp.md). On
+  // unless changed. FUWA_MCP.
+  bool mcp = 36;
   // The largest file one attachment upload may be; unset for no cap.
   // FUWA_LIMIT_ATTACHMENT_UPLOAD.
   optional int64 attachment_upload_bytes = 39;

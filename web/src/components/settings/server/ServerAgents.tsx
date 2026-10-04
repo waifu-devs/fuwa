@@ -1,15 +1,17 @@
-import { AtSignIcon, BotIcon, CheckIcon, LoaderCircleIcon, PlusIcon, UserMinusIcon, XIcon } from "lucide-react";
+import { AtSignIcon, BotIcon, CheckIcon, LoaderCircleIcon, PlugZapIcon, PlusIcon, UserMinusIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { Agent } from "@/gen/fuwa/v1/agent_pb";
-import { addAgent, kickMember, listAgents, run } from "@/fuwa/actions";
+import { McpAccessMode, type Agent, type McpAccess } from "@/gen/fuwa/v1/agent_pb";
+import { addAgent, getMcpAccess, kickMember, listAgents, run, setMcpAccess } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
+import { useFuwa } from "@/fuwa/store";
 import { AppBadge } from "@/components/AppBadge";
 import { UserAvatar } from "@/components/Icons";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { ago, displayName, isAgent, toDate } from "@/lib/format";
 import { openSettings, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -27,10 +29,32 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
   const [confirm, setConfirm] = useState<string | null>(null);
   const [justAdded, setJustAdded] = useState<string | null>(null);
   const shake = useAnimationControls();
+  const mcpOn = useFuwa((s) => !!s.instances[instanceKey]?.node?.mcp);
+  const [mcp, setMcp] = useState<McpAccess | null>(null);
 
   useEffect(() => {
     run(listAgents(instanceKey)).then(setMine, () => setMine([]));
   }, [instanceKey]);
+
+  useEffect(() => {
+    if (!mcpOn) return;
+    run(getMcpAccess(instanceKey, serverId)).then(setMcp, () => setMcp(null));
+  }, [instanceKey, serverId, mcpOn]);
+
+  async function saveMcp(mode: McpAccessMode, agentIds: string[]) {
+    const before = mcp;
+    // Shown at once; put back if the server says no.
+    setMcp((m) => (m ? { ...m, mode, agentIds } : m));
+    try {
+      setMcp(await run(setMcpAccess(instanceKey, serverId, mode, agentIds)));
+    } catch (err) {
+      setMcp(before);
+      toast((err as FuwaError).message);
+    }
+  }
+
+  const chosen = mcp?.mode === McpAccessMode.CHOSEN;
+  const mcpIds = new Set(mcp?.agentIds ?? []);
 
   const hereIds = new Set(here.map((m) => m.user?.id));
   const suggestions = mine.filter((a) => !hereIds.has(a.user?.id));
@@ -138,6 +162,8 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
         )}
       </AnimatePresence>
 
+      {mcpOn && mcp && <McpChoice mode={mcp.mode} onChange={(mode) => void saveMcp(mode, mode === McpAccessMode.CHOSEN ? [...mcpIds] : [])} />}
+
       {here.length === 0 ? (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-3 rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">
           <motion.span animate={{ y: [0, -4, 0] }} transition={{ duration: 2, repeat: Infinity, repeatDelay: 1 }} className="text-2xl">
@@ -189,6 +215,30 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
                       @{m.user?.username} · added {ago(toDate(m.joinedAt))}
                     </span>
                   </span>
+                  <AnimatePresence initial={false}>
+                    {chosen && (
+                      <motion.label
+                        key="mcp"
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                        transition={SPRING}
+                        className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground"
+                      >
+                        MCP
+                        <Switch
+                          checked={mcpIds.has(id)}
+                          aria-label={`${displayName(m.user)} can use this server through MCP`}
+                          onCheckedChange={(on) => {
+                            const ids = new Set(mcpIds);
+                            if (on) ids.add(id);
+                            else ids.delete(id);
+                            void saveMcp(McpAccessMode.CHOSEN, [...ids]);
+                          }}
+                        />
+                      </motion.label>
+                    )}
+                  </AnimatePresence>
                   <AnimatePresence mode="popLayout" initial={false}>
                     {confirm === id ? (
                       <motion.span key="confirm" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={SPRING} className="flex items-center gap-1">
@@ -222,5 +272,54 @@ export function ServerAgents({ instanceKey, serverId }: { instanceKey: string; s
         </ul>
       )}
     </section>
+  );
+}
+
+const MCP_CHOICES = [
+  { mode: McpAccessMode.ALL, label: "Every agent" },
+  { mode: McpAccessMode.CHOSEN, label: "Only chosen" },
+  { mode: McpAccessMode.OFF, label: "None" },
+];
+
+/**
+ * Which agents may use this server through the instance's MCP endpoint: AI
+ * apps (Claude and others) reach it there with an agent's token.
+ */
+function McpChoice({ mode, onChange }: { mode: McpAccessMode; onChange: (mode: McpAccessMode) => void }) {
+  const current = mode === McpAccessMode.UNSPECIFIED ? McpAccessMode.ALL : mode;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={SPRING}
+      data-setting="mcp-access"
+      className="flex flex-col gap-2 rounded-2xl border bg-background/40 p-3"
+    >
+      <div className="flex items-center gap-2">
+        <PlugZapIcon className="size-4 text-violet-500" />
+        <p className="flex-1 text-sm font-bold">Through MCP</p>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        AI apps such as Claude can use this server through the instance&apos;s MCP endpoint with an agent&apos;s token. This only decides MCP: what an agent can do here is still up to its roles.
+      </p>
+      <div role="radiogroup" aria-label="Agents that can use this server through MCP" className="grid grid-cols-3 gap-1 rounded-xl bg-muted/60 p-1">
+        {MCP_CHOICES.map((choice) => {
+          const on = current === choice.mode;
+          return (
+            <button
+              key={choice.mode}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              onClick={() => !on && onChange(choice.mode)}
+              className={cn("relative rounded-lg px-2 py-1.5 text-xs font-bold transition-colors", on ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
+            >
+              {on && <motion.span layoutId="mcp-choice" transition={SPRING} className="absolute inset-0 rounded-lg bg-background shadow-sm" />}
+              <span className="relative">{choice.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </motion.div>
   );
 }
