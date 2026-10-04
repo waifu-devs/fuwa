@@ -760,6 +760,9 @@ impl MessageService for Api {
                             "GIFs can't be sent in channels shared from another server yet".into(),
                         ));
                     }
+                    // Emoji from elsewhere are for this server's own channels;
+                    // the home shows its guests' custom emoji as their names.
+                    req.emojis.clear();
                     let message = shared::guest_send(&self.app, &sdb, &account, &member, &access, &link, req).await?;
                     return Ok(pb::SendMessageResponse { message: Some(message) });
                 }
