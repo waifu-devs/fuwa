@@ -32,6 +32,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0018_gifs.sql"),
     include_str!("../migrations/node/0019_attachment_days.sql"),
     include_str!("../migrations/node/0020_friends.sql"),
+    include_str!("../migrations/node/0021_presence.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
@@ -1053,6 +1054,75 @@ impl NodeDb {
         .await
     }
 
+    // ───────────────────────── Presence settings ─────────────────────────
+
+    /// What a person picked for their presence; the defaults (online, nothing
+    /// shared) when they never changed it.
+    pub async fn presence_settings(&self, account_id: &str) -> Result<pb::PresenceSettings> {
+        let conn = self.read()?;
+        let found = query_one(
+            &conn,
+            "SELECT status, show_activity, hidden_servers FROM presence_settings WHERE account_id = ?1",
+            [account_id],
+            |r| Ok((r.get::<i64>(0)?, r.get::<i64>(1)? != 0, r.get::<String>(2)?)),
+        )
+        .await?;
+        Ok(match found {
+            Some((status, show_activity, hidden)) => pb::PresenceSettings {
+                status: status as i32,
+                show_activity,
+                hidden_server_ids: serde_json::from_str(&hidden).unwrap_or_default(),
+            },
+            None => pb::PresenceSettings { status: pb::PresenceStatus::Online as i32, ..Default::default() },
+        })
+    }
+
+    /// Which of `ids` picked invisible: they show offline everywhere, to
+    /// friends too.
+    pub async fn invisible_of(&self, ids: &[&str]) -> Result<HashSet<String>> {
+        let mut invisible = HashSet::new();
+        if ids.is_empty() {
+            return Ok(invisible);
+        }
+        let conn = self.read()?;
+        // A few hundred at a time: a long friends list stays under SQLite's
+        // limit on bound values.
+        for chunk in ids.chunks(500) {
+            let placeholders = (2..=chunk.len() + 1).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+            let mut params = vec![turso::Value::from(pb::PresenceStatus::Invisible as i64)];
+            params.extend(chunk.iter().map(|id| turso::Value::from(*id)));
+            let rows = query_all(
+                &conn,
+                &format!(
+                    "SELECT account_id FROM presence_settings WHERE status = ?1 AND account_id IN ({placeholders})"
+                ),
+                params,
+                |r| r.get::<String>(0),
+            )
+            .await?;
+            invisible.extend(rows);
+        }
+        Ok(invisible)
+    }
+
+    pub async fn set_presence_settings(&self, account_id: &str, settings: &pb::PresenceSettings) -> Result<()> {
+        let hidden =
+            serde_json::to_string(&settings.hidden_server_ids).map_err(|err| Error::internal(err.to_string()))?;
+        db::write(&self.db, async |conn| {
+            conn.execute(
+                "INSERT INTO presence_settings (account_id, status, show_activity, hidden_servers, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT (account_id) DO UPDATE SET
+                   status = excluded.status, show_activity = excluded.show_activity,
+                   hidden_servers = excluded.hidden_servers, updated_at = excluded.updated_at",
+                (account_id, settings.status as i64, settings.show_activity, hidden.as_str(), now_ms()),
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
     // ───────────────────────── Notification settings ─────────────────────────
 
     pub async fn notification_settings(&self, account_id: &str) -> Result<Vec<pb::NotificationSettings>> {
@@ -1519,14 +1589,17 @@ impl NodeDb {
             // Every reservation writes the account's row for the day, so ones
             // made at once clash here and the counts below hold.
             let day = now / DAY_MS;
-            conn.execute(
-                &format!(
-                    "INSERT INTO {days} (account_id, day, bytes) VALUES (?1, ?2, ?3)
-                     ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes"
-                ),
-                (row.account_id.as_str(), day, row.size),
-            )
-            .await?;
+            // Sealed files are counted apart, in dms.db (Dms::count_sealed).
+            if row.purpose != pb::MediaPurpose::Sealed {
+                conn.execute(
+                    &format!(
+                        "INSERT INTO {days} (account_id, day, bytes) VALUES (?1, ?2, ?3)
+                         ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes"
+                    ),
+                    (row.account_id.as_str(), day, row.size),
+                )
+                .await?;
+            }
             if let Some(cap) = bytes_per_day {
                 let today = query_one(
                     conn,
@@ -1778,6 +1851,7 @@ impl NodeDb {
                 "server_arrangements",
                 "attachment_days",
                 "saved_gifs",
+                "presence_settings",
             ] {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
             }

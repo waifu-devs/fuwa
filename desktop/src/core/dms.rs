@@ -749,7 +749,7 @@ impl DmEngine {
     async fn post_message(&self, room: &Room, message: Vec<u8>) -> Result<(), Problem> {
         match room {
             Room::Dm(c) => {
-                let req = pb::PostMessageRequest { conversation_id: c.id.clone(), message };
+                let req = pb::PostMessageRequest { conversation_id: c.id.clone(), message, ..Default::default() };
                 rpc!(self.api.dms(), post_message(req)).await?;
             }
             Room::Channel { id, server_id, .. } => {
@@ -1047,6 +1047,21 @@ impl DmEngine {
                     target.edit_signed = signed;
                     change.items.push((id, target));
                 }
+            }
+            // Voice messages play in the web app for now; here they're a line
+            // saying one came, so the conversation still reads in order.
+            Some(Body::Voice(voice)) => {
+                let secs = voice.duration_ms / 1000;
+                let mut item = Item::new(seq, ItemKind::Text, at, sender_id, device_id);
+                item.content =
+                    format!("Voice message ({}:{:02}), open it in the web app to play it", secs / 60, secs % 60);
+                item.reply_to = voice.reply_to_sequence;
+                item.signed = signed;
+                let had = inner.vault.items(&id)?.iter().any(|i| i.seq == seq);
+                if !had && sender_id != self.me.id {
+                    fresh.push(item.clone());
+                }
+                change.items.push((id, item));
             }
             // Anything else is from a newer app: there's nothing to show for it here.
             Some(Body::Signed(_) | Body::History(_)) | None => {}

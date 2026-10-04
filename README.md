@@ -136,6 +136,7 @@ the log filter are read only from the environment.
 | `FUWA_SHARED_CHANNELS` | `on` | Servers sharing a text channel with another server on this instance ([docs/shared-channels.md](docs/shared-channels.md)); `off` stops new shares |
 | `FUWA_MCP` | `on` | Agents using the instance through MCP at `/mcp` with their token ([docs/mcp.md](docs/mcp.md)); `off` turns the endpoint off |
 | `FUWA_PROFILE_EFFECTS` | `on` | People putting an animated effect on their profile card ([docs/profile-effects.md](docs/profile-effects.md)); `off` hides everyone's |
+| `FUWA_RICH_PRESENCE` | `on` | People may show what they're doing (games and apps) to people they share a server with, once they turn it on themselves ([docs/presence.md](docs/presence.md)); `off` drops every activity, statuses still show |
 | `FUWA_FEDERATION` | `off` | Talking to other fuwa instances with signed calls, for sharing channels across instances ([docs/federation.md](docs/federation.md)); needs an https `FUWA_PUBLIC_URL` |
 | `FUWA_FEDERATION_ALLOW_PRIVATE` | `off` | Lets federation reach private, loopback and internal addresses and plain http, for tests and private deployments |
 | `FUWA_GIF_PROVIDER` | `off` | GIF search: `giphy`, `klipy` or `off` ([docs/gifs.md](docs/gifs.md)); instance settings can change it later |
@@ -151,6 +152,9 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_EMOJIS` | unlimited | Custom emoji per server |
 | `FUWA_LIMIT_PICTURE_UPLOAD` | unlimited | Largest avatar, banner, server icon or emoji one upload may be, like `8MB` |
 | `FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY` | unlimited | Pictures one account may upload in a day (UTC), like `256MiB` |
+| `FUWA_LIMIT_VOICE_MESSAGE_SECONDS` | unlimited | The longest voice message in direct messages; apps stop recording there |
+| `FUWA_LIMIT_VOICE_MESSAGE_BYTES` | unlimited | The biggest voice message, encrypted and padded, like `2MiB` |
+| `FUWA_LIMIT_VOICE_MESSAGES_PER_DAY` | unlimited | Voice messages one account may upload in a day (UTC), apart from pictures |
 | `FUWA_LIMIT_ATTACHMENT_UPLOAD` | unlimited | Largest file one message may carry, like `100MB` |
 | `FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY` | unlimited | Files one account may send in a day (UTC), apart from pictures, like `2GiB` |
 | `FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY` | unlimited | Times a day (UTC) one server's Smart filter may ask its moderation provider; past it, messages go through the Smart filter unchecked (also set from the app: Instance settings, Moderation) |

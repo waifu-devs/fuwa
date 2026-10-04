@@ -220,6 +220,20 @@ async fn friends_end_to_end() {
     }
     assert_eq!(list(&mut friends, &juan).await, vec![("mika".into(), FriendState::Friend, false)]);
     settings(&mut friends, &mika, pb::FriendSettings::default()).await;
+    let Payload::Presence(back) = next(&mut juan_live).await else { panic!() };
+    assert_eq!((back.user_id, back.online), (mika.id.clone(), true));
+    // Mika picks invisible: to friends that's offline too, and back again.
+    let mut presence = pb::presence_service_client::PresenceServiceClient::new(channel.clone());
+    for (status, online) in [(pb::PresenceStatus::Invisible, false), (pb::PresenceStatus::Online, true)] {
+        let picked = pb::PresenceSettings { status: status as i32, ..Default::default() };
+        presence
+            .update_presence_settings(authed(&mika.token, pb::UpdatePresenceSettingsRequest { settings: Some(picked) }))
+            .await
+            .unwrap();
+        let Payload::Presence(p) = next(&mut juan_live).await else { panic!() };
+        assert_eq!((p.user_id, p.online), (mika.id.clone(), online));
+        assert_eq!(list(&mut friends, &juan).await, vec![("mika".into(), FriendState::Friend, online)]);
+    }
     // Rin, who isn't a friend, never hears about any of it.
     let mut rin_live = watch(&mut friends, &rin).await;
     quiet(&mut rin_live).await;
@@ -269,6 +283,7 @@ async fn friends_end_to_end() {
     let post = |person: &Person, text: &[u8]| pb::PostMessageRequest {
         conversation_id: cid.clone(),
         message: person.device.encrypt(&cid, text).unwrap(),
+        ..Default::default()
     };
     dms.post_message(authed(&juan.token, post(&juan, b"hi"))).await.unwrap();
 
@@ -281,7 +296,6 @@ async fn friends_end_to_end() {
         .friend
         .unwrap();
     assert_eq!(blocked.state(), FriendState::Blocked);
-    // (Mika showing online again came first.)
     let ended = loop {
         match next(&mut juan_live).await {
             Payload::Presence(_) => continue,

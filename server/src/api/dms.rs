@@ -20,6 +20,7 @@ use crate::app::App;
 use crate::dms::{ConversationRow, DeviceRow, KeyPackage, MAX_KEY_PACKAGES, NewRecord};
 use crate::error::{Error, Result};
 use crate::id::{now_ms, timestamp};
+use crate::media::{self, MediaRow};
 use crate::node::Account;
 use crate::pb::{self, direct_message_service_server::DirectMessageService};
 
@@ -497,19 +498,68 @@ impl Api {
         for other in conversation.participants.iter().filter(|id| **id != account.id) {
             self.may_message(&account.id, other, true).await?;
         }
+        let media_ids = crate::sealed::carry(&self.app, &account.id, &req.media_ids).await?;
         let record = dms
-            .append(&NewRecord {
-                conversation_id: &conversation.id,
-                kind: pb::ConversationRecordKind::Message,
-                epoch: epoch(header.epoch)?,
-                sender_id: &account.id,
-                sender_device_id: &device.id,
-                data: &req.message,
-                group_info: None,
-                welcome: None,
-            })
+            .append_carrying(
+                &NewRecord {
+                    conversation_id: &conversation.id,
+                    kind: pb::ConversationRecordKind::Message,
+                    epoch: epoch(header.epoch)?,
+                    sender_id: &account.id,
+                    sender_device_id: &device.id,
+                    data: &req.message,
+                    group_info: None,
+                    welcome: None,
+                },
+                &media_ids,
+            )
             .await?;
+        crate::sealed::keep(&self.app, &media_ids).await;
         Ok(pb::PostMessageResponse { record: Some(record) })
+    }
+
+    /// Reserves an upload for a sealed file (see [`crate::sealed`]).
+    async fn create_sealed_upload(
+        &self,
+        metadata: &MetadataMap,
+        req: pb::CreateSealedUploadRequest,
+    ) -> Result<pb::CreateSealedUploadResponse> {
+        let OnDevice { account, .. } = self.on_device(metadata).await?;
+        self.app.dms()?.conversation_of(&account.id, &req.conversation_id).await?;
+        if req.size < crate::sealed::MIN_BYTES {
+            return Err(Error::invalid("that file is too small to be sealed"));
+        }
+        let settings = self.app.settings();
+        if let Some(cap) = settings.limits.voice_message_bytes
+            && req.size > cap
+        {
+            return Err(Error::ResourceExhausted(format!(
+                "voice messages can be at most {} here",
+                media::size_label(cap)
+            )));
+        }
+        let row = MediaRow {
+            id: media::new_id(),
+            account_id: account.id.clone(),
+            purpose: pb::MediaPurpose::Sealed,
+            content_type: crate::sealed::CONTENT_TYPE.to_string(),
+            size: req.size,
+            stored: false,
+            used: false,
+            server_id: None,
+        };
+        let token = crate::auth::new_token();
+        let expires_at = now_ms() + media::UPLOAD_TTL_MS;
+        // Under their own daily cap, apart from pictures'.
+        self.app.dms()?.count_sealed(&account.id, req.size, settings.limits.voice_message_bytes_per_day).await?;
+        self.app.node()?.reserve_media(&row, &crate::auth::hash_token(&token), expires_at, None).await?;
+        let base = &settings.public_url;
+        Ok(pb::CreateSealedUploadResponse {
+            upload_url: format!("{base}/media/upload/{token}"),
+            expires_at: Some(timestamp(expires_at)),
+            url: format!("{base}/media/{}", row.id),
+            media_id: row.id,
+        })
     }
 }
 
@@ -670,8 +720,38 @@ impl DirectMessageService for Api {
                 let req = request.get_ref();
                 let dms = self.app.dms()?;
                 let conversation = dms.conversation_of(&account.id, &req.conversation_id).await?;
-                dms.delete_record(&account.id, &conversation.id, req.sequence).await?;
+                let carried = dms.delete_record(&account.id, &conversation.id, req.sequence).await?;
+                // The record is gone either way; a file left behind is only
+                // ciphertext. Said without the cause, which may name it.
+                if self.app.delete_media(&carried).await.is_err() {
+                    tracing::warn!("couldn't delete a deleted message's sealed files");
+                }
                 Ok(pb::DeleteRecordResponse {})
+            }
+            .await,
+        )
+    }
+
+    async fn create_sealed_upload(
+        &self,
+        request: Request<pb::CreateSealedUploadRequest>,
+    ) -> Result<Response<pb::CreateSealedUploadResponse>, Status> {
+        let (metadata, _, req) = request.into_parts();
+        respond(Api::create_sealed_upload(self, &metadata, req).await)
+    }
+
+    async fn get_voice_limits(
+        &self,
+        request: Request<pb::GetVoiceLimitsRequest>,
+    ) -> Result<Response<pb::GetVoiceLimitsResponse>, Status> {
+        respond(
+            async {
+                self.account(request.metadata()).await?;
+                let limits = &self.app.settings().limits;
+                Ok(pb::GetVoiceLimitsResponse {
+                    max_seconds: limits.voice_message_seconds,
+                    max_bytes: limits.voice_message_bytes,
+                })
             }
             .await,
         )

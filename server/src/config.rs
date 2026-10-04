@@ -68,6 +68,9 @@ pub struct Config {
     pub mcp: bool,
     /// People may put an effect on their profile card. FUWA_PROFILE_EFFECTS.
     pub profile_effects: bool,
+    /// People may show what they're doing (docs/presence.md). On unless
+    /// FUWA_RICH_PRESENCE turns it off.
+    pub rich_presence: bool,
     /// FUWA_FEDERATION: on | off (default). Sharing channels with servers on
     /// other fuwa instances (docs/federation.md).
     pub federation: bool,
@@ -218,6 +221,14 @@ pub struct Limits {
     /// FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY: how many times a day (UTC) one
     /// server's Smart filter may ask its provider.
     pub automod_checks_per_day: Option<i64>,
+    /// FUWA_LIMIT_VOICE_MESSAGE_SECONDS: the longest voice message in direct
+    /// messages, which apps stop recording at.
+    pub voice_message_seconds: Option<i64>,
+    /// FUWA_LIMIT_VOICE_MESSAGE_BYTES: the biggest voice message, sealed.
+    pub voice_message_bytes: Option<i64>,
+    /// FUWA_LIMIT_VOICE_MESSAGES_PER_DAY: how many bytes of voice messages
+    /// one account may upload a day (UTC), apart from pictures.
+    pub voice_message_bytes_per_day: Option<i64>,
     /// FUWA_LIMIT_POLL_VOTES_PER_MINUTE: how many votes one account may make
     /// in polls in a minute.
     pub poll_votes_per_minute: Option<i64>,
@@ -375,6 +386,9 @@ impl Config {
             attachment_upload_bytes: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOAD")?,
             attachment_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY")?,
             automod_checks_per_day: count("FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY")?,
+            voice_message_seconds: count("FUWA_LIMIT_VOICE_MESSAGE_SECONDS")?,
+            voice_message_bytes: bytes("FUWA_LIMIT_VOICE_MESSAGE_BYTES")?,
+            voice_message_bytes_per_day: upload_bytes("FUWA_LIMIT_VOICE_MESSAGES_PER_DAY")?,
             poll_votes_per_minute: count("FUWA_LIMIT_POLL_VOTES_PER_MINUTE")?,
             shared_remote_sends_per_minute: count("FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE")?,
             shared_remote_people: count("FUWA_LIMIT_SHARED_REMOTE_PEOPLE")?,
@@ -425,6 +439,11 @@ impl Config {
             None | Some("on" | "true" | "1") => true,
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_PROFILE_EFFECTS must be on or off, got {other:?}")),
+        };
+        let rich_presence = match get("FUWA_RICH_PRESENCE").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_RICH_PRESENCE must be on or off, got {other:?}")),
         };
         let federation = match get("FUWA_FEDERATION").as_deref().map(str::trim) {
             None | Some("off" | "false" | "0") => false,
@@ -533,6 +552,7 @@ impl Config {
             shared_channels,
             mcp,
             profile_effects,
+            rich_presence,
             federation,
             federation_allow_private,
             call_recordings_keep_days,

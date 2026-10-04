@@ -53,6 +53,18 @@
     `App::find_agent`, the cluster call `FindAgent`), and it skips rules
     (never `pending`). Deleting a person deletes their agents
     (`erase_account`). Who may make agents is the `agent_creation` setting.
+  - `presence.rs`: who's online and what they're doing (docs/presence.md),
+    in memory only where accounts are: each app's lease (`UpdatePresence`,
+    150 seconds), people's saved choices (node.db's `presence_settings`) and
+    the live streams of people who share a server (`Index::neighbours`),
+    at most 5 changes per 20 seconds each, the rest merged by `tick`.
+    `api/presence.rs` is `PresenceService`; joins call `Presence::joined`
+    where the index learns of them. Activities are user content: checked
+    and capped in `check_activities`, pictures through `picture_link`, and
+    never logged or written down. The web app's side is `web/src/fuwa/presence.ts`
+    (its own small store, one subscription per person) and
+    `web/src/components/Presence.tsx` (dots, activity lines and cards, one
+    shared clock for timers that writes text without React).
   - `dms.rs`: direct messages (`dms.db`, on the directory): each device's
     public signature key and key packages (one-use, plus a last-resort one),
     each conversation's records in one order (MLS commits and messages, all
@@ -73,6 +85,13 @@
     or call a direct-message conversation. A friend list is its owner's
     alone: never in a server's events or audit log, never shown to other
     members, servers or agents, and a block is told to nobody.
+  - `sealed.rs`: sealed files, what a direct message carries that's too big
+    to go in it (voice messages): ciphertext the device uploads like a
+    picture (`MEDIA_PURPOSE_SEALED`, reserved with
+    `DirectMessageService.CreateSealedUpload`, taken as any bytes by
+    `media.rs`'s upload), kept with the record that names it in
+    `PostMessage.media_ids` (dms.db's `record_media`) and deleted with it.
+    The key lives only inside the encrypted message (docs/e2ee.md).
   - `twofactor.rs`: TOTP codes (RFC 6238) and backup codes for two-step sign-in.
   - `linked.rs`: signing in with waifu.dev (linked accounts): the instance is an
     OpenAuth client whose client ID is its public URL. `AuthService`'s
@@ -585,6 +604,16 @@
     `src/fuwa/dms.ts` are the actions; the screens are in `components/dm/`
     (`DmList`, `DmView`, `EncryptionDialog` with the safety number), routed at
     `/<instance>/dm/<conversation>`.
+  - `src/voice/`: voice messages on the device. `recorder.ts` records the
+    microphone through an AudioWorklet (`capture.worklet.ts`) into the
+    browser's Opus encoder (WebCodecs) and writes the Ogg file itself
+    (`ogg.ts`), with the waveform (`waveform.ts`); `seal.ts` seals and opens
+    the file (AES-256-GCM, WebCrypto); `player.ts` is the page's one audio
+    element, so playback outlives a message row scrolling away, with
+    `wav.ts` for browsers whose audio element can't play Ogg Opus. The
+    composer's mic and recording bar (`VoiceRecorder`) and the message
+    (`VoiceMessage`) are in `components/voice/` and know nothing about
+    where the sound comes from or goes, so other composers can use them.
   - `src/fuwa/search.ts`, `src/lib/search-query.ts`, `components/search/`:
     the search bar (Mod+F) and results panel. `search-query.ts` reads
     `from:`, `in:`, `has:`, `mentions:`, `before:`, `after:` and `during:`

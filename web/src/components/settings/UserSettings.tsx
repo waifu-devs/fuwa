@@ -273,8 +273,9 @@ export function UserSettings() {
           label: "Data and privacy",
           icon: DatabaseIcon,
           description: `What ${where} keeps about you.`,
-          keywords: "export download delete account gdpr",
+          keywords: "export download delete account gdpr activity rich presence game playing status",
           settings: [
+            { id: "activity-sharing", label: "Show what I'm doing", keywords: "rich presence activity game playing listening discord share" },
             { id: "export", label: "Download your data", keywords: "export json" },
             { id: "delete-account", label: "Delete your account", keywords: "remove close" },
           ],

@@ -53,6 +53,8 @@ pub struct App {
     friends: Option<crate::friends::Friends>,
     /// Every server and who's in it, where `node` is.
     pub index: Index,
+    /// Who's online and what they're doing, where `node` is; memory only.
+    pub presence: crate::presence::Presence,
     /// The servers whose files are here: all of them, or a shard's share.
     pub servers: Servers,
     pub hub: Arc<Hub>,
@@ -202,6 +204,7 @@ impl App {
             media,
             friends,
             index,
+            presence: crate::presence::Presence::default(),
             servers,
             hub,
             limiter: SignInLimiter::default(),
@@ -266,7 +269,21 @@ impl App {
 
     /// Deletes uploads that never arrived and pictures nothing used, as of `now`.
     pub async fn sweep_media(&self, now: i64) -> Result<usize> {
-        let ids = self.node()?.sweepable_media(now).await?;
+        let node = self.node()?;
+        let mut ids = node.sweepable_media(now).await?;
+        // A sealed file a message carries stays, even if it was never marked
+        // used (the server stopped between the two); it's marked now.
+        if let Ok(dms) = self.dms() {
+            let mut swept = Vec::with_capacity(ids.len());
+            for id in ids {
+                if dms.carries(&id).await? {
+                    node.use_media(&id, None).await?;
+                } else {
+                    swept.push(id);
+                }
+            }
+            ids = swept;
+        }
         self.delete_media(&ids).await?;
         Ok(ids.len())
     }
@@ -351,6 +368,7 @@ impl App {
             .add_service(crate::pb::gif_service_server::GifServiceServer::new(api.clone()))
             .add_service(DirectMessageServiceServer::new(api.clone()))
             .add_service(crate::pb::friend_service_server::FriendServiceServer::new(api.clone()))
+            .add_service(crate::pb::presence_service_server::PresenceServiceServer::new(api.clone()))
             .add_service(crate::pb::call_service_server::CallServiceServer::new(api.clone()))
             .add_service(crate::pb::secure_channel_service_server::SecureChannelServiceServer::new(api.clone()))
             .add_service(crate::pb::search_service_server::SearchServiceServer::new(api.clone()))
@@ -469,6 +487,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         agent_creation: settings.agent_creation as i32,
         telemetry: settings.telemetry,
         shared_channels: settings.shared_channels,
+        rich_presence: settings.rich_presence,
         federation: settings.shared_channels && settings.federation && !settings.public_url.is_empty(),
         mcp: settings.mcp,
         profile_effects: settings.profile_effects,
@@ -575,6 +594,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     if app.node.is_some() {
         crate::telemetry::spawn(app.clone());
         spawn_housekeeping(app.clone());
+        spawn_presence_ticks(app.clone());
     }
     if matches!(app.link, Link::Alone | Link::Shard(_)) {
         spawn_sso_rechecks(app.clone());
@@ -609,6 +629,21 @@ pub fn spawn_signal_handler(shutdown: CancellationToken) {
         wait_for_signal().await;
         tracing::info!("shutting down");
         shutdown.cancel();
+    });
+}
+
+/// Every second: forgets apps that stopped calling `UpdatePresence` and
+/// sends presence changes that waited for their window.
+fn spawn_presence_ticks(app: Arc<App>) {
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(Duration::from_secs(1));
+        every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = app.shutdown.cancelled() => return,
+                _ = every.tick() => app.presence.tick(&app.index),
+            }
+        }
     });
 }
 
