@@ -32,6 +32,8 @@ struct Extras {
     auto_mod: Option<pb::AutoModAlert>,
     #[prost(message, optional, tag = "6")]
     webhook: Option<pb::MessageWebhook>,
+    #[prost(message, repeated, tag = "7")]
+    emojis: Vec<pb::Emoji>,
 }
 
 impl Extras {
@@ -43,6 +45,7 @@ impl Extras {
             mention_role_ids: message.mention_role_ids.clone(),
             auto_mod: message.auto_mod.clone(),
             webhook: message.webhook.clone(),
+            emojis: message.emojis.clone(),
         };
         (extras != Extras::default()).then(|| extras.encode_to_vec())
     }
@@ -80,6 +83,70 @@ fn role_tokens(content: &str) -> Vec<&str> {
         }
     }
     ids
+}
+
+/// The ids of the custom emoji written as `<:name:id>` or `<a:name:id>` in
+/// `content`, once each, in order.
+fn emoji_tokens(content: &str) -> Vec<&str> {
+    let mut ids = Vec::new();
+    for (start, _) in content.match_indices('<') {
+        let rest = &content[start + 1..];
+        let rest = rest.strip_prefix('a').unwrap_or(rest);
+        let Some(rest) = rest.strip_prefix(':') else { continue };
+        let Some(end) = rest.find('>') else { continue };
+        let Some((name, id)) = rest[..end].split_once(':') else { continue };
+        let word = |s: &str, min: usize, under: bool| {
+            (min..=32).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || (under && b == b'_'))
+        };
+        if word(name, 2, true) && word(id, 10, false) && !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+/// The emoji from the author's other servers that `content` uses, of the
+/// ones the app sent along, checked (see [`App::check_emojis`]). Emoji of
+/// `server_id` itself are left out: everyone there has them already. When
+/// checking fails the message still goes, and they show as their names.
+async fn outside_emojis(
+    app: &App,
+    account_id: &str,
+    server_id: &str,
+    content: &str,
+    sent: Vec<pb::Emoji>,
+) -> Vec<pb::Emoji> {
+    let used = emoji_tokens(content);
+    let mut wanted: Vec<pb::Emoji> = Vec::new();
+    for emoji in sent {
+        if emoji.server_id != server_id && used.contains(&emoji.id.as_str()) && !wanted.iter().any(|w| w.id == emoji.id)
+        {
+            wanted.push(emoji);
+        }
+    }
+    match app.check_emojis(account_id, wanted).await {
+        Ok(emojis) => emojis,
+        Err(_) => {
+            tracing::warn!("couldn't check emoji from other servers; they show as names");
+            vec![]
+        }
+    }
+}
+
+/// An edited message's emoji from other servers: the ones it had that the
+/// new text still uses, then newly checked ones.
+fn kept_emojis(had: Vec<pb::Emoji>, checked: Vec<pb::Emoji>, content: &str) -> Vec<pb::Emoji> {
+    let used = emoji_tokens(content);
+    let mut kept: Vec<pb::Emoji> = Vec::new();
+    for emoji in had.into_iter().chain(checked) {
+        if used.contains(&emoji.id.as_str())
+            && !kept.iter().any(|k| k.id == emoji.id)
+            && kept.len() < crate::cluster::calls::MAX_OUTSIDE_EMOJIS
+        {
+            kept.push(emoji);
+        }
+    }
+    kept
 }
 
 /// Who a message pings, given what its author can do in its channel: everyone
@@ -133,6 +200,7 @@ fn message_row(server_id: &str) -> impl Fn(&turso::Row) -> turso::Result<(pb::Me
                 auto_mod: None,
                 webhook: None,
                 shared: None,
+                emojis: vec![],
             },
             r.get::<Option<Vec<u8>>>(4)?,
         ))
@@ -154,6 +222,7 @@ fn with_extras((mut message, extras): (pb::Message, Option<Vec<u8>>)) -> Result<
         message.mention_role_ids = extras.mention_role_ids;
         message.auto_mod = extras.auto_mod;
         message.webhook = extras.webhook;
+        message.emojis = extras.emojis;
     }
     Ok(message)
 }
@@ -518,6 +587,9 @@ impl MessageService for Api {
                     let message = shared::guest_send(&self.app, &sdb, &account, &member, &access, &link, req).await?;
                     return Ok(pb::SendMessageResponse { message: Some(message) });
                 }
+                let emojis =
+                    outside_emojis(&self.app, &account.id, &sdb.id, &req.content, std::mem::take(&mut req.emojis))
+                        .await;
                 let limits = sdb.limits(&self.app.settings().limits).await?;
                 if let Some(limit) = limits.storage_bytes
                     && sdb.storage_bytes() >= limit
@@ -583,6 +655,7 @@ impl MessageService for Api {
                             auto_mod: None,
                             webhook: None,
                             shared: None,
+                            emojis: emojis.clone(),
                         };
                         insert_message(conn, &message, now).await?;
                         events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
@@ -660,7 +733,7 @@ impl MessageService for Api {
         respond(
             async {
                 let account = self.account(request.metadata()).await?;
-                let req = request.into_inner();
+                let mut req = request.into_inner();
                 let Seat { sdb, member, access } = self.membership(&account, &req.server_id).await?;
                 check_not_timed_out(&member)?;
                 let located = shared::locate(
@@ -678,6 +751,9 @@ impl MessageService for Api {
                     let message = shared::guest_edit(&self.app, &sdb, &member, &access, &link, guest, &req).await?;
                     return Ok(pb::UpdateMessageResponse { message: Some(message) });
                 }
+                let checked =
+                    outside_emojis(&self.app, &account.id, &sdb.id, &req.content, std::mem::take(&mut req.emojis))
+                        .await;
                 // A provider is asked before the write, about new text the author wrote.
                 let before = load_message(&sdb.read()?, &sdb.id, &req.message_id).await?;
                 let (asked, later) = match before {
@@ -722,6 +798,8 @@ impl MessageService for Api {
                         let growth = req.content.len() as i64 - message.content.len() as i64;
                         (message.mentions_everyone, message.mention_role_ids) =
                             mentions(conn, &sdb.id, &access, &message.channel_id, &req.content).await?;
+                        message.emojis =
+                            kept_emojis(std::mem::take(&mut message.emojis), checked.clone(), &req.content);
                         message.content = req.content.clone();
                         message.edited_at = Some(timestamp(now));
                         conn.execute(

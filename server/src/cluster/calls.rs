@@ -287,6 +287,51 @@ impl App {
         }
     }
 
+    /// Which of the emoji someone wrote from their other servers they may
+    /// use: ones from a server they're a member of whose picture is one of
+    /// that server's emoji here. They come back as they're stored: the name
+    /// checked, the link rebuilt at this instance's public address (never
+    /// the one sent), and animated from the picture itself.
+    pub async fn check_emojis(&self, account_id: &str, emojis: Vec<pb::Emoji>) -> Result<Vec<pb::Emoji>> {
+        if emojis.is_empty() {
+            return Ok(vec![]);
+        }
+        if let Link::Shard(link) = &self.link {
+            let request = cpb::CheckEmojisRequest { account_id: account_id.to_string(), emojis };
+            return Ok(link.ask(request, |mut d, r| async move { d.check_emojis(r).await }).await?.emojis);
+        }
+        let node = self.node()?;
+        let base = self.settings().public_url.clone();
+        let mut kept: Vec<pb::Emoji> = Vec::new();
+        for emoji in emojis.into_iter().take(MAX_OUTSIDE_EMOJIS) {
+            let Some(media_id) = media::id_in_url(&emoji.url) else { continue };
+            if !emoji_name_ok(&emoji.name)
+                || !emoji_id_ok(&emoji.id)
+                || kept.iter().any(|k| k.id == emoji.id)
+                || !self.index.is_member(account_id, &emoji.server_id)
+            {
+                continue;
+            }
+            let Some(row) = node.media(&media_id).await? else { continue };
+            if row.purpose != pb::MediaPurpose::Emoji
+                || !row.stored
+                || !row.used
+                || row.server_id.as_deref() != Some(emoji.server_id.as_str())
+            {
+                continue;
+            }
+            kept.push(pb::Emoji {
+                id: emoji.id,
+                server_id: emoji.server_id,
+                name: emoji.name,
+                url: format!("{base}/media/{media_id}"),
+                animated: row.content_type == "image/gif",
+                ..Default::default()
+            });
+        }
+        Ok(kept)
+    }
+
     /// The regions this instance keeps servers in, the home region first;
     /// one or none when there's nothing to choose.
     pub fn regions(&self) -> Vec<pb::Region> {
@@ -528,4 +573,17 @@ impl App {
             Link::Alone => Err(Error::NotFound("server")),
         }
     }
+}
+
+/// Most emoji from other servers one message keeps.
+pub const MAX_OUTSIDE_EMOJIS: usize = 50;
+
+/// An emoji's name as messages write it: 2 to 32 letters, digits and underscores.
+fn emoji_name_ok(name: &str) -> bool {
+    (2..=32).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// An emoji's id as messages write it: 10 to 32 letters and digits.
+fn emoji_id_ok(id: &str) -> bool {
+    (10..=32).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric())
 }

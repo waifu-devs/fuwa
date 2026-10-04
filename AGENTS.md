@@ -116,7 +116,13 @@
     the server file (`emojis`, `api/emoji.rs`); their pictures are uploads
     (`MEDIA_PURPOSE_EMOJI`) counted in the server's attachments, and every
     change sends the whole list (`EmojisUpdated`). Messages write them
-    `<:name:id>` (`<a:name:id>` when they move).
+    `<:name:id>` (`<a:name:id>` when they move). A message may also use
+    emoji from its author's other servers on the instance: the app sends
+    them along (`SendMessageRequest.emojis`), `App::check_emojis` keeps those
+    from a server the author is in whose picture is that server's emoji
+    (the link rebuilt at the public address, never the one sent), and they
+    ride in the message's extras as `Message.emojis`, so everyone can draw
+    them. No new permission: being in the server is what lets you use them.
     Shared channels (`api/shared.rs`, docs/shared-channels.md): a channel's
     home keeps it and every message (`channel_guests`, `share_codes`,
     `channel_blocks`); a guest server shows it as a channel of its own
@@ -521,6 +527,16 @@
     plugin for `Markdown`), and `ServerLook`, the roles and members a server's
     messages need to color names. `MentionPicker.tsx` is the @ list in the
     composer; roles go in as `@Name` and are sent as `<@&id>`.
+  - Emoji: `components/EmojiPicker.tsx` is the picker (recently used, this
+    server's, your other servers' on the same instance, then the standard
+    set with skin tones; a hand-laid virtual grid that draws only the rows in
+    sight, driven by arrows from its search box). What it and the `:name:`
+    list offer is `lib/emoji-catalog.ts` (hooks and storage) over
+    `lib/emoji-search.ts` (names, `~2` for clashes, search, what a message
+    sends along). The standard set is `lib/emoji-data.json`, made from
+    `emojibase-data` by `scripts/emoji-data.mjs` and loaded only when needed;
+    nothing about emoji is ever fetched from outside. `EmojiImage.tsx` draws a
+    server emoji, holding moving ones still under reduced motion until hovered.
   - `src/components/settings/instance/`: the instance admin pages beyond
     settings (accounts, servers, announcement), shown by
     `settings/InstanceSettingsDialog.tsx`. The announcement itself is drawn by

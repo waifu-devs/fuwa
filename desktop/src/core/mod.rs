@@ -652,6 +652,7 @@ impl Core {
                 content: content.into(),
                 // The instance finds the channel; the web app names it.
                 channel_id: String::new(),
+                ..Default::default()
             })
         )
         .await?;

@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Attachment, Embed, Message as Message$1, User } from "./types_pb";
+import type { Attachment, Embed, Emoji, Message as Message$1, User } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/message.proto.
  */
 export const file_fuwa_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEiqwEKElNlbmRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEigKC2F0dGFjaG1lbnRzGAQgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgFIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYBiABKAkiOAoTU2VuZE1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIk4KEUdldE1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiVgoSR2V0TWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2USHQoGYXV0aG9yGAIgASgLMg0uZnV3YS52MS5Vc2VyInAKE0xpc3RNZXNzYWdlc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkSDQoFbGltaXQYAyABKAUSEQoJYmVmb3JlX2lkGAQgASgJEhAKCGFmdGVyX2lkGAUgASgJImwKFExpc3RNZXNzYWdlc1Jlc3BvbnNlEiIKCG1lc3NhZ2VzGAEgAygLMhAuZnV3YS52MS5NZXNzYWdlEh4KB2F1dGhvcnMYAiADKAsyDS5mdXdhLnYxLlVzZXISEAoIaGFzX21vcmUYAyABKAgiYgoUVXBkYXRlTWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgpjaGFubmVsX2lkGAQgASgJIjoKFVVwZGF0ZU1lc3NhZ2VSZXNwb25zZRIhCgdtZXNzYWdlGAEgASgLMhAuZnV3YS52MS5NZXNzYWdlIlEKFERlbGV0ZU1lc3NhZ2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgptZXNzYWdlX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkiFwoVRGVsZXRlTWVzc2FnZVJlc3BvbnNlMo4DCg5NZXNzYWdlU2VydmljZRJICgtTZW5kTWVzc2FnZRIbLmZ1d2EudjEuU2VuZE1lc3NhZ2VSZXF1ZXN0GhwuZnV3YS52MS5TZW5kTWVzc2FnZVJlc3BvbnNlEkUKCkdldE1lc3NhZ2USGi5mdXdhLnYxLkdldE1lc3NhZ2VSZXF1ZXN0GhsuZnV3YS52MS5HZXRNZXNzYWdlUmVzcG9uc2USSwoMTGlzdE1lc3NhZ2VzEhwuZnV3YS52MS5MaXN0TWVzc2FnZXNSZXF1ZXN0Gh0uZnV3YS52MS5MaXN0TWVzc2FnZXNSZXNwb25zZRJOCg1VcGRhdGVNZXNzYWdlEh0uZnV3YS52MS5VcGRhdGVNZXNzYWdlUmVxdWVzdBoeLmZ1d2EudjEuVXBkYXRlTWVzc2FnZVJlc3BvbnNlEk4KDURlbGV0ZU1lc3NhZ2USHS5mdXdhLnYxLkRlbGV0ZU1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5EZWxldGVNZXNzYWdlUmVzcG9uc2ViBnByb3RvMw", [file_fuwa_v1_types]);
+  fileDesc("ChVmdXdhL3YxL21lc3NhZ2UucHJvdG8SB2Z1d2EudjEiywEKElNlbmRNZXNzYWdlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRIPCgdjb250ZW50GAMgASgJEigKC2F0dGFjaG1lbnRzGAQgAygLMhMuZnV3YS52MS5BdHRhY2htZW50Eh4KBmVtYmVkcxgFIAMoCzIOLmZ1d2EudjEuRW1iZWQSEwoLcmVwbHlfdG9faWQYBiABKAkSHgoGZW1vamlzGAcgAygLMg4uZnV3YS52MS5FbW9qaSI4ChNTZW5kTWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiTgoRR2V0TWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCSJWChJHZXRNZXNzYWdlUmVzcG9uc2USIQoHbWVzc2FnZRgBIAEoCzIQLmZ1d2EudjEuTWVzc2FnZRIdCgZhdXRob3IYAiABKAsyDS5mdXdhLnYxLlVzZXIicAoTTGlzdE1lc3NhZ2VzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRINCgVsaW1pdBgDIAEoBRIRCgliZWZvcmVfaWQYBCABKAkSEAoIYWZ0ZXJfaWQYBSABKAkibAoUTGlzdE1lc3NhZ2VzUmVzcG9uc2USIgoIbWVzc2FnZXMYASADKAsyEC5mdXdhLnYxLk1lc3NhZ2USHgoHYXV0aG9ycxgCIAMoCzINLmZ1d2EudjEuVXNlchIQCghoYXNfbW9yZRgDIAEoCCKCAQoUVXBkYXRlTWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSDwoHY29udGVudBgDIAEoCRISCgpjaGFubmVsX2lkGAQgASgJEh4KBmVtb2ppcxgFIAMoCzIOLmZ1d2EudjEuRW1vamkiOgoVVXBkYXRlTWVzc2FnZVJlc3BvbnNlEiEKB21lc3NhZ2UYASABKAsyEC5mdXdhLnYxLk1lc3NhZ2UiUQoURGVsZXRlTWVzc2FnZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCSIXChVEZWxldGVNZXNzYWdlUmVzcG9uc2UyjgMKDk1lc3NhZ2VTZXJ2aWNlEkgKC1NlbmRNZXNzYWdlEhsuZnV3YS52MS5TZW5kTWVzc2FnZVJlcXVlc3QaHC5mdXdhLnYxLlNlbmRNZXNzYWdlUmVzcG9uc2USRQoKR2V0TWVzc2FnZRIaLmZ1d2EudjEuR2V0TWVzc2FnZVJlcXVlc3QaGy5mdXdhLnYxLkdldE1lc3NhZ2VSZXNwb25zZRJLCgxMaXN0TWVzc2FnZXMSHC5mdXdhLnYxLkxpc3RNZXNzYWdlc1JlcXVlc3QaHS5mdXdhLnYxLkxpc3RNZXNzYWdlc1Jlc3BvbnNlEk4KDVVwZGF0ZU1lc3NhZ2USHS5mdXdhLnYxLlVwZGF0ZU1lc3NhZ2VSZXF1ZXN0Gh4uZnV3YS52MS5VcGRhdGVNZXNzYWdlUmVzcG9uc2USTgoNRGVsZXRlTWVzc2FnZRIdLmZ1d2EudjEuRGVsZXRlTWVzc2FnZVJlcXVlc3QaHi5mdXdhLnYxLkRlbGV0ZU1lc3NhZ2VSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types]);
 
 /**
  * @generated from message fuwa.v1.SendMessageRequest
@@ -47,6 +47,17 @@ export type SendMessageRequest = Message<"fuwa.v1.SendMessageRequest"> & {
    * @generated from field: string reply_to_id = 6;
    */
   replyToId: string;
+
+  /**
+   * Emoji from other servers the caller is a member of on this instance,
+   * written in content as <:name:id>: id, server_id, name and url are read.
+   * Each is checked (the caller is in that server, and the url is one of its
+   * emoji's pictures here); ones that aren't, or that content doesn't use,
+   * are left out and show as their names. See Message.emojis.
+   *
+   * @generated from field: repeated fuwa.v1.Emoji emojis = 7;
+   */
+  emojis: Emoji[];
 };
 
 /**
@@ -225,6 +236,14 @@ export type UpdateMessageRequest = Message<"fuwa.v1.UpdateMessageRequest"> & {
    * @generated from field: string channel_id = 4;
    */
   channelId: string;
+
+  /**
+   * As in SendMessageRequest. Emoji the message already had stay while the
+   * new text still uses them.
+   *
+   * @generated from field: repeated fuwa.v1.Emoji emojis = 5;
+   */
+  emojis: Emoji[];
 };
 
 /**
