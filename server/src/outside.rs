@@ -188,7 +188,8 @@ async fn cached(url: &str) -> Result<Picture, Missing> {
 
 /// The bytes and type of the picture a message links to, for the server
 /// itself to read (AutoMod providers that look at pictures): an upload on
-/// this instance from its files, a link it rewrote or any other link
+/// this instance from its files (only ever one of the message's own
+/// attachments, checked as its sender's: see `automod::picture_links`), a link it rewrote or any other link
 /// fetched like readers' pictures are (public addresses only, at most
 /// [`MAX_BYTES`], cached). `None` when it isn't a picture or can't be had.
 pub async fn picture(app: &App, url: &str) -> Option<(&'static str, Bytes)> {

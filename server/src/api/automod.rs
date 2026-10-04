@@ -589,7 +589,14 @@ pub(super) fn picture_links(attachments: &[pb::Attachment], embeds: &[pb::Embed]
         .iter()
         .filter(|a| readable(a))
         .map(|a| a.url.clone())
-        .chain(embeds.iter().flat_map(|e| [e.image_url.clone(), e.thumbnail_url.clone()]))
+        // An embed's picture is read only from elsewhere: a link to an upload
+        // here could be someone else's file no message has yet, which only
+        // its uploader's own message may have read.
+        .chain(
+            embeds.iter().flat_map(|e| [e.image_url.clone(), e.thumbnail_url.clone()]).filter(|link| {
+                crate::media::id_in_url(link).is_none() && crate::media::server_file_in_url(link).is_none()
+            }),
+        )
         .filter(|link| !link.is_empty())
         .collect()
 }
@@ -967,6 +974,26 @@ impl AutoModService for Api {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embeds_never_lead_to_uploads_here() {
+        let file = pb::Attachment {
+            url: "https://fuwa.chat/media/0mqmvkbz3xq9wr61vcvvxwrg8q".into(),
+            content_type: "image/png".into(),
+            ..Default::default()
+        };
+        let embed = pb::Embed {
+            image_url: "https://fuwa.chat/media/2ftp7a3xyqbvr3dbhc1gkhwzn9".into(),
+            thumbnail_url: "https://fuwa.chat/media/servers/01M42CP6J090F6S8910RTR1417/2ftp7a3xyqbvr3dbhc1gkhwzn9"
+                .into(),
+            ..Default::default()
+        };
+        let outside = pb::Embed { image_url: "https://fuwa.chat/media/outside/abc?url=x".into(), ..Default::default() };
+        assert_eq!(
+            picture_links(std::slice::from_ref(&file), &[embed, outside.clone()]),
+            vec![file.url, outside.image_url]
+        );
+    }
 
     /// A provider answer that comes after the message went out still blocks
     /// it: down it comes, with an alert and a time out, as before sending.
