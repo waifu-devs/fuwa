@@ -8,6 +8,7 @@ import { AttachButton, DropOverlay, StagedTray, UploadRing } from "@/components/
 import { addFiles, takeFiles, useStaged } from "@/components/chat/staged";
 import { useFuwa } from "@/fuwa/store";
 import { MentionPicker, useMentionPicker } from "@/components/chat/MentionPicker";
+import { TimestampPicker } from "@/components/chat/TimestampPicker";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { RulesDialog } from "@/components/join/Rules";
 import { SPRING } from "@/components/motion";
@@ -246,6 +247,7 @@ export function Composer({
             </motion.span>
           )}
         </AnimatePresence>
+        <TimestampPicker onPick={insert} />
         <EmojiPicker
           emojis={emojis}
           server={server}
