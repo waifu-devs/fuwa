@@ -40,6 +40,9 @@ import { cn } from "@/lib/utils";
 
 const EMPTY: never[] = [];
 
+/** One of the replies row's two labels, stacked in the same grid cell: the last reply, or "View thread" while hovered. */
+export const SWAP = "truncate transition duration-200 ease-out [grid-area:1/1]";
+
 const useArchiveHours = (instanceKey: string, serverId: string) =>
   useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.threadArchiveHours ?? 0);
 
@@ -114,9 +117,14 @@ export const RepliesRow = memo(function RepliesRow({
         )}
       </AnimatePresence>
       {thread.locked && <LockIcon aria-label="Locked" className="size-3 shrink-0 text-muted-foreground" />}
-      <span className="min-w-0 truncate text-muted-foreground">
-        <span className="group-hover/replies:hidden">{archived ? "Archived" : `Last reply ${ago(last)}`}</span>
-        <span className="hidden group-hover/replies:inline">View thread</span>
+      {/* Both labels share one grid cell, so the row keeps the wider one's width and never shrinks out from under the pointer. */}
+      <span className="grid min-w-0 text-muted-foreground">
+        <span className={cn(SWAP, "group-hover/replies:-translate-y-1 group-hover/replies:opacity-0 group-focus-visible/replies:-translate-y-1 group-focus-visible/replies:opacity-0")}>
+          {archived ? "Archived" : `Last reply ${ago(last)}`}
+        </span>
+        <span aria-hidden className={cn(SWAP, "translate-y-1 opacity-0 group-hover/replies:translate-y-0 group-hover/replies:opacity-100 group-focus-visible/replies:translate-y-0 group-focus-visible/replies:opacity-100")}>
+          View thread
+        </span>
       </span>
     </motion.button>
   );

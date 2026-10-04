@@ -7,7 +7,7 @@ import { lineText, type Item } from "@/e2ee/vault";
 import { dmProblem, followSecureThread, lockSecureThread, markSecureThreadRead } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage, type ThreadNote } from "@/fuwa/store";
 import { EncryptedComposer, EncryptedMessages, type ThreadHooks } from "@/components/dm/DmView";
-import { Faces, PanelButton } from "@/components/chat/Threads";
+import { Faces, PanelButton, SWAP } from "@/components/chat/Threads";
 import { MessageBody, MessageLine } from "@/components/chat/MessageList";
 import { UserAvatar } from "@/components/Icons";
 import { Count, SPRING } from "@/components/motion";
@@ -75,11 +75,13 @@ export const SecureRepliesRow = memo(function SecureRepliesRow({
         )}
       </AnimatePresence>
       {thread.locked && <LockIcon aria-label="Locked" className="size-3 shrink-0 text-muted-foreground" />}
-      <span className="min-w-0 truncate text-muted-foreground">
-        <span className="group-hover/replies:hidden">
+      <span className="grid min-w-0 text-muted-foreground">
+        <span className={cn(SWAP, "group-hover/replies:-translate-y-1 group-hover/replies:opacity-0 group-focus-visible/replies:-translate-y-1 group-focus-visible/replies:opacity-0")}>
           {archived(thread, hours) ? "Archived" : thread.lastAt ? `Last reply ${ago(new Date(thread.lastAt))}` : "No replies"}
         </span>
-        <span className="hidden group-hover/replies:inline">View thread</span>
+        <span aria-hidden className={cn(SWAP, "translate-y-1 opacity-0 group-hover/replies:translate-y-0 group-hover/replies:opacity-100 group-focus-visible/replies:translate-y-0 group-focus-visible/replies:opacity-100")}>
+          View thread
+        </span>
       </span>
     </motion.button>
   );
