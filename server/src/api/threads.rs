@@ -328,13 +328,24 @@ impl Api {
         let mut threads = Vec::new();
         let mut has_more = false;
         let mut budget = MAX_SEARCH_READ;
+        let searched_all = (candidates.len() as i64) < scan;
+        // The last thread looked at, where the next page carries on.
+        let mut looked_at = String::new();
         for (id, summary) in candidates {
-            let Some(mut parent) = super::messages::load_message(&conn, &sdb.id, &id).await? else { continue };
+            if threads.len() == limit {
+                has_more = true;
+                break;
+            }
+            let Some(mut parent) = super::messages::load_message(&conn, &sdb.id, &id).await? else {
+                looked_at = id;
+                continue;
+            };
             if !query.is_empty() && !parent.content.to_lowercase().contains(&query) {
                 // A search reads a bounded number of replies in all; past that it
-                // stops, and the next page picks up after the last match.
+                // stops and says there's more, so a busy channel never answers
+                // "nothing found" without having looked everywhere.
                 if budget <= 0 {
-                    has_more = !threads.is_empty();
+                    has_more = true;
                     break;
                 }
                 let replies = query_all(
@@ -346,22 +357,25 @@ impl Api {
                 .await?;
                 budget -= replies.len().max(1) as i64;
                 if !replies.iter().any(|c| c.to_lowercase().contains(&query)) {
+                    looked_at = id;
                     continue;
                 }
             }
-            if threads.len() == limit {
-                has_more = true;
-                break;
-            }
+            looked_at = id;
             parent.thread = Some(summary);
             threads.push(parent);
+        }
+        // A search that read its whole share of threads may have more past them.
+        if !query.is_empty() && !searched_all {
+            has_more = true;
         }
         let mut ids = threads.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>();
         ids.extend(
             threads.iter().flat_map(|m| m.thread.iter().flat_map(|t| t.participant_ids.iter().map(String::as_str))),
         );
         let authors = users(&conn, &ids).await?;
-        Ok(pb::ListThreadsResponse { threads, authors, has_more })
+        let next_after_thread_id = if has_more { looked_at } else { String::new() };
+        Ok(pb::ListThreadsResponse { threads, authors, has_more, next_after_thread_id })
     }
 
     pub(super) async fn update_thread_impl(

@@ -397,10 +397,10 @@ export function ThreadList({
   }, [instanceKey, serverId, channel.id, query, archived]);
 
   const more = () => {
-    const last = page?.threads.at(-1);
-    if (!last) return;
+    const after = page?.nextAfterThreadId || page?.threads.at(-1)?.id;
+    if (!after) return;
     setLoading(true);
-    run(listThreads(instanceKey, serverId, channel.id, { query: query.trim(), archived, afterThreadId: last.id }))
+    run(listThreads(instanceKey, serverId, channel.id, { query: query.trim(), archived, afterThreadId: after }))
       .then((res) => setPage((p) => (p ? { ...res, threads: [...p.threads, ...res.threads] } : res)))
       .catch((err: FuwaError) => toast(err.message))
       .finally(() => setLoading(false));
@@ -460,7 +460,7 @@ export function ThreadList({
       </div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-2">
         {error && <p className="p-3 text-sm text-destructive">{error}</p>}
-        {!error && !loading && threads.length === 0 && (
+        {!error && !loading && threads.length === 0 && !page?.hasMore && (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -521,7 +521,7 @@ export function ThreadList({
             onClick={more}
             className="mx-auto my-2 block rounded-full px-3 py-1 text-xs font-bold text-primary hover:bg-primary/10"
           >
-            Show more
+            {threads.length === 0 ? "Search older threads" : "Show more"}
           </button>
         )}
       </div>

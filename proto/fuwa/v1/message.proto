@@ -128,6 +128,9 @@ message ListThreadsResponse {
   // Profiles of their authors and the threads' participants.
   repeated User authors = 2;
   bool has_more = 3;
+  // With has_more: the after_thread_id for the next page. A search can stop
+  // before it finds anything, with has_more and a place to carry on from.
+  string next_after_thread_id = 4;
 }
 
 message UpdateThreadRequest {
