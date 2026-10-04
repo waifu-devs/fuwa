@@ -7297,8 +7297,39 @@ async fn instances_meet_with_signed_calls() {
     let again = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap().into_inner();
     assert!(again.known_there);
 
+    // A rotates its key (only an admin can): B moves to the new one by
+    // itself, as the old one vouched for it.
+    assert!(fed_a.rotated_at.is_none());
+    let denied = ca.admin.rotate_federation_key(authed(&member, pb::RotateFederationKeyRequest {})).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied);
+    let rotated =
+        ca.admin.rotate_federation_key(authed(&admin_a, pb::RotateFederationKeyRequest {})).await.unwrap().into_inner();
+    assert_ne!(rotated.fingerprint, fed_a.fingerprint);
+    let after = federation(&mut ca, &admin_a).await;
+    assert_eq!(after.fingerprint, rotated.fingerprint);
+    assert!(after.rotated_at.is_some());
+    let mut moved = None;
+    for _ in 0..100 {
+        let seen = federation(&mut cb, &admin_b).await.peers.remove(0);
+        if seen.fingerprint == rotated.fingerprint {
+            moved = Some(seen);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let moved = moved.expect("B followed A's rotation");
+    assert!(!moved.needs_check);
+    assert_eq!(moved.moves.len(), 1);
+    assert_eq!(moved.moves[0].previous_fingerprint, fed_a.fingerprint);
+    assert_eq!(moved.moves[0].fingerprint, rotated.fingerprint);
+    // Signed calls still go both ways.
+    let again = ca.admin.check_instance(authed(&admin_a, check(&origin_b))).await.unwrap().into_inner();
+    assert!(again.known_there);
+    let back = cb.admin.check_instance(authed(&admin_b, check(&origin_a))).await.unwrap().into_inner();
+    assert!(back.known_there);
+
     // The key is the same after a restart.
-    let fingerprint_a = fed_a.fingerprint.clone();
+    let fingerprint_a = rotated.fingerprint.clone();
     a.stop().await;
     let a = start(dir_a.path(), &federated).await;
     let mut ca = clients(&a).await;
@@ -8030,6 +8061,15 @@ async fn channels_shared_across_instances() {
         .await
         .unwrap()
         .into_inner();
+    let avatar = upload(&mut ca, &a, &juan, pb::MediaPurpose::Avatar, png(64, 64)).await;
+    assert!(avatar.starts_with(&origin_a));
+    ca.auth
+        .update_profile(authed(
+            &juan,
+            pb::UpdateProfileRequest { avatar_url: Some(avatar.clone()), ..Default::default() },
+        ))
+        .await
+        .unwrap();
     send(&mut ca, &juan, &home, &dev.id, "@everyone hello from home").await.unwrap();
     let live = next_message(&mut stream).await;
     assert_eq!(live.content, "@everyone hello from home");
@@ -8038,7 +8078,10 @@ async fn channels_shared_across_instances() {
     assert_eq!(live.author_id, format!("{}@{origin_a}", juan_user.id));
     let author = live.shared.clone().unwrap();
     assert_eq!(author.user.as_ref().unwrap().username, "juan");
-    assert!(author.user.unwrap().avatar_url.is_empty(), "nothing to fetch from the other instance");
+    // Pictures come through the reader's own instance, never straight from the other.
+    let shown_avatar = author.user.unwrap().avatar_url;
+    assert!(shown_avatar.starts_with(&format!("{origin_b}/media/outside/")), "{shown_avatar}");
+    assert!(shown_avatar.contains(&avatar.rsplit('/').next().unwrap().to_string()), "{shown_avatar}");
     let from = author.server.unwrap();
     assert_eq!((from.id, from.name, from.instance), (format!("{home}@{origin_a}"), "Home".into(), a.addr.to_string()));
 
@@ -8175,25 +8218,54 @@ async fn channels_shared_across_instances() {
         .unwrap_err();
     assert_eq!(refused.code(), Code::FailedPrecondition);
 
-    // With the home's instance down, the guest hears why.
     let on = pb::InstanceSettings { federation: true, ..Default::default() };
     ca.admin.update_settings(authed(&juan, settings_update(on, &["federation"], &[]))).await.unwrap();
-    let code = make_code(&ca, true).await;
-    let asked = cb
-        .shared
-        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
-        .await
-        .unwrap()
-        .into_inner()
-        .connection
-        .unwrap();
-    ca.shared
-        .review_share(authed(
-            &juan,
-            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
-        ))
-        .await
-        .unwrap();
+    // Blocking an instance ends its shares on both sides; then, unblocked, the
+    // channel is shared again.
+    for block in [true, false] {
+        let code = make_code(&ca, true).await;
+        let asked = cb
+            .shared
+            .accept_share(authed(
+                &mika,
+                pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() },
+            ))
+            .await
+            .unwrap()
+            .into_inner()
+            .connection
+            .unwrap();
+        ca.shared
+            .review_share(authed(
+                &juan,
+                pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
+            ))
+            .await
+            .unwrap();
+        if !block {
+            continue;
+        }
+        let blocked = |hosts: Vec<String>| {
+            let settings = pb::InstanceSettings { federation_blocked_hosts: hosts, ..Default::default() };
+            authed(&juan, settings_update(settings, &["federation_blocked_hosts"], &[]))
+        };
+        ca.admin.update_settings(blocked(vec![b.addr.ip().to_string()])).await.unwrap();
+        let mut ended = false;
+        for _ in 0..100 {
+            let at_home = connections(&mut ca, &juan, &home).await.connections;
+            let at_guest = connections(&mut cb, &mika, &guest).await.connections;
+            if !at_home.iter().any(|c| c.instance == b.addr.to_string())
+                && !at_guest.iter().any(|c| c.instance == a.addr.to_string())
+            {
+                ended = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(ended, "blocking ends the share at home and at the guest");
+        ca.admin.update_settings(blocked(vec![])).await.unwrap();
+    }
+    // With the home's instance down, the guest hears why.
     let shown = list_channels(&mut cb, &mika, &guest)
         .await
         .into_iter()

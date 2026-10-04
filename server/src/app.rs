@@ -292,6 +292,12 @@ impl App {
         crate::outside::link(&self.picture_key, &self.settings().public_url, url)
     }
 
+    /// The link to show for a picture on another fuwa instance: see
+    /// [`crate::outside::link_on_origin`].
+    pub fn picture_link_on_origin(&self, url: &str) -> String {
+        crate::outside::link_on_origin(&self.picture_key, &self.settings().public_url, url)
+    }
+
     /// Direct messages, where accounts are kept.
     pub fn dms(&self) -> Result<&DmDb> {
         self.dms.as_ref().ok_or_else(|| Error::internal("this part of the instance doesn't keep direct messages"))

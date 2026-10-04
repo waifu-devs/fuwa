@@ -71,6 +71,11 @@ service AdminService {
   // this instance for that (or, later, a share request does). Needs
   // federation on.
   rpc CheckInstance(CheckInstanceRequest) returns (CheckInstanceResponse);
+  // Replaces this instance's key with a new one, which the old one vouches
+  // for: instances that pinned the old key move to the new one by
+  // themselves (docs/federation.md). Needs a public URL other instances can
+  // use.
+  rpc RotateFederationKey(RotateFederationKeyRequest) returns (RotateFederationKeyResponse);
 }
 
 // Everything about an instance an admin can change while it runs. Each setting
@@ -552,6 +557,15 @@ message GetFederationResponse {
   string fingerprint = 3;
   // Instances this one has pinned a key for, most recently heard from first.
   repeated FederationPeer peers = 4;
+  // When the key was last rotated; unset if it never was.
+  google.protobuf.Timestamp rotated_at = 5;
+}
+
+message RotateFederationKeyRequest {}
+
+message RotateFederationKeyResponse {
+  // The new key's fingerprint, as GetFederationResponse.fingerprint.
+  string fingerprint = 1;
 }
 
 // Another instance this one knows.
@@ -564,6 +578,19 @@ message FederationPeer {
   google.protobuf.Timestamp last_heard = 4;
   // Its host is in federation_blocked_hosts.
   bool blocked = 5;
+  // Its key changed in a way this instance couldn't follow (a rotation the
+  // old key didn't lead to, or one going back): nothing goes either way
+  // until an admin here checks it again over a channel they trust.
+  bool needs_check = 6;
+  // Its last key moves this instance followed, oldest first.
+  repeated FederationKeyMove moves = 7;
+}
+
+// Another instance's key moving to a new one, as it rotated it.
+message FederationKeyMove {
+  string previous_fingerprint = 1;
+  string fingerprint = 2;
+  google.protobuf.Timestamp moved_at = 3;
 }
 
 message CheckInstanceRequest {
