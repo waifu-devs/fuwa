@@ -29,6 +29,8 @@ message Node {
   AgentCreation agent_creation = 9;
   // Servers may share channels with each other here.
   bool shared_channels = 12;
+  // And with servers on other instances (docs/federation.md).
+  bool federation = 13;
   // Agents may use this instance through MCP: its endpoint is /mcp on this
   // address, described at /.well-known/mcp.json (docs/mcp.md).
   bool mcp = 14;

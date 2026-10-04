@@ -1358,8 +1358,8 @@ export const listConnections = (key: string, serverId: string) =>
 /** Reads the list again after a change here, without waiting for the event. */
 const relistShared = (key: string, serverId: string) => listConnections(key, serverId).pipe(Effect.ignore);
 
-export const createShareCode = (key: string, serverId: string, channelId: string) =>
-  call((signal) => api(key).shared.createShareCode({ serverId, channelId }, { signal })).pipe(
+export const createShareCode = (key: string, serverId: string, channelId: string, otherInstances = false) =>
+  call((signal) => api(key).shared.createShareCode({ serverId, channelId, otherInstances }, { signal })).pipe(
     Effect.map((r) => r.code!),
     Effect.tap(() => relistShared(key, serverId)),
   );

@@ -457,6 +457,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         agent_creation: settings.agent_creation as i32,
         telemetry: settings.telemetry,
         shared_channels: settings.shared_channels,
+        federation: settings.shared_channels && settings.federation && !settings.public_url.is_empty(),
         mcp: settings.mcp,
         announcement,
         build: Some(pb::Build {
