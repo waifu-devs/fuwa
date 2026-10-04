@@ -534,10 +534,13 @@ impl DmDb {
             let mut starts = self.backup_starts.lock().unwrap_or_else(|p| p.into_inner());
             starts.retain(|_, (since, _)| now - *since < HOUR_MS);
             let (_, count) = starts.entry(account_id.to_string()).or_insert((now, 0));
-            *count += more;
+            *count = count.wrapping_add(more);
             *count
         };
-        if started(0) >= BACKUP_STARTS_PER_HOUR {
+        // Counted before the write, so starts at once can't pass the limit;
+        // handed back if it fails.
+        if started(1) > BACKUP_STARTS_PER_HOUR {
+            started(u32::MAX);
             return Err(Error::ResourceExhausted(
                 "you've started your message backup too many times this hour; try again later".into(),
             ));
@@ -558,8 +561,10 @@ impl DmDb {
             .await?;
             backup_of(conn, account_id).await?.ok_or(Error::NotFound("backup"))
         })
-        .await?;
-        started(1);
+        .await
+        .inspect_err(|_| {
+            started(u32::MAX);
+        })?;
         Ok(row)
     }
 

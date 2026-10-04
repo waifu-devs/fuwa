@@ -186,9 +186,10 @@ in Settings, under Devices.
   from a secure channel someone has since lost access to come back on restore
   too. A device that loses its key (signing out wipes it) has to be given it
   again. The instance can't change, add, reorder or move parts, and a part it
-  holds back from the middle shows. One it holds back from the end, while
-  also under-reporting how many there are, doesn't: nothing the restoring
-  device has says how many there should be.
+  holds back from the middle shows. A lowered end doesn't: a hostile instance
+  can drop the newest parts and lower its count to match, and nothing a new
+  device has says how many there should be (only a device's own memory of
+  how far the backup had got could catch that).
 
 ## Where it lives
 
