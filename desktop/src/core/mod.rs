@@ -14,6 +14,7 @@ pub mod calls;
 pub mod compat;
 pub mod config;
 pub mod dms;
+pub mod emoji;
 pub mod history;
 pub mod instance_admin;
 pub mod instance_manage;
@@ -692,7 +693,15 @@ impl Core {
         let Some(api) = self.api(key) else { return Ok(()) };
         static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let nonce = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let pending = PendingMessage { nonce, content: content.into(), created_at_ms: dms::now_ms(), failed: None };
+        let emojis = self.shared.read(|s| s.instance(key).map(|i| emoji::outside(i, server_id, content)));
+        let emojis = emojis.unwrap_or_default();
+        let pending = PendingMessage {
+            nonce,
+            content: content.into(),
+            emojis: emojis.clone(),
+            created_at_ms: dms::now_ms(),
+            failed: None,
+        };
         self.shared.instance(key, |i| i.pending.entry(channel_id.to_owned()).or_default().push(pending));
         let res = rpc!(
             api.messages(),
@@ -700,6 +709,7 @@ impl Core {
                 server_id: server_id.into(),
                 channel_id: channel_id.into(),
                 content: content.into(),
+                emojis,
                 ..Default::default()
             })
         )
@@ -742,6 +752,7 @@ impl Core {
         content: &str,
     ) -> Result<(), Problem> {
         let Some(api) = self.api(key) else { return Ok(()) };
+        let emojis = self.shared.read(|s| s.instance(key).map(|i| emoji::outside(i, server_id, content)));
         let res = rpc!(
             api.messages(),
             update_message(pb::UpdateMessageRequest {
@@ -750,7 +761,7 @@ impl Core {
                 content: content.into(),
                 // A channel shown from another server isn't held here, so the instance needs it named.
                 channel_id: channel_id.into(),
-                ..Default::default()
+                emojis: emojis.unwrap_or_default(),
             })
         )
         .await?;

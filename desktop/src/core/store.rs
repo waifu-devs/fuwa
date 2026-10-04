@@ -34,6 +34,8 @@ pub struct ChannelMessages {
 pub struct PendingMessage {
     pub nonce: u64,
     pub content: String,
+    /// Emoji from other servers it brings along, so it draws them while it goes.
+    pub emojis: Vec<pb::Emoji>,
     pub created_at_ms: i64,
     pub failed: Option<String>,
 }

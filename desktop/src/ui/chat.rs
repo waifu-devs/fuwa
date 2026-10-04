@@ -1,6 +1,7 @@
 //! The middle of the window: a channel or a private conversation (its
 //! messages and the composer), the member list, an instance's page, or home.
 
+use crate::ui::emoji::InColor as _;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash as _, Hasher as _};
@@ -364,6 +365,7 @@ impl FuwaApp {
                     let can_delete = m.author_id == me || (manage && !(guest_side && from.is_some()));
                     let mut h = DefaultHasher::new();
                     (&m.content, m.edited_at.as_ref().map(|t| (t.seconds, t.nanos)), m.embeds.len()).hash(&mut h);
+                    m.emojis.iter().map(|e| (&e.id, &e.url)).for_each(|e| e.hash(&mut h));
                     (author_name, color.map(|c| [c.h, c.s, c.l, c.a].map(f32::to_bits)), badge).hash(&mut h);
                     user.as_ref().map(|u| (&u.avatar_url, &u.username)).hash(&mut h);
                     (look.digest, editing, manage, suppress, &me, &mine).hash(&mut h);
@@ -383,7 +385,7 @@ impl FuwaApp {
                             name: author_name.clone(),
                             color: *color,
                             content: m.content.clone(),
-                            shown: mention_links(&images_as_links(&m.content), &look),
+                            shown: mention_links(&images_as_links(&m.content), &look.with(&m.emojis)),
                             mentions_me: i.pings_me(&server, m, suppress),
                             editing,
                             can_delete,
@@ -413,7 +415,7 @@ impl FuwaApp {
                         name: i.display_name(Some(&server), &me),
                         color: i.name_color(&server, &me).map(|c| rgb(c).into()),
                         content: p.content.clone(),
-                        shown: mention_links(&images_as_links(&p.content), &look),
+                        shown: mention_links(&images_as_links(&p.content), &look.with(&p.emojis)),
                         mentions_me: false,
                         editing: false,
                         can_delete: false,
@@ -788,13 +790,14 @@ impl FuwaApp {
                 ))
                 .into_any_element();
         }
+        let emoji_panel = self.emoji_open.then(|| self.emoji_panel(&p, cx));
         div()
             .flex_none()
             .relative()
             .px(px(20.0))
             .pb(px(20.0))
             .when_some(self.picker.clone(), |el, picker| el.child(self.picker_list(picker, &p, cx)))
-            .when(self.emoji_open, |el| el.child(self.emoji_panel(&p, cx)))
+            .children(emoji_panel)
             .child(
                 div()
                     .flex()
@@ -887,7 +890,11 @@ impl FuwaApp {
                 Pick::Emoji(choice) => (
                     emoji_glyph(choice, 22.0),
                     format!(":{}:", choice.name),
-                    if choice.url.is_some() { "This server".into() } else { String::new() },
+                    match (&choice.from, &choice.url) {
+                        (Some(server), _) => server.clone(),
+                        (None, Some(_)) => "This server".into(),
+                        (None, None) => String::new(),
+                    },
                 ),
             };
             let pick = pick.clone();
@@ -1983,7 +1990,7 @@ pub(crate) fn emoji_glyph(choice: &crate::ui::emoji::Choice, size: f32) -> AnyEl
                 gpui_kit::img(SharedString::from(url.clone())).size(px(size)).object_fit(gpui_kit::ObjectFit::Contain)
             })
             .into_any_element(),
-        None => base.text_size(px(size * 0.85)).child(choice.insert.clone()).into_any_element(),
+        None => base.in_color().text_size(px(size * 0.85)).child(choice.insert.clone()).into_any_element(),
     }
 }
 

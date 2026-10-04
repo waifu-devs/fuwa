@@ -3,6 +3,7 @@
 //! preview drawn like the real thing. The web's
 //! `settings/server/WelcomeScreenEditor.tsx`.
 
+use crate::ui::emoji::InColor as _;
 use gpui_kit::component::input::Textarea;
 
 use super::roles::switch;
@@ -580,11 +581,12 @@ impl ServerSettingsView {
                 cx,
             ));
         }
-        for (n, (glyph, _)) in crate::ui::emoji::UNICODE.iter().take(EVERYDAY).enumerate() {
+        let everyday = crate::ui::emoji::standard().iter().flat_map(|g| &g.emojis).take(EVERYDAY);
+        for (n, e) in everyday.enumerate() {
             grid = grid.child(cell(
                 format!("welcome-e-{key}-u{n}"),
-                (*glyph).to_owned(),
-                div().text_size(px(19.0)).child(*glyph).into_any_element(),
+                e.char.clone(),
+                div().in_color().text_size(px(19.0)).child(e.char.clone()).into_any_element(),
                 cx,
             ));
         }

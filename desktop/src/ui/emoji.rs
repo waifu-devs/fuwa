@@ -1,206 +1,311 @@
-//! Emoji: a server's own (`<:name:id>`, `<a:name:id>` when it moves) and the
-//! everyday Unicode ones the pickers offer. The same list as the web app's
-//! `lib/emoji.ts`.
+//! Emoji: a server's own (`<:name:id>`, `<a:name:id>` when it moves), the
+//! person's other servers' on the same instance, and the standard Unicode
+//! set. Like the web app's `lib/emoji-search.ts` and `lib/emoji-catalog.ts`.
+//!
+//! Another server's emoji goes into a message as its token, and the app
+//! sends it along (`SendMessageRequest.emojis`): the instance checks the
+//! sender is in that server and keeps its picture link with the message, so
+//! everyone in the channel sees it. Emoji from other instances aren't
+//! offered: their pictures would load from someone else's server.
+//!
+//! In the composer server emoji are written `:name:`. When two servers have
+//! the same name the later one is `:name~2:` (then `~3`), so each name finds
+//! one.
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use crate::pb;
 
-/// Everyday Unicode emoji, with the names people type after a colon.
-pub const UNICODE: &[(&str, &str)] = &[
-    ("😀", "grinning smile happy"),
-    ("😄", "smile happy joy"),
-    ("😂", "joy laugh lol tears"),
-    ("🤣", "rofl rolling laugh"),
-    ("😊", "blush smile"),
-    ("😇", "innocent halo angel"),
-    ("🙂", "slight_smile"),
-    ("😉", "wink"),
-    ("😍", "heart_eyes love"),
-    ("🥰", "smiling_hearts love"),
-    ("😘", "kiss"),
-    ("😋", "yum tasty"),
-    ("😛", "tongue"),
-    ("😜", "wink_tongue crazy"),
-    ("🤪", "zany crazy"),
-    ("🤗", "hug hugs"),
-    ("🤔", "thinking think hmm"),
-    ("🤨", "raised_eyebrow sus"),
-    ("😐", "neutral meh"),
-    ("😑", "expressionless"),
-    ("🙄", "eye_roll rolling_eyes"),
-    ("😏", "smirk"),
-    ("😴", "sleeping zzz"),
-    ("😌", "relieved"),
-    ("🥺", "pleading puppy please"),
-    ("😢", "cry sad"),
-    ("😭", "sob crying"),
-    ("😤", "triumph huff"),
-    ("😠", "angry mad"),
-    ("🤯", "mind_blown exploding"),
-    ("😳", "flushed blush"),
-    ("🥵", "hot"),
-    ("🥶", "cold freezing"),
-    ("😱", "scream shock"),
-    ("😅", "sweat_smile phew"),
-    ("😬", "grimace yikes"),
-    ("🫠", "melting"),
-    ("🫡", "salute"),
-    ("🤫", "shush quiet"),
-    ("🤭", "giggle oops"),
-    ("😎", "sunglasses cool"),
-    ("🤓", "nerd"),
-    ("🥳", "partying_face celebrate"),
-    ("😈", "smiling_imp devil"),
-    ("💀", "skull dead"),
-    ("👻", "ghost boo"),
-    ("🤖", "robot bot"),
-    ("👀", "eyes look"),
-    ("👍", "thumbsup +1 yes like"),
-    ("👎", "thumbsdown -1 no"),
-    ("👏", "clap applause"),
-    ("🙌", "raised_hands hooray"),
-    ("🙏", "pray please thanks"),
-    ("👋", "wave hello hi bye"),
-    ("🤝", "handshake deal"),
-    ("✌️", "v peace"),
-    ("🤞", "crossed_fingers luck"),
-    ("👌", "ok_hand perfect"),
-    ("🤙", "call_me shaka"),
-    ("💪", "muscle strong flex"),
-    ("🫶", "heart_hands"),
-    ("❤️", "heart love red"),
-    ("🩷", "pink_heart"),
-    ("🧡", "orange_heart"),
-    ("💛", "yellow_heart"),
-    ("💚", "green_heart"),
-    ("💙", "blue_heart"),
-    ("💜", "purple_heart"),
-    ("🖤", "black_heart"),
-    ("🤍", "white_heart"),
-    ("💔", "broken_heart"),
-    ("💖", "sparkling_heart"),
-    ("💕", "two_hearts"),
-    ("✨", "sparkles shiny"),
-    ("⭐", "star"),
-    ("🌟", "glowing_star"),
-    ("🔥", "fire lit hot"),
-    ("💯", "100 hundred"),
-    ("🎉", "tada party celebrate"),
-    ("🎊", "confetti"),
-    ("🎁", "gift present"),
-    ("🎂", "cake birthday"),
-    ("🏆", "trophy win"),
-    ("🥇", "first_place gold"),
-    ("🎮", "video_game gaming controller"),
-    ("🎧", "headphones music"),
-    ("🎵", "music note"),
-    ("🎨", "art paint"),
-    ("📚", "books study"),
-    ("💻", "computer laptop code"),
-    ("🛠️", "tools build"),
-    ("🐛", "bug"),
-    ("🚀", "rocket ship launch"),
-    ("💡", "bulb idea"),
-    ("📌", "pin pushpin"),
-    ("📣", "mega announcement"),
-    ("📝", "memo note"),
-    ("✅", "white_check_mark check done yes"),
-    ("❌", "x no cross"),
-    ("⚠️", "warning"),
-    ("❓", "question"),
-    ("❗", "exclamation"),
-    ("💤", "zzz sleep"),
-    ("💬", "speech chat"),
-    ("🔔", "bell"),
-    ("🔒", "lock"),
-    ("🌸", "cherry_blossom sakura flower"),
-    ("🌈", "rainbow"),
-    ("☀️", "sun sunny"),
-    ("🌙", "moon night"),
-    ("⚡", "zap lightning"),
-    ("☕", "coffee"),
-    ("🍵", "tea"),
-    ("🍕", "pizza"),
-    ("🍜", "ramen noodles"),
-    ("🍣", "sushi"),
-    ("🍙", "rice_ball onigiri"),
-    ("🍰", "shortcake"),
-    ("🍓", "strawberry"),
-    ("🐱", "cat"),
-    ("🐶", "dog"),
-    ("🦊", "fox"),
-    ("🐰", "rabbit bunny"),
-    ("🐻", "bear"),
-    ("🐼", "panda"),
-    ("🐸", "frog"),
-    ("🐧", "penguin"),
-    ("🦄", "unicorn"),
-    ("🐉", "dragon"),
-    ("🍀", "four_leaf_clover luck"),
-    ("🌊", "wave ocean"),
-    ("🏠", "house home"),
-    ("👑", "crown king queen"),
-    ("💎", "gem diamond"),
-];
+// ───────────────────────── The standard set ─────────────────────────
 
-/// How a server emoji is written in a message.
-pub fn token(e: &pb::Emoji) -> String {
-    format!("<{}:{}:{}>", if e.animated { "a" } else { "" }, e.name, e.id)
+/// One standard emoji: how it's written, its names (the first is the one
+/// typed after a colon), words to find it by, and its five skin tones.
+#[derive(Debug)]
+pub struct Standard {
+    pub char: String,
+    pub names: Vec<String>,
+    pub words: String,
+    pub skins: Option<Vec<String>>,
 }
 
-/// Images whose address starts with this are server emoji, drawn in the line.
-pub const SCHEME: &str = "fuwa-emoji:";
+#[derive(Debug)]
+pub struct Group {
+    pub id: String,
+    pub name: String,
+    pub emojis: Vec<Standard>,
+}
 
-/// One emoji to pick: a server's own (with its picture) or a Unicode one.
+/// The standard emoji, the same file the web app bundles, read the first time
+/// something needs them.
+pub fn standard() -> &'static [Group] {
+    static GROUPS: OnceLock<Vec<Group>> = OnceLock::new();
+    GROUPS.get_or_init(|| {
+        let raw: serde_json::Value =
+            serde_json::from_str(include_str!("../../../web/src/lib/emoji-data.json")).unwrap_or_default();
+        let text = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_owned();
+        let mut groups = Vec::new();
+        for group in raw.as_array().into_iter().flatten() {
+            let Some([id, name, entries]) = group.as_array().map(Vec::as_slice) else { continue };
+            let emojis = entries
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| {
+                    let e = e.as_array()?;
+                    Some(Standard {
+                        char: text(e.first()?),
+                        names: text(e.get(1)?).split(' ').map(str::to_owned).collect(),
+                        words: e.get(2).map(text).unwrap_or_default(),
+                        skins: e.get(3).and_then(|s| s.as_array()).map(|s| s.iter().map(text).collect()),
+                    })
+                })
+                .collect();
+            groups.push(Group { id: text(id), name: text(name), emojis });
+        }
+        groups
+    })
+}
+
+impl Standard {
+    /// In a skin tone: 0 is the default yellow, 1 to 5 light to dark.
+    pub fn toned(&self, tone: u8) -> &str {
+        match (tone, &self.skins) {
+            (1..=5, Some(skins)) => skins.get(tone as usize - 1).unwrap_or(&self.char),
+            _ => &self.char,
+        }
+    }
+}
+
+/// A standard emoji by its character.
+pub fn standard_by_char(char: &str) -> Option<&'static Standard> {
+    static BY_CHAR: OnceLock<HashMap<&'static str, &'static Standard>> = OnceLock::new();
+    BY_CHAR
+        .get_or_init(|| standard().iter().flat_map(|g| &g.emojis).map(|e| (e.char.as_str(), e)).collect())
+        .get(char)
+        .copied()
+}
+
+// ───────────────────────── Server emoji ─────────────────────────
+
+pub use crate::core::emoji::{token, token_at};
+
+fn word(s: &str, min: usize, under: bool) -> bool {
+    (min..=32).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || (under && b == b'_'))
+}
+
+/// The server a section of emoji comes from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerRef {
+    pub id: String,
+    pub name: String,
+    pub icon_url: String,
+}
+
+/// A server's emoji with the name the composer writes it by.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Custom {
+    pub emoji: pb::Emoji,
+    pub alias: String,
+    pub server: usize,
+    /// From the server being written in.
+    pub here: bool,
+}
+
+/// Every server emoji someone can use in a server: its own, then their other
+/// servers' on the same instance (in the order they were joined).
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Catalog {
+    pub servers: Vec<ServerRef>,
+    pub emojis: Vec<Custom>,
+    /// Indexes into `emojis`, by section, each sorted by name.
+    pub sections: Vec<(usize, Vec<usize>)>,
+    by_alias: HashMap<String, usize>,
+    by_id: HashMap<String, usize>,
+}
+
+impl Catalog {
+    /// The catalog for writing in `server_id`, from what the instance has loaded.
+    pub fn of(servers: &[pb::Server], emojis: &HashMap<String, Vec<pb::Emoji>>, server_id: &str) -> Self {
+        let here = servers.iter().filter(|s| s.id == server_id);
+        let mut out = Catalog::default();
+        for server in here.chain(servers.iter().filter(|s| s.id != server_id)) {
+            let mut list: Vec<&pb::Emoji> = emojis.get(&server.id).into_iter().flatten().collect();
+            if list.is_empty() {
+                continue;
+            }
+            list.sort_by(|a, b| a.name.cmp(&b.name));
+            let at = out.servers.len();
+            out.servers.push(ServerRef {
+                id: server.id.clone(),
+                name: server.name.clone(),
+                icon_url: server.icon_url.clone(),
+            });
+            let mut section = Vec::with_capacity(list.len());
+            for emoji in list {
+                let mut alias = emoji.name.clone();
+                let mut n = 2;
+                while out.by_alias.contains_key(&alias.to_lowercase()) {
+                    alias = format!("{}~{n}", emoji.name);
+                    n += 1;
+                }
+                let index = out.emojis.len();
+                out.by_alias.insert(alias.to_lowercase(), index);
+                out.by_id.insert(emoji.id.clone(), index);
+                out.emojis.push(Custom { emoji: emoji.clone(), alias, server: at, here: server.id == server_id });
+                section.push(index);
+            }
+            out.sections.push((at, section));
+        }
+        out
+    }
+
+    /// Only one server's own (the welcome screen).
+    pub fn own(server: &pb::Server, emojis: &[pb::Emoji]) -> Self {
+        let map = HashMap::from([(server.id.clone(), emojis.to_vec())]);
+        Self::of(std::slice::from_ref(server), &map, &server.id)
+    }
+
+    pub fn by_id(&self, id: &str) -> Option<&Custom> {
+        self.by_id.get(id).map(|&n| &self.emojis[n])
+    }
+
+    pub fn by_alias(&self, alias: &str) -> Option<&Custom> {
+        self.by_alias.get(&alias.to_lowercase()).map(|&n| &self.emojis[n])
+    }
+
+    pub fn server_of(&self, custom: &Custom) -> &ServerRef {
+        &self.servers[custom.server]
+    }
+
+    /// The text with each `:name:` (or `:name~2:`) of a catalog emoji made into its token.
+    pub fn encode(&self, content: &str) -> String {
+        if self.emojis.is_empty() {
+            return content.to_owned();
+        }
+        let mut out = String::with_capacity(content.len());
+        let mut rest = content;
+        while let Some(start) = rest.find(':') {
+            let after = &rest[start + 1..];
+            let alias = after.find(':').map(|e| &after[..e]).filter(|a| {
+                let (name, n) = a.split_once('~').unwrap_or((a, "1"));
+                word(name, 2, true) && (1..=3).contains(&n.len()) && n.bytes().all(|b| b.is_ascii_digit())
+            });
+            // Not inside a token someone typed (`<:name:id>`).
+            let in_token = rest[..start].ends_with('<') || rest[..start].ends_with("<a");
+            match alias.filter(|_| !in_token).and_then(|a| Some((a, self.by_alias(a)?))) {
+                Some((alias, custom)) => {
+                    out.push_str(&rest[..start]);
+                    out.push_str(&token(&custom.emoji));
+                    rest = &after[alias.len() + 1..];
+                }
+                None => {
+                    out.push_str(&rest[..=start]);
+                    rest = after;
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// Ids to pictures of the other servers' emoji, for drawing tokens in messages.
+    pub fn other_pictures(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.emojis.iter().filter(|c| !c.here).map(|c| (c.emoji.id.as_str(), c.emoji.url.as_str()))
+    }
+}
+
+// ───────────────────────── Picking ─────────────────────────
+
+/// One emoji to pick.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Choice {
+    /// `c:` and a server emoji's id, or `u:` and the character (untoned), for remembering it.
+    pub key: String,
+    /// What it's written as after a colon.
     pub name: String,
-    /// What goes in the box: the character, or `:name:` for a server's own.
+    /// What goes in the box: the character, or `:alias:` for a server's own.
     pub insert: String,
     /// A server emoji's picture.
     pub url: Option<String>,
+    /// The server it's from, when it isn't the one being written in.
+    pub from: Option<String>,
 }
 
 impl Choice {
-    fn own(e: &pb::Emoji) -> Self {
-        Self { name: e.name.clone(), insert: format!(":{}:", e.name), url: Some(e.url.clone()) }
-    }
-
-    fn plain(char: &str, name: &str) -> Self {
-        Self { name: name.to_owned(), insert: char.to_owned(), url: None }
-    }
-}
-
-/// Server emoji and Unicode ones whose names start with (then contain) `query`.
-pub fn search(query: &str, server: &[pb::Emoji], limit: usize) -> Vec<Choice> {
-    let q = query.to_lowercase();
-    let mut ranked: Vec<(u8, Choice)> = server
-        .iter()
-        .filter(|e| e.name.to_lowercase().contains(&q))
-        .map(|e| (if e.name.to_lowercase().starts_with(&q) { 0 } else { 2 }, Choice::own(e)))
-        .collect();
-    for (char, names) in UNICODE {
-        let mut names = names.split(' ');
-        let name = names.clone().find(|n| n.starts_with(&q)).or_else(|| names.find(|n| n.contains(&q)));
-        if let Some(name) = name {
-            ranked.push((if name.starts_with(&q) { 1 } else { 3 }, Choice::plain(char, name)));
+    pub fn custom(catalog: &Catalog, c: &Custom) -> Self {
+        Self {
+            key: format!("c:{}", c.emoji.id),
+            name: c.alias.clone(),
+            insert: format!(":{}:", c.alias),
+            url: Some(c.emoji.url.clone()),
+            from: (!c.here).then(|| catalog.server_of(c).name.clone()),
         }
     }
-    ranked.sort_by_key(|(rank, _)| *rank);
-    ranked.into_iter().take(limit).map(|(_, c)| c).collect()
+
+    pub fn standard(e: &Standard, tone: u8) -> Self {
+        Self {
+            key: format!("u:{}", e.char),
+            name: e.names.first().cloned().unwrap_or_default(),
+            insert: e.toned(tone).to_owned(),
+            url: None,
+            from: None,
+        }
+    }
+
+    /// A remembered one, if it's still around.
+    pub fn recalled(key: &str, catalog: &Catalog, tone: u8) -> Option<Self> {
+        if let Some(id) = key.strip_prefix("c:") {
+            return catalog.by_id(id).map(|c| Self::custom(catalog, c));
+        }
+        standard_by_char(key.strip_prefix("u:")?).map(|e| Self::standard(e, tone))
+    }
 }
 
-/// Everything for the picker: the server's own (by name), then the
-/// everyday ones, each narrowed by `query`.
-pub fn all(query: &str, server: &[pb::Emoji]) -> (Vec<Choice>, Vec<Choice>) {
+/// Emoji whose names (or, for standard ones, words) match `query`: whole
+/// names first, then names that start with it, then ones that have it;
+/// within each, this server's, then other servers', then standard ones.
+pub fn search(query: &str, catalog: &Catalog, tone: u8, limit: usize) -> Vec<Choice> {
     let q = query.trim().trim_matches(':').to_lowercase();
-    let mut own: Vec<Choice> = server.iter().filter(|e| e.name.to_lowercase().contains(&q)).map(Choice::own).collect();
-    own.sort_by(|a, b| a.name.cmp(&b.name));
-    let plain = UNICODE
-        .iter()
-        .filter(|(_, names)| q.is_empty() || names.split(' ').any(|n| n.contains(&q)))
-        .map(|(char, names)| Choice::plain(char, names.split(' ').next().unwrap_or_default()))
-        .collect();
-    (own, plain)
+    if q.is_empty() {
+        return Vec::new();
+    }
+    let name_rank = |name: &str| {
+        let name = name.to_lowercase();
+        if name == q {
+            Some(0)
+        } else if name.starts_with(&q) {
+            Some(1)
+        } else if name.contains(&q) {
+            Some(2)
+        } else {
+            None
+        }
+    };
+    let mut ranked: Vec<(u8, usize, Choice)> = Vec::new();
+    for (_, section) in &catalog.sections {
+        for &n in section {
+            let c = &catalog.emojis[n];
+            let best = [name_rank(&c.alias), name_rank(&c.emoji.name)].into_iter().flatten().min();
+            if let Some(best) = best {
+                let rank = best * 3 + u8::from(!c.here);
+                ranked.push((rank, ranked.len(), Choice::custom(catalog, c)));
+            }
+        }
+    }
+    for group in standard() {
+        for e in &group.emojis {
+            let best = e.names.iter().filter_map(|n| name_rank(n)).min();
+            let rank = match best {
+                Some(best) => best * 3 + 2,
+                None if q.len() >= 2 && e.words.split(' ').any(|w| w.starts_with(&q)) => 9,
+                None => continue,
+            };
+            ranked.push((rank, ranked.len(), Choice::standard(e, tone)));
+        }
+    }
+    ranked.sort_by_key(|(rank, order, _)| (*rank, *order));
+    ranked.into_iter().take(limit).map(|(_, _, c)| c).collect()
 }
 
 /// The `:query` being typed just before the caret, two letters or more.
@@ -216,39 +321,27 @@ pub fn typing(text: &str, caret: usize) -> Option<(usize, String)> {
     .then(|| (colon, query.to_lowercase()))
 }
 
-/// The text to send: each `:name:` of one of the server's emoji becomes its token.
-pub fn encode(content: &str, server: &[pb::Emoji]) -> String {
-    if server.is_empty() {
-        return content.to_owned();
-    }
-    let mut out = String::with_capacity(content.len());
-    let mut rest = content;
-    while let Some(start) = rest.find(':') {
-        let after = &rest[start + 1..];
-        let end = after.find(':');
-        let name = end
-            .map(|e| &after[..e])
-            .filter(|n| (2..=32).contains(&n.len()) && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
-        // Not inside a token someone typed (`<:name:id>`).
-        let in_token = rest[..start].ends_with('<') || rest[..start].ends_with("<a");
-        let emoji = name.filter(|_| !in_token).and_then(|n| {
-            server.iter().find(|e| e.name == n).or_else(|| server.iter().find(|e| e.name.eq_ignore_ascii_case(n)))
-        });
-        match (emoji, name) {
-            (Some(e), Some(n)) => {
-                out.push_str(&rest[..start]);
-                out.push_str(&token(e));
-                rest = &after[n.len() + 1..];
-            }
-            _ => {
-                out.push_str(&rest[..=start]);
-                rest = after;
-            }
+/// Draws emoji in the system's color emoji font where asking for it by name
+/// works. Not on Linux: the text system there drops any font without an "m"
+/// (every color emoji font) when it's asked for by name, which also takes it
+/// out of the fallback that finds emoji for ordinary text.
+pub trait InColor: gpui_kit::Styled + Sized {
+    fn in_color(self) -> Self {
+        if cfg!(target_os = "macos") {
+            self.font_family("Apple Color Emoji")
+        } else if cfg!(target_os = "windows") {
+            self.font_family("Segoe UI Emoji")
+        } else {
+            // Don't name "Noto Color Emoji" here: see above.
+            self
         }
     }
-    out.push_str(rest);
-    out
 }
+
+impl<E: gpui_kit::Styled> InColor for E {}
+
+/// Images whose address starts with this are server emoji, drawn in the line.
+pub const SCHEME: &str = "fuwa-emoji:";
 
 /// Draws `![:name:](fuwa-emoji:<url>)` images as the picture, the size of the text.
 pub struct Plugin;
@@ -306,16 +399,63 @@ pub fn markdown_extensions() -> gpui_kit::component::text::MarkdownExtensions {
 mod tests {
     use super::*;
 
-    fn emoji(name: &str) -> pb::Emoji {
-        pb::Emoji { id: "01J9ZZZZZZZZZZZZZZZZZZZZZZ".into(), name: name.into(), url: "u".into(), ..Default::default() }
+    const ID: &str = "01J9ZZZZZZZZZZZZZZZZZZZZZZ";
+
+    fn emoji(id: &str, name: &str) -> pb::Emoji {
+        pb::Emoji { id: id.into(), name: name.into(), url: format!("https://x/{id}"), ..Default::default() }
+    }
+
+    fn server(id: &str) -> pb::Server {
+        pb::Server { id: id.into(), name: format!("Server {id}"), ..Default::default() }
+    }
+
+    fn catalog() -> Catalog {
+        let servers = [server("a"), server("b")];
+        let emojis = HashMap::from([
+            ("a".to_owned(), vec![emoji(ID, "blob_cat")]),
+            (
+                "b".to_owned(),
+                vec![emoji("01J9YYYYYYYYYYYYYYYYYYYYYY", "blob_cat"), emoji("01J9XXXXXXXXXXXXXXXXXXXXXX", "wave")],
+            ),
+        ]);
+        Catalog::of(&servers, &emojis, "b")
     }
 
     #[test]
-    fn names_become_tokens() {
-        let own = [emoji("blob_cat")];
-        assert_eq!(encode("hi :blob_cat: :nope:", &own), "hi <:blob_cat:01J9ZZZZZZZZZZZZZZZZZZZZZZ> :nope:");
-        assert_eq!(encode("<:blob_cat:01J9ZZZZZZZZZZZZZZZZZZZZZZ>", &own), "<:blob_cat:01J9ZZZZZZZZZZZZZZZZZZZZZZ>");
-        assert_eq!(encode("12:30 and :BLOB_CAT:", &own), "12:30 and <:blob_cat:01J9ZZZZZZZZZZZZZZZZZZZZZZ>");
+    fn the_server_written_in_comes_first_and_names_stay_apart() {
+        let c = catalog();
+        assert_eq!(c.servers[c.sections[0].0].id, "b");
+        assert_eq!(c.by_alias("blob_cat").unwrap().emoji.id, "01J9YYYYYYYYYYYYYYYYYYYYYY");
+        assert_eq!(c.by_alias("BLOB_CAT~2").unwrap().emoji.id, ID);
+        assert!(!c.by_id(ID).unwrap().here);
+    }
+
+    #[test]
+    fn names_become_tokens_and_other_servers_go_along() {
+        let c = catalog();
+        let sent = c.encode("hi :blob_cat~2: :wave: :nope: 12:30");
+        assert_eq!(sent, format!("hi <:blob_cat:{ID}> <:wave:01J9XXXXXXXXXXXXXXXXXXXXXX> :nope: 12:30"));
+        assert_eq!(c.encode(&format!("<:blob_cat:{ID}>")), format!("<:blob_cat:{ID}>"));
+    }
+
+    #[test]
+    fn searching() {
+        let c = catalog();
+        let found = search("blob", &c, 0, 3);
+        assert_eq!(found[0].insert, ":blob_cat:");
+        assert_eq!(found[1].from.as_deref(), Some("Server a"));
+        assert!(search("smile", &Catalog::default(), 0, 5).iter().any(|c| c.insert == "😄"));
+        let wave = search("wave", &Catalog::default(), 3, 1);
+        assert_ne!(wave[0].insert, "👋");
+        assert_eq!(wave[0].key, "u:👋");
+    }
+
+    #[test]
+    fn the_standard_set_loads() {
+        let groups = standard();
+        assert_eq!(groups.len(), 8);
+        assert!(groups.iter().map(|g| g.emojis.len()).sum::<usize>() > 1500);
+        assert!(standard_by_char("\u{1F44D}\u{FE0F}").is_some_and(|e| e.skins.is_some()));
     }
 
     #[test]
@@ -323,7 +463,5 @@ mod tests {
         assert_eq!(typing("so :sm", 6), Some((3, "sm".into())));
         assert_eq!(typing("so :s", 5), None);
         assert_eq!(typing("12:30", 5), None);
-        assert!(search("smile", &[], 3).iter().any(|c| c.insert == "😄"));
-        assert_eq!(search("blob", &[emoji("blob_cat")], 3)[0].insert, ":blob_cat:");
     }
 }
