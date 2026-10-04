@@ -324,7 +324,11 @@
     instance, and whether a message should notify), `account.rs` (profile,
     pictures, password, signed-in devices, rules, the welcome screen, creating
     channels), `moderation.rs` (time outs, kicks and bans, and who may do
-    them to whom: the permission plus outranking them), `server_admin.rs`
+    them to whom: the permission plus outranking them), `shared.rs`
+    (channels shared between servers: share codes and finding one in pasted
+    text, previews, asking and approving, what the other side may do,
+    keeping someone out, and the labels the web's `lib/shared.ts` makes),
+    `server_admin.rs`
     (a server's settings, invites, bans and audit log), `calls.rs` (who's in
     voice and which conversations have a call, and the direct-message call
     frame encryption, byte for byte the web app's; the call itself comes
@@ -365,7 +369,8 @@
     `lib/keybinds.ts` list and combo format, so a saved combo means the same
     in both), `settings_keys.rs` the Keyboard page where they're changed,
     `server_settings.rs` a server's settings
-    (overview, welcome screen, invites, roles, channels, emoji, integrations, members,
+    (overview, welcome screen, invites, roles, channels, emoji, integrations,
+    shared channels, members,
     bans, AutoMod, audit log; the server's name opens it; a cached view, so
     it redraws only when the server changes, and its flourishes play once
     rather than loop; `save_bar` is the floating unsaved-changes bar pages
@@ -389,7 +394,13 @@
     time with `core/arrange.rs`'s `step`, each one's name, topic, category
     and slow mode, and who can see and do what in it, saved as one
     `SetChannelPermissions`; the New button opens the app's new-channel
-    dialog and stays in settings),
+    dialog and stays in settings; its Share tab makes a channel's share
+    codes), `server_settings/shared.rs` the Shared channels page (paste a
+    code, see where it leads, ask to connect; approve, turn down and
+    disconnect; what each side may do; codes still out; people kept out)
+    and the Share tab, with `shared_marks.rs` drawing the linked rings, the
+    sidebar badge, the header pill and the other server's tag beside a name
+    (a server picture only from this instance),
     `instance_settings.rs` an instance's settings for its admins (the gear
     by the instance's name; General, Sign-ups, Single sign-on
     (`instance_settings/sso.rs`: the identity provider, SAML metadata read

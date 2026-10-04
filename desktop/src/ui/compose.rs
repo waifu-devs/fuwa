@@ -204,9 +204,10 @@ impl FuwaApp {
         }
         let core = self.core.clone();
         match self.target() {
-            Some(Target::Channel { key, server, .. }) => {
+            Some(Target::Channel { key, server, channel }) => {
                 let text = self.encode_emoji(&text);
-                self.run(cx, async move { core.edit_message(&key, &server, &id, &text).await }, |this, result, cx| {
+                let edit = async move { core.edit_message(&key, &server, &channel, &id, &text).await };
+                self.run(cx, edit, |this, result, cx| {
                     if let Err(err) = result {
                         this.toast("circle-alert", "Couldn't edit that".into(), err.message, None, None, cx);
                     }

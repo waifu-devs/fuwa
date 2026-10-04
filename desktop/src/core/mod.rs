@@ -24,6 +24,7 @@ pub mod permissions;
 pub mod reports;
 pub mod secrets;
 pub mod server_admin;
+pub mod shared;
 pub mod sso;
 pub mod store;
 mod sync;
@@ -575,6 +576,7 @@ impl Core {
             for user in res.authors {
                 i.users.insert(user.id.clone(), user);
             }
+            store::add_shared_authors(&mut i.users, &res.messages);
             let entry = i.messages.entry(channel_id.to_owned()).or_default();
             for m in res.messages {
                 upsert_message(&mut entry.items, m);
@@ -641,6 +643,7 @@ impl Core {
         &self,
         key: &str,
         server_id: &str,
+        channel_id: &str,
         message_id: &str,
         content: &str,
     ) -> Result<(), Problem> {
@@ -651,8 +654,8 @@ impl Core {
                 server_id: server_id.into(),
                 message_id: message_id.into(),
                 content: content.into(),
-                // The instance finds the channel; the web app names it.
-                channel_id: String::new(),
+                // A channel shown from another server isn't held here, so the instance needs it named.
+                channel_id: channel_id.into(),
             })
         )
         .await?;

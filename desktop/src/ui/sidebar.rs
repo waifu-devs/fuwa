@@ -461,6 +461,9 @@ impl FuwaApp {
                     .when(strong, |el| el.font_weight(FontWeight::BOLD))
                     .child(c.name.clone()),
             )
+            .when_some(crate::core::shared::shared_label(c), |el, label| {
+                el.child(crate::ui::shared_marks::badge(&c.id, label.text, alpha(p.primary, 0.8)))
+            })
             .when(unread > 0 && !active, |el| el.child(badge(unread, p).border_color(p.sidebar)))
             .when(in_voice > 0, |el| {
                 el.opacity(1.0).child(
