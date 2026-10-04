@@ -23,7 +23,13 @@ that turns fuwa's questions into another provider's.
 
 - Only the instance calls a provider, never an app.
 - It gets the message's text and nothing else: no ids, names, servers,
-  channels or addresses. Mentions become `@someone`, `@role` and `#channel`,
+  channels or addresses. The text is what its sender wrote anywhere in it,
+  each on its own line in one request: the message, a poll's question and
+  answers, the title, description and fields of embeds the sender made, and
+  its files' names (as shown, nothing read from their shape). When that
+  passes 4,000 characters, both parts are cut to fit: the message's own text
+  keeps at least half (all of it when shorter), the rest gets what's left. Keyword and link rules read the same text; mention spam counts
+  only the message's own text, the only part that pings anyone. Mentions become `@someone`, `@role` and `#channel`,
   custom emoji become `:emoji:`, and only the first 4,000 characters go.
   Messages in DMs and secure channels are end-to-end encrypted and never go.
 - Pictures go only to providers that read them (Cloudflare Clef), and only
