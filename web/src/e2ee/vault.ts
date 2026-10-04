@@ -58,9 +58,10 @@ export type Item = {
    * came in here (what came before, it can't read). unreadable: a record it
    * couldn't open. reset: someone started a secure channel's encryption over.
    * setting: someone turned a secure channel's history sharing on ("on") or
-   * off ("off"), in content.
+   * off ("off"), in content. voice: a voice message (`voice`), with a
+   * line about it in content for previews and notifications.
    */
-  kind: "text" | "devices" | "joined" | "unreadable" | "reset" | "setting";
+  kind: "text" | "devices" | "joined" | "unreadable" | "reset" | "setting" | "voice";
   content: string;
   replyTo: number;
   /** Unix ms of the last edit, or 0. */
@@ -74,7 +75,22 @@ export type Item = {
   editSigned?: Signed;
   /** Who passed it on to this device, when it came as shared history rather than as it was sent. */
   sharedBy?: string;
+  /** A voice message: what fetching, opening and showing it takes. */
+  voice?: Voice;
 };
+
+/** A voice message's sealed file and what it sounds like, from inside the encrypted message. */
+export type Voice = {
+  mediaId: string;
+  key: Uint8Array;
+  sha256: Uint8Array;
+  size: number;
+  durationMs: number;
+  waveform: Uint8Array;
+};
+
+/** Something someone said: text or a voice message. */
+export const isMessage = (i: Pick<Item, "kind">) => i.kind === "text" || i.kind === "voice";
 
 /** This device's hold on the account's message backup: the recovery key, which never leaves the browser. */
 export type StoredBackup = { vault: string; key: Uint8Array; check: Uint8Array };

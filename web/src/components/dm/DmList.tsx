@@ -3,7 +3,7 @@ import { LockKeyholeIcon, PhoneCallIcon, ShieldAlertIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useMemo, type Ref } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
-import type { Item } from "@/e2ee/vault";
+import { isMessage, type Item } from "@/e2ee/vault";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
 import { useLayout } from "@/components/Shell";
@@ -90,7 +90,7 @@ function preview(items: Item[] | undefined, meId: string | undefined): string {
   if (!items) return "";
   for (let n = items.length - 1; n >= 0; n--) {
     const item = items[n]!;
-    if (item.kind !== "text") continue;
+    if (!isMessage(item)) continue;
     if (item.deleted) return "Message deleted";
     const text = item.content.replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim();
     return item.senderId === meId ? `You: ${text}` : text;

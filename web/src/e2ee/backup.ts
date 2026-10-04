@@ -17,6 +17,7 @@ import {
 } from "@/gen/fuwa/v1/dm_pb";
 import { deriveKeys, formatRecoveryKey, newer, newRecoveryKey, open, paddingFor, parseRecoveryKey, sameBytes, seal, type BackupKeys } from "./backupkey";
 import * as vault from "./vault";
+import { toVoiceMessage, voiceOf } from "./voice";
 
 /**
  * The account's message backup, as this device takes part in it: every line
@@ -40,12 +41,14 @@ const KINDS: Partial<Record<vault.Item["kind"], BackupItemKind>> = {
   devices: BackupItemKind.DEVICES,
   reset: BackupItemKind.RESET,
   setting: BackupItemKind.SETTING,
+  voice: BackupItemKind.VOICE,
 };
 const FROM_KIND: Record<number, vault.Item["kind"]> = {
   [BackupItemKind.TEXT]: "text",
   [BackupItemKind.DEVICES]: "devices",
   [BackupItemKind.RESET]: "reset",
   [BackupItemKind.SETTING]: "setting",
+  [BackupItemKind.VOICE]: "voice",
 };
 
 const signedForm = (s: vault.Signed | undefined) =>
@@ -72,6 +75,7 @@ function toBackup(i: vault.Item): BackupItem | null {
     signed: signedForm(i.signed),
     editSigned: signedForm(i.editSigned),
     sharedBy: i.sharedBy ?? "",
+    voice: i.voice ? toVoiceMessage(i.voice) : undefined,
   });
 }
 
@@ -79,6 +83,8 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
   const kind = FROM_KIND[b.kind];
   const seq = Number(b.sequence);
   if (!kind || !b.conversationId || !(seq > 0)) return null;
+  const voice = kind === "voice" && !b.deleted ? voiceOf(b.voice) : null;
+  if (kind === "voice" && !voice && !b.deleted) return null;
   return {
     vault: vaultKey,
     conversation: b.conversationId,
@@ -96,6 +102,7 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
     signed: fromSigned(b.signed),
     editSigned: fromSigned(b.editSigned),
     sharedBy: b.sharedBy || undefined,
+    voice: voice ?? undefined,
   };
 }
 
