@@ -126,7 +126,9 @@ the `@waifu-devs/fuwa` SDK (or any gRPC client) with the same token. With
 `follow_new_servers` the stream picks up a server the moment the agent is
 added to it (announced as `followed`, with the sequence it starts after), and
 can start following none, for an agent that isn't anywhere yet. Resetting the
-agent's token, or deleting the agent, ends its streams at once.
+agent's token, or deleting the agent, ends its streams at once. Instances
+that have this list `agent-streams` in `Node.versions.features`
+(docs/compatibility.md); an older one ignores `follow_new_servers`.
 
 ## How it works
 

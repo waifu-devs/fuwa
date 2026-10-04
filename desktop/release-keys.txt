@@ -1,0 +1,10 @@
+# The keys fuwa's releases are signed with: one base64 Ed25519 public key
+# (32 bytes) a line. The desktop app installs an update only when the
+# release's SHA256SUMS carries a valid signature from one of them (see
+# src/core/updates.rs and "Release signing" in docs/self-hosting.md). The
+# private key lives only in the repository's FUWA_RELEASE_SIGNING_KEY secret.
+#
+# To rotate: add the new key here and ship a release signed with the old one,
+# then sign with the new one and remove the old line.
+
+4AcpEV4vcLlII3lWX0ZaUeK4VRMA0gBEjyt3E5eFtTQ=

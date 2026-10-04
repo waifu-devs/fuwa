@@ -69,6 +69,7 @@ fn config(dir: &Path, vars: &[(&str, String)]) -> Config {
     let mut config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         "FUWA_ADMIN_TOKEN" => Some(ADMIN_TOKEN.into()),
         "FUWA_CLUSTER_KEY" => Some(KEY.into()),
         _ => vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()),

@@ -283,6 +283,7 @@ async fn friends_end_to_end() {
     let post = |person: &Person, text: &[u8]| pb::PostMessageRequest {
         conversation_id: cid.clone(),
         message: person.device.encrypt(&cid, text).unwrap(),
+        ..Default::default()
     };
     dms.post_message(authed(&juan.token, post(&juan, b"hi"))).await.unwrap();
 

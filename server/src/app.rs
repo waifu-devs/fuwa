@@ -84,6 +84,9 @@ pub struct App {
     /// Accounts joining servers, as (account, server), for streams that
     /// follow new servers. See [`App::joined_server`].
     joined: tokio::sync::broadcast::Sender<(Arc<str>, Arc<str>)>,
+    /// Whether a newer fuwa is out (`releases.rs`); checked by a single
+    /// process and a split instance's directory, which answers GetNode.
+    pub releases: Arc<crate::releases::Releases>,
 }
 
 /// Where the parts this process doesn't run are.
@@ -199,6 +202,8 @@ impl App {
         }
 
         let federation = crate::federation::Federation::new(config.federation_allow_private);
+        let update_check = config.update_check;
+        let release_cache = config.data_path.join("release-cache");
         let shutdown = CancellationToken::new();
         let media_link = media_link(&config, &shutdown).await;
 
@@ -226,7 +231,11 @@ impl App {
             federation,
             ended: tokio::sync::broadcast::Sender::new(256),
             joined: tokio::sync::broadcast::Sender::new(256),
+            releases: crate::releases::Releases::new(update_check, release_cache),
         });
+        if app.node.is_some() {
+            app.releases.spawn(app.shutdown.clone());
+        }
         if app.node.is_some() {
             app.sweep_media(crate::id::now_ms()).await?;
         }
@@ -300,7 +309,21 @@ impl App {
 
     /// Deletes uploads that never arrived and pictures nothing used, as of `now`.
     pub async fn sweep_media(&self, now: i64) -> Result<usize> {
-        let ids = self.node()?.sweepable_media(now).await?;
+        let node = self.node()?;
+        let mut ids = node.sweepable_media(now).await?;
+        // A sealed file a message carries stays, even if it was never marked
+        // used (the server stopped between the two); it's marked now.
+        if let Ok(dms) = self.dms() {
+            let mut swept = Vec::with_capacity(ids.len());
+            for id in ids {
+                if dms.carries(&id).await? {
+                    node.use_media(&id, None).await?;
+                } else {
+                    swept.push(id);
+                }
+            }
+            ids = swept;
+        }
         self.delete_media(&ids).await?;
         Ok(ids.len())
     }
@@ -351,7 +374,11 @@ impl App {
     }
 
     pub fn node_info(&self) -> pb::Node {
-        pb::Node { regions: self.regions(), ..node_info(&self.settings(), self.announcement()) }
+        pb::Node {
+            regions: self.regions(),
+            versions: Some(crate::compat::versions(self.releases.newer())),
+            ..node_info(&self.settings(), self.announcement())
+        }
     }
 
     /// Every route: the gRPC services (also reachable as gRPC-Web from
@@ -437,6 +464,8 @@ impl App {
             router = router.merge(crate::sso::http::server_routes(self.clone()));
         }
         if !self.config.cluster.is_split() {
+            // Desktop apps' updates; behind gateways, they answer these.
+            router = router.merge(self.releases.routes());
             // MCP answers through every route above, as clients reach them.
             let mcp = crate::mcp::routes(router.clone(), self.clone());
             router = router.merge(mcp);
@@ -515,6 +544,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
             source: crate::SOURCE.into(),
         }),
         regions: vec![],
+        versions: Some(crate::compat::versions(None)),
     }
 }
 

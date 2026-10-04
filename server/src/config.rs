@@ -50,6 +50,10 @@ pub struct Config {
     /// picture uploads. Unlimited by default, but for picture uploads.
     pub limits: Limits,
     pub telemetry: Telemetry,
+    /// FUWA_UPDATE_CHECK: on (default) | off. Asks GitHub daily whether a
+    /// newer fuwa is out, to tell admins and pass desktop apps their updates
+    /// (`releases.rs`). Nothing about the instance goes with it.
+    pub update_check: bool,
     /// FUWA_WEB: on (default) | off. Serves the web client on / when the binary
     /// was built with it (the Docker image and release builds are).
     pub web: bool,
@@ -128,6 +132,7 @@ impl std::fmt::Debug for Config {
             .field("admin_token", &Secret(&self.admin_token))
             .field("limits", &self.limits)
             .field("telemetry", &self.telemetry)
+            .field("update_check", &self.update_check)
             .field("web", &self.web)
             .field("cluster", &self.cluster)
             .field("replica", &self.replica)
@@ -221,6 +226,14 @@ pub struct Limits {
     /// FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY: how many times a day (UTC) one
     /// server's Smart filter may ask its provider.
     pub automod_checks_per_day: Option<i64>,
+    /// FUWA_LIMIT_VOICE_MESSAGE_SECONDS: the longest voice message in direct
+    /// messages, which apps stop recording at.
+    pub voice_message_seconds: Option<i64>,
+    /// FUWA_LIMIT_VOICE_MESSAGE_BYTES: the biggest voice message, sealed.
+    pub voice_message_bytes: Option<i64>,
+    /// FUWA_LIMIT_VOICE_MESSAGES_PER_DAY: how many bytes of voice messages
+    /// one account may upload a day (UTC), apart from pictures.
+    pub voice_message_bytes_per_day: Option<i64>,
     /// FUWA_LIMIT_POLL_VOTES_PER_MINUTE: how many votes one account may make
     /// in polls in a minute.
     pub poll_votes_per_minute: Option<i64>,
@@ -378,6 +391,9 @@ impl Config {
             attachment_upload_bytes: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOAD")?,
             attachment_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY")?,
             automod_checks_per_day: count("FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY")?,
+            voice_message_seconds: count("FUWA_LIMIT_VOICE_MESSAGE_SECONDS")?,
+            voice_message_bytes: bytes("FUWA_LIMIT_VOICE_MESSAGE_BYTES")?,
+            voice_message_bytes_per_day: upload_bytes("FUWA_LIMIT_VOICE_MESSAGES_PER_DAY")?,
             poll_votes_per_minute: count("FUWA_LIMIT_POLL_VOTES_PER_MINUTE")?,
             shared_remote_sends_per_minute: count("FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE")?,
             shared_remote_people: count("FUWA_LIMIT_SHARED_REMOTE_PEOPLE")?,
@@ -388,6 +404,12 @@ impl Config {
             None | Some("on" | "true" | "1") => !do_not_track,
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_TELEMETRY must be on or off, got {other:?}")),
+        };
+
+        let update_check = match get("FUWA_UPDATE_CHECK").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_UPDATE_CHECK must be on or off, got {other:?}")),
         };
 
         let hosted = match get("FUWA_HOSTING").as_deref().map(str::trim) {
@@ -534,6 +556,7 @@ impl Config {
                 url: get("FUWA_TELEMETRY_URL").unwrap_or_else(|| DEFAULT_TELEMETRY_URL.into()),
                 hosted,
             },
+            update_check,
             web,
             cluster,
             calls,
