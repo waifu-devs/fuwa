@@ -70,7 +70,7 @@ text · Dismiss (failed).
 | --- | --- |
 | primary | Mark as read · Invite people · Copy link (on the instance's own address, like invite links) |
 | notifications | Mute channel ▸ (15 min, 1 h, 3 h, 8 h, 24 h, until turned back on) or Unmute channel · Notifications ▸ (Use the server's, All messages, Only @mentions, Nothing) |
-| manage | Edit channel · Permissions · Duplicate channel (not secure or shared channels; with permissions of its own, only with Manage Roles where the copy goes and outranking every role and member they name; the copy is made with its topic, slow mode and permissions in one request, so it is never seen with other permissions) |
+| manage | Edit channel · Permissions · Duplicate channel (not secure or shared channels; with permissions of its own, only with Manage Roles where the copy goes and outranking every role and member they name; the copy is made with its topic, slow mode and permissions in one request, so it is never seen with other permissions; overwrites for people who have left the server are dropped) |
 | developer | Copy channel ID |
 | danger | Delete channel (asks first) |
 
