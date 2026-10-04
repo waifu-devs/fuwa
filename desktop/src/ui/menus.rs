@@ -1,6 +1,6 @@
 //! The bells: how a channel, or a whole server, notifies you. The settings
 //! live on the instance, so they follow you to every device. Like the web
-//! app's `NotificationBell.tsx`.
+//! app's `NotificationBell.tsx`. And your status menu, like `UserPanel.tsx`.
 
 use std::time::Duration;
 
@@ -249,6 +249,141 @@ impl FuwaApp {
             }))
             .child(icon(glyph).size(px(16.0)))
             .child(label.to_owned())
+    }
+}
+
+/// The statuses you can pick, like the web app's menu, and what each means.
+const STATUSES: [(pb::PresenceStatus, &str); 4] = [
+    (pb::PresenceStatus::Online, ""),
+    (pb::PresenceStatus::Idle, "Shown as away"),
+    (pb::PresenceStatus::DoNotDisturb, "No sounds or notifications"),
+    (pb::PresenceStatus::Invisible, "Look offline, still use everything"),
+];
+
+pub fn status_label(status: pb::PresenceStatus) -> &'static str {
+    match status {
+        pb::PresenceStatus::Idle => "Idle",
+        pb::PresenceStatus::DoNotDisturb => "Do not disturb",
+        pb::PresenceStatus::Invisible => "Invisible",
+        pb::PresenceStatus::Offline => "Offline",
+        _ => "Online",
+    }
+}
+
+/// The dot for a status: green, amber, red with a bar, or grey with a hole.
+/// `ring` cuts it out of what it sits on (your picture); `under` is the color behind it.
+pub fn status_dot(
+    status: pb::PresenceStatus,
+    size: f32,
+    ring: bool,
+    under: gpui_kit::Rgba,
+    p: &Palette,
+) -> gpui_kit::Div {
+    let inner = if ring { size - 4.0 } else { size };
+    let dot = div().size(px(size)).rounded_full().flex().items_center().justify_center();
+    let dot = if ring { dot.border_2().border_color(under) } else { dot };
+    match status {
+        pb::PresenceStatus::Idle => dot.bg(gpui_kit::hsla(0.12, 0.9, 0.55, 1.0)),
+        pb::PresenceStatus::DoNotDisturb => {
+            dot.bg(p.destructive).child(div().w(px(inner * 0.6)).h(px(inner * 0.2)).rounded_full().bg(under))
+        }
+        pb::PresenceStatus::Invisible | pb::PresenceStatus::Offline => {
+            dot.bg(p.muted_foreground).child(div().size(px(inner * 0.45)).rounded_full().bg(under))
+        }
+        _ => dot.bg(p.success),
+    }
+}
+
+impl FuwaApp {
+    /// Your status on an instance: it saves at once and follows the account,
+    /// so your other apps there show the same.
+    pub(crate) fn status_menu(&mut self, key: &str, cx: &mut Context<Self>) -> AnyElement {
+        let p = pal(cx);
+        let (current, instance) = self
+            .core
+            .shared
+            .read(|s| s.instance(key).map(|i| (i.status(), i.name())))
+            .unwrap_or((pb::PresenceStatus::Online, String::new()));
+        let mut body = menu_title(&format!("Your status on {instance}"), &p);
+        for (n, (status, hint)) in STATUSES.into_iter().enumerate() {
+            let on = status == current;
+            let hover = alpha(p.primary, 0.1);
+            let key = key.to_owned();
+            body = body.child(motion::rise(
+                div()
+                    .id(SharedString::from(format!("status-{}", status as i32)))
+                    .min_h(px(38.0))
+                    .px(px(10.0))
+                    .py(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .rounded(corner(10.0))
+                    .cursor_pointer()
+                    .text_sm()
+                    .hover(move |s| s.bg(hover))
+                    .active(|s| s.top(px(1.0)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.menu = None;
+                        let core = this.core.clone();
+                        let key = key.clone();
+                        this.run(cx, async move { core.set_status(&key, status).await }, |this, result, cx| {
+                            if let Err(err) = result {
+                                this.toast(
+                                    "circle-alert",
+                                    "Couldn't change your status".into(),
+                                    err.message,
+                                    None,
+                                    None,
+                                    cx,
+                                );
+                            }
+                            cx.notify();
+                        });
+                        cx.notify();
+                    }))
+                    .child(status_dot(status, 12.0, false, p.card, &p).flex_none())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(div().font_weight(FontWeight::BOLD).child(status_label(status)))
+                            .when(!hint.is_empty(), |el| {
+                                el.child(div().text_xs().text_color(p.muted_foreground).child(hint))
+                            }),
+                    )
+                    .when(on, |el| el.child(div().flex_none().size(px(6.0)).rounded_full().bg(p.primary))),
+                SharedString::from(format!("status-in-{n}")),
+                Duration::from_millis(30 * n as u64),
+                4.0,
+            ));
+        }
+        div()
+            .id("menu-status-away")
+            .absolute()
+            .inset_0()
+            .occlude()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.menu = None;
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .id("menu-status")
+                    .absolute()
+                    .bottom(px(68.0))
+                    .left(px(crate::ui::rail::RAIL + 8.0))
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(motion::rise(
+                        card(&p).rounded(corner(16.0)).child(body),
+                        "menu-status",
+                        Duration::ZERO,
+                        8.0,
+                    )),
+            )
+            .into_any_element()
     }
 }
 

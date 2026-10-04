@@ -183,6 +183,58 @@ fn two_people_talk_in_a_server_and_in_private() {
             && s.instance(&key).unwrap().unread.get(&general).copied() == Some(3)
     });
     assert!(notices.try_recv().is_err(), "a muted channel notified");
+
+    // A status picked here is the account's: read back from the instance, it's still there.
+    use fuwa_desktop::pb::PresenceStatus;
+    assert_eq!(bob.shared.read(|s| s.instance(&key).unwrap().status()), PresenceStatus::Online);
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move { core.set_status(&key, PresenceStatus::Invisible).await }).unwrap();
+    }
+    bob.shared.instance(&key, |i| i.presence = None);
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move { core.refresh_presence(&key).await });
+    }
+    assert_eq!(bob.shared.read(|s| s.instance(&key).unwrap().status()), PresenceStatus::Invisible);
+    // Another app of Bob's shares his activity, this one reads that, then the
+    // other turns sharing off: picking a status here must keep it off.
+    let other_app = |settings: pb::PresenceSettings| {
+        let api = bob.api(&key).unwrap();
+        wait(&bob, async move {
+            let req = pb::UpdatePresenceSettingsRequest { settings: Some(settings) };
+            fuwa_desktop::rpc!(api.presence(), update_presence_settings(req)).await.unwrap();
+        });
+    };
+    let shared = pb::PresenceSettings {
+        status: PresenceStatus::Invisible as i32,
+        show_activity: true,
+        hidden_server_ids: vec![server.id.clone()],
+    };
+    other_app(shared.clone());
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move { core.refresh_presence(&key).await });
+    }
+    assert!(bob.shared.read(|s| s.instance(&key).unwrap().presence.as_ref().unwrap().show_activity));
+    other_app(pb::PresenceSettings { show_activity: false, ..shared });
+    {
+        let (core, key) = (bob.clone(), key.clone());
+        wait(&bob, async move { core.set_status(&key, PresenceStatus::Idle).await }).unwrap();
+    }
+    let saved = {
+        let api = bob.api(&key).unwrap();
+        wait(&bob, async move {
+            fuwa_desktop::rpc!(api.presence(), get_presence_settings(pb::GetPresenceSettingsRequest {}))
+                .await
+                .unwrap()
+                .settings
+                .unwrap()
+        })
+    };
+    assert_eq!(saved.status(), PresenceStatus::Idle);
+    assert!(!saved.show_activity, "a status picked here turned sharing back on");
+    assert_eq!(saved.hidden_server_ids, vec![server.id.clone()]);
     // It's kept on the instance, so it follows Bob to his other devices.
     bob.shared.instance(&key, |i| i.notifications.clear());
     {

@@ -74,6 +74,9 @@ pub struct InstanceState {
     /// Per server: its shared channels both ways, requests, codes and people kept out,
     /// once a manager has looked. Read again when the server says they changed.
     pub shared: HashMap<String, pb::ListConnectionsResponse>,
+    /// Your status (online, idle, do not disturb, invisible) and what you share,
+    /// once read. It follows the account, so every app shows the same.
+    pub presence: Option<pb::PresenceSettings>,
 }
 
 impl InstanceState {
@@ -100,6 +103,21 @@ impl InstanceState {
             notifications: HashMap::new(),
             voice: HashMap::new(),
             shared: HashMap::new(),
+            presence: None,
+        }
+    }
+
+    /// Whether the instance has a feature (`compat.rs`), so its screens may show.
+    pub fn has(&self, feature: &str) -> bool {
+        let versions = self.node.as_ref().and_then(|n| n.versions.as_ref());
+        crate::core::compat::instance_has(versions, feature, &crate::core::compat::FEATURES)
+    }
+
+    /// The status you picked here; online until it's been read.
+    pub fn status(&self) -> pb::PresenceStatus {
+        match self.presence.as_ref().map(|p| p.status()) {
+            None | Some(pb::PresenceStatus::Unspecified) => pb::PresenceStatus::Online,
+            Some(status) => status,
         }
     }
 
