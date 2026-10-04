@@ -378,8 +378,10 @@
     `SetChannelPermissions`; the New button opens the app's new-channel
     dialog and stays in settings),
     `instance_settings.rs` an instance's settings for its admins (the gear
-    by the instance's name; General, Sign-ups, Limits, Privacy, Calls and
-    Moderation, where the providers servers' smart filters ask are set up
+    by the instance's name; General, Sign-ups, Single sign-on
+    (`instance_settings/sso.rs`: the identity provider, SAML metadata read
+    by `core/sso.rs`, a test sign-in in the browser), Limits, Privacy,
+    Calls and Moderation, where the providers servers' smart filters ask are set up
     and tried, over `core/instance_admin.rs`, which names every setting's
     path and keeps unsaved edits across a save; the pages are built from
     `instance_settings/controls.rs`, the web's `settings/controls.tsx`:

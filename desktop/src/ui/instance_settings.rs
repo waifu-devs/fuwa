@@ -16,6 +16,7 @@ mod controls;
 mod general;
 mod limits;
 mod signups;
+mod sso;
 
 use gpui_kit::component::input::{Input, InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -50,6 +51,7 @@ pub enum InstanceSettingsEvent {
 enum Page {
     General,
     SignUps,
+    Sso,
     Limits,
     Privacy,
     Calls,
@@ -63,6 +65,7 @@ impl Page {
         match self {
             Page::General => "General",
             Page::SignUps => "Sign-ups",
+            Page::Sso => "Single sign-on",
             Page::Limits => "Limits",
             Page::Privacy => "Privacy",
             Page::Calls => "Calls",
@@ -76,6 +79,7 @@ impl Page {
         match self {
             Page::General => "sliders-horizontal",
             Page::SignUps => "user-plus",
+            Page::Sso => "building",
             Page::Limits => "gauge",
             Page::Privacy => "shield-check",
             Page::Calls => "audio-lines",
@@ -89,6 +93,7 @@ impl Page {
         match self {
             Page::General => "What everyone here gets. Changes apply right away.",
             Page::SignUps => "Who can join this instance and what they can make.",
+            Page::Sso => "Let people sign in here through your organization's identity provider.",
             Page::Limits => "Caps every server starts with.",
             Page::Privacy => "What this instance tells Waifu Devs.",
             Page::Calls => "Voice channels and calls in direct messages.",
@@ -106,7 +111,10 @@ impl Page {
 
 /// The menu's groups and their pages, in the web's order.
 const GROUPS: [(&str, &[Page]); 2] = [
-    ("INSTANCE", &[Page::General, Page::SignUps, Page::Limits, Page::Privacy, Page::Calls, Page::Moderation]),
+    (
+        "INSTANCE",
+        &[Page::General, Page::SignUps, Page::Sso, Page::Limits, Page::Privacy, Page::Calls, Page::Moderation],
+    ),
     ("MANAGE", &[Page::Accounts, Page::Announcement]),
 ];
 
@@ -190,6 +198,7 @@ pub struct InstanceSettingsView {
     units: HashMap<&'static str, usize>,
     bar: Option<AnyElement>,
     announce: announcement::Announce,
+    sso: sso::Sso,
     accounts: accounts::Accounts,
     _subscriptions: Vec<Subscription>,
     _boxes: Vec<Subscription>,
@@ -212,6 +221,8 @@ impl InstanceSettingsView {
         let (announce, announce_sub) = announcement::Announce::new(window, cx);
         let (accounts, mut boxes) = accounts::Accounts::new(window, cx);
         boxes.push(announce_sub);
+        let (sso, sso_subs) = sso::Sso::new(window, cx);
+        boxes.extend(sso_subs);
         let mut view = Self {
             core,
             key,
@@ -230,6 +241,7 @@ impl InstanceSettingsView {
             units: HashMap::new(),
             bar: None,
             announce,
+            sso,
             accounts,
             _subscriptions: Vec::new(),
             _boxes: boxes,
@@ -473,6 +485,7 @@ impl InstanceSettingsView {
     /// Puts the draft into the boxes that don't already say it (after loading, a save or a discard),
     /// leaving what's typed alone where it means the same.
     fn sync_boxes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_sso(window, cx);
         let Some(draft) = self.draft.clone() else { return };
         for (path, _, get, _) in TEXTS {
             let Some(state) = self.texts.get(path) else { continue };
@@ -1391,6 +1404,7 @@ impl Render for InstanceSettingsView {
             match page {
                 Page::General => self.general_page(&p, window, cx),
                 Page::SignUps => self.signups_page(&p, window, cx),
+                Page::Sso => self.sso_page(&p, window, cx),
                 Page::Limits => self.limits_page(&p, window, cx),
                 Page::Calls => self.calls_page(&p, window, cx),
                 Page::Privacy => self.privacy_page(&p, cx),

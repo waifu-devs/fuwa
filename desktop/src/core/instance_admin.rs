@@ -229,7 +229,10 @@ fn differs(a: &pb::InstanceSettings, b: &pb::InstanceSettings, path: &str) -> bo
         "linked_accounts" => a.linked_accounts != b.linked_accounts,
         "linked_issuer" => a.linked_issuer.trim().trim_end_matches('/') != b.linked_issuer.trim().trim_end_matches('/'),
         "sso_accounts" => a.sso_accounts != b.sso_accounts,
-        "sso_provider" => a.sso_provider != b.sso_provider,
+        "sso_provider" => {
+            crate::core::sso::provider_print(a.sso_provider.as_ref())
+                != crate::core::sso::provider_print(b.sso_provider.as_ref())
+        }
         "server_creation" => a.server_creation != b.server_creation,
         "agent_creation" => a.agent_creation != b.agent_creation,
         "shared_channels" => a.shared_channels != b.shared_channels,
