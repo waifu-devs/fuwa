@@ -34,6 +34,20 @@ message GetKeyResponse {
   string origin = 1;
   // Its Ed25519 public key, 32 bytes.
   bytes public_key = 2;
+  // Its last key rotations, oldest first, the last one ending at public_key:
+  // what lets an instance that pinned an older key move to this one.
+  repeated KeyRotation rotations = 3;
+}
+
+// An instance's key, replaced by another the old one vouches for.
+message KeyRotation {
+  bytes previous_key = 1;
+  bytes key = 2;
+  int64 rotated_at_ms = 3;
+  // Ed25519 by previous_key over "fuwa-federation-v1 rotation", then the
+  // instance's origin, previous_key and key, each after its length as 8
+  // bytes (big-endian), then rotated_at_ms as 8 bytes.
+  bytes signature = 4;
 }
 
 message HelloRequest {
@@ -71,6 +85,10 @@ message Envelope {
   // reply_to and payload, each after its length as 8 bytes (big-endian),
   // sent_at_ms as 8 bytes itself.
   bytes signature = 7;
+  // The sender's public key, 32 bytes: only a hint, never trusted. A
+  // receiver that pinned an older key looks for the sender's rotations only
+  // when the envelope checks out with this one.
+  bytes key = 8;
 }
 
 message Hello {}

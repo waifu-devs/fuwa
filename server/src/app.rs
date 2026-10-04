@@ -59,6 +59,8 @@ pub struct App {
     pub servers: Servers,
     pub hub: Arc<Hub>,
     pub limiter: SignInLimiter,
+    /// Live event streams held open, per account and in all.
+    pub streams: Arc<crate::streams::Streams>,
     pub started: Instant,
     /// Cancelled when the instance shuts down, ending live streams.
     pub shutdown: CancellationToken,
@@ -206,6 +208,9 @@ impl App {
         let release_cache = config.data_path.join("release-cache");
         let shutdown = CancellationToken::new();
         let media_link = media_link(&config, &shutdown).await;
+        let streams = crate::streams::Streams::new(config.max_streams);
+        crate::db::set_write_queue(config.write_queue);
+        crate::auth::set_sign_in_queue(config.sign_in_queue);
 
         let app = Arc::new(Self {
             config,
@@ -220,6 +225,7 @@ impl App {
             servers,
             hub,
             limiter: SignInLimiter::default(),
+            streams,
             started: Instant::now(),
             shutdown,
             link,
@@ -284,6 +290,12 @@ impl App {
     /// The link to store for a picture someone gave: see [`crate::outside::link`].
     pub fn picture_link(&self, url: &str) -> String {
         crate::outside::link(&self.picture_key, &self.settings().public_url, url)
+    }
+
+    /// The link to show for a picture on another fuwa instance: see
+    /// [`crate::outside::link_on_origin`].
+    pub fn picture_link_on_origin(&self, url: &str) -> String {
+        crate::outside::link_on_origin(&self.picture_key, &self.settings().public_url, url)
     }
 
     /// Direct messages, where accounts are kept.
@@ -444,9 +456,19 @@ impl App {
             let app = self.clone();
             router = router.route(
                 "/healthz/parts",
+                get(move |headers: http::HeaderMap| {
+                    let app = app.clone();
+                    async move { crate::cluster::status::parts(&app, &headers).await }
+                }),
+            );
+        } else {
+            // How busy a shard is, for its directory's answer (behind the cluster key).
+            let app = self.clone();
+            router = router.route(
+                "/healthz/load",
                 get(move || {
                     let app = app.clone();
-                    async move { crate::cluster::status::parts(&app).await }
+                    async move { crate::cluster::status::json_response(&crate::cluster::status::load(&app)) }
                 }),
             );
         }
@@ -484,6 +506,18 @@ impl App {
         let key: Arc<str> = self.config.cluster.key.as_deref().unwrap_or_default().into();
         router.layer(axum::middleware::from_fn_with_state(key, crate::cluster::require_key))
     }
+}
+
+/// Sends what each answer writes straight away. Without it, the small
+/// frames a gRPC answer ends with wait for the client's acknowledgement of
+/// the ones before (Nagle), adding up to 40 ms to every call.
+pub fn no_delay(
+    listener: tokio::net::TcpListener,
+) -> impl axum::serve::Listener<Io = tokio::net::TcpStream, Addr = SocketAddr> {
+    use axum::serve::ListenerExt;
+    listener.tap_io(|stream| {
+        let _ = stream.set_nodelay(true);
+    })
 }
 
 /// Where calls' sound goes: a media part in this process (when it runs
@@ -663,7 +697,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     }
 
     let shutdown = app.shutdown.clone();
-    let served = axum::serve(listener, app.router())
+    let served = axum::serve(crate::app::no_delay(listener), app.router())
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
         .await
         .map_err(|err| format!("server error: {err}"));

@@ -13,7 +13,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { memo, useState, type ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import type { Attachment } from "@/gen/fuwa/v1/types_pb";
 import { familyOf, fitBox, lookOf, shortName, type FileFamily } from "@/lib/attachments";
 import { formatBytes } from "@/lib/format";
@@ -21,6 +21,8 @@ import { usePrefs } from "@/lib/prefs";
 import { shownPicture } from "@/lib/shown";
 import { reportError } from "@/lib/reports";
 import { cn } from "@/lib/utils";
+import { VoiceMessage, VoiceProblem } from "@/components/voice/VoiceMessage";
+import { attachmentLoader } from "@/voice/fetch";
 
 /** The most room one picture or video takes in a message. */
 const MEDIA_BOX = { width: 420, height: 320 };
@@ -124,6 +126,7 @@ export const Attachments = memo(function Attachments({ files, animate }: { files
         const look = lookOf(file.contentType);
         const delay = animate ? (pictures.length + n) * 0.04 : 0;
         if (look === "video" && shownPicture(file.url)) return <Video key={file.id || file.url} file={file} delay={delay} animate={animate} />;
+        if (look === "audio" && file.voice && shownPicture(file.url)) return <Voice key={file.id || file.url} file={file} delay={delay} animate={animate} />;
         if (look === "audio" && shownPicture(file.url)) return <Audio key={file.id || file.url} file={file} delay={delay} animate={animate} />;
         return <FileCard key={file.id || file.url} file={file} delay={delay} animate={animate} />;
       })}
@@ -232,6 +235,23 @@ function Audio({ file, delay, animate }: { file: Attachment; delay: number; anim
   );
 }
 
+/**
+ * A voice message recorded in the app: its waveform drawn as bars from what
+ * the sender's app sent, the sound fetched only when it's first played,
+ * from a fuwa instance and no bigger than the file is.
+ */
+function Voice({ file, delay, animate }: { file: Attachment; delay: number; animate: boolean }) {
+  const voice = file.voice!;
+  const load = useMemo(() => attachmentLoader(file.url, Number(file.size)), [file.url, file.size]);
+  const id = `attachment:${file.id || file.url}`;
+  return (
+    <motion.div {...enter(animate, delay)} className="w-full max-w-[22rem]">
+      <VoiceMessage id={id} durationMs={voice.durationMs} waveform={voice.waveform} load={load} />
+      <VoiceProblem id={id} />
+    </motion.div>
+  );
+}
+
 /** A file's name and size, with its download button. */
 function FileLine({ file }: { file: Attachment }) {
   return (
@@ -330,12 +350,16 @@ export function PendingFiles({ files }: { files: Attachment[] }) {
   if (!files.length) return null;
   return (
     <div className="mt-1 flex flex-wrap gap-1.5">
-      {files.map((file) => (
+      {files.map((file) =>
+        file.voice ? (
+          <VoiceMessage key={file.url} id={`pending:${file.url}`} durationMs={file.voice.durationMs} waveform={file.voice.waveform} load={null} pending />
+        ) : (
         <span key={file.url} className="flex max-w-60 items-center gap-2 rounded-xl border bg-card/70 py-1.5 pr-3 pl-1.5 text-xs">
           <FileBadge name={file.filename} className="size-7 rounded-lg [&_svg]:size-4" />
           <span className="truncate font-bold">{shortName(file.filename, 28)}</span>
         </span>
-      ))}
+        ),
+      )}
     </div>
   );
 }

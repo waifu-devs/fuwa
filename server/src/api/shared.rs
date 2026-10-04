@@ -242,21 +242,55 @@ impl Instance {
     }
 }
 
+/// Pictures in what another instance (at `origin`) sends: kept only when
+/// they're that instance's own, and then as links through this instance's
+/// picture proxy (`link`, [`crate::outside`]), so apps here never fetch
+/// anything from another instance, and nothing anywhere else is fetched for it.
+pub struct Pictures<'a> {
+    pub origin: &'a str,
+    pub link: &'a dyn Fn(&str) -> String,
+}
+
+impl Pictures<'_> {
+    /// The link apps here load a picture from there at, or empty for none.
+    fn of(&self, url: &str) -> String {
+        if is_on(url, self.origin) { (self.link)(url) } else { String::new() }
+    }
+}
+
+/// Whether `url` is a plain link to something at `origin` (no password in
+/// it, not overlong).
+fn is_on(url: &str, origin: &str) -> bool {
+    let (Ok(url), Ok(origin)) = (reqwest::Url::parse(url), reqwest::Url::parse(origin)) else { return false };
+    url.as_str().len() <= 2048
+        && matches!(url.scheme(), "https" | "http")
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.origin() == origin.origin()
+}
+
+/// A picture of this instance's as it leaves for another, which fetches it
+/// through its own proxy: only this instance's own (an upload, or a link it
+/// fetches itself), never a link to anywhere else.
+fn own_picture(url: &str, public_url: &str) -> String {
+    if is_on(url, public_url) { url.to_string() } else { String::new() }
+}
+
 /// A server on another instance as this one keeps it: its id under that
-/// instance's address, its name on one line and clipped, and no icon, since
-/// apps here never fetch anything from another instance.
-fn their_server(server: Option<&mut pb::SharedServer>, at: &str) -> Result<()> {
+/// instance's address, its name on one line and clipped, and its icon
+/// through this instance's proxy.
+fn their_server(server: Option<&mut pb::SharedServer>, at: &str, pictures: &Pictures) -> Result<()> {
     let server = server.ok_or_else(|| Error::invalid("server is required"))?;
     server.id = format!("{}@{at}", parse_id("server", &server.id)?);
-    shown_server(server);
+    shown_server(server, pictures);
     Ok(())
 }
 
 /// A server another instance named, cleaned up as [`their_server`] does,
 /// and marked with its instance when it isn't this one.
-fn shown_server(server: &mut pb::SharedServer) {
+fn shown_server(server: &mut pb::SharedServer, pictures: &Pictures) {
     server.name = one_line(&server.name, 100);
-    server.icon_url.clear();
+    server.icon_url = if server.id.contains('@') { pictures.of(&server.icon_url) } else { String::new() };
     server.instance = store::shared_server(server.id.clone(), String::new(), String::new()).instance;
 }
 
@@ -272,16 +306,17 @@ fn from_there(id: &str, at: &str, own: &str) -> Result<String> {
 }
 
 /// A person as another instance sent them: their id read by [`from_there`],
-/// their names on one line and clipped, and nothing to fetch. This
-/// instance's own people keep only their id: how they look is this
-/// instance's to say ([`own_people`]), never the other's.
-fn their_user(user: &mut pb::User, at: &str, own: &str) -> Result<()> {
+/// their names on one line and clipped, and their avatar through this
+/// instance's proxy. This instance's own people keep only their id: how
+/// they look is this instance's to say ([`own_people`]), never the other's.
+fn their_user(user: &mut pb::User, at: &str, own: &str, pictures: &Pictures) -> Result<()> {
     let id = from_there(&user.id, at, own)?;
     *user = if id.contains('@') {
         pb::User {
             id,
             username: one_line(&user.username, 32),
             display_name: one_line(&user.display_name, 64),
+            avatar_url: pictures.of(&user.avatar_url),
             kind: user.kind,
             ..Default::default()
         }
@@ -291,13 +326,15 @@ fn their_user(user: &mut pb::User, at: &str, own: &str) -> Result<()> {
     Ok(())
 }
 
-/// Someone as they leave this instance for another: who they are, and
-/// nothing more (no status, avatar or anything else to fetch from here).
-fn plain_user(user: &pb::User) -> pb::User {
+/// Someone as they leave this instance for another: who they are and
+/// their avatar, if it's on this instance, and nothing more (no status,
+/// banner or anything else of theirs).
+fn plain_user(user: &pb::User, public_url: &str) -> pb::User {
     pb::User {
         id: user.id.clone(),
         username: user.username.clone(),
         display_name: user.display_name.clone(),
+        avatar_url: own_picture(&user.avatar_url, public_url),
         kind: user.kind,
         ..Default::default()
     }
@@ -305,20 +342,20 @@ fn plain_user(user: &pb::User) -> pb::User {
 
 /// Someone in a guest server on another instance, acting in the channel:
 /// always that instance's own people and server.
-fn their_guest(guest: Option<&mut cpb::Guest>, at: &str) -> Result<()> {
+fn their_guest(guest: Option<&mut cpb::Guest>, at: &str, pictures: &Pictures) -> Result<()> {
     let guest = guest.ok_or_else(|| Error::invalid("guest is required"))?;
     parse_id("connection id", &guest.connection_id)?;
     let user = guest.user.as_mut().ok_or_else(|| Error::invalid("user is required"))?;
     parse_id("user", &user.id)?;
-    their_user(user, at, "")?;
-    their_server(guest.server.as_mut(), at)
+    their_user(user, at, "", pictures)?;
+    their_server(guest.server.as_mut(), at, pictures)
 }
 
 /// A message from a home on another instance, as this one shows it: its
-/// people and servers read by [`from_there`], and nothing in it that apps
-/// here would fetch from there (files, pictures and avatars come later,
-/// through this instance's own proxy).
-fn their_message(message: &mut pb::Message, at: &str, own: &str) -> Result<()> {
+/// people and servers read by [`from_there`], its pictures (avatars, icons,
+/// custom emoji, a GIF, link previews') only through this instance's proxy,
+/// and no files.
+fn their_message(message: &mut pb::Message, at: &str, own: &str, pictures: &Pictures) -> Result<()> {
     parse_id("message", &message.id)?;
     if !message.reply_to_id.is_empty() {
         parse_id("message", &message.reply_to_id)?;
@@ -329,22 +366,25 @@ fn their_message(message: &mut pb::Message, at: &str, own: &str) -> Result<()> {
     message.author_id = from_there(&message.author_id, at, own)?;
     message.content = message.content.chars().take(messages::MAX_MESSAGE_LENGTH).collect();
     message.attachments.clear();
-    message.embeds = message.embeds.iter().take(10).map(their_embed).collect();
+    message.embeds = message.embeds.iter().take(10).map(|e| their_embed(e, pictures)).collect();
     message.auto_mod = None;
     // Threads stay in the channel's own server for now.
     no_threads(message);
-    // Custom emoji and GIFs are pictures on the other instance: emoji show
-    // as their names, GIFs not at all.
-    message.emojis.clear();
-    message.gif = None;
+    message.emojis = message
+        .emojis
+        .iter()
+        .take(crate::cluster::calls::MAX_OUTSIDE_EMOJIS)
+        .filter_map(|e| their_emoji(e, pictures))
+        .collect();
+    message.gif = message.gif.as_ref().and_then(|gif| their_gif(gif, pictures));
     if let Some(webhook) = &mut message.webhook {
         webhook.webhook_id.clear();
         webhook.name = one_line(&webhook.name, 80);
-        webhook.avatar_url.clear();
+        webhook.avatar_url = pictures.of(&webhook.avatar_url);
     }
     if let Some(shared) = &mut message.shared {
         if let Some(user) = &mut shared.user {
-            their_user(user, at, own)?;
+            their_user(user, at, own, pictures)?;
             // Who wrote it is the author, never someone else named here.
             if user.id != message.author_id {
                 return Err(Error::invalid("that names someone other than who wrote it"));
@@ -352,7 +392,7 @@ fn their_message(message: &mut pb::Message, at: &str, own: &str) -> Result<()> {
         }
         if let Some(server) = &mut shared.server {
             server.id = from_there(&server.id, at, own)?;
-            shown_server(server);
+            shown_server(server, pictures);
         }
     }
     no_pings(message);
@@ -404,9 +444,38 @@ async fn own_authors(conn: &turso::Connection, authors: Vec<pb::User>) -> Result
     Ok(shown)
 }
 
-/// A link preview from another instance: its words and link, and none of
-/// its pictures.
-fn their_embed(embed: &pb::Embed) -> pb::Embed {
+/// A custom emoji in a message from another instance: its name and its
+/// picture through this instance's proxy, or none when there's no picture
+/// to show (the message shows its name).
+fn their_emoji(emoji: &pb::Emoji, pictures: &Pictures) -> Option<pb::Emoji> {
+    let name_ok =
+        (2..=32).contains(&emoji.name.len()) && emoji.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    let url = pictures.of(&emoji.url);
+    (parse_id("emoji", &emoji.id).is_ok() && name_ok && !url.is_empty()).then(|| pb::Emoji {
+        id: emoji.id.clone(),
+        name: emoji.name.clone(),
+        url,
+        animated: emoji.animated,
+        ..Default::default()
+    })
+}
+
+/// A GIF in a message from another instance, through this instance's proxy.
+fn their_gif(gif: &pb::MessageGif, pictures: &Pictures) -> Option<pb::MessageGif> {
+    let url = pictures.of(&gif.url);
+    (!url.is_empty()).then(|| pb::MessageGif {
+        url,
+        width: gif.width.clamp(0, 4096),
+        height: gif.height.clamp(0, 4096),
+        title: one_line(&gif.title, 200),
+        provider: gif.provider,
+        seal: String::new(),
+    })
+}
+
+/// A link preview from another instance: its words, its link, and its
+/// pictures through this instance's proxy.
+fn their_embed(embed: &pb::Embed, pictures: &Pictures) -> pb::Embed {
     pb::Embed {
         title: one_line(&embed.title, 256),
         description: embed.description.chars().take(4096).collect(),
@@ -422,7 +491,8 @@ fn their_embed(embed: &pb::Embed) -> pb::Embed {
                 inline: f.inline,
             })
             .collect(),
-        ..Default::default()
+        thumbnail_url: pictures.of(&embed.thumbnail_url),
+        image_url: pictures.of(&embed.image_url),
     }
 }
 
@@ -450,7 +520,14 @@ fn elsewhere_allowed(list: &[i32]) -> Result<Vec<i32>> {
 /// A call from another instance, as this one reads it: every server and
 /// person it speaks for is that instance's ("<id>@<instance>"), so it can't
 /// speak for this instance's own or a third one's.
-pub fn arrived(mut call: cpb::SharedCall, origin: &str, own: &str, fingerprint: &str) -> Result<cpb::SharedCall> {
+pub fn arrived(
+    mut call: cpb::SharedCall,
+    origin: &str,
+    own: &str,
+    fingerprint: &str,
+    link: &dyn Fn(&str) -> String,
+) -> Result<cpb::SharedCall> {
+    let pictures = Pictures { origin, link };
     let at = federation::address(origin);
     let own = federation::address(own);
     let message_id = |id: &str| if id.is_empty() { Ok(()) } else { parse_id("message", id).map(|_| ()) };
@@ -462,7 +539,7 @@ pub fn arrived(mut call: cpb::SharedCall, origin: &str, own: &str, fingerprint: 
         Some(Call::Lookup(lookup)) => lookup.guest_server_id = theirs(&lookup.guest_server_id)?,
         Some(Call::Ask(ask)) => {
             ask.asked_by_id = actor(&ask.asked_by_id)?;
-            their_server(ask.guest.as_mut(), at)?;
+            their_server(ask.guest.as_mut(), at, &pictures)?;
         }
         Some(Call::Left(left)) => {
             left.guest_server_id = theirs(&left.guest_server_id)?;
@@ -471,7 +548,7 @@ pub fn arrived(mut call: cpb::SharedCall, origin: &str, own: &str, fingerprint: 
         Some(Call::Readers(readers)) => readers.guest_server_id = theirs(&readers.guest_server_id)?,
         Some(Call::Approved(approved)) => {
             let connection = approved.connection.as_mut().ok_or_else(|| Error::invalid("connection is required"))?;
-            their_server(connection.server.as_mut(), at)?;
+            their_server(connection.server.as_mut(), at, &pictures)?;
             connection.allowed = elsewhere_allowed(&connection.allowed)?;
             connection.home_channel_name = one_line(&connection.home_channel_name, 100);
             approved.actor_id = actor(&approved.actor_id)?;
@@ -479,32 +556,32 @@ pub fn arrived(mut call: cpb::SharedCall, origin: &str, own: &str, fingerprint: 
         Some(Call::Ended(ended)) => ended.actor_id = actor(&ended.actor_id)?,
         Some(Call::Updated(updated)) => {
             let connection = updated.connection.as_mut().ok_or_else(|| Error::invalid("connection is required"))?;
-            their_server(connection.server.as_mut(), at)?;
+            their_server(connection.server.as_mut(), at, &pictures)?;
             connection.allowed = elsewhere_allowed(&connection.allowed)?;
             connection.home_channel_name = one_line(&connection.home_channel_name, 100);
         }
         // To the home: someone there acting in the channel.
         Some(Call::Send(send)) => {
-            their_guest(send.guest.as_mut(), at)?;
+            their_guest(send.guest.as_mut(), at, &pictures)?;
             their_text(&send.content, &send.attachments, &mut send.embeds)?;
             message_id(&send.reply_to_id)?;
         }
         Some(Call::List(list)) => {
-            their_guest(list.guest.as_mut(), at)?;
+            their_guest(list.guest.as_mut(), at, &pictures)?;
             message_id(&list.before_id)?;
             message_id(&list.after_id)?;
         }
         Some(Call::Get(get)) => {
-            their_guest(get.guest.as_mut(), at)?;
+            their_guest(get.guest.as_mut(), at, &pictures)?;
             parse_id("message", &get.message_id)?;
         }
         Some(Call::Edit(edit)) => {
-            their_guest(edit.guest.as_mut(), at)?;
+            their_guest(edit.guest.as_mut(), at, &pictures)?;
             parse_id("message", &edit.message_id)?;
             messages::check_content(&edit.content, false)?;
         }
         Some(Call::Delete(delete)) => {
-            their_guest(delete.guest.as_mut(), at)?;
+            their_guest(delete.guest.as_mut(), at, &pictures)?;
             parse_id("message", &delete.message_id)?;
         }
         // To a guest: what just happened in the channel.
@@ -515,7 +592,7 @@ pub fn arrived(mut call: cpb::SharedCall, origin: &str, own: &str, fingerprint: 
                     Some(
                         Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
                         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) }),
-                    ) => their_message(m, at, own)?,
+                    ) => their_message(m, at, own, &pictures)?,
                     Some(Payload::MessageDeleted(deleted)) => {
                         parse_id("message", &deleted.message_id)?;
                     }
@@ -557,18 +634,20 @@ pub fn returned(
     origin: &str,
     own: &str,
     fingerprint: &str,
+    link: &dyn Fn(&str) -> String,
 ) -> Result<cpb::SharedReply> {
+    let pictures = Pictures { origin, link };
     let at = federation::address(origin);
     let own = federation::address(own);
     let mut out = cpb::SharedReply::default();
     match &call.call {
         Some(Call::Send(_) | Call::Get(_) | Call::Edit(_)) => {
             if let Some(mut message) = reply.message {
-                their_message(&mut message, at, own)?;
+                their_message(&mut message, at, own, &pictures)?;
                 out.message = Some(message);
             }
             if let Some(mut author) = reply.author {
-                their_user(&mut author, at, own)?;
+                their_user(&mut author, at, own, &pictures)?;
                 out.author = Some(author);
             }
             return Ok(out);
@@ -576,12 +655,12 @@ pub fn returned(
         Some(Call::List(_)) => {
             let mut page = reply.page.unwrap_or_default();
             for message in &mut page.messages {
-                their_message(message, at, own)?;
+                their_message(message, at, own, &pictures)?;
             }
             page.authors.truncate(page.messages.len());
             page.parent = None;
             for author in &mut page.authors {
-                their_user(author, at, own)?;
+                their_user(author, at, own, &pictures)?;
             }
             out.page = Some(page);
             return Ok(out);
@@ -590,7 +669,7 @@ pub fn returned(
     }
     match (&call.call, reply.preview, reply.connection) {
         (Some(Call::Lookup(_)), Some(mut preview), _) => {
-            their_server(preview.home_server.as_mut(), at)?;
+            their_server(preview.home_server.as_mut(), at, &pictures)?;
             // Its regions are that instance's, which this one can't name.
             preview.region.clear();
             preview.allowed = elsewhere_allowed(&preview.allowed)?;
@@ -601,7 +680,7 @@ pub fn returned(
             out.preview = Some(preview);
         }
         (Some(Call::Ask(_)), _, Some(mut connection)) => {
-            their_server(connection.server.as_mut(), at)?;
+            their_server(connection.server.as_mut(), at, &pictures)?;
             connection.allowed = elsewhere_allowed(&connection.allowed)?;
             connection.home_channel_name = one_line(&connection.home_channel_name, 100);
             connection.instance = federation::display(origin).to_string();
@@ -633,7 +712,7 @@ async fn from_elsewhere(app: &App, sdb: &ServerDb, call: &cpb::SharedCall, from:
         // At the home, the guest's server id (under its instance) is checked.
         _ => return Ok(()),
     };
-    let link = link_by_id(&sdb.read()?, connection_id).await?;
+    let link = link_by_id(&*sdb.read()?, connection_id).await?;
     let home = match &call.call {
         Some(Call::Approved(cpb::HomeApproved { connection: Some(c), .. })) => c.server.as_ref().map(|s| s.id.as_str()),
         _ => None,
@@ -1000,6 +1079,7 @@ async fn to_home(app: &Arc<App>, server_id: &str, link: &LinkRow, call: Call) ->
 
 /// Someone here, acting in a channel this server shows from another.
 pub(super) async fn guest_of(
+    app: &App,
     conn: &turso::Connection,
     server_id: &str,
     account: &Account,
@@ -1009,7 +1089,7 @@ pub(super) async fn guest_of(
     let channel_id = link.channel_id.as_deref().unwrap_or_default();
     let mut user = store::user(conn, &account.id).await?.ok_or_else(|| Error::denied("join this server first"))?;
     if link.instance.origin.is_some() {
-        user = plain_user(&user);
+        user = plain_user(&user, &app.settings().public_url);
     }
     Ok(cpb::Guest {
         connection_id: link.id.clone(),
@@ -1086,7 +1166,7 @@ async fn review_here(
     content: &str,
     pictures: &[String],
 ) -> Result<()> {
-    if access.has(Permission::ManageServer) || store::load_automod(&sdb.read()?).await?.is_empty() {
+    if access.has(Permission::ManageServer) || store::load_automod(&*sdb.read()?).await?.is_empty() {
         return Ok(());
     }
     let asked = automod::ask(app, sdb, member, access, channel_id, content, pictures).await;
@@ -1120,7 +1200,7 @@ pub(super) async fn locate(
         if !access.can_see(channel_id) {
             return Err(Error::NotFound("message"));
         }
-        let guest = guest_of(conn, server_id, account, access, &link).await?;
+        let guest = guest_of(app, conn, server_id, account, access, &link).await?;
         return Ok(Some((link, guest)));
     }
     if load_message(conn, server_id, message_id).await?.is_some() {
@@ -1136,7 +1216,7 @@ pub(super) async fn locate(
         {
             continue;
         }
-        let guest = guest_of(conn, server_id, account, access, &link).await?;
+        let guest = guest_of(app, conn, server_id, account, access, &link).await?;
         let call = Call::Get(cpb::GuestGet { guest: Some(guest.clone()), message_id: message_id.to_string() });
         if app
             .shared(cpb::SharedCall { server_id: link.home.id.clone(), call: Some(call), ..Default::default() })
@@ -1161,7 +1241,7 @@ pub(super) async fn guest_send(
     req: pb::SendMessageRequest,
 ) -> Result<pb::Message> {
     let channel_id = link.channel_id.clone().unwrap_or_default();
-    let guest = guest_of(&sdb.read()?, &sdb.id, account, access, link).await?;
+    let guest = guest_of(app, &*sdb.read()?, &sdb.id, account, access, link).await?;
     let pictures = automod::picture_links(&req.attachments, &req.embeds, &[]);
     review_here(app, sdb, member, access, &channel_id, &req.content, &pictures).await?;
     let call = Call::Send(cpb::GuestSend {
@@ -1260,8 +1340,8 @@ pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::S
         Call::Lookup(lookup) => home_lookup(app, &sdb, lookup, &from).await,
         Call::Ask(ask) => home_ask(&sdb, ask, &from).await,
         Call::Send(send) => home_send(app, &sdb, send).await,
-        Call::List(list) => home_list(&sdb, list).await,
-        Call::Get(get) => home_get(&sdb, get).await,
+        Call::List(list) => home_list(app, &sdb, list).await,
+        Call::Get(get) => home_get(app, &sdb, get).await,
         Call::Edit(edit) => home_edit(app, &sdb, edit).await,
         Call::Delete(delete) => home_delete(app, &sdb, delete).await,
         Call::Left(left) => home_left(&sdb, left).await,
@@ -1534,7 +1614,7 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
     Ok(cpb::SharedReply { message: Some(message), ..Default::default() })
 }
 
-async fn home_list(sdb: &ServerDb, list: cpb::GuestList) -> Result<cpb::SharedReply> {
+async fn home_list(app: &App, sdb: &ServerDb, list: cpb::GuestList) -> Result<cpb::SharedReply> {
     let guest = list.guest.ok_or_else(|| Error::invalid("guest is required"))?;
     let conn = sdb.read()?;
     let (row, user, _) = connection(&conn, &guest).await?;
@@ -1548,8 +1628,9 @@ async fn home_list(sdb: &ServerDb, list: cpb::GuestList) -> Result<cpb::SharedRe
     decorate(&conn, Some(&home), &mut messages).await?;
     let mut authors = users(&conn, &messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>()).await?;
     if user.id.contains('@') {
-        messages.iter_mut().for_each(plain_message);
-        authors = authors.iter().map(plain_user).collect();
+        let public_url = &app.settings().public_url;
+        messages.iter_mut().for_each(|m| plain_message(m, public_url));
+        authors = authors.iter().map(|a| plain_user(a, public_url)).collect();
     }
     Ok(cpb::SharedReply {
         page: Some(pb::ListMessagesResponse { messages, authors, has_more, parent: None }),
@@ -1557,7 +1638,7 @@ async fn home_list(sdb: &ServerDb, list: cpb::GuestList) -> Result<cpb::SharedRe
     })
 }
 
-async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply> {
+async fn home_get(app: &App, sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply> {
     let guest = get.guest.ok_or_else(|| Error::invalid("guest is required"))?;
     let conn = sdb.read()?;
     let (row, user, _) = connection(&conn, &guest).await?;
@@ -1573,8 +1654,9 @@ async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply
     decorate(&conn, Some(&home), std::slice::from_mut(&mut message)).await?;
     let mut author = store::user(&conn, &message.author_id).await?;
     if user.id.contains('@') {
-        plain_message(&mut message);
-        author = author.as_ref().map(plain_user);
+        let public_url = &app.settings().public_url;
+        plain_message(&mut message, public_url);
+        author = author.as_ref().map(|a| plain_user(a, public_url));
     }
     Ok(cpb::SharedReply { message: Some(message), author, ..Default::default() })
 }
@@ -1617,7 +1699,7 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
     let guest = edit.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
     let author_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
     // Only new text the author wrote goes to a provider.
-    let before = load_message(&sdb.read()?, &sdb.id, &edit.message_id).await?;
+    let before = load_message(&*sdb.read()?, &sdb.id, &edit.message_id).await?;
     let asked = match before {
         Some(m) if m.author_id == author_id && m.content != edit.content => {
             ask_home(app, sdb, &guest, &edit.content, &[], &[]).await
@@ -1860,7 +1942,7 @@ async fn guest_ended(app: &Arc<App>, sdb: &ServerDb, ended: cpb::HomeEnded) -> R
 
 async fn guest_events(app: &Arc<App>, sdb: &ServerDb, home: cpb::HomeEvents) -> Result<cpb::SharedReply> {
     let link =
-        link_by_id(&sdb.read()?, &home.connection_id).await?.filter(|l| l.active).ok_or(Error::NotFound(GONE))?;
+        link_by_id(&*sdb.read()?, &home.connection_id).await?.filter(|l| l.active).ok_or(Error::NotFound(GONE))?;
     let Some(channel_id) = link.channel_id.clone() else { return Err(Error::NotFound(GONE)) };
     let mut events = home.events;
     if link.instance.origin.is_some() {
@@ -2074,7 +2156,7 @@ struct Target {
 async fn targets(app: &App, server_id: &str) -> HashMap<String, Vec<Target>> {
     let loaded = async {
         let sdb = app.servers.get(server_id).await?;
-        let rows = all_guests(&sdb.read()?).await?;
+        let rows = all_guests(&*sdb.read()?).await?;
         Ok::<_, Error>(rows)
     }
     .await;
@@ -2088,7 +2170,7 @@ async fn targets(app: &App, server_id: &str) -> HashMap<String, Vec<Target>> {
                     .push(Target { connection_id: row.id, guest_server_id: row.server.id });
             }
         }
-        Err(err) => tracing::warn!(server = %server_id, error = %err, "couldn't read a server's shared channels"),
+        Err(_) => tracing::warn!("couldn't read a server's shared channels"),
     }
     targets
 }
@@ -2147,9 +2229,9 @@ async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
             decorate(&conn, Some(&home), std::slice::from_mut(m)).await
         }
         .await;
-        if let Err(err) = decorated {
+        if decorated.is_err() {
             crate::reports::server_error("shared_decorate", Some("SharedChannels/fanout"));
-            tracing::warn!(server = %event.server_id, error = %err, "couldn't say who wrote a shared message");
+            tracing::warn!("couldn't say who wrote a shared message");
             return None;
         }
     }
@@ -2158,33 +2240,47 @@ async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
 
 /// An event as it leaves for another instance: who wrote a message, and
 /// nothing more of them or their server.
-fn leaving(event: &pb::Event) -> pb::Event {
+fn leaving(event: &pb::Event, public_url: &str) -> pb::Event {
     let mut event = event.clone();
     if let Some(
         Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) }),
     ) = event.payload.as_mut()
     {
-        plain_message(m);
+        plain_message(m, public_url);
     }
     event
 }
 
-/// A message as it leaves for another instance, as [`leaving`] says, and
-/// without its files, custom emoji or GIF (all kept here; emoji show there as
-/// their names).
-fn plain_message(message: &mut pb::Message) {
+/// A message as it leaves for another instance, as [`leaving`] says: no
+/// files (kept here), and only this instance's own pictures, which the
+/// other fetches through its own proxy.
+fn plain_message(message: &mut pb::Message, public_url: &str) {
     message.attachments.clear();
-    message.emojis.clear();
-    message.gif = None;
+    message.emojis.retain_mut(|emoji| {
+        emoji.url = own_picture(&emoji.url, public_url);
+        emoji.creator_id.clear();
+        !emoji.url.is_empty()
+    });
+    if let Some(gif) = &mut message.gif {
+        gif.url = own_picture(&gif.url, public_url);
+        gif.seal.clear();
+    }
+    if message.gif.as_ref().is_some_and(|gif| gif.url.is_empty()) {
+        message.gif = None;
+    }
+    for embed in &mut message.embeds {
+        embed.image_url = own_picture(&embed.image_url, public_url);
+        embed.thumbnail_url = own_picture(&embed.thumbnail_url, public_url);
+    }
     if let Some(shared) = &mut message.shared {
-        shared.user = shared.user.as_ref().map(plain_user);
+        shared.user = shared.user.as_ref().map(|u| plain_user(u, public_url));
         if let Some(server) = &mut shared.server {
-            server.icon_url.clear();
+            server.icon_url = own_picture(&server.icon_url, public_url);
         }
     }
     if let Some(webhook) = &mut message.webhook {
-        webhook.avatar_url.clear();
+        webhook.avatar_url = own_picture(&webhook.avatar_url, public_url);
     }
 }
 
@@ -2244,9 +2340,9 @@ fn spawn_queue(app: Arc<App>) -> mpsc::Sender<Outgoing> {
                             .await
                     }
                     .await;
-                    if let Err(err) = healed {
+                    if healed.is_err() {
                         crate::reports::server_error("shared_heal", Some("SharedChannels/fanout"));
-                        tracing::warn!(server = %home_id, error = %err, "couldn't end a shared channel its guest left");
+                        tracing::warn!("couldn't end a shared channel its guest left");
                     }
                 }
                 // What the other end said stays out of the log: it's theirs.
@@ -2260,9 +2356,66 @@ fn spawn_queue(app: Arc<App>) -> mpsc::Sender<Outgoing> {
     tx
 }
 
+// ─────────────── Blocked instances ───────────────
+
+/// Ends every share with an instance on the block list, on both sides: at
+/// start-up, and each time a host joins the list. Runs where servers are
+/// kept. The other instance is told the share ended (the only call that
+/// still goes to a blocked instance); nothing from it is taken any more.
+fn spawn_block_sweeper(app: Arc<App>) {
+    let mut settings = app.watch_settings();
+    tokio::spawn(async move {
+        let mut swept: Vec<String> = Vec::new();
+        loop {
+            let blocked = settings.borrow_and_update().federation_blocked_hosts.clone();
+            if blocked.iter().any(|host| !swept.contains(host)) {
+                for sdb in app.servers.all() {
+                    if end_blocked(&app, &sdb).await.is_err() {
+                        crate::reports::server_error("shared_block", Some("SharedChannels/block"));
+                        tracing::warn!("couldn't end a server's shares with a blocked instance");
+                    }
+                }
+            }
+            swept = blocked;
+            tokio::select! {
+                changed = settings.changed() => if changed.is_err() { break },
+                () = app.shutdown.cancelled() => break,
+            }
+        }
+    });
+}
+
+/// Ends one server's shares with blocked instances, as an instance admin
+/// ending them would.
+async fn end_blocked(app: &Arc<App>, sdb: &ServerDb) -> Result<()> {
+    let conn = sdb.read()?;
+    let guests = query_all(
+        &conn,
+        &format!("SELECT {GUEST_COLUMNS} FROM channel_guests WHERE instance IS NOT NULL"),
+        (),
+        guest_row,
+    )
+    .await?;
+    let links =
+        query_all(&conn, &format!("SELECT {LINK_COLUMNS} FROM channel_links WHERE instance IS NOT NULL"), (), link_row)
+            .await?;
+    drop(conn);
+    let gone = guests
+        .into_iter()
+        .map(|row| (row.id, row.instance))
+        .chain(links.into_iter().map(|row| (row.id, row.instance)))
+        .filter(|(_, instance)| instance.origin.as_deref().is_some_and(|origin| federation::blocked(app, origin)));
+    for (connection_id, _) in gone {
+        Box::pin(end_connection(app, sdb, "", &connection_id, true)).await?;
+    }
+    Ok(())
+}
+
 /// Passes what happens in the shared channels kept here on to the servers
-/// that show them. Runs where servers are kept.
+/// that show them, and ends shares with blocked instances. Runs where
+/// servers are kept.
 pub fn spawn_shared_fanout(app: Arc<App>) {
+    spawn_block_sweeper(app.clone());
     let mut events = app.hub.shared_tap();
     tokio::spawn(async move {
         let mut known: HashMap<String, Arc<HashMap<String, Vec<Target>>>> = HashMap::new();
@@ -2300,7 +2453,11 @@ pub fn spawn_shared_fanout(app: Arc<App>) {
             let Some(list) = server_targets.get(channel_id) else { continue };
             let Some(shown) = for_guests(&app, &event).await else { continue };
             for target in list {
-                let shown = if target.guest_server_id.contains('@') { leaving(&shown) } else { shown.clone() };
+                let shown = if target.guest_server_id.contains('@') {
+                    leaving(&shown, &app.settings().public_url)
+                } else {
+                    shown.clone()
+                };
                 let call = cpb::SharedCall {
                     server_id: target.guest_server_id.clone(),
                     call: Some(Call::Events(cpb::HomeEvents {
@@ -2627,7 +2784,7 @@ impl SharedChannelService for Api {
                 // The guest makes its channel first, so an approval it can't
                 // take (no room for another channel, say) doesn't stand here.
                 let mut offered = home_connection(&row, &channel.name);
-                offered.server = Some(this_server(&sdb.read()?, &sdb.id).await?);
+                offered.server = Some(this_server(&*sdb.read()?, &sdb.id).await?);
                 let approved = cpb::HomeApproved { connection: Some(offered), actor_id: account.id.clone() };
                 self.app
                     .shared(cpb::SharedCall { server_id: row.server.id.clone(), call: Some(Call::Approved(approved)), ..Default::default() })
@@ -2740,7 +2897,7 @@ impl SharedChannelService for Api {
                 let req = request.into_inner();
                 let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageServer).await?;
                 let allowed = allowed_from(&req.allowed)?;
-                let row = guest_by_id(&sdb.read()?, &req.connection_id).await?.ok_or(Error::NotFound("connection"))?;
+                let row = guest_by_id(&*sdb.read()?, &req.connection_id).await?.ok_or(Error::NotFound("connection"))?;
                 access.require_in(&row.channel_id, Permission::ManageChannels)?;
                 let (row, channel_name) = sdb
                     .write(&account.id, async |conn, events| {
@@ -2881,6 +3038,11 @@ mod tests {
     /// This instance, in the tests of calls from another.
     const OWN: &str = "https://fuwa.example";
 
+    /// A picture from another instance, as this one's proxy would link it.
+    fn proxied(url: &str) -> String {
+        format!("{OWN}/media/outside/sig?url={url}")
+    }
+
     #[test]
     fn calls_from_other_instances_speak_only_for_their_own() {
         let origin = "https://night-owls.example";
@@ -2902,14 +3064,14 @@ mod tests {
             from_instance: String::new(),
             from_fingerprint: "forged".into(),
         };
-        let read = arrived(ask, origin, OWN, "abcd").unwrap();
+        let read = arrived(ask, origin, OWN, "abcd", &proxied).unwrap();
         assert_eq!(read.from_instance, origin);
         assert_eq!(read.from_fingerprint, "abcd");
         let Some(Call::Ask(ask)) = read.call else { panic!("not an ask") };
         let server = ask.guest.unwrap();
         assert_eq!(server.id, format!("{guest}@night-owls.example"));
         assert_eq!(server.name, "NightOwls");
-        assert!(server.icon_url.is_empty(), "apps here never fetch from another instance");
+        assert_eq!(server.icon_url, proxied("https://night-owls.example/icon.png"), "only through this instance");
         assert_eq!(ask.asked_by_id, format!("{person}@night-owls.example"));
 
         // Ids naming another instance's, or this one's own as theirs, are refused.
@@ -2922,11 +3084,13 @@ mod tests {
             })),
             ..Default::default()
         };
-        assert!(arrived(left(format!("{guest}@third.example")), origin, OWN, "abcd").is_err());
-        let Some(Call::Left(read)) = arrived(left(guest.clone()), origin, OWN, "abcd").unwrap().call else { panic!() };
+        assert!(arrived(left(format!("{guest}@third.example")), origin, OWN, "abcd", &proxied).is_err());
+        let Some(Call::Left(read)) = arrived(left(guest.clone()), origin, OWN, "abcd", &proxied).unwrap().call else {
+            panic!()
+        };
         assert_eq!(read.actor_id, "@night-owls.example");
         let elsewhere = cpb::SharedCall { server_id: format!("{home}@night-owls.example"), ..left(guest.clone()) };
-        assert!(arrived(elsewhere, origin, OWN, "abcd").is_err());
+        assert!(arrived(elsewhere, origin, OWN, "abcd", &proxied).is_err());
 
         // Instance admins' calls don't cross instances, and every guest
         // call says who's acting.
@@ -2936,7 +3100,7 @@ mod tests {
             Call::AdminEnd(cpb::AdminEnd::default()),
         ] {
             let call = cpb::SharedCall { server_id: home.clone(), call: Some(call), ..Default::default() };
-            assert!(arrived(call, origin, OWN, "abcd").is_err());
+            assert!(arrived(call, origin, OWN, "abcd", &proxied).is_err());
         }
     }
 
@@ -2949,8 +3113,39 @@ mod tests {
             author_id: author_id.clone(),
             content: "hi @everyone".into(),
             mentions_everyone: true,
-            emojis: vec![pb::Emoji { id: new_id(), name: "owl".into(), ..Default::default() }],
-            gif: Some(pb::MessageGif { url: "https://night-owls.example/g.gif".into(), ..Default::default() }),
+            emojis: vec![
+                pb::Emoji {
+                    id: new_id(),
+                    name: "owl".into(),
+                    url: "https://night-owls.example/media/e".into(),
+                    creator_id: new_id(),
+                    ..Default::default()
+                },
+                // Pictures from anywhere but the instance itself aren't fetched.
+                pb::Emoji {
+                    id: new_id(),
+                    name: "pixel".into(),
+                    url: "https://tracker.example/e".into(),
+                    ..Default::default()
+                },
+                pb::Emoji {
+                    id: new_id(),
+                    name: "no".into(),
+                    url: "https://night-owls.example.tracker.example/e".into(),
+                    ..Default::default()
+                },
+                pb::Emoji {
+                    id: new_id(),
+                    name: "pw".into(),
+                    url: "https://me:pw@night-owls.example/e".into(),
+                    ..Default::default()
+                },
+            ],
+            gif: Some(pb::MessageGif {
+                url: "https://night-owls.example/g.gif".into(),
+                seal: "theirs".into(),
+                ..Default::default()
+            }),
             thread_id: "elsewhere".into(),
             also_in_channel: true,
             attachments: vec![pb::Attachment::default()],
@@ -2958,6 +3153,7 @@ mod tests {
                 title: "a\nlink".into(),
                 url: "javascript:alert(1)".into(),
                 image_url: "https://tracker.example/pixel.png".into(),
+                thumbnail_url: "https://night-owls.example/media/outside/x?url=y".into(),
                 ..Default::default()
             }],
             shared: Some(pb::SharedAuthor {
@@ -2983,24 +3179,30 @@ mod tests {
             })),
             ..Default::default()
         };
-        let read = arrived(events(written(there.clone())), origin, OWN, "abcd").unwrap();
+        let read = arrived(events(written(there.clone())), origin, OWN, "abcd", &proxied).unwrap();
         let Some(Call::Events(home)) = read.call else { panic!() };
         let Some(Payload::MessageCreated(created)) = &home.events[0].payload else { panic!() };
         let m = created.message.as_ref().unwrap();
         assert_eq!(m.author_id, format!("{there}@night-owls.example"));
         assert!(!m.mentions_everyone && m.attachments.is_empty());
         assert!(m.thread_id.is_empty() && !m.also_in_channel, "threads stay at home for now");
-        assert!(m.emojis.is_empty(), "custom emoji show as their names");
-        assert!(m.gif.is_none(), "apps here never fetch from another instance");
+        // Pictures are that instance's own, through this one's proxy.
+        let emoji = &m.emojis[..];
+        assert_eq!(emoji.len(), 1, "only pictures on the instance itself");
+        assert_eq!(emoji[0].url, proxied("https://night-owls.example/media/e"));
+        assert!(emoji[0].creator_id.is_empty());
+        let gif = m.gif.as_ref().unwrap();
+        assert_eq!((gif.url.as_str(), gif.seal.as_str()), (proxied("https://night-owls.example/g.gif").as_str(), ""));
         assert_eq!((m.embeds[0].title.as_str(), m.embeds[0].url.as_str()), ("alink", ""));
-        assert!(m.embeds[0].image_url.is_empty(), "apps here never fetch from another instance");
+        assert!(m.embeds[0].image_url.is_empty(), "apps here never fetch from anywhere else");
+        assert_eq!(m.embeds[0].thumbnail_url, proxied("https://night-owls.example/media/outside/x?url=y"));
         let user = m.shared.as_ref().unwrap().user.as_ref().unwrap();
         assert_eq!((user.id.as_str(), user.username.as_str()), (m.author_id.as_str(), "mika"));
-        assert!(user.avatar_url.is_empty());
+        assert_eq!(user.avatar_url, proxied("https://night-owls.example/a.png"));
         assert!(home.events[0].actor_id.is_empty());
         // This instance's own people read back as its own, and how they look
         // is this instance's to say.
-        let read = arrived(events(written(format!("{here}@fuwa.example"))), origin, OWN, "abcd").unwrap();
+        let read = arrived(events(written(format!("{here}@fuwa.example"))), origin, OWN, "abcd", &proxied).unwrap();
         let Some(Call::Events(home)) = read.call else { panic!() };
         let Some(Payload::MessageCreated(created)) = &home.events[0].payload else { panic!() };
         let m = created.message.as_ref().unwrap();
@@ -3009,9 +3211,9 @@ mod tests {
         // Who wrote it is the author, not someone else they name.
         let mut posing = written(there.clone());
         posing.shared.as_mut().unwrap().user.as_mut().unwrap().id = format!("{here}@fuwa.example");
-        assert!(arrived(events(posing), origin, OWN, "abcd").is_err());
+        assert!(arrived(events(posing), origin, OWN, "abcd", &proxied).is_err());
         // A third instance's people aren't theirs to name.
-        assert!(arrived(events(written(format!("{there}@third.example"))), origin, OWN, "abcd").is_err());
+        assert!(arrived(events(written(format!("{there}@third.example"))), origin, OWN, "abcd", &proxied).is_err());
 
         // A guest there sends text as one of its own, never with files.
         let send = |user_id: String, attachments: Vec<pb::Attachment>| cpb::SharedCall {
@@ -3029,14 +3231,15 @@ mod tests {
             })),
             ..Default::default()
         };
-        let Some(Call::Send(sent)) = arrived(send(there.clone(), vec![]), origin, OWN, "abcd").unwrap().call else {
+        let Some(Call::Send(sent)) = arrived(send(there.clone(), vec![]), origin, OWN, "abcd", &proxied).unwrap().call
+        else {
             panic!()
         };
         let guest = sent.guest.unwrap();
         assert_eq!(guest.user.unwrap().id, format!("{there}@night-owls.example"));
         assert_eq!(guest.server.unwrap().instance, "night-owls.example");
-        assert!(arrived(send(format!("{here}@fuwa.example"), vec![]), origin, OWN, "abcd").is_err());
-        assert!(arrived(send(there.clone(), vec![pb::Attachment::default()]), origin, OWN, "abcd").is_err());
+        assert!(arrived(send(format!("{here}@fuwa.example"), vec![]), origin, OWN, "abcd", &proxied).is_err());
+        assert!(arrived(send(there.clone(), vec![pb::Attachment::default()]), origin, OWN, "abcd", &proxied).is_err());
     }
 
     #[test]
@@ -3052,36 +3255,60 @@ mod tests {
         let event = pb::Event {
             payload: Some(Payload::MessageCreated(pb::MessageCreated {
                 message: Some(pb::Message {
-                    emojis: vec![pb::Emoji { id: new_id(), name: "sakura".into(), ..Default::default() }],
-                    gif: Some(pb::MessageGif { url: "https://fuwa.example/media/g.gif".into(), ..Default::default() }),
+                    emojis: vec![
+                        pb::Emoji {
+                            id: new_id(),
+                            name: "sakura".into(),
+                            url: "https://fuwa.example/media/e".into(),
+                            creator_id: new_id(),
+                            ..Default::default()
+                        },
+                        pb::Emoji {
+                            id: new_id(),
+                            name: "far".into(),
+                            url: "https://far.example/e".into(),
+                            ..Default::default()
+                        },
+                    ],
+                    gif: Some(pb::MessageGif {
+                        url: "https://fuwa.example/media/g.gif".into(),
+                        seal: "ours".into(),
+                        ..Default::default()
+                    }),
                     attachments: vec![pb::Attachment {
                         url: "https://fuwa.example/media/f.png".into(),
                         ..Default::default()
                     }],
                     shared: Some(pb::SharedAuthor {
                         user: Some(user.clone()),
-                        server: Some(store::shared_server(
-                            new_id(),
-                            "Home".into(),
-                            "https://fuwa.example/i.png".into(),
-                        )),
+                        server: Some(store::shared_server(new_id(), "Home".into(), "https://far.example/i.png".into())),
                     }),
                     ..Default::default()
                 }),
             })),
             ..Default::default()
         };
-        let Some(Payload::MessageCreated(created)) = leaving(&event).payload else { panic!() };
+        let Some(Payload::MessageCreated(created)) = leaving(&event, OWN).payload else { panic!() };
         let message = created.message.unwrap();
-        assert!(message.emojis.is_empty(), "custom emoji are pictures here");
-        assert!(message.gif.is_none(), "GIFs are pictures here");
+        // Only this instance's own pictures, which the other fetches itself.
+        let emoji = &message.emojis[..];
+        assert_eq!((emoji.len(), emoji[0].url.as_str()), (1, "https://fuwa.example/media/e"));
+        assert!(emoji[0].creator_id.is_empty());
+        let gif = message.gif.unwrap();
+        assert_eq!((gif.url.as_str(), gif.seal.as_str()), ("https://fuwa.example/media/g.gif", ""));
         assert!(message.attachments.is_empty(), "files stay here");
         let shared = message.shared.unwrap();
         assert_eq!(
             shared.user.unwrap(),
-            pb::User { id: user.id, username: "juan".into(), display_name: "Juan".into(), ..Default::default() }
+            pb::User {
+                id: user.id,
+                username: "juan".into(),
+                display_name: "Juan".into(),
+                avatar_url: user.avatar_url,
+                ..Default::default()
+            }
         );
-        assert!(shared.server.unwrap().icon_url.is_empty());
+        assert!(shared.server.unwrap().icon_url.is_empty(), "never a link to anywhere else");
     }
 
     #[test]
@@ -3098,7 +3325,7 @@ mod tests {
             author: Some(pb::User::default()),
             ..Default::default()
         };
-        let read = returned(&lookup, reply.clone(), origin, OWN, "abcd").unwrap();
+        let read = returned(&lookup, reply.clone(), origin, OWN, "abcd", &proxied).unwrap();
         let preview = read.preview.unwrap();
         assert_eq!(preview.home_server.unwrap().id, format!("{home}@night-owls.example"));
         assert_eq!((preview.instance.as_str(), preview.fingerprint.as_str()), ("night-owls.example", "abcd"));
@@ -3124,13 +3351,13 @@ mod tests {
             }),
             ..Default::default()
         };
-        let page = returned(&list, page, origin, OWN, "abcd").unwrap().page.unwrap();
+        let page = returned(&list, page, origin, OWN, "abcd", &proxied).unwrap().page.unwrap();
         assert!(page.parent.is_none(), "threads stay at home for now");
         let authors = page.authors;
         assert_eq!(authors, vec![pb::User { id: here, ..Default::default() }], "no more people than messages");
         // An answer to another call keeps none of it.
         let left = cpb::SharedCall { call: Some(Call::Left(cpb::GuestLeft::default())), ..Default::default() };
-        assert_eq!(returned(&left, reply, origin, OWN, "abcd").unwrap(), cpb::SharedReply::default());
+        assert_eq!(returned(&left, reply, origin, OWN, "abcd", &proxied).unwrap(), cpb::SharedReply::default());
     }
 
     #[test]

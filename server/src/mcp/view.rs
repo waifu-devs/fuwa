@@ -138,6 +138,8 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
         .attachments
         .iter()
         .map(|a| {
+            // A voice message's length, never its waveform.
+            let voice_ms = a.voice.as_ref().map(|v| v.duration_ms);
             trim(json!({
                 "filename": a.filename,
                 "content_type": a.content_type,
@@ -146,6 +148,7 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
                 // 0 is unknown.
                 "width": (a.width > 0).then_some(a.width),
                 "height": (a.height > 0).then_some(a.height),
+                "voice_duration_ms": voice_ms,
             }))
         })
         .collect();
@@ -340,6 +343,7 @@ mod tests {
             url: "https://fuwa.example/media/f".into(),
             width,
             height: width / 2,
+            voice: None,
         };
         let m = pb::Message {
             id: "m".into(),
@@ -360,6 +364,20 @@ mod tests {
                 },
                 { "filename": "dog.png", "content_type": "image/png", "size": 2048, "url": "https://fuwa.example/media/f" },
             ])
+        );
+        // A voice message: its length, never its waveform.
+        let voice = pb::Attachment {
+            filename: "voice-message.ogg".into(),
+            content_type: "audio/ogg; codecs=opus".into(),
+            size: 4096,
+            voice: Some(pb::VoiceNote { duration_ms: 3000, waveform: vec![9, 200, 40] }),
+            ..Default::default()
+        };
+        let m = pb::Message { id: "v".into(), attachments: vec![voice], ..Default::default() };
+        let shown = message(&m, &HashMap::new());
+        assert_eq!(
+            shown["attachments"],
+            json!([{ "filename": "voice-message.ogg", "content_type": "audio/ogg; codecs=opus", "size": 4096, "voice_duration_ms": 3000 }])
         );
     }
 }

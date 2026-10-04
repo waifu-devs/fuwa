@@ -1,13 +1,15 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import { BanIcon, CheckIcon, FingerprintIcon, LoaderCircleIcon, NetworkIcon, RadarIcon, TriangleAlertIcon } from "lucide-react";
+import { BanIcon, CheckIcon, FingerprintIcon, KeyRoundIcon, LoaderCircleIcon, NetworkIcon, RadarIcon, RefreshCwIcon, ShieldAlertIcon, TriangleAlertIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import type { CheckInstanceResponse, FederationPeer, GetFederationResponse, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
-import { checkInstance, getFederation, run } from "@/fuwa/actions";
+import { checkInstance, getFederation, rotateFederationKey, run } from "@/fuwa/actions";
 import { Private, usePrivateField } from "@/components/Private";
+import { ConfirmDialog } from "@/components/settings/server/SharedChannels";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/lib/ui";
 import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Cap, Setting, SPRING, Toggle } from "../controls";
@@ -38,7 +40,7 @@ export const FEDERATION_SECTION = {
   keywords: "federation federate instances share channels across key fingerprint block",
   settings: [
     { id: "federation", label: "Talk to other instances", keywords: "federation on off" },
-    { id: "federation-identity", label: "This instance's key", keywords: "fingerprint key address" },
+    { id: "federation-identity", label: "This instance's key", keywords: "fingerprint key address rotate replace" },
     { id: "federation-check", label: "Check an instance", keywords: "test reach ping" },
     { id: "federation-peers", label: "Instances this one knows", keywords: "pinned peers" },
     { id: "federation-blocked", label: "Blocked instances", keywords: "block list deny" },
@@ -79,6 +81,8 @@ export function FederationSettings({
   const [infoError, setInfoError] = useState<string | null>(null);
   const [blockText, setBlockText] = useState(() => saved.federationBlockedHosts.join("\n"));
   const [shownPeers, setShownPeers] = useState(PAGE);
+  const [rotating, setRotating] = useState(false);
+  const [reads, setReads] = useState(0);
 
   // Read again once a change to the switch, the address or the list is saved.
   const savedKey = `${saved.federation}|${saved.publicUrl}|${saved.federationBlockedHosts.join(",")}`;
@@ -91,7 +95,7 @@ export function FederationSettings({
     return () => {
       live = false;
     };
-  }, [instanceKey, savedKey]);
+  }, [instanceKey, savedKey, reads]);
 
   return (
     <>
@@ -154,9 +158,36 @@ export function FederationSettings({
             <p className="text-xs text-muted-foreground">
               Before sharing with another instance, compare fingerprints with its admins somewhere you trust: theirs shows here once the two have met.
             </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="group rounded-xl"
+                disabled={!info.origin}
+                onClick={() => setRotating(true)}
+              >
+                <RefreshCwIcon className="transition-transform duration-500 group-hover:rotate-180" /> Rotate key
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {info.rotatedAt ? `Last rotated ${ago(timestampDate(info.rotatedAt))}.` : "Never rotated."}
+              </span>
+            </div>
           </motion.div>
         )}
       </Setting>
+
+      <ConfirmDialog
+        open={rotating}
+        onOpenChange={setRotating}
+        title="Rotate this instance's key?"
+        body="A new key replaces this one, and the old key vouches for it, so instances that know this one move to the new key by themselves. Signed calls on their way when it changes are turned away once. Rotating doesn't help if the key was stolen: then other instances' admins check this one again and compare the new fingerprint with you somewhere you trust."
+        action="Rotate it"
+        onConfirm={async () => {
+          const r = await run(rotateFederationKey(instanceKey));
+          setReads((n) => n + 1);
+          toast(`New key ${r.fingerprint.split(" ").slice(0, 2).join(" ")}…`);
+        }}
+      />
 
       <CheckCard instanceKey={instanceKey} enabled={saved.federation} onChecked={(r) => setInfo((i) => (i ? withPeer(i, r.peer) : i))} />
 
@@ -232,6 +263,7 @@ function withPeer(info: GetFederationResponse, peer: FederationPeer | undefined)
 
 function PeerRow({ peer, delay }: { peer: FederationPeer; delay: number }) {
   const heard = peer.lastHeard ? ago(timestampDate(peer.lastHeard)) : "never";
+  const lastMove = peer.moves.at(-1);
   return (
     <motion.li
       layout="position"
@@ -239,7 +271,11 @@ function PeerRow({ peer, delay }: { peer: FederationPeer; delay: number }) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.97 }}
       transition={{ ...SPRING, delay }}
-      className={cn("flex flex-col gap-1 rounded-xl border p-3 sm:flex-row sm:items-center sm:gap-3", peer.blocked && "border-destructive/40 bg-destructive/5")}
+      className={cn(
+        "flex flex-col gap-1 rounded-xl border p-3 sm:flex-row sm:items-center sm:gap-3",
+        peer.blocked && "border-destructive/40 bg-destructive/5",
+        peer.needsCheck && !peer.blocked && "border-amber-500/40 bg-amber-500/5",
+      )}
     >
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2 text-sm font-bold">
@@ -249,8 +285,32 @@ function PeerRow({ peer, delay }: { peer: FederationPeer; delay: number }) {
               <BanIcon className="size-3" /> Blocked
             </span>
           )}
+          {peer.needsCheck && (
+            <motion.span
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={SPRING}
+              className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300"
+            >
+              <ShieldAlertIcon className="size-3" /> Check again
+            </motion.span>
+          )}
         </span>
         <code className="block truncate font-mono text-[11px] text-muted-foreground">{peer.fingerprint}</code>
+        {peer.needsCheck && (
+          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+            Its key changed in a way its old key didn't vouch for, so nothing goes either way. Compare its new fingerprint with its admins somewhere you trust, then check it above.
+          </p>
+        )}
+        {lastMove && (
+          <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+            <KeyRoundIcon className="size-3 shrink-0" />
+            <span className="truncate">
+              Moved to this key {lastMove.movedAt ? ago(timestampDate(lastMove.movedAt)) : ""} from <code className="font-mono">{lastMove.previousFingerprint.split(" ").slice(0, 2).join(" ")}…</code>
+              {peer.moves.length > 1 && ` (${peer.moves.length} moves)`}
+            </span>
+          </p>
+        )}
       </span>
       <span className="shrink-0 text-xs text-muted-foreground">Heard from {heard}</span>
     </motion.li>

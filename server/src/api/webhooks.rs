@@ -206,7 +206,7 @@ impl WebhookService for Api {
                 let req = request.into_inner();
                 let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageWebhooks).await?;
                 let name = text("name", &req.name, 1, 80)?;
-                let current = seen_webhook(&sdb.read()?, &sdb.id, &req.webhook_id, &access).await?;
+                let current = seen_webhook(&*sdb.read()?, &sdb.id, &req.webhook_id, &access).await?;
                 if !req.channel_id.is_empty() {
                     seen_channel(&access, &req.channel_id)?;
                 }
@@ -322,7 +322,7 @@ pub struct WebhookPost {
 /// webhooks and wrong tokens are both "not found".
 pub async fn verify_webhook(app: &Arc<App>, server_id: &str, webhook_id: &str, token: &str) -> Result<()> {
     let sdb = app.servers.get(server_id).await?;
-    match load_webhook(&sdb.read()?, &sdb.id, webhook_id).await {
+    match load_webhook(&*sdb.read()?, &sdb.id, webhook_id).await {
         Ok(webhook) if same_token(&webhook.token, token) => Ok(()),
         Ok(_) | Err(Error::NotFound(_)) => Err(Error::NotFound("webhook")),
         Err(err) => Err(err),
@@ -339,7 +339,7 @@ pub async fn execute_webhook(
     post: WebhookPost,
 ) -> Result<pb::Message> {
     let sdb = app.servers.get(server_id).await?;
-    let webhook = load_webhook(&sdb.read()?, &sdb.id, webhook_id).await.ok().filter(|w| same_token(&w.token, token));
+    let webhook = load_webhook(&*sdb.read()?, &sdb.id, webhook_id).await.ok().filter(|w| same_token(&w.token, token));
     let webhook = webhook.ok_or(Error::NotFound("webhook"))?;
     let username = match post.username.trim() {
         "" => webhook.name.clone(),
