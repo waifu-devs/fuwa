@@ -2,17 +2,20 @@
 //! floating over the bottom of the sidebar so it covers nothing you're
 //! using: "Restart to update", "What's new" (the Updates page in settings),
 //! or, where the app can't put it in place itself, the way to get it.
-//! Closing it hides it until the next start. Nothing installs unless the
+//! It also says "Update fuwa to use …" when an instance has a feature this
+//! app is too old for (`core::compat`). Closing it hides it until the next start. Nothing installs unless the
 //! person presses Restart.
 
 use std::time::Duration;
 
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 use parking_lot::Mutex;
 
+use crate::core::compat;
 use crate::core::updates::{self, Manual, Status};
 use crate::ui::motion;
 use crate::ui::rail::RAIL;
@@ -34,16 +37,24 @@ impl crate::ui::app::FuwaApp {
         cx: &mut gpui_kit::Context<Self>,
     ) -> Option<AnyElement> {
         let status = updates::status();
-        let (release, ready, why) = match &status {
-            Status::Ready { release } => (release.clone(), true, None),
-            Status::Available { release, why } => (release.clone(), false, Some(*why)),
-            _ => return None,
+        // An instance with a feature this app is too old for (core::compat).
+        let needs = self.core.shared.read(|s| {
+            s.order.iter().find_map(|key| {
+                s.instance(key).and_then(|i| compat::update_line(i.node.as_ref().and_then(|n| n.versions.as_ref())))
+            })
+        });
+        let (version, ready, why) = match &status {
+            Status::Ready { release } => (release.version.clone(), true, None),
+            Status::Available { release, why } => (release.version.clone(), false, Some(*why)),
+            _ => (needs.clone()?, false, Some(Manual::Off)),
         };
-        if CLOSED.lock().as_deref() == Some(release.version.as_str()) {
+        // What closing it hides: this version, or this line.
+        let shown_for = if status.release().is_some() { version.clone() } else { needs.clone().unwrap_or_default() };
+        if CLOSED.lock().as_deref() == Some(shown_for.as_str()) {
             return None;
         }
+        let compat_only = status.release().is_none();
         let p = pal(cx);
-        let version = release.version.clone();
 
         let badge = div()
             .relative()
@@ -76,7 +87,9 @@ impl crate::ui::app::FuwaApp {
                 },
             ));
 
-        let (title, line) = if ready {
+        let (title, line) = if compat_only {
+            (needs.clone().unwrap_or_default(), "Everything else keeps working.")
+        } else if ready {
             (format!("fuwa {version} is ready"), "Restart to update when it suits you.")
         } else if why == Some(Manual::Off) {
             (format!("fuwa {version} is out"), "Download it when you like.")
@@ -98,9 +111,9 @@ impl crate::ui::app::FuwaApp {
             .text_color(p.muted_foreground)
             .hover(|s| s.bg(alpha(gpui_kit::rgb(0x808080), 0.2)))
             .on_click({
-                let version = version.clone();
+                let shown_for = shown_for.clone();
                 cx.listener(move |_, _, _, cx| {
-                    *CLOSED.lock() = Some(version.clone());
+                    *CLOSED.lock() = Some(shown_for.clone());
                     cx.notify();
                 })
             })
@@ -126,7 +139,11 @@ impl crate::ui::app::FuwaApp {
                 .active(|s| s.top(px(1.0)))
                 .child(label)
         };
-        let main = if ready {
+        let main = if compat_only {
+            small("update-how", "How to update", true)
+                .on_click(cx.listener(|this, _, window, cx| this.open_updates_page(window, cx)))
+                .into_any_element()
+        } else if ready {
             small("update-restart", "Restart", true)
                 .on_click(|_, window, cx| match updates::restart() {
                     Ok(()) => cx.quit(),
@@ -167,7 +184,7 @@ impl crate::ui::app::FuwaApp {
                         .child(div().text_xs().text_color(p.muted_foreground).child(line)),
                 ),
             )
-            .child(div().flex().gap(px(6.0)).child(main).child(whats_new))
+            .child(div().flex().gap(px(6.0)).child(main).when(!compat_only, |el| el.child(whats_new)))
             .child(close);
         Some(
             div()

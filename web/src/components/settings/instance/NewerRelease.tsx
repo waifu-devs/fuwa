@@ -13,7 +13,7 @@ const GUIDE = "https://github.com/waifu-devs/fuwa/blob/master/docs/self-hosting.
  * the links say where to read about it and how. Both open github.com, and say so.
  */
 export function NewerRelease({ node }: { node: Node | null | undefined }) {
-  const release = node?.newerRelease;
+  const release = node?.versions?.newerRelease;
   if (!release?.version) return null;
   const calm = reduceMotion();
   const stamp = release.publishedAt ? formatStamp(toDate(release.publishedAt)) : null;

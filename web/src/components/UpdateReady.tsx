@@ -2,7 +2,9 @@ import { RefreshCwIcon, SparklesIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { SPRING } from "@/components/motion";
+import { updateLine } from "@/lib/compat";
 import { FRESH, entryOf, look, type Freshness } from "@/lib/fresh";
+import { useInstances } from "@/fuwa/hooks";
 import { reduceMotion } from "@/lib/prefs";
 import { reportError, reportUsage } from "@/lib/reports";
 
@@ -31,7 +33,9 @@ async function servedEntry(): Promise<string | null> {
 
 /**
  * When the instance serving this page deploys a newer web app (fuwa.chat
- * does on every merge), a small pill says so with a Reload button. Nothing
+ * does on every merge), a small pill says so with a Reload button. It also
+ * says "Update fuwa to use …" when an instance has a feature this app is too
+ * old for (`lib/compat.ts`). Nothing
  * is forced: the page never reloads by itself, and "Later" hides the pill
  * until the next deploy. Only the page's own instance is asked, the same
  * index.html it loaded from (`lib/fresh.ts` decides).
@@ -42,6 +46,12 @@ export function UpdateReady() {
   /** The build "Later" was pressed for; a newer deploy asks again. */
   const [later, setLater] = useState<string | null>(null);
   const fresh = useRef<Freshness>(FRESH);
+  // An instance with features this app doesn't know asks for a newer app too
+  // (lib/compat.ts); the rest keeps working.
+  const needs = useInstances()
+    .map((i) => updateLine(i.node?.versions))
+    .find((line) => line !== null) ?? null;
+  const showing = behind && behind !== later ? "updated" : needs && needs !== later ? "needs" : null;
 
   useEffect(() => {
     // The dev server swaps code in place; only a built app looks.
@@ -78,7 +88,7 @@ export function UpdateReady() {
   return (
     <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex justify-center px-4">
       <AnimatePresence>
-      {behind && behind !== later && (
+      {showing && (
         <motion.div
           key="update-ready"
           role="status"
@@ -100,7 +110,7 @@ export function UpdateReady() {
             )}
             <SparklesIcon className="size-4" />
           </span>
-          <span className="min-w-0 truncate font-semibold">fuwa was updated</span>
+          <span className="min-w-0 truncate font-semibold">{showing === "updated" ? "fuwa was updated" : needs}</span>
           <button
             type="button"
             onClick={reload}
@@ -111,7 +121,7 @@ export function UpdateReady() {
           </button>
           <button
             type="button"
-            onClick={() => setLater(behind)}
+            onClick={() => setLater(showing === "updated" ? behind : needs)}
             aria-label="Later"
             title="Later: keep using this version until you reload"
             className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

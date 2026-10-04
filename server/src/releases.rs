@@ -6,7 +6,7 @@
 //! came out, its notes, and its `SHA256SUMS` with the signature over them.
 //! Nothing is ever installed here: admins update the image or binary
 //! themselves (docs/self-hosting.md, "Updating"). `/healthz` and
-//! `Node.newer_release` say when there's something to update to.
+//! `Node.versions.newer_release` say when there's something to update to.
 //!
 //! Desktop apps ask their instance rather than GitHub, so GitHub never learns
 //! who uses fuwa or from where: `GET /updates/latest.json` is what the

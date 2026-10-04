@@ -11,6 +11,7 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
+use crate::core::compat;
 use crate::core::config::Prefs;
 use crate::core::updates::{self, Manual, Status};
 use crate::ui::motion;
@@ -138,12 +139,11 @@ impl SettingsView {
                             .flex_col()
                             .gap(px(2.0))
                             .child(div().font_weight(FontWeight::EXTRA_BOLD).child(line))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(p.muted_foreground)
-                                    .child(format!("This is fuwa desktop {}.", env!("CARGO_PKG_VERSION"))),
-                            ),
+                            .child(div().text_sm().text_color(p.muted_foreground).child(format!(
+                                "This is fuwa desktop {}, compatibility date {}.",
+                                env!("CARGO_PKG_VERSION"),
+                                compat::client_date()
+                            ))),
                     )
                     .child(check),
             );
@@ -209,6 +209,40 @@ impl SettingsView {
                 cx,
                 |this, on, cx| this.set(cx, |pr| pr.auto_update = on),
             ));
+        // Instances with features this app is too old for; everything else keeps working.
+        let needs: Vec<(String, String)> = self.core.shared.read(|s| {
+            s.order
+                .iter()
+                .filter_map(|key| s.instance(key))
+                .filter_map(|i| {
+                    let line = compat::update_line(i.node.as_ref().and_then(|n| n.versions.as_ref()))?;
+                    let name =
+                        if prefs.streamer_mode { "An instance you added".to_owned() } else { i.name().to_string() };
+                    Some((name, line))
+                })
+                .collect()
+        });
+        if !needs.is_empty() {
+            let rows = div().flex().flex_col().gap(px(10.0)).children(needs.into_iter().map(|(name, line)| {
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(10.0))
+                    .p(px(14.0))
+                    .rounded(corner(14.0))
+                    .bg(p.card)
+                    .border_1()
+                    .border_color(p.border)
+                    .text_sm()
+                    .child(icon("sparkles").size(px(16.0)).mt(px(2.0)).text_color(p.primary))
+                    .child(div().flex_1().min_w_0().child(div().font_weight(FontWeight::BOLD).child(name)).child(
+                        div().text_color(p.muted_foreground).child(format!(
+                            "{line}. It has something newer than this app knows; everything else keeps working."
+                        )),
+                    ))
+            }));
+            page = page.child(section("Needs a newer app", rows, p));
+        }
         if let Some(release) = status.release().filter(|r| !r.notes.trim().is_empty()) {
             let notes = div()
                 .id("updates-notes")

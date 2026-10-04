@@ -932,7 +932,11 @@ async fn browsers_can_call_over_grpc_web() {
     let health = http.get(format!("{base}/healthz")).send().await.unwrap().text().await.unwrap();
     assert!(health.starts_with("ok\nfuwa 999.0.0 is out; this is "), "{health}");
     let mut node = pb::node_service_client::NodeServiceClient::new(instance.channel().await);
-    let told = node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap().newer_release.unwrap();
+    let versions = node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap().versions.unwrap();
+    // And apps learn which features it has, and since when.
+    assert_eq!(versions.compatibility_date, fuwa_server::compat::date());
+    assert!(versions.features.iter().any(|f| f.id == "compatibility-dates"));
+    let told = versions.newer_release.unwrap();
     assert_eq!((told.version.as_str(), told.url.as_str()), ("999.0.0", newer.page.as_str()));
     // Only the release's listed desktop builds pass through; anything else is never fetched.
     for name in ["fuwa-999.0.0-x86_64-linux", "SHA256SUMS", "..%2F..%2Fetc%2Fpasswd", "fuwa-desktop-0.1.0-x86_64-linux"]

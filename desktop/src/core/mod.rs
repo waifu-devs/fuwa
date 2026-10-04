@@ -11,6 +11,7 @@ pub mod api;
 pub mod arrange;
 pub mod backgrounds;
 pub mod calls;
+pub mod compat;
 pub mod config;
 pub mod dms;
 pub mod instance_admin;

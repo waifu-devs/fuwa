@@ -318,7 +318,7 @@ impl App {
     pub fn node_info(&self) -> pb::Node {
         pb::Node {
             regions: self.regions(),
-            newer_release: self.releases.newer(),
+            versions: Some(crate::compat::versions(self.releases.newer())),
             ..node_info(&self.settings(), self.announcement())
         }
     }
@@ -478,7 +478,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
             source: crate::SOURCE.into(),
         }),
         regions: vec![],
-        newer_release: None,
+        versions: Some(crate::compat::versions(None)),
     }
 }
 

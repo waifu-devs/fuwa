@@ -10,6 +10,7 @@ pub mod app;
 pub mod auth;
 pub mod automod;
 pub mod cluster;
+pub mod compat;
 pub mod config;
 pub mod db;
 pub mod dms;
