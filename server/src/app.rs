@@ -77,6 +77,9 @@ pub struct App {
     picture_key: crate::outside::Key,
     /// How this instance talks to other fuwa instances (docs/federation.md).
     pub federation: crate::federation::Federation,
+    /// Whether a newer fuwa is out (`releases.rs`); checked by a single
+    /// process and a split instance's directory, which answers GetNode.
+    pub releases: Arc<crate::releases::Releases>,
 }
 
 /// Where the parts this process doesn't run are.
@@ -192,6 +195,8 @@ impl App {
         }
 
         let federation = crate::federation::Federation::new(config.federation_allow_private);
+        let update_check = config.update_check;
+        let release_cache = config.data_path.join("release-cache");
         let shutdown = CancellationToken::new();
         let media_link = media_link(&config, &shutdown).await;
 
@@ -217,7 +222,11 @@ impl App {
             media_link,
             picture_key,
             federation,
+            releases: crate::releases::Releases::new(update_check, release_cache),
         });
+        if app.node.is_some() {
+            app.releases.spawn(app.shutdown.clone());
+        }
         if app.node.is_some() {
             app.sweep_media(crate::id::now_ms()).await?;
         }
@@ -340,7 +349,11 @@ impl App {
     }
 
     pub fn node_info(&self) -> pb::Node {
-        pb::Node { regions: self.regions(), ..node_info(&self.settings(), self.announcement()) }
+        pb::Node {
+            regions: self.regions(),
+            versions: Some(crate::compat::versions(self.releases.newer())),
+            ..node_info(&self.settings(), self.announcement())
+        }
     }
 
     /// Every route: the gRPC services (also reachable as gRPC-Web from
@@ -426,6 +439,8 @@ impl App {
             router = router.merge(crate::sso::http::server_routes(self.clone()));
         }
         if !self.config.cluster.is_split() {
+            // Desktop apps' updates; behind gateways, they answer these.
+            router = router.merge(self.releases.routes());
             // MCP answers through every route above, as clients reach them.
             let mcp = crate::mcp::routes(router.clone(), self.clone());
             router = router.merge(mcp);
@@ -504,6 +519,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
             source: crate::SOURCE.into(),
         }),
         regions: vec![],
+        versions: Some(crate::compat::versions(None)),
     }
 }
 

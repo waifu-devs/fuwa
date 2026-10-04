@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
+import { NewerRelease } from "@/components/settings/instance/NewerRelease";
 import {
   InstanceSettingsSchema,
   LinkedAccounts,
@@ -320,6 +321,7 @@ export function InstanceSettingsDialog({
         <div className="flex flex-col">
           {tab === "general" && (
             <>
+              <NewerRelease node={inst?.node} />
               <Setting id="name" title="Name" hint="Shown in the app and when people add this instance." defaultLabel={defaults.name} {...resetter("name")}>
                 <Input value={draft.name} maxLength={64} onChange={(e) => patch((d) => (d.name = e.target.value))} className="h-10 rounded-xl" />
               </Setting>
