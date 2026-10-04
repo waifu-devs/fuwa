@@ -1,0 +1,4 @@
+# pnpm settings for the SDK (its own package, like web/).
+# buf's install script isn't needed: pnpm installs its binary as a platform package.
+ignoredBuiltDependencies:
+  - "@bufbuild/buf"

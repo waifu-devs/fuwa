@@ -7,7 +7,9 @@ import { Markdown } from "@/components/Markdown";
 import { SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { AppBadge } from "@/components/AppBadge";
-import { colorCss, displayName, isAgent, shownStatus, toDate } from "@/lib/format";
+import { ProfileEffect } from "@/components/ProfileEffect";
+import { colorCss, displayName, hueOf, isAgent, shownStatus, toDate } from "@/lib/format";
+import { usePrefs } from "@/lib/prefs";
 import { shownPicture } from "@/lib/shown";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +21,8 @@ const PlainText = ({ children, className }: { children: string; className?: stri
  * Someone's profile as others see it: their banner (a picture, or their
  * color), avatar, name, pronouns, status and bio, and how long they've been
  * around. The same card opens from the member list and messages, and shows
- * your own while you edit it.
+ * your own while you edit it. Their profile effect, if they picked one, plays
+ * over it (others' only while the viewer lets them).
  */
 export function ProfileCard({
   user,
@@ -34,7 +37,7 @@ export function ProfileCard({
 }: {
   user: User;
   /** The rest of the profile; while it loads, the card shows what it has. */
-  profile?: Pick<Profile, "pronouns" | "bio" | "bannerUrl" | "accentColor" | "createdAt">;
+  profile?: Pick<Profile, "pronouns" | "bio" | "bannerUrl" | "accentColor" | "createdAt"> & Partial<Pick<Profile, "effect">>;
   /** Their membership in the server it opened from. */
   member?: Member;
   /** They own the server it opened from. */
@@ -55,9 +58,12 @@ export function ProfileCard({
   const since = profile?.createdAt ? toDate(profile.createdAt) : null;
   const joined = member?.joinedAt ? toDate(member.joinedAt) : null;
   const day = (d: Date) => d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const othersEffects = usePrefs((p) => p.othersEffects);
+  const effect = me || othersEffects ? profile?.effect : undefined;
 
   return (
-    <div className={cn("overflow-hidden rounded-3xl border bg-card shadow-xl", className)}>
+    <div className={cn("relative overflow-hidden rounded-3xl border bg-card shadow-xl", className)}>
+      {effect && <ProfileEffect key={effect} effect={effect} seed={user.id} color={accent === undefined ? `hsl(${hueOf(user.id)} 85% 72%)` : colorCss(accent)} />}
       <div className="relative h-28 overflow-hidden">
         <AnimatePresence initial={false}>
           <motion.div

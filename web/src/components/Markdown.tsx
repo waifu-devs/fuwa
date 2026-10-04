@@ -2,6 +2,8 @@ import { memo, type ComponentProps, type ReactElement } from "react";
 import renderMarkdown, { type Components, type Options } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { Timestamp } from "@/components/Timestamp";
+import { remarkTimestamps } from "@/lib/timestamps";
 import { cn } from "@/lib/utils";
 
 /*
@@ -13,6 +15,9 @@ import { cn } from "@/lib/utils";
  * rendered and unsafe URLs (javascript:, data:, ...) are dropped. On top of
  * that, images show as links, so nobody can put tracking pixels or huge
  * pictures on someone else's page.
+ *
+ * Timestamps (`<t:SECONDS:STYLE>`, as in Discord) read in each reader's own
+ * time zone, in block and inline Markdown alike.
  *
  * Styles live in app.css (.markdown and .markdown-inline) and only use theme
  * tokens, so Markdown looks right in every theme.
@@ -51,7 +56,8 @@ const blockComponents: Components = {
   h4: ({ node: _node, ...props }) => <h4 {...props} />,
   h5: ({ node: _node, ...props }) => <h4 {...props} />,
   h6: ({ node: _node, ...props }) => <h4 {...props} />,
-};
+  "fuwa-time": Timestamp,
+} as Components;
 
 /** Extra syntax for one kind of text, like mentions in chat: more remark plugins and the elements they make. */
 export type MarkdownExtension = { remarkPlugins: NonNullable<Options["remarkPlugins"]>; components: Record<string, unknown> };
@@ -83,7 +89,7 @@ function cached(kind: string, text: string, make: () => ReactElement): ReactElem
   return made;
 }
 
-const BLOCK_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkBreaks];
+const BLOCK_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkBreaks, remarkTimestamps];
 const extensionIds = new WeakMap<MarkdownExtension, string>();
 let extensions = 0;
 const extensionOptions = (extension: MarkdownExtension): Options => ({
@@ -112,10 +118,10 @@ export const Markdown = memo(function Markdown({
   return <div className={cn("markdown", className)}>{content}</div>;
 });
 
-const INLINE = ["em", "strong", "del", "code", "a"];
+const INLINE = ["em", "strong", "del", "code", "a", "fuwa-time"];
 const INLINE_NO_LINKS = INLINE.filter((tag) => tag !== "a");
-const INLINE_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm];
-const INLINE_COMPONENTS: Components = { a: Anchor };
+const INLINE_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm, remarkTimestamps];
+const INLINE_COMPONENTS = { a: Anchor, "fuwa-time": Timestamp } as Components;
 
 /**
  * Markdown for one-line text: bold, italics, strikethrough, code and links.
