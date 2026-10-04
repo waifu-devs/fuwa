@@ -209,6 +209,12 @@ pub struct Limits {
     /// FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY: how many bytes of pictures one
     /// account may upload in a day (UTC), e.g. `256MiB`.
     pub picture_upload_bytes_per_day: Option<i64>,
+    /// FUWA_LIMIT_ATTACHMENT_UPLOAD: the largest file one attachment upload
+    /// may be, e.g. `100MB`.
+    pub attachment_upload_bytes: Option<i64>,
+    /// FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY: how many bytes of attachments
+    /// one account may upload in a day (UTC), e.g. `2GiB`.
+    pub attachment_upload_bytes_per_day: Option<i64>,
     /// FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY: how many times a day (UTC) one
     /// server's Smart filter may ask its provider.
     pub automod_checks_per_day: Option<i64>,
@@ -348,7 +354,7 @@ impl Config {
         let bytes = |key: &str| -> Result<Option<i64>, String> {
             get(key).map(|value| parse_bytes(&value).map_err(|err| format!("{key} {err}"))).transpose()
         };
-        // Picture upload caps also take `unlimited`, the same as leaving them unset.
+        // Upload caps also take `unlimited`, the same as leaving them unset.
         let upload_bytes = |key: &str| -> Result<Option<i64>, String> {
             match get(key) {
                 Some(value) if value.trim().eq_ignore_ascii_case("unlimited") => Ok(None),
@@ -365,6 +371,8 @@ impl Config {
             recording_bytes: bytes("FUWA_LIMIT_RECORDING_STORAGE")?,
             picture_upload_bytes: upload_bytes("FUWA_LIMIT_PICTURE_UPLOAD")?,
             picture_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY")?,
+            attachment_upload_bytes: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOAD")?,
+            attachment_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY")?,
             automod_checks_per_day: count("FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY")?,
             voice_message_seconds: count("FUWA_LIMIT_VOICE_MESSAGE_SECONDS")?,
             voice_message_bytes: bytes("FUWA_LIMIT_VOICE_MESSAGE_BYTES")?,

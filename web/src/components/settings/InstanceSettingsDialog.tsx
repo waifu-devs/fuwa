@@ -75,6 +75,8 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "default_limits.recording_bytes", get: (s) => s.defaultLimits?.recordingBytes },
   { path: "picture_upload_bytes", get: (s) => s.pictureUploadBytes },
   { path: "picture_upload_bytes_per_day", get: (s) => s.pictureUploadBytesPerDay },
+  { path: "attachment_upload_bytes", get: (s) => s.attachmentUploadBytes },
+  { path: "attachment_upload_bytes_per_day", get: (s) => s.attachmentUploadBytesPerDay },
   { path: "voice_message_seconds", get: (s) => s.voiceMessageSeconds },
   { path: "voice_message_bytes", get: (s) => s.voiceMessageBytes },
   { path: "voice_message_bytes_per_day", get: (s) => s.voiceMessageBytesPerDay },
@@ -646,11 +648,36 @@ export function InstanceSettingsDialog({
                 />
               </Setting>
               <Setting
+                id="attachment-uploads"
+                title="Largest file in a message"
+                hint="Any file people send with a message: documents, archives, audio, video. Leave it empty for no limit."
+                defaultLabel={size(defaults.attachmentUploadBytes)}
+                delay={0.12}
+                {...resetter("attachment_upload_bytes")}
+              >
+                <Cap label="Up to" bytes value={draft.attachmentUploadBytes} onChange={(v) => patch((d) => (d.attachmentUploadBytes = v))} />
+              </Setting>
+              <Setting
+                id="attachment-uploads-per-day"
+                title="Files per day"
+                hint="How much one account may send in files in a day (UTC), apart from pictures."
+                defaultLabel={size(defaults.attachmentUploadBytesPerDay)}
+                delay={0.16}
+                {...resetter("attachment_upload_bytes_per_day")}
+              >
+                <Cap
+                  label="Up to"
+                  bytes
+                  value={draft.attachmentUploadBytesPerDay}
+                  onChange={(v) => patch((d) => (d.attachmentUploadBytesPerDay = v))}
+                />
+              </Setting>
+              <Setting
                 id="voice-message-seconds"
                 title="Longest voice message"
                 hint="In direct messages. Apps stop recording here; voice messages are end-to-end encrypted, so this instance can't check their length itself."
                 defaultLabel={defaults.voiceMessageSeconds === undefined ? "no limit" : `${count(defaults.voiceMessageSeconds)} seconds`}
-                delay={0.12}
+                delay={0.2}
                 {...resetter("voice_message_seconds")}
               >
                 <Cap label="Seconds" value={draft.voiceMessageSeconds} onChange={(v) => patch((d) => (d.voiceMessageSeconds = v))} />
@@ -660,7 +687,7 @@ export function InstanceSettingsDialog({
                 title="Biggest voice message"
                 hint="Its encrypted file, which this instance does see. A minute of voice is about 240 KB."
                 defaultLabel={size(defaults.voiceMessageBytes)}
-                delay={0.16}
+                delay={0.24}
                 {...resetter("voice_message_bytes")}
               >
                 <Cap label="Up to" bytes value={draft.voiceMessageBytes} onChange={(v) => patch((d) => (d.voiceMessageBytes = v))} />
@@ -668,9 +695,9 @@ export function InstanceSettingsDialog({
               <Setting
                 id="voice-message-bytes-per-day"
                 title="Voice messages a day"
-                hint="What one account may send in a day (UTC), counted apart from pictures."
+                hint="What one account may send in a day (UTC), counted apart from pictures and files."
                 defaultLabel={size(defaults.voiceMessageBytesPerDay)}
-                delay={0.2}
+                delay={0.28}
                 {...resetter("voice_message_bytes_per_day")}
               >
                 <Cap
@@ -837,6 +864,12 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "picture_upload_bytes_per_day":
         into.pictureUploadBytesPerDay = from.pictureUploadBytesPerDay;
+        break;
+      case "attachment_upload_bytes":
+        into.attachmentUploadBytes = from.attachmentUploadBytes;
+        break;
+      case "attachment_upload_bytes_per_day":
+        into.attachmentUploadBytesPerDay = from.attachmentUploadBytesPerDay;
         break;
       case "voice_message_seconds":
         into.voiceMessageSeconds = from.voiceMessageSeconds;

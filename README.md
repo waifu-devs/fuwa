@@ -154,6 +154,8 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_VOICE_MESSAGE_SECONDS` | unlimited | The longest voice message in direct messages; apps stop recording there |
 | `FUWA_LIMIT_VOICE_MESSAGE_BYTES` | unlimited | The biggest voice message, encrypted and padded, like `2MiB` |
 | `FUWA_LIMIT_VOICE_MESSAGES_PER_DAY` | unlimited | Voice messages one account may upload in a day (UTC), apart from pictures |
+| `FUWA_LIMIT_ATTACHMENT_UPLOAD` | unlimited | Largest file one message may carry, like `100MB` |
+| `FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY` | unlimited | Files one account may send in a day (UTC), apart from pictures, like `2GiB` |
 | `FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY` | unlimited | Times a day (UTC) one server's Smart filter may ask its moderation provider; past it, messages go through the Smart filter unchecked (also set from the app: Instance settings, Moderation) |
 | `FUWA_TELEMETRY` | `on` | The anonymous usage signal and health reports; `off` turns both off (so does `DO_NOT_TRACK=1`), and apps on the instance then send no reports either |
 | `FUWA_TELEMETRY_URL` | `https://analytics.waifu.dev/v1/fuwa/signals` | Where the signal goes |

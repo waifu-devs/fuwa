@@ -240,8 +240,13 @@ impl App {
                 new_url: new_url.to_string(),
                 server_id: server_id.to_string(),
             };
-            if let Err(err) = link.directory().drop_picture(request).await {
-                tracing::warn!(media = %id, error = %err.message(), "couldn't delete a replaced picture");
+            if link.directory().drop_picture(request).await.is_err() {
+                tracing::warn!(media = %id, "couldn't delete a replaced picture");
+                // Its copy here goes anyway unless the server still uses it;
+                // the directory's row is left to the sweeps.
+                if !matches!(crate::cluster::pictures::uses(self, server_id, &id).await, Ok(true)) {
+                    crate::cluster::pictures::drop(self, server_id, &id).await;
+                }
                 return;
             }
             // The directory deletes it only if it was the server's, and only
@@ -260,8 +265,13 @@ impl App {
         let belongs = match owner {
             PictureOwner::Account(account_id, purpose) => row.account_id == account_id && row.purpose == purpose,
             PictureOwner::Server(server_id) => {
-                matches!(row.purpose, pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji | pb::MediaPurpose::Avatar)
-                    && row.server_id.as_deref() == Some(server_id)
+                matches!(
+                    row.purpose,
+                    pb::MediaPurpose::ServerIcon
+                        | pb::MediaPurpose::Emoji
+                        | pb::MediaPurpose::Avatar
+                        | pb::MediaPurpose::Attachment
+                ) && row.server_id.as_deref() == Some(server_id)
             }
         };
         if belongs && let Err(err) = self.delete_media(&[id]).await {
