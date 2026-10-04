@@ -1608,6 +1608,14 @@ impl NodeDb {
         .await
     }
 
+    /// Every picture uploaded for or used by a server, whatever its state:
+    /// they go when the server is deleted.
+    pub async fn media_of_server(&self, server_id: &str) -> Result<Vec<String>> {
+        let conn = self.read()?;
+        query_all(&conn, "SELECT id FROM media WHERE server_id = ?1 ORDER BY id", [server_id], |r| r.get::<String>(0))
+            .await
+    }
+
     pub async fn delete_media(&self, ids: &[String]) -> Result<()> {
         db::write(&self.db, async |conn| {
             for id in ids {

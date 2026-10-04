@@ -29,6 +29,8 @@ message Node {
   AgentCreation agent_creation = 9;
   // Servers may share channels with each other here.
   bool shared_channels = 12;
+  // And with servers on other instances (docs/federation.md).
+  bool federation = 13;
   // People may put an effect on their profile card (Profile.effect). While
   // it's off, profiles come back without one and apps hide the picker.
   bool profile_effects = 15;
