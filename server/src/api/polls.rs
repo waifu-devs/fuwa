@@ -335,11 +335,8 @@ pub(super) async fn forget_thread(conn: &turso::Connection, thread_id: &str) -> 
         [thread_id],
     )
     .await?;
-    conn.execute(
-        "DELETE FROM polls WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?1)",
-        [thread_id],
-    )
-    .await?;
+    conn.execute("DELETE FROM polls WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?1)", [thread_id])
+        .await?;
     Ok(())
 }
 
