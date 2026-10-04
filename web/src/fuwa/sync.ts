@@ -8,6 +8,7 @@ import { fromItems } from "@/lib/rail";
 import { reportStartup, reportTiming, type ReportTarget } from "@/lib/reports";
 import { makeApi, type Api } from "./client";
 import { followFriends } from "./friends";
+import { startPresence } from "./presence";
 import { FuwaError, call, toFuwaError } from "./errors";
 import { instanceKey, loadSaved, storeSaved, type SavedInstance } from "./saved";
 import {
@@ -166,6 +167,11 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
     }
     // Friends too: listening is also what shows you online to them.
     if (me.user) yield* Effect.forkScoped(followFriends(key, api));
+    // Presence (who's online, what they're doing) runs alongside too.
+    yield* Effect.acquireRelease(
+      Effect.sync(() => startPresence(key, api)),
+      (stop) => Effect.sync(stop),
+    );
     // Notification settings follow the account; an older instance without them just has none.
     const notifications = yield* call((signal) => api.account.getNotificationSettings({}, { signal })).pipe(
       Effect.map((r) => Object.fromEntries(r.settings.map((n) => [notificationKey(n.serverId, n.channelId), n]))),

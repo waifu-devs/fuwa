@@ -53,6 +53,8 @@ pub struct App {
     friends: Option<crate::friends::Friends>,
     /// Every server and who's in it, where `node` is.
     pub index: Index,
+    /// Who's online and what they're doing, where `node` is; memory only.
+    pub presence: crate::presence::Presence,
     /// The servers whose files are here: all of them, or a shard's share.
     pub servers: Servers,
     pub hub: Arc<Hub>,
@@ -207,6 +209,7 @@ impl App {
             media,
             friends,
             index,
+            presence: crate::presence::Presence::default(),
             servers,
             hub,
             limiter: SignInLimiter::default(),
@@ -364,6 +367,7 @@ impl App {
             .add_service(crate::pb::gif_service_server::GifServiceServer::new(api.clone()))
             .add_service(DirectMessageServiceServer::new(api.clone()))
             .add_service(crate::pb::friend_service_server::FriendServiceServer::new(api.clone()))
+            .add_service(crate::pb::presence_service_server::PresenceServiceServer::new(api.clone()))
             .add_service(crate::pb::call_service_server::CallServiceServer::new(api.clone()))
             .add_service(crate::pb::secure_channel_service_server::SecureChannelServiceServer::new(api.clone()))
             .add_service(crate::pb::search_service_server::SearchServiceServer::new(api.clone()))
@@ -484,6 +488,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         agent_creation: settings.agent_creation as i32,
         telemetry: settings.telemetry,
         shared_channels: settings.shared_channels,
+        rich_presence: settings.rich_presence,
         federation: settings.shared_channels && settings.federation && !settings.public_url.is_empty(),
         mcp: settings.mcp,
         profile_effects: settings.profile_effects,
@@ -591,6 +596,7 @@ pub async fn run(config: Config) -> std::result::Result<(), String> {
     if app.node.is_some() {
         crate::telemetry::spawn(app.clone());
         spawn_housekeeping(app.clone());
+        spawn_presence_ticks(app.clone());
     }
     if matches!(app.link, Link::Alone | Link::Shard(_)) {
         spawn_sso_rechecks(app.clone());
@@ -625,6 +631,21 @@ pub fn spawn_signal_handler(shutdown: CancellationToken) {
         wait_for_signal().await;
         tracing::info!("shutting down");
         shutdown.cancel();
+    });
+}
+
+/// Every second: forgets apps that stopped calling `UpdatePresence` and
+/// sends presence changes that waited for their window.
+fn spawn_presence_ticks(app: Arc<App>) {
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(Duration::from_secs(1));
+        every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = app.shutdown.cancelled() => return,
+                _ = every.tick() => app.presence.tick(&app.index),
+            }
+        }
     });
 }
 

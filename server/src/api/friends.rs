@@ -87,8 +87,9 @@ impl Drop for Online {
 }
 
 /// Tells someone's friends whether they're online, as they are when it
-/// runs (so a quick on-and-off settles right), unless they hide it.
-fn announce(app: Arc<App>, account_id: String) {
+/// runs (so a quick on-and-off settles right), unless they hide it or
+/// picked invisible.
+pub(super) fn announce(app: Arc<App>, account_id: String) {
     tokio::spawn(async move {
         let told = async {
             let friends = app.friends()?;
@@ -96,7 +97,9 @@ fn announce(app: Arc<App>, account_id: String) {
             if ids.is_empty() {
                 return Ok(());
             }
-            let online = friends.is_online(&account_id) && !friends.settings(&account_id).await?.hide_online;
+            let invisible = !app.node()?.invisible_of(&[account_id.as_str()]).await?.is_empty();
+            let online =
+                friends.is_online(&account_id) && !invisible && !friends.settings(&account_id).await?.hide_online;
             let presence = pb::FriendPresence { user_id: account_id.clone(), online };
             friends.publish(
                 ids.iter().map(String::as_str),
@@ -173,12 +176,14 @@ impl Api {
             links.iter().filter(|l| l.state == FriendState::Friend).map(|l| l.other_id.as_str()).collect();
         let online = friends.online_of(friend_ids.iter().copied());
         let hidden = friends.settings_of(&friend_ids).await?;
+        let invisible = self.app.node()?.invisible_of(&friend_ids).await?;
         Ok(links
             .iter()
             .filter_map(|link| {
                 // Someone deleted since: the sweep that forgot them is moments away.
                 let user = users.get(&link.other_id)?.clone();
-                let shows = !hidden.get(&link.other_id).is_some_and(|s| s.hide_online);
+                let shows =
+                    !hidden.get(&link.other_id).is_some_and(|s| s.hide_online) && !invisible.contains(&link.other_id);
                 Some(pb::Friend {
                     user: Some(user),
                     state: link.state as i32,
