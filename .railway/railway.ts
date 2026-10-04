@@ -10,6 +10,9 @@ import { bucket, defineRailway, image, project, ref, service, volume } from "rai
  * them with any other key, so it must never change. Keep a copy in a password manager.
  * Before turning SPLIT on, also FUWA_CLUSTER_KEY (`openssl rand -hex 32`), the secret the
  * parts send each other; that one can change later, and every part restarts with it.
+ * And FUWA_MEDIA_KEY (`openssl rand -hex 32` again, not the same value), the only
+ * secret the media parts hold: they never get the cluster key, so one that's broken
+ * into can't reach the directory or the shards.
  * The DNS records for fuwa.chat live with its registrar.
  *
  * The CDN and edge rules aren't something Railway configuration can declare yet, so
@@ -196,8 +199,13 @@ export default defineRailway((ctx) => {
     FUWA_CLUSTER_KEY: ctx.shared.FUWA_CLUSTER_KEY,
   });
   const internalUrl = (name: string) => `http://\${{${name}.RAILWAY_PRIVATE_DOMAIN}}:${PORT}`;
+  // A media part holds the media key alone, never the cluster key (fuwa then accepts
+  // only the media key on it); the directory and shards send it when opening calls.
   const mediaEnv = (region: { id: string; name: string }) => ({
-    ...part("media"),
+    PORT: String(PORT),
+    FUWA_HOST: "::",
+    FUWA_ROLE: "media",
+    FUWA_MEDIA_KEY: ctx.shared.FUWA_MEDIA_KEY,
     ...label(region),
     FUWA_MEDIA_PORT: String(MEDIA_PORT),
     FUWA_MEDIA_ADDRESSES: "tcp/${{RAILWAY_TCP_PROXY_DOMAIN}}:${{RAILWAY_TCP_PROXY_PORT}}",
@@ -220,10 +228,10 @@ export default defineRailway((ctx) => {
         }),
       ];
   // Where the directory (calls in direct messages) and shards (voice channels) open calls.
-  // A media host gets its own key (shared variable FUWA_MEDIA_KEY), never the cluster key.
-  const mediaUrl = MEDIA_HOST_URL
-    ? { FUWA_MEDIA_URL: MEDIA_HOST_URL, FUWA_MEDIA_KEY: ctx.shared.FUWA_MEDIA_KEY }
-    : { FUWA_MEDIA_URL: internalUrl("fuwa-media") };
+  // Media parts, here or on a host of their own, get their own key (shared variable
+  // FUWA_MEDIA_KEY), never the cluster key.
+  const mediaKey = { FUWA_MEDIA_KEY: ctx.shared.FUWA_MEDIA_KEY };
+  const mediaUrl = { FUWA_MEDIA_URL: MEDIA_HOST_URL || internalUrl("fuwa-media"), ...mediaKey };
 
   const directory = service("fuwa-directory", {
     source: fuwaImage(),
@@ -324,6 +332,7 @@ export default defineRailway((ctx) => {
           FUWA_S3_SECRET_ACCESS_KEY: ref(regionReplica, "SECRET_ACCESS_KEY"),
           FUWA_RESTORE: "if-empty",
           FUWA_MEDIA_URL: internalUrl(regionMedia.name),
+          ...mediaKey,
         },
       });
       return [shardData, shard];
