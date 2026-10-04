@@ -898,6 +898,31 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
         pb::JoinVoiceRequest { server_id: sid.clone(), channel_id: voice.id.clone(), offer, ..Default::default() };
     let watcher = c.calls.join_voice(authed(&juan, request)).await.unwrap().into_inner();
     watching.answer(&watcher.answer);
+    // Juan's app keeps his place every few seconds, as a real one does: an
+    // unkept place is let go after 15 seconds, and this test runs longer
+    // than that on a slow machine.
+    let keeper = {
+        let (mut calls, juan, request) = (
+            c.calls.clone(),
+            juan.clone(),
+            pb::KeepVoiceRequest {
+                server_id: sid.clone(),
+                session_id: watcher.session_id.clone(),
+                channel_id: voice.id.clone(),
+                ..Default::default()
+            },
+        );
+        // It stops on the first failed keep and hands back why; the end of
+        // the test fails on it.
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                if let Err(status) = calls.keep_voice(authed(&juan, request.clone())).await {
+                    return status;
+                }
+            }
+        })
+    };
 
     // Until asked, a viewer gets the smallest size, starting on a keyframe.
     // A bigger one may come first, when its first frames reach the media
@@ -1000,14 +1025,6 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     assert_eq!(watching.seen.len(), seen, "no camera or screen once a moderator turns them off");
     assert_eq!(watching.screen_sounds_heard(heard), 0, "nor the screen's sound");
     assert!(watching.heard.len() > heard + 10, "the voice goes on");
-    // Juan keeps watching: an unkept place is let go after 15 seconds.
-    let request = pb::KeepVoiceRequest {
-        server_id: sid.clone(),
-        session_id: watcher.session_id.clone(),
-        channel_id: voice.id.clone(),
-        ..Default::default()
-    };
-    c.calls.keep_voice(authed(&juan, request)).await.unwrap();
     // Lifted: Mika turns them on again.
     c.calls.moderate_voice(authed(&juan, video_off(&mika_id, false))).await.unwrap();
     assert!(!sdb.voice_moderation(&mika_id).await.unwrap().video_off);
@@ -1074,6 +1091,8 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     let state = c.calls.keep_voice(authed(&mika, record)).await.unwrap().into_inner().state.unwrap();
     assert!(state.self_record && !state.record_suppress, "everyone sees Mika recording");
 
+    assert!(!keeper.is_finished(), "Juan lost his place: {:?}", keeper.await);
+    keeper.abort();
     instance.app.shutdown.cancel();
     instance.serving.await.unwrap();
 }
