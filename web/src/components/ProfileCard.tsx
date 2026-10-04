@@ -7,6 +7,7 @@ import { Markdown } from "@/components/Markdown";
 import { SPRING, SwapText } from "@/components/motion";
 import { Private } from "@/components/Private";
 import { AppBadge } from "@/components/AppBadge";
+import { ActivityCards, PresenceDot } from "@/components/Presence";
 import { ProfileEffect } from "@/components/ProfileEffect";
 import { colorCss, displayName, hueOf, isAgent, shownStatus, toDate } from "@/lib/format";
 import { usePrefs } from "@/lib/prefs";
@@ -33,6 +34,7 @@ export function ProfileCard({
   me = false,
   loading = false,
   editing = false,
+  instanceKey,
   className,
 }: {
   user: User;
@@ -49,6 +51,8 @@ export function ProfileCard({
   loading?: boolean;
   /** A live preview while you type: text changes in place instead of sliding. */
   editing?: boolean;
+  /** Where they're seen, for their presence: their dot and what they're doing. */
+  instanceKey?: string;
   className?: string;
 }) {
   const Text = editing ? PlainText : SwapText;
@@ -88,7 +92,10 @@ export function ProfileCard({
             transition={{ type: "spring", stiffness: 420, damping: 18 }}
             className="avatar-ring inline-block shrink-0 rounded-full p-[3px]"
           >
-            <UserAvatar user={user} className="size-20 text-3xl ring-4 ring-card" />
+            <span className="relative block">
+              <UserAvatar user={user} className="size-20 text-3xl ring-4 ring-card" />
+              {instanceKey && <PresenceDot instanceKey={instanceKey} userId={user.id} className="absolute right-0.5 bottom-0.5 size-5 ring-[5px]" />}
+            </span>
           </motion.span>
           <AnimatePresence>
             {status && (
@@ -133,6 +140,7 @@ export function ProfileCard({
           </p>
         </motion.div>
         {roles}
+        {instanceKey && <ActivityCards instanceKey={instanceKey} userId={user.id} />}
         <AnimatePresence initial={false}>
           {(profile?.bio || loading) && (
             <motion.div

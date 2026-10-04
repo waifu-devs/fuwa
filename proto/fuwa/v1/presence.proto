@@ -1,0 +1,165 @@
+syntax = "proto3";
+
+package fuwa.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Who's online and what they're doing (docs/presence.md). Kept in memory
+// where accounts are, never written down: a restart forgets it and apps send
+// it again within a minute.
+//
+// A person's presence reaches only people who share a server with them. Their
+// status (online, idle, do not disturb) always does, unless they're
+// invisible; what they're doing (activities) only once they turn on "Show
+// what I'm doing" (PresenceSettings.show_activity), not in servers they hid
+// it from, and never while the instance has rich presence off
+// (Node.rich_presence).
+service PresenceService {
+  // Each signed-in app calls this when it starts and then about every
+  // minute: whether its person is away from it, and what they're doing
+  // there. An app's word lasts 150 seconds; without another call it's
+  // forgotten, and a person with no app left is offline. Updates past 5 in
+  // 20 seconds aren't refused: the latest is passed on when the window
+  // allows.
+  rpc UpdatePresence(UpdatePresenceRequest) returns (UpdatePresenceResponse);
+  // Streams the presence of everyone the caller can see: first everyone
+  // who's online (offline is the default), then `ready`, then each change.
+  // The caller's own comes too, so their other apps follow a status change.
+  // A response with neither set is a heartbeat. A slow reader's stream ends
+  // with ABORTED; watch again.
+  rpc WatchPresence(WatchPresenceRequest) returns (stream WatchPresenceResponse);
+  // The caller's status and what they share.
+  rpc GetPresenceSettings(GetPresenceSettingsRequest) returns (GetPresenceSettingsResponse);
+  // Changes them. Every field is applied as given.
+  rpc UpdatePresenceSettings(UpdatePresenceSettingsRequest) returns (UpdatePresenceSettingsResponse);
+}
+
+enum PresenceStatus {
+  PRESENCE_STATUS_UNSPECIFIED = 0;
+  // No app of theirs is signed in, or they're invisible.
+  PRESENCE_STATUS_OFFLINE = 1;
+  PRESENCE_STATUS_ONLINE = 2;
+  // Away: picked, or every app of theirs says they are.
+  PRESENCE_STATUS_IDLE = 3;
+  // Apps don't make sounds or show notifications for them.
+  PRESENCE_STATUS_DO_NOT_DISTURB = 4;
+  // Picked only: they look offline to everyone else.
+  PRESENCE_STATUS_INVISIBLE = 5;
+}
+
+enum ActivityKind {
+  ACTIVITY_KIND_UNSPECIFIED = 0;
+  // "Playing <name>".
+  ACTIVITY_KIND_PLAYING = 1;
+  // "Streaming <name>".
+  ACTIVITY_KIND_STREAMING = 2;
+  // "Listening to <name>".
+  ACTIVITY_KIND_LISTENING = 3;
+  // "Watching <name>".
+  ACTIVITY_KIND_WATCHING = 4;
+  // "Competing in <name>".
+  ACTIVITY_KIND_COMPETING = 5;
+}
+
+// Something a person is doing, as a game or app reports it (on the desktop,
+// through Discord's local RPC, so details follow its activity object). All
+// of it is the person's own content: lengths are capped and pictures and
+// links are checked.
+message Activity {
+  ActivityKind kind = 1;
+  // The game or app, such as "Celeste". 1 to 128 characters.
+  string name = 2;
+  // What they're doing in it, such as "Chapter 3". At most 128 characters.
+  string details = 3;
+  // Their state in it, such as "In a party". At most 128 characters.
+  string state = 4;
+  // When it started (clients count up from here) or will end (they count
+  // down); either may be unset.
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp ends_at = 6;
+  // Party size: `party_size` of `party_max`; 0 when there's no party.
+  // At most 1,000,000 each.
+  uint32 party_size = 7;
+  uint32 party_max = 8;
+  // Pictures, each a link on this instance or empty. Sent as an https link
+  // or a key: the instance fetches https pictures itself (apps never load
+  // them from that site), keys it has no picture for are dropped, and apps
+  // then show the app's name with a default icon.
+  string large_image_url = 9;
+  // Shown on the large picture. At most 128 characters.
+  string large_text = 10;
+  string small_image_url = 11;
+  string small_text = 12;
+  // At most 2.
+  repeated ActivityButton buttons = 13;
+  // The id the game sent with it (a Discord application id, through the
+  // desktop app), only to label the activity and find its pictures. Never
+  // an identity: anyone can send any id. At most 64 characters.
+  string application_id = 14;
+}
+
+// A link under an activity. Apps confirm before opening it, naming its host.
+message ActivityButton {
+  // 1 to 32 characters.
+  string label = 1;
+  // https only, at most 512 characters, with no user name or password in it.
+  string url = 2;
+}
+
+// What one person shows.
+message Presence {
+  string user_id = 1;
+  // Offline, online, idle or do not disturb; invisible only in the caller's
+  // own presence.
+  PresenceStatus status = 2;
+  // What they're doing, while they share it with the one asking.
+  repeated Activity activities = 3;
+  // Which kinds of app they're on, such as "web" and "desktop".
+  repeated string apps = 4;
+}
+
+message UpdatePresenceRequest {
+  // "web", "desktop" or "agent": labels only.
+  string app = 1;
+  // The person hasn't used this app for a while.
+  bool idle = 2;
+  // At most 5; replaces what this app said before. Empty clears it.
+  repeated Activity activities = 3;
+}
+
+message UpdatePresenceResponse {
+  // Call again before this many seconds pass.
+  uint32 renew_seconds = 1;
+}
+
+message WatchPresenceRequest {}
+
+message WatchPresenceResponse {
+  Presence presence = 1;
+  // Sent once, after everyone online.
+  bool ready = 2;
+}
+
+message PresenceSettings {
+  // ONLINE, IDLE, DO_NOT_DISTURB or INVISIBLE. Unspecified means online.
+  PresenceStatus status = 1;
+  // "Show what I'm doing". Off unless turned on.
+  bool show_activity = 2;
+  // Servers where what they're doing isn't shown even when show_activity
+  // is on ("Share my activity here" off).
+  repeated string hidden_server_ids = 3;
+}
+
+message GetPresenceSettingsRequest {}
+
+message GetPresenceSettingsResponse {
+  PresenceSettings settings = 1;
+}
+
+message UpdatePresenceSettingsRequest {
+  PresenceSettings settings = 1;
+}
+
+message UpdatePresenceSettingsResponse {
+  PresenceSettings settings = 1;
+}
