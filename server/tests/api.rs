@@ -6019,7 +6019,7 @@ async fn share(
         .shared
         .create_share_code(authed(
             home_token,
-            pb::CreateShareCodeRequest { server_id: home.into(), channel_id: channel_id.into() },
+            pb::CreateShareCodeRequest { server_id: home.into(), channel_id: channel_id.into(), ..Default::default() },
         ))
         .await
         .unwrap()
@@ -6081,7 +6081,7 @@ async fn channels_shared_between_servers() {
         .shared
         .create_share_code(authed(
             &sora,
-            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone() },
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), ..Default::default() },
         ))
         .await
         .unwrap_err();
@@ -6089,7 +6089,10 @@ async fn channels_shared_between_servers() {
     let voice = new_channel(&mut c, &juan, &home, "Lounge", pb::ChannelType::Voice).await;
     let refused = c
         .shared
-        .create_share_code(authed(&juan, pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: voice.id }))
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: voice.id, ..Default::default() },
+        ))
         .await
         .unwrap_err();
     assert_eq!(refused.code(), Code::InvalidArgument);
@@ -6099,7 +6102,7 @@ async fn channels_shared_between_servers() {
         .shared
         .create_share_code(authed(
             &juan,
-            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone() },
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), ..Default::default() },
         ))
         .await
         .unwrap()
@@ -6381,7 +6384,10 @@ async fn shared_channels_can_be_turned_off() {
     let general = list_channels(&mut c, &juan, &home).await[0].id.clone();
     let off = c
         .shared
-        .create_share_code(authed(&juan, pb::CreateShareCodeRequest { server_id: home, channel_id: general }))
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home, channel_id: general, ..Default::default() },
+        ))
         .await
         .unwrap_err();
     assert_eq!(off.code(), Code::FailedPrecondition);
@@ -6405,7 +6411,7 @@ async fn shared_preview_names_outside_providers() {
         .shared
         .create_share_code(authed(
             &juan,
-            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone() },
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), ..Default::default() },
         ))
         .await
         .unwrap()
@@ -6522,7 +6528,7 @@ async fn instance_admins_end_any_share() {
         .shared
         .create_share_code(authed(
             &juan,
-            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone() },
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), ..Default::default() },
         ))
         .await
         .unwrap()
@@ -6824,4 +6830,189 @@ async fn presence_reaches_server_mates() {
     assert!(ann_now.activities.is_empty());
 
     instance.stop().await;
+}
+
+/// A channel shared with a server on another instance: a code made for
+/// other instances, a preview naming the home instance and its key, the ask
+/// (which pins each instance's key at the other), approval and ending.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn channels_shared_across_instances() {
+    let federated = [("FUWA_FEDERATION", "on"), ("FUWA_FEDERATION_ALLOW_PRIVATE", "1")];
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (a, b) = (start(dir_a.path(), &federated).await, start(dir_b.path(), &federated).await);
+    let (mut ca, mut cb) = (clients(&a).await, clients(&b).await);
+    let (juan, _, _) = sign_up(&mut ca, "juan").await;
+    let (mika, _, _) = sign_up(&mut cb, "mika").await;
+    let (origin_a, origin_b) = (format!("http://{}", a.addr), format!("http://{}", b.addr));
+    for (c, admin, origin) in [(&mut ca, &juan, &origin_a), (&mut cb, &mika, &origin_b)] {
+        let settings = pb::InstanceSettings { public_url: origin.clone(), ..Default::default() };
+        c.admin.update_settings(authed(admin, settings_update(settings, &["public_url"], &[]))).await.unwrap();
+    }
+    let node = ca.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert!(node.federation);
+    let federation = |c: &Clients, admin: &str| {
+        let mut admin_client = c.admin.clone();
+        let request = authed(admin, pb::GetFederationRequest {});
+        async move { admin_client.get_federation(request).await.unwrap().into_inner() }
+    };
+    let (fed_a, fed_b) = (federation(&ca, &juan).await, federation(&cb, &mika).await);
+    let home = create_server(&mut ca, &juan, "Home", false).await.id;
+    let guest = create_server(&mut cb, &mika, "Guest", false).await.id;
+    let dev = new_channel(&mut ca, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let make_code = |c: &Clients, other_instances: bool| {
+        let mut shared = c.shared.clone();
+        let request = authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), other_instances },
+        );
+        async move { shared.create_share_code(request).await.unwrap().into_inner().code.unwrap().code }
+    };
+    let preview = |c: &Clients, code: &str| {
+        let mut shared = c.shared.clone();
+        let request = authed(&mika, pb::PreviewShareRequest { server_id: guest.clone(), code: code.into() });
+        async move { shared.preview_share(request).await }
+    };
+
+    // A code for this instance only can't be used from another, even with
+    // the home's host added.
+    let local = make_code(&ca, false).await;
+    assert!(!local.contains('@'));
+    let refused = preview(&cb, &format!("{local}@{origin_a}")).await.unwrap_err();
+    assert_eq!(refused.code(), Code::NotFound, "{refused:?}");
+    // Asking with it fails too, and the home pins nothing for a code that
+    // doesn't work.
+    let refused = cb
+        .shared
+        .accept_share(authed(
+            &mika,
+            pb::AcceptShareRequest {
+                server_id: guest.clone(),
+                code: format!("{local}@{origin_a}"),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::NotFound, "{refused:?}");
+    assert!(federation(&ca, &juan).await.peers.is_empty());
+    assert!(federation(&cb, &mika).await.peers.is_empty(), "the guest pins only once the home answers");
+
+    // One for other instances names this one, and the preview names the
+    // home instance and its key's fingerprint, without pinning anything.
+    let code = make_code(&ca, true).await;
+    assert!(code.ends_with(&format!("@{origin_a}")), "{code}");
+    let seen = preview(&cb, &code).await.unwrap().into_inner();
+    assert_eq!(seen.channel_name, "dev");
+    assert_eq!(seen.instance, a.addr.to_string());
+    assert_eq!(seen.fingerprint, fed_a.fingerprint);
+    // Files don't cross instances yet, so the home can't let them.
+    assert!(!seen.allowed.contains(&(pb::Permission::AttachFiles as i32)));
+    assert!(seen.allowed.contains(&(pb::Permission::SendMessages as i32)));
+    let home_server = seen.home_server.unwrap();
+    assert_eq!(home_server.name, "Home");
+    assert_eq!(home_server.id, format!("{home}@{origin_a}"));
+    assert!(federation(&ca, &juan).await.peers.is_empty());
+
+    // Asking pins each instance's key at the other.
+    let asked = cb
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    assert_eq!(asked.state, pb::SharedConnectionState::Waiting as i32);
+    assert_eq!(asked.instance, a.addr.to_string());
+    assert_eq!(asked.fingerprint, fed_a.fingerprint);
+    let (pinned_a, pinned_b) = (federation(&ca, &juan).await, federation(&cb, &mika).await);
+    assert_eq!(pinned_a.peers.len(), 1);
+    assert_eq!(pinned_a.peers[0].origin, origin_b);
+    assert_eq!(pinned_a.peers[0].fingerprint, fed_b.fingerprint);
+    assert_eq!(pinned_b.peers[0].origin, origin_a);
+
+    // The home's admins see where the request comes from before approving.
+    let request = connections(&mut ca, &juan, &home).await.connections.pop().unwrap();
+    assert_eq!(request.id, asked.id);
+    assert_eq!(request.instance, b.addr.to_string());
+    assert_eq!(request.fingerprint, fed_b.fingerprint);
+    // Nor can its admins let them later.
+    let all = [pb::Permission::SendMessages, pb::Permission::AttachFiles].map(|p| p as i32).to_vec();
+    let updated = ca
+        .shared
+        .update_connection(authed(
+            &juan,
+            pb::UpdateConnectionRequest { server_id: home.clone(), connection_id: asked.id.clone(), allowed: all },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    assert_eq!(updated.allowed, vec![pb::Permission::SendMessages as i32]);
+    let from = request.server.unwrap();
+    assert_eq!(from.id, format!("{guest}@{origin_b}"));
+    assert_eq!(from.name, "Guest");
+    ca.shared
+        .review_share(authed(
+            &juan,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id.clone(), approve: true },
+        ))
+        .await
+        .unwrap();
+    let shown = list_channels(&mut cb, &mika, &guest)
+        .await
+        .into_iter()
+        .find(|ch| ch.shared.as_ref().is_some_and(|s| !s.home))
+        .expect("the guest shows the channel once approved");
+    assert_eq!(shown.name, "dev");
+    let listed = connections(&mut cb, &mika, &guest).await.connections;
+    assert_eq!(listed[0].state, pb::SharedConnectionState::Active as i32);
+    assert_eq!(listed[0].instance, a.addr.to_string());
+
+    // Messages don't cross instances yet.
+    let not_yet = send(&mut cb, &mika, &guest, &shown.id, "hi").await.unwrap_err();
+    assert_eq!(not_yet.code(), Code::FailedPrecondition, "{not_yet:?}");
+    assert!(not_yet.message().contains("can't do that yet"), "{not_yet:?}");
+
+    // The home ends it, and the guest's channel goes.
+    ca.shared
+        .disconnect(authed(&juan, pb::DisconnectRequest { server_id: home.clone(), connection_id: asked.id.clone() }))
+        .await
+        .unwrap();
+    assert!(list_channels(&mut cb, &mika, &guest).await.iter().all(|ch| ch.id != shown.id));
+    assert!(connections(&mut cb, &mika, &guest).await.connections.is_empty());
+
+    // A guest withdrawing its request leaves nothing waiting at the home.
+    let code = make_code(&ca, true).await;
+    let asked = cb
+        .shared
+        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    assert_eq!(connections(&mut ca, &juan, &home).await.connections.len(), 1);
+    cb.shared
+        .disconnect(authed(&mika, pb::DisconnectRequest { server_id: guest.clone(), connection_id: asked.id }))
+        .await
+        .unwrap();
+    assert!(connections(&mut ca, &juan, &home).await.connections.is_empty());
+
+    // With federation off at the home, codes for other instances aren't made.
+    let off = pb::InstanceSettings { federation: false, ..Default::default() };
+    ca.admin.update_settings(authed(&juan, settings_update(off, &["federation"], &[]))).await.unwrap();
+    let refused = ca
+        .shared
+        .create_share_code(authed(
+            &juan,
+            pb::CreateShareCodeRequest { server_id: home.clone(), channel_id: dev.id.clone(), other_instances: true },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), Code::FailedPrecondition);
+
+    a.stop().await;
+    b.stop().await;
 }

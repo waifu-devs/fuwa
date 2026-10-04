@@ -527,11 +527,16 @@ impl App {
     // ─────────────── Between shared channels' servers ───────────────
 
     /// A call between the two ends of a shared channel, answered where the
-    /// server it's for is kept: here, or on its shard through the directory
-    /// (shards don't know each other).
+    /// server it's for is kept: here, on its shard through the directory
+    /// (shards don't know each other), or on another instance.
     pub async fn shared(self: &Arc<Self>, call: cpb::SharedCall) -> Result<cpb::SharedReply> {
         if self.servers.holds(&call.server_id) {
             return crate::api::shared_call(self, call).await;
+        }
+        // A server on another instance ("<id>@<instance>"): the part that
+        // keeps the instance's key calls it; a shard passes it there.
+        if call.server_id.contains('@') && !matches!(self.link, Link::Shard(_)) {
+            return crate::federation::shared(self, call).await;
         }
         match &self.link {
             Link::Shard(link) => {

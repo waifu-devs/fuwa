@@ -6,6 +6,7 @@ import {
   DatabaseIcon,
   EyeIcon,
   FolderIcon,
+  GlobeIcon,
   HashIcon,
   ImageIcon,
   KeyRoundIcon,
@@ -61,7 +62,7 @@ import { Switch } from "@/components/ui/switch";
 import { displayName, formatDay, toDate } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { has } from "@/lib/permissions";
-import { codeLeft, findShareCode } from "@/lib/shared";
+import { codeLeft, findShareCode, shareCodeInstance } from "@/lib/shared";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
@@ -97,6 +98,8 @@ export function useSharedList(instanceKey: string, serverId: string) {
 
 /** Whether sharing is on for the instance. Off, nothing new starts; what's shared already keeps working. */
 export const useSharingOn = (instanceKey: string) => useFuwa((s) => !!s.instances[instanceKey]?.node?.sharedChannels);
+/** Servers here may share channels with servers on other instances too. */
+const useFederationOn = (instanceKey: string) => useFuwa((s) => !!s.instances[instanceKey]?.node?.federation);
 
 /** The server settings page. */
 export function SharedChannels({ instanceKey, serverId }: { instanceKey: string; serverId: string }) {
@@ -406,11 +409,16 @@ function PreviewCard({ preview, instanceKey }: { preview: PreviewShareResponse; 
             <InlineMarkdown className="text-muted-foreground">{preview.channelTopic}</InlineMarkdown>
           </motion.div>
         )}
+        {preview.instance && (
+          <motion.div {...stagger(0.5)}>
+            <InstanceLine instance={preview.instance} fingerprint={preview.fingerprint} note="Before asking, check its key fingerprint with their admins somewhere you trust:" />
+          </motion.div>
+        )}
         <motion.p {...stagger(1)} className="flex items-start gap-2">
           <DatabaseIcon className="mt-0.5 size-4 shrink-0 text-primary" />
           <span>
             Messages are stored only on <b>{home?.name ?? "the other server"}</b>
-            {hasRegions(regions) && (
+            {hasRegions(regions) && !preview.instance && (
               <>
                 , in <b>{regionName(regions, preview.region)}</b>
               </>
@@ -444,6 +452,19 @@ function PreviewCard({ preview, instanceKey }: { preview: PreviewShareResponse; 
         </motion.div>
       </div>
     </div>
+  );
+}
+
+/** Where the other end is when it's on another instance: its host, and its key's fingerprint for admins to compare. */
+function InstanceLine({ instance, fingerprint, note }: { instance: string; fingerprint: string; note: string }) {
+  return (
+    <p className="flex items-start gap-2 text-sm">
+      <GlobeIcon className="mt-0.5 size-4 shrink-0 text-primary" />
+      <span className="min-w-0">
+        On another instance, <b className="text-foreground">{instance}</b>. <span className="text-muted-foreground">{note}</span>
+        <code className="mt-1 block font-mono text-xs tracking-wider break-all text-foreground">{fingerprint}</code>
+      </span>
+    </p>
   );
 }
 
@@ -534,6 +555,13 @@ function askCopy(ask: Ask, c: SharedConnection, otherName: string, homeName: str
       };
 }
 
+/** What a connection with a server on another instance says beside that instance's key. */
+function instanceNote(c: SharedConnection) {
+  if (c.home && waiting(c)) return "Before approving, check their key fingerprint with their admins somewhere you trust:";
+  if (waiting(c)) return "Their key fingerprint:";
+  return "Messages don't cross instances yet. Their key fingerprint:";
+}
+
 /** One connection, from this server's side, with what you can do about it. */
 export function ConnectionRow({
   instanceKey,
@@ -576,6 +604,7 @@ export function ConnectionRow({
         <StateChip connection={c} />
         <ConnectionActions instanceKey={instanceKey} serverId={serverId} connection={c} onAsk={setConfirm} approved={`#${homeName} is now shared with ${otherName}`} />
       </div>
+      {c.instance && <InstanceLine instance={c.instance} fingerprint={c.fingerprint} note={instanceNote(c)} />}
       {c.checkedBy.length > 0 && (
         <motion.p
           initial={{ opacity: 0, y: 4 }}
@@ -932,9 +961,55 @@ function ShownChannelShare({ instanceKey, serverId, channel, guests }: ShareProp
   );
 }
 
+/** A code just made, to copy. */
+function FreshCode({ code, now }: { code: ShareCode; now: number }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.96 }}
+      transition={{ type: "spring", stiffness: 420, damping: 26 }}
+      className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary/5 p-3"
+    >
+      <div className="flex items-center gap-2">
+        <code className="min-w-0 flex-1 font-mono text-sm font-bold break-all">
+          <Private text={code.code} kind="secret" className="text-clip whitespace-normal" />
+        </code>
+        <CopyButton text={code.code} label="Copy code" />
+      </div>
+      <p className="flex items-center gap-1 text-xs text-muted-foreground">
+        <TimerIcon className="size-3" /> Works for {codeLeft(toDate(code.expiresAt).getTime() - now)}, for one server
+        {shareCodeInstance(code.code) ? ", here or on another instance." : " on this instance."}
+      </p>
+    </motion.div>
+  );
+}
+
+/** The button that makes a code, and, when this instance shares with others, whether it's for a server on another one. */
+function MakeCode({ pending, federation, onMake }: { pending: boolean; federation: boolean; onMake: (elsewhere: boolean) => void }) {
+  const [elsewhere, setElsewhere] = useState(false);
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-wrap items-center gap-x-4 gap-y-3">
+      <Button type="button" disabled={pending} onClick={() => onMake(federation && elsewhere)} className="btn rounded-xl font-bold">
+        {pending ? <LoaderCircleIcon className="animate-spin" /> : <PlusIcon />} Create share code
+      </Button>
+      {federation && (
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <Switch checked={elsewhere} onCheckedChange={setElsewhere} aria-label="For a server on another instance" />
+          <span>
+            <span className="font-bold">For a server on another instance</span>
+            <span className="block text-xs text-muted-foreground">The code names this instance, so theirs can find it.</span>
+          </span>
+        </label>
+      )}
+    </motion.div>
+  );
+}
+
 /** One of this server's channels: a code to share it, codes still out, and who it's shared with. */
 function HomeChannelShare({ instanceKey, serverId, channel, guests, loaded, codes: all }: ShareProps & { loaded: boolean; codes: ShareCode[] }) {
   const on = useSharingOn(instanceKey);
+  const federation = useFederationOn(instanceKey);
   const make = useAction(createShareCode);
   const [fresh, setFresh] = useState<ShareCode | null>(null);
   const now = useNow(60_000);
@@ -959,38 +1034,17 @@ function HomeChannelShare({ instanceKey, serverId, channel, guests, loaded, code
         </div>
         <AnimatePresence mode="popLayout" initial={false}>
           {fresh ? (
-            <motion.div
-              key="code"
-              initial={{ opacity: 0, y: 12, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              transition={{ type: "spring", stiffness: 420, damping: 26 }}
-              className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary/5 p-3"
-            >
-              <div className="flex items-center gap-2">
-                <code className="min-w-0 flex-1 font-mono text-sm font-bold break-all">
-                  <Private text={fresh.code} kind="secret" className="text-clip whitespace-normal" />
-                </code>
-                <CopyButton text={fresh.code} label="Copy code" />
-              </div>
-              <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                <TimerIcon className="size-3" /> Works for {codeLeft(toDate(fresh.expiresAt).getTime() - now)}, for one server.
-              </p>
-            </motion.div>
+            <FreshCode key="code" code={fresh} now={now} />
           ) : on && !taken ? (
-            <motion.div key="make" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Button
-                type="button"
-                disabled={make.pending}
-                onClick={async () => {
-                  const code = await make.go(instanceKey, serverId, channel.id);
-                  if (code) setFresh(code);
-                }}
-                className="btn rounded-xl font-bold"
-              >
-                {make.pending ? <LoaderCircleIcon className="animate-spin" /> : <PlusIcon />} Create share code
-              </Button>
-            </motion.div>
+            <MakeCode
+              key="make"
+              pending={make.pending}
+              federation={federation}
+              onMake={async (elsewhere) => {
+                const code = await make.go(instanceKey, serverId, channel.id, elsewhere);
+                if (code) setFresh(code);
+              }}
+            />
           ) : (
             <motion.p key="why" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-xs text-muted-foreground">
               {!on ? "Sharing is turned off on this instance." : "A channel can be shared with one other server for now."}

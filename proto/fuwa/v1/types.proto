@@ -29,6 +29,8 @@ message Node {
   AgentCreation agent_creation = 9;
   // Servers may share channels with each other here.
   bool shared_channels = 12;
+  // And with servers on other instances (docs/federation.md).
+  bool federation = 13;
   // People may show what they're doing (PresenceService). Their status shows
   // either way.
   bool rich_presence = 15;

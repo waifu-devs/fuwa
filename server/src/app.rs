@@ -459,6 +459,7 @@ pub fn node_info(settings: &Settings, announcement: Option<pb::Announcement>) ->
         telemetry: settings.telemetry,
         shared_channels: settings.shared_channels,
         rich_presence: settings.rich_presence,
+        federation: settings.shared_channels && settings.federation && !settings.public_url.is_empty(),
         announcement,
         build: Some(pb::Build {
             version: crate::VERSION.into(),
