@@ -559,6 +559,7 @@ impl Core {
                 limit: PAGE,
                 before_id: before_id.unwrap_or_default(),
                 after_id: String::new(),
+                thread_id: String::new(),
             })
         )
         .await;

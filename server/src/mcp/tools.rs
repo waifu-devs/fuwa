@@ -463,6 +463,7 @@ async fn run(cx: &Cx, name: &str, args: &Args<'_>) -> Result<Result<Value, Statu
                 limit,
                 before_id: args.optional("before_id")?,
                 after_id: args.optional("after_id")?,
+                thread_id: String::new(),
             };
             list_messages(cx, req).await
         }

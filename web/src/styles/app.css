@@ -1076,3 +1076,13 @@ button:active > .rail-folder { scale: 0.92; }
 .fx-custom-thumb.on { animation-play-state: running; }
 @keyframes fx-custom-spin { to { transform: rotate(1turn); } }
 :root[data-reduce-motion] .fx-custom-thumb { animation: none; }
+
+/* A message jumped to from its thread: a glow that fades out, on opacity only. */
+.jumped { position: relative; }
+.jumped::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--primary) 18%, transparent); box-shadow: inset 3px 0 0 var(--primary);
+  animation: jumped 1.8s ease-out forwards;
+}
+@keyframes jumped { 0%, 35% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .jumped::after { animation-duration: 0.01s; animation-delay: 1.2s; } }
