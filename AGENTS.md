@@ -158,6 +158,18 @@
     the message (`execute_webhook`): its `author_id` is the webhook's id and
     `Message.webhook` carries the name and picture it posted under. Webhook
     messages never ping @everyone, @here or roles, and nobody can edit them.
+  - `mcp/`: the instance as an MCP server for agents (`docs/mcp.md`), at
+    `/mcp` and `/.well-known/mcp.json`: stateless Streamable HTTP, one
+    JSON-RPC message per POST, plain JSON back, no sessions. Agent tokens
+    only, a token bucket per agent account (`Limits`). Every tool
+    (`tools.rs`) is a public gRPC call made in process through the same
+    router clients reach (`call!` over `Mcp::inner`: the gateway's when
+    split), so routing, permission checks and limits are the call's own;
+    it never touches a database. `view.rs` turns messages into compact
+    JSON, `catalog.rs` holds the resources and prompts. Before any tool on
+    a server it asks `AgentService.GetMcpAccess` (the server file's
+    `mcp_access`) whether that server's managers let the agent in. A new
+    API call agents should have gets a tool here, wrapping that call.
   - `automod/`: what an AutoMod rule catches (words with `*` wildcards,
     pings, links to sites not allowed); `api/automod.rs` keeps the rules
     (`automod_rules`, one protobuf blob each) and `review` runs them inside
