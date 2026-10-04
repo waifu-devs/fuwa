@@ -1805,6 +1805,82 @@ async fn profiles_nicknames_and_notification_settings() {
 }
 
 #[tokio::test]
+async fn server_arrangements_follow_the_account() {
+    use pb::server_rail_item::Item;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let a = create_server(&mut c, &juan, "Alpha", true).await;
+    let b = create_server(&mut c, &juan, "Beta", true).await;
+    let other = create_server(&mut c, &mika, "Mika's", true).await;
+
+    let get = |token: &str| authed(token, pb::GetServerArrangementRequest {});
+    let empty = c.account.get_server_arrangement(get(&juan)).await.unwrap().into_inner();
+    assert!(empty.items.is_empty() && empty.updated_at.is_none());
+
+    let server = |id: &str| pb::ServerRailItem { item: Some(Item::ServerId(id.into())) };
+    let folder = |servers: Vec<String>| pb::ServerRailItem {
+        item: Some(Item::Folder(pb::ServerFolder {
+            id: "games".into(),
+            name: "Games".into(),
+            color: 0x66ccff,
+            server_ids: servers,
+        })),
+    };
+    // A server you aren't in is dropped, not refused.
+    let set = c
+        .account
+        .set_server_arrangement(authed(
+            &juan,
+            pb::SetServerArrangementRequest {
+                items: vec![folder(vec![b.id.clone(), a.id.clone()]), server(&other.id)],
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(set.items, vec![folder(vec![b.id.clone(), a.id.clone()])]);
+    assert!(set.updated_at.is_some());
+    let got = c.account.get_server_arrangement(get(&juan)).await.unwrap().into_inner();
+    assert_eq!(got.items, set.items);
+    // Only yours.
+    assert!(c.account.get_server_arrangement(get(&mika)).await.unwrap().into_inner().items.is_empty());
+    let bad = c
+        .account
+        .set_server_arrangement(authed(
+            &juan,
+            pb::SetServerArrangementRequest { items: vec![folder(vec![a.id.clone()]), folder(vec![b.id.clone()])] },
+        ))
+        .await;
+    assert_eq!(bad.unwrap_err().code(), Code::InvalidArgument);
+
+    // A server you leave drops out.
+    c.servers
+        .join_server(authed(&mika, pb::JoinServerRequest { server_id: a.id.clone(), ..Default::default() }))
+        .await
+        .unwrap();
+    c.account
+        .set_server_arrangement(authed(
+            &mika,
+            pb::SetServerArrangementRequest { items: vec![server(&a.id), server(&other.id)] },
+        ))
+        .await
+        .unwrap();
+    c.servers.leave_server(authed(&mika, pb::LeaveServerRequest { server_id: a.id.clone() })).await.unwrap();
+    let left = c.account.get_server_arrangement(get(&mika)).await.unwrap().into_inner();
+    assert_eq!(left.items, vec![server(&other.id)]);
+
+    // Clearing it forgets it.
+    c.account.set_server_arrangement(authed(&mika, pb::SetServerArrangementRequest { items: vec![] })).await.unwrap();
+    let cleared = c.account.get_server_arrangement(get(&mika)).await.unwrap().into_inner();
+    assert!(cleared.items.is_empty() && cleared.updated_at.is_none());
+
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn data_export_and_account_deletion() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path(), &[]).await;
@@ -5422,6 +5498,9 @@ async fn agents_are_made_by_people_and_added_by_managers() {
     let me_agent = me(&mut c, &token).await.unwrap();
     assert_eq!(me_agent.username, "helper");
     assert_eq!(sign_in(&mut c, "helper", "whatever123").await.unwrap_err().code(), Code::Unauthenticated);
+    // Agents have no rail to arrange.
+    let arranged = c.account.get_server_arrangement(authed(&token, pb::GetServerArrangementRequest {})).await;
+    assert_eq!(arranged.unwrap_err().code(), Code::PermissionDenied);
     let listed = c.agents.list_agents(authed(&owner, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents;
     assert_eq!(listed.len(), 1);
     assert!(listed[0].last_active_at.is_some(), "using the token shows");
@@ -6455,6 +6534,55 @@ async fn shared_channels_can_be_turned_off() {
         .await
         .unwrap_err();
     assert_eq!(off.code(), Code::FailedPrecondition);
+    instance.stop().await;
+}
+
+#[tokio::test]
+async fn profile_effects_save_and_hide_while_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (admin, admin_user, _) = sign_up(&mut c, "admin").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let effect = |id: &str| pb::UpdateProfileRequest { effect: Some(id.into()), ..Default::default() };
+    let saved = c.auth.update_profile(authed(&admin, effect(" sakura "))).await.unwrap().into_inner();
+    assert_eq!(saved.profile.unwrap().effect, "sakura");
+    for bad in ["Sakura", "-sakura", "sak ura", "../x", &"a".repeat(33)] {
+        let refused = c.auth.update_profile(authed(&admin, effect(bad))).await.unwrap_err();
+        assert_eq!(refused.code(), Code::InvalidArgument, "{bad}");
+    }
+    // Changing something else keeps it.
+    let kept = c
+        .auth
+        .update_profile(authed(
+            &admin,
+            pb::UpdateProfileRequest { pronouns: Some("they/them".into()), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(kept.profile.unwrap().effect, "sakura");
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert!(node.profile_effects);
+
+    // Off: everyone's is hidden and new ones are refused, but the pick stays.
+    let off = pb::InstanceSettings { profile_effects: false, ..Default::default() };
+    c.admin.update_settings(authed(&admin, settings_update(off, &["profile_effects"], &[]))).await.unwrap();
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert!(!node.profile_effects);
+    let get = || pb::GetProfileRequest { user_id: admin_user.id.clone() };
+    let hidden = c.auth.get_profile(authed(&admin, get())).await.unwrap().into_inner().profile.unwrap();
+    assert!(hidden.effect.is_empty());
+    let refused = c.auth.update_profile(authed(&mika, effect("stars"))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::FailedPrecondition);
+    c.auth.update_profile(authed(&mika, effect(""))).await.unwrap();
+
+    c.admin
+        .update_settings(authed(&admin, settings_update(Default::default(), &[], &["profile_effects"])))
+        .await
+        .unwrap();
+    let back = c.auth.get_profile(authed(&admin, get())).await.unwrap().into_inner().profile.unwrap();
+    assert_eq!(back.effect, "sakura");
     instance.stop().await;
 }
 

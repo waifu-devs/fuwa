@@ -17,6 +17,16 @@
 - `e2ee-wasm/`: `fuwa-e2ee` for the web app, as WebAssembly. `pnpm wasm` (in
   `web/`) builds it into `web/src/e2ee/pkg` (not committed); the wasm-bindgen
   crate and CLI versions must match.
+- `sdk/`: `@waifu-devs/fuwa`, the TypeScript SDK (its own pnpm package, like
+  `web/`; docs/sdk.md). `src/gen` is generated from `proto/fuwa/v1` with the
+  web app's buf setup plus `.js` import paths (`pnpm generate`, checked in
+  CI). `client.ts` makes the typed clients (`createFuwa`: auth, typed errors
+  from `errors.ts`, retries from `retry.ts`), `events.ts` the reconnecting
+  `EventFollower`, `agent.ts` the `Agent` (commands, mentions, typed event
+  handlers), `voice.ts` voice channels over ListenVoice/SpeakVoice (no WebRTC), `ogg.ts`
+  Ogg Opus files, `pages.ts`, `upload.ts` and `text.ts` the helpers. It never logs
+  tokens or addresses and reports nothing. `test/agent.test.ts` drives a real
+  instance (`FUWA_BIN`); new agent-facing calls get a helper and a test there.
 - `voice/`: `fuwa-voice`, the client crate programs use to hear and talk in
   voice channels (`ListenVoice` and `SpeakVoice`, no WebRTC), with the
   `parrot` example. The server's tests use it against a real instance.
@@ -25,7 +35,10 @@
   - `api/`: one file per gRPC service, all implemented on `Api`.
   - `node.rs`: the instance database (`node.db`): accounts and profiles,
     sessions (devices), two-step sign-in (TOTP secrets, backup codes, sign-in
-    tickets), notification settings, meta (the install id, the announcement).
+    tickets), notification settings, server arrangements (each person's rail
+    order and folders, `AccountService.Get/SetServerArrangement`; the web side
+    is `lib/rail.ts`, `components/RailFolder.tsx` and `hooks/use-rail-arrange.ts`),
+    meta (the install id, the announcement).
     Admins can turn an account off (`disabled_at`): it loses its sessions and
     can't sign in until it's turned back on. What belongs to a person but not to
     one server lives here; a server file keeps only a copy of what its members
@@ -401,7 +414,10 @@
     (`instance_settings/sso.rs`: the identity provider, SAML metadata read
     by `core/sso.rs`, a test sign-in in the browser), Limits, Privacy,
     Calls and Moderation, where the providers servers' smart filters ask are set up
-    and tried, over `core/instance_admin.rs`, which names every setting's
+    and tried, and Other instances (`instance_settings/federation.rs`: the
+    switch for sharing channels with other instances, this instance's key,
+    checking another instance, who it has heard from and the blocked hosts),
+    over `core/instance_admin.rs`, which names every setting's
     path and keeps unsaved edits across a save; the pages are built from
     `instance_settings/controls.rs`, the web's `settings/controls.tsx`:
     a setting with its default and reset, option cards, caps; a cached view

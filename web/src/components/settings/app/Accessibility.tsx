@@ -66,6 +66,20 @@ export function Accessibility() {
           <RoleName id="preview-mio" name="Mio" color={0x34d399} />
         </div>
       </PrefSetting>
+      <PrefSetting
+        id="others-effects"
+        title="Profile effects"
+        hint={reduceMotion(p) ? "With motion calmed, effects show as a still picture." : "Petals, stars and the like that people put on their profile cards."}
+        keys={["othersEffects"]}
+        delay={0.07}
+      >
+        <Toggle
+          checked={p.othersEffects}
+          onChange={(othersEffects) => setPrefs({ othersEffects })}
+          label="Show effects on other people's cards"
+          hint="Your own always shows to you, so you can see what others do."
+        />
+      </PrefSetting>
       <PrefSetting id="underline-links" title="Links" keys={["underlineLinks"]} delay={0.08}>
         <Toggle
           checked={p.underlineLinks}

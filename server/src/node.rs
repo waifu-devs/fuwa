@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
+use prost::Message as _;
 use tokio::sync::Mutex;
 use turso::{Connection, Row};
 
@@ -26,6 +27,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0010_sso.sql"),
     include_str!("../migrations/node/0011_regions.sql"),
     include_str!("../migrations/node/0012_federation.sql"),
+    include_str!("../migrations/node/0013_profile_effects.sql"),
+    include_str!("../migrations/node/0014_server_arrangements.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
@@ -157,6 +160,8 @@ pub struct ProfileChange {
     pub accent_color: Option<Option<i32>>,
     /// The status and when it runs out, set together.
     pub status: Option<(String, Option<i64>)>,
+    /// A profile effect's id; empty for none.
+    pub effect: Option<String>,
 }
 
 /// A device signed in to an account.
@@ -635,7 +640,7 @@ impl NodeDb {
                    accent_color = CASE WHEN ?7 IS NULL THEN accent_color WHEN ?7 < 0 THEN NULL ELSE ?7 END,
                    status = coalesce(?8, status),
                    status_expires_at = CASE WHEN ?8 IS NULL THEN status_expires_at ELSE ?9 END,
-                   updated_at = ?10
+                   updated_at = ?10, profile_effect = coalesce(?11, profile_effect)
                  WHERE id = ?1",
                 (
                     id,
@@ -648,6 +653,7 @@ impl NodeDb {
                     status,
                     status_expires_at,
                     now_ms(),
+                    change.effect.as_deref(),
                 ),
             )
             .await?;
@@ -662,7 +668,9 @@ impl NodeDb {
         let conn = self.read()?;
         query_one(
             &conn,
-            &format!("SELECT {ACCOUNT_COLUMNS}, pronouns, bio, banner_url, accent_color FROM accounts WHERE id = ?1"),
+            &format!(
+                "SELECT {ACCOUNT_COLUMNS}, pronouns, bio, banner_url, accent_color, profile_effect FROM accounts WHERE id = ?1"
+            ),
             [id],
             |row| {
                 let account = account(row)?;
@@ -673,6 +681,7 @@ impl NodeDb {
                     banner_url: row.get(ACCOUNT_COLUMN_COUNT + 2)?,
                     accent_color: row.get(ACCOUNT_COLUMN_COUNT + 3)?,
                     created_at: Some(timestamp(account.created_at)),
+                    effect: row.get(ACCOUNT_COLUMN_COUNT + 4)?,
                 })
             },
         )
@@ -1129,6 +1138,51 @@ impl NodeDb {
             Ok(())
         })
         .await
+    }
+
+    // ───────────────────────── Server arrangement ─────────────────────────
+
+    /// How someone arranged their servers, and when (ms), as stored: it can
+    /// still name servers they left since.
+    pub async fn server_arrangement(&self, account_id: &str) -> Result<(Vec<pb::ServerRailItem>, Option<i64>)> {
+        let conn = self.read()?;
+        let row = query_one(
+            &conn,
+            "SELECT items, updated_at FROM server_arrangements WHERE account_id = ?1",
+            [account_id],
+            |r| Ok((r.get::<Vec<u8>>(0)?, r.get::<i64>(1)?)),
+        )
+        .await?;
+        let Some((items, updated_at)) = row else { return Ok((Vec::new(), None)) };
+        // Written by this code from a checked request, so it always decodes;
+        // if it ever doesn't, the person just starts from the default order.
+        let items = pb::SetServerArrangementRequest::decode(items.as_slice()).map(|r| r.items).unwrap_or_default();
+        Ok((items, Some(updated_at)))
+    }
+
+    /// Replaces someone's arrangement (already checked); an empty one is
+    /// forgotten. Returns when it changed (ms).
+    pub async fn set_server_arrangement(&self, account_id: &str, items: Vec<pb::ServerRailItem>) -> Result<i64> {
+        let now = now_ms();
+        let encoded = (!items.is_empty()).then(|| pb::SetServerArrangementRequest { items }.encode_to_vec());
+        db::write(&self.db, async |conn| {
+            match &encoded {
+                Some(bytes) => {
+                    conn.execute(
+                        "INSERT INTO server_arrangements (account_id, items, updated_at) VALUES (?1, ?2, ?3)
+                         ON CONFLICT (account_id) DO UPDATE SET items = excluded.items, updated_at = excluded.updated_at",
+                        (account_id, bytes.clone(), now),
+                    )
+                    .await?;
+                }
+                None => {
+                    conn.execute("DELETE FROM server_arrangements WHERE account_id = ?1", [account_id]).await?;
+                }
+            }
+            Ok(())
+        })
+        .await?;
+        Ok(now)
     }
 
     // ───────────────────────── Split instances ─────────────────────────
@@ -1694,7 +1748,14 @@ impl NodeDb {
     /// Deletes an account and everything node.db keeps about it.
     pub async fn delete_account(&self, account_id: &str) -> Result<()> {
         db::write(&self.db, async |conn| {
-            for table in ["sessions", "backup_codes", "sign_in_tickets", "notification_settings", "upload_days"] {
+            for table in [
+                "sessions",
+                "backup_codes",
+                "sign_in_tickets",
+                "notification_settings",
+                "upload_days",
+                "server_arrangements",
+            ] {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
             }
             conn.execute("DELETE FROM accounts WHERE id = ?1", [account_id]).await?;

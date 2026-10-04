@@ -414,6 +414,14 @@ fn instance_admins_manage_every_server() {
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
     assert!(!home.path().join("book-nook.db.part").exists());
 
+    // Other instances: a key to compare, and no reaching out while federation is off.
+    let (core, k) = (app.clone(), key.clone());
+    let info = wait(&app, async move { core.federation(&k).await }).unwrap();
+    assert_eq!(info.fingerprint.split(' ').count(), 8);
+    assert!(info.peers.is_empty());
+    let (core, k) = (app.clone(), key.clone());
+    assert!(wait(&app, async move { core.check_instance(&k, "chat.example.com").await }).is_err());
+
     // Deleting it takes it off the list.
     let (core, k, id) = (app.clone(), key.clone(), server.id.clone());
     wait(&app, async move { core.delete_any_server(&k, &id).await }).unwrap();

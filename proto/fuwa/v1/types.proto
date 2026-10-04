@@ -31,6 +31,9 @@ message Node {
   bool shared_channels = 12;
   // And with servers on other instances (docs/federation.md).
   bool federation = 13;
+  // People may put an effect on their profile card (Profile.effect). While
+  // it's off, profiles come back without one and apps hide the picker.
+  bool profile_effects = 18;
   // Where this instance keeps community servers, the home region first.
   // Empty, or one region, when there's no choice to make (an instance run
   // as one process, or one whose parts are all in one place).
@@ -207,6 +210,11 @@ message Profile {
   optional int32 accent_color = 5;
   // When the account was made on this instance.
   google.protobuf.Timestamp created_at = 6;
+  // An animated effect over the profile card, by the id of one the apps
+  // ship with (docs/profile-effects.md), such as "sakura". Empty for none.
+  // Apps that don't know an id show no effect. Empty while the instance has
+  // profile effects off.
+  string effect = 7;
 }
 
 message Member {
