@@ -344,7 +344,7 @@ impl ServerService for Api {
                 // Its pictures go with it, here and wherever its uploads are kept.
                 crate::cluster::pictures::drop_all(&self.app, &sdb.id).await;
                 super::shared::tell_ended(&self.app, &sdb.id, &actor, ended).await;
-                tracing::info!(server = %sdb.id, by = %actor, "server deleted");
+                tracing::info!(server = %sdb.id, "server deleted");
                 Ok(pb::DeleteServerResponse {})
             }
             .await,
