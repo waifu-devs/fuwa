@@ -12,7 +12,7 @@
 # runs too.
 set -euo pipefail
 
-parts=(server desktop proto docker image)
+parts=(server desktop proto docker image sdk)
 
 everything() {
   for part in "${parts[@]}"; do echo "$part=true"; done
@@ -42,10 +42,10 @@ top_md() { [[ $1 != */* && $1 == *.md ]]; }
 not_for_server() {
   top_md "$1" && return 0
   case $1 in
-    docs/* | desktop/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
+    docs/* | desktop/* | sdk/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
     Dockerfile | .dockerignore | \
     .github/workflows/desktop.yml | .github/workflows/release.yml | .github/workflows/publish.yml | \
-    .github/workflows/reproducible.yml | .github/workflows/railway-config.yml) return 0 ;;
+    .github/workflows/reproducible.yml | .github/workflows/railway-config.yml | .github/workflows/sdk-release.yml) return 0 ;;
   esac
   return 1
 }
@@ -53,10 +53,10 @@ not_for_server() {
 not_for_desktop() {
   top_md "$1" && return 0
   case $1 in
-    docs/* | web/* | e2ee-wasm/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
+    docs/* | web/* | sdk/* | e2ee-wasm/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
     Cargo.lock | Dockerfile | .dockerignore | buf.yaml | buf.lock | \
     .github/workflows/desktop.yml | .github/workflows/release.yml | .github/workflows/publish.yml | \
-    .github/workflows/reproducible.yml | .github/workflows/railway-config.yml) return 0 ;;
+    .github/workflows/reproducible.yml | .github/workflows/railway-config.yml | .github/workflows/sdk-release.yml) return 0 ;;
   esac
   return 1
 }
@@ -84,15 +84,25 @@ for_docker() {
 not_for_image() {
   top_md "$1" && return 0
   case $1 in
-    docs/* | desktop/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
+    docs/* | desktop/* | sdk/* | .railway/* | deploy/* | LICENSE* | package.json | package-lock.json | \
     buf.yaml | buf.lock | \
     .github/workflows/ci.yml | .github/workflows/desktop.yml | .github/workflows/release.yml | \
-    .github/workflows/reproducible.yml | .github/workflows/railway-config.yml) return 0 ;;
+    .github/workflows/reproducible.yml | .github/workflows/railway-config.yml | .github/workflows/sdk-release.yml) return 0 ;;
   esac
   return 1
 }
 
-server=false desktop=false proto=false docker=false image=false
+# The SDK (sdk/): its own code, the protocol it's generated from, and how CI runs it.
+# Its tests run a real instance, but a server change alone doesn't run them.
+for_sdk() {
+  case $1 in
+    sdk/* | proto/* | buf.yaml | buf.lock | .github/workflows/ci.yml | .github/workflows/sdk-release.yml | \
+    .github/scripts/*) return 0 ;;
+  esac
+  return 1
+}
+
+server=false desktop=false proto=false docker=false image=false sdk=false
 count=0
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -102,7 +112,8 @@ while IFS= read -r f; do
   for_proto "$f" && proto=true
   for_docker "$f" && docker=true
   not_for_image "$f" || image=true
+  for_sdk "$f" && sdk=true
 done <<< "$files"
 # Nothing changed (an empty commit, or a merge that only moved history): run nothing.
 echo "changed files: $count" >&2
-printf 'server=%s\ndesktop=%s\nproto=%s\ndocker=%s\nimage=%s\n' "$server" "$desktop" "$proto" "$docker" "$image"
+printf 'server=%s\ndesktop=%s\nproto=%s\ndocker=%s\nimage=%s\nsdk=%s\n' "$server" "$desktop" "$proto" "$docker" "$image" "$sdk"

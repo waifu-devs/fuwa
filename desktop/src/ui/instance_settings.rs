@@ -13,6 +13,7 @@ mod accounts;
 mod announcement;
 mod calls;
 mod controls;
+mod federation;
 mod general;
 mod limits;
 mod servers;
@@ -59,6 +60,7 @@ enum Page {
     Privacy,
     Calls,
     Moderation,
+    Federation,
     Accounts,
     Servers,
     Announcement,
@@ -74,6 +76,7 @@ impl Page {
             Page::Privacy => "Privacy",
             Page::Calls => "Calls",
             Page::Moderation => "Moderation",
+            Page::Federation => "Other instances",
             Page::Accounts => "Accounts",
             Page::Servers => "Servers",
             Page::Announcement => "Announcement",
@@ -89,6 +92,7 @@ impl Page {
             Page::Privacy => "shield-check",
             Page::Calls => "audio-lines",
             Page::Moderation => "shield-alert",
+            Page::Federation => "network",
             Page::Accounts => "users",
             Page::Servers => "server",
             Page::Announcement => "megaphone",
@@ -104,6 +108,7 @@ impl Page {
             Page::Privacy => "What this instance tells Waifu Devs.",
             Page::Calls => "Voice channels and calls in direct messages.",
             Page::Moderation => "Services servers' AutoMod can ask about messages.",
+            Page::Federation => "Let servers here share channels with servers on other fuwa instances.",
             Page::Accounts => "Everyone with an account here. Make admins, reset passwords, or turn an account off.",
             Page::Servers => "Every community server here. Change one's caps, move it, save its file, or delete it.",
             Page::Announcement => "A banner at the top of the app for everyone on this instance.",
@@ -120,7 +125,16 @@ impl Page {
 const GROUPS: [(&str, &[Page]); 2] = [
     (
         "INSTANCE",
-        &[Page::General, Page::SignUps, Page::Sso, Page::Limits, Page::Privacy, Page::Calls, Page::Moderation],
+        &[
+            Page::General,
+            Page::SignUps,
+            Page::Sso,
+            Page::Limits,
+            Page::Privacy,
+            Page::Calls,
+            Page::Moderation,
+            Page::Federation,
+        ],
     ),
     ("MANAGE", &[Page::Accounts, Page::Servers, Page::Announcement]),
 ];
@@ -137,7 +151,7 @@ const TEXTS: [(&str, &str, GetText, SetText); 4] = [
 ];
 
 /// Lists typed one per line: (path, placeholder, read, write).
-const AREAS: [(&str, &str, GetText, SetText); 2] = [
+const AREAS: [(&str, &str, GetText, SetText); 3] = [
     (
         "allowed_origins",
         "https://fuwa.waifu.dev\nhttps://chat.example.com",
@@ -149,6 +163,12 @@ const AREAS: [(&str, &str, GetText, SetText); 2] = [
         "stun:stun.example.com:3478\nturn:turn.example.com:3478?transport=udp",
         |s| s.ice_urls.join("\n"),
         |s, v| s.ice_urls = v.split('\n').map(str::to_owned).collect(),
+    ),
+    (
+        "federation_blocked_hosts",
+        "spam.example.com\nchat.example.org",
+        |s| s.federation_blocked_hosts.join("\n"),
+        |s, v| s.federation_blocked_hosts = admin::hosts(&v.lines().collect::<Vec<_>>()),
     ),
 ];
 
@@ -208,6 +228,7 @@ pub struct InstanceSettingsView {
     sso: sso::Sso,
     accounts: accounts::Accounts,
     servers: servers::Servers,
+    federation: federation::Federation,
     _subscriptions: Vec<Subscription>,
     _boxes: Vec<Subscription>,
 }
@@ -233,6 +254,8 @@ impl InstanceSettingsView {
         boxes.extend(sso_subs);
         let (servers, servers_subs) = servers::Servers::new(window, cx);
         boxes.extend(servers_subs);
+        let (federation, federation_subs) = federation::Federation::new(window, cx);
+        boxes.extend(federation_subs);
         let mut view = Self {
             core,
             key,
@@ -254,6 +277,7 @@ impl InstanceSettingsView {
             sso,
             accounts,
             servers,
+            federation,
             _subscriptions: Vec::new(),
             _boxes: boxes,
         };
@@ -1427,6 +1451,7 @@ impl Render for InstanceSettingsView {
                 Page::Calls => self.calls_page(&p, window, cx),
                 Page::Privacy => self.privacy_page(&p, cx),
                 Page::Moderation => self.moderation_page(&p, window, cx),
+                Page::Federation => self.federation_page(&p, window, cx),
                 Page::Accounts | Page::Servers | Page::Announcement => div().into_any_element(),
             }
         };

@@ -1,0 +1,15 @@
+version: v2
+clean: true
+inputs:
+  # Only the client API; fuwa/cluster is the servers' internal protocol.
+  - directory: ../proto
+    paths:
+      - ../proto/fuwa/v1
+plugins:
+  # The same generator as web/, with .js import paths so the output runs in
+  # Node as ESM and CommonJS without a bundler.
+  - local: protoc-gen-es
+    out: src/gen
+    opt:
+      - target=ts
+      - import_extension=js
