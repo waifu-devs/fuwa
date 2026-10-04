@@ -764,6 +764,10 @@ impl Api {
         self.calls_on()?;
         check_session(&req.session_id)?;
         let conversation = self.app.dms()?.conversation_of(&account.id, &req.conversation_id).await?;
+        // A block stops calls as it stops messages.
+        for other in conversation.participants.iter().filter(|id| **id != account.id) {
+            self.may_message(&account.id, other, true).await?;
+        }
         let scope = voice::dm_scope(&conversation.id);
         let before = self.app.voice.get(&scope, &account.id);
         let session_id = match &before {

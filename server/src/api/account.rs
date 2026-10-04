@@ -172,6 +172,8 @@ impl Api {
         self.app.node()?.delete_account(&account.id).await?;
         // Their conversations stay for the other person in each; their devices go.
         self.app.dms()?.forget_account(&account.id).await?;
+        // Nobody keeps them as a friend, a request or a block.
+        super::friends::forget_account(&self.app, &account.id).await?;
         if let Err(err) = self.app.delete_media(&uploads).await {
             tracing::warn!(account = %account.id, error = %err, "couldn't delete a deleted account's pictures");
         }
@@ -429,6 +431,12 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
     let profile = node.profile(&account.id).await?.ok_or(Error::NotFound("account"))?;
     let sessions = node.sessions(&account.id, &caller.token_hash).await?;
     let notifications = node.notification_settings(&account.id).await?;
+    let friends = app.friends()?;
+    let links = friends.links(&account.id, now_ms()).await?;
+    let ids: Vec<&str> = links.iter().map(|l| l.other_id.as_str()).collect();
+    let names: std::collections::HashMap<String, String> =
+        node.accounts(&ids).await?.into_iter().map(|a| (a.id, a.username)).collect();
+    let friend_settings = friends.settings(&account.id).await?;
     let settings = app.settings();
     let head = json!({
         "format": "fuwa.export.v1",
@@ -472,6 +480,25 @@ async fn export(app: &Arc<App>, caller: &Caller, tx: &ExportSender) -> Result<()
             "muted_until": wire_time(&n.muted_until),
             "suppress_everyone": n.suppress_everyone,
         })).collect::<Vec<_>>(),
+        "friends": links.iter().map(|l| json!({
+            "user_id": l.other_id,
+            "username": names.get(&l.other_id),
+            "state": match l.state {
+                pb::FriendState::Friend => "friend",
+                pb::FriendState::Outgoing => "request sent",
+                pb::FriendState::Incoming => "request received",
+                pb::FriendState::Blocked => "blocked",
+                pb::FriendState::Unspecified => "none",
+            },
+            "since": time(l.created_at),
+            "expires_at": l.expires_at.map_or(Value::Null, time),
+        })).collect::<Vec<_>>(),
+        "friend_settings": {
+            "requests_from": friend_settings.requests_from().as_str_name(),
+            "direct_messages_from": friend_settings.direct_messages_from().as_str_name(),
+            "hide_online": friend_settings.hide_online,
+            "hide_mutual_friends": friend_settings.hide_mutual_friends,
+        },
     });
     let mut head = serde_json::to_string_pretty(&head).map_err(|err| Error::internal(err.to_string()))?;
     head.truncate(head.trim_end().len() - 1); // the closing brace, reopened for the servers

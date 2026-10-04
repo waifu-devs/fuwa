@@ -10,6 +10,7 @@ import { ChannelService, SharedChannelService } from "@/gen/fuwa/v1/channel_pb";
 import { DirectMessageService } from "@/gen/fuwa/v1/dm_pb";
 import { EmojiService } from "@/gen/fuwa/v1/emoji_pb";
 import { EventService } from "@/gen/fuwa/v1/event_pb";
+import { FriendService } from "@/gen/fuwa/v1/friend_pb";
 import { InviteService } from "@/gen/fuwa/v1/invite_pb";
 import { JoinService } from "@/gen/fuwa/v1/join_pb";
 import { MediaService } from "@/gen/fuwa/v1/media_pb";
@@ -37,6 +38,7 @@ export type Api = {
   invites: Client<typeof InviteService>;
   join: Client<typeof JoinService>;
   dms: Client<typeof DirectMessageService>;
+  friends: Client<typeof FriendService>;
   secure: Client<typeof SecureChannelService>;
   automod: Client<typeof AutoModService>;
   emojis: Client<typeof EmojiService>;
@@ -73,6 +75,7 @@ export function makeApi(url: string, token: () => string | null): Api {
     invites: createClient(InviteService, transport),
     join: createClient(JoinService, transport),
     dms: createClient(DirectMessageService, transport),
+    friends: createClient(FriendService, transport),
     secure: createClient(SecureChannelService, transport),
     automod: createClient(AutoModService, transport),
     emojis: createClient(EmojiService, transport),

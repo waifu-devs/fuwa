@@ -26,6 +26,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0010_sso.sql"),
     include_str!("../migrations/node/0011_regions.sql"),
     include_str!("../migrations/node/0012_federation.sql"),
+    include_str!("../migrations/node/0013_friends.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
@@ -608,6 +609,13 @@ impl NodeDb {
             |row| Ok((account(row)?, row.get::<Option<String>>(ACCOUNT_COLUMN_COUNT)?.unwrap_or_default())),
         )
         .await
+    }
+
+    /// Any kind of account, by username (lowercase).
+    pub async fn account_by_username(&self, username: &str) -> Result<Option<Account>> {
+        let conn = self.read()?;
+        query_one(&conn, &format!("SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE username = ?1"), [username], account)
+            .await
     }
 
     pub async fn account(&self, id: &str) -> Result<Option<Account>> {

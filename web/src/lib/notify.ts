@@ -120,6 +120,41 @@ export function onSecureMessage(key: string, serverId: string, channelId: string
   notify(inst, serverId, channelId, authorId, content, mention);
 }
 
+type OpenFriends = (instance: string) => void;
+let openFriends: OpenFriends | null = null;
+
+/** Where clicking a friend request's notification goes. */
+export const setFriendsNotificationTarget = (open: OpenFriends) => {
+  openFriends = open;
+};
+
+/**
+ * Someone asked you to be friends, or took your request: a chime and a
+ * toast, and on the desktop while you're elsewhere.
+ */
+export function onFriendNews(key: string, user: User | undefined, what: "asked" | "accepted") {
+  const name = displayName(user);
+  const text = what === "asked" ? `${name} wants to be friends` : `${name} accepted your friend request`;
+  playSome("mention", 600);
+  if (!document.hidden && document.hasFocus()) {
+    toast(text);
+    return;
+  }
+  const p = getPrefs();
+  if (!p.desktopNotifications || (p.streamer && p.streamerMuteNotifications)) return;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    const n = new Notification(text, { icon: "/favicon.svg", tag: `friend-${user?.id ?? ""}` });
+    n.onclick = () => {
+      window.focus();
+      openFriends?.(key);
+      n.close();
+    };
+  } catch {
+    // Some browsers only allow notifications from a service worker; stay quiet there.
+  }
+}
+
 /** Tells you when an owner or admin took you out of a server. Called with its name, which is gone from the store by then. */
 export function onRemoved(serverName: string, reason: LeaveReason) {
   if (reason === LeaveReason.KICKED) toast(`You were removed from ${serverName}`);

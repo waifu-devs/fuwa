@@ -109,6 +109,12 @@ impl Api {
         Ok(OnDevice { account: caller.account, device })
     }
 
+    /// Someone's friends, who may open conversations with them without a
+    /// server in common.
+    async fn friend_set(&self, account_id: &str) -> Result<HashSet<String>> {
+        Ok(self.app.friends()?.friend_ids(account_id).await?.into_iter().collect())
+    }
+
     /// The devices of these accounts whose sessions are still signed in.
     async fn live_devices(&self, account_ids: &[&str]) -> Result<Vec<DeviceRow>> {
         let live = self.app.node()?.live_session_ids(Some(account_ids)).await?;
@@ -212,12 +218,19 @@ impl Api {
             return Err(Error::invalid(format!("ask about at most {MAX_LOOKUPS} people at once")));
         }
         let partners = self.app.dms()?.partners(&account.id).await?;
+        let friends = self.friend_set(&account.id).await?;
         let mut ids: Vec<&str> = req.user_ids.iter().map(String::as_str).collect();
         ids.sort_unstable();
         ids.dedup();
         for &id in &ids {
-            if id != account.id && !partners.contains(id) && !self.app.index.share_a_server(&account.id, id) {
-                return Err(Error::denied("you can only see the devices of people you share a server with"));
+            if id != account.id
+                && !partners.contains(id)
+                && !friends.contains(id)
+                && !self.app.index.share_a_server(&account.id, id)
+            {
+                return Err(Error::denied(
+                    "you can only see the devices of friends and people you share a server with",
+                ));
             }
         }
         let devices = self.live_devices(&ids).await?;
@@ -235,18 +248,20 @@ impl Api {
         }
         let dms = self.app.dms()?;
         let partners = dms.partners(&account.id).await?;
+        let friends = self.friend_set(&account.id).await?;
         let mut ids: Vec<&str> = req.device_ids.iter().map(String::as_str).collect();
         ids.sort_unstable();
         ids.dedup();
         let devices = dms.devices(&ids).await?;
         // Secure channels add the devices of people who share a server with
-        // you, the same people you could open a conversation with.
+        // you; those and your friends are who you could open a conversation with.
         if devices.iter().any(|device| {
             device.account_id != account.id
                 && !partners.contains(&device.account_id)
+                && !friends.contains(&device.account_id)
                 && !self.app.index.share_a_server(&account.id, &device.account_id)
         }) {
-            return Err(Error::denied("you can only add the devices of people you share a server with"));
+            return Err(Error::denied("you can only add the devices of friends and people you share a server with"));
         }
         let mut owners: Vec<&str> = devices.iter().map(|device| device.account_id.as_str()).collect();
         owners.sort_unstable();
@@ -290,9 +305,10 @@ impl Api {
             return Err(Error::invalid("you can't start a conversation with yourself"));
         }
         let dms = self.app.dms()?;
-        if !self.app.index.share_a_server(&account.id, with) && !dms.partners(&account.id).await?.contains(with) {
-            return Err(Error::denied("you can only message people you share a server with"));
-        }
+        let existing = dms.partners(&account.id).await?.contains(with);
+        // Who may start one is theirs to say (friends, people in a server
+        // with them, nobody new), and a block stops even an old one.
+        self.may_message(&account.id, with, existing).await?;
         let other = self.app.node()?.account(with).await?.ok_or(Error::NotFound("user"))?;
         if account.kind == pb::AccountKind::Agent || other.kind == pb::AccountKind::Agent {
             return Err(Error::FailedPrecondition(AGENTS_HAVE_NO_DMS.into()));
@@ -390,6 +406,9 @@ impl Api {
         }
         if conversation.epoch == 0 {
             return Err(Error::FailedPrecondition("add the conversation's devices before sending".into()));
+        }
+        for other in conversation.participants.iter().filter(|id| **id != account.id) {
+            self.may_message(&account.id, other, true).await?;
         }
         let record = dms
             .append(&NewRecord {
