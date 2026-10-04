@@ -897,7 +897,7 @@ impl MessageService for Api {
                     if !req.thread_id.is_empty() {
                         return Err(Error::NotFound("thread"));
                     }
-                    let guest = shared::guest_of(&conn, &sdb.id, &account, &access, &link).await?;
+                    let guest = shared::guest_of(&self.app, &conn, &sdb.id, &account, &access, &link).await?;
                     return shared::guest_list(&self.app, &sdb.id, &link, guest, &req).await;
                 }
                 let mut parent = None;

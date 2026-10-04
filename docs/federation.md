@@ -132,7 +132,8 @@ On "Other instances" in Instance settings (`GetFederation`,
   instance's host ("Home · chat.example.com"). How this instance's own
   people look is never taken from the other: a home there can only name
   people of the guest server, shown as their own instance has them. People
-  leave an instance as their id, username, display name and kind only.
+  leave an instance as their id, username, display name, kind and avatar
+  only.
 - A guest server on another instance counts as one sender at the home: its
   people together send at most `FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE`
   messages a minute, it brings at most `FUWA_LIMIT_SHARED_REMOTE_PEOPLE`
@@ -145,10 +146,15 @@ On "Other instances" in Instance settings (`GetFederation`,
   512 events wait for one guest server, none longer than a minute. When the
   home's instance can't be reached, the guest's people are told "can't
   reach <host> right now" and nothing is sent.
-- Nothing from the other instance is fetched by apps: its servers' icons,
-  people's avatars and link previews' pictures aren't kept (pictures come
-  through each instance's own proxy later), a link preview keeps only its
-  words and an https link, and files can't be sent across instances yet.
+- Nothing from the other instance is fetched by apps. Its pictures (servers'
+  icons, people's avatars, webhooks' pictures, custom emoji, GIFs and link
+  previews' pictures) are shown through the reader's own instance's picture
+  proxy (`/media/outside/`), which fetches them from the other instance
+  without anything about the reader. Only pictures on the other instance
+  itself are taken (a link anywhere else is dropped), and an instance sends
+  only its own. A link preview keeps its words, an https link and its
+  pictures; threads stay with their server, and files can't be sent across
+  instances yet.
 - Stored in server migration 0020: `instance` and `instance_fingerprint` on
   `channel_guests` and `channel_links`, and `other_instances` on
   `share_codes`.
@@ -162,4 +168,4 @@ who talks to whom.
 
 ## Next
 
-Pictures through each reader's own instance, blocking that ends shares, key rotation, and attachments. The plan is in the shared channels phase 2 design.
+Blocking that ends shares, key rotation, and attachments. The plan is in the shared channels phase 2 design.

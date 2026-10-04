@@ -855,7 +855,9 @@ pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedR
     crate::reports::server_timing("federation:shared", started.elapsed());
     let reply = match answer.answer {
         Some(fpb::response::Answer::Shared(reply)) => {
-            crate::api::shared_returned(&call, *reply, &origin, &own, &fingerprint(&peer.public_key))?
+            crate::api::shared_returned(&call, *reply, &origin, &own, &fingerprint(&peer.public_key), &|url| {
+                app.picture_link(url)
+            })?
         }
         _ => return Err(Error::Unavailable(format!("{}'s answer didn't read", display(&origin)))),
     };
@@ -1071,8 +1073,10 @@ impl fpb::federation_service_server::FederationService for Service {
                 fpb::Response { answer: Some(fpb::response::Answer::Pong(fpb::Pong {})) }
             }
             Some(fpb::request::Call::Shared(call)) => {
-                let call =
-                    crate::api::shared_arrived(*call, &from, &own, &fingerprint(&public_key)).map_err(Status::from)?;
+                let call = crate::api::shared_arrived(*call, &from, &own, &fingerprint(&public_key), &|url| {
+                    self.0.picture_link(url)
+                })
+                .map_err(Status::from)?;
                 if first_contact && !self.0.federation.take_share(&format!("in:{}", call.server_id)) {
                     return Err(Status::from(shares_capped()));
                 }

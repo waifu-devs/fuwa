@@ -7797,6 +7797,15 @@ async fn channels_shared_across_instances() {
         .await
         .unwrap()
         .into_inner();
+    let avatar = upload(&mut ca, &a, &juan, pb::MediaPurpose::Avatar, png(64, 64)).await;
+    assert!(avatar.starts_with(&origin_a));
+    ca.auth
+        .update_profile(authed(
+            &juan,
+            pb::UpdateProfileRequest { avatar_url: Some(avatar.clone()), ..Default::default() },
+        ))
+        .await
+        .unwrap();
     send(&mut ca, &juan, &home, &dev.id, "@everyone hello from home").await.unwrap();
     let live = next_message(&mut stream).await;
     assert_eq!(live.content, "@everyone hello from home");
@@ -7805,7 +7814,10 @@ async fn channels_shared_across_instances() {
     assert_eq!(live.author_id, format!("{}@{origin_a}", juan_user.id));
     let author = live.shared.clone().unwrap();
     assert_eq!(author.user.as_ref().unwrap().username, "juan");
-    assert!(author.user.unwrap().avatar_url.is_empty(), "nothing to fetch from the other instance");
+    // Pictures come through the reader's own instance, never straight from the other.
+    let shown_avatar = author.user.unwrap().avatar_url;
+    assert!(shown_avatar.starts_with(&format!("{origin_b}/media/outside/")), "{shown_avatar}");
+    assert!(shown_avatar.ends_with(&avatar.rsplit('/').next().unwrap().to_string()), "{shown_avatar}");
     let from = author.server.unwrap();
     assert_eq!((from.id, from.name, from.instance), (format!("{home}@{origin_a}"), "Home".into(), a.addr.to_string()));
 
