@@ -96,8 +96,10 @@ instance's Servers page). The directory runs the move:
 4. The old shard lets go: requests for the server are sent on to the new
    shard, open live streams follow it there from where they were, and the old
    shard deletes its files, its recordings, its pictures and its replica's
-   copies (only
-   those, if both shards share a bucket).
+   copies (only those, if both shards share a bucket). If its bucket can't
+   be reached then, it notes the copies are owed and tries again every ten
+   minutes, across restarts, until they're gone (unless the server has come
+   back to it meanwhile).
 
 Changes made during the move wait at the gateway (the same way they wait out
 a deploy, up to 30 seconds) and then go through on the new shard, so for most
