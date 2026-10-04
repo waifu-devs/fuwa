@@ -125,8 +125,8 @@ impl App {
             let ids = self.node()?.media_of_server(server_id).await?;
             self.delete_media(&ids).await
         };
-        if let Err(err) = dropped.await {
-            tracing::warn!(server = %server_id, error = %err, "couldn't delete a deleted server's pictures");
+        if dropped.await.is_err() {
+            tracing::warn!(server = %server_id, "couldn't delete a deleted server's pictures");
             crate::reports::server_error("server_media_drop", Some("cluster::calls"));
         }
     }
