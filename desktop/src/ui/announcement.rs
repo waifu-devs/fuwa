@@ -106,14 +106,12 @@ pub fn banner(
     );
     let ends = ends_ms(a).map(|at| (ends_label(at, now), stamp_label(at, now)));
     let words = motion::rise(
-        div()
-            .min_w_0()
-            .flex_shrink(1.0)
-            .text_sm()
-            .font_weight(FontWeight::BOLD)
-            .text_color(fg)
-            .line_clamp(2)
-            .child(crate::ui::text::markdown(SharedString::from(format!("{id}-text-{}", a.id)), a.text.clone())),
+        div().min_w_0().flex_shrink(1.0).text_sm().font_weight(FontWeight::BOLD).text_color(fg).line_clamp(2).child(
+            crate::ui::text::markdown(
+                SharedString::from(format!("{id}-text-{}", a.id)),
+                crate::ui::text::images_as_links(&a.text),
+            ),
+        ),
         SharedString::from(format!("{id}-words-{}|{}", a.id, a.text.len())),
         Duration::from_millis(80),
         8.0,
