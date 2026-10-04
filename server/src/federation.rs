@@ -790,6 +790,13 @@ async fn reach(app: &App, address: &str, pin_new: bool, hello: bool) -> Result<(
 /// This instance's origin and another's, if this one may talk to it:
 /// federation is on, and it's someone else, not on the block list.
 fn allowed(app: &App, address: &str) -> Result<(String, String)> {
+    allowed_unless_farewell(app, address, false)
+}
+
+/// As [`allowed`], but a `farewell` (telling an instance a share with it
+/// ended) still goes to one on the block list: blocking ends its shares on
+/// both sides.
+fn allowed_unless_farewell(app: &App, address: &str, farewell: bool) -> Result<(String, String)> {
     if !app.settings().federation {
         return Err(Error::FailedPrecondition("federation is off on this instance".into()));
     }
@@ -798,7 +805,7 @@ fn allowed(app: &App, address: &str) -> Result<(String, String)> {
     if origin == own {
         return Err(Error::invalid("that's this instance's own address"));
     }
-    if blocked(app, &origin) {
+    if blocked(app, &origin) && !farewell {
         return Err(Error::FailedPrecondition(format!("{} is on this instance's block list", display(&origin))));
     }
     Ok((own, origin))
@@ -821,7 +828,8 @@ pub async fn shared(app: &App, mut call: cpb::SharedCall) -> Result<cpb::SharedR
         .split_once('@')
         .ok_or(Error::NotFound("server"))
         .map(|(id, at)| (id.to_string(), at.to_string()))?;
-    let (own, origin) = allowed(app, &address)?;
+    let farewell = matches!(&call.call, Some(cpb::shared_call::Call::Ended(_) | cpb::shared_call::Call::Left(_)));
+    let (own, origin) = allowed_unless_farewell(app, &address, farewell)?;
     let asker = match &call.call {
         Some(cpb::shared_call::Call::Lookup(lookup)) => Some(lookup.guest_server_id.as_str()),
         Some(cpb::shared_call::Call::Ask(ask)) => ask.guest.as_ref().map(|guest| guest.id.as_str()),

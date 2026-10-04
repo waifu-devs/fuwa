@@ -99,7 +99,11 @@ On "Other instances" in Instance settings (`GetFederation`,
 - the instances this one knows: origin, fingerprint, when it was last heard
   from, and whether it's blocked;
 - **Blocked instances** (`federation_blocked_hosts`, field 35): host names
-  this instance never calls and whose calls it turns away.
+  this instance never calls and whose calls it turns away. Blocking one
+  ends every share with it, as an instance admin ending each would: it's
+  told each share ended (the only call that still goes to a blocked
+  instance), and shares asked or approved before it was unblocked stay
+  ended.
 
 ## Sharing a channel with another instance
 
@@ -168,4 +172,4 @@ who talks to whom.
 
 ## Next
 
-Blocking that ends shares, key rotation, and attachments. The plan is in the shared channels phase 2 design.
+Key rotation, and attachments. The plan is in the shared channels phase 2 design.

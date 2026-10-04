@@ -7954,25 +7954,54 @@ async fn channels_shared_across_instances() {
         .unwrap_err();
     assert_eq!(refused.code(), Code::FailedPrecondition);
 
-    // With the home's instance down, the guest hears why.
     let on = pb::InstanceSettings { federation: true, ..Default::default() };
     ca.admin.update_settings(authed(&juan, settings_update(on, &["federation"], &[]))).await.unwrap();
-    let code = make_code(&ca, true).await;
-    let asked = cb
-        .shared
-        .accept_share(authed(&mika, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
-        .await
-        .unwrap()
-        .into_inner()
-        .connection
-        .unwrap();
-    ca.shared
-        .review_share(authed(
-            &juan,
-            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
-        ))
-        .await
-        .unwrap();
+    // Blocking an instance ends its shares on both sides; then, unblocked, the
+    // channel is shared again.
+    for block in [true, false] {
+        let code = make_code(&ca, true).await;
+        let asked = cb
+            .shared
+            .accept_share(authed(
+                &mika,
+                pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() },
+            ))
+            .await
+            .unwrap()
+            .into_inner()
+            .connection
+            .unwrap();
+        ca.shared
+            .review_share(authed(
+                &juan,
+                pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
+            ))
+            .await
+            .unwrap();
+        if !block {
+            continue;
+        }
+        let blocked = |hosts: Vec<String>| {
+            let settings = pb::InstanceSettings { federation_blocked_hosts: hosts, ..Default::default() };
+            authed(&juan, settings_update(settings, &["federation_blocked_hosts"], &[]))
+        };
+        ca.admin.update_settings(blocked(vec![b.addr.ip().to_string()])).await.unwrap();
+        let mut ended = false;
+        for _ in 0..100 {
+            let at_home = connections(&mut ca, &juan, &home).await.connections;
+            let at_guest = connections(&mut cb, &mika, &guest).await.connections;
+            if !at_home.iter().any(|c| c.instance == b.addr.to_string())
+                && !at_guest.iter().any(|c| c.instance == a.addr.to_string())
+            {
+                ended = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(ended, "blocking ends the share at home and at the guest");
+        ca.admin.update_settings(blocked(vec![])).await.unwrap();
+    }
+    // With the home's instance down, the guest hears why.
     let shown = list_channels(&mut cb, &mika, &guest)
         .await
         .into_iter()

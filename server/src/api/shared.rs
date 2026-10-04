@@ -2349,9 +2349,66 @@ fn spawn_queue(app: Arc<App>) -> mpsc::Sender<Outgoing> {
     tx
 }
 
+// ─────────────── Blocked instances ───────────────
+
+/// Ends every share with an instance on the block list, on both sides: at
+/// start-up, and each time a host joins the list. Runs where servers are
+/// kept. The other instance is told the share ended (the only call that
+/// still goes to a blocked instance); nothing from it is taken any more.
+fn spawn_block_sweeper(app: Arc<App>) {
+    let mut settings = app.watch_settings();
+    tokio::spawn(async move {
+        let mut swept: Vec<String> = Vec::new();
+        loop {
+            let blocked = settings.borrow_and_update().federation_blocked_hosts.clone();
+            if blocked.iter().any(|host| !swept.contains(host)) {
+                for sdb in app.servers.all() {
+                    if end_blocked(&app, &sdb).await.is_err() {
+                        crate::reports::server_error("shared_block", Some("SharedChannels/block"));
+                        tracing::warn!(server = %sdb.id, "couldn't end a server's shares with a blocked instance");
+                    }
+                }
+            }
+            swept = blocked;
+            tokio::select! {
+                changed = settings.changed() => if changed.is_err() { break },
+                () = app.shutdown.cancelled() => break,
+            }
+        }
+    });
+}
+
+/// Ends one server's shares with blocked instances, as an instance admin
+/// ending them would.
+async fn end_blocked(app: &Arc<App>, sdb: &ServerDb) -> Result<()> {
+    let conn = sdb.read()?;
+    let guests = query_all(
+        &conn,
+        &format!("SELECT {GUEST_COLUMNS} FROM channel_guests WHERE instance IS NOT NULL"),
+        (),
+        guest_row,
+    )
+    .await?;
+    let links =
+        query_all(&conn, &format!("SELECT {LINK_COLUMNS} FROM channel_links WHERE instance IS NOT NULL"), (), link_row)
+            .await?;
+    drop(conn);
+    let gone = guests
+        .into_iter()
+        .map(|row| (row.id, row.instance))
+        .chain(links.into_iter().map(|row| (row.id, row.instance)))
+        .filter(|(_, instance)| instance.origin.as_deref().is_some_and(|origin| federation::blocked(app, origin)));
+    for (connection_id, _) in gone {
+        Box::pin(end_connection(app, sdb, "", &connection_id, true)).await?;
+    }
+    Ok(())
+}
+
 /// Passes what happens in the shared channels kept here on to the servers
-/// that show them. Runs where servers are kept.
+/// that show them, and ends shares with blocked instances. Runs where
+/// servers are kept.
 pub fn spawn_shared_fanout(app: Arc<App>) {
+    spawn_block_sweeper(app.clone());
     let mut events = app.hub.shared_tap();
     tokio::spawn(async move {
         let mut known: HashMap<String, Arc<HashMap<String, Vec<Target>>>> = HashMap::new();
