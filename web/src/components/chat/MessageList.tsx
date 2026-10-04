@@ -36,6 +36,7 @@ import {
   MessageKind,
   Permission,
   type Channel,
+  type Emoji,
   type Member,
   type Message,
   type MessageWebhook,
@@ -49,10 +50,10 @@ import { doneJumping, useJump } from "@/fuwa/search";
 import { AlsoSentNote, RepliesRow } from "@/components/chat/Threads";
 import { useThreadOpener } from "@/lib/threads";
 import { sendsMessage } from "@/components/chat/Composer";
-import { Mention, remarkMentions, ServerLookProvider, useRoleColor, useServerLook, type ServerLook } from "@/components/chat/mentions";
+import { Mention, MessageEmojis, remarkMentions, ServerLookProvider, useRoleColor, useServerLook, type ServerLook } from "@/components/chat/mentions";
 import { Markdown, type MarkdownExtension } from "@/components/Markdown";
-import { encodeEmoji } from "@/components/chat/MentionPicker";
 import { EMOJI_TOKEN, onlyEmoji } from "@/lib/emoji";
+import { encodeEmoji, useCatalog } from "@/lib/emoji-catalog";
 import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
 import { ProfilePopover } from "@/components/ProfilePopover";
@@ -144,6 +145,11 @@ export const MessageList = forwardRef<
   const pending = useFuwa((s) => s.instances[instanceKey]?.pending[at] ?? EMPTY);
   const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? EMPTY);
   const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[serverId] ?? EMPTY);
+  const catalog = useCatalog(instanceKey, serverId);
+  const otherEmojis = useMemo(
+    () => new Map([...catalog.byId].filter(([, c]) => !c.here).map(([id, c]) => [id, c.emoji])),
+    [catalog],
+  );
   const users = useFuwa((s) => s.instances[instanceKey]?.users);
   const me = useFuwa((s) => s.instances[instanceKey]?.me ?? undefined);
   const ownerId = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.ownerId ?? "");
@@ -207,9 +213,10 @@ export const MessageList = forwardRef<
       roles,
       members,
       emojis,
+      otherEmojis,
       me: me ? { id: me.id, username: me.username, roleIds: myRoleIds ?? [] } : undefined,
     }),
-    [instanceKey, ownerId, roles, members, emojis, me, myRoleIds],
+    [instanceKey, ownerId, roles, members, emojis, otherEmojis, me, myRoleIds],
   );
 
   const actions = useMemo<RowActions>(
@@ -217,7 +224,7 @@ export const MessageList = forwardRef<
       edit: setEditing,
       cancelEdit: () => setEditing(null),
       save: async (id, content) => {
-        await run(editMessage(instanceKey, serverId, channel.id, id, encodeEmoji(content, emojis)));
+        await run(editMessage(instanceKey, serverId, channel.id, id, encodeEmoji(content, catalog)));
         setEditing(null);
       },
       remove: (id) => run(deleteMessage(instanceKey, serverId, channel.id, id)),
@@ -233,7 +240,7 @@ export const MessageList = forwardRef<
       },
       thread: (id) => openThread?.(id),
     }),
-    [instanceKey, serverId, channel.id, channel.name, emojis, at, threadId, openThread],
+    [instanceKey, serverId, channel.id, channel.name, catalog, at, threadId, openThread],
   );
 
   const rows = useMemo(() => {
@@ -636,11 +643,24 @@ export function MessageLine({
 const CHAT: MarkdownExtension = { remarkPlugins: [remarkMentions], components: { "fuwa-mention": Mention } };
 
 /** A message's text, mentions and all; in compact display its first paragraph runs on after the name. */
-export function MessageBody({ content, display, className }: { content: string; display: MessageDisplay; className?: string }) {
+export function MessageBody({
+  content,
+  emojis,
+  display,
+  className,
+}: {
+  content: string;
+  /** Emoji from other servers the message brought along. */
+  emojis?: Emoji[];
+  display: MessageDisplay;
+  className?: string;
+}) {
   return (
-    <Markdown className={cn("chat", display === "compact" && "inline-first", onlyEmoji(content) && "jumbo", className)} extension={CHAT}>
-      {content}
-    </Markdown>
+    <MessageEmojis value={emojis}>
+      <Markdown className={cn("chat", display === "compact" && "inline-first", onlyEmoji(content) && "jumbo", className)} extension={CHAT}>
+        {content}
+      </Markdown>
+    </MessageEmojis>
   );
 }
 
@@ -777,7 +797,7 @@ const MessageRow = memo(function MessageRow({
         ) : (
           <>
             {message.threadId && <AlsoSentNote message={message} inThread={inThread} onOpen={actions.thread} />}
-            {message.content && <MessageBody content={message.content} display={display} />}
+            {message.content && <MessageBody content={message.content} emojis={message.emojis} display={display} />}
             {edited && (
               <span className="text-[0.7rem] text-muted-foreground" title={formatFull(toDate(message.editedAt))}>
                 {" "}

@@ -1641,6 +1641,18 @@ pub async fn load_emojis(conn: &Connection, server_id: &str) -> Result<Vec<pb::E
         .await
 }
 
+/// The server's emoji with these ids, the ones that exist.
+pub async fn load_emojis_by_id(conn: &Connection, server_id: &str, ids: &[String]) -> Result<Vec<pb::Emoji>> {
+    let mut found = Vec::new();
+    for id in ids {
+        let sql = format!("SELECT {EMOJI_COLUMNS} FROM emojis WHERE id = ?1");
+        if let Some(emoji) = query_one(conn, &sql, [id.as_str()], emoji_row(server_id)).await? {
+            found.push(emoji);
+        }
+    }
+    Ok(found)
+}
+
 /// The server's AutoMod rules, oldest first.
 /// A new, empty server file at `path`, for tests that work in one.
 #[cfg(test)]
