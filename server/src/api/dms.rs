@@ -65,15 +65,23 @@ async fn blocked_at(
     viewer: &str,
     conversation: &ConversationRow,
 ) -> Result<Option<std::result::Result<i64, ()>>> {
-    let mut at: Option<i64> = None;
-    for other in conversation.participants.iter().filter(|id| *id != viewer) {
-        if let Some(link) = friends.link(viewer, other, 0).await?
-            && link.state == pb::FriendState::Blocked
-        {
-            at = Some(at.map_or(link.created_at, |at| at.min(link.created_at)));
-        }
-    }
-    Ok(at.map(|at| if conversation.created_at > at { Err(()) } else { Ok(at) }))
+    Ok(blocked_in(&friends.blocks(viewer).await?, viewer, conversation))
+}
+
+/// [`blocked_at`] from the blocks `viewer` made, read once for many
+/// conversations.
+fn blocked_in(
+    blocks: &HashMap<String, i64>,
+    viewer: &str,
+    conversation: &ConversationRow,
+) -> Option<std::result::Result<i64, ()>> {
+    let at = conversation
+        .participants
+        .iter()
+        .filter(|id| *id != viewer)
+        .filter_map(|other| blocks.get(other).copied())
+        .min()?;
+    Some(if conversation.created_at > at { Err(()) } else { Ok(at) })
 }
 
 /// Keeps what someone `viewer` blocked sent out of what they read: a
@@ -181,10 +189,10 @@ impl Api {
     /// blocked stays where it was when they blocked them (what's sent since
     /// is kept from them), and one that person opened since isn't there.
     async fn as_seen_by(&self, account_id: &str, mut rows: Vec<ConversationRow>) -> Result<Vec<ConversationRow>> {
-        let friends = self.app.friends()?;
+        let blocks = self.app.friends()?.blocks(account_id).await?;
         let mut kept = Vec::with_capacity(rows.len());
         for mut row in rows.drain(..) {
-            match blocked_at(friends, account_id, &row).await? {
+            match blocked_in(&blocks, account_id, &row) {
                 Some(Err(())) => continue,
                 Some(Ok(at)) => row.updated_at = row.updated_at.min(at),
                 None => {}
