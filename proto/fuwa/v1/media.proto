@@ -42,6 +42,8 @@ enum MediaPurpose {
   // .CreateSealedUpload): ciphertext the instance keeps but can't open.
   // Not reserved through CreateUpload.
   MEDIA_PURPOSE_SEALED = 6;
+  // A GIF of your own to send (GifService.SaveGif keeps it). Only image/gif.
+  MEDIA_PURPOSE_GIF = 8;
 }
 
 // A stored file.

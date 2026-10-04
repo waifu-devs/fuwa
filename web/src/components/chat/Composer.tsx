@@ -12,6 +12,7 @@ import { useContextMenu } from "@/components/ContextMenu";
 import { composerMenu } from "@/components/menus/composer";
 import { COMPOSER_INSERT } from "@/components/menus/member";
 import { useCatalog } from "@/lib/emoji-catalog";
+import { GifPicker } from "@/components/chat/GifPicker";
 import { RulesDialog } from "@/components/join/Rules";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
@@ -303,6 +304,7 @@ export function Composer({
             </motion.button>
           )}
         </EmojiPicker>
+        <GifPicker instanceKey={instanceKey} serverId={serverId} channelId={channelId} />
         <motion.button
           type="button"
           onClick={send}

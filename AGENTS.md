@@ -168,6 +168,17 @@
     the message (`execute_webhook`): its `author_id` is the webhook's id and
     `Message.webhook` carries the name and picture it posted under. Webhook
     messages never ping @everyone, @here or roles, and nobody can edit them.
+  - GIFs (`docs/gifs.md` is the design): `gifs/` asks the instance's provider
+    (`giphy.rs`, `klipy.rs` behind `Kind`; the `gifs` setting holds the key,
+    never sent to apps, gateways or shards; another provider never gets it) with no forwarding headers, caches answers by a
+    SHA-256 key, and hands results back as signed tokens with previews
+    through the picture proxy. `gifs/store.rs` stores a picked GIF once
+    (`gif_files`, media owner "gifs", metadata stripped) and keeps saved GIFs;
+    `api/gifs.rs` is `GifService` (directory). `MessageGif.seal` is an HMAC
+    the server checks in `send_message` and clears. `media/still.rs` draws a
+    GIF's first frame (for AutoMod). Web: `fuwa/gifs.ts`,
+    `components/chat/GifPicker.tsx` (button) and `GifPanel.tsx` (the picker,
+    a lazy file).
   - `mcp/`: the instance as an MCP server for agents (`docs/mcp.md`), at
     `/mcp` and `/.well-known/mcp.json`: stateless Streamable HTTP, one
     JSON-RPC message per POST, plain JSON back, no sessions. Agent tokens
