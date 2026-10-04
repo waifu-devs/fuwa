@@ -14,6 +14,7 @@ import {
   SharedHistorySchema,
   SignedContentSchema,
   SignedPayloadSchema,
+  ThreadChangeSchema,
   type Conversation,
   type ConversationRecord,
   type DirectMessageContent,
@@ -29,6 +30,7 @@ import { accessOf, hasIn } from "@/lib/permissions";
 import { reportError } from "@/lib/reports";
 import { BackupSync } from "./backup";
 import * as history from "./history";
+import * as threads from "./threads";
 import * as vault from "./vault";
 import { toVoiceMessage, voiceLength, voiceOf } from "./voice";
 import { loadE2ee, type Commit, type Device, type E2ee, type Processed, type WasmMember } from "./wasm";
@@ -174,8 +176,9 @@ const ref = (m: WasmMember): vault.DeviceRef => ({ userId: m.userId, deviceId: m
 
 /** The plaintext of a message: what only the conversation's devices see. */
 export type Content =
-  | { text: string; replyTo?: number }
+  | { text: string; replyTo?: number; thread?: number; inChannel?: boolean }
   | { edit: number; text: string }
+  | { lock: number; locked: boolean }
   | { voice: vault.Voice; replyTo?: number };
 
 function contentOf(content: Content): DirectMessageContent {
@@ -184,8 +187,45 @@ function contentOf(content: Content): DirectMessageContent {
       ? { case: "voice", value: toVoiceMessage(content.voice, content.replyTo) }
       : "edit" in content
         ? { case: "edit", value: create(DirectMessageEditSchema, { sequence: BigInt(content.edit), content: content.text }) }
-        : { case: "text", value: create(DirectMessageTextSchema, { content: content.text, replyToSequence: BigInt(content.replyTo ?? 0) }) };
+        : "lock" in content
+          ? { case: "thread", value: create(ThreadChangeSchema, { parentSequence: BigInt(content.lock), locked: content.locked }) }
+          : {
+              case: "text",
+              value: create(DirectMessageTextSchema, {
+                content: content.text,
+                replyToSequence: BigInt(content.replyTo ?? 0),
+                threadSequence: BigInt(content.thread ?? 0),
+                inChannel: !!content.inChannel,
+              }),
+            };
   return create(DirectMessageContentSchema, { body });
+}
+
+/** A thread reply's place, from what its sender wrote; nothing for a line that isn't one. */
+function threadFields(text: { threadSequence: bigint; inChannel: boolean }): Pick<vault.Item, "thread" | "inChannel"> {
+  const thread = Number(text.threadSequence);
+  return thread > 0 ? { thread, inChannel: text.inChannel } : {};
+}
+
+/**
+ * Who has Manage Messages in a secure channel, by this device's view of the
+ * server's roles and the channel's overwrites: whose lock on a thread counts.
+ */
+export function secureModerates(key: string, serverId: string, channelId: string): (userId: string) => boolean {
+  const i = store.get().instances[key];
+  const server = i?.servers.find((x) => x.id === serverId);
+  if (!i || !server) return () => false;
+  const members = new Map((i.members[serverId] ?? []).map((m) => [m.user?.id ?? "", m]));
+  const seen = new Map<string, boolean>();
+  return (userId) => {
+    let yes = seen.get(userId);
+    if (yes === undefined) {
+      const member = members.get(userId);
+      const access = accessOf(serverId, server.ownerId, i.roles[serverId] ?? [], i.channels[serverId] ?? [], userId, member?.roleIds ?? []);
+      seen.set(userId, (yes = !!member && hasIn(access, channelId, Permission.MANAGE_MESSAGES)));
+    }
+    return yes;
+  };
 }
 
 export { voiceLength };
@@ -619,10 +659,22 @@ export class DmEngine {
           break;
         }
       }
+      if (c.channel) {
+        // A thread goes with its message: replies under a deleted one are dropped here (and only here).
+        for (const i of threads.orphaned(known.values(), known)) {
+          known.set(i.seq, i);
+          changed.set(i.seq, i);
+        }
+      }
       await vault.write(this.vaultKey, { device: this.saved(), notes: [note], items: [...changed.values()], forgetSent });
       this.tell(id);
+      const lines = c.channel ? [...known.values()] : [];
       for (const i of changed.values()) {
-        if (vault.isMessage(i) && !had.has(i.seq) && i.senderId !== this.me.id && !i.sharedBy) c.notify(i);
+        if (!vault.isMessage(i) || had.has(i.seq) || i.senderId === this.me.id || i.sharedBy || i.deleted) continue;
+        // A reply kept to its thread only reaches you if you follow the thread.
+        const parent = c.channel ? threads.threadOf(i, known) : 0;
+        if (parent && !i.inChannel && !threads.following(note, parent, lines, this.me.id)) continue;
+        c.notify(i);
       }
       if (rejoin) {
         if (depth < 2) await this.catchUp(id, depth + 1);
@@ -666,7 +718,7 @@ export class DmEngine {
     if (record.data.length === 0) {
       // Deleted before this device read it.
       const before = known.get(seq);
-      if (before && !before.deleted) put({ ...before, deleted: true, content: "" });
+      if (before && !before.deleted) put(threads.emptied(before));
       return;
     }
     const own = record.senderDeviceId === this.device.deviceId;
@@ -768,6 +820,21 @@ export class DmEngine {
           deviceId,
           content: body.value.content.slice(0, MAX_DM),
           replyTo: Number(body.value.replyToSequence),
+          ...(c.channel ? threadFields(body.value) : {}),
+          signed,
+        }),
+      );
+    } else if (body.case === "thread" && c.channel && signed) {
+      // Whether it counts (only from someone with Manage Messages) is worked out where threads are shown.
+      put(
+        item(this.vaultKey, c.id, {
+          seq,
+          at,
+          kind: "thread",
+          senderId,
+          deviceId,
+          thread: Number(body.value.parentSequence),
+          content: body.value.locked ? "locked" : "unlocked",
           signed,
         }),
       );
@@ -842,7 +909,7 @@ export class DmEngine {
       try {
         const o = this.openSigned(c.id, entry.payload, entry.signature, entry.signatureKey);
         const body = o?.payload.content?.body;
-        if (o && (body?.case === "text" || body?.case === "edit")) opened.push({ seq, opened: o, deviceId: this.e2ee.deviceId(entry.signatureKey) });
+        if (o && (body?.case === "text" || body?.case === "edit" || body?.case === "thread")) opened.push({ seq, opened: o, deviceId: this.e2ee.deviceId(entry.signatureKey) });
       } catch {
         // Not a signed payload: left out.
       }
@@ -876,6 +943,22 @@ export class DmEngine {
             deviceId,
             content: body.value.content.slice(0, MAX_DM),
             replyTo: Number(body.value.replyToSequence),
+            ...threadFields(body.value),
+            signed: o.signed,
+            sharedBy: by,
+          }),
+        );
+      } else if (body.case === "thread") {
+        if (known.has(seq)) continue;
+        put(
+          item(this.vaultKey, c.id, {
+            seq,
+            at,
+            kind: "thread",
+            senderId,
+            deviceId,
+            thread: Number(body.value.parentSequence),
+            content: body.value.locked ? "locked" : "unlocked",
             signed: o.signed,
             sharedBy: by,
           }),
@@ -920,7 +1003,7 @@ export class DmEngine {
     // What was said while sharing was off stays with those who were there.
     const since = Math.max(0, ...all.filter((i) => i.kind === "setting").map((i) => i.seq));
     const items = all
-      .filter((i) => i.kind === "text" && !i.deleted && i.signed && i.seq > since)
+      .filter((i) => (i.kind === "text" || i.kind === "thread") && !i.deleted && i.signed && i.seq > since)
       .sort((a, b) => b.seq - a.seq);
     const entries: ReturnType<typeof create<typeof SharedEntrySchema>>[] = [];
     let size = 0;
@@ -1106,17 +1189,25 @@ export class DmEngine {
   async remove(id: string, seq: number) {
     const c = this.room(id);
     if (!c) throw new DmError("that conversation isn't here");
-    await c.remove(seq);
-    await this.forgetDeleted(id, seq);
+    await threads.deleteLine({ ...this.lines(id), remove: (s) => c.remove(s) }, seq, this.secure.has(id));
+    await this.refresh(id);
   }
 
   private async forgetDeleted(id: string, seq: number) {
-    await exclusive(this.lock, async () => {
-      const before = (await vault.loadItems(this.vaultKey, id)).find((i) => i.seq === seq);
-      if (before && !before.deleted) await vault.write(this.vaultKey, { items: [{ ...before, deleted: true, content: "" }] });
-      this.tell(id);
-    });
+    await threads.forgetLine(this.lines(id), seq, this.secure.has(id));
     await this.refresh(id);
+  }
+
+  /** One conversation's lines on this device, read and written under the device's lock. */
+  private lines(id: string) {
+    return {
+      locked: (fn: () => Promise<void>) => exclusive(this.lock, fn),
+      load: () => vault.loadItems(this.vaultKey, id),
+      write: async (items: vault.Item[]) => {
+        await vault.write(this.vaultKey, { items });
+        this.tell(id);
+      },
+    };
   }
 
   /** Notes that you've seen everything in a conversation so far. */
@@ -1137,6 +1228,27 @@ export class DmEngine {
     await exclusive(this.lock, async () => {
       const note = await vault.loadNote(this.vaultKey, id);
       await vault.write(this.vaultKey, { notes: [{ ...note, verified: safety }] });
+      this.tell(id);
+    });
+    await this.refresh(id);
+  }
+
+  /** Follows a secure channel's thread by hand, or stops (kept on this device only). */
+  async followThread(id: string, parent: number, on: boolean) {
+    await exclusive(this.lock, async () => {
+      const note = await vault.loadNote(this.vaultKey, id);
+      await vault.write(this.vaultKey, { notes: [{ ...note, follows: { ...note.follows, [parent]: on } }] });
+      this.tell(id);
+    });
+    await this.refresh(id);
+  }
+
+  /** Notes that you've seen a secure channel's thread up to `seq`. */
+  async markThreadRead(id: string, parent: number, seq: number) {
+    await exclusive(this.lock, async () => {
+      const note = await vault.loadNote(this.vaultKey, id);
+      if ((note.threadRead?.[parent] ?? 0) >= seq) return;
+      await vault.write(this.vaultKey, { notes: [{ ...note, threadRead: { ...note.threadRead, [parent]: seq } }] });
       this.tell(id);
     });
     await this.refresh(id);
@@ -1192,13 +1304,18 @@ export class DmEngine {
     if (this.stopped || !this.secure.has(id)) return;
     const focused = store.get().focus;
     const looking = focused?.instance === this.key && focused.channel === id && document.visibilityState === "visible";
+    // Replies kept to their threads count in their threads, not the channel.
+    const bySeq = new Map(items.map((i) => [i.seq, i]));
+    const inChannel = (i: vault.Item) => !threads.threadOf(i, bySeq) || !!i.inChannel;
     const unread = looking
       ? 0
-      : items.filter((i) => i.kind === "text" && !i.deleted && i.senderId !== this.me.id && i.seq > note.read).length;
+      : items.filter((i) => i.kind === "text" && !i.deleted && i.senderId !== this.me.id && i.seq > note.read && inChannel(i)).length;
+    const threadNote = { follows: note.follows ?? {}, read: note.threadRead ?? {} };
     updateDms(this.key, (d) => ({
       ...d,
       items: { ...d.items, [id]: items },
       members: { ...d.members, [id]: members satisfies DmMember[] },
+      threadNotes: { ...d.threadNotes, [id]: threadNote },
     }));
     updateInstance(this.key, (i) => (i.unread[id] === unread ? i : { ...i, unread: { ...i.unread, [id]: unread } }));
     if (looking && items.length && note.read < items.at(-1)!.seq) void this.markRead(id).catch(() => {});
