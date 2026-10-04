@@ -135,7 +135,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 29] = [
+pub const PATHS: [&str; 31] = [
     "name",
     "public_url",
     "allowed_origins",
@@ -165,6 +165,8 @@ pub const PATHS: [&str; 29] = [
     "turn_secret",
     "automod_providers",
     "automod_checks_per_day",
+    "federation",
+    "federation_blocked_hosts",
 ];
 
 /// A default cap, or `None` for one that isn't there.
@@ -243,8 +245,17 @@ fn differs(a: &pb::InstanceSettings, b: &pb::InstanceSettings, path: &str) -> bo
         "ice_urls" => lines(&a.ice_urls) != lines(&b.ice_urls),
         "turn_secret" => a.turn_secret.trim() != b.turn_secret.trim(),
         "automod_providers" => prints(a) != prints(b),
+        "federation" => a.federation != b.federation,
+        "federation_blocked_hosts" => hosts(&a.federation_blocked_hosts) != hosts(&b.federation_blocked_hosts),
         _ => cap(a, path) != cap(b, path),
     }
+}
+
+/// Host names as the instance reads them: trimmed, lowercased, each once, in order.
+/// The web's `hosts`.
+pub fn hosts<S: AsRef<str>>(list: &[S]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    list.iter().map(|h| h.as_ref().trim().to_lowercase()).filter(|h| !h.is_empty() && seen.insert(h.clone())).collect()
 }
 
 /// The settings that differ between a draft and what's saved, as the API names them.
@@ -278,6 +289,8 @@ pub fn copy_field(into: &mut pb::InstanceSettings, from: &pb::InstanceSettings, 
             into.turn_secret_hint = from.turn_secret_hint.clone();
         }
         "automod_providers" => into.automod_providers = from.automod_providers.clone(),
+        "federation" => into.federation = from.federation,
+        "federation_blocked_hosts" => into.federation_blocked_hosts = from.federation_blocked_hosts.clone(),
         _ => set_cap(into, path, cap(from, path)),
     }
 }
@@ -404,6 +417,18 @@ pub fn label_name(id: &str) -> String {
 }
 
 impl Core {
+    /// This instance as other instances see it, and the instances it knows. Admins only.
+    pub async fn federation(&self, key: &str) -> Result<pb::GetFederationResponse, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        rpc!(api.admin(), get_federation(pb::GetFederationRequest {})).await
+    }
+
+    /// Reaches another instance with a signed greeting and back, pinning its key here.
+    pub async fn check_instance(&self, key: &str, address: &str) -> Result<pb::CheckInstanceResponse, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        rpc!(api.admin(), check_instance(pb::CheckInstanceRequest { address: address.trim().to_owned() })).await
+    }
+
     /// The instance's settings, where each comes from, and how it was started. Admins only.
     pub async fn instance_settings(&self, key: &str) -> Result<pb::InstanceConfig, Problem> {
         let api = self.api(key).ok_or_else(missing)?;
@@ -452,6 +477,14 @@ impl Core {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn blocked_hosts_read_like_the_web() {
+        assert_eq!(
+            super::hosts(&[" Spam.Example.com", "", "spam.example.com", "b.org"]),
+            ["spam.example.com", "b.org"]
+        );
+    }
+
     use super::*;
 
     fn custom(url: &str) -> pb::AutoModProviderSettings {
