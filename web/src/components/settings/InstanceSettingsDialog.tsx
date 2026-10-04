@@ -890,6 +890,7 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "voice_message_bytes_per_day":
         into.voiceMessageBytesPerDay = from.voiceMessageBytesPerDay;
+        break;
       case "poll_votes_per_minute":
         into.pollVotesPerMinute = from.pollVotesPerMinute;
         break;
