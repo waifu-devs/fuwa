@@ -154,9 +154,12 @@ async fn follow_instance(
     };
     // What games report goes out with this app's presence.
     let presence = tokio::spawn(crate::core::presence::keep(api.clone(), core.games.clone()));
+    // Friends follow alongside; having that stream open is what shows you online to them.
+    let friends = tokio::spawn(crate::core::friends::follow(core.clone(), key.to_owned(), api.clone()));
     let result = follow_events(core, key, api, followed).await;
     refresh.abort();
     presence.abort();
+    friends.abort();
     result
 }
 

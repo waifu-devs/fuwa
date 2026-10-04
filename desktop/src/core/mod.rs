@@ -16,6 +16,7 @@ pub mod compat;
 pub mod config;
 pub mod dms;
 pub mod emoji;
+pub mod friends;
 pub mod history;
 pub mod i18n;
 pub mod instance_admin;
@@ -76,6 +77,8 @@ pub enum Notice {
     Removed { server: String },
     /// A session ended on its own.
     SignedOut { instance: String },
+    /// Someone asked to be friends, or took your request.
+    Friend { instance: String, title: String },
 }
 
 /// The store, and telling the window it changed.

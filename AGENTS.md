@@ -506,7 +506,11 @@
     place (and the keys they take first), `mentions.rs` finds mentions and
     makes them links, `menus.rs` the bell menus, `context_menu.rs` the
     right-click menus (docs/context-menus.md; what's in each is
-    `menu_items.rs`, from the same actions and checks as the buttons), `notify.rs` the system
+    `menu_items.rs`, from the same actions and checks as the buttons),
+    `friends.rs` the Friends screen under Home and the friend buttons on
+    profile cards (over `core/friends.rs`, which follows `WatchFriends`
+    beside the event stream), `settings_friends.rs` Friends and privacy,
+    `notify.rs` the system
     notifications (clicks come back through a channel), `settings_account.rs`
     the profile and security pages, `settings_look.rs` the Appearance
     (themes, light and dark picks, theme files) and Background pages,
