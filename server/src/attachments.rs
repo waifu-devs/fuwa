@@ -45,12 +45,17 @@ impl Attached {
 }
 
 /// A file's name as people gave it, made safe to show and to download as:
-/// only its last part (no folders), without control characters or the
-/// invisible marks that turn text around (which can make `exe.pdf` of
-/// `fdp.exe`), at most [`MAX_NAME`] characters; "file" when nothing's left.
+/// only its last part (no folders), without control characters, line
+/// breaks, zero-width characters or the invisible marks that turn text
+/// around (which can make `exe.pdf` of `fdp.exe`), at most [`MAX_NAME`] characters; "file" when nothing's left.
 pub fn clean_name(name: &str) -> String {
     let last = name.rsplit(['/', '\\']).next().unwrap_or_default();
-    let turns = |c: char| matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}');
+    let turns = |c: char| {
+        matches!(
+            c,
+            '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}'
+        )
+    };
     let kept: String = last.chars().filter(|c| !c.is_control() && !turns(*c)).take(MAX_NAME).collect();
     let kept = kept.trim().trim_start_matches('.').trim().to_string();
     if kept.is_empty() { "file".to_string() } else { kept }
@@ -83,6 +88,7 @@ fn row(r: &turso::Row) -> turso::Result<Attached> {
 pub async fn add(conn: &turso::Connection, message: &pb::Message, now: i64) -> Result<()> {
     let mut bytes = 0;
     for file in message.attachments.iter().filter(|a| crate::media::parse_id(&a.id).is_some()) {
+        conn.execute("DELETE FROM loose_files WHERE media_id = ?1", [file.id.as_str()]).await?;
         conn.execute(
             "INSERT INTO attachments (media_id, message_id, channel_id, filename, content_type, size, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -117,6 +123,44 @@ pub async fn forget_channel(conn: &turso::Connection, channel_id: &str) -> Resul
     forget(conn, "channel_id", channel_id).await
 }
 
+/// Whether `media_id` is a file uploaded for the server that no message has.
+pub async fn is_loose(conn: &turso::Connection, media_id: &str) -> Result<bool> {
+    Ok(query_one(conn, "SELECT 1 FROM loose_files WHERE media_id = ?1", [media_id], |r| r.get::<i64>(0))
+        .await?
+        .is_some())
+}
+
+/// Notes a file just uploaded for a server: loose until a message takes it.
+pub async fn note_loose(app: &App, server_id: &str, media_id: &str) -> Result<()> {
+    let sdb = app.servers.get(server_id).await?;
+    let media_id = media_id.to_string();
+    sdb.write("", async move |conn, _| {
+        conn.execute(
+            "INSERT OR IGNORE INTO loose_files (media_id, created_at) VALUES (?1, ?2)",
+            (media_id.as_str(), crate::id::now_ms()),
+        )
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+/// Forgets a loose file once its bytes are gone.
+pub async fn forget_loose(app: &App, server_id: &str, media_id: &str) {
+    let gone = async {
+        let sdb = app.servers.get(server_id).await?;
+        let media_id = media_id.to_string();
+        sdb.write("", async move |conn, _| {
+            conn.execute("DELETE FROM loose_files WHERE media_id = ?1", [media_id.as_str()]).await?;
+            Ok(())
+        })
+        .await
+    };
+    if gone.await.is_err() {
+        tracing::warn!(media = %media_id, "couldn't forget a deleted file");
+    }
+}
+
 /// Every file a server's messages have, for when the server is deleted.
 pub async fn all(conn: &turso::Connection) -> Result<Vec<String>> {
     query_all(conn, "SELECT media_id FROM attachments", (), |r| r.get::<String>(0)).await
@@ -131,6 +175,15 @@ async fn forget(conn: &turso::Connection, column: &str, id: &str) -> Result<Vec<
         return Ok(vec![]);
     }
     conn.execute(&format!("DELETE FROM attachments WHERE {column} = ?1"), [id]).await?;
+    // Loose until they're gone, so nothing serves them meanwhile.
+    let now = crate::id::now_ms();
+    for (media_id, _) in &files {
+        conn.execute(
+            "INSERT OR IGNORE INTO loose_files (media_id, created_at) VALUES (?1, ?2)",
+            (media_id.as_str(), now),
+        )
+        .await?;
+    }
     let bytes: i64 = files.iter().map(|(_, size)| size).sum();
     store::add_usage(conn, UsageChange { attachment_bytes: -bytes, ..Default::default() }).await?;
     Ok(files.into_iter().map(|(media_id, _)| media_id).collect())
@@ -149,6 +202,11 @@ pub fn drop_soon(app: &Arc<App>, server_id: &str, media_ids: Vec<String>) {
         for id in media_ids {
             let link = format!("{base}/media/{id}");
             app.drop_picture(&link, "", crate::api::PictureOwner::Server(&server_id)).await;
+            // A shard forgets it once the bytes are gone; in one process
+            // they're never served by this note.
+            if !matches!(app.link, Link::Shard(_)) {
+                forget_loose(&app, &server_id, &id).await;
+            }
         }
     });
 }
@@ -174,6 +232,7 @@ mod tests {
         assert_eq!(clean_name("C:\\Users\\me\\Desktop\\cat.png"), "cat.png");
         assert_eq!(clean_name("../../etc/passwd"), "passwd");
         assert_eq!(clean_name("fdp\u{202e}exe.pdf"), "fdpexe.pdf");
+        assert_eq!(clean_name("a\u{061c}b\u{2028}c\u{2029}d\u{200b}e\u{feff}.txt"), "abcde.txt");
         assert_eq!(clean_name("line\nbreak\t.txt"), "linebreak.txt");
         assert_eq!(clean_name("  .hidden "), "hidden");
         assert_eq!(clean_name(""), "file");

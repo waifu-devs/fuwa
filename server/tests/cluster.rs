@@ -1549,6 +1549,19 @@ async fn servers_live_in_their_region_and_move() {
     let file = reserved.media.unwrap();
     assert!(picture_at(&shard_b, &file.id).exists() && picture_at(&bucket_eu, &file.id).exists());
     assert!(!directory_media.join(&file.id).exists());
+    // A picture uploaded as a file isn't served as a picture while no
+    // message has it.
+    let request = pb::CreateUploadRequest {
+        purpose: pb::MediaPurpose::Attachment as i32,
+        content_type: "image/png".into(),
+        size: png.len() as i64,
+        server_id: server.id.clone(),
+    };
+    let loose = c.media.create_upload(authed(&juan, request)).await.unwrap().into_inner();
+    assert_eq!(http.put(&loose.upload_url).body(png.clone()).send().await.unwrap().status(), 204);
+    let loose = loose.media.unwrap();
+    assert!(picture_at(&shard_b, &loose.id).exists());
+    assert_eq!(http.get(&loose.url).send().await.unwrap().status(), 404);
     let channel = general(&mut c, &juan, &server.id).await;
     let request = pb::SendMessageRequest {
         server_id: server.id.clone(),
@@ -1560,7 +1573,6 @@ async fn servers_live_in_their_region_and_move() {
     let attached = sent.attachments[0].clone();
     assert!(attached.url.ends_with(&format!("/media/servers/{}/{}", server.id, file.id)), "{}", attached.url);
     assert_eq!((attached.content_type.as_str(), attached.size), ("application/zip", 5000));
-    let node = cluster.directory.app().node().unwrap();
     assert!(node.media(&file.id).await.unwrap().unwrap().used, "kept at the directory");
     let served = http.get(&attached.url).send().await.unwrap();
     assert_eq!(served.headers()["content-type"], "application/octet-stream");

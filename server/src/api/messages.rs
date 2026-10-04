@@ -644,6 +644,16 @@ impl MessageService for Api {
                             webhook: None,
                             shared: None,
                         };
+                        // Checked again here, where no other message can take the room meanwhile.
+                        if file_bytes > 0
+                            && let Some(limit) = limits.attachment_bytes
+                            && store::usage_count(conn, "attachment_bytes").await? + file_bytes > limit
+                        {
+                            return Err(Error::ResourceExhausted(format!(
+                                "this server is out of room for files ({} in all)",
+                                media::size_label(limit)
+                            )));
+                        }
                         insert_message(conn, &message, now).await?;
                         events.push(Payload::MessageCreated(pb::MessageCreated { message: Some(message.clone()) }));
                         Ok(Ok(message))

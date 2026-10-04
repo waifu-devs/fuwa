@@ -150,6 +150,8 @@ pub async fn drop(app: &App, server_id: &str, media_id: &str) {
         Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
             tracing::warn!(media = %media_id, error = %err, "couldn't delete a server's picture");
         }
+        // A file no message had is gone now, so it needn't be noted.
+        _ if app.servers.holds(&server_id) => crate::attachments::forget_loose(app, &server_id, &media_id).await,
         _ => {}
     }
     if let Some(replica) = app.servers.replica()
@@ -277,14 +279,21 @@ async fn upload(app: &App, server_id: &str, token: &str, body: Body) -> Response
     let dir = server_dir(&app.config.data_path, &server_id);
     let temp = dir.join(format!(".incoming-{id}"));
     let dest = dir.join(&id);
+    let purpose = pb::MediaPurpose::try_from(started.purpose).unwrap_or(pb::MediaPurpose::Unspecified);
     let kept = async {
         std::fs::create_dir_all(&dir).map_err(|err| failed_io(&id, err))?;
         let wait = std::time::Duration::from_millis(crate::media::RECEIVE_TTL_MS as u64);
-        let purpose = pb::MediaPurpose::try_from(started.purpose).unwrap_or(pb::MediaPurpose::Unspecified);
         let received = crate::media::receive_file(&id, purpose, started.size, &temp, body);
         let (kind, size) = tokio::time::timeout(wait, received)
             .await
             .map_err(|_| (StatusCode::REQUEST_TIMEOUT, "the upload took too long".to_string()))??;
+        // A file is loose until a message takes it, and never served before.
+        if purpose == pb::MediaPurpose::Attachment
+            && crate::attachments::note_loose(app, &server_id, &id).await.is_err()
+        {
+            tracing::warn!(media = %id, "couldn't note an uploaded file");
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "something went wrong on the server".to_string()));
+        }
         std::fs::rename(&temp, &dest).map_err(|err| failed_io(&id, err))?;
         if let Some(replica) = app.servers.replica() {
             replica.store().put_file(&name(&server_id, &id), &dest).await.map_err(|err| {
@@ -401,7 +410,21 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
     // A message's file is served while a message has it, by what it is.
     match crate::attachments::find(app, &server_id, &id).await {
         Ok(Some(file)) => return crate::media::serve_file(&path, &file, headers).await,
-        Ok(None) => {}
+        // A file no message has (yet, or any more) is never served, whatever
+        // its bytes look like; anything else is a picture.
+        Ok(None) => {
+            match async { crate::attachments::is_loose(&app.servers.get(&server_id).await?.read()?, &id).await }.await {
+                Ok(false) => {}
+                Ok(true) => return plain(StatusCode::NOT_FOUND, "not found"),
+                Err(_) => {
+                    tracing::warn!(media = %id, "couldn't look up an attachment");
+                    return plain(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "that file can't be reached right now; try again soon",
+                    );
+                }
+            }
+        }
         Err(_) => {
             tracing::warn!(media = %id, "couldn't look up an attachment");
             return plain(StatusCode::SERVICE_UNAVAILABLE, "that file can't be reached right now; try again soon");
@@ -453,7 +476,7 @@ fn unused(used: Result<bool>, media_id: &str) -> bool {
 
 /// Whether the server links to the file: its icon, an emoji, a webhook's
 /// picture or a message's attachment.
-async fn uses(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
+pub(crate) async fn uses(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
     let used = async {
         let sdb = app.servers.get(server_id).await?;
         let conn = sdb.read()?;

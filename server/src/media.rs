@@ -373,7 +373,8 @@ async fn serve_attachment(app: &App, row: &MediaRow, media: &Store, headers: &He
     let attached = match (&row.server_id, &app.link) {
         // A directory keeps an attachment only when one process's files came
         // to it before its shard took them: it has no server to ask.
-        (Some(_), crate::app::Link::Directory(_)) => Ok(Some(crate::attachments::Attached::bare(row))),
+        // It's served only while it's in use: a message took it.
+        (Some(_), crate::app::Link::Directory(_)) => Ok(row.used.then(|| crate::attachments::Attached::bare(row))),
         (Some(server_id), _) => crate::attachments::find(app, server_id, &row.id).await,
         (None, _) => Ok(None),
     };
