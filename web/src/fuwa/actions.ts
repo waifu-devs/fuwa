@@ -11,11 +11,13 @@ import {
   ApplicationStatus,
   ChannelType,
   JoinFormSchema,
+  OnboardingSchema,
   WelcomeScreenSchema,
   type AnnouncementTone,
   type AutoModRule,
   type Emoji,
   type WelcomeScreen,
+  type Onboarding,
   type Application,
   type Channel,
   type Member,
@@ -867,6 +869,12 @@ export const updateServer = (
     minAccountAgeSeconds?: number;
     applications?: boolean;
     linkedOnly?: boolean;
+    /** Empty for no banner. */
+    bannerUrl?: string;
+    bannerFocusX?: number;
+    bannerFocusY?: number;
+    /** 0xRRGGBB, or -1 for none. */
+    accentColor?: number;
   },
 ) =>
   Effect.gen(function* () {
@@ -1270,6 +1278,31 @@ export const setWelcomeScreen = (key: string, serverId: string, welcomeScreen: W
       return server ? addServer(i, { ...server, hasWelcomeScreen: saved.enabled }) : i;
     });
     return saved;
+  });
+
+// ───────────────────────── Onboarding ─────────────────────────
+
+export const getOnboarding = (key: string, serverId: string) =>
+  call((signal) => api(key).join.getOnboarding({ serverId }, { signal })).pipe(Effect.map((r) => r.onboarding ?? create(OnboardingSchema)));
+
+export const setOnboarding = (key: string, serverId: string, onboarding: Onboarding) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) => api(key).join.setOnboarding({ serverId, onboarding }, { signal }));
+    const saved = res.onboarding ?? create(OnboardingSchema);
+    updateInstance(key, (i) => {
+      const server = i.servers.find((s) => s.id === serverId);
+      return server ? addServer(i, { ...server, hasOnboarding: saved.enabled }) : i;
+    });
+    return saved;
+  });
+
+/** You went through a server's onboarding, picking these options (none to skip it). */
+export const finishOnboarding = (key: string, serverId: string, optionIds: string[]) =>
+  Effect.gen(function* () {
+    reportUsage(optionIds.length ? "onboarding.finish" : "onboarding.skip");
+    const { member } = yield* call((signal) => api(key).join.finishOnboarding({ serverId, optionIds }, { signal }));
+    storeMember(key, serverId, member);
+    return true;
   });
 
 // ───────────────────────── Agents ─────────────────────────

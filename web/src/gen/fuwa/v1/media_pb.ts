@@ -76,7 +76,8 @@ export type CreateUploadRequest = Message<"fuwa.v1.CreateUploadRequest"> & {
   size: bigint;
 
   /**
-   * For a server's icon, an emoji or a webhook's picture: the server it's
+   * For a server's icon or banner, an emoji or a webhook's picture (and
+   * for a server's banner, needed): the server it's
    * for (you must be in it). The picture can then only be used there, and on
    * an instance split across regions its bytes go straight to the server's
    * region rather than the home one.
@@ -238,6 +239,8 @@ export enum MediaPurpose {
   AVATAR = 1,
 
   /**
+   * A profile banner, or with a server_id, a server's banner.
+   *
    * @generated from enum value: MEDIA_PURPOSE_BANNER = 2;
    */
   BANNER = 2,

@@ -109,6 +109,7 @@ const KINDS: Record<AuditAction, Kind> = {
   [AuditAction.SHARED_CHANNEL_UPDATE]: { label: "Shared channel changes", icon: SlidersHorizontalIcon, tint: "bg-sky-500/15 text-sky-500" },
   [AuditAction.SHARED_CHANNEL_BLOCK]: { label: "Kept out of shared channels", icon: BanIcon, tint: "bg-orange-500/15 text-orange-500" },
   [AuditAction.SHARED_CHANNEL_UNBLOCK]: { label: "Let back into shared channels", icon: UndoIcon, tint: "bg-emerald-500/15 text-emerald-500" },
+  [AuditAction.ONBOARDING_UPDATE]: { label: "Onboarding", icon: PartyPopperIcon, tint: "bg-pink-500/15 text-pink-500" },
 };
 
 const FIELD: Record<string, string> = {
@@ -481,7 +482,19 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
         return rank.after === "2" ? <>{actor} made {target} an admin</> : <>{actor} made {target} a member again</>;
       return <>{actor} changed {target}'s nickname</>;
     }
-    case AuditAction.MEMBER_ROLES_UPDATE:
+    case AuditAction.MEMBER_ROLES_UPDATE: {
+      // Picked in the server's onboarding: role names, comma-separated.
+      const picked = change("roles");
+      if (picked)
+        return picked.after ? (
+          <>
+            {target} picked <b>{picked.after}</b> in onboarding
+          </>
+        ) : (
+          <>
+            {target} unpicked <b>{picked.before}</b> in onboarding
+          </>
+        );
       return given?.after ? (
         <>
           {actor} gave {target} {role}
@@ -491,6 +504,7 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
           {actor} took {role} from {target}
         </>
       );
+    }
     case AuditAction.ROLE_CREATE:
       return <>{actor} created the role {role}</>;
     case AuditAction.ROLE_UPDATE: {
@@ -569,6 +583,12 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
       if (on && entry.changes.length === 1)
         return on.after === "true" ? <>{actor} turned on the welcome screen</> : <>{actor} turned off the welcome screen</>;
       return <>{actor} changed the welcome screen</>;
+    }
+    case AuditAction.ONBOARDING_UPDATE: {
+      const on = change("enabled");
+      if (on && entry.changes.length === 1)
+        return on.after === "true" ? <>{actor} turned on onboarding</> : <>{actor} turned off onboarding</>;
+      return <>{actor} changed the onboarding</>;
     }
     case AuditAction.AUTO_MOD_RULE_CREATE:
       return <>{actor} added the AutoMod rule <b>{change("name")?.after}</b></>;

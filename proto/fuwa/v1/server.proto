@@ -92,6 +92,13 @@ message UpdateServerRequest {
   optional int32 min_account_age_seconds = 8;
   optional bool applications = 9;
   optional bool linked_only = 10;
+  // An upload made for this server (MEDIA_PURPOSE_BANNER), or empty for none.
+  optional string banner_url = 12;
+  // 0 to 100 each.
+  optional int32 banner_focus_x = 13;
+  optional int32 banner_focus_y = 14;
+  // 0xRRGGBB, or -1 for none.
+  optional int32 accent_color = 15;
 }
 
 message UpdateServerResponse {
@@ -303,6 +310,7 @@ enum AuditAction {
   // they're the target.
   AUDIT_ACTION_SHARED_CHANNEL_BLOCK = 46;
   AUDIT_ACTION_SHARED_CHANNEL_UNBLOCK = 47;
+  AUDIT_ACTION_ONBOARDING_UPDATE = 53;
 }
 
 // One thing someone did with a moderator's or manager's permission.
