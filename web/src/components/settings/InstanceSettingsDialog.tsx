@@ -63,6 +63,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "server_creation", get: (s) => s.serverCreation },
   { path: "agent_creation", get: (s) => s.agentCreation },
   { path: "shared_channels", get: (s) => s.sharedChannels },
+  { path: "profile_effects", get: (s) => s.profileEffects },
   { path: "rich_presence", get: (s) => s.richPresence },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
@@ -205,6 +206,7 @@ export function InstanceSettingsDialog({
                 { id: "servers-per-account", label: "Servers per account" },
                 { id: "agent-creation", label: "Who can make agents", keywords: "bots integrations" },
                 { id: "shared-channels", label: "Shared channels", keywords: "share connect servers slack connect" },
+                { id: "profile-effects", label: "Profile effects", keywords: "sparkles petals animation card decoration" },
                 { id: "rich-presence", label: "Rich presence", keywords: "activity playing game status discord presence" },
               ],
             },
@@ -490,10 +492,24 @@ export function InstanceSettingsDialog({
                 />
               </Setting>
               <Setting
+                id="profile-effects"
+                title="Profile effects"
+                defaultLabel={defaults.profileEffects ? "on" : "off"}
+                delay={0.28}
+                {...resetter("profile_effects")}
+              >
+                <Toggle
+                  checked={draft.profileEffects}
+                  onChange={(on) => patch((d) => (d.profileEffects = on))}
+                  label="People can put an effect on their profile card"
+                  hint="Petals, stars and the like, drawn by the app from your theme's colors. Turned off, nobody's shows, and everyone's pick comes back when it's on again."
+                />
+              </Setting>
+              <Setting
                 id="rich-presence"
                 title="Rich presence"
                 defaultLabel={defaults.richPresence ? "on" : "off"}
-                delay={0.28}
+                delay={0.32}
                 {...resetter("rich_presence")}
               >
                 <Toggle
@@ -721,6 +737,7 @@ const CREATION_LABEL: Record<number, string> = {
 const COPIED = [
   ...CALL_FIELDS,
   { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) },
+  { path: "profile_effects", copy: (into: InstanceSettings, from: InstanceSettings) => (into.profileEffects = from.profileEffects) },
   { path: "rich_presence", copy: (into: InstanceSettings, from: InstanceSettings) => (into.richPresence = from.richPresence) },
 ];
 
