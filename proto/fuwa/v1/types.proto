@@ -33,7 +33,7 @@ message Node {
   bool federation = 13;
   // People may put an effect on their profile card (Profile.effect). While
   // it's off, profiles come back without one and apps hide the picker.
-  bool profile_effects = 15;
+  bool profile_effects = 18;
   // Where this instance keeps community servers, the home region first.
   // Empty, or one region, when there's no choice to make (an instance run
   // as one process, or one whose parts are all in one place).

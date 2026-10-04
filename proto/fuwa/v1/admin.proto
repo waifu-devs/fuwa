@@ -163,7 +163,7 @@ message InstanceSettings {
   // People may put an animated effect on their profile card. Turning it off
   // hides everyone's (their picks are kept for when it's back on).
   // FUWA_PROFILE_EFFECTS, on unless set.
-  bool profile_effects = 39;
+  bool profile_effects = 42;
 }
 
 // One moderation provider, as the instance's admins set it up: one fuwa
