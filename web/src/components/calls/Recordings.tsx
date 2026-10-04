@@ -1,8 +1,8 @@
-import { AudioLinesIcon, DownloadIcon, FileArchiveIcon, HourglassIcon, LoaderCircleIcon, ServerIcon, Trash2Icon } from "lucide-react";
+import { AudioLinesIcon, DownloadIcon, FileArchiveIcon, HourglassIcon, LoaderCircleIcon, MonitorIcon, ServerIcon, Trash2Icon, VideoIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Permission, type Channel, type VoiceState } from "@/gen/fuwa/v1/types_pb";
-import type { Recording, RecordingTrack } from "@/gen/fuwa/v1/call_pb";
+import { RecordingPart, type Recording, type RecordingTrack } from "@/gen/fuwa/v1/call_pb";
 import { useAccess } from "@/fuwa/hooks";
 import { toFuwaError } from "@/fuwa/errors";
 import { useFuwa, type FuwaState } from "@/fuwa/store";
@@ -20,8 +20,9 @@ import { saveFile, zip } from "@/lib/zip";
 
 /**
  * A voice channel's recordings on the server: one track per person, each
- * an Ogg Opus file, for the people with Record there. Downloads come as
- * they are (a track each, or all of them in a .zip), lined up from the
+ * an Ogg Opus file (and, when the server records video, their camera and
+ * shared screen as WebM), for the people with Record there. Downloads come
+ * as they are (a file each, or all of them in a .zip), lined up from the
  * recording's start so they drop straight into an editor.
  */
 
@@ -194,6 +195,19 @@ function baseName(channel: Channel, rec: Recording) {
 /** Characters no file system takes in a name. */
 const safe = (name: string) => name.replace(/[\\/:*?"<>|]+/g, "-").trim() || "someone";
 
+/** One of a person's files in a recording. */
+type FilePart = { part: RecordingPart; bytes: (t: RecordingTrack) => bigint; suffix: string; type: string; what: string; icon: typeof VideoIcon };
+
+const PARTS: FilePart[] = [
+  { part: RecordingPart.UNSPECIFIED, bytes: (t) => t.sizeBytes, suffix: ".opus", type: "audio/ogg", what: "sound (Ogg Opus)", icon: DownloadIcon },
+  { part: RecordingPart.CAMERA, bytes: (t) => t.cameraBytes, suffix: " camera.webm", type: "video/webm", what: "camera (WebM)", icon: VideoIcon },
+  { part: RecordingPart.SCREEN, bytes: (t) => t.screenBytes, suffix: " screen.webm", type: "video/webm", what: "shared screen (WebM)", icon: MonitorIcon },
+];
+
+/** The files a person has in a recording. */
+const filesOf = (track: RecordingTrack) => PARTS.filter((p) => p.bytes(track) > 0n);
+const fileKey = (track: RecordingTrack, part: FilePart) => `${track.userId}:${part.part}`;
+
 function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }: { instanceKey: string; serverId: string; channel: Channel; rec: Recording; index: number; onDeleted: () => void }) {
   const live = !rec.endedAt;
   const now = useNow(live ? 1_000 : 60_000);
@@ -215,14 +229,15 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
   const [deleting, setDeleting] = useState(false);
   const busy = Object.keys(progress).length > 0;
 
-  /** One track's file, as plain Ogg Opus. */
-  const fetchTrack = async (track: RecordingTrack) => {
+  /** One of a person's files, plain: Ogg Opus, or WebM. */
+  const fetchTrack = async (track: RecordingTrack, part: FilePart) => {
     const parts: Uint8Array<ArrayBuffer>[] = [];
     let got = 0;
-    for await (const res of engine(instanceKey).api.calls.downloadRecording({ serverId, recordingId: rec.id, userId: track.userId })) {
+    const key = fileKey(track, part);
+    for await (const res of engine(instanceKey).api.calls.downloadRecording({ serverId, recordingId: rec.id, userId: track.userId, part: part.part })) {
       parts.push(new Uint8Array(res.data));
       got += res.data.length;
-      setProgress((p) => ({ ...p, [track.userId]: Math.min(0.98, got / Math.max(1, Number(track.sizeBytes))) }));
+      setProgress((p) => ({ ...p, [key]: Math.min(0.98, got / Math.max(1, Number(part.bytes(track)))) }));
     }
     const data = new Uint8Array(got);
     let at = 0;
@@ -232,29 +247,31 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
     }
     return data;
   };
-  const fileName = (track: RecordingTrack) => `${baseName(channel, rec)} - ${safe(names[track.userId] ?? track.userId)}.opus`;
-  const done = (ids: string[]) => setProgress((p) => Object.fromEntries(Object.entries(p).filter(([id]) => !ids.includes(id))));
+  const fileName = (track: RecordingTrack, part: FilePart) => `${baseName(channel, rec)} - ${safe(names[track.userId] ?? track.userId)}${part.suffix}`;
+  const done = (keys: string[]) => setProgress((p) => Object.fromEntries(Object.entries(p).filter(([key]) => !keys.includes(key))));
+  const everything = rec.tracks.flatMap((track) => filesOf(track).map((part) => ({ track, part })));
 
-  const downloadOne = async (track: RecordingTrack) => {
-    setProgress((p) => ({ ...p, [track.userId]: 0 }));
+  const downloadOne = async (track: RecordingTrack, part: FilePart) => {
+    const key = fileKey(track, part);
+    setProgress((p) => ({ ...p, [key]: 0 }));
     try {
-      saveFile(new Blob([await fetchTrack(track)], { type: "audio/ogg" }), fileName(track));
+      saveFile(new Blob([await fetchTrack(track, part)], { type: part.type }), fileName(track, part));
     } catch (err) {
       toast(`Couldn't download it: ${toFuwaError(err).message}`);
     } finally {
-      done([track.userId]);
+      done([key]);
     }
   };
   const downloadAll = async () => {
-    setProgress(Object.fromEntries(rec.tracks.map((t) => [t.userId, 0])));
+    setProgress(Object.fromEntries(everything.map(({ track, part }) => [fileKey(track, part), 0])));
     try {
       const files = [];
-      for (const track of rec.tracks) files.push({ name: fileName(track), data: await fetchTrack(track) });
+      for (const { track, part } of everything) files.push({ name: fileName(track, part), data: await fetchTrack(track, part) });
       saveFile(zip(files, started), `${safe(baseName(channel, rec))}.zip`);
     } catch (err) {
       toast(`Couldn't download it: ${toFuwaError(err).message}`);
     } finally {
-      done(rec.tracks.map((t) => t.userId));
+      done(everything.map(({ track, part }) => fileKey(track, part)));
     }
   };
   const remove = async () => {
@@ -277,11 +294,22 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
       exit={{ opacity: 0, x: -40, scale: 0.95, transition: { duration: 0.2 } }}
       className={cn("overflow-hidden rounded-3xl border bg-background/60", live && "border-[#ed4245]/40 shadow-[0_0_0_1px_rgb(237_66_69/0.15),0_12px_40px_-16px_rgb(237_66_69/0.5)]")}
     >
-      <div className="flex items-center gap-3 px-4 pt-3.5 pb-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-3.5 pb-2">
         <Wave live={live} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-extrabold">
-            {started.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+        <div className="min-w-40 flex-1">
+          <p className="flex items-center gap-1.5 font-extrabold">
+            <span className="truncate">{started.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+            {rec.video && (
+              <motion.span
+                initial={{ opacity: 0, scale: 0.7 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={SPRING}
+                title="Cameras and shared screens are recorded too"
+                className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[0.7rem] font-bold text-primary"
+              >
+                <VideoIcon className="size-3.5" /> <span className="hidden sm:inline">With video</span>
+              </motion.span>
+            )}
           </p>
           <p className="truncate text-xs text-muted-foreground">
             {live ? (
@@ -295,8 +323,8 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
           </p>
         </div>
         {!live && (
-          <div className="flex shrink-0 items-center gap-1">
-            <Button size="sm" variant="secondary" className="group h-8 rounded-xl font-bold" disabled={busy || !rec.tracks.length} onClick={() => void downloadAll()}>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <Button size="sm" variant="secondary" className="group h-8 rounded-xl font-bold" disabled={busy || !everything.length} onClick={() => void downloadAll()}>
               <FileArchiveIcon className="transition-transform group-hover:-translate-y-0.5" /> <span className="hidden sm:inline">All</span> .zip
             </Button>
             <AnimatePresence mode="wait" initial={false}>
@@ -338,12 +366,12 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
             className="relative flex items-center gap-2.5 overflow-hidden rounded-2xl px-2 py-1.5 transition-colors hover:bg-muted/60"
           >
             <AnimatePresence>
-              {progress[track.userId] !== undefined && (
+              {filesOf(track).some((part) => progress[fileKey(track, part)] !== undefined) && (
                 <motion.span
                   aria-hidden
                   className="absolute inset-y-0 left-0 w-full origin-left bg-primary/12"
                   initial={{ scaleX: 0, opacity: 1 }}
-                  animate={{ scaleX: progress[track.userId] }}
+                  animate={{ scaleX: Math.max(...filesOf(track).map((part) => progress[fileKey(track, part)] ?? 0)) }}
                   exit={{ scaleX: 1, opacity: 0, transition: { duration: 0.35 } }}
                   transition={{ type: "spring", stiffness: 200, damping: 30 }}
                 />
@@ -351,20 +379,35 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
             </AnimatePresence>
             <TrackAvatar instanceKey={instanceKey} userId={track.userId} />
             <span className="relative min-w-0 flex-1 truncate text-sm font-bold">{names[track.userId]}</span>
-            <span className="relative shrink-0 text-xs text-muted-foreground tabular-nums">{formatBytes(Number(track.sizeBytes))}</span>
-            {!live && (
-              <motion.button
-                type="button"
-                whileTap={{ scale: 0.85 }}
-                disabled={progress[track.userId] !== undefined}
-                onClick={() => void downloadOne(track)}
-                aria-label={`Download ${names[track.userId]}'s track`}
-                title="Download this track (Ogg Opus)"
-                className="group relative grid size-8 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-primary/10 hover:text-primary disabled:opacity-60"
-              >
-                {progress[track.userId] !== undefined ? <LoaderCircleIcon className="size-4 animate-spin" /> : <DownloadIcon className="size-4 transition-transform group-hover:translate-y-0.5" />}
-              </motion.button>
-            )}
+            <span className="relative shrink-0 text-xs text-muted-foreground tabular-nums">{formatBytes(Number(track.sizeBytes + track.cameraBytes + track.screenBytes))}</span>
+            {live
+              ? filesOf(track)
+                  .filter((part) => part.part !== RecordingPart.UNSPECIFIED)
+                  .map((part) => (
+                    <motion.span key={part.part} initial={{ scale: 0 }} animate={{ scale: 1 }} transition={SPRING} title={`Recording their ${part.what.split(" (")[0]}`} className="relative text-muted-foreground">
+                      <part.icon className="size-3.5" />
+                    </motion.span>
+                  ))
+              : filesOf(track).map((part) => {
+                  const getting = progress[fileKey(track, part)] !== undefined;
+                  return (
+                    <motion.button
+                      key={part.part}
+                      type="button"
+                      initial={{ opacity: 0, scale: 0.6 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={SPRING}
+                      whileTap={{ scale: 0.85 }}
+                      disabled={getting}
+                      onClick={() => void downloadOne(track, part)}
+                      aria-label={`Download ${names[track.userId]}'s ${part.what}`}
+                      title={`Download their ${part.what}`}
+                      className="group relative grid size-8 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-primary/10 hover:text-primary disabled:opacity-60"
+                    >
+                      {getting ? <LoaderCircleIcon className="size-4 animate-spin" /> : <part.icon className="size-4 transition-transform group-hover:translate-y-0.5" />}
+                    </motion.button>
+                  );
+                })}
           </motion.li>
         ))}
         {!rec.tracks.length && <li className="px-2 py-1.5 text-sm text-muted-foreground">{live ? "Nobody has said anything yet." : "Nobody said anything."}</li>}

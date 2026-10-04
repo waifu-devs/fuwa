@@ -16,6 +16,8 @@ export type FollowUpdate =
   | { type: "event"; event: Event }
   /** Any replay is done and the stream is live; where each server stands. */
   | { type: "ready"; heads: ServerHead[] }
+  /** With `followNewServers`: a server the caller joined or was added to, followed from here on. */
+  | { type: "followed"; head: ServerHead }
   /** The stream broke; it reconnects after `retryInMs`, resuming from the last event seen. */
   | { type: "disconnected"; error: FuwaError; retryInMs: number };
 
@@ -28,6 +30,13 @@ export interface FollowOptions {
    * somewhere to resume after a restart without missing anything.
    */
   cursors?: Record<string, bigint> | Map<string, bigint>;
+  /**
+   * Also follow servers the caller joins or is added to while the stream is
+   * open, announced as "followed". Instances with the `agent-streams`
+   * feature do this; older ones refuse a stream with no servers and ignore
+   * the request otherwise.
+   */
+  followNewServers?: boolean;
   /** Stops following. */
   signal?: AbortSignal;
   /**
@@ -101,7 +110,7 @@ export class EventFollower implements AsyncIterable<FollowUpdate> {
     let failures = 0;
     try {
       while (!outer?.aborted) {
-        if (this.#servers.size === 0) {
+        if (this.#servers.size === 0 && !this.#opts.followNewServers) {
           // Nothing to follow: wait for setServers or the end.
           await new Promise<void>((resolve) => {
             this.#wake = resolve;
@@ -130,7 +139,11 @@ export class EventFollower implements AsyncIterable<FollowUpdate> {
             serverId,
             afterSequence: this.cursors.get(serverId),
           }));
-          for await (const res of this.#fuwa.events.subscribe({ servers }, { signal: restart.signal, timeoutMs: 0 })) {
+          const followNewServers = this.#opts.followNewServers ?? false;
+          for await (const res of this.#fuwa.events.subscribe(
+            { servers, followNewServers },
+            { signal: restart.signal, timeoutMs: 0 },
+          )) {
             heard();
             if (res.event) {
               const e = res.event;
@@ -153,6 +166,13 @@ export class EventFollower implements AsyncIterable<FollowUpdate> {
               }
               failures = 0;
               yield { type: "ready", heads: res.ready.servers };
+            } else if (res.followed) {
+              const head = res.followed;
+              // Joined while the stream was open: its events after this come next.
+              if (this.#servers.has(head.serverId)) continue;
+              this.#servers.add(head.serverId);
+              if (!this.cursors.has(head.serverId)) this.cursors.set(head.serverId, head.sequence);
+              yield { type: "followed", head };
             }
           }
           error = new UnavailableError(Code.Unavailable, STREAM_ENDED);

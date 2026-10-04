@@ -30,7 +30,9 @@ export interface AgentOptions extends Omit<FuwaOptions, "token"> {
   ignoreWebhooks?: boolean;
   /**
    * How often to look for servers the agent was added to or removed from,
-   * in milliseconds. The instance sends no event for that yet. Default 30 s; 0 never.
+   * in milliseconds, on instances without the `agent-streams` feature
+   * (newer ones say so on the event stream, and nothing is polled).
+   * Default 30 s; 0 never.
    */
   serverRefreshMs?: number;
   /**
@@ -51,7 +53,7 @@ export interface MessageContext {
   serverId: string;
   channelId: string;
   content: string;
-  /** It mentions the agent by @username. */
+  /** It mentions the agent: <@id> (as the apps write it) or @username. */
   mentioned: boolean;
   /** Who wrote it (from the instance, cached). Undefined for webhook messages. */
   author(): Promise<User | undefined>;
@@ -131,6 +133,7 @@ export class Agent {
   #authors = new Map<string, Promise<User | undefined>>();
   #chains = new Map<string, Promise<void>>();
   #follower: EventFollower | undefined;
+  #followsNew = false;
   #stop: AbortController | undefined;
   #closed: Promise<void> | undefined;
   #voices = new Set<VoiceConnection>();
@@ -206,11 +209,16 @@ export class Agent {
       const me = (await this.api.auth.getMe({}, { signal: stop.signal })).user;
       if (!me) throw new UnauthenticatedError(Code.Unauthenticated, "the token didn't sign in");
       this.#me = me;
-      const { servers } = await this.api.servers.listServers({}, { signal: stop.signal });
+      const [{ servers }, followNewServers] = await Promise.all([
+        this.api.servers.listServers({}, { signal: stop.signal }),
+        this.#instanceHas("agent-streams", stop.signal),
+      ]);
+      this.#followsNew = followNewServers;
       const follower = new EventFollower(this.api, {
         servers: servers.map((s) => s.id),
         cursors: this.#opts.cursors,
         signal: stop.signal,
+        followNewServers,
       });
       this.#follower = follower;
       let live!: (heads: ServerHead[]) => void;
@@ -328,16 +336,29 @@ export class Agent {
   }
 
   async #run(follower: EventFollower, signal: AbortSignal, live: (heads: ServerHead[]) => void): Promise<void> {
-    const refresh = this.#opts.serverRefreshMs ?? 30_000;
+    // An instance that announces new servers on the stream needs no polling.
+    const refresh = this.#followsNew ? 0 : (this.#opts.serverRefreshMs ?? 30_000);
     const timer = refresh > 0 ? setInterval(() => void this.#refreshServers(follower, signal), refresh) : undefined;
     try {
       for await (const update of follower) {
         if (update.type === "ready") live(update.heads);
+        else if (update.type === "followed") this.#emit("serverAdded", update.head.serverId);
         else if (update.type === "disconnected") this.#emit("disconnected", update);
         else this.#dispatch(update.event, follower);
       }
     } finally {
       clearInterval(timer);
+    }
+  }
+
+  /** Whether the instance lists a feature; an unanswered question counts as no. */
+  async #instanceHas(id: string, signal: AbortSignal): Promise<boolean> {
+    try {
+      const { node } = await this.api.node.getNode({}, { signal });
+      return node?.versions?.features.some((f) => f.id === id) ?? false;
+    } catch (err) {
+      if (signal.aborted) throw err;
+      return false;
     }
   }
 
@@ -412,7 +433,7 @@ export class Agent {
       serverId: message.serverId,
       channelId: message.channelId,
       content: message.content,
-      mentioned: mentions(message.content, this.#me!.username),
+      mentioned: message.mentionUserIds.includes(this.#me!.id) || mentions(message.content, this.#me!.username),
       author: () => (message.webhook ? Promise.resolve(undefined) : message.shared?.user ? Promise.resolve(message.shared.user) : this.user(message.authorId)),
       reply: (content) => this.reply(message, content),
       send: (content) => this.send(message.serverId, message.channelId, content),

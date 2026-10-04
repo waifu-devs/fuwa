@@ -299,6 +299,7 @@ export function RecordButton({ size = "sm", className }: { size?: "sm" | "lg"; c
   const offered = useCalls((s) => s.serverRecordings);
   const target = useCalls((s) => s.call?.target);
   const may = useMayRecord(target);
+  const video = useFuwa((s) => target?.kind === "voice" && !!s.instances[target.instance]?.servers.find((x) => x.id === target.serverId)?.recordVideo);
   const on = device || server;
   if (!may && !on) return null;
   const both = target?.kind === "voice" && (offered || server);
@@ -341,7 +342,9 @@ export function RecordButton({ size = "sm", className }: { size?: "sm" | "lg"; c
           <ServerIcon className="mt-0.5" />
           <span className="min-w-0">
             <span className="block font-bold">{server ? "Stop recording on the server" : "On the server"}</span>
-            <span className="block text-xs text-muted-foreground">{server ? "It stays in this channel's recordings." : "A track per person, kept for people who can record here."}</span>
+            <span className="block text-xs text-muted-foreground">
+              {server ? "It stays in this channel's recordings." : video ? "Everyone's sound, camera and screen, kept for people who can record here." : "A track per person, kept for people who can record here."}
+            </span>
           </span>
           {server && <RecordingDot />}
         </DropdownMenuItem>
@@ -386,7 +389,8 @@ export function RecordingWatch() {
     const onDevice = fresh.filter((id) => !id.startsWith("server:"));
     cue("recording");
     if (onDevice.length) toast(`${name(onDevice)} started recording this call.`);
-    if (onServer.length) toast(`${name(onServer)} started recording this channel on the server.`);
+    const video = target.kind === "voice" && !!inst?.servers.find((x) => x.id === target.serverId)?.recordVideo;
+    if (onServer.length) toast(`${name(onServer)} started recording this channel on the server${video ? ", with cameras and shared screens" : ""}.`);
   }, [recording, target]);
   return null;
 }

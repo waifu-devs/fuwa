@@ -101,6 +101,9 @@ message UpdateServerRequest {
   optional int32 banner_focus_y = 14;
   // 0xRRGGBB, or -1 for none.
   optional int32 accent_color = 15;
+  // Turning it on fails with FAILED_PRECONDITION where the instance doesn't
+  // let servers record video (InstanceSettings.call_recording_video).
+  optional bool record_video = 16;
 }
 
 message UpdateServerResponse {

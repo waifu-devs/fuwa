@@ -146,6 +146,7 @@ const FIELD: Record<string, string> = {
   uses: "People it let in",
   min_account_age_seconds: "Minimum account age",
   thread_archive_hours: "Archive quiet threads after",
+  record_video: "Recordings keep",
   applications: "Apply to join",
   linked_only: "waifu.dev accounts only",
   rules: "Rules",
@@ -437,6 +438,7 @@ function value(field: string, raw: string, users: Record<string, User>, channels
   if (field === "expires_at") return raw ? formatStamp(new Date(Number(raw))) : "Never";
   if (field === "min_account_age_seconds") return raw === "0" ? "Any age" : formatDuration(Number(raw));
   if (field === "thread_archive_hours") return raw === "0" ? "Never" : formatDuration(Number(raw) * 3600);
+  if (field === "record_video") return raw === "true" ? "Sound and video" : "Sound only";
   return raw || "Nothing";
 }
 
@@ -458,6 +460,9 @@ function sentence(entry: AuditEntry, users: Record<string, User>, channels: Chan
       const age = change("min_account_age_seconds");
       const apply = change("applications");
       const linked = change("linked_only");
+      const video = change("record_video");
+      if (video && entry.changes.length === 1)
+        return video.after === "true" ? <>{actor} turned on recording cameras and screens</> : <>{actor} made recordings sound only</>;
       if (apply && entry.changes.length === 1)
         return apply.after === "true" ? <>{actor} made people apply to join</> : <>{actor} let people join without applying</>;
       if (linked && entry.changes.length === 1)
