@@ -1,30 +1,22 @@
 import { timestampDate, type Timestamp } from "@bufbuild/protobuf/wkt";
 import { AccountKind, type Member, type User } from "@/gen/fuwa/v1/types_pb";
-import { getPrefs, type Clock } from "@/lib/prefs";
+import { i18n } from "@/i18n/i18n";
+import { getPrefs } from "@/lib/prefs";
 
 export const toDate = (ts: Timestamp | undefined) => (ts ? timestampDate(ts) : new Date(0));
 
-const day = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
-const dayWithYear = new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric", year: "numeric" });
-
-/** Times follow the 12 or 24 hour clock setting; "auto" is the language's own. */
-const clocks = new Map<Clock, { time: Intl.DateTimeFormat; full: Intl.DateTimeFormat }>();
-function clock() {
+/** The 12 or 24 hour clock setting; "auto" is the language's own. */
+function hourCycle() {
   const setting = getPrefs().clock;
-  let formats = clocks.get(setting);
-  if (!formats) {
-    const hourCycle = setting === "24h" ? "h23" : setting === "12h" ? "h12" : undefined;
-    formats = {
-      time: new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", hourCycle }),
-      full: new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short", hourCycle }),
-    };
-    clocks.set(setting, formats);
-  }
-  return formats;
+  return setting === "24h" ? "h23" : setting === "12h" ? "h12" : undefined;
 }
 
-export const formatTime = (d: Date) => clock().time.format(d);
-export const formatFull = (d: Date) => clock().full.format(d);
+const DAY = { weekday: "long", month: "long", day: "numeric" } as const;
+const DAY_WITH_YEAR = { month: "long", day: "numeric", year: "numeric" } as const;
+
+// Dates and times read in the app's language (i18n/).
+export const formatTime = (d: Date) => i18n().date(d, { hour: "numeric", minute: "2-digit", hourCycle: hourCycle() });
+export const formatFull = (d: Date) => i18n().date(d, { dateStyle: "full", timeStyle: "short", hourCycle: hourCycle() });
 
 function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
@@ -34,18 +26,25 @@ export function sameDay(a: Date, b: Date) {
   return startOfDay(a) === startOfDay(b);
 }
 
+const daysAgo = (d: Date, now: Date) => Math.round((startOfDay(now) - startOfDay(d)) / 86_400_000);
+
 /** "Today", "Yesterday", "Monday, June 3", or with the year when it's not this year. */
 export function formatDay(d: Date, now = new Date()) {
-  const days = Math.round((startOfDay(now) - startOfDay(d)) / 86_400_000);
-  if (days === 0) return "Today";
-  if (days === 1) return "Yesterday";
-  return d.getFullYear() === now.getFullYear() ? day.format(d) : dayWithYear.format(d);
+  const { t, date } = i18n();
+  const days = daysAgo(d, now);
+  if (days === 0) return t("common.time.today");
+  if (days === 1) return t("common.time.yesterday");
+  return date(d, d.getFullYear() === now.getFullYear() ? DAY : DAY_WITH_YEAR);
 }
 
 /** "Today at 3:04 PM", "Yesterday at 9:12 AM", or the date and time. */
 export function formatStamp(d: Date, now = new Date()) {
-  const label = formatDay(d, now);
-  return label === "Today" || label === "Yesterday" ? `${label} at ${formatTime(d)}` : `${label}, ${formatTime(d)}`;
+  const { t } = i18n();
+  const days = daysAgo(d, now);
+  const time = formatTime(d);
+  if (days === 0) return t("common.time.todayAt", { time });
+  if (days === 1) return t("common.time.yesterdayAt", { time });
+  return t("common.time.dayTime", { day: formatDay(d, now), time });
 }
 
 export function formatBytes(bytes: number) {

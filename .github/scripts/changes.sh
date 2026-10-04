@@ -76,7 +76,7 @@ for_docker() {
     Dockerfile | .dockerignore | Cargo.toml | Cargo.lock | rustfmt.toml | \
     server/Cargo.toml | server/build.rs | e2ee/Cargo.toml | e2ee-wasm/Cargo.toml | voice/Cargo.toml | \
     web/package.json | web/pnpm-lock.yaml | web/pnpm-workspace.yaml | web/vite.config.ts | \
-    web/tsconfig*.json | web/index.html | web/scripts/* | \
+    web/tsconfig*.json | web/index.html | web/scripts/* | locales/* | \
     .github/workflows/ci.yml | .github/workflows/publish.yml | .github/scripts/*) return 0 ;;
   esac
   return 1

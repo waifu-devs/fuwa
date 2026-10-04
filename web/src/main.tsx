@@ -7,7 +7,8 @@ import { refreshOnFocus } from "@/fuwa/actions";
 import { reportTarget, restore } from "@/fuwa/sync";
 import { startReports } from "@/lib/reports";
 import { watchUnread } from "@/lib/notify";
-import { applyPrefs, usePrefs, watchSystem } from "@/lib/prefs";
+import { switchLanguage } from "@/i18n/i18n";
+import { applyPrefs, getPrefs, subscribePrefs, usePrefs, watchSystem } from "@/lib/prefs";
 import { router } from "@/router";
 import "@fontsource/m-plus-rounded-1c/400.css";
 import "@fontsource/m-plus-rounded-1c/700.css";
@@ -32,8 +33,15 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+// The Language setting, or the browser's languages while it says "auto".
+subscribePrefs(() => void switchLanguage(getPrefs().language));
+window.addEventListener("languagechange", () => void switchLanguage(getPrefs().language));
+
+// The first paint waits for the language's strings (a small same-origin file), so the app doesn't flash in English.
+void switchLanguage(getPrefs().language).finally(() =>
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  ),
 );

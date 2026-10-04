@@ -2,7 +2,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, type Plugin, searchForWorkspaceRoot } from "vite";
 
 // In development the page is served by Vite, so gRPC-Web calls, picture
 // uploads and identity providers' answers (/sso/...) to this origin are
@@ -33,6 +33,9 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   server: {
+    // The translations (locales/ at the repo root) are shared with the desktop app.
+    // (allow replaces Vite's default, so the workspace root goes back in, and nothing wider.)
+    fs: { allow: [searchForWorkspaceRoot(process.cwd()), fileURLToPath(new URL("../locales", import.meta.url))] },
     proxy: {
       "^/fuwa\\.v1\\.": { target: fuwa, changeOrigin: true },
       "^/media/": { target: fuwa, changeOrigin: true },

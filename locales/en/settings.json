@@ -1,0 +1,9 @@
+{
+  "language.title": "Language",
+  "language.hint": "For fuwa on this device. What people write stays as they wrote it.",
+  "language.matchBrowser": "Match my browser",
+  "language.matchBrowserNote": "Right now that's {language}",
+  "language.coverage": "{percent} translated",
+  "language.draft": "Machine draft, not yet checked by a speaker",
+  "language.failed": "Couldn't load that language. Check your connection and try again."
+}
