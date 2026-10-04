@@ -152,8 +152,8 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_EMOJIS` | unlimited | Custom emoji per server |
 | `FUWA_LIMIT_PICTURE_UPLOAD` | unlimited | Largest avatar, banner, server icon or emoji one upload may be, like `8MB` |
 | `FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY` | unlimited | Pictures one account may upload in a day (UTC), like `256MiB` |
-| `FUWA_LIMIT_VOICE_MESSAGE_SECONDS` | unlimited | The longest voice message in direct messages; apps stop recording there |
-| `FUWA_LIMIT_VOICE_MESSAGE_BYTES` | unlimited | The biggest voice message, encrypted and padded, like `2MiB` |
+| `FUWA_LIMIT_VOICE_MESSAGE_SECONDS` | unlimited | The longest voice message; apps stop recording there. The instance can only check the length apps report, not the audio itself |
+| `FUWA_LIMIT_VOICE_MESSAGE_BYTES` | unlimited | The biggest voice message, like `2MiB` (in direct messages, encrypted and padded) |
 | `FUWA_LIMIT_VOICE_MESSAGES_PER_DAY` | unlimited | Voice messages one account may upload in a day (UTC), apart from pictures |
 | `FUWA_LIMIT_ATTACHMENT_UPLOAD` | unlimited | Largest file one message may carry, like `100MB` |
 | `FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY` | unlimited | Files one account may send in a day (UTC), apart from pictures, like `2GiB` |

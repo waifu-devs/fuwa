@@ -66,7 +66,7 @@ impl FuwaApp {
         };
         let mention = match &target {
             Target::Channel { .. } => mentions::token(&text, caret),
-            Target::Dm { .. } => None,
+            Target::Dm { .. } | Target::Secure { .. } => None,
         };
         let Some((start, query, kind)) = mention
             .map(|(start, query)| (start, query, '@'))
@@ -94,7 +94,9 @@ impl FuwaApp {
                     }
                 })
                 .unwrap_or_default(),
-            Target::Dm { .. } => emoji::search(&query, &[], 8).into_iter().map(mentions::Pick::Emoji).collect(),
+            Target::Dm { .. } | Target::Secure { .. } => {
+                emoji::search(&query, &[], 8).into_iter().map(mentions::Pick::Emoji).collect()
+            }
         });
         if options.is_empty() {
             self.picker = None;
@@ -213,7 +215,7 @@ impl FuwaApp {
                     }
                 })
             }
-            Some(Target::Dm { key, conversation }) => {
+            Some(Target::Dm { key, conversation } | Target::Secure { key, channel: conversation, .. }) => {
                 let Ok(sequence) = id.parse::<i64>() else { return };
                 self.run(
                     cx,

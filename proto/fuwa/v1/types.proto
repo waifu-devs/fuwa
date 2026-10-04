@@ -975,6 +975,17 @@ message Attachment {
   // so apps can save its place before it loads; 0 when unknown.
   int32 width = 6;
   int32 height = 7;
+  // Set when the file is a voice message recorded in the app (Ogg Opus,
+  // the message's only file): apps show a player instead of a file.
+  VoiceNote voice = 8;
+}
+
+// What a voice message looks like before it plays, from the sending app.
+message VoiceNote {
+  // How long it plays, in milliseconds.
+  uint32 duration_ms = 1;
+  // Its loudness over time: up to 128 values, 0 (silence) to 255.
+  bytes waveform = 2;
 }
 
 message Embed {

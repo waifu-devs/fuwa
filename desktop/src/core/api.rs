@@ -111,6 +111,7 @@ clients! {
     automod => "AutoModService" pb::auto_mod_service_client::AutoModServiceClient<Transport>,
     invites => "InviteService" pb::invite_service_client::InviteServiceClient<Transport>,
     dms => "DirectMessageService" pb::direct_message_service_client::DirectMessageServiceClient<Transport>,
+    secure => "SecureChannelService" pb::secure_channel_service_client::SecureChannelServiceClient<Transport>,
     media => "MediaService" pb::media_service_client::MediaServiceClient<Transport>,
     join => "JoinService" pb::join_service_client::JoinServiceClient<Transport>,
     calls => "CallService" pb::call_service_client::CallServiceClient<Transport>,

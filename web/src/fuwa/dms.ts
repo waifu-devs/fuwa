@@ -6,6 +6,7 @@ import { reportError, reportTiming, reportUsage } from "@/lib/reports";
 import type { Voice as VoiceFile } from "@/e2ee/vault";
 import type { Loader } from "@/voice/player";
 import type { Clip } from "@/voice/recorder";
+import { MAX_VOICE_BYTES, readExactly } from "@/voice/fetch";
 import { open, seal } from "@/voice/seal";
 import { call, FuwaError, toFuwaError } from "./errors";
 import { store, updateDms, type PendingMessage } from "./store";
@@ -219,32 +220,6 @@ const opened = new Map<string, Uint8Array<ArrayBuffer>>();
 function keepOpened(mediaId: string, ogg: Uint8Array<ArrayBuffer>) {
   opened.set(mediaId, ogg);
   while (opened.size > 8) opened.delete(opened.keys().next().value!);
-}
-
-/**
- * The biggest sealed voice message this app fetches: fifteen minutes at
- * 64 kbps, padded, which is twice what this app records at.
- */
-const MAX_VOICE_BYTES = 8 * 1024 * 1024;
-
-/** Reads exactly `size` bytes, stopping as soon as there are more. */
-async function readExactly(body: ReadableStream<Uint8Array>, size: number): Promise<Uint8Array<ArrayBuffer>> {
-  const out = new Uint8Array(size);
-  const reader = body.getReader();
-  let at = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (at + value.length > size) throw new Error("this voice message isn't the one that was sent");
-      out.set(value, at);
-      at += value.length;
-    }
-  } finally {
-    void reader.cancel().catch(() => {});
-  }
-  if (at !== size) throw new Error("this voice message isn't the one that was sent");
-  return out;
 }
 
 /**

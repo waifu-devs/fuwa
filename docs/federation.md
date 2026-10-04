@@ -36,8 +36,52 @@ settings). Off, the instance answers other instances with nothing but "off".
 - An instance **pins** another's key only when one of its own admins checks
   that instance, or when a share is asked with a code (both instances pin
   the other's then), never because another instance said Hello. A different key
-  for an instance already pinned is refused (rotation comes in a later
-  update), and an instance keeps at most 1000 pinned keys.
+  for an instance already pinned is refused unless its old key vouched for
+  it (below), and an instance keeps at most 1000 pinned keys.
+
+### Rotating a key
+
+- An instance admin can **rotate** this instance's key (`RotateFederationKey`,
+  on "Other instances"). In one node.db write a new key replaces the old one,
+  and a **rotation** is kept: the old and new public keys and the time,
+  signed by the old key over `"fuwa-federation-v1 rotation"`, then the
+  origin, the old key and the new key (each after its length as 8 bytes,
+  big-endian), then the time as 8 bytes. The old private key is replaced in
+  node.db, and the copies this instance read of it are overwritten in
+  memory (`ring` keeps its own copy inside a key pair, which goes when the
+  pair does). The last 16 rotations are kept, and `GetKey`
+  serves them with the key (`GetKeyResponse.rotations`).
+- Then it pings every instance it pinned (and hasn't blocked), so each one
+  moves now. One it couldn't reach moves the next time they talk.
+- Every envelope also names the key it was signed with (`Envelope.key`),
+  only as a hint. When a signed call or answer from a pinned instance fails
+  its signature check but checks out with the key it names, the receiver
+  fetches that instance's key again: no more than once every 5 minutes for
+  one instance and named key (an admin's check looks every time), and
+  within the caps on fetching strangers' keys. Envelopes forged with other
+  keys get looks of their own, so they can't use up a real rotation's (at
+  most 8 kept for one instance and 1024 in all at a time). It moves to the new key only if the rotations lead there
+  from the key it pinned, each one signed by the key before it for that
+  origin, never back to a key it already left. Then it checks the call
+  again with the new key. Otherwise the call is refused as before.
+- Calls signed with the old key and still on their way when the other
+  instance moved are refused; their sender tries again as after any
+  refusal. Nonces and the start-time check work as before.
+- Two different next keys for one key, or a key going back to one it left,
+  mean someone holding an old key may be moving it: nothing moves, and the
+  instance is marked **check again**. Nothing goes either way with it (shares
+  with it say why) until an admin here checks it again on "Other
+  instances", which takes the key it has now.
+- Each move is listed on "Other instances" with the instance (the last 16
+  each). The log notes one fixed line, naming no instance or key.
+- Rotating is routine care, not a fix for a stolen key: whoever holds the
+  stolen old key can sign a rotation to a key of their own. After a theft,
+  the other instances' admins check this one again and compare the new
+  fingerprint over a channel they trust, as for the first pin. An instance
+  pinned to a key more than 16 rotations back can't move by itself either:
+  its admins check this one again.
+- Stored in node migration 0022: `federation_moves` (each move followed
+  here), and `needs_check` on `federation_peers`.
 
 ## The wire
 
@@ -96,10 +140,14 @@ On "Other instances" in Instance settings (`GetFederation`,
   back, and shows its fingerprint, the round trip, and whether it knows this
   instance too (a signed ping goes through once its admins have checked
   this instance);
+- **Rotate key**, and when it was last rotated;
 - the instances this one knows: origin, fingerprint, when it was last heard
-  from, and whether it's blocked;
+  from, whether it's blocked or needs checking again, and its key moves;
 - **Blocked instances** (`federation_blocked_hosts`, field 35): host names
-  this instance never calls and whose calls it turns away.
+  this instance never calls and whose calls it turns away. Blocking one
+  ends every share with it, as an instance admin ending each would: it's
+  told each share ended (the only call that still goes to a blocked
+  instance). Unblocking doesn't bring them back.
 
 ## Sharing a channel with another instance
 
@@ -132,7 +180,8 @@ On "Other instances" in Instance settings (`GetFederation`,
   instance's host ("Home · chat.example.com"). How this instance's own
   people look is never taken from the other: a home there can only name
   people of the guest server, shown as their own instance has them. People
-  leave an instance as their id, username, display name and kind only.
+  leave an instance as their id, username, display name, kind and avatar
+  only.
 - A guest server on another instance counts as one sender at the home: its
   people together send at most `FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE`
   messages a minute, it brings at most `FUWA_LIMIT_SHARED_REMOTE_PEOPLE`
@@ -145,10 +194,15 @@ On "Other instances" in Instance settings (`GetFederation`,
   512 events wait for one guest server, none longer than a minute. When the
   home's instance can't be reached, the guest's people are told "can't
   reach <host> right now" and nothing is sent.
-- Nothing from the other instance is fetched by apps: its servers' icons,
-  people's avatars and link previews' pictures aren't kept (pictures come
-  through each instance's own proxy later), a link preview keeps only its
-  words and an https link, and files can't be sent across instances yet.
+- Nothing from the other instance is fetched by apps. Its pictures (servers'
+  icons, people's avatars, webhooks' pictures, custom emoji, GIFs and link
+  previews' pictures) are shown through the reader's own instance's picture
+  proxy (`/media/outside/`), which fetches them from the other instance
+  without anything about the reader. Only pictures on the other instance
+  itself are taken (a link anywhere else is dropped), and an instance sends
+  only its own. A link preview keeps its words, an https link and its
+  pictures; threads stay with their server, and files can't be sent across
+  instances yet.
 - Stored in server migration 0020: `instance` and `instance_fingerprint` on
   `channel_guests` and `channel_links`, and `other_instances` on
   `share_codes`.
@@ -157,9 +211,9 @@ On "Other instances" in Instance settings (`GetFederation`,
 
 Counts only, like every report: refused envelopes by reason (bad signature,
 replay, clock, malformed), unreachable instances, refusals from the other
-side, and how long calls take. Never a host name, so the reports can't say
+side, key rotations and moves, and how long calls take. Never a host name, so the reports can't say
 who talks to whom.
 
 ## Next
 
-Pictures through each reader's own instance, blocking that ends shares, key rotation, and attachments. The plan is in the shared channels phase 2 design.
+Attachments. The plan is in the shared channels phase 2 design.
