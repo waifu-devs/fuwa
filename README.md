@@ -341,7 +341,10 @@ Agents can be in voice channels too, hearing each person and talking back,
 without WebRTC: `CallService.ListenVoice` streams everyone's sound as Opus
 frames labelled with who said them, and `SpeakVoice` says frames back. The
 [`fuwa-voice`](voice/) crate does both for Rust programs, with a parrot bot
-to start from; see [docs/calls.md](docs/calls.md#agents-bots-and-apps).
+to start from; see [docs/calls.md](docs/calls.md#agents-bots-and-apps). The
+TypeScript SDK adds what a spoken conversation needs: each person's
+utterances as they speak, speech streamed back as a service makes it, and
+stopping when someone talks over it ([docs/sdk.md](docs/sdk.md#conversations)).
 
 ### Looking after an instance
 
