@@ -21,6 +21,9 @@ path = "src/lib.rs"
 [workspace]
 
 [dependencies]
+cpal = "0.18"
+opus = "0.4"
+str0m = { version = "0.24", default-features = false, features = ["rust-crypto"] }
 anyhow = "1"
 base64 = "0.22"
 bytes = "1"

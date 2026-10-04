@@ -28,6 +28,7 @@ pub mod store;
 mod sync;
 pub mod themes;
 pub mod vault;
+pub mod voice;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -143,6 +144,7 @@ pub struct Core {
     prefs: Mutex<Prefs>,
     version: watch::Receiver<u64>,
     notices: Mutex<Option<mpsc::UnboundedReceiver<Notice>>>,
+    voice: voice::Voice,
 }
 
 /// Messages per page, as the web app reads them.
@@ -181,6 +183,7 @@ impl Core {
             prefs: Mutex::new(prefs),
             version,
             notices: Mutex::new(Some(notices)),
+            voice: voice::Voice::default(),
         });
         for saved in config::load_instances(&core.paths, &core.secrets) {
             core.add_instance(&saved.url, saved.token);
