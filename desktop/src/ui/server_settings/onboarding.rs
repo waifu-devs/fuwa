@@ -397,9 +397,7 @@ impl ServerSettingsView {
             let rx = core.spawn({
                 let core = core.clone();
                 async move {
-                    let bytes = tokio::fs::read(&path)
-                        .await
-                        .map_err(|_| Problem::new(tonic::Code::NotFound, "Couldn't read that file."))?;
+                    let bytes = crate::core::account::read_picture(&path).await?;
                     core.upload_picture_for(&key, &sid, pb::MediaPurpose::Banner, kind, bytes).await
                 }
             });

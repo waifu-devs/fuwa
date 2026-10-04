@@ -250,9 +250,7 @@ impl ServerSettingsView {
             let rx = core.spawn({
                 let core = core.clone();
                 async move {
-                    let bytes = tokio::fs::read(&path).await.map_err(|err| {
-                        Problem::new(tonic::Code::NotFound, format!("Couldn't read that file: {err}"))
-                    })?;
+                    let bytes = crate::core::account::read_picture(&path).await?;
                     let url = core.upload_picture(&key, pb::MediaPurpose::Avatar, kind, bytes).await?;
                     core.update_webhook(&key, &w, WebhookPatch { avatar_url: Some(url), ..WebhookPatch::default() })
                         .await
