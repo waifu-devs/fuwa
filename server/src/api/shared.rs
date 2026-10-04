@@ -37,6 +37,8 @@ pub const SHAREABLE: Bits = bit(Permission::SendMessages) | bit(Permission::Embe
 const SHAREABLE_ELSEWHERE: Bits = SHAREABLE & !bit(Permission::AttachFiles);
 /// How long a share code works.
 const CODE_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+/// Requests from one other instance a server keeps waiting, at most.
+const MAX_WAITING_FROM_INSTANCE: i64 = 20;
 /// How many servers one channel is shown in besides its home, for now.
 const MAX_GUESTS: usize = 1;
 /// Letters and digits that read the same in any font, as invite codes use.
@@ -1028,6 +1030,22 @@ async fn home_ask(sdb: &ServerDb, ask: cpb::ShareAsk, from: &Instance) -> Result
             let guests = guests_of(conn, &channel.id).await?;
             if guests.iter().any(|g| g.server.id == guest.id) {
                 return Err(Error::AlreadyExists("this server already shows that channel, or has asked to".into()));
+            }
+            if let Some(origin) = &from.origin {
+                let waiting = query_one(
+                    conn,
+                    "SELECT count(*) FROM channel_guests WHERE instance = ?1 AND active = 0",
+                    [origin.as_str()],
+                    |r| r.get::<i64>(0),
+                )
+                .await?
+                .unwrap_or(0);
+                if waiting >= MAX_WAITING_FROM_INSTANCE {
+                    return Err(Error::ResourceExhausted(
+                        "this server has too many requests waiting from your instance; its admins have to answer some first"
+                            .into(),
+                    ));
+                }
             }
             if guests.len() >= MAX_GUESTS {
                 return Err(Error::FailedPrecondition(

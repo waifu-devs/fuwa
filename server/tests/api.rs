@@ -6748,6 +6748,7 @@ async fn channels_shared_across_instances() {
         .unwrap_err();
     assert_eq!(refused.code(), Code::NotFound, "{refused:?}");
     assert!(federation(&ca, &juan).await.peers.is_empty());
+    assert!(federation(&cb, &mika).await.peers.is_empty(), "the guest pins only once the home answers");
 
     // One for other instances names this one, and the preview names the
     // home instance and its key's fingerprint, without pinning anything.

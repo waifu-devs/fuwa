@@ -112,7 +112,11 @@ On "Other instances" in Instance settings (`GetFederation`,
   nothing) and shows the preview with **the home instance's host and key
   fingerprint**, to compare with the home's admins somewhere they trust.
 - Asking pins the home's key at the guest's instance and the guest's at the
-  home's. The home's admins see the request with the guest instance's host
+  home's, each only once the ask went through (the guest's instance once
+  the home's signed answer checks out), and no more than 3 instances under
+  one registered domain this way. Each server makes and takes at most 20
+  lookups and asks a minute, and keeps at most 20 requests waiting from one
+  other instance. The home's admins see the request with the guest instance's host
   and fingerprint before approving. Approving, turning down, ending and
   withdrawing work as on one instance.
 - Each instance reads every id another instance sends as that instance's
