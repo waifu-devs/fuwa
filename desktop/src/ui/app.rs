@@ -257,6 +257,9 @@ pub struct FuwaApp {
     /// The emoji picker over the composer, and its search box.
     pub emoji_open: bool,
     pub emoji_query: Entity<InputState>,
+    pub emoji: crate::ui::emoji_picker::EmojiPicker,
+    /// When the picker opened, so its emoji ripple in only then.
+    pub emoji_born: Option<std::time::Instant>,
     /// The profile the open card shows, once it arrives.
     pub profile: Option<crate::pb::Profile>,
     /// The rules the rules dialog shows, once they arrive.
@@ -312,8 +315,11 @@ impl FuwaApp {
                     this.save_edit(window, cx);
                 }
             }),
-            cx.subscribe_in(&emoji_query, window, |_: &mut Self, _, event: &InputEvent, _, cx| {
+            cx.subscribe_in(&emoji_query, window, |this: &mut Self, _, event: &InputEvent, _, cx| {
                 if let InputEvent::Change = event {
+                    // A new search starts at the top, on its best match.
+                    this.emoji.active = None;
+                    this.emoji.scroll.scroll_to_item(0, gpui_kit::ScrollStrategy::Top);
                     cx.notify();
                 }
             }),
@@ -440,6 +446,8 @@ impl FuwaApp {
             covers: 0,
             emoji_open: false,
             emoji_query,
+            emoji: Default::default(),
+            emoji_born: None,
             profile: None,
             rules: None,
             _subscriptions: subscriptions,

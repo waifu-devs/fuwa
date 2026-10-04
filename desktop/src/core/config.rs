@@ -169,6 +169,10 @@ pub struct Prefs {
     pub game_activity: bool,
     /// Your answer for each game or app that asked, by `Program::key`.
     pub game_answers: std::collections::BTreeMap<String, bool>,
+    /// Emoji picked lately, newest first: `u:` and the character, or `c:` and a server emoji's id.
+    pub recent_emoji: Vec<String>,
+    /// The skin tone for standard emoji: 0 is the default yellow, 1 to 5 light to dark.
+    pub skin_tone: u8,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -204,9 +208,14 @@ impl Default for Prefs {
             shared_notes_closed: Default::default(),
             game_activity: true,
             game_answers: Default::default(),
+            recent_emoji: Vec::new(),
+            skin_tone: 0,
         }
     }
 }
+
+/// How many recently picked emoji are kept.
+pub const MAX_RECENT_EMOJI: usize = 24;
 
 pub fn load_prefs(paths: &Paths) -> Prefs {
     let mut prefs: Prefs = read(&paths.settings()).unwrap_or_default();
@@ -227,6 +236,10 @@ impl Prefs {
         self.custom_themes = themes::sanitize_custom(std::mem::take(&mut self.custom_themes));
         self.keybinds.retain(|_, combo| combo.as_deref().is_none_or(keybinds::valid));
         self.custom_keybinds = keybinds::tidy_custom(std::mem::take(&mut self.custom_keybinds));
+        self.recent_emoji.truncate(MAX_RECENT_EMOJI);
+        if self.skin_tone > 5 {
+            self.skin_tone = 0;
+        }
         let known =
             |id: &str| themes::builtins().iter().any(|t| t.id == id) || self.custom_themes.iter().any(|t| t.id == id);
         if !known(&self.theme) {

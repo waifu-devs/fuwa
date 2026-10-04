@@ -18,6 +18,13 @@ use fuwa_desktop::pb;
 use fuwa_server::app::App;
 use fuwa_server::config::Config;
 
+/// A 1×1 PNG, for an emoji's picture.
+const TINY_PNG: [u8; 70] = [
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196,
+    137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 223, 224, 240, 31, 0, 7, 0, 2, 191, 43, 215, 199, 226, 0, 0,
+    0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
 struct Instance {
     url: String,
     runtime: tokio::runtime::Runtime,
@@ -252,6 +259,30 @@ fn two_people_talk_in_a_server_and_in_private() {
     )));
     bob.set_focus(Some(Focus { instance: key.clone(), channel: general.clone() }));
     assert_eq!(bob.shared.read(|s| s.instance(&key).unwrap().unread.get(&general).copied()), None);
+
+    // Alice writes with an emoji from her other server, which Bob isn't in:
+    // it goes along with the message, so Bob can draw it.
+    let owls = {
+        let (core, key) = (alice.clone(), key.clone());
+        wait(&alice, async move { core.create_server(&key, "Owl post").await }).unwrap()
+    };
+    let owl = {
+        let (core, key, sid) = (alice.clone(), key.clone(), owls.id.clone());
+        wait(&alice, async move { core.add_emoji(&key, &sid, "owl", "image/png", TINY_PNG.to_vec()).await }).unwrap()
+    };
+    until(&alice, "the owl emoji", |s| s.instance(&key).unwrap().emojis.get(&owls.id).is_some_and(|l| l.len() == 1));
+    let hoot = format!("hoot {}", fuwa_desktop::core::emoji::token(&owl));
+    {
+        let (core, key, sid, cid, text) =
+            (alice.clone(), key.clone(), server.id.clone(), general.clone(), hoot.clone());
+        wait(&alice, async move { core.send_message(&key, &sid, &cid, &text).await }).unwrap();
+    }
+    until(&bob, "the owl message", |s| {
+        s.instance(&key).unwrap().messages[&general]
+            .items
+            .iter()
+            .any(|m| m.content == hoot && m.emojis.iter().any(|e| e.id == owl.id && !e.url.is_empty()))
+    });
 
     // Alice opens a conversation with Bob and writes; only their devices can read it.
     let bob_id = bob.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().id);
