@@ -71,6 +71,9 @@ pub struct InstanceState {
     pub notifications: HashMap<String, pb::NotificationSettings>,
     /// Per server: who's in its voice channels, in the order they joined.
     pub voice: HashMap<String, Vec<pb::VoiceState>>,
+    /// Per server: its shared channels both ways, requests, codes and people kept out,
+    /// once a manager has looked. Read again when the server says they changed.
+    pub shared: HashMap<String, pb::ListConnectionsResponse>,
 }
 
 impl InstanceState {
@@ -96,6 +99,7 @@ impl InstanceState {
             dms: DmState::default(),
             notifications: HashMap::new(),
             voice: HashMap::new(),
+            shared: HashMap::new(),
         }
     }
 
@@ -214,6 +218,15 @@ pub fn upsert_message(items: &mut Vec<pb::Message>, message: pb::Message) {
     }
 }
 
+/// In a shared channel the authors needn't be members here: each message carries who wrote it.
+pub fn add_shared_authors(users: &mut HashMap<String, pb::User>, messages: &[pb::Message]) {
+    for user in messages.iter().filter_map(|m| m.shared.as_ref()?.user.as_ref()) {
+        if users.get(&user.id) != Some(user) {
+            users.insert(user.id.clone(), user.clone());
+        }
+    }
+}
+
 fn add_user(users: &mut HashMap<String, pb::User>, user: Option<&pb::User>) {
     if let Some(user) = user {
         users.insert(user.id.clone(), user.clone());
@@ -249,6 +262,7 @@ pub fn remove_server(i: &mut InstanceState, server_id: &str) {
     i.roles.remove(server_id);
     i.voice.remove(server_id);
     i.emojis.remove(server_id);
+    i.shared.remove(server_id);
     i.synced.remove(server_id);
     for id in channels {
         i.messages.remove(&id);
@@ -345,6 +359,7 @@ pub fn apply_event(i: &mut InstanceState, event: &pb::Event, focus: Option<&str>
                 return Outcome::Nothing;
             }
             let created = matches!(payload, Payload::MessageCreated(_));
+            add_shared_authors(&mut i.users, std::slice::from_ref(message));
             let mut known = false;
             if let Some(loaded) = i.messages.get_mut(&message.channel_id) {
                 known = loaded.items.iter().any(|m| m.id == message.id);

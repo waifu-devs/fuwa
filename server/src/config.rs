@@ -226,6 +226,12 @@ pub struct Limits {
     /// FUWA_LIMIT_VOICE_MESSAGES_PER_DAY: how many bytes of voice messages
     /// one account may upload a day (UTC), apart from pictures.
     pub voice_message_bytes_per_day: Option<i64>,
+    /// FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE: messages a minute all the
+    /// people of one server on another instance may send together.
+    pub shared_remote_sends_per_minute: Option<i64>,
+    /// FUWA_LIMIT_SHARED_REMOTE_PEOPLE: people one server on another
+    /// instance may bring to a server's shared channels.
+    pub shared_remote_people: Option<i64>,
 }
 
 impl Limits {
@@ -377,6 +383,8 @@ impl Config {
             voice_message_seconds: count("FUWA_LIMIT_VOICE_MESSAGE_SECONDS")?,
             voice_message_bytes: bytes("FUWA_LIMIT_VOICE_MESSAGE_BYTES")?,
             voice_message_bytes_per_day: upload_bytes("FUWA_LIMIT_VOICE_MESSAGES_PER_DAY")?,
+            shared_remote_sends_per_minute: count("FUWA_LIMIT_SHARED_REMOTE_SENDS_PER_MINUTE")?,
+            shared_remote_people: count("FUWA_LIMIT_SHARED_REMOTE_PEOPLE")?,
         };
 
         let do_not_track = get("DO_NOT_TRACK").is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes"));
