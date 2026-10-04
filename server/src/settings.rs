@@ -221,14 +221,16 @@ impl Settings {
                 .iter()
                 .map(|setup| setup.to_pb(false))
                 .collect(),
-            gifs: Some(self.gifs.to_pb(true)),
+            // Only the directory asks the provider, and it reads the key from
+            // node.db, so the key never goes to gateways, shards or apps.
+            gifs: Some(self.gifs.to_pb(false)),
         }
     }
 
     /// As instance admins see it: secrets stay on the server, shown only as
     /// whether one is saved and its last characters.
     pub fn to_admin_pb(&self) -> pb::InstanceSettings {
-        pb::InstanceSettings { turn_secret: String::new(), gifs: Some(self.gifs.to_pb(false)), ..self.to_pb() }
+        pb::InstanceSettings { turn_secret: String::new(), ..self.to_pb() }
     }
 
     /// A moderation provider servers can use now, by id.
@@ -702,6 +704,14 @@ mod tests {
             copy.set_json(field, &settings.get_json(field).unwrap()).unwrap();
             assert_eq!(copy.get_json(field).unwrap(), settings.get_json(field).unwrap(), "{field}");
             let mut from_pb = Settings::defaults(&config());
+            if *field == "gifs" {
+                // The key never travels in settings; the receiver keeps its own.
+                from_pb.gifs = crate::gifs::Setup {
+                    provider: settings.gifs.provider,
+                    api_key: settings.gifs.api_key.clone(),
+                    ..Default::default()
+                };
+            }
             from_pb.set_from_pb(field, &settings.to_pb()).unwrap();
             assert_eq!(from_pb.get_json(field).unwrap(), settings.get_json(field).unwrap(), "{field} via pb");
         }
@@ -739,6 +749,13 @@ mod tests {
         let mut saved = settings.clone();
         saved.set_from_pb("gifs", &settings.to_admin_pb()).unwrap();
         assert_eq!(saved.gifs.api_key, "giphy-key-abcd");
+        // Nor does it go to gateways and shards.
+        assert!(settings.to_pb().gifs.unwrap().api_key.is_empty());
+        // Switching provider never carries the key over.
+        let mut switched = settings.to_admin_pb();
+        switched.gifs.as_mut().unwrap().provider = pb::GifProvider::Klipy as i32;
+        saved.set_from_pb("gifs", &switched).unwrap();
+        assert!(saved.gifs.api_key.is_empty());
         assert!(saved.set_json("gifs", &serde_json::json!({"provider": "tenor"})).is_err());
     }
 

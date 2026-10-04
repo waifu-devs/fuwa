@@ -138,7 +138,7 @@
     messages never ping @everyone, @here or roles, and nobody can edit them.
   - GIFs (`docs/gifs.md` is the design): `gifs/` asks the instance's provider
     (`giphy.rs`, `klipy.rs` behind `Kind`; the `gifs` setting holds the key,
-    never sent to apps) with no forwarding headers, caches answers by a
+    never sent to apps, gateways or shards; another provider never gets it) with no forwarding headers, caches answers by a
     SHA-256 key, and hands results back as signed tokens with previews
     through the picture proxy. `gifs/store.rs` stores a picked GIF once
     (`gif_files`, media owner "gifs", metadata stripped) and keeps saved GIFs;

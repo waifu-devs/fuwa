@@ -163,12 +163,18 @@ impl Setup {
         }
     }
 
-    /// From a request: an empty key keeps `previous`'s.
+    /// From a request: an empty key keeps `previous`'s, but only for the same
+    /// provider, so one provider's key is never sent to another.
     pub fn from_pb(given: &pb::GifSettings, previous: &Setup) -> Result<Setup> {
         let key = given.api_key.trim();
+        let provider = Kind::from_pb(given.provider);
         let setup = Setup {
-            provider: Kind::from_pb(given.provider),
-            api_key: if key.is_empty() { previous.api_key.clone() } else { key.to_string() },
+            provider,
+            api_key: match key {
+                "" if provider == previous.provider => previous.api_key.clone(),
+                "" => String::new(),
+                key => key.to_string(),
+            },
             rating: match given.rating.trim().to_ascii_lowercase().as_str() {
                 "" | "pg-13" => String::new(),
                 other => other.to_string(),
@@ -311,7 +317,8 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .expect("the GIF client's settings are valid")
 });
 
-/// For FUWA_GIF_API_URL (tests): anywhere, still never through a proxy.
+/// For FUWA_GIF_API_URL (tests): a provider on this machine (the config
+/// takes only a loopback address there), never through a proxy.
 static TEST_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .no_proxy()
@@ -451,11 +458,23 @@ type KeptCategories = HashMap<String, (Instant, Vec<pb::GifCategory>)>;
 /// The categories, each with the first GIF its search finds; kept a while.
 pub async fn categories(app: &App, setup: &Setup) -> Result<Vec<pb::GifCategory>> {
     static KEPT: LazyLock<Mutex<KeptCategories>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+    // One load at a time, so many people opening the picker at once ask the
+    // provider once (each of its asks counts toward the daily cap).
+    static LOADING: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
     let key = format!("{}:{}", setup.provider.report_id(), setup.rating());
-    if let Some((at, kept)) = KEPT.lock().unwrap_or_else(|p| p.into_inner()).get(&key)
-        && at.elapsed() < CATEGORIES_TTL
-    {
-        return Ok(kept.clone());
+    let kept = || {
+        KEPT.lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&key)
+            .filter(|(at, _)| at.elapsed() < CATEGORIES_TTL)
+            .map(|(_, kept)| kept.clone())
+    };
+    if let Some(kept) = kept() {
+        return Ok(kept);
+    }
+    let _loading = LOADING.lock().await;
+    if let Some(kept) = kept() {
+        return Ok(kept);
     }
     let asks = CATEGORIES.iter().map(|(_, query)| ask(app, setup, Ask { query, cursor: 0, limit: 1 }));
     let answers = futures::future::join_all(asks).await;

@@ -165,12 +165,20 @@ pub async fn store_found(app: &App, setup: &Setup, token: &Token) -> Result<pb::
 /// The bytes of a provider's GIF: only a GIF, at most `max` bytes.
 async fn download(app: &App, url: &str, max: usize) -> std::result::Result<bytes::Bytes, &'static str> {
     let picture = if app.config.gif_api_url.is_some() {
-        // Tests: the provider is on this machine.
-        let response = super::TEST_CLIENT.get(url).send().await.map_err(|_| "it didn't answer")?;
-        let bytes = response.bytes().await.map_err(|_| "cut off")?;
-        if bytes.len() > max {
-            return Err("too big");
+        // Tests: the provider is on this machine; only its own files, capped.
+        let base = app.config.gif_api_url.as_deref().unwrap_or_default();
+        if !url.starts_with(&format!("{base}/")) {
+            return Err("not the test provider");
         }
+        let mut response = super::TEST_CLIENT.get(url).send().await.map_err(|_| "it didn't answer")?;
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|_| "cut off")? {
+            if body.len() + chunk.len() > max {
+                return Err("too big");
+            }
+            body.extend_from_slice(&chunk);
+        }
+        let bytes = bytes::Bytes::from(body);
         crate::outside::Picture {
             content_type: crate::media::sniff(&bytes[..bytes.len().min(16)]).ok_or("not a picture")?,
             bytes,

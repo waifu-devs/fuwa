@@ -503,9 +503,7 @@ impl Config {
             turn_secret: get("FUWA_TURN_SECRET").map(|s| s.trim().to_string()).unwrap_or_default(),
             automod_providers: automod_providers(&get)?,
             gifs: gifs(&get)?,
-            gif_api_url: get("FUWA_GIF_API_URL")
-                .map(|v| v.trim().trim_end_matches('/').to_string())
-                .filter(|v| !v.is_empty()),
+            gif_api_url: gif_api_url(&get)?,
             media,
             media_urls,
             replica,
@@ -645,6 +643,31 @@ fn automod_providers(get: &impl Fn(&str) -> Option<String>) -> Result<Vec<crate:
 
 /// GIF search from FUWA_GIF_PROVIDER and FUWA_GIF_API_KEY, checked like a
 /// change from the app.
+/// FUWA_GIF_API_URL: a stand-in GIF provider for tests, only ever on this
+/// machine, since calls to it skip the public-address check.
+fn gif_api_url(get: &impl Fn(&str) -> Option<String>) -> Result<Option<String>, String> {
+    let Some(url) =
+        get("FUWA_GIF_API_URL").map(|v| v.trim().trim_end_matches('/').to_string()).filter(|v| !v.is_empty())
+    else {
+        return Ok(None);
+    };
+    let local = reqwest::Url::parse(&url).ok().filter(|u| {
+        let loopback = match u.host() {
+            Some(url::Host::Domain(host)) => host == "localhost",
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        };
+        loopback && matches!(u.scheme(), "http" | "https") && u.path() == "/" && u.query().is_none()
+    });
+    match local {
+        Some(_) => Ok(Some(url)),
+        None => Err(format!(
+            "FUWA_GIF_API_URL is for tests and must be a loopback address like http://127.0.0.1:9000, got {url:?}"
+        )),
+    }
+}
+
 fn gifs(get: &impl Fn(&str) -> Option<String>) -> Result<crate::gifs::Setup, String> {
     let value = |name: &str| get(name).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
     let provider = match value("FUWA_GIF_PROVIDER").as_deref().map(str::to_ascii_lowercase).as_deref() {
@@ -796,6 +819,16 @@ mod tests {
         }
         for public in ["http://media.example.com:8443", "http://203.0.113.5:8080", "http://[2001:db8::1]:8080"] {
             assert!(media(public).unwrap_err().contains("must be https://"), "{public}");
+        }
+    }
+
+    #[test]
+    fn the_test_gif_provider_is_only_on_this_machine() {
+        let local = config(&[("FUWA_GIF_API_URL", "http://127.0.0.1:9911/")]).unwrap();
+        assert_eq!(local.gif_api_url.as_deref(), Some("http://127.0.0.1:9911"));
+        assert!(config(&[("FUWA_GIF_API_URL", "http://localhost:9911")]).is_ok());
+        for elsewhere in ["http://10.0.0.5", "https://api.giphy.com", "http://127.0.0.1.example.com", "file:///etc"] {
+            assert!(config(&[("FUWA_GIF_API_URL", elsewhere)]).is_err(), "{elsewhere}");
         }
     }
 
