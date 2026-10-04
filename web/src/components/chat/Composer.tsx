@@ -85,10 +85,13 @@ function useSendGate(instanceKey: string, serverId: string, channel: Channel) {
     /** Synced and allowed to write here. */
     canSend: !member || hasIn(access, channel.id, Permission.SEND_MESSAGES),
     /**
-     * May send files here. Not in a channel another server shares with this
-     * one: files stay with the server they're uploaded for.
+     * May send files here. Not yet in a channel shared from another
+     * instance; a home on this one takes and keeps them.
      */
-    canAttach: !!member && hasIn(access, channel.id, Permission.ATTACH_FILES) && !(channel.shared && !channel.shared.home),
+    canAttach:
+      !!member &&
+      hasIn(access, channel.id, Permission.ATTACH_FILES) &&
+      !(channel.shared && !channel.shared.home && channel.shared.homeServer?.instance),
     canStartThreads: !member || hasIn(access, channel.id, Permission.CREATE_THREADS),
     /** Joined, but hasn't agreed to the server's rules yet. */
     pending: !!member && access.pending,

@@ -1897,6 +1897,25 @@ impl NodeDb {
         .await
     }
 
+    /// Moves a file `account_id` uploaded for the guest server `from` to the
+    /// shared channel's home `to` it's sent in, marking it used: only a
+    /// stored attachment no message has yet. Whether it moved; a second try
+    /// for the same file finds it taken.
+    pub async fn take_media(&self, id: &str, from: &str, to: &str, account_id: &str) -> Result<bool> {
+        db::write(&self.db, async |conn| {
+            let changed = conn
+                .execute(
+                    "UPDATE media SET server_id = ?3, used_at = ?4
+                     WHERE id = ?1 AND server_id = ?2 AND account_id = ?5 AND purpose = ?6
+                       AND stored_at IS NOT NULL AND used_at IS NULL",
+                    (id, from, to, now_ms(), account_id, pb::MediaPurpose::Attachment as i64),
+                )
+                .await?;
+            Ok(changed == 1)
+        })
+        .await
+    }
+
     /// A server's files in use: its icon, banner, emoji, webhooks' pictures
     /// and messages' attachments.
     pub async fn server_media(&self, server_id: &str) -> Result<Vec<String>> {

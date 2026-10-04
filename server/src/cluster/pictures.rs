@@ -61,9 +61,6 @@ pub fn server_dir(data: &Path, server_id: &str) -> PathBuf {
 /// isn't the server's to take (one an account or another server uses), or
 /// was taken already, stays where it is.
 pub async fn take(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
-    use sha2::{Digest, Sha256};
-    use tokio::io::AsyncWriteExt;
-
     let Link::Shard(link) = &app.link else { return Ok(false) };
     let (server_id, media_id) = (parse_id("server_id", server_id)?, canonical(media_id)?);
     let data = &app.config.data_path;
@@ -82,28 +79,7 @@ pub async fn take(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
     let dir = server_dir(data, &server_id);
     std::fs::create_dir_all(&dir)?;
     let partial = dir.join(format!(".incoming-{media_id}"));
-    let received = async {
-        let mut out = tokio::fs::File::create(&partial).await?;
-        let mut hash = Sha256::new();
-        while let Some(piece) = stream.message().await.map_err(Error::retried)? {
-            out.write_all(&piece.data).await?;
-            hash.update(&piece.data);
-            if piece.sha256.is_empty() {
-                continue;
-            }
-            out.sync_all().await?;
-            if hash.finalize().as_slice() != piece.sha256.as_slice() {
-                return Err(Error::internal(format!("picture {media_id} didn't arrive intact")));
-            }
-            return Ok(());
-        }
-        Err(Error::internal(format!("the directory stopped partway through picture {media_id}")))
-    }
-    .await;
-    if let Err(err) = received {
-        let _ = std::fs::remove_file(&partial);
-        return Err(err);
-    }
+    receive(&mut stream, &partial, &media_id, u64::MAX).await?;
     std::fs::rename(&partial, &dest)?;
     if let Some(replica) = app.servers.replica()
         && let Err(err) = replica.store().put_file(&name(&server_id, &media_id), &dest).await
@@ -115,6 +91,47 @@ pub async fn take(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
     let request = cpb::ForgetPictureRequest { media_id: media_id.clone(), server_id: server_id.clone() };
     link.ask(request, |mut d, r| async move { d.forget_picture(r).await }).await?;
     Ok(true)
+}
+
+/// Writes a picture's pieces to `partial`, checked against the SHA-256 the
+/// last one carries and stopped past `most` bytes. Whatever went wrong,
+/// nothing is left at `partial`.
+async fn receive(
+    stream: &mut tonic::Streaming<cpb::SendPictureResponse>,
+    partial: &Path,
+    media_id: &str,
+    most: u64,
+) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncWriteExt;
+
+    let received = async {
+        let mut out = tokio::fs::File::create(partial).await?;
+        let mut hash = Sha256::new();
+        let mut got = 0u64;
+        while let Some(piece) = stream.message().await.map_err(Error::retried)? {
+            got += piece.data.len() as u64;
+            if got > most {
+                return Err(Error::internal(format!("picture {media_id} is bigger than it should be")));
+            }
+            out.write_all(&piece.data).await?;
+            hash.update(&piece.data);
+            if piece.sha256.is_empty() {
+                continue;
+            }
+            out.sync_all().await?;
+            if hash.finalize().as_slice() != piece.sha256.as_slice() {
+                return Err(Error::internal(format!("picture {media_id} didn't arrive intact")));
+            }
+            return Ok(());
+        }
+        Err(Error::internal(format!("the other side stopped partway through picture {media_id}")))
+    }
+    .await;
+    if received.is_err() {
+        let _ = std::fs::remove_file(partial);
+    }
+    received
 }
 
 /// Takes in the background, after a server here started using a picture.
@@ -597,18 +614,23 @@ pub async fn send(
     server_id: String,
     media_id: String,
 ) -> Result<mpsc::Receiver<Result<cpb::SendPictureResponse, Status>>> {
-    use sha2::{Digest, Sha256};
-    use tokio::io::AsyncReadExt;
-
     let media_id = canonical(&media_id)?;
     takeable(&app, &server_id, &media_id).await?;
-    let mut file = match tokio::fs::File::open(app.media()?.path(&media_id)).await {
+    let file = match tokio::fs::File::open(app.media()?.path(&media_id)).await {
         Ok(file) => file,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Err(Error::FailedPrecondition("that picture was taken already".into()));
         }
         Err(err) => return Err(err.into()),
     };
+    Ok(stream_file(file))
+}
+
+/// A file's pieces, the last carrying its SHA-256.
+fn stream_file(mut file: tokio::fs::File) -> mpsc::Receiver<Result<cpb::SendPictureResponse, Status>> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncReadExt;
+
     let (tx, rx) = mpsc::channel(4);
     tokio::spawn(async move {
         let mut hash = Sha256::new();
@@ -633,7 +655,109 @@ pub async fn send(
             }
         }
     });
-    Ok(rx)
+    rx
+}
+
+// ─────────────── Files sent in a shared channel ───────────────
+
+/// Sends a file a server here uploaded and no message has yet to the shard
+/// holding the shared channel's home that took it ([`take_shared`]): only
+/// one still loose here whose row says that home took it from `account_id`.
+pub async fn send_shared(
+    app: &App,
+    req: &cpb::SendSharedFileRequest,
+) -> Result<mpsc::Receiver<Result<cpb::SendPictureResponse, Status>>> {
+    let (server_id, media_id) = (parse_id("server_id", &req.server_id)?, canonical(&req.media_id)?);
+    let home_id = parse_id("server_id", &req.home_id)?;
+    if !app.servers.holds(&server_id) {
+        return Err(Error::Misrouted);
+    }
+    if !crate::attachments::is_loose(&*app.servers.get(&server_id).await?.read()?, &media_id).await? {
+        return Err(Error::NotFound(GONE_UPLOAD));
+    }
+    let url = format!("{}/media/{media_id}", app.settings().public_url);
+    match app.check_upload(&req.account_id, pb::MediaPurpose::Attachment, &url, Some(&home_id)).await {
+        Ok(Some(_)) => {}
+        _ => return Err(Error::NotFound(GONE_UPLOAD)),
+    }
+    match tokio::fs::File::open(app.config.data_path.join(name(&server_id, &media_id))).await {
+        Ok(file) => Ok(stream_file(file)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(Error::NotFound(GONE_UPLOAD)),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// What's said of an upload that's no longer there to send.
+pub const GONE_UPLOAD: &str = "uploaded file; upload it again";
+
+/// Puts a file a guest server on this instance uploaded with the home
+/// server here, once the home has claimed its row
+/// ([`App::take_attachment`]) and before the message that has it is
+/// written: noted loose first, so it's never served before a message has
+/// it, then moved over (the guest's on this shard too) or copied from the
+/// guest's shard, at most `size` bytes, and backed up. In one process the
+/// file stays where it is.
+pub async fn take_shared(
+    app: &App,
+    guest_id: &str,
+    home_id: &str,
+    media_id: &str,
+    account_id: &str,
+    size: u64,
+) -> Result<()> {
+    let Link::Shard(link) = &app.link else { return Ok(()) };
+    let (guest_id, home_id, media_id) =
+        (parse_id("server_id", guest_id)?, parse_id("server_id", home_id)?, canonical(media_id)?);
+    if app.servers.frozen().contains(&home_id) {
+        return Err(Error::Moving);
+    }
+    crate::attachments::note_loose(app, &home_id, &media_id).await?;
+    let data = &app.config.data_path;
+    let dir = server_dir(data, &home_id);
+    std::fs::create_dir_all(&dir)?;
+    let dest = dir.join(&media_id);
+    if app.servers.holds(&guest_id) {
+        match std::fs::rename(data.join(name(&guest_id, &media_id)), &dest) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound && !dest.exists() => {
+                return Err(Error::NotFound(GONE_UPLOAD));
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+    } else if !dest.exists() {
+        let request = cpb::PlacementsRequest { server_ids: vec![guest_id.clone()] };
+        let placements = link.ask(request, |mut d, r| async move { d.placements(r).await }).await?;
+        let url = placements
+            .placements
+            .into_iter()
+            .find(|p| p.server_id == guest_id && !p.url.is_empty())
+            .map(|p| p.url)
+            .ok_or_else(|| {
+                Error::Unavailable("part of this instance is unreachable right now; try again soon".into())
+            })?;
+        let request = cpb::SendSharedFileRequest {
+            server_id: guest_id.clone(),
+            media_id: media_id.clone(),
+            home_id: home_id.clone(),
+            account_id: account_id.to_string(),
+        };
+        let mut stream = super::shard_client(&url, app.config.cluster.key_value()?)?
+            .send_shared_file(request)
+            .await
+            .map_err(|status| match status.code() {
+                tonic::Code::NotFound => Error::NotFound(GONE_UPLOAD),
+                _ => Error::retried(status),
+            })?
+            .into_inner();
+        let partial = dir.join(format!(".incoming-{media_id}"));
+        receive(&mut stream, &partial, &media_id, size).await?;
+        std::fs::rename(&partial, &dest)?;
+    }
+    if let Some(replica) = app.servers.replica() {
+        replica.store().put_file(&name(&home_id, &media_id), &dest).await?;
+    }
+    Ok(())
 }
 
 /// Deletes the directory's copy of a picture its server's shard has taken.

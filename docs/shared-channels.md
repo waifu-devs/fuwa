@@ -104,6 +104,18 @@ audit log notes an instance admin did it.
   (`HomeEvents`). The guest publishes them to its members as sequence 0: shown,
   not kept, so a client catching up after a gap re-reads the channel from the
   home.
+- **Files** a guest sends are the home's, like everything else in the
+  channel. The guest uploads them for its own server as usual; the home
+  checks each one is the sender's own upload for that server (and that they
+  may attach files there), counts it against its own room for files, and
+  takes it (`take_files` in `api/shared.rs`): it claims the upload's row
+  first (`Node::take_media`, so a file goes in one message), then keeps the
+  bytes with its own pictures. On a split instance its shard moves them in
+  place, or copies them from the guest's shard (`ShardService.SendSharedFile`,
+  checked by SHA-256 and the row's size) when the two servers live apart; in
+  one process they stay where they are. The guest's shard then lets go of
+  its copy. From then on the file is served, counted and deleted as one of
+  the home's. Files can't come from another instance yet.
 - `Channel.shared` tells apps a channel is shared: from here with which
   servers (`home`), or from which server and channel (not `home`).
   `SharedChannelsUpdated` tells managers to re-read `ListConnections`.

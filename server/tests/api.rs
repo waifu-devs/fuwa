@@ -8415,6 +8415,78 @@ async fn send_files(
         .map(|r| r.into_inner().message.unwrap())
 }
 
+/// A guest's files in a shared channel are the home's: it takes them from
+/// the guest's server, keeps them under its own room for files, and deletes
+/// them with their message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn files_in_shared_channels_stay_with_the_home() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[("FUWA_LIMIT_ATTACHMENT_STORAGE", "10KB")]).await;
+    let mut c = clients(&instance).await;
+    let (juan, _, _) = sign_up(&mut c, "juan").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let (rin, _, _) = sign_up(&mut c, "rin").await;
+    let home = create_server(&mut c, &juan, "Home", true).await.id;
+    let guest = create_server(&mut c, &mika, "Guest", true).await.id;
+    join(&mut c, &rin, &guest).await;
+    let dev = new_channel(&mut c, &juan, &home, "dev", pb::ChannelType::Text).await;
+    let shown = share(&mut c, &juan, &home, &dev.id, &mika, &guest).await;
+    let node = instance.app.node().unwrap();
+
+    let notes = b"notes from the guest's side".to_vec();
+    let url = attach(&mut c, &instance, &rin, &guest, notes.clone()).await;
+    let sent = send_files(&mut c, &rin, &guest, &shown.id, &[(&url, "../notes.txt")]).await.unwrap();
+    let [file] = &sent.attachments[..] else { panic!("{:?}", sent.attachments) };
+    assert_eq!((file.filename.as_str(), file.size), ("notes.txt", notes.len() as i64));
+    assert!(url.ends_with(&file.id));
+    let row = node.media(&file.id).await.unwrap().unwrap();
+    assert_eq!((row.server_id.as_deref(), row.used), (Some(home.as_str()), true));
+    let (status, _, body) = fetch(&instance, &file.url).await;
+    assert_eq!((status, body), (reqwest::StatusCode::OK, notes.clone()));
+    let at_home = messages(&mut c, &juan, &home, &dev.id).await;
+    assert_eq!(at_home.iter().find(|m| m.id == sent.id).unwrap().attachments, sent.attachments);
+    assert_eq!(usage(&mut c, &juan, &home).await.attachment_bytes, notes.len() as i64);
+    assert_eq!(usage(&mut c, &mika, &guest).await.attachment_bytes, 0);
+    // A file goes in one message, and only its uploader sends it.
+    let again = send_files(&mut c, &rin, &guest, &shown.id, &[(&url, "again.txt")]).await.unwrap_err();
+    assert_eq!(again.code(), Code::PermissionDenied, "{again:?}");
+    let theirs = attach(&mut c, &instance, &mika, &guest, notes.clone()).await;
+    let stolen = send_files(&mut c, &rin, &guest, &shown.id, &[(&theirs, "x.txt")]).await.unwrap_err();
+    assert_eq!(stolen.code(), Code::PermissionDenied, "{stolen:?}");
+
+    // The home's room for files counts them; one that doesn't fit stays the
+    // guest's upload, untouched.
+    let big = attach(&mut c, &instance, &rin, &guest, vec![7; 10_000]).await;
+    let full = send_files(&mut c, &rin, &guest, &shown.id, &[(&big, "big.bin")]).await.unwrap_err();
+    assert_eq!(full.code(), Code::ResourceExhausted, "{full:?}");
+    let big_id = big.rsplit('/').next().unwrap();
+    let row = node.media(big_id).await.unwrap().unwrap();
+    assert_eq!((row.server_id.as_deref(), row.used), (Some(guest.as_str()), false));
+
+    // Deleting the message deletes the file.
+    c.messages
+        .delete_message(authed(
+            &juan,
+            pb::DeleteMessageRequest {
+                server_id: home.clone(),
+                message_id: sent.id.clone(),
+                channel_id: dev.id.clone(),
+            },
+        ))
+        .await
+        .unwrap();
+    let file_id = file.id.clone();
+    for _ in 0..100 {
+        if node.media(&file_id).await.unwrap().is_none() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(node.media(&file_id).await.unwrap().is_none());
+    assert_eq!(fetch(&instance, &file.url).await.0, reqwest::StatusCode::NOT_FOUND);
+    instance.stop().await;
+}
+
 #[tokio::test]
 async fn attachments_upload_send_serve_and_go_with_their_message() {
     let dir = tempfile::tempdir().unwrap();

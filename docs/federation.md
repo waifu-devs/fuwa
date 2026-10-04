@@ -202,7 +202,7 @@ On "Other instances" in Instance settings (`GetFederation`,
   itself are taken (a link anywhere else is dropped), and an instance sends
   only its own. A link preview keeps its words, an https link and its
   pictures; threads stay with their server, and files can't be sent across
-  instances yet.
+  instances yet (within one instance they can: docs/shared-channels.md).
 - Stored in server migration 0020: `instance` and `instance_fingerprint` on
   `channel_guests` and `channel_links`, and `other_instances` on
   `share_codes`.
