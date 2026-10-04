@@ -11,6 +11,8 @@
 //! shard holding the server, so its link never changes. The pictures go
 //! with the server when it moves, as its recordings do; pictures a server
 //! used before this, or that couldn't be taken, are taken when it moves.
+//! When the server is deleted they're deleted with it, on its shard, in its
+//! bucket and at the directory ([`drop_all`]).
 //!
 //! node.db keeps each picture's row (who uploaded it, its size and type),
 //! as it keeps accounts. One process running everything keeps pictures
@@ -154,6 +156,31 @@ pub async fn drop(app: &App, server_id: &str, media_id: &str) {
         && let Err(err) = replica.store().delete(&key).await
     {
         tracing::warn!(media = %media_id, error = %err, "couldn't delete a server's picture from the replica");
+    }
+}
+
+/// Deletes every picture of a deleted server here, and the replica's copies.
+/// What can't be deleted is logged and reported; nothing comes back for it.
+pub async fn drop_all(app: &App, server_id: &str) {
+    let Ok(server_id) = parse_id("server_id", server_id) else { return };
+    match std::fs::remove_dir_all(server_dir(&app.config.data_path, &server_id)) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+            tracing::warn!(server = %server_id, error = %err, "couldn't delete a deleted server's pictures");
+            crate::reports::server_error("server_pictures_drop", Some("cluster::pictures"));
+        }
+        _ => {}
+    }
+    let Some(replica) = app.servers.replica() else { return };
+    let prefix = format!("{DIR}/{server_id}/");
+    let dropped = async {
+        for object in replica.store().list(&prefix).await? {
+            replica.store().delete(&object.key).await?;
+        }
+        Ok::<_, Error>(())
+    };
+    if let Err(err) = dropped.await {
+        tracing::warn!(server = %server_id, error = %err, "couldn't delete a deleted server's pictures from the replica");
+        crate::reports::server_error("server_pictures_drop_replica", Some("cluster::pictures"));
     }
 }
 
