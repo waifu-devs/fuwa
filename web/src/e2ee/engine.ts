@@ -27,6 +27,7 @@ import { Permission, type Event, type User } from "@/gen/fuwa/v1/types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { accessOf, hasIn } from "@/lib/permissions";
 import { reportError } from "@/lib/reports";
+import { BackupSync } from "./backup";
 import * as history from "./history";
 import * as vault from "./vault";
 import { loadE2ee, type Commit, type Device, type E2ee, type Processed, type WasmMember } from "./wasm";
@@ -201,6 +202,8 @@ export class DmEngine {
   /** Catch-ups waiting their turn, so a burst of records reads each conversation once. */
   private queued = new Set<string>();
   private work: Promise<void> = Promise.resolve();
+  /** The account's message backup, as this device takes part in it. */
+  readonly backup: BackupSync;
 
   private constructor(
     readonly key: string,
@@ -213,6 +216,17 @@ export class DmEngine {
     private version: number,
   ) {
     this.lock = lockName(vaultKey);
+    this.backup = new BackupSync(
+      key,
+      api,
+      vaultKey,
+      me.id,
+      (fn) => exclusive(`${this.lock}:backup`, fn),
+      async (ids) => {
+        await Promise.all(ids.map((id) => this.refresh(id).catch(() => {})));
+        for (const id of ids) this.tell(id);
+      },
+    );
     this.tabs = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("fuwa-e2ee");
     if (this.tabs) {
       this.tabs.onmessage = (e: MessageEvent<{ vault: string; conversation?: string; list?: boolean }>) => {
@@ -268,6 +282,7 @@ export class DmEngine {
   stop() {
     if (this.stopped) return;
     this.controller.abort();
+    this.backup.stop();
     this.tabs?.close();
     for (const timer of this.settling.values()) clearTimeout(timer);
     try {
@@ -1325,6 +1340,10 @@ export function startDms(key: string, api: Api, me: User, token: string) {
       engines.set(key, engine);
       updateDms(key, (d) => ({ ...d, status: "ready", deviceId: engine.deviceId }));
       void engine.follow((problem) => updateDms(key, (d) => ({ ...d, problem })));
+      engine.backup.start().catch((err: unknown) => {
+        console.warn("fuwa: couldn't check the message backup", err);
+        updateDms(key, (d) => ({ ...d, backup: { ...d.backup, problem: toFuwaError(err).message } }));
+      });
     })
     .catch((err: unknown) => {
       if (starting.get(key) !== attempt) return;

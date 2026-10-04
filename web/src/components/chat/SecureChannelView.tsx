@@ -22,7 +22,7 @@ import { dmProblem, markDmRead, prepareSecureChannel, resetSecureChannel, setSec
 import { useAccess } from "@/fuwa/hooks";
 import { useFuwa, type DmMember, type DmState } from "@/fuwa/store";
 import { NotificationBell } from "@/components/chat/NotificationBell";
-import { EncryptedComposer, EncryptedMessages, Starting, Unavailable } from "@/components/dm/DmView";
+import { EncryptedComposer, EncryptedMessages, earlierFrom, Starting, Unavailable, type Earlier } from "@/components/dm/DmView";
 import { Padlock } from "@/components/dm/Padlock";
 import { ConnDot, connectionLabel, UserAvatar } from "@/components/Icons";
 import { InlineMarkdown } from "@/components/Markdown";
@@ -93,10 +93,13 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
   const byId = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
   const userOf = useCallback((userId: string) => byId.get(userId)?.user ?? users?.[userId], [byId, users]);
   const memberOf = useCallback((userId: string) => byId.get(userId), [byId]);
-  const shared = useFuwa((s) => !!s.instances[instanceKey]?.dms.items[id]?.some((i) => i.sharedBy));
+  const earlier = useFuwa((s) => {
+    const dms = s.instances[instanceKey]?.dms;
+    return earlierFrom(dms?.items[id], dms?.backup.status === "locked");
+  });
   const describe = useCallback(
-    (item: Item) => (me ? channelLine(item, (u) => nameIn(byId, users, u), me, shared && item.kind === "joined") : ""),
-    [byId, users, me, shared],
+    (item: Item) => (me ? channelLine(item, (u) => nameIn(byId, users, u), me, item.kind === "joined" ? earlier : null) : ""),
+    [byId, users, me, earlier],
   );
 
   return (
@@ -210,14 +213,15 @@ function nameIn(byId: Map<string, Member>, users: Record<string, User> | undefin
 }
 
 /** What changed about the channel's devices, in words, from the commit itself (not from the server). */
-export function channelLine(item: Item, nameOf: (userId: string) => string, me: User, shared = false): string {
+export function channelLine(item: Item, nameOf: (userId: string) => string, me: User, earlier: Earlier = null): string {
   const name = (id: string) => (id === me.id ? "you" : nameOf(id));
   const whose = (id: string) => (id === me.id ? "your" : `${nameOf(id)}'s`);
   const capital = (text: string) => `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
   if (item.kind === "joined") {
-    return shared
-      ? "This device joined the channel. The messages above were passed on by a member's device."
-      : "This device joined the channel. Messages from before it can't be read here.";
+    if (earlier === "shared") return "This device joined the channel. The messages above were passed on by a member's device.";
+    if (earlier === "backup") return "This device joined the channel. The messages above came from your message backup.";
+    if (earlier === "restorable") return "This device joined the channel. To read what came before, restore your message backup in Settings, under Devices.";
+    return "This device joined the channel. Messages from before it can't be read here.";
   }
   if (item.kind === "unreadable") return `A message from ${name(item.senderId)} couldn't be opened on this device.`;
   if (item.kind === "setting") {
