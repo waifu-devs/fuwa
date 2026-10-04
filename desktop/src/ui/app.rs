@@ -49,21 +49,34 @@ pub enum Nav {
 /// Where the composer sends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
-    Channel { key: String, server: String, channel: String },
-    Dm { key: String, conversation: String },
+    Channel {
+        key: String,
+        server: String,
+        channel: String,
+    },
+    /// A server's end-to-end encrypted channel: read and written through this device's encryption.
+    Secure {
+        key: String,
+        server: String,
+        channel: String,
+    },
+    Dm {
+        key: String,
+        conversation: String,
+    },
 }
 
 impl Target {
     pub fn id(&self) -> String {
         match self {
-            Target::Channel { key, channel, .. } => format!("c|{key}|{channel}"),
+            Target::Channel { key, channel, .. } | Target::Secure { key, channel, .. } => format!("c|{key}|{channel}"),
             Target::Dm { key, conversation } => format!("d|{key}|{conversation}"),
         }
     }
 
     pub fn key(&self) -> &str {
         match self {
-            Target::Channel { key, .. } | Target::Dm { key, .. } => key,
+            Target::Channel { key, .. } | Target::Secure { key, .. } | Target::Dm { key, .. } => key,
         }
     }
 }
@@ -95,12 +108,18 @@ pub enum Dialog {
         user_id: String,
         server: Option<String>,
     },
-    /// A new channel, or a category with `category`, under `parent` (or at the top).
+    /// A new channel (or category) of `kind`, under `parent` (or at the top).
     CreateChannel {
         key: String,
         server: String,
         parent: String,
-        category: bool,
+        kind: crate::pb::ChannelType,
+    },
+    /// How a secure channel is kept private, and who can read it.
+    Secure {
+        key: String,
+        server: String,
+        channel: String,
     },
     /// A server's rules, to agree to before talking.
     Rules {
@@ -186,6 +205,10 @@ pub struct FuwaApp {
     pub fresh: HashMap<String, Instant>,
     pub requested: HashSet<String>,
     pub prepared: HashSet<String>,
+    /// Starting a secure channel's encryption over, from its dialog.
+    pub secure_reset: crate::ui::secure::Reset,
+    /// Turning a secure channel's history sharing on or off.
+    pub secure_saving: bool,
     pub hovered: Option<String>,
     pub members_open: bool,
     /// The open server's member list, a view of its own.
@@ -362,6 +385,8 @@ impl FuwaApp {
             fresh: HashMap::new(),
             requested: HashSet::new(),
             prepared: HashSet::new(),
+            secure_reset: Default::default(),
+            secure_saving: false,
             hovered: None,
             members_open: true,
             members_view: None,
@@ -547,7 +572,17 @@ impl FuwaApp {
         match &self.nav {
             Nav::Server { key, server } => {
                 let channel = self.channel_in(key, server)?;
-                Some(Target::Channel { key: key.clone(), server: server.clone(), channel })
+                let secure = self.core.shared.read(|s| {
+                    s.instance(key)
+                        .and_then(|i| i.channel(server, &channel))
+                        .is_some_and(|c| c.r#type == crate::pb::ChannelType::Secure as i32)
+                });
+                let (key, server) = (key.clone(), server.clone());
+                Some(if secure {
+                    Target::Secure { key, server, channel }
+                } else {
+                    Target::Channel { key, server, channel }
+                })
             }
             Nav::Home { dm: Some((key, conversation)) } => {
                 Some(Target::Dm { key: key.clone(), conversation: conversation.clone() })
@@ -564,7 +599,9 @@ impl FuwaApp {
             let text = |c: &&crate::pb::Channel| {
                 matches!(
                     crate::pb::ChannelType::try_from(c.r#type),
-                    Ok(crate::pb::ChannelType::Text | crate::pb::ChannelType::Announcement)
+                    Ok(crate::pb::ChannelType::Text
+                        | crate::pb::ChannelType::Announcement
+                        | crate::pb::ChannelType::Secure)
                 )
             };
             last.and_then(|id| channels.iter().filter(text).find(|c| &c.id == id))
@@ -623,7 +660,9 @@ impl FuwaApp {
             self.menu = None;
         }
         let focus = target.as_ref().map(|t| match t {
-            Target::Channel { key, channel, .. } => Focus { instance: key.clone(), channel: channel.clone() },
+            Target::Channel { key, channel, .. } | Target::Secure { key, channel, .. } => {
+                Focus { instance: key.clone(), channel: channel.clone() }
+            }
             Target::Dm { key, conversation } => Focus { instance: key.clone(), channel: conversation.clone() },
         });
         self.core.set_focus(focus);
@@ -634,7 +673,7 @@ impl FuwaApp {
 
     fn placeholder(&self) -> String {
         match self.target() {
-            Some(Target::Channel { key, server, channel }) => {
+            Some(Target::Channel { key, server, channel } | Target::Secure { key, server, channel }) => {
                 let name = self
                     .core
                     .shared
@@ -676,6 +715,25 @@ impl FuwaApp {
                     );
                 }
             }
+            Some(Target::Secure { key, server, channel }) => {
+                let (ready, write) = self.core.shared.read(|s| {
+                    s.instance(&key).map_or((false, false), |i| {
+                        (
+                            i.dms.status.is_ready(),
+                            i.access(&server).has_in(&channel, crate::pb::Permission::SendMessages),
+                        )
+                    })
+                });
+                let id = format!("{key}|{channel}|{write}");
+                if ready && self.prepared.insert(id) {
+                    let core = self.core.clone();
+                    self.run(
+                        cx,
+                        async move { core.prepare_secure_channel(&key, &server, &channel, write).await },
+                        |_, _, cx| cx.notify(),
+                    );
+                }
+            }
             Some(Target::Dm { key, conversation }) => {
                 let ready = self.core.shared.read(|s| s.instance(&key).is_some_and(|i| i.dms.status.is_ready()));
                 let id = format!("{key}|{conversation}");
@@ -714,7 +772,8 @@ impl FuwaApp {
         if text.is_empty() {
             return;
         }
-        if let Target::Dm { key, conversation } = &target {
+        if let Target::Dm { key, conversation: id } | Target::Secure { key, channel: id, .. } = &target {
+            let conversation = id;
             let blocked =
                 self.core.shared.read(|s| s.instance(key).and_then(|i| i.dms.blocked.get(conversation).cloned()));
             if blocked.is_some() {
@@ -734,7 +793,7 @@ impl FuwaApp {
                     cx.notify()
                 });
             }
-            Target::Dm { key, conversation } => {
+            Target::Dm { key, conversation } | Target::Secure { key, channel: conversation, .. } => {
                 self.run(
                     cx,
                     async move { core.send_dm(&key, &conversation, Content::Text { text, reply_to: 0 }).await },
@@ -806,7 +865,7 @@ impl FuwaApp {
                     },
                 );
             }
-            Some(Target::Dm { key, conversation }) => {
+            Some(Target::Dm { key, conversation } | Target::Secure { key, channel: conversation, .. }) => {
                 let Ok(seq) = id.parse::<i64>() else { return };
                 self.run(cx, async move { core.delete_dm(&key, &conversation, seq).await }, |this, result, cx| {
                     if let Err(err) = result {
@@ -963,7 +1022,12 @@ impl FuwaApp {
                             let v = view.read(cx);
                             (v.key.clone(), v.server.clone())
                         };
-                        let dialog = Dialog::CreateChannel { key, server, parent: parent.clone(), category: false };
+                        let dialog = Dialog::CreateChannel {
+                            key,
+                            server,
+                            parent: parent.clone(),
+                            kind: crate::pb::ChannelType::Text,
+                        };
                         this.open_dialog(dialog, window, cx);
                     }
                 }
@@ -979,8 +1043,7 @@ impl FuwaApp {
         let placeholder = match &dialog {
             Dialog::CreateServer { .. } => "My cozy server",
             Dialog::JoinInvite { .. } => "https://fuwa.chat/invite/hTKzmak",
-            Dialog::CreateChannel { category: false, .. } => "new-channel",
-            Dialog::CreateChannel { category: true, .. } => "Cozy corner",
+            Dialog::CreateChannel { kind, .. } => crate::ui::secure::name_hint(*kind),
             Dialog::Moderate { .. } => "Why? It goes in the audit log",
             _ => "",
         };
@@ -1237,7 +1300,7 @@ impl FuwaApp {
                     cx.notify();
                 }
             }
-            Dialog::Welcome { .. } => self.close_dialog(cx),
+            Dialog::Welcome { .. } | Dialog::Secure { .. } => self.close_dialog(cx),
             Dialog::Moderate { key, server, user_id, action } => {
                 let reason: String = value.chars().take(512).collect();
                 self.moderate(key, server, user_id, action, reason, cx);
@@ -1246,14 +1309,14 @@ impl FuwaApp {
                 self.dialog = None;
                 self.message_person(key, user_id, window, cx);
             }
-            Dialog::CreateChannel { key, server, parent, category } => {
+            Dialog::CreateChannel { key, server, parent, kind } => {
+                let category = kind == crate::pb::ChannelType::Category;
                 if value.is_empty() {
                     self.dialog_error = Some("Give it a name.".into());
                     cx.notify();
                     return;
                 }
                 self.dialog_busy = true;
-                let kind = if category { crate::pb::ChannelType::Category } else { crate::pb::ChannelType::Text };
                 let rx = core.spawn({
                     let (core, key, server) = (core.clone(), key.clone(), server.clone());
                     async move { core.create_channel(&key, &server, &value, kind, &parent).await }

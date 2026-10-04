@@ -177,10 +177,19 @@ fn start_dms(
                     i.dms.device_id = engine.device_id().to_owned();
                 });
                 *slot.lock() = Some(engine.clone());
+                // Servers that loaded first: their secure channels' news is read now.
+                let servers: Vec<(String, Vec<pb::Channel>)> = core.shared.read(|s| {
+                    s.instance(&key)
+                        .map(|i| i.channels.iter().map(|(sid, list)| (sid.clone(), list.clone())).collect())
+                        .unwrap_or_default()
+                });
+                for (server_id, channels) in servers {
+                    follow_secure(&core, &key, &server_id, &channels);
+                }
                 engine.follow().await;
             }
             Err(err) => {
-                tracing::warn!("direct messages didn't start: {err}");
+                tracing::warn!("direct messages didn't start");
                 core.shared.instance(&key, |i| {
                     i.dms.status = DmStatus::Failed;
                     i.dms.problem = Some(if err.0.contains("support that yet") {
@@ -394,6 +403,12 @@ fn handle_event(core: &Arc<Core>, key: &str, event: pb::Event, state: &Arc<Mutex
     if let Some(notice) = notice {
         core.shared.notice(notice);
     }
+    // Secure channels' records, and changes to who can read them, go to the encryption.
+    if let Some(payload) = &event.payload
+        && let Some(engine) = core.dm_engine(key)
+    {
+        engine.on_server_event(&sid, payload);
+    }
     // A server's shared channels changed: read them again where a manager has them open.
     if matches!(event.payload, Some(Payload::SharedChannelsUpdated(_)))
         && core.shared.read(|s| s.instance(key).is_some_and(|i| i.shared.contains_key(&sid)))
@@ -441,6 +456,7 @@ async fn snapshot(core: Arc<Core>, key: String, api: Api, server_id: String, sta
     match retrying(&core, &key, load).await {
         Ok((server, channels, members, roles, emojis, voice)) => {
             let held = state.lock().held.remove(&server_id).unwrap_or_default();
+            follow_secure(&core, &key, &server_id, &channels.channels);
             core.shared.update(|s| {
                 let focus = s.focus_channel(&key).map(str::to_owned);
                 let Some(i) = s.instances.get_mut(&key) else { return };
@@ -525,6 +541,7 @@ async fn relist(core: Arc<Core>, key: String, api: Api, server_id: String, state
     .await;
     let events = state.lock().relisting.remove(&server_id).unwrap_or_default();
     if let Ok(listed) = listed {
+        follow_secure(&core, &key, &server_id, &listed.channels);
         core.shared.update(|s| {
             let focus = s.focus_channel(&key).map(str::to_owned);
             let Some(i) = s.instances.get_mut(&key) else { return };
@@ -536,5 +553,18 @@ async fn relist(core: Arc<Core>, key: String, api: Api, server_id: String, state
                 store::apply_event(i, event, focus.as_deref());
             }
         });
+    }
+}
+
+/// Follows the secure channels this device was already in, once their server loads.
+fn follow_secure(core: &Arc<Core>, key: &str, server_id: &str, channels: &[pb::Channel]) {
+    let ids: Vec<String> =
+        channels.iter().filter(|c| c.r#type == pb::ChannelType::Secure as i32).map(|c| c.id.clone()).collect();
+    if ids.is_empty() {
+        return;
+    }
+    if let Some(engine) = core.dm_engine(key) {
+        let server_id = server_id.to_owned();
+        tokio::spawn(async move { engine.follow_server(&server_id, &ids).await });
     }
 }

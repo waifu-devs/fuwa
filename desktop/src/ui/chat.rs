@@ -12,8 +12,9 @@ use gpui_kit::component::message_scroller::MessageScroller;
 use gpui_kit::component::text::{TextView, TextViewStyle};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, px, rgb,
+    AnyElement, App, AppContext as _, Context, Div, Focusable as _, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window,
+    div, px, rgb,
 };
 
 use crate::core::config::Density;
@@ -31,6 +32,120 @@ use crate::ui::widgets::{
     app_badge, avatar, card, conn_dot, error_line, fuwa_mark, icon, icon_button, icon_button_in, is_agent, pal,
     primary_button, soft_button,
 };
+
+/// Who wrote something in a conversation or a secure channel, as shown.
+pub(crate) struct Who {
+    pub name: String,
+    pub color: Option<Hsla>,
+    pub user: Option<pb::User>,
+}
+
+fn plain_msg(id: String, who: Who, content: String, at: i64, mine: bool) -> Msg {
+    Msg {
+        id,
+        shown: images_as_links(&content),
+        user: who.user,
+        name: who.name,
+        color: who.color,
+        content,
+        mentions_me: false,
+        editing: false,
+        can_delete: mine,
+        at,
+        edited: false,
+        head: true,
+        mine,
+        pending: false,
+        failed: None,
+        nonce: 0,
+        unreadable: false,
+        badge: None,
+        embeds: Vec::new(),
+        from: None,
+        keep_out: false,
+        keeping_out: false,
+        sig: 0,
+    }
+}
+
+/// The rows of a conversation or a secure channel (`moderate` is Some for a
+/// channel: whether you may delete others' messages there), from what this
+/// device opened.
+pub(crate) fn encrypted_rows(
+    i: &InstanceState,
+    id: &str,
+    start: Row,
+    who: &dyn Fn(&str) -> Who,
+    moderate: Option<bool>,
+    editing: Option<&str>,
+) -> Vec<Row> {
+    let me = i.me.clone();
+    let me_id = me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
+    let items = i.dms.items.get(id).map(Vec::as_slice).unwrap_or_default();
+    let channel = moderate.is_some();
+    let shared = items.iter().any(|it| !it.shared_by.is_empty());
+    let mut rows = vec![start];
+    for item in items {
+        let mine = item.sender_id == me_id;
+        let can_delete = mine || moderate == Some(true);
+        match item.kind {
+            ItemKind::Text if !item.deleted => {
+                let mut m = plain_msg(item.seq.to_string(), who(&item.sender_id), item.content.clone(), item.at, mine);
+                m.editing = editing == Some(m.id.as_str());
+                m.edited = item.edited_at > 0;
+                m.can_delete = can_delete;
+                rows.push(Row::Msg(Rc::new(m)));
+            }
+            ItemKind::Text => {}
+            // A channel says it in a line; a conversation shows the message it couldn't open.
+            ItemKind::Unreadable if !channel => {
+                let text = "This message can't be opened on this device.".to_owned();
+                let mut m = plain_msg(item.seq.to_string(), who(&item.sender_id), text, item.at, mine);
+                m.shown = String::new();
+                m.unreadable = true;
+                m.can_delete = can_delete;
+                rows.push(Row::Msg(Rc::new(m)));
+            }
+            ItemKind::Joined if !channel => rows.push(Row::Note {
+                id: item.seq.to_string(),
+                icon: "shield-check",
+                text: "This device joined the conversation. What came before stays on the devices that were here."
+                    .into(),
+            }),
+            // The devices a conversation started with aren't news.
+            ItemKind::Devices if !channel && !rows.iter().any(|r| matches!(r, Row::Msg(_))) => {}
+            ItemKind::Devices if !channel => {
+                let added = item.added.iter().filter(|d| d.user_id != me_id || d.device_id != i.dms.device_id);
+                let mut lines: Vec<String> = Vec::new();
+                for d in added {
+                    lines.push(format!("{} added a device", who(&d.user_id).name));
+                }
+                for d in &item.removed {
+                    lines.push(format!("{} removed a device", who(&d.user_id).name));
+                }
+                if !lines.is_empty() {
+                    lines.dedup();
+                    rows.push(Row::Note { id: item.seq.to_string(), icon: "laptop", text: lines.join(" · ") });
+                }
+            }
+            ItemKind::Reset | ItemKind::Setting if !channel => {}
+            _ => {
+                let name = |id: &str| who(id).name;
+                let (icon, text) = crate::ui::secure::channel_line(item, &name, &me_id, shared);
+                rows.push(Row::Note { id: item.seq.to_string(), icon, text });
+            }
+        }
+    }
+    for (n, text) in i.dms.sending.get(id).into_iter().flatten().enumerate() {
+        let who = Who { name: me.as_ref().map(user_name).unwrap_or_default(), color: None, user: me.clone() };
+        let mut m = plain_msg(format!("s{n}"), who, text.clone(), crate::core::dms::now_ms(), true);
+        m.can_delete = false;
+        m.pending = true;
+        rows.push(Row::Msg(Rc::new(m)));
+    }
+    group(&mut rows);
+    rows
+}
 
 /// Why you can't write here, and what would let you.
 pub struct Blocked {
@@ -324,129 +439,42 @@ impl FuwaApp {
             }),
             Some(Target::Dm { key, conversation }) => self.core.shared.read(|s| {
                 let Some(i) = s.instance(&key) else { return Vec::new() };
-                let me = i.me.clone();
-                let me_id = me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
+                let me = i.me.as_ref().map(|m| m.id.clone()).unwrap_or_default();
                 let users: Vec<pb::User> =
                     i.dms.conversations.iter().find(|c| c.id == conversation).map(|c| c.users.clone()).unwrap_or_default();
                 let person = |id: &str| users.iter().find(|u| u.id == id).cloned().or_else(|| i.users.get(id).cloned());
-                let other = users.iter().find(|u| u.id != me_id).map(user_name).unwrap_or_else(|| "them".into());
-                let mut rows = vec![Row::Start {
+                let other = users.iter().find(|u| u.id != me).map(user_name).unwrap_or_else(|| "them".into());
+                let start = Row::Start {
                     icon: "lock",
                     title: other.clone(),
                     body: format!(
                         "This is the start of your private conversation with {other}. It's end-to-end encrypted: only your devices and theirs can read it."
                     ),
                     shared: None,
-                }];
-                for item in i.dms.items.get(&conversation).into_iter().flatten() {
-                    let name = person(&item.sender_id).map(|u| user_name(&u)).unwrap_or_else(|| "Someone".into());
-                    match item.kind {
-                        ItemKind::Text if !item.deleted => rows.push(Row::Msg(Rc::new(Msg {
-                            id: item.seq.to_string(),
-                            user: person(&item.sender_id),
-                            name,
-                            color: None,
-                            content: item.content.clone(),
-                            shown: images_as_links(&item.content),
-                            mentions_me: false,
-                            editing: self.editing.as_deref() == Some(item.seq.to_string().as_str()),
-                            can_delete: item.sender_id == me_id,
-                            at: item.at,
-                            edited: item.edited_at > 0,
-                            head: true,
-                            mine: item.sender_id == me_id,
-                            pending: false,
-                            failed: None,
-                            nonce: 0,
-                            unreadable: false,
-                            badge: None,
-                            embeds: Vec::new(),
-                            from: None,
-                            keep_out: false,
-                            keeping_out: false,
-                        sig: 0,
-                        }))),
-                        ItemKind::Text => {}
-                        ItemKind::Unreadable => rows.push(Row::Msg(Rc::new(Msg {
-                            id: item.seq.to_string(),
-                            user: person(&item.sender_id),
-                            name,
-                            color: None,
-                            content: "This message can't be opened on this device.".into(),
-                            shown: String::new(),
-                            mentions_me: false,
-                            editing: false,
-                            can_delete: item.sender_id == me_id,
-                            at: item.at,
-                            edited: false,
-                            head: true,
-                            mine: item.sender_id == me_id,
-                            pending: false,
-                            failed: None,
-                            nonce: 0,
-                            unreadable: true,
-                            badge: None,
-                            embeds: Vec::new(),
-                            from: None,
-                            keep_out: false,
-                            keeping_out: false,
-                        sig: 0,
-                        }))),
-                        ItemKind::Joined => rows.push(Row::Note {
-                            id: item.seq.to_string(),
-                            icon: "shield-check",
-                            text: "This device joined the conversation. What came before stays on the devices that were here."
-                                .into(),
-                        }),
-                        // The devices a conversation started with aren't news.
-                        ItemKind::Devices if !rows.iter().any(|r| matches!(r, Row::Msg(_))) => {}
-                        ItemKind::Devices => {
-                            let added = item.added.iter().filter(|d| d.user_id != me_id || d.device_id != i.dms.device_id);
-                            let mut lines: Vec<String> = Vec::new();
-                            for d in added {
-                                let who = person(&d.user_id).map(|u| user_name(&u)).unwrap_or_else(|| "Someone".into());
-                                lines.push(format!("{who} added a device"));
-                            }
-                            for d in &item.removed {
-                                let who = person(&d.user_id).map(|u| user_name(&u)).unwrap_or_else(|| "Someone".into());
-                                lines.push(format!("{who} removed a device"));
-                            }
-                            if !lines.is_empty() {
-                                lines.dedup();
-                                rows.push(Row::Note { id: item.seq.to_string(), icon: "laptop", text: lines.join(" · ") });
-                            }
-                        }
-                    }
-                }
-                for (n, text) in i.dms.sending.get(&conversation).into_iter().flatten().enumerate() {
-                    rows.push(Row::Msg(Rc::new(Msg {
-                        id: format!("s{n}"),
-                        user: me.clone(),
-                        name: me.as_ref().map(user_name).unwrap_or_default(),
-                        color: None,
-                        content: text.clone(),
-                        shown: images_as_links(text),
-                        mentions_me: false,
-                        editing: false,
-                        can_delete: false,
-                        at: crate::core::dms::now_ms(),
-                        edited: false,
-                        head: true,
-                        mine: true,
-                        pending: true,
-                        failed: None,
-                        nonce: 0,
-                        unreadable: false,
-                        badge: None,
-                        embeds: Vec::new(),
-                        from: None,
-                        keep_out: false,
-                        keeping_out: false,
-                        sig: 0,
-                    })));
-                }
-                group(&mut rows);
-                rows
+                };
+                let who = |id: &str| {
+                    let user = person(id);
+                    Who { name: user.as_ref().map(user_name).unwrap_or_else(|| "Someone".into()), color: None, user }
+                };
+                encrypted_rows(i, &conversation, start, &who, None, self.editing.as_deref())
+            }),
+            Some(Target::Secure { key, server, channel }) => self.core.shared.read(|s| {
+                let Some(i) = s.instance(&key) else { return Vec::new() };
+                let name = i.channel(&server, &channel).map(|c| c.name.clone()).unwrap_or_default();
+                let shares = i.dms.secure_history.get(&channel).copied().unwrap_or(false);
+                let start = Row::Start {
+                    icon: "shield-check",
+                    title: format!("Welcome to #{name}"),
+                    body: crate::ui::secure::beginning(shares),
+                    shared: None,
+                };
+                let who = |id: &str| Who {
+                    name: i.display_name(Some(&server), id),
+                    color: i.name_color(&server, id).map(|c| rgb(c).into()),
+                    user: i.users.get(id).cloned(),
+                };
+                let manage = i.access(&server).has_in(&channel, pb::Permission::ManageMessages);
+                encrypted_rows(i, &channel, start, &who, Some(manage), self.editing.as_deref())
             }),
             None => Vec::new(),
         }
@@ -559,76 +587,42 @@ impl FuwaApp {
             )
             .into_any_element();
         };
-        let header = div()
-            .h(px(56.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .px(px(20.0))
-            .border_b_1()
-            .border_color(p.border)
-            .child(icon("hash").size(px(20.0)).text_color(p.muted_foreground))
-            .child(div().font_weight(FontWeight::EXTRA_BOLD).child(channel.name.clone()))
-            .when_some(shared::pill_text(&channel), |el, text| {
-                el.child(crate::ui::shared_marks::pill(text, &channel.id, &p))
-            })
-            .when(!channel.topic.is_empty(), |el| {
-                el.child(div().w(px(1.0)).h(px(20.0)).bg(p.border)).child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_sm()
-                        .text_color(p.muted_foreground)
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(channel.topic.clone()),
-                )
-            })
-            .when(channel.topic.is_empty(), |el| el.child(div().flex_1()))
-            .child({
-                let muted = self.core.shared.read(|s| {
-                    s.instance(key).is_some_and(|i| i.is_muted(server, &channel.id, crate::core::dms::now_ms()))
-                });
-                let menu =
-                    Menu::Channel { key: key.to_owned(), server: server.to_owned(), channel: channel.id.clone() };
-                let open = self.menu.as_ref() == Some(&menu);
-                icon_button("bell", if muted { "bell-off" } else { "bell" }, &p)
-                    .when(open || muted, |el| el.text_color(p.primary))
-                    .when(open, |el| el.bg(alpha(p.primary, 0.12)))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.menu = if this.menu.as_ref() == Some(&menu) { None } else { Some(menu.clone()) };
-                        cx.notify();
-                    }))
-            })
-            .child(
-                icon_button("members-toggle", "users", &p)
-                    .when(self.members_open, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.members_open = !this.members_open;
-                        cx.notify();
-                    })),
-            );
+        let secure = channel.r#type == pb::ChannelType::Secure as i32;
+        let header = if secure {
+            self.secure_header(key, server, &channel, &p, cx)
+        } else {
+            div()
+                .h(px(56.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .px(px(20.0))
+                .border_b_1()
+                .border_color(p.border)
+                .child(icon("hash").size(px(20.0)).text_color(p.muted_foreground))
+                .child(div().font_weight(FontWeight::EXTRA_BOLD).child(channel.name.clone()))
+                .when_some(shared::pill_text(&channel), |el, text| {
+                    el.child(crate::ui::shared_marks::pill(text, &channel.id, &p))
+                })
+                .when(!channel.topic.is_empty(), |el| {
+                    el.child(div().w(px(1.0)).h(px(20.0)).bg(p.border)).child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_sm()
+                            .text_color(p.muted_foreground)
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(channel.topic.clone()),
+                    )
+                })
+                .when(channel.topic.is_empty(), |el| el.child(div().flex_1()))
+        }
+        .child(self.header_buttons(key, server, &channel.id, &p, cx));
 
-        let blocked = self.core.shared.read(|s| {
-            let i = s.instance(key)?;
-            let access = i.access(server);
-            if access.pending {
-                return Some(Blocked {
-                    text: "Agree to this server's rules to start talking.".into(),
-                    action: Some(("Read the rules", Dialog::Rules { key: key.to_owned(), server: server.to_owned() })),
-                });
-            }
-            let now = crate::core::dms::now_ms();
-            if let Some(until) = i.my_member(server).and_then(|m| m.timed_out_until.as_ref()).map(|t| ms_of(Some(t)))
-                && until > now
-                && !access.owner
-            {
-                return Some(Blocked { text: format!("You're timed out until {}.", clock(until)), action: None });
-            }
-            (!access.has_in(&channel.id, pb::Permission::SendMessages))
-                .then(|| Blocked { text: "You can't send messages in this channel.".into(), action: None })
-        });
+        let blocked = self.channel_blocked(key, server, &channel.id);
+        let blocked = if secure { self.secure_blocked(key, server, &channel.id, blocked) } else { blocked };
         let column = div()
             .flex_1()
             .min_w_0()
@@ -647,6 +641,68 @@ impl FuwaApp {
             view = view.child(self.bell_menu(&key, &server, &channel, window, cx));
         }
         view.into_any_element()
+    }
+
+    /// Why you can't write in a server's channel, if you can't: the rules, a time out, or its permissions.
+    pub(crate) fn channel_blocked(&self, key: &str, server: &str, channel_id: &str) -> Option<Blocked> {
+        self.core.shared.read(|s| {
+            let i = s.instance(key)?;
+            let access = i.access(server);
+            if access.pending {
+                return Some(Blocked {
+                    text: "Agree to this server's rules to start talking.".into(),
+                    action: Some(("Read the rules", Dialog::Rules { key: key.to_owned(), server: server.to_owned() })),
+                });
+            }
+            let now = crate::core::dms::now_ms();
+            if let Some(until) = i.my_member(server).and_then(|m| m.timed_out_until.as_ref()).map(|t| ms_of(Some(t)))
+                && until > now
+                && !access.owner
+            {
+                return Some(Blocked { text: format!("You're timed out until {}.", clock(until)), action: None });
+            }
+            (!access.has_in(channel_id, pb::Permission::SendMessages))
+                .then(|| Blocked { text: "You can't send messages in this channel.".into(), action: None })
+        })
+    }
+
+    /// A channel header's bell and member list buttons.
+    fn header_buttons(
+        &mut self,
+        key: &str,
+        server: &str,
+        channel_id: &str,
+        p: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let p = *p;
+        div()
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .child({
+                let muted = self.core.shared.read(|s| {
+                    s.instance(key).is_some_and(|i| i.is_muted(server, channel_id, crate::core::dms::now_ms()))
+                });
+                let menu =
+                    Menu::Channel { key: key.to_owned(), server: server.to_owned(), channel: channel_id.to_owned() };
+                let open = self.menu.as_ref() == Some(&menu);
+                icon_button("bell", if muted { "bell-off" } else { "bell" }, &p)
+                    .when(open || muted, |el| el.text_color(p.primary))
+                    .when(open, |el| el.bg(alpha(p.primary, 0.12)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.menu = if this.menu.as_ref() == Some(&menu) { None } else { Some(menu.clone()) };
+                        cx.notify();
+                    }))
+            })
+            .child(
+                icon_button("members-toggle", "users", &p)
+                    .when(self.members_open, |el| el.text_color(p.primary).bg(alpha(p.primary, 0.12)))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.members_open = !this.members_open;
+                        cx.notify();
+                    })),
+            )
     }
 
     fn message_list(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1185,6 +1241,10 @@ fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElemen
                 ))
                 .into_any_element()
         }
+        // A secure channel's start says how it's kept private, in its own colour.
+        Row::Start { icon: glyph, title, body, .. } if *glyph == "shield-check" => {
+            crate::ui::secure::start(title.clone(), body.clone(), &p).into_any_element()
+        }
         Row::Start { icon: glyph, title, body, shared } => div()
             .px(px(20.0))
             .pt(px(32.0))
@@ -1215,8 +1275,15 @@ fn render_row(row: &Row, ix: usize, ctx: &Rc<RowCtx>, cx: &mut App) -> AnyElemen
             .gap(px(10.0))
             .text_sm()
             .text_color(p.muted_foreground)
-            .child(div().w(px(40.0)).flex().justify_center().child(icon(glyph).size(px(16.0)).text_color(p.primary)))
-            .child(text.clone())
+            .child(
+                div()
+                    .w(px(40.0))
+                    .flex_none()
+                    .flex()
+                    .justify_center()
+                    .child(icon(glyph).size(px(16.0)).text_color(p.primary)),
+            )
+            .child(div().flex_1().min_w_0().child(text.clone()))
             .into_any_element(),
         Row::Msg(m) => message(m, &p, ctx, cx),
     };
