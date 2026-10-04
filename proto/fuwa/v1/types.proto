@@ -432,6 +432,13 @@ message Server {
   // It has onboarding turned on: new members go through its steps once
   // they're in. See JoinService.GetOnboarding.
   bool has_onboarding = 27;
+  // Recordings on the server keep everyone's camera and shared screen too,
+  // each as a WebM (VP8) file next to their sound. Off unless someone with
+  // MANAGE_SERVER turns it on, where the instance allows it
+  // (InstanceSettings.call_recording_video). Turning it either way ends the
+  // recording going on and everyone's ask to record on the server: a new one
+  // starts when someone presses Record again.
+  bool record_video = 28;
 }
 
 // What new members see once they're in: a few words and the channels to

@@ -168,6 +168,7 @@ the log filter are read only from the environment.
 | `FUWA_LOG` | `info,turso_core=warn` | Log filter ([syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)) |
 | `FUWA_CALLS` | `on` | Voice channels and calls in direct messages; `off` turns them off |
 | `FUWA_CALL_RECORDINGS` | `on` | Recording voice channels on the server (a track per person, for people with Record); `off` turns it off |
+| `FUWA_CALL_RECORDING_VIDEO` | `off` | `on` lets servers keep cameras and shared screens in their recordings too, as WebM files (each server still chooses; far bigger than sound) |
 | `FUWA_CALL_RECORDINGS_KEEP_DAYS` | unset | Days a finished server recording is kept before it deletes itself; unset keeps them until someone does |
 | `FUWA_MEDIA_PORT` | `50000` | The port calls' sound uses, UDP and TCP, open to the internet; `off` for no calls in this process |
 | `FUWA_MEDIA_ADDRESSES` | this machine's address | Where apps reach that port: `HOST`, `HOST:PORT`, or `udp/…` or `tcp/…` for one protocol (a TCP proxy), comma-separated |

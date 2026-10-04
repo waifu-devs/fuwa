@@ -51,6 +51,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/server/0026_search.sql"),
     include_str!("../migrations/server/0028_banner_onboarding.sql"),
     include_str!("../migrations/server/0029_polls.sql"),
+    include_str!("../migrations/server/0030_record_video.sql"),
 ];
 
 pub type Payload = pb::event::Payload;
@@ -221,12 +222,14 @@ pub struct RecordingRow {
     pub ended_at: Option<i64>,
     /// Its files are sealed with a key from the instance's encryption key.
     pub sealed: bool,
-    /// JSON: `[{user_id, size_bytes, duration_ms}]`.
+    /// JSON: `[{user_id, size_bytes, duration_ms, camera_bytes, screen_bytes}]`.
     pub tracks: String,
     pub size_bytes: i64,
+    /// It keeps cameras and screens too.
+    pub video: bool,
 }
 
-const RECORDING_COLUMNS: &str = "id, channel_id, started_by, started_at, ended_at, sealed, tracks, size_bytes";
+const RECORDING_COLUMNS: &str = "id, channel_id, started_by, started_at, ended_at, sealed, tracks, size_bytes, video";
 
 fn recording_row(r: &Row) -> turso::Result<RecordingRow> {
     Ok(RecordingRow {
@@ -238,6 +241,7 @@ fn recording_row(r: &Row) -> turso::Result<RecordingRow> {
         sealed: r.get::<i64>(5)? != 0,
         tracks: r.get(6)?,
         size_bytes: r.get(7)?,
+        video: r.get::<i64>(8)? != 0,
     })
 }
 
@@ -605,8 +609,15 @@ impl ServerDb {
         let row = row.clone();
         db::write(&self.db, async |conn| {
             conn.execute(
-                "INSERT INTO recordings (id, channel_id, started_by, started_at, sealed) VALUES (?1, ?2, ?3, ?4, ?5)",
-                (row.id.as_str(), row.channel_id.as_str(), row.started_by.as_str(), row.started_at, row.sealed as i64),
+                "INSERT INTO recordings (id, channel_id, started_by, started_at, sealed, video) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                (
+                    row.id.as_str(),
+                    row.channel_id.as_str(),
+                    row.started_by.as_str(),
+                    row.started_at,
+                    row.sealed as i64,
+                    row.video as i64,
+                ),
             )
             .await?;
             Ok(())
@@ -763,7 +774,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
         "SELECT server.id, name, description, icon_url, owner_id, discoverable, created_at, server.updated_at, usage.members,
                 default_notifications, system_channel_id, min_account_age_seconds, applications, linked_only, rules <> '[]', welcome,
                 sso, sso_required, sso_recheck_days, region, thread_archive_hours,
-                banner_url, banner_focus_x, banner_focus_y, accent_color, onboarding
+                banner_url, banner_focus_x, banner_focus_y, accent_color, onboarding, record_video
          FROM server, usage WHERE usage.id = 1",
         (),
         |r| {
@@ -795,6 +806,7 @@ pub async fn load_server(conn: &Connection) -> Result<pb::Server> {
                 banner_focus_y: r.get(23)?,
                 accent_color: r.get(24)?,
                 has_onboarding: decode_onboarding(&r.get::<Vec<u8>>(25)?).enabled,
+                record_video: r.get(26)?,
             })
         },
     )

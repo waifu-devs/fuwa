@@ -40,6 +40,7 @@ impl cpb::media_service_server::MediaService for Internal {
                 &r.participant,
                 &r.session_id,
                 May { speak: r.may_speak, hear: r.may_hear, video: false, screen: false },
+                r.watch,
             )
             .await?;
         let events = tokio_stream::wrappers::ReceiverStream::new(heard).map(|bridged| {
@@ -48,6 +49,13 @@ impl cpb::media_service_server::MediaService for Internal {
                     participant: h.participant,
                     frame: h.frame,
                     timestamp: h.timestamp,
+                }),
+                Bridged::Picture(p) => cpb::bridge_response::Event::Picture(cpb::WatchedFrame {
+                    participant: p.participant,
+                    frame: p.frame,
+                    keyframe: p.keyframe,
+                    screen: p.screen,
+                    time: p.time,
                 }),
                 Bridged::Ended(ending) => cpb::bridge_response::Event::Ended(ending.as_str().into()),
             };

@@ -286,6 +286,9 @@ impl ServerService for Api {
                 if req.min_account_age_seconds.is_some_and(|age| !(0..=MAX_ACCOUNT_AGE).contains(&age)) {
                     return Err(Error::invalid("the minimum account age is up to a year"));
                 }
+                if req.record_video == Some(true) && !self.app.settings().call_recording_video {
+                    return Err(Error::FailedPrecondition("this instance doesn't let servers record video".into()));
+                }
                 if req.thread_archive_hours.is_some_and(|hours| !(0..=MAX_THREAD_ARCHIVE_HOURS).contains(&hours)) {
                     return Err(Error::invalid("threads are archived after at most a year"));
                 }
@@ -337,6 +340,9 @@ impl ServerService for Api {
                             ),
                         )
                         .await?;
+                        if let Some(on) = req.record_video {
+                            conn.execute("UPDATE server SET record_video = ?1", [on]).await?;
+                        }
                         let server = store::load_server(conn).await?;
                         let entry = Audit::new(pb::AuditAction::ServerUpdate, "")
                             .change("name", &before.name, &server.name)
@@ -359,7 +365,8 @@ impl ServerService for Api {
                                 format!("{},{}", before.banner_focus_x, before.banner_focus_y),
                                 format!("{},{}", server.banner_focus_x, server.banner_focus_y),
                             )
-                            .change("accent_color", color_label(before.accent_color), color_label(server.accent_color));
+                            .change("accent_color", color_label(before.accent_color), color_label(server.accent_color))
+                            .change("record_video", before.record_video, server.record_video);
                         if !entry.changes.is_empty() {
                             store::audit(conn, &account.id, entry).await?;
                         }
@@ -390,6 +397,9 @@ impl ServerService for Api {
                     }
                 };
                 self.app.server_changed(&server).await;
+                if before.record_video != server.record_video {
+                    crate::recordings::end_asks(&self.app, &server.id);
+                }
                 // What the write replaced, read inside it, so a change racing
                 // this one can't leave a picture behind.
                 self.drop_picture(&before.icon_url, &server.icon_url, PictureOwner::Server(&server.id)).await;

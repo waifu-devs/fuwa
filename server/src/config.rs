@@ -64,6 +64,9 @@ pub struct Config {
     /// FUWA_CALL_RECORDINGS: on (default) | off. Recording voice channels on
     /// the server, for people with RECORD.
     pub call_recordings: bool,
+    /// FUWA_CALL_RECORDING_VIDEO: on | off (default). Servers may have their
+    /// recordings keep cameras and shared screens too (Server.record_video).
+    pub call_recording_video: bool,
     /// FUWA_SHARED_CHANNELS: on (default) | off. Servers sharing channels
     /// with each other.
     pub shared_channels: bool,
@@ -436,6 +439,11 @@ impl Config {
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_CALL_RECORDINGS must be on or off, got {other:?}")),
         };
+        let call_recording_video = match get("FUWA_CALL_RECORDING_VIDEO").as_deref().map(str::trim) {
+            Some("on" | "true" | "1") => true,
+            None | Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_CALL_RECORDING_VIDEO must be on or off, got {other:?}")),
+        };
         let shared_channels = match get("FUWA_SHARED_CHANNELS").as_deref().map(str::trim) {
             None | Some("on" | "true" | "1") => true,
             Some("off" | "false" | "0") => false,
@@ -561,6 +569,7 @@ impl Config {
             cluster,
             calls,
             call_recordings,
+            call_recording_video,
             shared_channels,
             mcp,
             profile_effects,

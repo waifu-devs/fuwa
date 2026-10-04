@@ -121,7 +121,8 @@ screen's sound. It passes that on exactly when it passes the screen on
 apps play it beside the sharer's voice, never mixed into it, and it shares
 the voice's caps (80 KB a second, 1500 bytes a frame). In direct messages it
 is end-to-end encrypted like the voice. Programs and server recordings get
-voices only, never a screen's sound.
+voices only, never a screen's sound (a recording with video keeps the
+screen's picture, not its sound).
 
 The web app asks before sharing: with its sound, or the picture only (it
 remembers, and the shortcut uses the choice). The sound goes as it is, no
@@ -206,6 +207,44 @@ started one, or someone with MANAGE_CHANNELS there, deletes it
 
 Direct-message calls are never recorded on the server: their sound is
 end-to-end encrypted, so all it could keep is ciphertext.
+
+#### With video
+
+Where the instance allows it (`FUWA_CALL_RECORDING_VIDEO`, or Video in
+recordings on the Calls page; off unless turned on), a server can keep
+cameras and shared screens too (`Server.record_video`, under Recordings in
+its settings, for someone with MANAGE_SERVER). It's off until someone turns
+it on. Changing it ends the recording going on, and everyone's Record on
+the server with it: KeepVoice says why (`recording_ended`), and nothing
+starts again until someone presses Record, so a new recording starts the
+way any does, for everyone to see and hear, and is all one or the other
+(`Recording.video`). Everyone in the call sees "Recording with video" while
+it is. The instance turning it off turns it off in every server and ends the
+recordings filming. Recordings on someone's own device stay sound only.
+
+The bridge then watches as well as listens: the media part passes it each
+camera's and screen's VP8 frames as they came, starting on a keyframe (it
+asks the sender for one when the bridge first sees a picture, and again if
+the bridge fell behind and left frames out). Cameras come at half their full
+size (simulcast "m", or the nearest one sent); screens as they're sent. Each
+person's camera and screen go to their own WebM file next to their sound
+(`<account>.camera.webm`, `<account>.screen.webm`): the frames untouched,
+never decoded or put together into one picture, which would take the CPU
+to decode and encode every frame. A picture starts at its first keyframe,
+timed from the recording's start on the camera's own clock, so it lines up
+with everyone's sound in an editor; one that goes off and on again picks up
+where it came back. Files are written a cluster (about two seconds) at a
+time, with the segment's size left unknown as a live stream's is, so a
+crash loses at most the last two seconds. Sealed files have their own keys
+(the person's sound, camera and screen each one).
+
+`RecordingTrack` says how big each person's camera and screen files are
+(zero for none), and `DownloadRecording` takes `part` to get them. Pictures
+count against the same storage cap, and delete with the recording. An hour
+of one person's camera at half size is around 100 MB, against 15 to 30 MB
+for their sound: an instance letting servers record video wants a storage
+cap (`FUWA_LIMIT_RECORDING_STORAGE`) and room for it. Pictures may take at
+most half of a bridge's queue, so sound always gets through.
 
 ### Pop-out windows and clean feeds
 
@@ -351,7 +390,9 @@ headers (`libasound2-dev`).
 ## Privacy
 
 Apps only ever connect to the media part, never to each other: there's no
-peer-to-peer fallback. The media part never sends anyone another person's
+peer-to-peer fallback. Nothing is kept of anyone's camera or screen unless
+their server records video and someone records the call, which everyone in
+it sees. The media part never sends anyone another person's
 addresses or candidates, and nothing about where someone connects from goes
 in call events, logs or the audit log.
 

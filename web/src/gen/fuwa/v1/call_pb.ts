@@ -2,8 +2,8 @@
 // @generated from file fuwa/v1/call.proto (package fuwa.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { VoiceState } from "./types_pb";
 import { file_fuwa_v1_types } from "./types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fuwa/v1/call.proto.
  */
 export const file_fuwa_v1_call: GenFile = /*@__PURE__*/
-  fileDesc("ChJmdXdhL3YxL2NhbGwucHJvdG8SB2Z1d2EudjEiPwoJSWNlU2VydmVyEgwKBHVybHMYASADKAkSEAoIdXNlcm5hbWUYAiABKAkSEgoKY3JlZGVudGlhbBgDIAEoCSIYChZHZXRDYWxsU2V0dGluZ3NSZXF1ZXN0In0KF0dldENhbGxTZXR0aW5nc1Jlc3BvbnNlEg8KB2VuYWJsZWQYASABKAgSJwoLaWNlX3NlcnZlcnMYAiADKAsyEi5mdXdhLnYxLkljZVNlcnZlchISCgpyZWNvcmRpbmdzGAMgASgIEhQKDHNjcmVlbl9zb3VuZBgEIAEoCCLXAQoQSm9pblZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKY2hhbm5lbF9pZBgCIAEoCRINCgVvZmZlchgDIAEoCRIRCglzZWxmX211dGUYBCABKAgSEQoJc2VsZl9kZWFmGAUgASgIEhIKCnNlc3Npb25faWQYBiABKAkSEgoKc2VsZl92aWRlbxgHIAEoCBITCgtzZWxmX3N0cmVhbRgIIAEoCBITCgtzZWxmX3JlY29yZBgJIAEoCBIVCg1zZXJ2ZXJfcmVjb3JkGAogASgIInQKEUpvaW5Wb2ljZVJlc3BvbnNlEg4KBmFuc3dlchgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEiIKBXN0YXRlGAMgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlEhcKD3JlY29yZGluZ3NfZnVsbBgEIAEoCCI6ChFMZWF2ZVZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIUChJMZWF2ZVZvaWNlUmVzcG9uc2UiyAEKEEtlZXBWb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEgoKY2hhbm5lbF9pZBgDIAEoCRIRCglzZWxmX211dGUYBCABKAgSEQoJc2VsZl9kZWFmGAUgASgIEhIKCnNlbGZfdmlkZW8YBiABKAgSEwoLc2VsZl9zdHJlYW0YByABKAgSEwoLc2VsZl9yZWNvcmQYCCABKAgSFQoNc2VydmVyX3JlY29yZBgJIAEoCCJQChFLZWVwVm9pY2VSZXNwb25zZRIiCgVzdGF0ZRgBIAEoCzITLmZ1d2EudjEuVm9pY2VTdGF0ZRIXCg9yZWNvcmRpbmdzX2Z1bGwYAiABKAgiKwoWTGlzdFZvaWNlU3RhdGVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiPgoXTGlzdFZvaWNlU3RhdGVzUmVzcG9uc2USIwoGc3RhdGVzGAEgAygLMhMuZnV3YS52MS5Wb2ljZVN0YXRlItYBChRNb2RlcmF0ZVZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIYCgtzZXJ2ZXJfbXV0ZRgDIAEoCEgAiAEBEhgKC3NlcnZlcl9kZWFmGAQgASgISAGIAQESEgoKZGlzY29ubmVjdBgFIAEoCBIdChBzZXJ2ZXJfdmlkZW9fb2ZmGAYgASgISAKIAQFCDgoMX3NlcnZlcl9tdXRlQg4KDF9zZXJ2ZXJfZGVhZkITChFfc2VydmVyX3ZpZGVvX29mZiIXChVNb2RlcmF0ZVZvaWNlUmVzcG9uc2UidQoSTGlzdGVuVm9pY2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXNlbGZfbXV0ZRgDIAEoCBIRCglzZWxmX2RlYWYYBCABKAgSEgoKc2Vzc2lvbl9pZBgFIAEoCSKaAQoTTGlzdGVuVm9pY2VSZXNwb25zZRImCgZqb2luZWQYASABKAsyFC5mdXdhLnYxLlZvaWNlSm9pbmVkSAASJAoFZnJhbWUYAiABKAsyEy5mdXdhLnYxLlZvaWNlRnJhbWVIABIsCglrZWVwYWxpdmUYAyABKAsyFy5mdXdhLnYxLlZvaWNlS2VlcGFsaXZlSABCBwoFZXZlbnQiEAoOVm9pY2VLZWVwYWxpdmUiRQoLVm9pY2VKb2luZWQSEgoKc2Vzc2lvbl9pZBgBIAEoCRIiCgVzdGF0ZRgCIAEoCzITLmZ1d2EudjEuVm9pY2VTdGF0ZSI+CgpWb2ljZUZyYW1lEg8KB3VzZXJfaWQYASABKAkSDAoEb3B1cxgCIAEoDBIRCgl0aW1lc3RhbXAYAyABKA0iXQoRU3BlYWtWb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGZnJhbWVzGAMgAygMEhEKCWludGVycnVwdBgEIAEoCCIkChJTcGVha1ZvaWNlUmVzcG9uc2USDgoGcXVldWVkGAEgASgNIrMBChFKb2luRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSDQoFb2ZmZXIYAiABKAkSEQoJc2VsZl9tdXRlGAMgASgIEhEKCXNlbGZfZGVhZhgEIAEoCBISCgpzZXNzaW9uX2lkGAUgASgJEhIKCnNlbGZfdmlkZW8YBiABKAgSEwoLc2VsZl9zdHJlYW0YByABKAgSEwoLc2VsZl9yZWNvcmQYCCABKAgiXAoSSm9pbkRtQ2FsbFJlc3BvbnNlEg4KBmFuc3dlchgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEiIKBXN0YXRlGAMgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlIkEKEkxlYXZlRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIVChNMZWF2ZURtQ2FsbFJlc3BvbnNlIqQBChFLZWVwRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIRCglzZWxmX211dGUYAyABKAgSEQoJc2VsZl9kZWFmGAQgASgIEhIKCnNlbGZfdmlkZW8YBSABKAgSEwoLc2VsZl9zdHJlYW0YBiABKAgSEwoLc2VsZl9yZWNvcmQYByABKAgiOAoSS2VlcERtQ2FsbFJlc3BvbnNlEiIKBXN0YXRlGAEgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlIhQKEkxpc3REbUNhbGxzUmVxdWVzdCI1ChNMaXN0RG1DYWxsc1Jlc3BvbnNlEh4KBWNhbGxzGAEgAygLMg8uZnV3YS52MS5EbUNhbGwikAEKBkRtQ2FsbBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSKQoMcGFydGljaXBhbnRzGAIgAygLMhMuZnV3YS52MS5Wb2ljZVN0YXRlEi4KCnN0YXJ0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCnN0YXJ0ZWRfYnkYBCABKAki2gEKCVJlY29yZGluZxIKCgJpZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCnN0YXJ0ZWRfYnkYAyABKAkSLgoKc3RhcnRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEicKBnRyYWNrcxgGIAMoCzIXLmZ1d2EudjEuUmVjb3JkaW5nVHJhY2sSEgoKc2l6ZV9ieXRlcxgHIAEoAyJKCg5SZWNvcmRpbmdUcmFjaxIPCgd1c2VyX2lkGAEgASgJEhIKCnNpemVfYnl0ZXMYAiABKAMSEwoLZHVyYXRpb25fbXMYAyABKAMiPgoVTGlzdFJlY29yZGluZ3NSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJIqABChZMaXN0UmVjb3JkaW5nc1Jlc3BvbnNlEiYKCnJlY29yZGluZ3MYASADKAsyEi5mdXdhLnYxLlJlY29yZGluZxISCgp1c2VkX2J5dGVzGAIgASgDEhYKCWNhcF9ieXRlcxgDIAEoA0gAiAEBEhYKCWtlZXBfZGF5cxgEIAEoA0gBiAEBQgwKCl9jYXBfYnl0ZXNCDAoKX2tlZXBfZGF5cyJUChhEb3dubG9hZFJlY29yZGluZ1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhQKDHJlY29yZGluZ19pZBgCIAEoCRIPCgd1c2VyX2lkGAMgASgJIikKGURvd25sb2FkUmVjb3JkaW5nUmVzcG9uc2USDAoEZGF0YRgBIAEoDCJBChZEZWxldGVSZWNvcmRpbmdSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIUCgxyZWNvcmRpbmdfaWQYAiABKAkiGQoXRGVsZXRlUmVjb3JkaW5nUmVzcG9uc2UylAkKC0NhbGxTZXJ2aWNlElQKD0dldENhbGxTZXR0aW5ncxIfLmZ1d2EudjEuR2V0Q2FsbFNldHRpbmdzUmVxdWVzdBogLmZ1d2EudjEuR2V0Q2FsbFNldHRpbmdzUmVzcG9uc2USQgoJSm9pblZvaWNlEhkuZnV3YS52MS5Kb2luVm9pY2VSZXF1ZXN0GhouZnV3YS52MS5Kb2luVm9pY2VSZXNwb25zZRJFCgpMZWF2ZVZvaWNlEhouZnV3YS52MS5MZWF2ZVZvaWNlUmVxdWVzdBobLmZ1d2EudjEuTGVhdmVWb2ljZVJlc3BvbnNlEkIKCUtlZXBWb2ljZRIZLmZ1d2EudjEuS2VlcFZvaWNlUmVxdWVzdBoaLmZ1d2EudjEuS2VlcFZvaWNlUmVzcG9uc2USVAoPTGlzdFZvaWNlU3RhdGVzEh8uZnV3YS52MS5MaXN0Vm9pY2VTdGF0ZXNSZXF1ZXN0GiAuZnV3YS52MS5MaXN0Vm9pY2VTdGF0ZXNSZXNwb25zZRJOCg1Nb2RlcmF0ZVZvaWNlEh0uZnV3YS52MS5Nb2RlcmF0ZVZvaWNlUmVxdWVzdBoeLmZ1d2EudjEuTW9kZXJhdGVWb2ljZVJlc3BvbnNlEkoKC0xpc3RlblZvaWNlEhsuZnV3YS52MS5MaXN0ZW5Wb2ljZVJlcXVlc3QaHC5mdXdhLnYxLkxpc3RlblZvaWNlUmVzcG9uc2UwARJFCgpTcGVha1ZvaWNlEhouZnV3YS52MS5TcGVha1ZvaWNlUmVxdWVzdBobLmZ1d2EudjEuU3BlYWtWb2ljZVJlc3BvbnNlElEKDkxpc3RSZWNvcmRpbmdzEh4uZnV3YS52MS5MaXN0UmVjb3JkaW5nc1JlcXVlc3QaHy5mdXdhLnYxLkxpc3RSZWNvcmRpbmdzUmVzcG9uc2USXAoRRG93bmxvYWRSZWNvcmRpbmcSIS5mdXdhLnYxLkRvd25sb2FkUmVjb3JkaW5nUmVxdWVzdBoiLmZ1d2EudjEuRG93bmxvYWRSZWNvcmRpbmdSZXNwb25zZTABElQKD0RlbGV0ZVJlY29yZGluZxIfLmZ1d2EudjEuRGVsZXRlUmVjb3JkaW5nUmVxdWVzdBogLmZ1d2EudjEuRGVsZXRlUmVjb3JkaW5nUmVzcG9uc2USRQoKSm9pbkRtQ2FsbBIaLmZ1d2EudjEuSm9pbkRtQ2FsbFJlcXVlc3QaGy5mdXdhLnYxLkpvaW5EbUNhbGxSZXNwb25zZRJICgtMZWF2ZURtQ2FsbBIbLmZ1d2EudjEuTGVhdmVEbUNhbGxSZXF1ZXN0GhwuZnV3YS52MS5MZWF2ZURtQ2FsbFJlc3BvbnNlEkUKCktlZXBEbUNhbGwSGi5mdXdhLnYxLktlZXBEbUNhbGxSZXF1ZXN0GhsuZnV3YS52MS5LZWVwRG1DYWxsUmVzcG9uc2USSAoLTGlzdERtQ2FsbHMSGy5mdXdhLnYxLkxpc3REbUNhbGxzUmVxdWVzdBocLmZ1d2EudjEuTGlzdERtQ2FsbHNSZXNwb25zZWIGcHJvdG8z", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
+  fileDesc("ChJmdXdhL3YxL2NhbGwucHJvdG8SB2Z1d2EudjEiPwoJSWNlU2VydmVyEgwKBHVybHMYASADKAkSEAoIdXNlcm5hbWUYAiABKAkSEgoKY3JlZGVudGlhbBgDIAEoCSIYChZHZXRDYWxsU2V0dGluZ3NSZXF1ZXN0IpYBChdHZXRDYWxsU2V0dGluZ3NSZXNwb25zZRIPCgdlbmFibGVkGAEgASgIEicKC2ljZV9zZXJ2ZXJzGAIgAygLMhIuZnV3YS52MS5JY2VTZXJ2ZXISEgoKcmVjb3JkaW5ncxgDIAEoCBIUCgxzY3JlZW5fc291bmQYBCABKAgSFwoPcmVjb3JkaW5nX3ZpZGVvGAUgASgIItcBChBKb2luVm9pY2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEg0KBW9mZmVyGAMgASgJEhEKCXNlbGZfbXV0ZRgEIAEoCBIRCglzZWxmX2RlYWYYBSABKAgSEgoKc2Vzc2lvbl9pZBgGIAEoCRISCgpzZWxmX3ZpZGVvGAcgASgIEhMKC3NlbGZfc3RyZWFtGAggASgIEhMKC3NlbGZfcmVjb3JkGAkgASgIEhUKDXNlcnZlcl9yZWNvcmQYCiABKAgidAoRSm9pblZvaWNlUmVzcG9uc2USDgoGYW5zd2VyGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSIgoFc3RhdGUYAyABKAsyEy5mdXdhLnYxLlZvaWNlU3RhdGUSFwoPcmVjb3JkaW5nc19mdWxsGAQgASgIIjoKEUxlYXZlVm9pY2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIhQKEkxlYXZlVm9pY2VSZXNwb25zZSLIAQoQS2VlcFZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRISCgpjaGFubmVsX2lkGAMgASgJEhEKCXNlbGZfbXV0ZRgEIAEoCBIRCglzZWxmX2RlYWYYBSABKAgSEgoKc2VsZl92aWRlbxgGIAEoCBITCgtzZWxmX3N0cmVhbRgHIAEoCBITCgtzZWxmX3JlY29yZBgIIAEoCBIVCg1zZXJ2ZXJfcmVjb3JkGAkgASgIImkKEUtlZXBWb2ljZVJlc3BvbnNlEiIKBXN0YXRlGAEgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlEhcKD3JlY29yZGluZ3NfZnVsbBgCIAEoCBIXCg9yZWNvcmRpbmdfZW5kZWQYAyABKAgiKwoWTGlzdFZvaWNlU3RhdGVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiPgoXTGlzdFZvaWNlU3RhdGVzUmVzcG9uc2USIwoGc3RhdGVzGAEgAygLMhMuZnV3YS52MS5Wb2ljZVN0YXRlItYBChRNb2RlcmF0ZVZvaWNlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdXNlcl9pZBgCIAEoCRIYCgtzZXJ2ZXJfbXV0ZRgDIAEoCEgAiAEBEhgKC3NlcnZlcl9kZWFmGAQgASgISAGIAQESEgoKZGlzY29ubmVjdBgFIAEoCBIdChBzZXJ2ZXJfdmlkZW9fb2ZmGAYgASgISAKIAQFCDgoMX3NlcnZlcl9tdXRlQg4KDF9zZXJ2ZXJfZGVhZkITChFfc2VydmVyX3ZpZGVvX29mZiIXChVNb2RlcmF0ZVZvaWNlUmVzcG9uc2UidQoSTGlzdGVuVm9pY2VSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhEKCXNlbGZfbXV0ZRgDIAEoCBIRCglzZWxmX2RlYWYYBCABKAgSEgoKc2Vzc2lvbl9pZBgFIAEoCSKaAQoTTGlzdGVuVm9pY2VSZXNwb25zZRImCgZqb2luZWQYASABKAsyFC5mdXdhLnYxLlZvaWNlSm9pbmVkSAASJAoFZnJhbWUYAiABKAsyEy5mdXdhLnYxLlZvaWNlRnJhbWVIABIsCglrZWVwYWxpdmUYAyABKAsyFy5mdXdhLnYxLlZvaWNlS2VlcGFsaXZlSABCBwoFZXZlbnQiEAoOVm9pY2VLZWVwYWxpdmUiRQoLVm9pY2VKb2luZWQSEgoKc2Vzc2lvbl9pZBgBIAEoCRIiCgVzdGF0ZRgCIAEoCzITLmZ1d2EudjEuVm9pY2VTdGF0ZSI+CgpWb2ljZUZyYW1lEg8KB3VzZXJfaWQYASABKAkSDAoEb3B1cxgCIAEoDBIRCgl0aW1lc3RhbXAYAyABKA0iXQoRU3BlYWtWb2ljZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGZnJhbWVzGAMgAygMEhEKCWludGVycnVwdBgEIAEoCCIkChJTcGVha1ZvaWNlUmVzcG9uc2USDgoGcXVldWVkGAEgASgNIrMBChFKb2luRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSDQoFb2ZmZXIYAiABKAkSEQoJc2VsZl9tdXRlGAMgASgIEhEKCXNlbGZfZGVhZhgEIAEoCBISCgpzZXNzaW9uX2lkGAUgASgJEhIKCnNlbGZfdmlkZW8YBiABKAgSEwoLc2VsZl9zdHJlYW0YByABKAgSEwoLc2VsZl9yZWNvcmQYCCABKAgiXAoSSm9pbkRtQ2FsbFJlc3BvbnNlEg4KBmFuc3dlchgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEiIKBXN0YXRlGAMgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlIkEKEkxlYXZlRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIVChNMZWF2ZURtQ2FsbFJlc3BvbnNlIqQBChFLZWVwRG1DYWxsUmVxdWVzdBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIRCglzZWxmX211dGUYAyABKAgSEQoJc2VsZl9kZWFmGAQgASgIEhIKCnNlbGZfdmlkZW8YBSABKAgSEwoLc2VsZl9zdHJlYW0YBiABKAgSEwoLc2VsZl9yZWNvcmQYByABKAgiOAoSS2VlcERtQ2FsbFJlc3BvbnNlEiIKBXN0YXRlGAEgASgLMhMuZnV3YS52MS5Wb2ljZVN0YXRlIhQKEkxpc3REbUNhbGxzUmVxdWVzdCI1ChNMaXN0RG1DYWxsc1Jlc3BvbnNlEh4KBWNhbGxzGAEgAygLMg8uZnV3YS52MS5EbUNhbGwikAEKBkRtQ2FsbBIXCg9jb252ZXJzYXRpb25faWQYASABKAkSKQoMcGFydGljaXBhbnRzGAIgAygLMhMuZnV3YS52MS5Wb2ljZVN0YXRlEi4KCnN0YXJ0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCnN0YXJ0ZWRfYnkYBCABKAki6QEKCVJlY29yZGluZxIKCgJpZBgBIAEoCRISCgpjaGFubmVsX2lkGAIgASgJEhIKCnN0YXJ0ZWRfYnkYAyABKAkSLgoKc3RhcnRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEicKBnRyYWNrcxgGIAMoCzIXLmZ1d2EudjEuUmVjb3JkaW5nVHJhY2sSEgoKc2l6ZV9ieXRlcxgHIAEoAxINCgV2aWRlbxgIIAEoCCJ2Cg5SZWNvcmRpbmdUcmFjaxIPCgd1c2VyX2lkGAEgASgJEhIKCnNpemVfYnl0ZXMYAiABKAMSEwoLZHVyYXRpb25fbXMYAyABKAMSFAoMY2FtZXJhX2J5dGVzGAQgASgDEhQKDHNjcmVlbl9ieXRlcxgFIAEoAyI+ChVMaXN0UmVjb3JkaW5nc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAkioAEKFkxpc3RSZWNvcmRpbmdzUmVzcG9uc2USJgoKcmVjb3JkaW5ncxgBIAMoCzISLmZ1d2EudjEuUmVjb3JkaW5nEhIKCnVzZWRfYnl0ZXMYAiABKAMSFgoJY2FwX2J5dGVzGAMgASgDSACIAQESFgoJa2VlcF9kYXlzGAQgASgDSAGIAQFCDAoKX2NhcF9ieXRlc0IMCgpfa2VlcF9kYXlzInoKGERvd25sb2FkUmVjb3JkaW5nUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSFAoMcmVjb3JkaW5nX2lkGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSJAoEcGFydBgEIAEoDjIWLmZ1d2EudjEuUmVjb3JkaW5nUGFydCIpChlEb3dubG9hZFJlY29yZGluZ1Jlc3BvbnNlEgwKBGRhdGEYASABKAwiQQoWRGVsZXRlUmVjb3JkaW5nUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSFAoMcmVjb3JkaW5nX2lkGAIgASgJIhkKF0RlbGV0ZVJlY29yZGluZ1Jlc3BvbnNlKmUKDVJlY29yZGluZ1BhcnQSHgoaUkVDT1JESU5HX1BBUlRfVU5TUEVDSUZJRUQQABIZChVSRUNPUkRJTkdfUEFSVF9DQU1FUkEQARIZChVSRUNPUkRJTkdfUEFSVF9TQ1JFRU4QAjKUCQoLQ2FsbFNlcnZpY2USVAoPR2V0Q2FsbFNldHRpbmdzEh8uZnV3YS52MS5HZXRDYWxsU2V0dGluZ3NSZXF1ZXN0GiAuZnV3YS52MS5HZXRDYWxsU2V0dGluZ3NSZXNwb25zZRJCCglKb2luVm9pY2USGS5mdXdhLnYxLkpvaW5Wb2ljZVJlcXVlc3QaGi5mdXdhLnYxLkpvaW5Wb2ljZVJlc3BvbnNlEkUKCkxlYXZlVm9pY2USGi5mdXdhLnYxLkxlYXZlVm9pY2VSZXF1ZXN0GhsuZnV3YS52MS5MZWF2ZVZvaWNlUmVzcG9uc2USQgoJS2VlcFZvaWNlEhkuZnV3YS52MS5LZWVwVm9pY2VSZXF1ZXN0GhouZnV3YS52MS5LZWVwVm9pY2VSZXNwb25zZRJUCg9MaXN0Vm9pY2VTdGF0ZXMSHy5mdXdhLnYxLkxpc3RWb2ljZVN0YXRlc1JlcXVlc3QaIC5mdXdhLnYxLkxpc3RWb2ljZVN0YXRlc1Jlc3BvbnNlEk4KDU1vZGVyYXRlVm9pY2USHS5mdXdhLnYxLk1vZGVyYXRlVm9pY2VSZXF1ZXN0Gh4uZnV3YS52MS5Nb2RlcmF0ZVZvaWNlUmVzcG9uc2USSgoLTGlzdGVuVm9pY2USGy5mdXdhLnYxLkxpc3RlblZvaWNlUmVxdWVzdBocLmZ1d2EudjEuTGlzdGVuVm9pY2VSZXNwb25zZTABEkUKClNwZWFrVm9pY2USGi5mdXdhLnYxLlNwZWFrVm9pY2VSZXF1ZXN0GhsuZnV3YS52MS5TcGVha1ZvaWNlUmVzcG9uc2USUQoOTGlzdFJlY29yZGluZ3MSHi5mdXdhLnYxLkxpc3RSZWNvcmRpbmdzUmVxdWVzdBofLmZ1d2EudjEuTGlzdFJlY29yZGluZ3NSZXNwb25zZRJcChFEb3dubG9hZFJlY29yZGluZxIhLmZ1d2EudjEuRG93bmxvYWRSZWNvcmRpbmdSZXF1ZXN0GiIuZnV3YS52MS5Eb3dubG9hZFJlY29yZGluZ1Jlc3BvbnNlMAESVAoPRGVsZXRlUmVjb3JkaW5nEh8uZnV3YS52MS5EZWxldGVSZWNvcmRpbmdSZXF1ZXN0GiAuZnV3YS52MS5EZWxldGVSZWNvcmRpbmdSZXNwb25zZRJFCgpKb2luRG1DYWxsEhouZnV3YS52MS5Kb2luRG1DYWxsUmVxdWVzdBobLmZ1d2EudjEuSm9pbkRtQ2FsbFJlc3BvbnNlEkgKC0xlYXZlRG1DYWxsEhsuZnV3YS52MS5MZWF2ZURtQ2FsbFJlcXVlc3QaHC5mdXdhLnYxLkxlYXZlRG1DYWxsUmVzcG9uc2USRQoKS2VlcERtQ2FsbBIaLmZ1d2EudjEuS2VlcERtQ2FsbFJlcXVlc3QaGy5mdXdhLnYxLktlZXBEbUNhbGxSZXNwb25zZRJICgtMaXN0RG1DYWxscxIbLmZ1d2EudjEuTGlzdERtQ2FsbHNSZXF1ZXN0GhwuZnV3YS52MS5MaXN0RG1DYWxsc1Jlc3BvbnNlYgZwcm90bzM", [file_fuwa_v1_types, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message fuwa.v1.IceServer
@@ -90,6 +90,14 @@ export type GetCallSettingsResponse = Message<"fuwa.v1.GetCallSettingsResponse">
    * @generated from field: bool screen_sound = 4;
    */
   screenSound: boolean;
+
+  /**
+   * Servers may have their recordings keep video too
+   * (InstanceSettings.call_recording_video, Server.record_video).
+   *
+   * @generated from field: bool recording_video = 5;
+   */
+  recordingVideo: boolean;
 };
 
 /**
@@ -330,6 +338,15 @@ export type KeepVoiceResponse = Message<"fuwa.v1.KeepVoiceResponse"> & {
    * @generated from field: bool recordings_full = 2;
    */
   recordingsFull: boolean;
+
+  /**
+   * Recording on the server stopped because someone changed what the
+   * server's recordings keep (Server.record_video). It doesn't start again
+   * by itself: press Record to start a new one, as it now says.
+   *
+   * @generated from field: bool recording_ended = 3;
+   */
+  recordingEnded: boolean;
 };
 
 /**
@@ -939,6 +956,14 @@ export type Recording = Message<"fuwa.v1.Recording"> & {
    * @generated from field: int64 size_bytes = 7;
    */
   sizeBytes: bigint;
+
+  /**
+   * It keeps cameras and shared screens too (Server.record_video was on
+   * when it started).
+   *
+   * @generated from field: bool video = 8;
+   */
+  video: boolean;
 };
 
 /**
@@ -950,7 +975,9 @@ export const RecordingSchema: GenMessage<Recording> = /*@__PURE__*/
 
 /**
  * One person's sound in a recording, from when the recording started (it's
- * silent until they first spoke) to when it ended.
+ * silent until they first spoke) to when it ended, and in recordings with
+ * video their camera and shared screen, each from the first picture to the
+ * last (on the same clock: a picture at 1:00 goes with the sound at 1:00).
  *
  * @generated from message fuwa.v1.RecordingTrack
  */
@@ -961,6 +988,8 @@ export type RecordingTrack = Message<"fuwa.v1.RecordingTrack"> & {
   userId: string;
 
   /**
+   * The sound's file.
+   *
    * @generated from field: int64 size_bytes = 2;
    */
   sizeBytes: bigint;
@@ -969,6 +998,20 @@ export type RecordingTrack = Message<"fuwa.v1.RecordingTrack"> & {
    * @generated from field: int64 duration_ms = 3;
    */
   durationMs: bigint;
+
+  /**
+   * Their camera's file; zero when it was never on.
+   *
+   * @generated from field: int64 camera_bytes = 4;
+   */
+  cameraBytes: bigint;
+
+  /**
+   * Their shared screen's file; zero when they never shared it.
+   *
+   * @generated from field: int64 screen_bytes = 5;
+   */
+  screenBytes: bigint;
 };
 
 /**
@@ -1057,6 +1100,13 @@ export type DownloadRecordingRequest = Message<"fuwa.v1.DownloadRecordingRequest
    * @generated from field: string user_id = 3;
    */
   userId: string;
+
+  /**
+   * Unset for their sound.
+   *
+   * @generated from field: fuwa.v1.RecordingPart part = 4;
+   */
+  part: RecordingPart;
 };
 
 /**
@@ -1119,6 +1169,40 @@ export type DeleteRecordingResponse = Message<"fuwa.v1.DeleteRecordingResponse">
  */
 export const DeleteRecordingResponseSchema: GenMessage<DeleteRecordingResponse> = /*@__PURE__*/
   messageDesc(file_fuwa_v1_call, 36);
+
+/**
+ * Which of a person's files in a recording.
+ *
+ * @generated from enum fuwa.v1.RecordingPart
+ */
+export enum RecordingPart {
+  /**
+   * Their sound, as Ogg Opus.
+   *
+   * @generated from enum value: RECORDING_PART_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Their camera, as WebM (VP8, no sound).
+   *
+   * @generated from enum value: RECORDING_PART_CAMERA = 1;
+   */
+  CAMERA = 1,
+
+  /**
+   * Their shared screen, as WebM (VP8, no sound).
+   *
+   * @generated from enum value: RECORDING_PART_SCREEN = 2;
+   */
+  SCREEN = 2,
+}
+
+/**
+ * Describes the enum fuwa.v1.RecordingPart.
+ */
+export const RecordingPartSchema: GenEnum<RecordingPart> = /*@__PURE__*/
+  enumDesc(file_fuwa_v1_call, 0);
 
 /**
  * Voice: talking in a server's voice channels, and calls in direct messages.
@@ -1272,8 +1356,9 @@ export const CallService: GenService<{
     output: typeof ListRecordingsResponseSchema;
   },
   /**
-   * One person's track of a finished recording, as an Ogg Opus file sent in
-   * pieces. Needs RECORD in the recording's channel.
+   * One person's track of a finished recording, as a file sent in pieces:
+   * their sound as Ogg Opus, or (in recordings with video) their camera or
+   * shared screen as WebM. Needs RECORD in the recording's channel.
    *
    * @generated from rpc fuwa.v1.CallService.DownloadRecording
    */

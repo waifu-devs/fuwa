@@ -1151,6 +1151,191 @@ async fn recordings(c: &mut Clients, token: &str, sid: &str, channel: &str) -> V
 }
 
 #[tokio::test]
+async fn servers_may_record_cameras_and_screens_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path()).await;
+    let mut c = clients(&instance).await;
+    let (juan, juan_id) = sign_up(&mut c, "juan").await;
+    let (mika, mika_id) = sign_up(&mut c, "mika").await;
+    let request = pb::CreateServerRequest { name: "Studio".into(), discoverable: true, ..Default::default() };
+    let server = c.servers.create_server(authed(&juan, request)).await.unwrap().into_inner().server.unwrap();
+    assert!(!server.record_video, "off unless turned on");
+    let sid = server.id;
+    let request = pb::JoinServerRequest { server_id: sid.clone(), ..Default::default() };
+    c.servers.join_server(authed(&mika, request)).await.unwrap();
+    let request = pb::CreateChannelRequest {
+        server_id: sid.clone(),
+        name: "Booth".into(),
+        r#type: pb::ChannelType::Voice as i32,
+        ..Default::default()
+    };
+    let voice = c.channels.create_channel(authed(&juan, request)).await.unwrap().into_inner().channel.unwrap();
+    let record_video =
+        |on| pb::UpdateServerRequest { server_id: sid.clone(), record_video: Some(on), ..Default::default() };
+    let denied = c.servers.update_server(authed(&mika, record_video(true))).await.unwrap_err();
+    assert_eq!(denied.code(), Code::PermissionDenied, "only for people who manage the server");
+    let refused = c.servers.update_server(authed(&juan, record_video(true))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::FailedPrecondition, "only where the instance lets servers record video");
+    let mut settings = (*instance.app.settings()).clone();
+    settings.call_recording_video = true;
+    instance.app.replace_settings(settings);
+
+    // Mika films and shares her screen; Juan records, sound only for now.
+    let (mut b, offer) = Peer::with_camera_and_screen().await;
+    let request = pb::JoinVoiceRequest {
+        server_id: sid.clone(),
+        channel_id: voice.id.clone(),
+        offer,
+        self_video: true,
+        self_stream: true,
+        ..Default::default()
+    };
+    let joined = c.calls.join_voice(authed(&mika, request)).await.unwrap().into_inner();
+    b.answer(&joined.answer);
+    let (mut a, offer) = Peer::new().await;
+    let request = pb::JoinVoiceRequest {
+        server_id: sid.clone(),
+        channel_id: voice.id.clone(),
+        offer,
+        server_record: true,
+        ..Default::default()
+    };
+    let joined = c.calls.join_voice(authed(&juan, request)).await.unwrap().into_inner();
+    a.answer(&joined.answer);
+    talk(&mut a, &mut b, Duration::from_secs(2)).await;
+    let first = recordings(&mut c, &juan, &sid, &voice.id).await;
+    assert_eq!(first.len(), 1);
+    assert!(!first[0].video);
+
+    // Turning video on ends that recording, and Juan's ask: nothing starts
+    // filming until he presses Record again.
+    let updated = c.servers.update_server(authed(&juan, record_video(true))).await.unwrap().into_inner();
+    assert!(updated.server.unwrap().record_video);
+    let recording = |on| pb::KeepVoiceRequest {
+        server_id: sid.clone(),
+        session_id: joined.session_id.clone(),
+        channel_id: voice.id.clone(),
+        server_record: on,
+        ..Default::default()
+    };
+    let kept = c.calls.keep_voice(authed(&juan, recording(true))).await.unwrap().into_inner();
+    assert!(kept.recording_ended, "he's told why it stopped");
+    assert!(!kept.state.unwrap().server_record);
+    let mut listed = Vec::new();
+    for _ in 0..30 {
+        talk(&mut a, &mut b, Duration::from_millis(100)).await;
+        listed = recordings(&mut c, &juan, &sid, &voice.id).await;
+        if listed[0].ended_at.is_some() {
+            break;
+        }
+    }
+    assert_eq!(listed.len(), 1, "no new recording started by itself");
+    assert!(listed[0].ended_at.is_some(), "the one before ended");
+    assert!(listed[0].tracks.iter().all(|t| t.camera_bytes == 0 && t.screen_bytes == 0), "and kept no pictures");
+
+    // He presses Record: the new one keeps pictures too.
+    let kept = c.calls.keep_voice(authed(&juan, recording(true))).await.unwrap().into_inner();
+    assert!(!kept.recording_ended && kept.state.unwrap().server_record, "a new ask is a new recording");
+    for _ in 0..50 {
+        talk(&mut a, &mut b, Duration::from_millis(100)).await;
+        listed = recordings(&mut c, &juan, &sid, &voice.id).await;
+        if listed.len() == 2 {
+            break;
+        }
+    }
+    assert_eq!(listed.len(), 2, "a new recording started");
+    assert!(listed[0].video && listed[0].ended_at.is_none());
+    talk(&mut a, &mut b, Duration::from_secs(3)).await;
+
+    // Juan stops recording.
+    let keep = pb::KeepVoiceRequest {
+        server_id: sid.clone(),
+        session_id: joined.session_id.clone(),
+        channel_id: voice.id.clone(),
+        ..Default::default()
+    };
+    c.calls.keep_voice(authed(&juan, keep)).await.unwrap();
+    let ended = 'ended: {
+        for _ in 0..50 {
+            let listed = recordings(&mut c, &juan, &sid, &voice.id).await;
+            if listed[0].ended_at.is_some() {
+                break 'ended listed[0].clone();
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("the recording never ended");
+    };
+    let mika_track = ended.tracks.iter().find(|t| t.user_id == mika_id).unwrap();
+    assert!(mika_track.camera_bytes > 0 && mika_track.screen_bytes > 0, "{mika_track:?}");
+    let juan_track = ended.tracks.iter().find(|t| t.user_id == juan_id).unwrap();
+    assert_eq!((juan_track.camera_bytes, juan_track.screen_bytes), (0, 0), "no camera, no picture");
+    let total: i64 = ended.tracks.iter().map(|t| t.size_bytes + t.camera_bytes + t.screen_bytes).sum();
+    assert_eq!(ended.size_bytes, total, "pictures count against the cap");
+
+    let download = |user: &str, part: pb::RecordingPart| {
+        let request = pb::DownloadRecordingRequest {
+            server_id: sid.clone(),
+            recording_id: ended.id.clone(),
+            user_id: user.into(),
+            part: part as i32,
+        };
+        authed(&juan, request)
+    };
+    for (part, what) in [(pb::RecordingPart::Camera, &b"camera"[..]), (pb::RecordingPart::Screen, &b"screen"[..])] {
+        let mut stream = c.calls.download_recording(download(&mika_id, part)).await.unwrap().into_inner();
+        let mut file = Vec::new();
+        while let Some(piece) = stream.next().await {
+            file.extend(piece.unwrap().data);
+        }
+        assert!(file.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]), "WebM");
+        assert!(file.windows(5).any(|w| w == b"V_VP8"));
+        let frames = file.windows(what.len()).filter(|w| *w == what).count();
+        assert!(frames > 20, "{frames} frames");
+        // Cameras at half their full size; screens as they come.
+        if part == pb::RecordingPart::Camera {
+            assert!(!file.windows(9).any(|w| w == b"h camera ") && !file.windows(9).any(|w| w == b"l camera "));
+        }
+        let expected =
+            if part == pb::RecordingPart::Camera { mika_track.camera_bytes } else { mika_track.screen_bytes };
+        assert_eq!(file.len() as i64, expected);
+    }
+    let none = c.calls.download_recording(download(&juan_id, pb::RecordingPart::Camera)).await.unwrap_err();
+    assert_eq!(none.code(), Code::NotFound, "juan had no camera");
+    let files = dir.path().join("recordings").join(&sid).join(&ended.id);
+    assert!(files.join(format!("{mika_id}.camera.webm")).exists());
+
+    let mut unknown = download(&mika_id, pb::RecordingPart::Camera);
+    unknown.get_mut().part = 9;
+    let unknown = c.calls.download_recording(unknown).await.unwrap_err();
+    assert_eq!(unknown.code(), Code::InvalidArgument, "an unknown part isn't the sound");
+
+    // The instance stops letting servers record video: it's off in the server.
+    let mut settings = (*instance.app.settings()).clone();
+    settings.call_recording_video = false;
+    instance.app.replace_settings(settings);
+    let turned_off = 'off: {
+        for _ in 0..50 {
+            let request = pb::GetServerRequest { server_id: sid.clone() };
+            let server = c.servers.get_server(authed(&juan, request)).await.unwrap().into_inner().server.unwrap();
+            if !server.record_video {
+                break 'off true;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        false
+    };
+    assert!(turned_off, "the instance turned video off in the server");
+
+    // Deleting it takes the pictures too.
+    let delete = pb::DeleteRecordingRequest { server_id: sid.clone(), recording_id: ended.id.clone() };
+    c.calls.delete_recording(authed(&juan, delete)).await.unwrap();
+    assert!(!files.exists());
+
+    instance.app.shutdown.cancel();
+    instance.serving.await.unwrap();
+}
+
+#[tokio::test]
 async fn voice_channels_record_on_the_server() {
     let dir = tempfile::tempdir().unwrap();
     let instance = start(dir.path()).await;
@@ -1248,7 +1433,12 @@ async fn voice_channels_record_on_the_server() {
     let download = |token: &str, user: &str| {
         authed(
             token,
-            pb::DownloadRecordingRequest { server_id: sid.clone(), recording_id: rec.id.clone(), user_id: user.into() },
+            pb::DownloadRecordingRequest {
+                server_id: sid.clone(),
+                recording_id: rec.id.clone(),
+                user_id: user.into(),
+                ..Default::default()
+            },
         )
     };
     let early = c.calls.download_recording(download(&juan, &juan_id)).await.unwrap_err();
