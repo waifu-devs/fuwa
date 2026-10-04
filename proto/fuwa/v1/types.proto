@@ -29,6 +29,14 @@ message Node {
   AgentCreation agent_creation = 9;
   // Servers may share channels with each other here.
   bool shared_channels = 12;
+  // And with servers on other instances (docs/federation.md).
+  bool federation = 13;
+  // Agents may use this instance through MCP: its endpoint is /mcp on this
+  // address, described at /.well-known/mcp.json (docs/mcp.md).
+  bool mcp = 14;
+  // People may put an effect on their profile card (Profile.effect). While
+  // it's off, profiles come back without one and apps hide the picker.
+  bool profile_effects = 18;
   // Where this instance keeps community servers, the home region first.
   // Empty, or one region, when there's no choice to make (an instance run
   // as one process, or one whose parts are all in one place).
@@ -165,6 +173,11 @@ message Profile {
   optional int32 accent_color = 5;
   // When the account was made on this instance.
   google.protobuf.Timestamp created_at = 6;
+  // An animated effect over the profile card, by the id of one the apps
+  // ship with (docs/profile-effects.md), such as "sakura". Empty for none.
+  // Apps that don't know an id show no effect. Empty while the instance has
+  // profile effects off.
+  string effect = 7;
 }
 
 message Member {
@@ -255,6 +268,12 @@ enum Permission {
   // Record voice channels on their own device. Everyone in the channel
   // sees while someone records.
   PERMISSION_RECORD = 25;
+
+  // Server-wide, and per channel through overwrites.
+
+  // Start a thread under a message. Replying in a thread that's already
+  // there needs SEND_MESSAGES.
+  PERMISSION_CREATE_THREADS = 26;
 }
 
 // A named set of permissions handed to members. Every server has @everyone,
@@ -343,6 +362,10 @@ message Server {
   // The region its data is kept in (Node.regions): its messages, files,
   // recordings and calls. Empty for the home region.
   string region = 21;
+  // Threads nobody has replied in for this many hours are archived: they
+  // leave the channel's list of threads until someone replies again. Zero
+  // never archives them.
+  int32 thread_archive_hours = 22;
 }
 
 // What new members see once they're in: a few words and the channels to
@@ -693,6 +716,63 @@ message Message {
   MessageWebhook webhook = 15;
   // In a shared channel: who wrote it and from which server.
   SharedAuthor shared = 16;
+  // Emoji from the author's other servers on this instance that the text
+  // writes as <:name:id>, so everyone can draw them: their id, server_id,
+  // name, url (on this instance) and animated. The server's own emoji aren't
+  // here; they're in ListEmojis.
+  repeated Emoji emojis = 17;
+  // A reply in a thread: the id of the message the thread is under. Thread
+  // replies stay out of the channel's own list unless also_in_channel.
+  string thread_id = 18;
+  // On a message with a thread under it: how the thread stands.
+  ThreadSummary thread = 19;
+  // A thread reply its author also sent to the channel.
+  bool also_in_channel = 20;
+  // A GIF sent with it (GifService), kept on this instance.
+  MessageGif gif = 22;
+}
+
+// A thread under a message, as the channel shows it.
+message ThreadSummary {
+  int32 reply_count = 1;
+  // When the latest reply came, or the thread started if it has none.
+  google.protobuf.Timestamp last_reply_at = 2;
+  // Who replied, the latest first, up to 5.
+  repeated string participant_ids = 3;
+  // Locked by a moderator: only people who can manage messages reply.
+  bool locked = 4;
+}
+
+// A thread's replies changed, or it was locked or unlocked. A thread whose
+// parent message is deleted goes with it (MessageDeleted for the parent).
+message ThreadUpdated {
+  string channel_id = 1;
+  // The message the thread is under.
+  string thread_id = 2;
+  ThreadSummary thread = 3;
+}
+
+// Where a GIF came from: a search provider the instance's admins set up,
+// or unspecified for one somebody uploaded.
+enum GifProvider {
+  GIF_PROVIDER_UNSPECIFIED = 0;
+  GIF_PROVIDER_GIPHY = 1;
+  GIF_PROVIDER_KLIPY = 2;
+}
+
+// A GIF in a message. The file is on this instance (a /media/ link), stored
+// when it was first sent, so it keeps working if the provider drops it.
+message MessageGif {
+  string url = 1;
+  int32 width = 2;
+  int32 height = 3;
+  // What it shows, for screen readers. May be empty.
+  string title = 4;
+  // Who to credit, where their terms ask for it.
+  GifProvider provider = 5;
+  // From GifService: what lets SendMessage take it. Never on a message read
+  // back.
+  string seal = 6;
 }
 
 // The name and picture a webhook message was posted under: the webhook's
@@ -703,12 +783,24 @@ message MessageWebhook {
   string avatar_url = 3;
 }
 
+// A file sent with a message: an upload of this instance's
+// (MEDIA_PURPOSE_ATTACHMENT), sent by its `url` and `filename`. The server
+// fills in the rest from the upload and keeps the file for as long as the
+// message has it.
 message Attachment {
+  // The upload's id.
   string id = 1;
+  // What it's called, up to 255 characters. Shown, and the name it downloads as.
   string filename = 2;
+  // What its bytes are: a picture type, an audio or video type apps can
+  // play, or application/octet-stream for anything else.
   string content_type = 3;
   int64 size = 4;
   string url = 5;
+  // A picture's or video's size in pixels, as the sending app measured it,
+  // so apps can save its place before it loads; 0 when unknown.
+  int32 width = 6;
+  int32 height = 7;
 }
 
 message Embed {
@@ -770,6 +862,7 @@ message ServerUsage {
   int64 messages_sent = 5;
   // Bytes of message text currently stored.
   int64 message_bytes = 6;
+  // Files attached to messages, and their bytes.
   int64 attachments = 7;
   int64 attachment_bytes = 8;
   // Lifetime count of events in the server's log.
@@ -840,6 +933,7 @@ message Event {
     SecureRecordAdded secure_record_added = 27;
     SecureRecordDeleted secure_record_deleted = 28;
     SharedChannelsUpdated shared_channels_updated = 29;
+    ThreadUpdated thread_updated = 30;
     // Not stored: who's in a voice channel lives in memory, so these always
     // have sequence 0. After a reconnect, apps list them again
     // (CallService.ListVoiceStates).

@@ -4,6 +4,7 @@ import type { SubscribeResponse } from "@/gen/fuwa/v1/event_pb";
 import { ChannelType, type Event } from "@/gen/fuwa/v1/types_pb";
 import { dmEngine, startDms, stopDms, wipeDms } from "@/e2ee/engine";
 import { onLiveEvent, onRemoved } from "@/lib/notify";
+import { fromItems } from "@/lib/rail";
 import { reportStartup, reportTiming, type ReportTarget } from "@/lib/reports";
 import { makeApi, type Api } from "./client";
 import { FuwaError, call, toFuwaError } from "./errors";
@@ -168,6 +169,12 @@ const run = (key: string, e: Engine): Effect.Effect<void, never> =>
       Effect.catchAll((err) => (err.signedOut ? Effect.fail(err) : Effect.succeed({}))),
     );
     patchInstance(key, { notifications });
+    // So is how you arranged your servers; an older instance just keeps the order you joined in.
+    const rail = yield* call((signal) => api.account.getServerArrangement({}, { signal })).pipe(
+      Effect.map((r) => (r.updatedAt ? fromItems(r.items) : null)),
+      Effect.catchAll((err) => (err.signedOut ? Effect.fail(err) : Effect.succeed(null))),
+    );
+    patchInstance(key, { rail });
 
     const { servers } = yield* retrying(call((signal) => api.servers.listServers({}, { signal })));
     updateInstance(key, (i) => servers.reduce(addServer, i));
@@ -267,7 +274,8 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           let next = applySnapshot(current, server.server, channels.channels, members.members, roles.roles, emojis.emojis);
           next = { ...next, voice: { ...next.voice, [serverId]: voice } };
           const focus = s.focus?.instance === key ? s.focus.channel : null;
-          for (const event of held.get(serverId) ?? []) next = applyEvent(next, event, focus);
+          const thread = s.focus?.instance === key ? (s.focus.thread ?? null) : null;
+          for (const event of held.get(serverId) ?? []) next = applyEvent(next, event, focus, thread);
           return { ...s, instances: { ...s.instances, [key]: next } };
         });
         held.delete(serverId);
@@ -312,7 +320,8 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           if (!current?.synced[serverId]) return s;
           let next = withChannels(current, serverId, channels);
           const focus = s.focus?.instance === key ? s.focus.channel : null;
-          for (const event of relisting.get(serverId) ?? []) next = applyEvent(next, event, focus);
+          const thread = s.focus?.instance === key ? (s.focus.thread ?? null) : null;
+          for (const event of relisting.get(serverId) ?? []) next = applyEvent(next, event, focus, thread);
           return { ...s, instances: { ...s.instances, [key]: next } };
         });
       }).pipe(
@@ -402,7 +411,8 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
             const current = s.instances[key];
             if (!current) return s;
             const focus = s.focus?.instance === key ? s.focus.channel : null;
-            return { ...s, instances: { ...s.instances, [key]: applyEvent(current, event, focus) } };
+            const thread = s.focus?.instance === key ? (s.focus.thread ?? null) : null;
+            return { ...s, instances: { ...s.instances, [key]: applyEvent(current, event, focus, thread) } };
           });
           onLiveEvent(key, event);
           dmEngine(key)?.onServerEvent(event);

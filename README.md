@@ -31,6 +31,13 @@ like, hosted or self-hosted, over the same protocol.
   channel, like Slack Connect: both admins agree, the messages live only on
   the server that shared it, and each side keeps its own roles and
   moderators. See [docs/shared-channels.md](docs/shared-channels.md).
+- **Profile effects.** Petals, starfall, sparkles, confetti and more over
+  your profile card: a short intro when it opens, then a gentle loop, drawn
+  by the app in your theme's colors. Viewers and instances can turn them off.
+  See [docs/profile-effects.md](docs/profile-effects.md).
+- **GIFs, privately.** GIF search (GIPHY or Klipy) goes through the instance,
+  so the library never sees who's searching, and a sent GIF is stored on the
+  instance. See [docs/gifs.md](docs/gifs.md).
 - **Usage tracked, limits optional.** Every server counts its members, channels,
   messages and storage. Limits are off unless the operator sets them.
 - **Live by design.** Every change is an event in the server's log; clients
@@ -127,8 +134,12 @@ the log filter are read only from the environment.
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
 | `FUWA_AGENT_CREATION` | `everyone` | Who can make agents (accounts programs drive): `everyone`, `admins`, `off` |
 | `FUWA_SHARED_CHANNELS` | `on` | Servers sharing a text channel with another server on this instance ([docs/shared-channels.md](docs/shared-channels.md)); `off` stops new shares |
+| `FUWA_MCP` | `on` | Agents using the instance through MCP at `/mcp` with their token ([docs/mcp.md](docs/mcp.md)); `off` turns the endpoint off |
+| `FUWA_PROFILE_EFFECTS` | `on` | People putting an animated effect on their profile card ([docs/profile-effects.md](docs/profile-effects.md)); `off` hides everyone's |
 | `FUWA_FEDERATION` | `off` | Talking to other fuwa instances with signed calls, for sharing channels across instances ([docs/federation.md](docs/federation.md)); needs an https `FUWA_PUBLIC_URL` |
 | `FUWA_FEDERATION_ALLOW_PRIVATE` | `off` | Lets federation reach private, loopback and internal addresses and plain http, for tests and private deployments |
+| `FUWA_GIF_PROVIDER` | `off` | GIF search: `giphy`, `klipy` or `off` ([docs/gifs.md](docs/gifs.md)); instance settings can change it later |
+| `FUWA_GIF_API_KEY` | unset | The GIF provider's key; GIFs stay off without one |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |
 | `FUWA_ENCRYPTION_KEY` | unset | 64 hex characters (`openssl rand -hex 32`); encrypts every database at rest |
 | `FUWA_LIMIT_SERVERS_PER_ACCOUNT` | unlimited | Servers one account may own |
@@ -140,6 +151,8 @@ the log filter are read only from the environment.
 | `FUWA_LIMIT_EMOJIS` | unlimited | Custom emoji per server |
 | `FUWA_LIMIT_PICTURE_UPLOAD` | unlimited | Largest avatar, banner, server icon or emoji one upload may be, like `8MB` |
 | `FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY` | unlimited | Pictures one account may upload in a day (UTC), like `256MiB` |
+| `FUWA_LIMIT_ATTACHMENT_UPLOAD` | unlimited | Largest file one message may carry, like `100MB` |
+| `FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY` | unlimited | Files one account may send in a day (UTC), apart from pictures, like `2GiB` |
 | `FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY` | unlimited | Times a day (UTC) one server's Smart filter may ask its moderation provider; past it, messages go through the Smart filter unchecked (also set from the app: Instance settings, Moderation) |
 | `FUWA_TELEMETRY` | `on` | The anonymous usage signal and health reports; `off` turns both off (so does `DO_NOT_TRACK=1`), and apps on the instance then send no reports either |
 | `FUWA_TELEMETRY_URL` | `https://analytics.waifu.dev/v1/fuwa/signals` | Where the signal goes |
@@ -333,6 +346,10 @@ by username. They talk with the roles they're given, show an AGENT badge,
 can't own servers or use direct messages, and go away with the person who
 made them.
 
+For JavaScript and TypeScript, the [`@waifu-devs/fuwa`](sdk/) SDK does the
+rest: typed clients, commands and mentions, and an event stream that
+reconnects and catches up by itself. See [docs/sdk.md](docs/sdk.md).
+
 Agents can be in voice channels too, hearing each person and talking back,
 without WebRTC: `CallService.ListenVoice` streams everyone's sound as Opus
 frames labelled with who said them, and `SpeakVoice` says frames back. The
@@ -379,7 +396,8 @@ only in Turso either way.)
 
 To back up, copy the directory (or stop the server and copy single files). To
 bring back a deleted server, move its file from `deleted/` into `servers/` as
-`<id>.db` and restart. A server file dropped into `servers/` is picked up at
+`<id>.db` and restart; its pictures (icon, emoji, webhooks' pictures) were
+deleted with it and don't come back. A server file dropped into `servers/` is picked up at
 startup.
 
 ### Scaling out
@@ -649,6 +667,9 @@ someone else. Releases attach an installer for each system (`.deb` and
 AppImage, `.dmg`, `-setup.exe`) and the bare `fuwa-desktop` program; to make
 the installers yourself, `cargo install cargo-packager --locked` and then
 `cargo build --release && cargo packager --release` in `desktop/`.
+
+The TypeScript SDK lives in [`sdk/`](sdk), generated from the same protocol;
+[docs/sdk.md](docs/sdk.md#working-on-the-sdk) has its commands.
 
 See [AGENTS.md](AGENTS.md) for how the code is laid out.
 

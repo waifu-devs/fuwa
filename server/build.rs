@@ -3,7 +3,7 @@ use std::{env, path::PathBuf, process::Command};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = [
         "types", "node", "auth", "account", "server", "channel", "message", "event", "admin", "media", "role",
-        "invite", "join", "dm", "automod", "emoji", "webhook", "agent", "call", "sso", "secure",
+        "invite", "join", "dm", "automod", "emoji", "webhook", "agent", "call", "sso", "secure", "gif",
     ]
     .map(|name| PathBuf::from(format!("../proto/fuwa/v1/{name}.proto")));
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
@@ -36,11 +36,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&federation)?;
     let mut config = tonic_prost_build::Config::new();
     config.protoc_executable(protoc_bin_vendored::protoc_bin_path()?);
-    tonic_prost_build::configure().build_client(false).out_dir(federation).compile_with_config(
-        config,
-        &[PathBuf::from("../proto/fuwa/federation/v1/federation.proto")],
-        &includes,
-    )?;
+    tonic_prost_build::configure()
+        .build_client(false)
+        .out_dir(federation)
+        .extern_path(".fuwa.v1", "crate::pb")
+        .extern_path(".fuwa.cluster.v1", "crate::cpb")
+        .boxed(".fuwa.federation.v1.Request.call.shared")
+        .boxed(".fuwa.federation.v1.Response.answer.shared")
+        .compile_with_config(config, &[PathBuf::from("../proto/fuwa/federation/v1/federation.proto")], &includes)?;
 
     println!("cargo:rerun-if-changed=../proto");
 

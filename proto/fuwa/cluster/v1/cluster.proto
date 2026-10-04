@@ -64,6 +64,10 @@ service DirectoryService {
   rpc CountOwnedServers(CountOwnedServersRequest) returns (CountOwnedServersResponse);
   // An agent by username, for adding it to a server.
   rpc FindAgent(FindAgentRequest) returns (FindAgentResponse);
+  // Which of the emoji someone wrote from their other servers they may use:
+  // they're a member of the emoji's server, and its picture is that
+  // server's emoji here.
+  rpc CheckEmojis(CheckEmojisRequest) returns (CheckEmojisResponse);
   // For a secure channel: the device the calling session registered, and the
   // signed-in devices of the people who may be in the channel.
   rpc SecureDevices(SecureDevicesRequest) returns (SecureDevicesResponse);
@@ -96,6 +100,9 @@ service ShardService {
   rpc DescribeServers(DescribeServersRequest) returns (DescribeServersResponse);
   // Whether a server has a channel, before notification settings point at it.
   rpc ChannelExists(ChannelExistsRequest) returns (ChannelExistsResponse);
+  // A server's emoji with these ids, as stored, for the directory's
+  // CheckEmojis.
+  rpc ServerEmojis(ServerEmojisRequest) returns (ServerEmojisResponse);
   // Where an invite leads, for the directory's GetInvite.
   rpc DescribeInvite(DescribeInviteRequest) returns (DescribeInviteResponse);
   // A call from the other end of a shared channel, for one of this shard's
@@ -423,6 +430,9 @@ message StartServerUploadResponse {
   string media_id = 1;
   // The size it was said to be, in bytes.
   int64 size = 2;
+  // What it's for (fuwa.v1.MediaPurpose): an attachment may be any kind of
+  // file, everything else must be a picture.
+  int32 purpose = 3;
 }
 
 message FinishServerUploadRequest {
@@ -446,6 +456,17 @@ message CountOwnedServersResponse {
 
 message FindAgentRequest {
   string username = 1;
+}
+
+message CheckEmojisRequest {
+  string account_id = 1;
+  repeated fuwa.v1.Emoji emojis = 2;
+}
+
+message CheckEmojisResponse {
+  // The ones that passed, as they're stored: id, server_id, name, the
+  // picture's link at this instance's public address, and animated.
+  repeated fuwa.v1.Emoji emojis = 1;
 }
 
 message FindAgentResponse {
@@ -562,6 +583,15 @@ message ChannelExistsResponse {
   bool exists = 1;
 }
 
+message ServerEmojisRequest {
+  string server_id = 1;
+  repeated string ids = 2;
+}
+
+message ServerEmojisResponse {
+  repeated fuwa.v1.Emoji emojis = 1;
+}
+
 message SendServerRequest {
   string server_id = 1;
 }
@@ -655,6 +685,11 @@ message SharedCall {
     AdminShares admin_list = 15;
     AdminEnd admin_end = 16;
   }
+  // Set only by the instance that received the call from another instance
+  // (whatever the other instance sent there): that instance's origin and
+  // its key's fingerprint. Empty for calls made inside this instance.
+  string from_instance = 17;
+  string from_fingerprint = 18;
 }
 
 message SharedReply {

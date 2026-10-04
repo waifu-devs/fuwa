@@ -128,6 +128,6 @@ admin disconnects them.
 - More than one guest server per channel.
 - Across instances (phase 2): the home instance relays everything, instances
   trust each other through signed instance keys, off by default. The link
-  between instances is in [federation.md](federation.md); sharing over it
-  comes next.
+  between instances, and asking for and approving a share across it, are in
+  [federation.md](federation.md); messages across instances come next.
 - The desktop app's screens.

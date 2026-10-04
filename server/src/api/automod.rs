@@ -268,8 +268,6 @@ type Answer = futures::future::Shared<futures::future::BoxFuture<'static, Option
 pub(super) struct Checking {
     rule_id: String,
     provider: String,
-    /// The provider's id, whose lane it waits in (see `automod::pace`).
-    lane: String,
     answer: Answer,
 }
 
@@ -334,14 +332,12 @@ pub(super) async fn start(
     drop(conn);
     let setup = app.settings().automod_provider(&rule.provider)?.clone();
     let provider = setup.name().to_string();
-    let lane = setup.id.clone();
     let pictures: Vec<String> = if rule.pictures && setup.reads_pictures() { pictures.to_vec() } else { vec![] };
     if content.trim().is_empty() && pictures.is_empty() {
         return None;
     }
     let key = (sdb.id.clone(), setup.id.clone(), content.to_string(), pictures.clone());
-    let checking =
-        |answer| Some(Checking { rule_id: rule.id.clone(), provider: provider.clone(), lane: lane.clone(), answer });
+    let checking = |answer| Some(Checking { rule_id: rule.id.clone(), provider: provider.clone(), answer });
     if let Some(answer) = asking().get(&key).cloned() {
         return checking(answer);
     }
@@ -369,11 +365,10 @@ pub(super) async fn start(
     checking(answer)
 }
 
-/// Starts asking, as [`ask`] does, and waits only as long as the provider
-/// usually takes: the answer when it came in time, or the check still going,
-/// for [`Checking::later`] once the message is sent.
+/// Starts asking, as [`ask`] does, without waiting: the message is sent at
+/// once, and [`Checking::later`] acts on the answer when it comes.
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn ask_soon(
+pub(super) async fn ask_after(
     app: &std::sync::Arc<crate::app::App>,
     sdb: &store::ServerDb,
     member: &pb::Member,
@@ -381,22 +376,8 @@ pub(super) async fn ask_soon(
     channel_id: &str,
     content: &str,
     pictures: &[String],
-) -> (Option<Asked>, Option<Checking>) {
-    match start(app, sdb, member, access, channel_id, content, pictures).await {
-        Some(checking) => match checking.soon().await {
-            Soon::Answered(asked) => (asked, None),
-            Soon::Later(checking) => (None, Some(checking)),
-        },
-        None => (None, None),
-    }
-}
-
-/// What came of a check by the time its message is sent.
-pub(super) enum Soon {
-    /// The provider answered in time (or didn't, and won't).
-    Answered(Option<Asked>),
-    /// Still asking: the message is sent, and checked when the answer comes.
-    Later(Checking),
+) -> Option<Checking> {
+    start(app, sdb, member, access, channel_id, content, pictures).await
 }
 
 impl Checking {
@@ -406,17 +387,6 @@ impl Checking {
         Some(Asked { rule_id: self.rule_id, provider: self.provider, scores })
     }
 
-    /// Waits for the answer only as long as the provider usually takes (see
-    /// `automod::pace::budget`), so a slow provider doesn't hold the message.
-    pub(super) async fn soon(self) -> Soon {
-        match tokio::time::timeout(automod::pace::budget(&self.lane), self.answer.clone()).await {
-            Ok(scores) => {
-                Soon::Answered(scores.map(|scores| Asked { rule_id: self.rule_id, provider: self.provider, scores }))
-            }
-            Err(_) => Soon::Later(self),
-        }
-    }
-
     /// Checks a message already sent when the answer comes, in its own task:
     /// AutoMod then does what the rule says, as it would have before the
     /// message was sent, and takes the message down if the rule blocks it.
@@ -424,12 +394,12 @@ impl Checking {
     /// is checked again).
     pub(super) fn later(
         self,
+        app: std::sync::Arc<crate::app::App>,
         sdb: std::sync::Arc<store::ServerDb>,
         member: pb::Member,
         message_id: String,
         content: String,
     ) {
-        crate::reports::server_error("automod_checked_after_sending", None);
         tokio::spawn(async move {
             let Some(asked) = self.wait().await else { return };
             let reviewed = sdb
@@ -437,8 +407,9 @@ impl Checking {
                     review_sent(conn, &sdb.id, &member, &message_id, &content, &asked, events).await
                 })
                 .await;
-            if reviewed.is_err() {
-                crate::reports::server_error("automod_late_review_failed", None);
+            match reviewed {
+                Ok(files) => crate::attachments::drop_soon(&app, &sdb.id, files),
+                Err(_) => crate::reports::server_error("automod_late_review_failed", None),
             }
         });
     }
@@ -618,7 +589,14 @@ pub(super) fn picture_links(attachments: &[pb::Attachment], embeds: &[pb::Embed]
         .iter()
         .filter(|a| readable(a))
         .map(|a| a.url.clone())
-        .chain(embeds.iter().flat_map(|e| [e.image_url.clone(), e.thumbnail_url.clone()]))
+        // An embed's picture is read only from elsewhere: a link to an upload
+        // here could be someone else's file no message has yet, which only
+        // its uploader's own message may have read.
+        .chain(
+            embeds.iter().flat_map(|e| [e.image_url.clone(), e.thumbnail_url.clone()]).filter(|link| {
+                crate::media::id_in_url(link).is_none() && crate::media::server_file_in_url(link).is_none()
+            }),
+        )
         .filter(|link| !link.is_empty())
         .collect()
 }
@@ -781,36 +759,37 @@ async fn review_sent(
     content: &str,
     asked: &Asked,
     events: &mut Vec<Payload>,
-) -> Result<()> {
-    let Some(message) = super::messages::load_message(conn, server_id, message_id).await? else { return Ok(()) };
+) -> Result<Vec<String>> {
+    let Some(message) = super::messages::load_message(conn, server_id, message_id).await? else { return Ok(vec![]) };
     if message.content != content {
-        return Ok(());
+        return Ok(vec![]);
     }
-    let Some(channel) = load_channel(conn, server_id, &message.channel_id).await? else { return Ok(()) };
+    let Some(channel) = load_channel(conn, server_id, &message.channel_id).await? else { return Ok(vec![]) };
     let rules = store::load_automod(conn).await?;
-    let Some(rule) = rules.into_iter().find(|r| r.id == asked.rule_id && r.enabled) else { return Ok(()) };
+    let Some(rule) = rules.into_iter().find(|r| r.id == asked.rule_id && r.enabled) else { return Ok(vec![]) };
     let exempt = rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id)
         || rule.exempt_role_ids.iter().any(|id| member.role_ids.contains(id));
-    let Some((level, hit)) = automod::provider_hit(&rule, &asked.scores).filter(|_| !exempt) else { return Ok(()) };
+    let Some((level, hit)) = automod::provider_hit(&rule, &asked.scores).filter(|_| !exempt) else {
+        return Ok(vec![]);
+    };
     let caught = [(effective(&rule, Some(level)), hit)];
-    if act(conn, server_id, member, &channel, content, Some(asked), &caught, events).await?.is_some() {
-        conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
-        store::add_usage(
-            conn,
-            UsageChange {
-                messages: -1,
-                message_bytes: -(message.content.len() as i64),
-                attachments: -(message.attachments.len() as i64),
-                ..Default::default()
-            },
-        )
-        .await?;
-        events.push(Payload::MessageDeleted(pb::MessageDeleted {
-            channel_id: message.channel_id.clone(),
-            message_id: message.id.clone(),
-        }));
+    if act(conn, server_id, member, &channel, content, Some(asked), &caught, events).await?.is_none() {
+        return Ok(vec![]);
     }
-    Ok(())
+    let author_id = member.user.as_ref().map(|u| u.id.as_str()).unwrap_or_default();
+    let entry = Audit::new(pb::AuditAction::AutoModMessageDelete, author_id)
+        .channel(channel.name.clone())
+        .reason(rule.name.clone());
+    store::audit(conn, author_id, entry).await?;
+    let mut files = super::messages::remove_message(conn, &message).await?;
+    events.push(Payload::MessageDeleted(pb::MessageDeleted {
+        channel_id: message.channel_id.clone(),
+        message_id: message.id.clone(),
+    }));
+    files.extend(
+        super::threads::after_delete(conn, &message.channel_id, &message.id, &message.thread_id, events).await?,
+    );
+    Ok(files)
 }
 
 #[tonic::async_trait]
@@ -999,6 +978,26 @@ impl AutoModService for Api {
 mod tests {
     use super::*;
 
+    #[test]
+    fn embeds_never_lead_to_uploads_here() {
+        let file = pb::Attachment {
+            url: "https://fuwa.chat/media/0mqmvkbz3xq9wr61vcvvxwrg8q".into(),
+            content_type: "image/png".into(),
+            ..Default::default()
+        };
+        let embed = pb::Embed {
+            image_url: "https://fuwa.chat/media/2ftp7a3xyqbvr3dbhc1gkhwzn9".into(),
+            thumbnail_url: "https://fuwa.chat/media/servers/01M42CP6J090F6S8910RTR1417/2ftp7a3xyqbvr3dbhc1gkhwzn9"
+                .into(),
+            ..Default::default()
+        };
+        let outside = pb::Embed { image_url: "https://fuwa.chat/media/outside/abc?url=x".into(), ..Default::default() };
+        assert_eq!(
+            picture_links(std::slice::from_ref(&file), &[embed, outside.clone()]),
+            vec![file.url, outside.image_url]
+        );
+    }
+
     /// A provider answer that comes after the message went out still blocks
     /// it: down it comes, with an alert and a time out, as before sending.
     #[tokio::test]
@@ -1063,5 +1062,8 @@ mod tests {
         assert!(alert.blocked && alert.content == "free nitro" && alert.provider == "Cloudflare Clef", "{alert:?}");
         assert!(events.iter().any(|e| matches!(e, Payload::MessageDeleted(d) if d.message_id == "m2")));
         assert!(events.iter().any(|e| matches!(e, Payload::MemberUpdated(_))));
+        let logged: Vec<i32> =
+            crate::db::query_all(&conn, "SELECT action FROM audit", (), |r| r.get::<i32>(0)).await.unwrap();
+        assert!(logged.contains(&(pb::AuditAction::AutoModMessageDelete as i32)), "{logged:?}");
     }
 }

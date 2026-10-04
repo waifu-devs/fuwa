@@ -13,8 +13,10 @@ mod accounts;
 mod announcement;
 mod calls;
 mod controls;
+mod federation;
 mod general;
 mod limits;
+mod servers;
 mod signups;
 mod sso;
 
@@ -45,6 +47,8 @@ pub enum InstanceSettingsEvent {
         icon: &'static str,
         title: String,
     },
+    /// Close settings and go to this server.
+    OpenServer(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -56,7 +60,9 @@ enum Page {
     Privacy,
     Calls,
     Moderation,
+    Federation,
     Accounts,
+    Servers,
     Announcement,
 }
 
@@ -70,7 +76,9 @@ impl Page {
             Page::Privacy => "Privacy",
             Page::Calls => "Calls",
             Page::Moderation => "Moderation",
+            Page::Federation => "Other instances",
             Page::Accounts => "Accounts",
+            Page::Servers => "Servers",
             Page::Announcement => "Announcement",
         }
     }
@@ -84,7 +92,9 @@ impl Page {
             Page::Privacy => "shield-check",
             Page::Calls => "audio-lines",
             Page::Moderation => "shield-alert",
+            Page::Federation => "network",
             Page::Accounts => "users",
+            Page::Servers => "server",
             Page::Announcement => "megaphone",
         }
     }
@@ -98,14 +108,16 @@ impl Page {
             Page::Privacy => "What this instance tells Waifu Devs.",
             Page::Calls => "Voice channels and calls in direct messages.",
             Page::Moderation => "Services servers' AutoMod can ask about messages.",
+            Page::Federation => "Let servers here share channels with servers on other fuwa instances.",
             Page::Accounts => "Everyone with an account here. Make admins, reset passwords, or turn an account off.",
+            Page::Servers => "Every community server here. Change one's caps, move it, save its file, or delete it.",
             Page::Announcement => "A banner at the top of the app for everyone on this instance.",
         }
     }
 
     /// Pages that look after the instance rather than change its settings.
     fn manages(self) -> bool {
-        matches!(self, Page::Accounts | Page::Announcement)
+        matches!(self, Page::Accounts | Page::Servers | Page::Announcement)
     }
 }
 
@@ -113,9 +125,18 @@ impl Page {
 const GROUPS: [(&str, &[Page]); 2] = [
     (
         "INSTANCE",
-        &[Page::General, Page::SignUps, Page::Sso, Page::Limits, Page::Privacy, Page::Calls, Page::Moderation],
+        &[
+            Page::General,
+            Page::SignUps,
+            Page::Sso,
+            Page::Limits,
+            Page::Privacy,
+            Page::Calls,
+            Page::Moderation,
+            Page::Federation,
+        ],
     ),
-    ("MANAGE", &[Page::Accounts, Page::Announcement]),
+    ("MANAGE", &[Page::Accounts, Page::Servers, Page::Announcement]),
 ];
 
 type GetText = fn(&pb::InstanceSettings) -> String;
@@ -130,7 +151,7 @@ const TEXTS: [(&str, &str, GetText, SetText); 4] = [
 ];
 
 /// Lists typed one per line: (path, placeholder, read, write).
-const AREAS: [(&str, &str, GetText, SetText); 2] = [
+const AREAS: [(&str, &str, GetText, SetText); 3] = [
     (
         "allowed_origins",
         "https://fuwa.waifu.dev\nhttps://chat.example.com",
@@ -142,6 +163,12 @@ const AREAS: [(&str, &str, GetText, SetText); 2] = [
         "stun:stun.example.com:3478\nturn:turn.example.com:3478?transport=udp",
         |s| s.ice_urls.join("\n"),
         |s, v| s.ice_urls = v.split('\n').map(str::to_owned).collect(),
+    ),
+    (
+        "federation_blocked_hosts",
+        "spam.example.com\nchat.example.org",
+        |s| s.federation_blocked_hosts.join("\n"),
+        |s, v| s.federation_blocked_hosts = admin::hosts(&v.lines().collect::<Vec<_>>()),
     ),
 ];
 
@@ -200,6 +227,8 @@ pub struct InstanceSettingsView {
     announce: announcement::Announce,
     sso: sso::Sso,
     accounts: accounts::Accounts,
+    servers: servers::Servers,
+    federation: federation::Federation,
     _subscriptions: Vec<Subscription>,
     _boxes: Vec<Subscription>,
 }
@@ -223,6 +252,10 @@ impl InstanceSettingsView {
         boxes.push(announce_sub);
         let (sso, sso_subs) = sso::Sso::new(window, cx);
         boxes.extend(sso_subs);
+        let (servers, servers_subs) = servers::Servers::new(window, cx);
+        boxes.extend(servers_subs);
+        let (federation, federation_subs) = federation::Federation::new(window, cx);
+        boxes.extend(federation_subs);
         let mut view = Self {
             core,
             key,
@@ -243,6 +276,8 @@ impl InstanceSettingsView {
             announce,
             sso,
             accounts,
+            servers,
+            federation,
             _subscriptions: Vec::new(),
             _boxes: boxes,
         };
@@ -609,10 +644,16 @@ impl InstanceSettingsView {
 
     /// Esc closes a dialog over the page first; false when there was none.
     pub fn escape(&mut self, cx: &mut Context<Self>) -> bool {
-        self.close_account_dialog(cx)
+        match self.page {
+            Page::Servers => self.escape_servers(cx),
+            _ => self.close_account_dialog(cx),
+        }
     }
 
     fn open(&mut self, page: Page, cx: &mut Context<Self>) {
+        if page == Page::Servers && self.page == Page::Servers {
+            self.servers_back(cx);
+        }
         self.page = page;
         self.error = None;
         cx.notify();
@@ -1393,6 +1434,7 @@ impl Render for InstanceSettingsView {
         let body = if page.manages() {
             match page {
                 Page::Accounts => self.accounts_page(&p, window, cx),
+                Page::Servers => self.servers_page(&p, window, cx),
                 Page::Announcement => self.announcement_page(&p, window, cx),
                 _ => div().into_any_element(),
             }
@@ -1409,7 +1451,8 @@ impl Render for InstanceSettingsView {
                 Page::Calls => self.calls_page(&p, window, cx),
                 Page::Privacy => self.privacy_page(&p, cx),
                 Page::Moderation => self.moderation_page(&p, window, cx),
-                Page::Accounts | Page::Announcement => div().into_any_element(),
+                Page::Federation => self.federation_page(&p, window, cx),
+                Page::Accounts | Page::Servers | Page::Announcement => div().into_any_element(),
             }
         };
         let changed = self.changed();
@@ -1424,8 +1467,8 @@ impl Render for InstanceSettingsView {
                 |this: &mut Self, window, cx| this.commit(this.changed(), Vec::new(), window, cx),
             ));
         }
-        // The accounts list scrolls on its own, drawing only the rows in sight.
-        let fills = page == Page::Accounts;
+        // The accounts and servers lists scroll on their own, drawing only the rows in sight.
+        let fills = page == Page::Accounts || (page == Page::Servers && self.servers_fill());
         let content = div()
             .w(px(720.0))
             .when(fills, |el| el.h_full())
@@ -1439,7 +1482,10 @@ impl Render for InstanceSettingsView {
             .child(body)
             .child(div().h(px(if self.bar.is_some() { 90.0 } else { 0.0 })));
 
-        let dialog = self.account_dialog(&p, window, cx);
+        let dialog = match page {
+            Page::Servers => self.share_dialog(&p, cx),
+            _ => self.account_dialog(&p, window, cx),
+        };
         motion::fade_in(
             div()
                 .id("instance-settings")

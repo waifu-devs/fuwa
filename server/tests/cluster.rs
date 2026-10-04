@@ -295,6 +295,17 @@ async fn wait_for(done: impl Fn() -> bool) {
     assert!(done(), "it didn't happen in time");
 }
 
+/// Waits for something done in the background that takes a call to see.
+async fn wait_for_async(done: impl AsyncFn() -> bool) {
+    for _ in 0..100 {
+        if done().await {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(done().await, "it didn't happen in time");
+}
+
 async fn eventually<T, F: Future<Output = Result<T, tonic::Status>>>(mut call: impl FnMut() -> F) -> T {
     for _ in 0..100 {
         match call().await {
@@ -684,6 +695,26 @@ async fn a_split_instance_works_like_one() {
     let mine = c.agents.list_agents(authed(&juan, pb::ListAgentsRequest {})).await.unwrap().into_inner().agents;
     assert_eq!(mine[0].servers, 1);
 
+    // MCP through the gateway: its tools reach the shard holding the server.
+    let mcp = |name: &str, arguments: serde_json::Value| {
+        http.post(format!("{}/mcp", cluster.gateway.url()))
+            .bearer_auth(&made.token)
+            .json(&serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": name, "arguments": arguments } }))
+            .send()
+    };
+    let read: serde_json::Value =
+        mcp("list_messages", serde_json::json!({ "server_id": on_b.id, "channel_id": channel.id }))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+    let messages = &read["result"]["structuredContent"]["messages"];
+    assert!(messages.as_array().unwrap().iter().any(|m| m["content"] == "relayed"), "{read}");
+    let head: serde_json::Value =
+        mcp("list_events", serde_json::json!({ "server_id": on_b.id })).await.unwrap().json().await.unwrap();
+    assert!(head["result"]["structuredContent"]["cursor"].as_i64().unwrap() > 0, "{head}");
+
     // A moderation provider set up on the directory reaches the shards, key
     // and all (they check messages), while clients only learn a key is set.
     let jev = pb::AutoModProviderSettings {
@@ -711,7 +742,33 @@ async fn a_split_instance_works_like_one() {
     }
     assert_eq!(offered[0].id, "typesafe-jev");
 
-    // Deleting a server: the stream says so, and the directory forgets it.
+    // Deleting a server: the stream says so, and the directory forgets it
+    // and its pictures, as its shard does.
+    let reserved = c
+        .media
+        .create_upload(authed(
+            &juan,
+            pb::CreateUploadRequest {
+                purpose: pb::MediaPurpose::ServerIcon as i32,
+                content_type: "image/png".into(),
+                size: png.len() as i64,
+                server_id: String::new(),
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    let put = http.put(&reserved.upload_url).body(png.clone()).send().await.unwrap();
+    assert_eq!(put.status(), reqwest::StatusCode::NO_CONTENT);
+    let a_icon = reserved.media.unwrap();
+    let icon = pb::UpdateServerRequest {
+        server_id: on_a.id.clone(),
+        icon_url: Some(a_icon.url.clone()),
+        ..Default::default()
+    };
+    c.servers.update_server(authed(&juan, icon)).await.unwrap();
+    let a_pictures = root.path().join("shard-a").join("server-pictures").join(&on_a.id);
+    wait_for(|| a_pictures.join(&a_icon.id).exists()).await;
     c.servers.delete_server(authed(&juan, pb::DeleteServerRequest { server_id: on_a.id.clone() })).await.unwrap();
     let deleted = until(&mut stream, |e| matches!(e.payload, Some(Payload::ServerDeleted(_)))).await;
     assert_eq!(deleted.server_id, on_a.id);
@@ -720,6 +777,12 @@ async fn a_split_instance_works_like_one() {
     assert_eq!(gone.unwrap_err().code(), Code::NotFound);
     let mine = c.servers.list_servers(authed(&mika, pb::ListServersRequest {})).await.unwrap().into_inner().servers;
     assert_eq!(mine.len(), 1);
+    assert!(!a_pictures.exists());
+    let directory = cluster.directory.app().node().unwrap();
+    wait_for_async(async || directory.media(&a_icon.id).await.unwrap().is_none()).await;
+    assert_eq!(http.get(&a_icon.url).send().await.unwrap().status(), 404);
+    // The other server's picture stays.
+    assert!(on_shard.exists());
 
     // A data export gathers every shard's part.
     let mut chunks = c.account.export_data(authed(&mika, pb::ExportDataRequest {})).await.unwrap().into_inner();
@@ -1143,7 +1206,7 @@ async fn channels_are_shared_across_shards() {
         .shared
         .create_share_code(authed(
             &juan,
-            pb::CreateShareCodeRequest { server_id: home.id.clone(), channel_id: dev.id.clone() },
+            pb::CreateShareCodeRequest { server_id: home.id.clone(), channel_id: dev.id.clone(), ..Default::default() },
         ))
         .await
         .unwrap()
@@ -1277,7 +1340,7 @@ async fn servers_live_in_their_region_and_move() {
         .clone()
         .create_share_code(authed(
             &juan,
-            pb::CreateShareCodeRequest { server_id: in_eu.id.clone(), channel_id: channel.id },
+            pb::CreateShareCodeRequest { server_id: in_eu.id.clone(), channel_id: channel.id, ..Default::default() },
         ))
         .await
         .unwrap()
@@ -1494,6 +1557,77 @@ async fn servers_live_in_their_region_and_move() {
     assert!(!picture_at(&shard_b, &unused.id).exists() && !picture_at(&bucket_eu, &unused.id).exists());
     assert!(picture_at(&shard_b, &direct.id).exists(), "the icon it uses stays");
     assert!(cluster.directory.app().node().unwrap().moves().await.unwrap().is_empty(), "the move is over");
+    // A file attached to a message goes straight to the server's region too,
+    // is served there (as a download) while the message has it, and goes
+    // with the message.
+    let node = cluster.directory.app().node().unwrap();
+    let mut zip = b"PK\x03\x04".to_vec();
+    zip.resize(5000, 9);
+    let request = pb::CreateUploadRequest {
+        purpose: pb::MediaPurpose::Attachment as i32,
+        content_type: "application/zip".into(),
+        size: zip.len() as i64,
+        server_id: server.id.clone(),
+    };
+    let reserved = c.media.create_upload(authed(&juan, request)).await.unwrap().into_inner();
+    assert!(reserved.upload_url.contains(&format!("/media/servers/{}/upload/", server.id)));
+    assert_eq!(http.put(&reserved.upload_url).body(zip.clone()).send().await.unwrap().status(), 204);
+    let file = reserved.media.unwrap();
+    assert!(picture_at(&shard_b, &file.id).exists() && picture_at(&bucket_eu, &file.id).exists());
+    assert!(!directory_media.join(&file.id).exists());
+    // A picture uploaded as a file isn't served as a picture while no
+    // message has it.
+    let request = pb::CreateUploadRequest {
+        purpose: pb::MediaPurpose::Attachment as i32,
+        content_type: "image/png".into(),
+        size: png.len() as i64,
+        server_id: server.id.clone(),
+    };
+    let loose = c.media.create_upload(authed(&juan, request)).await.unwrap().into_inner();
+    assert_eq!(http.put(&loose.upload_url).body(png.clone()).send().await.unwrap().status(), 204);
+    let loose = loose.media.unwrap();
+    assert!(picture_at(&shard_b, &loose.id).exists());
+    assert_eq!(http.get(&loose.url).send().await.unwrap().status(), 404);
+    let channel = general(&mut c, &juan, &server.id).await;
+    let request = pb::SendMessageRequest {
+        server_id: server.id.clone(),
+        channel_id: channel.id.clone(),
+        attachments: vec![pb::Attachment { url: file.url.clone(), filename: "notes.zip".into(), ..Default::default() }],
+        ..Default::default()
+    };
+    let sent = c.messages.send_message(authed(&juan, request)).await.unwrap().into_inner().message.unwrap();
+    let attached = sent.attachments[0].clone();
+    assert!(attached.url.ends_with(&format!("/media/servers/{}/{}", server.id, file.id)), "{}", attached.url);
+    assert_eq!((attached.content_type.as_str(), attached.size), ("application/zip", 5000));
+    assert!(node.media(&file.id).await.unwrap().unwrap().used, "kept at the directory");
+    let served = http.get(&attached.url).send().await.unwrap();
+    assert_eq!(served.headers()["content-type"], "application/octet-stream");
+    assert!(served.headers()["content-disposition"].to_str().unwrap().starts_with("attachment;"));
+    assert_eq!(served.bytes().await.unwrap().to_vec(), zip);
+    let part = http.get(&attached.url).header("range", "bytes=4990-").send().await.unwrap();
+    assert_eq!(part.status(), 206);
+    assert_eq!(part.bytes().await.unwrap().to_vec(), zip[4990..].to_vec());
+    // Its upload's link leads there too.
+    assert_eq!(http.get(&file.url).send().await.unwrap().bytes().await.unwrap().to_vec(), zip);
+    let request = pb::DeleteMessageRequest {
+        server_id: server.id.clone(),
+        message_id: sent.id.clone(),
+        channel_id: channel.id.clone(),
+    };
+    c.messages.delete_message(authed(&juan, request)).await.unwrap();
+    wait_for(|| !picture_at(&shard_b, &file.id).exists() && !picture_at(&bucket_eu, &file.id).exists()).await;
+    assert!(node.media(&file.id).await.unwrap().is_none());
+    assert_eq!(http.get(&attached.url).send().await.unwrap().status(), 404);
+
+    // Deleting the server deletes its pictures in its region and their rows.
+    let request = pb::DeleteServerRequest { server_id: server.id.clone() };
+    c.servers.delete_server(authed(&juan, request)).await.unwrap();
+    assert!(!shard_b.join("server-pictures").join(&server.id).exists());
+    let in_bucket = std::fs::read_dir(bucket_eu.join("server-pictures").join(&server.id)).map_or(0, |d| d.count());
+    assert_eq!(in_bucket, 0, "nothing is left in its bucket");
+    let node = cluster.directory.app().node().unwrap();
+    wait_for_async(async || node.media_of_server(&server.id).await.unwrap().is_empty()).await;
+    assert_eq!(http.get(&direct.url).send().await.unwrap().status(), 404);
 
     cluster.stop().await;
 }
@@ -1530,6 +1664,64 @@ async fn split_instances_meet_through_their_gateways() {
     assert_eq!(fed_b.peers.len(), 1);
     assert_eq!(fed_b.peers[0].origin, format!("http://{}", a.gateway.addr));
 
+    // A channel on one of A's shards is shared into a server on one of B's:
+    // each shard's call goes out through its directory, and comes in
+    // through the other's gateway and directory to the server's shard.
+    let home = create_server(&mut ca, &admin_a, "Home").await.id;
+    let guest = create_server(&mut cb, &admin_b, "Guest").await.id;
+    let channel = general(&mut ca, &admin_a, &home).await;
+    let code = ca
+        .shared
+        .create_share_code(authed(
+            &admin_a,
+            pb::CreateShareCodeRequest {
+                server_id: home.clone(),
+                channel_id: channel.id.clone(),
+                other_instances: true,
+            },
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .code
+        .unwrap()
+        .code;
+    let preview = cb
+        .shared
+        .preview_share(authed(&admin_b, pb::PreviewShareRequest { server_id: guest.clone(), code: code.clone() }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(preview.instance, a.gateway.addr.to_string());
+    assert_eq!(preview.fingerprint, fed_a_fingerprint(&mut ca, &admin_a).await);
+    let asked = cb
+        .shared
+        .accept_share(authed(&admin_b, pb::AcceptShareRequest { server_id: guest.clone(), code, ..Default::default() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .connection
+        .unwrap();
+    ca.shared
+        .review_share(authed(
+            &admin_a,
+            pb::ReviewShareRequest { server_id: home.clone(), connection_id: asked.id, approve: true },
+        ))
+        .await
+        .unwrap();
+    let shown = cb
+        .channels
+        .list_channels(authed(&admin_b, pb::ListChannelsRequest { server_id: guest.clone() }))
+        .await
+        .unwrap()
+        .into_inner()
+        .channels;
+    assert!(shown.iter().any(|ch| ch.shared.as_ref().is_some_and(|s| !s.home)), "{shown:?}");
+
     a.stop().await;
     b.stop().await;
+}
+
+async fn fed_a_fingerprint(c: &mut Clients, admin: &str) -> String {
+    c.admin.get_federation(authed(admin, pb::GetFederationRequest {})).await.unwrap().into_inner().fingerprint
 }

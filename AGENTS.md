@@ -17,6 +17,16 @@
 - `e2ee-wasm/`: `fuwa-e2ee` for the web app, as WebAssembly. `pnpm wasm` (in
   `web/`) builds it into `web/src/e2ee/pkg` (not committed); the wasm-bindgen
   crate and CLI versions must match.
+- `sdk/`: `@waifu-devs/fuwa`, the TypeScript SDK (its own pnpm package, like
+  `web/`; docs/sdk.md). `src/gen` is generated from `proto/fuwa/v1` with the
+  web app's buf setup plus `.js` import paths (`pnpm generate`, checked in
+  CI). `client.ts` makes the typed clients (`createFuwa`: auth, typed errors
+  from `errors.ts`, retries from `retry.ts`), `events.ts` the reconnecting
+  `EventFollower`, `agent.ts` the `Agent` (commands, mentions, typed event
+  handlers), `voice.ts` voice channels over ListenVoice/SpeakVoice (no WebRTC), `ogg.ts`
+  Ogg Opus files, `pages.ts`, `upload.ts` and `text.ts` the helpers. It never logs
+  tokens or addresses and reports nothing. `test/agent.test.ts` drives a real
+  instance (`FUWA_BIN`); new agent-facing calls get a helper and a test there.
 - `voice/`: `fuwa-voice`, the client crate programs use to hear and talk in
   voice channels (`ListenVoice` and `SpeakVoice`, no WebRTC), with the
   `parrot` example. The server's tests use it against a real instance.
@@ -25,7 +35,10 @@
   - `api/`: one file per gRPC service, all implemented on `Api`.
   - `node.rs`: the instance database (`node.db`): accounts and profiles,
     sessions (devices), two-step sign-in (TOTP secrets, backup codes, sign-in
-    tickets), notification settings, meta (the install id, the announcement).
+    tickets), notification settings, server arrangements (each person's rail
+    order and folders, `AccountService.Get/SetServerArrangement`; the web side
+    is `lib/rail.ts`, `components/RailFolder.tsx` and `hooks/use-rail-arrange.ts`),
+    meta (the install id, the announcement).
     Admins can turn an account off (`disabled_at`): it loses its sessions and
     can't sign in until it's turned back on. What belongs to a person but not to
     one server lives here; a server file keeps only a copy of what its members
@@ -116,7 +129,19 @@
     the server file (`emojis`, `api/emoji.rs`); their pictures are uploads
     (`MEDIA_PURPOSE_EMOJI`) counted in the server's attachments, and every
     change sends the whole list (`EmojisUpdated`). Messages write them
-    `<:name:id>` (`<a:name:id>` when they move).
+    `<:name:id>` (`<a:name:id>` when they move). A message may also use
+    emoji from its author's other servers on the instance: the app sends
+    them along (`SendMessageRequest.emojis`), `App::check_emojis` keeps those
+    from a server the author is in that still has them (`ServerEmojis` on its
+    shard), with their stored name and picture (the link rebuilt at the
+    public address, never the one sent), and they
+    ride in the message's extras as `Message.emojis`, so everyone can draw
+    them. No new permission: being in the server is what lets you use them.
+    Threads (`api/threads.rs`, docs/threads.md): a reply is a message with
+    `thread_id` (its parent) and `in_channel`; `threads` sums each one up
+    and every send or delete of a reply calls `threads::refresh` in the
+    same write (`ThreadUpdated`). Paths that delete messages call
+    `threads::after_delete`; shared channels strip threads for guests.
     Shared channels (`api/shared.rs`, docs/shared-channels.md): a channel's
     home keeps it and every message (`channel_guests`, `share_codes`,
     `channel_blocks`); a guest server shows it as a channel of its own
@@ -136,6 +161,29 @@
     the message (`execute_webhook`): its `author_id` is the webhook's id and
     `Message.webhook` carries the name and picture it posted under. Webhook
     messages never ping @everyone, @here or roles, and nobody can edit them.
+  - GIFs (`docs/gifs.md` is the design): `gifs/` asks the instance's provider
+    (`giphy.rs`, `klipy.rs` behind `Kind`; the `gifs` setting holds the key,
+    never sent to apps, gateways or shards; another provider never gets it) with no forwarding headers, caches answers by a
+    SHA-256 key, and hands results back as signed tokens with previews
+    through the picture proxy. `gifs/store.rs` stores a picked GIF once
+    (`gif_files`, media owner "gifs", metadata stripped) and keeps saved GIFs;
+    `api/gifs.rs` is `GifService` (directory). `MessageGif.seal` is an HMAC
+    the server checks in `send_message` and clears. `media/still.rs` draws a
+    GIF's first frame (for AutoMod). Web: `fuwa/gifs.ts`,
+    `components/chat/GifPicker.tsx` (button) and `GifPanel.tsx` (the picker,
+    a lazy file).
+  - `mcp/`: the instance as an MCP server for agents (`docs/mcp.md`), at
+    `/mcp` and `/.well-known/mcp.json`: stateless Streamable HTTP, one
+    JSON-RPC message per POST, plain JSON back, no sessions. Agent tokens
+    only, a token bucket per agent account (`Limits`). Every tool
+    (`tools.rs`) is a public gRPC call made in process through the same
+    router clients reach (`call!` over `Mcp::inner`: the gateway's when
+    split), so routing, permission checks and limits are the call's own;
+    it never touches a database. `view.rs` turns messages into compact
+    JSON, `catalog.rs` holds the resources and prompts. Before any tool on
+    a server it asks `AgentService.GetMcpAccess` (the server file's
+    `mcp_access`) whether that server's managers let the agent in. A new
+    API call agents should have gets a tool here, wrapping that call.
   - `automod/`: what an AutoMod rule catches (words with `*` wildcards,
     pings, links to sites not allowed); `api/automod.rs` keeps the rules
     (`automod_rules`, one protobuf blob each) and `review` runs them inside
@@ -230,6 +278,20 @@
     reserved with `MediaService.CreateUpload` (`api/media.rs`) and checks its
     bytes really are the picture type it claims; `GET /media/<id>` serves it.
     Pictures nothing uses are swept hourly and at startup.
+  - `attachments.rs`: files sent with messages (`MEDIA_PURPOSE_ATTACHMENT`,
+    any kind). Uploaded for one server and stored with its pictures (on its
+    shard when split); a message may only link this instance's uploads, and
+    its server file keeps an `attachments` row per file, written and deleted
+    with the message (or its channel, a ban's purge, an AutoMod takedown),
+    counted in the server's attachment bytes. The row is what serves the
+    file: the kind found in its bytes (`media::kind_of`, never the client's),
+    `Content-Disposition: attachment` for anything but pictures, audio and
+    video, nosniff and a sandbox CSP always, single ranges for players.
+    Caps: FUWA_LIMIT_ATTACHMENT_UPLOAD and _UPLOADS_PER_DAY (node.db
+    `attachment_days`), the server's `attachment_bytes`. Not in secure
+    channels (they'd upload ciphertext) or channels shared from another
+    server yet. The web app's side is `components/chat/Attachments.tsx`,
+    `ComposerFiles.tsx` and `staged.ts`.
   - `outside.rs`: pictures from other sites. No client ever loads a picture
     from anywhere but a fuwa instance, since that site would learn the
     reader's IP address: any picture link that isn't an upload (embed images,
@@ -389,14 +451,20 @@
     (`instance_settings/sso.rs`: the identity provider, SAML metadata read
     by `core/sso.rs`, a test sign-in in the browser), Limits, Privacy,
     Calls and Moderation, where the providers servers' smart filters ask are set up
-    and tried, over `core/instance_admin.rs`, which names every setting's
+    and tried, and Other instances (`instance_settings/federation.rs`: the
+    switch for sharing channels with other instances, this instance's key,
+    checking another instance, who it has heard from and the blocked hosts),
+    over `core/instance_admin.rs`, which names every setting's
     path and keeps unsaved edits across a save; the pages are built from
     `instance_settings/controls.rs`, the web's `settings/controls.tsx`:
     a setting with its default and reset, option cards, caps; a cached view
     like server settings, sharing its `save_bar`, `switch` and chips; its
     Manage group acts straight away instead: `instance_settings/accounts.rs`
     finds accounts and makes admins, resets passwords or turns accounts off,
-    in a list that draws only the rows in sight, and
+    in a list that draws only the rows in sight,
+    `instance_settings/servers.rs` lists every server and opens one to change
+    its caps, move its region, end its shared channels, save its file or
+    delete it (over `core/instance_servers.rs`), and
     `instance_settings/announcement.rs` puts up the banner, over
     `core/instance_manage.rs`),
     `announcement.rs` that banner across the top of the app (news, heads-up
@@ -466,6 +534,12 @@
     `src/fuwa/dms.ts` are the actions; the screens are in `components/dm/`
     (`DmList`, `DmView`, `EncryptionDialog` with the safety number), routed at
     `/<instance>/dm/<conversation>`.
+  - Right-click menus (`docs/context-menus.md` lists them for every app): one
+    menu at a time, `components/ContextMenu.tsx` (`useContextMenu` on the
+    element, `ContextMenuHost` draws it with the animated dropdown menu);
+    what's in each is data built in `components/menus/`, from the same
+    actions and permission checks as the buttons. Later features add items
+    with `extendMenu` (`lib/context-menu.ts`) instead of editing the menus.
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
     an instance or a server live on that instance instead.
@@ -528,6 +602,16 @@
     plugin for `Markdown`), and `ServerLook`, the roles and members a server's
     messages need to color names. `MentionPicker.tsx` is the @ list in the
     composer; roles go in as `@Name` and are sent as `<@&id>`.
+  - Emoji: `components/EmojiPicker.tsx` is the picker (recently used, this
+    server's, your other servers' on the same instance, then the standard
+    set with skin tones; a hand-laid virtual grid that draws only the rows in
+    sight, driven by arrows from its search box). What it and the `:name:`
+    list offer is `lib/emoji-catalog.ts` (hooks and storage) over
+    `lib/emoji-search.ts` (names, `~2` for clashes, search, what a message
+    sends along). The standard set is `lib/emoji-data.json`, made from
+    `emojibase-data` by `scripts/emoji-data.mjs` and loaded only when needed;
+    nothing about emoji is ever fetched from outside. `EmojiImage.tsx` draws a
+    server emoji, holding moving ones still under reduced motion until hovered.
   - `src/components/settings/instance/`: the instance admin pages beyond
     settings (accounts, servers, announcement), shown by
     `settings/InstanceSettingsDialog.tsx`. The announcement itself is drawn by

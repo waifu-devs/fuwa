@@ -165,8 +165,9 @@ log notes it), and time-outs, kicks and bans apply.
   passed on. Shared messages show a small "shared" chip and never chime or
   notify. Messages sent before signing existed aren't shared.
 - **A new device starts empty**, as with direct messages: MLS can't decrypt a
-  message twice, so each device keeps what it read. A key backup only you can
-  open would fix this for direct messages and channels together.
+  message twice, so each device keeps what it read. With a message backup on
+  (see [e2ee.md](e2ee.md#message-backup)), a new device restores what the
+  account's other devices read, channels included, with the recovery key.
 - **Losing access** takes the channel off the device too: the app forgets its
   group and what it kept of it.
 

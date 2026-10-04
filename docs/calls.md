@@ -1,8 +1,8 @@
 # Calls
 
 Voice channels in community servers and calls in direct messages, with
-sound, cameras and shared screens. The desktop app's calls come later;
-this is how calls work now and what those build on.
+sound, cameras and shared screens. The desktop app has voice channels with
+sound; its cameras, shared screens and direct-message calls come later.
 
 ## The parts
 
@@ -327,6 +327,24 @@ it and since when, their mute, deafen, camera and shared screen on or off, the s
 timing of the sealed frames, and which camera frames are keyframes. Not the
 sound or the pictures.
 
+## The desktop app
+
+Voice channels, sound only (`desktop/src/core/voice`). It's the web app's
+call in Rust: str0m as the WebRTC client (the library the media part runs),
+Opus at 48 kHz in 20 ms frames, and cpal for the system's default
+microphone and speakers at whatever rate they run, resampled to and from
+48 kHz on a thread of their own. It joins, keeps its place every 5 s (and at
+once when you mute or deafen), answers the media part's offers on the
+"fuwa" data channel, and rejoins with the same session after a drop or a
+"restarting". Deafening also mutes, as on the web.
+
+It connects only to the addresses in the media part's answer: over UDP,
+and at the same time over ICE-TCP (RFC 4571 framing) to its TCP addresses,
+which is how it gets through on hosts that only proxy TCP. Its own
+addresses aren't in its offer; the media part learns the one it uses from
+the connectivity checks, as it does a browser's. Linux builds need the ALSA
+headers (`libasound2-dev`).
+
 ## Privacy
 
 Apps only ever connect to the media part, never to each other: there's no
@@ -367,6 +385,6 @@ interruption.
 
 ## Next
 
-- **The desktop app's calls**: str0m as the WebRTC client, cpal for the
-  microphone and speakers, Opus, the frame encryption it already has, and
+- **The rest of the desktop app's calls**: direct-message calls (with the
+  frame encryption it already has), picking the microphone and speakers,
   then cameras, with each person's camera in a native window of its own.

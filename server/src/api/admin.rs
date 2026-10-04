@@ -20,7 +20,7 @@ use crate::settings::{self, Settings};
 const EXPORT_CHUNK: usize = 256 * 1024;
 
 impl Api {
-    async fn require_instance_admin(&self, metadata: &tonic::metadata::MetadataMap) -> Result<Viewer> {
+    pub(super) async fn require_instance_admin(&self, metadata: &tonic::metadata::MetadataMap) -> Result<Viewer> {
         let viewer = self.viewer(metadata).await?;
         if !viewer.is_instance_admin() {
             return Err(Error::denied("only this instance's admins can do that"));
@@ -296,9 +296,10 @@ impl AdminService for Api {
                 if req.admin == Some(true) {
                     self.app.node()?.set_admin(&req.account_id, true).await?;
                 }
-                let by = viewer.account().map(|a| a.id.clone()).unwrap_or_else(|_| "operator".into());
-                tracing::info!(account = %req.account_id, admin = ?req.admin, disabled = ?req.disabled, by = %by, "account updated by an admin");
-                let summary = self.app.node()?.account_summary(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
+                // No account ids: these logs can be public.
+                tracing::info!(admin = ?req.admin, disabled = ?req.disabled, "account updated by an admin");
+                let summary =
+                    self.app.node()?.account_summary(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
                 Ok(pb::UpdateAccountResponse { account: Some(self.account_summary_pb(summary)) })
             }
             .await,
@@ -314,7 +315,9 @@ impl AdminService for Api {
                 let viewer = self.require_instance_admin(request.metadata()).await?;
                 let req = request.into_inner();
                 if viewer.account().is_ok_and(|me| me.id == req.account_id) {
-                    return Err(Error::FailedPrecondition("change your own password from your account settings".into()));
+                    return Err(Error::FailedPrecondition(
+                        "change your own password from your account settings".into(),
+                    ));
                 }
                 let account = self.app.node()?.account(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
                 if !account.has_password() {
@@ -323,7 +326,7 @@ impl AdminService for Api {
                 let password = auth::temporary_password();
                 let hash = auth::hash_password(password.clone()).await?;
                 self.app.node()?.reset_password(&account.id, &hash, req.turn_off_two_factor).await?;
-                tracing::info!(account = %account.id, two_factor_off = req.turn_off_two_factor, "password reset by an admin");
+                tracing::info!(two_factor_off = req.turn_off_two_factor, "password reset by an admin");
                 Ok(pb::ResetAccountPasswordResponse { password })
             }
             .await,
@@ -370,7 +373,11 @@ impl AdminService for Api {
                 let call = crate::cpb::shared_call::Call::AdminList(crate::cpb::AdminShares {});
                 let reply = self
                     .app
-                    .shared(crate::cpb::SharedCall { server_id: request.into_inner().server_id, call: Some(call) })
+                    .shared(crate::cpb::SharedCall {
+                        server_id: request.into_inner().server_id,
+                        call: Some(call),
+                        ..Default::default()
+                    })
                     .await?;
                 Ok(pb::ListServerSharesResponse { connections: reply.connections })
             }
@@ -391,7 +398,9 @@ impl AdminService for Api {
                     actor_id: viewer.account().map(|a| a.id.clone()).unwrap_or_default(),
                 };
                 let call = crate::cpb::shared_call::Call::AdminEnd(end);
-                self.app.shared(crate::cpb::SharedCall { server_id: req.server_id, call: Some(call) }).await?;
+                self.app
+                    .shared(crate::cpb::SharedCall { server_id: req.server_id, call: Some(call), ..Default::default() })
+                    .await?;
                 Ok(pb::EndServerShareResponse {})
             }
             .await,
@@ -461,7 +470,7 @@ impl AdminService for Api {
         &self,
         request: Request<pb::ExportServerRequest>,
     ) -> Result<Response<Self::ExportServerStream>, Status> {
-        let viewer = self.require_instance_admin(request.metadata()).await?;
+        self.require_instance_admin(request.metadata()).await?;
         let sdb = self.app.servers.get(&request.get_ref().server_id).await?;
         let server = sdb.server().await?;
         let dir = self.app.config.data_path.join("exports");
@@ -472,8 +481,8 @@ impl AdminService for Api {
             return Err(err.into());
         }
         let size = std::fs::metadata(&path).map_err(Error::from)?.len() as i64;
-        let by = viewer.account().map(|a| a.id.clone()).unwrap_or_else(|_| "operator".into());
-        tracing::info!(server = %sdb.id, bytes = size, by = %by, "server exported");
+        // No account id: these logs can be public.
+        tracing::info!(server = %sdb.id, bytes = size, "server exported");
 
         let filename = format!("{}.db", file_slug(&server.name));
         let (tx, rx) = mpsc::channel::<Result<pb::ExportServerResponse, Status>>(4);

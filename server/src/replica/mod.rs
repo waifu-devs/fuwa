@@ -70,6 +70,11 @@ const FENCE_EVERY: Duration = Duration::from_secs(60);
 
 /// How often new pictures are copied up.
 const MEDIA_EVERY: Duration = Duration::from_secs(60);
+/// How often releases that failed (the bucket was unreachable) are tried
+/// again, so a server that moved away leaves nothing in the old bucket.
+const RETRY_RELEASES: Duration = Duration::from_secs(10 * 60);
+/// Where, under `<data>/replica/`, owed releases are noted.
+const RELEASES: &str = "released";
 
 /// Files synced at once.
 const PARALLEL: usize = 8;
@@ -171,6 +176,10 @@ pub struct Replica {
     fence_every_ms: std::sync::atomic::AtomicU64,
     stop: CancellationToken,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// One lock per file, held while a release deletes and by
+    /// [`track`](Self::track), so a server coming back here never has its
+    /// replica deleted under it, and a slow bucket holds up no other file.
+    releasing: Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl Replica {
@@ -207,6 +216,7 @@ impl Replica {
             files: Mutex::new(BTreeMap::new()),
             media: Mutex::new(None),
             media_copied: tokio::sync::Mutex::new(None),
+            releasing: Mutex::new(BTreeMap::new()),
             checkpoint_bytes,
             rebase_bytes,
             fence_every_ms: (FENCE_EVERY.as_millis() as u64).into(),
@@ -224,6 +234,8 @@ impl Replica {
     pub async fn track(&self, name: &str, db: Arc<Db>) -> Result<()> {
         db::pragma(&db::connect(&db)?, "PRAGMA mvcc_checkpoint_threshold = -1").await?;
         db.replicated();
+        // Waits out a release of it that's under way.
+        let _released = self.release_lock(name).lock_owned().await;
         let position = self.load_position(name);
         let tracked = Arc::new(Tracked {
             name: name.to_string(),
@@ -231,6 +243,8 @@ impl Replica {
             state: tokio::sync::Mutex::new(State { position, ..State::default() }),
         });
         self.lock_files().insert(name.to_string(), tracked);
+        // It's back here: a release still owed from when it left is void.
+        let _ = std::fs::remove_file(self.release_path(name));
         Ok(())
     }
 
@@ -276,6 +290,26 @@ impl Replica {
     /// generations not in use, leaving the new shard's.
     pub async fn release(&self, name: &str) {
         self.forget(name, false).await;
+        // Noted first, so a failure (or a restart) is tried again later.
+        let owed = self.release_path(name);
+        if let Some(dir) = owed.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if std::fs::write(&owed, b"").is_err() {
+            tracing::warn!(file = %name, "couldn't note a release to try again");
+        }
+        self.try_release(name).await;
+    }
+
+    /// Deletes what's in the replica of a file this process let go of, and
+    /// clears the note that it's owed. On failure the note stays.
+    async fn try_release(&self, name: &str) -> bool {
+        let _alone = self.release_lock(name).lock_owned().await;
+        if self.lock_files().contains_key(name) {
+            // It came back here: what's in the replica is its own again.
+            let _ = std::fs::remove_file(self.release_path(name));
+            return false;
+        }
         let released = async {
             let current = current(&self.store, name).await?;
             let ours = current.as_ref().and_then(|c| c.writer.as_deref()).is_none_or(|writer| writer == self.writer);
@@ -296,9 +330,40 @@ impl Replica {
             Ok::<_, Error>(())
         }
         .await;
-        if let Err(err) = released {
-            tracing::warn!(file = %name, error = %err, "couldn't delete the replica of a server that moved away");
+        if released.is_err() {
+            tracing::warn!(file = %name, "couldn't delete the replica of a server that moved away; trying again later");
+            crate::reports::server_error("replica_release", Some("replica"));
+            return false;
         }
+        let _ = std::fs::remove_file(self.release_path(name));
+        true
+    }
+
+    /// Tries again the releases that failed, leaving out any file that came
+    /// back here since. Returns how many went through.
+    pub async fn retry_releases(&self) -> usize {
+        let Ok(entries) = std::fs::read_dir(self.positions.join(RELEASES)) else { return 0 };
+        let mut done = 0;
+        for entry in entries.flatten() {
+            let Ok(id) = entry.file_name().into_string() else { continue };
+            if !crate::id::parse_id("server_id", &id).is_ok_and(|parsed| parsed == id) {
+                continue;
+            }
+            let name = format!("servers/{id}");
+            done += usize::from(self.try_release(&name).await);
+        }
+        done
+    }
+
+    /// The lock a file's release and tracking take.
+    fn release_lock(&self, name: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.releasing.lock().unwrap_or_else(|p| p.into_inner());
+        locks.entry(name.to_string()).or_default().clone()
+    }
+
+    /// Where the note that a file's release is owed is kept.
+    fn release_path(&self, name: &str) -> PathBuf {
+        self.positions.join(RELEASES).join(name.strip_prefix("servers/").unwrap_or(name).replace('/', "_"))
     }
 
     /// Copies pictures from `dir` (`<data>/media`) up as they arrive.
@@ -339,6 +404,7 @@ impl Replica {
             let mut every = tokio::time::interval(replica.interval);
             every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             let mut media_synced: Option<Instant> = None;
+            let mut released: Option<Instant> = None;
             loop {
                 tokio::select! {
                     _ = replica.stop.cancelled() => return,
@@ -347,9 +413,13 @@ impl Replica {
                 replica.sync_files().await;
                 if media_synced.is_none_or(|at| at.elapsed() >= MEDIA_EVERY) {
                     media_synced = Some(Instant::now());
-                    if let Err(err) = replica.sync_media().await {
-                        tracing::warn!(error = %err, "couldn't copy new pictures to the replica");
+                    if replica.sync_media().await.is_err() {
+                        tracing::warn!("couldn't copy new pictures to the replica");
                     }
+                }
+                if released.is_none_or(|at| at.elapsed() >= RETRY_RELEASES) {
+                    released = Some(Instant::now());
+                    replica.retry_releases().await;
                 }
             }
         });

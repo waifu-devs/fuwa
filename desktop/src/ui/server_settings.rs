@@ -1658,6 +1658,7 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::AutoModRuleUpdate => ("shield-alert", sky),
         A::AutoModRuleDelete => ("shield-x", red),
         A::AutoModTimeOut => ("bot", amber),
+        A::AutoModMessageDelete => ("bot", red),
         A::EmojiCreate => ("face-slightly-smiling-plus", green),
         A::EmojiUpdate => ("face-slightly-smiling", sky),
         A::EmojiDelete => ("face-slightly-frowning", red),
@@ -1672,6 +1673,9 @@ fn kind(action: A, p: &Palette) -> (&'static str, Hsla) {
         A::SharedChannelDisconnect => ("unplug", red),
         A::SharedChannelBlock => ("user-x", red),
         A::SharedChannelUnblock => ("undo", green),
+        A::ThreadLock => ("lock", amber),
+        A::ThreadUnlock => ("lock-open", green),
+        A::ThreadDelete => ("message-square-x", red),
         A::Unspecified => ("scroll-text", p.muted_foreground.into()),
     }
 }
@@ -1927,6 +1931,13 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
             }
             s
         }
+        A::AutoModMessageDelete => {
+            let mut s = format!("**AutoMod** took down a message from {target}");
+            if !entry.channel_name.is_empty() {
+                s.push_str(&format!(" in {}", named_channel(&entry.channel_name)));
+            }
+            s
+        }
         A::EmojiCreate => format!("{actor} added the emoji **:{}:**", name_of(true)),
         A::EmojiUpdate => format!("{actor} renamed **:{}:** to **:{}:**", name_of(false), name_of(true)),
         A::EmojiDelete => format!("{actor} deleted the emoji **:{}:**", name_of(false)),
@@ -1952,6 +1963,9 @@ pub fn sentence(entry: &pb::AuditEntry, people: &People, channels: &[pb::Channel
         }
         A::SharedChannelBlock => format!("{actor} kept {target} out of {}", named_channel(&entry.channel_name)),
         A::SharedChannelUnblock => format!("{actor} let {target} back into {}", named_channel(&entry.channel_name)),
+        A::ThreadLock => format!("{actor} locked {target}'s thread in {}", named_channel(&entry.channel_name)),
+        A::ThreadUnlock => format!("{actor} unlocked {target}'s thread in {}", named_channel(&entry.channel_name)),
+        A::ThreadDelete => format!("{actor} deleted {target}'s thread in {}", named_channel(&entry.channel_name)),
         A::Unspecified => format!("{actor} did something"),
     }
 }

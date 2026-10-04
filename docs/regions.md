@@ -96,8 +96,10 @@ instance's Servers page). The directory runs the move:
 4. The old shard lets go: requests for the server are sent on to the new
    shard, open live streams follow it there from where they were, and the old
    shard deletes its files, its recordings, its pictures and its replica's
-   copies (only
-   those, if both shards share a bucket).
+   copies (only those, if both shards share a bucket). If its bucket can't
+   be reached then, it notes the copies are owed and tries again every ten
+   minutes, across restarts, until they're gone (unless the server has come
+   back to it meanwhile).
 
 Changes made during the move wait at the gateway (the same way they wait out
 a deploy, up to 30 seconds) and then go through on the new shard, so for most
@@ -195,8 +197,9 @@ What the operator must still do:
   holds, and that calls through a gateway in another region pass through it
   (or run gateways in the region, and later regional addresses).
 - Answer requests that aren't self-service: erasure of a server's content
-  (deleting the server, then emptying `deleted/` on its shard and the bucket's
-  copies after the retention they choose), access requests by people without
+  (deleting the server, which deletes its pictures everywhere, then emptying
+  `deleted/` on its shard and the bucket's copies of its file after the
+  retention they choose), access requests by people without
   an account, and records of processing.
 - Put the directory in the region whose rules the instance follows, and keep
   backups (Railway volume backups, buckets) in the same region as what they

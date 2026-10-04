@@ -108,11 +108,26 @@ impl App {
                     tracing::warn!(server = %server_id, error = %err, "couldn't forget where a deleted server was");
                 }
                 self.forget_notifications(server_id, None, None).await;
+                self.drop_server_media(server_id).await;
             }
             Link::Alone => {
                 self.index.remove(server_id);
                 self.forget_notifications(server_id, None, None).await;
+                self.drop_server_media(server_id).await;
             }
+        }
+    }
+
+    /// Deletes the pictures kept here that were made for or used by a server
+    /// that's gone, and their rows. A failure is logged and reported.
+    async fn drop_server_media(&self, server_id: &str) {
+        let dropped = async {
+            let ids = self.node()?.media_of_server(server_id).await?;
+            self.delete_media(&ids).await
+        };
+        if dropped.await.is_err() {
+            tracing::warn!(server = %server_id, "couldn't delete a deleted server's pictures");
+            crate::reports::server_error("server_media_drop", Some("cluster::calls"));
         }
     }
 
@@ -225,8 +240,13 @@ impl App {
                 new_url: new_url.to_string(),
                 server_id: server_id.to_string(),
             };
-            if let Err(err) = link.directory().drop_picture(request).await {
-                tracing::warn!(media = %id, error = %err.message(), "couldn't delete a replaced picture");
+            if link.directory().drop_picture(request).await.is_err() {
+                tracing::warn!(media = %id, "couldn't delete a replaced picture");
+                // Its copy here goes anyway unless the server still uses it;
+                // the directory's row is left to the sweeps.
+                if !matches!(crate::cluster::pictures::uses(self, server_id, &id).await, Ok(true)) {
+                    crate::cluster::pictures::drop(self, server_id, &id).await;
+                }
                 return;
             }
             // The directory deletes it only if it was the server's, and only
@@ -245,8 +265,13 @@ impl App {
         let belongs = match owner {
             PictureOwner::Account(account_id, purpose) => row.account_id == account_id && row.purpose == purpose,
             PictureOwner::Server(server_id) => {
-                matches!(row.purpose, pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji | pb::MediaPurpose::Avatar)
-                    && row.server_id.as_deref() == Some(server_id)
+                matches!(
+                    row.purpose,
+                    pb::MediaPurpose::ServerIcon
+                        | pb::MediaPurpose::Emoji
+                        | pb::MediaPurpose::Avatar
+                        | pb::MediaPurpose::Attachment
+                ) && row.server_id.as_deref() == Some(server_id)
             }
         };
         if belongs && let Err(err) = self.delete_media(&[id]).await {
@@ -285,6 +310,78 @@ impl App {
                 .filter(|row| !row.account.disabled)
                 .map(|row| FoundAgent { account: row.account, owner_id: row.owner_id, public: row.public })),
         }
+    }
+
+    /// Which of the emoji someone wrote from their other servers they may
+    /// use: ones of a server they're a member of that it still has, with a
+    /// picture that's one of that server's emoji here. They come back as the
+    /// server keeps them (only the id sent is used): the stored name, the
+    /// link rebuilt at this instance's public address, and animated from the
+    /// picture itself.
+    pub async fn check_emojis(&self, account_id: &str, emojis: Vec<pb::Emoji>) -> Result<Vec<pb::Emoji>> {
+        if emojis.is_empty() {
+            return Ok(vec![]);
+        }
+        if let Link::Shard(link) = &self.link {
+            let request = cpb::CheckEmojisRequest { account_id: account_id.to_string(), emojis };
+            return Ok(link.ask(request, |mut d, r| async move { d.check_emojis(r).await }).await?.emojis);
+        }
+        // The ids asked for, by server, in the order they came.
+        let mut order: Vec<String> = Vec::new();
+        let mut by_server: Vec<(String, Vec<String>)> = Vec::new();
+        for emoji in emojis.into_iter().take(MAX_OUTSIDE_EMOJIS) {
+            if !emoji_id_ok(&emoji.id)
+                || order.contains(&emoji.id)
+                || !self.index.is_member(account_id, &emoji.server_id)
+            {
+                continue;
+            }
+            order.push(emoji.id.clone());
+            match by_server.iter_mut().find(|(server_id, _)| *server_id == emoji.server_id) {
+                Some((_, ids)) => ids.push(emoji.id),
+                None => by_server.push((emoji.server_id, vec![emoji.id])),
+            }
+        }
+        let node = self.node()?;
+        let base = self.settings().public_url.clone();
+        let mut found: HashMap<String, pb::Emoji> = HashMap::new();
+        for (server_id, ids) in by_server {
+            // A server that can't be asked leaves its emoji as names.
+            let Ok(stored) = self.server_emojis(&server_id, ids).await else { continue };
+            for emoji in stored {
+                let Some(media_id) = media::id_in_url(&emoji.url) else { continue };
+                let Some(row) = node.media(&media_id).await? else { continue };
+                if row.purpose != pb::MediaPurpose::Emoji
+                    || !row.stored
+                    || !row.used
+                    || row.server_id.as_deref() != Some(server_id.as_str())
+                {
+                    continue;
+                }
+                found.insert(
+                    emoji.id.clone(),
+                    pb::Emoji {
+                        id: emoji.id,
+                        server_id: server_id.clone(),
+                        name: emoji.name,
+                        url: format!("{base}/media/{media_id}"),
+                        animated: row.content_type == "image/gif",
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        Ok(order.iter().filter_map(|id| found.remove(id)).collect())
+    }
+
+    /// A server's emoji with these ids, asked of the shard holding it.
+    async fn server_emojis(&self, server_id: &str, ids: Vec<String>) -> Result<Vec<pb::Emoji>> {
+        let Link::Directory(shards) = &self.link else {
+            return shard::server_emojis(&self.servers, server_id, &ids).await;
+        };
+        let shard_id = self.index.placement(server_id).ok_or(Error::NotFound("server"))?;
+        let request = cpb::ServerEmojisRequest { server_id: server_id.to_string(), ids };
+        Ok(shards.client(&shard_id)?.server_emojis(request).await?.into_inner().emojis)
     }
 
     /// The regions this instance keeps servers in, the home region first;
@@ -509,11 +606,16 @@ impl App {
     // ─────────────── Between shared channels' servers ───────────────
 
     /// A call between the two ends of a shared channel, answered where the
-    /// server it's for is kept: here, or on its shard through the directory
-    /// (shards don't know each other).
+    /// server it's for is kept: here, on its shard through the directory
+    /// (shards don't know each other), or on another instance.
     pub async fn shared(self: &Arc<Self>, call: cpb::SharedCall) -> Result<cpb::SharedReply> {
         if self.servers.holds(&call.server_id) {
             return crate::api::shared_call(self, call).await;
+        }
+        // A server on another instance ("<id>@<instance>"): the part that
+        // keeps the instance's key calls it; a shard passes it there.
+        if call.server_id.contains('@') && !matches!(self.link, Link::Shard(_)) {
+            return crate::federation::shared(self, call).await;
         }
         match &self.link {
             Link::Shard(link) => {
@@ -528,4 +630,12 @@ impl App {
             Link::Alone => Err(Error::NotFound("server")),
         }
     }
+}
+
+/// Most emoji from other servers one message keeps.
+pub const MAX_OUTSIDE_EMOJIS: usize = 50;
+
+/// An emoji's id as messages write it: 10 to 32 letters and digits.
+fn emoji_id_ok(id: &str) -> bool {
+    (10..=32).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric())
 }

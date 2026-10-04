@@ -4,9 +4,17 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { MessageKind, Permission, type Channel } from "@/gen/fuwa/v1/types_pb";
 import { run, sendMessage } from "@/fuwa/actions";
 import { useAccess } from "@/fuwa/hooks";
+import { AttachButton, DropOverlay, StagedTray, UploadRing } from "@/components/chat/ComposerFiles";
+import { addFiles, takeFiles, useStaged } from "@/components/chat/staged";
 import { useFuwa } from "@/fuwa/store";
 import { MentionPicker, useMentionPicker } from "@/components/chat/MentionPicker";
+import { TimestampPicker } from "@/components/chat/TimestampPicker";
 import { EmojiPicker } from "@/components/EmojiPicker";
+import { useContextMenu } from "@/components/ContextMenu";
+import { composerMenu } from "@/components/menus/composer";
+import { COMPOSER_INSERT } from "@/components/menus/member";
+import { useCatalog } from "@/lib/emoji-catalog";
+import { GifPicker } from "@/components/chat/GifPicker";
 import { RulesDialog } from "@/components/join/Rules";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
@@ -14,6 +22,7 @@ import { formatDuration, formatLeft, timedOutUntil, toDate } from "@/lib/format"
 import { hasIn } from "@/lib/permissions";
 import { comboLabel, isMac } from "@/lib/keybinds";
 import { usePrefs, type SendWith } from "@/lib/prefs";
+import { onCommand } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 const MAX = 4000;
@@ -70,6 +79,12 @@ function useSendGate(instanceKey: string, serverId: string, channel: Channel) {
     now,
     /** Synced and allowed to write here. */
     canSend: !member || hasIn(access, channel.id, Permission.SEND_MESSAGES),
+    /**
+     * May send files here. Not in a channel another server shares with this
+     * one: files stay with the server they're uploaded for.
+     */
+    canAttach: !!member && hasIn(access, channel.id, Permission.ATTACH_FILES) && !(channel.shared && !channel.shared.home),
+    canStartThreads: !member || hasIn(access, channel.id, Permission.CREATE_THREADS),
     /** Joined, but hasn't agreed to the server's rules yet. */
     pending: !!member && access.pending,
     slowmode,
@@ -90,17 +105,23 @@ export function Composer({
   instanceKey,
   serverId,
   channel,
+  thread,
   placeholder,
   onEditLast,
 }: {
   instanceKey: string;
   serverId: string;
   channel: Channel;
+  /** Replying in the thread under this message: locked keeps you out; not started yet needs Start threads. */
+  thread?: { id: string; locked: boolean; started: boolean };
   placeholder: string;
   onEditLast: () => void;
 }) {
   const channelId = channel.id;
-  const [text, setText] = useState(() => drafts.get(channelId) ?? "");
+  // Drafts are kept per channel, and per thread apart from their channel.
+  const draftKey = thread ? `thread:${thread.id}` : channelId;
+  const [text, setText] = useState(() => drafts.get(draftKey) ?? "");
+  const [alsoToChannel, setAlsoToChannel] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
   const plane = useAnimationControls();
   const nudge = useAnimationControls();
@@ -111,7 +132,9 @@ export function Composer({
   const picker = useMentionPicker(instanceKey, serverId, channel, box, text, setText);
   const server = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId));
   const [rules, setRules] = useState(false);
-  const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[serverId]);
+  const catalog = useCatalog(instanceKey, serverId);
+  const staged = useStaged(channelId);
+  const where = { instanceKey, serverId, channelId };
 
   /** Puts text at the caret, with a space before it when it would touch a word. */
   function insert(piece: string) {
@@ -128,13 +151,47 @@ export function Composer({
     });
   }
 
+  /** Replaces what's selected (or nothing, at the caret) with `piece`, for the right-click menu's paste and cut. */
+  function replaceSelection(piece: string) {
+    const el = box.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    setText(text.slice(0, start) + piece + text.slice(end));
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(start + piece.length, start + piece.length);
+    });
+  }
+
+  const menu = useContextMenu("composer", () =>
+    box.current
+      ? composerMenu(
+          { instanceKey, serverId, channel, insert },
+          {
+            box: box.current,
+            replaceSelection,
+            openEmoji: () => box.current?.parentElement?.querySelector<HTMLElement>("[data-composer-emoji]")?.click(),
+          },
+        )
+      : null,
+    { touch: false },
+  );
+
+  // "Mention" in someone's menu types their name here.
+  const typing = gate.canSend && !gate.pending && !timedOut;
+  const inserts = useRef(insert);
   useEffect(() => {
-    setText(drafts.get(channelId) ?? "");
+    inserts.current = insert;
+  });
+  useEffect(() => (typing ? onCommand(COMPOSER_INSERT, (piece) => piece && inserts.current(piece)) : undefined), [typing]);
+
+  useEffect(() => {
+    setText(drafts.get(draftKey) ?? "");
     if (window.matchMedia("(pointer: fine)").matches) box.current?.focus();
-  }, [channelId]);
+  }, [draftKey]);
   useEffect(() => {
-    drafts.set(channelId, text);
-  }, [channelId, text]);
+    drafts.set(draftKey, text);
+  }, [draftKey, text]);
 
   // Grow with the text, up to a point.
   useLayoutEffect(() => {
@@ -146,15 +203,19 @@ export function Composer({
 
   const content = text.trim();
   const tooLong = text.length > MAX;
+  const uploading = staged.some((s) => !s.done && !s.failed);
+  const brokenFile = staged.some((s) => s.failed);
+  const uploaded = staged.length ? staged.reduce((sum, s) => sum + (s.failed ? 0 : s.sent), 0) / staged.length : 0;
 
   function send() {
-    if (!content || tooLong || timedOut) return;
-    if (cooling) {
+    if ((!content && !staged.length) || tooLong || timedOut) return;
+    if (cooling || uploading || brokenFile) {
       void nudge.start({ x: [0, -5, 5, -3, 3, 0], transition: { duration: 0.4 } });
       return;
     }
+    const files = takeFiles(channelId);
     setText("");
-    drafts.delete(channelId);
+    drafts.delete(draftKey);
     void plane.start({
       x: [0, 28, -18, 0],
       y: [0, -14, 8, 0],
@@ -162,7 +223,16 @@ export function Composer({
       rotate: [0, -20, 0, 0],
       transition: { duration: 0.55, times: [0, 0.45, 0.5, 1], ease: "easeOut" },
     });
-    run(sendMessage(instanceKey, serverId, channelId, picker.encode(content))).catch(() => {
+    run(
+      sendMessage(
+        instanceKey,
+        serverId,
+        channelId,
+        picker.encode(content),
+        files,
+        thread ? { threadId: thread.id, alsoToChannel } : undefined,
+      ),
+    ).catch(() => {
       // The message stays in the list, marked as failed, with a retry.
     });
   }
@@ -179,7 +249,7 @@ export function Composer({
     }
   }
 
-  const ready = !!content && !tooLong && !cooling;
+  const ready = (!!content || staged.length > 0) && !tooLong && !cooling && !uploading && !brokenFile;
 
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
@@ -188,8 +258,14 @@ export function Composer({
           <AgreeFirst key="rules" onRead={() => setRules(true)} />
         ) : timedOut ? (
           <TimedOut key="timed-out" left={gate.timedOutUntil - gate.now} />
-        ) : !gate.canSend ? (
-          <ReadOnly key="read-only" name={channel.name} />
+        ) : thread?.locked ? (
+          <ReadOnly key="locked" title="This thread is locked" about="A moderator locked it: you can read along, not reply." />
+        ) : !gate.canSend || (thread && !thread.started && !gate.canStartThreads) ? (
+          <ReadOnly
+            key="read-only"
+            title={gate.canSend ? `You can't start threads in #${channel.name}` : `You can't send messages in #${channel.name}`}
+            about="Your roles let you read along here, not write."
+          />
         ) : (
           <motion.div
             key="composer"
@@ -198,7 +274,10 @@ export function Composer({
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
             transition={SPRING}
           >
-      <motion.div animate={nudge} className="composer relative flex items-end gap-2 rounded-2xl border bg-card px-3 py-2">
+      <motion.div animate={nudge} className="composer relative rounded-2xl border bg-card px-3 py-2">
+        <AnimatePresence initial={false}>{staged.length > 0 && <StagedTray key="files" where={where} staged={staged} />}</AnimatePresence>
+        <div className="flex items-end gap-2">
+        {gate.canAttach && <AttachButton where={where} />}
         <MentionPicker picker={picker} />
         <textarea
           ref={box}
@@ -207,7 +286,18 @@ export function Composer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onSelect={picker.onSelect}
-          onKeyDown={onKeyDown}
+          onKeyDown={(e) => {
+            menu.onKeyDown(e);
+            if (!e.defaultPrevented) onKeyDown(e);
+          }}
+          onContextMenu={menu.onContextMenu}
+          data-context-menu=""
+          onPaste={(e) => {
+            const pasted = Array.from(e.clipboardData.files);
+            if (!pasted.length || !gate.canAttach) return;
+            e.preventDefault();
+            addFiles(instanceKey, serverId, channelId, pasted);
+          }}
           placeholder={placeholder}
           aria-label={placeholder}
           className="scroll-thin max-h-[40vh] min-h-6 flex-1 resize-none bg-transparent py-1.5 text-[0.95rem] leading-6 outline-none placeholder:text-muted-foreground"
@@ -224,9 +314,9 @@ export function Composer({
             </motion.span>
           )}
         </AnimatePresence>
+        <TimestampPicker onPick={insert} />
         <EmojiPicker
-          emojis={emojis}
-          server={server}
+          catalog={catalog}
           closeOnPick={false}
           onPick={(emoji) => insert(emoji.text.startsWith("<") ? `:${emoji.name}:` : emoji.text)}
         >
@@ -234,6 +324,7 @@ export function Composer({
             <motion.button
               type="button"
               aria-label="Emoji"
+              data-composer-emoji
               whileHover={{ scale: 1.12, rotate: -10 }}
               whileTap={{ scale: 0.85 }}
               className={cn("group mb-0.5 grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition-colors hover:text-primary", open && "bg-primary/10 text-primary")}
@@ -242,11 +333,14 @@ export function Composer({
             </motion.button>
           )}
         </EmojiPicker>
+        <GifPicker instanceKey={instanceKey} serverId={serverId} channelId={channelId} />
         <motion.button
           type="button"
           onClick={send}
           disabled={!ready}
-          aria-label={cooling ? `Slow mode: send again in ${formatLeft(gate.cooldownUntil - gate.now)}` : "Send"}
+          aria-label={
+            cooling ? `Slow mode: send again in ${formatLeft(gate.cooldownUntil - gate.now)}` : uploading ? `Uploading files: ${Math.round(uploaded * 100)}%` : "Send"
+          }
           whileTap={{ scale: 0.85 }}
           initial={false}
           animate={{ scale: ready || cooling ? 1 : 0.9 }}
@@ -259,6 +353,8 @@ export function Composer({
           <AnimatePresence mode="popLayout" initial={false}>
             {cooling ? (
               <Cooldown key="cooldown" left={gate.cooldownUntil - gate.now} total={gate.slowmode * 1000} />
+            ) : uploading ? (
+              <UploadRing key="uploading" share={uploaded} />
             ) : (
               <motion.span
                 key="plane"
@@ -274,12 +370,25 @@ export function Composer({
             )}
           </AnimatePresence>
         </motion.button>
+        </div>
       </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+      {gate.canAttach && !gate.pending && !timedOut && gate.canSend && <DropOverlay where={where} channelName={channel.name} />}
       <div className="mt-1 flex items-center gap-3 px-1 text-[0.7rem] text-muted-foreground">
-        <p className="hidden min-w-0 flex-1 truncate sm:block">
+        {thread && gate.canSend && !thread.locked && (
+          <label className="flex shrink-0 cursor-pointer items-center gap-1.5 font-bold select-none">
+            <input
+              type="checkbox"
+              checked={alsoToChannel}
+              onChange={(e) => setAlsoToChannel(e.target.checked)}
+              className="size-3.5 accent-[var(--primary)]"
+            />
+            Also send to #{channel.name}
+          </label>
+        )}
+        <p className={cn("hidden min-w-0 flex-1 truncate", !thread && "sm:block")}>
           <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
           <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
         </p>
@@ -383,7 +492,7 @@ function Cooldown({ left, total }: { left: number; total: number }) {
 }
 
 /** In place of the box where your roles don't let you write. */
-function ReadOnly({ name }: { name: string }) {
+function ReadOnly({ title, about }: { title: string; about: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -402,8 +511,8 @@ function ReadOnly({ name }: { name: string }) {
         <LockIcon className="size-[18px]" />
       </motion.span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold">You can't send messages in #{name}</p>
-        <p className="text-xs text-muted-foreground">Your roles let you read along here, not write.</p>
+        <p className="truncate text-sm font-bold">{title}</p>
+        <p className="text-xs text-muted-foreground">{about}</p>
       </div>
     </motion.div>
   );

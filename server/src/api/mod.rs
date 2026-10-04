@@ -10,6 +10,7 @@ mod channels;
 mod dms;
 mod emoji;
 mod events;
+mod gifs;
 mod invites;
 mod join;
 mod media;
@@ -20,13 +21,16 @@ mod secure;
 mod servers;
 mod shared;
 mod sso;
+mod threads;
 mod webhooks;
 
 pub(crate) use account::export_server;
 pub use calls::{hang_up_server, spawn_voice_guard, spawn_voice_sweeper};
 pub use media::PictureOwner;
 pub use secure::MAX_SECURE_MEMBERS;
-pub use shared::{shared_call, spawn_shared_fanout};
+pub use shared::{
+    arrived as shared_arrived, returned as shared_returned, shared_call, spawn_shared_fanout, undo as shared_undo,
+};
 pub use sso::note_lapses;
 pub use webhooks::{WebhookPost, execute_webhook, verify_webhook};
 
@@ -107,6 +111,20 @@ fn text(field: &str, value: &str, min: usize, max: usize) -> Result<String> {
         } else {
             format!("{field} must be {min} to {max} characters")
         }));
+    }
+    Ok(value.to_string())
+}
+
+/// A profile effect's id: lowercase letters, digits and dashes, up to 32, or
+/// empty for none. Ids are the apps' to name (docs/profile-effects.md), so the
+/// server checks only the shape and apps show nothing for one they don't know.
+fn effect_id(value: &str) -> Result<String> {
+    let value = value.trim();
+    let shaped = value.len() <= 32
+        && value.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !value.starts_with('-');
+    if !shaped {
+        return Err(Error::invalid("effect is an id of lowercase letters, digits and dashes, up to 32"));
     }
     Ok(value.to_string())
 }

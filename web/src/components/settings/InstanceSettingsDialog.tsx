@@ -45,6 +45,7 @@ import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { Accounts } from "./instance/Accounts";
 import { Announcement } from "./instance/Announcement";
 import { CALL_FIELDS, CALL_SECTION, CallSettings } from "./instance/Calls";
+import { GIF_FIELDS, GIF_SECTION, GifSettings } from "./instance/Gifs";
 import { FEDERATION_FIELDS, FEDERATION_SECTION, FederationSettings } from "./instance/Federation";
 import { MODERATION_FIELDS, MODERATION_SECTION, ModerationSettings } from "./instance/Moderation";
 import { Servers } from "./instance/Servers";
@@ -63,6 +64,8 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "server_creation", get: (s) => s.serverCreation },
   { path: "agent_creation", get: (s) => s.agentCreation },
   { path: "shared_channels", get: (s) => s.sharedChannels },
+  { path: "mcp", get: (s) => s.mcp },
+  { path: "profile_effects", get: (s) => s.profileEffects },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
   { path: "default_limits.channels", get: (s) => s.defaultLimits?.channels },
@@ -72,11 +75,14 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "default_limits.recording_bytes", get: (s) => s.defaultLimits?.recordingBytes },
   { path: "picture_upload_bytes", get: (s) => s.pictureUploadBytes },
   { path: "picture_upload_bytes_per_day", get: (s) => s.pictureUploadBytesPerDay },
+  { path: "attachment_upload_bytes", get: (s) => s.attachmentUploadBytes },
+  { path: "attachment_upload_bytes_per_day", get: (s) => s.attachmentUploadBytesPerDay },
   { path: "telemetry", get: (s) => s.telemetry },
   { path: "web", get: (s) => s.web },
   ...CALL_FIELDS,
   ...MODERATION_FIELDS,
   ...FEDERATION_FIELDS,
+  ...GIF_FIELDS,
 ];
 
 const changedPaths = (draft: InstanceSettings, saved: InstanceSettings) =>
@@ -203,7 +209,9 @@ export function InstanceSettingsDialog({
                 { id: "server-creation", label: "Who can create servers" },
                 { id: "servers-per-account", label: "Servers per account" },
                 { id: "agent-creation", label: "Who can make agents", keywords: "bots integrations" },
+                { id: "mcp", label: "Agents through MCP", keywords: "mcp claude ai model context protocol" },
                 { id: "shared-channels", label: "Shared channels", keywords: "share connect servers slack connect" },
+                { id: "profile-effects", label: "Profile effects", keywords: "sparkles petals animation card decoration" },
               ],
             },
             {
@@ -239,6 +247,7 @@ export function InstanceSettingsDialog({
             CALL_SECTION,
             MODERATION_SECTION,
             FEDERATION_SECTION,
+            GIF_SECTION,
           ],
         },
         {
@@ -474,6 +483,20 @@ export function InstanceSettingsDialog({
                 />
               </Setting>
               <Setting
+                id="mcp"
+                title="Agents through MCP"
+                defaultLabel={defaults.mcp ? "on" : "off"}
+                delay={0.22}
+                {...resetter("mcp")}
+              >
+                <Toggle
+                  checked={draft.mcp}
+                  onChange={(on) => patch((d) => (d.mcp = on))}
+                  label="Agents can use this instance as an MCP server"
+                  hint="AI apps such as Claude reach it at /mcp with an agent's token and get the same permissions the agent has. Server managers can still pick which agents may use theirs."
+                />
+              </Setting>
+              <Setting
                 id="shared-channels"
                 title="Shared channels"
                 defaultLabel={defaults.sharedChannels ? "on" : "off"}
@@ -485,6 +508,20 @@ export function InstanceSettingsDialog({
                   onChange={(on) => patch((d) => (d.sharedChannels = on))}
                   label="Servers can share channels with each other"
                   hint="Admins of two servers here can show one channel in both. Turned off, nobody can start a new one; channels already shared stay until either side ends them."
+                />
+              </Setting>
+              <Setting
+                id="profile-effects"
+                title="Profile effects"
+                defaultLabel={defaults.profileEffects ? "on" : "off"}
+                delay={0.28}
+                {...resetter("profile_effects")}
+              >
+                <Toggle
+                  checked={draft.profileEffects}
+                  onChange={(on) => patch((d) => (d.profileEffects = on))}
+                  label="People can put an effect on their profile card"
+                  hint="Petals, stars and the like, drawn by the app from your theme's colors. Turned off, nobody's shows, and everyone's pick comes back when it's on again."
                 />
               </Setting>
             </>
@@ -607,6 +644,31 @@ export function InstanceSettingsDialog({
                   onChange={(v) => patch((d) => (d.pictureUploadBytesPerDay = v))}
                 />
               </Setting>
+              <Setting
+                id="attachment-uploads"
+                title="Largest file in a message"
+                hint="Any file people send with a message: documents, archives, audio, video. Leave it empty for no limit."
+                defaultLabel={size(defaults.attachmentUploadBytes)}
+                delay={0.12}
+                {...resetter("attachment_upload_bytes")}
+              >
+                <Cap label="Up to" bytes value={draft.attachmentUploadBytes} onChange={(v) => patch((d) => (d.attachmentUploadBytes = v))} />
+              </Setting>
+              <Setting
+                id="attachment-uploads-per-day"
+                title="Files per day"
+                hint="How much one account may send in files in a day (UTC), apart from pictures."
+                defaultLabel={size(defaults.attachmentUploadBytesPerDay)}
+                delay={0.16}
+                {...resetter("attachment_upload_bytes_per_day")}
+              >
+                <Cap
+                  label="Up to"
+                  bytes
+                  value={draft.attachmentUploadBytesPerDay}
+                  onChange={(v) => patch((d) => (d.attachmentUploadBytesPerDay = v))}
+                />
+              </Setting>
             </>
           )}
           {tab === "calls" && <CallSettings config={config} draft={draft} defaults={defaults} patch={patch} resetter={resetter} />}
@@ -615,6 +677,9 @@ export function InstanceSettingsDialog({
           )}
           {tab === "federation" && saved && (
             <FederationSettings instanceKey={instanceKey} draft={draft} saved={saved} defaults={defaults} patch={patch} resetter={resetter} />
+          )}
+          {tab === "gifs" && saved && (
+            <GifSettings instanceKey={instanceKey} draft={draft} saved={saved} defaults={defaults} patch={patch} resetter={resetter} />
           )}
           {tab === "privacy" && (
             <>
@@ -702,7 +767,12 @@ const CREATION_LABEL: Record<number, string> = {
 };
 
 /** Settings copied by a function of their own, beside the switch below. */
-const COPIED = [...CALL_FIELDS, { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) }];
+const COPIED = [
+  ...CALL_FIELDS,
+  { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) },
+  { path: "mcp", copy: (into: InstanceSettings, from: InstanceSettings) => (into.mcp = from.mcp) },
+  { path: "profile_effects", copy: (into: InstanceSettings, from: InstanceSettings) => (into.profileEffects = from.profileEffects) },
+];
 
 /** Copies the named settings from one draft into another. */
 function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: string[]) {
@@ -710,6 +780,7 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
     COPIED.find((f) => f.path === path)?.copy(into, from);
     MODERATION_FIELDS.find((f) => f.path === path)?.copy(into, from);
     FEDERATION_FIELDS.find((f) => f.path === path)?.copy(into, from);
+    GIF_FIELDS.find((f) => f.path === path)?.copy(into, from);
     switch (path) {
       case "name":
         into.name = from.name;
@@ -755,6 +826,12 @@ function mergeFields(into: InstanceSettings, from: InstanceSettings, paths: stri
         break;
       case "picture_upload_bytes_per_day":
         into.pictureUploadBytesPerDay = from.pictureUploadBytesPerDay;
+        break;
+      case "attachment_upload_bytes":
+        into.attachmentUploadBytes = from.attachmentUploadBytes;
+        break;
+      case "attachment_upload_bytes_per_day":
+        into.attachmentUploadBytesPerDay = from.attachmentUploadBytesPerDay;
         break;
       default: {
         // Settings copied above by their own pages' functions.

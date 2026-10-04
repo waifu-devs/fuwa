@@ -63,6 +63,11 @@ pub struct Config {
     /// FUWA_SHARED_CHANNELS: on (default) | off. Servers sharing channels
     /// with each other.
     pub shared_channels: bool,
+    /// FUWA_MCP: on (default) | off. Agents using the instance through MCP
+    /// at /mcp (docs/mcp.md).
+    pub mcp: bool,
+    /// People may put an effect on their profile card. FUWA_PROFILE_EFFECTS.
+    pub profile_effects: bool,
     /// FUWA_FEDERATION: on | off (default). Sharing channels with servers on
     /// other fuwa instances (docs/federation.md).
     pub federation: bool,
@@ -83,6 +88,12 @@ pub struct Config {
     /// FUWA_JEV_API_KEY turns TypeSafe Jev on; FUWA_CLEF_API_TOKEN and
     /// FUWA_CLEF_ACCOUNT_ID turn Cloudflare Clef on. None by default.
     pub automod_providers: Vec<crate::automod::providers::Setup>,
+    /// GIF search: FUWA_GIF_PROVIDER (giphy or klipy) with FUWA_GIF_API_KEY
+    /// turns it on from the start. Off by default.
+    pub gifs: crate::gifs::Setup,
+    /// FUWA_GIF_API_URL: where the GIF provider's API is instead of its own
+    /// address, reached without the public-address check. For tests only.
+    pub gif_api_url: Option<String>,
     /// Where this process carries calls itself (one process, or a media
     /// part): FUWA_MEDIA_PORT (default 50000, UDP and TCP; `off` for no
     /// calls here) and FUWA_MEDIA_ADDRESSES. None when it's off, or this
@@ -126,6 +137,7 @@ impl std::fmt::Debug for Config {
             .field("streams_per_account", &self.streams_per_account)
             .field("max_streams", &self.max_streams)
             .field("automod_providers", &self.automod_providers)
+            .field("gifs", &self.gifs)
             .finish()
     }
 }
@@ -205,6 +217,12 @@ pub struct Limits {
     /// FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY: how many bytes of pictures one
     /// account may upload in a day (UTC), e.g. `256MiB`.
     pub picture_upload_bytes_per_day: Option<i64>,
+    /// FUWA_LIMIT_ATTACHMENT_UPLOAD: the largest file one attachment upload
+    /// may be, e.g. `100MB`.
+    pub attachment_upload_bytes: Option<i64>,
+    /// FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY: how many bytes of attachments
+    /// one account may upload in a day (UTC), e.g. `2GiB`.
+    pub attachment_upload_bytes_per_day: Option<i64>,
     /// FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY: how many times a day (UTC) one
     /// server's Smart filter may ask its provider.
     pub automod_checks_per_day: Option<i64>,
@@ -336,7 +354,7 @@ impl Config {
         let bytes = |key: &str| -> Result<Option<i64>, String> {
             get(key).map(|value| parse_bytes(&value).map_err(|err| format!("{key} {err}"))).transpose()
         };
-        // Picture upload caps also take `unlimited`, the same as leaving them unset.
+        // Upload caps also take `unlimited`, the same as leaving them unset.
         let upload_bytes = |key: &str| -> Result<Option<i64>, String> {
             match get(key) {
                 Some(value) if value.trim().eq_ignore_ascii_case("unlimited") => Ok(None),
@@ -353,6 +371,8 @@ impl Config {
             recording_bytes: bytes("FUWA_LIMIT_RECORDING_STORAGE")?,
             picture_upload_bytes: upload_bytes("FUWA_LIMIT_PICTURE_UPLOAD")?,
             picture_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_PICTURE_UPLOADS_PER_DAY")?,
+            attachment_upload_bytes: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOAD")?,
+            attachment_upload_bytes_per_day: upload_bytes("FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY")?,
             automod_checks_per_day: count("FUWA_LIMIT_AUTOMOD_CHECKS_PER_DAY")?,
         };
 
@@ -391,6 +411,16 @@ impl Config {
             None | Some("on" | "true" | "1") => true,
             Some("off" | "false" | "0") => false,
             Some(other) => return Err(format!("FUWA_SHARED_CHANNELS must be on or off, got {other:?}")),
+        };
+        let mcp = match get("FUWA_MCP").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_MCP must be on or off, got {other:?}")),
+        };
+        let profile_effects = match get("FUWA_PROFILE_EFFECTS").as_deref().map(str::trim) {
+            None | Some("on" | "true" | "1") => true,
+            Some("off" | "false" | "0") => false,
+            Some(other) => return Err(format!("FUWA_PROFILE_EFFECTS must be on or off, got {other:?}")),
         };
         let federation = match get("FUWA_FEDERATION").as_deref().map(str::trim) {
             None | Some("off" | "false" | "0") => false,
@@ -510,12 +540,16 @@ impl Config {
             calls,
             call_recordings,
             shared_channels,
+            mcp,
+            profile_effects,
             federation,
             federation_allow_private,
             call_recordings_keep_days,
             ice_urls,
             turn_secret: get("FUWA_TURN_SECRET").map(|s| s.trim().to_string()).unwrap_or_default(),
             automod_providers: automod_providers(&get)?,
+            gifs: gifs(&get)?,
+            gif_api_url: gif_api_url(&get)?,
             media,
             media_urls,
             replica,
@@ -655,6 +689,50 @@ fn automod_providers(get: &impl Fn(&str) -> Option<String>) -> Result<Vec<crate:
     Ok(setups)
 }
 
+/// GIF search from FUWA_GIF_PROVIDER and FUWA_GIF_API_KEY, checked like a
+/// change from the app.
+/// FUWA_GIF_API_URL: a stand-in GIF provider for tests, only ever on this
+/// machine, since calls to it skip the public-address check.
+fn gif_api_url(get: &impl Fn(&str) -> Option<String>) -> Result<Option<String>, String> {
+    let Some(url) =
+        get("FUWA_GIF_API_URL").map(|v| v.trim().trim_end_matches('/').to_string()).filter(|v| !v.is_empty())
+    else {
+        return Ok(None);
+    };
+    let local = reqwest::Url::parse(&url).ok().filter(|u| {
+        let loopback = match u.host() {
+            Some(url::Host::Domain(host)) => host == "localhost",
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        };
+        loopback && matches!(u.scheme(), "http" | "https") && u.path() == "/" && u.query().is_none()
+    });
+    match local {
+        Some(_) => Ok(Some(url)),
+        None => Err(format!(
+            "FUWA_GIF_API_URL is for tests and must be a loopback address like http://127.0.0.1:9000, got {url:?}"
+        )),
+    }
+}
+
+fn gifs(get: &impl Fn(&str) -> Option<String>) -> Result<crate::gifs::Setup, String> {
+    let value = |name: &str| get(name).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let provider = match value("FUWA_GIF_PROVIDER").as_deref().map(str::to_ascii_lowercase).as_deref() {
+        None | Some("off") => pb::GifProvider::Unspecified,
+        Some("giphy") => pb::GifProvider::Giphy,
+        Some("klipy") => pb::GifProvider::Klipy,
+        Some(other) => return Err(format!("FUWA_GIF_PROVIDER must be giphy, klipy or off, got {other:?}")),
+    };
+    let given = pb::GifSettings {
+        provider: provider as i32,
+        api_key: value("FUWA_GIF_API_KEY").unwrap_or_default(),
+        ..Default::default()
+    };
+    crate::gifs::Setup::from_pb(&given, &crate::gifs::Setup::default())
+        .map_err(|err| format!("FUWA_GIF_PROVIDER or FUWA_GIF_API_KEY: {err}"))
+}
+
 /// Whether an `http://` URL's host is on a private network: a name with no
 /// dots (Docker Compose), localhost, `*.internal` (Railway's private network)
 /// or a loopback, private or link-local address. Anything else is reached over
@@ -789,6 +867,16 @@ mod tests {
         }
         for public in ["http://media.example.com:8443", "http://203.0.113.5:8080", "http://[2001:db8::1]:8080"] {
             assert!(media(public).unwrap_err().contains("must be https://"), "{public}");
+        }
+    }
+
+    #[test]
+    fn the_test_gif_provider_is_only_on_this_machine() {
+        let local = config(&[("FUWA_GIF_API_URL", "http://127.0.0.1:9911/")]).unwrap();
+        assert_eq!(local.gif_api_url.as_deref(), Some("http://127.0.0.1:9911"));
+        assert!(config(&[("FUWA_GIF_API_URL", "http://localhost:9911")]).is_ok());
+        for elsewhere in ["http://10.0.0.5", "https://api.giphy.com", "http://127.0.0.1.example.com", "file:///etc"] {
+            assert!(config(&[("FUWA_GIF_API_URL", elsewhere)]).is_err(), "{elsewhere}");
         }
     }
 

@@ -27,6 +27,8 @@ import { focusChannel } from "@/fuwa/actions";
 import { deleteDm, dismissDm, dmProblem, editDm, markDmRead, prepareConversation, retryDm, sendDm } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage } from "@/fuwa/store";
 import { sendsMessage } from "@/components/chat/Composer";
+import { TimestampPicker } from "@/components/chat/TimestampPicker";
+import { insertAtCaret } from "@/lib/caret";
 import { DayDivider, EditBox, MessageBody, MessageLine, ToolButton } from "@/components/chat/MessageList";
 import { EncryptionDialog } from "@/components/dm/EncryptionDialog";
 import { CallButton, DmCallStrip } from "@/components/calls/DmCall";
@@ -220,7 +222,11 @@ function DmMessages({
 }) {
   const users = useMemo(() => new Map(conversation.users.map((u) => [u.id, u])), [conversation.users]);
   const userOf = useCallback((id: string) => users.get(id), [users]);
-  const describe = useCallback((item: Item) => deviceLine(item, users, me), [users, me]);
+  const earlier = useFuwa((s) => {
+    const dms = s.instances[instanceKey]?.dms;
+    return earlierFrom(dms?.items[conversation.id], dms?.backup.status === "locked");
+  });
+  const describe = useCallback((item: Item) => deviceLine(item, users, me, earlier), [users, me, earlier]);
   return (
     <EncryptedMessages
       instanceKey={instanceKey}
@@ -614,12 +620,27 @@ const DmRow = memo(function DmRow({
   );
 });
 
+/** Where the messages from before this device joined came from: passed on by a member, or this account's backup. */
+/** Or, with none here, "restorable" if the account's backup could bring them. */
+export type Earlier = "shared" | "backup" | "restorable" | null;
+
+export function earlierFrom(items: Item[] | undefined, locked: boolean): Earlier {
+  if (items?.some((i) => i.sharedBy)) return "shared";
+  const joined = items?.findLast((i) => i.kind === "joined");
+  if (joined && items!.some((i) => i.kind === "text" && i.seq < joined.seq)) return "backup";
+  return locked ? "restorable" : null;
+}
+
 /** What changed about the conversation's devices, in words. */
-function deviceLine(item: Item, users: Map<string, User>, me: User): string {
+function deviceLine(item: Item, users: Map<string, User>, me: User, earlier: Earlier): string {
   const name = (id: string) => (id === me.id ? "you" : displayName(users.get(id)));
   const whose = (id: string) => (id === me.id ? "your" : `${displayName(users.get(id))}'s`);
   const capital = (text: string) => `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
-  if (item.kind === "joined") return "This device joined the conversation. Messages from before it can't be read here.";
+  if (item.kind === "joined") {
+    if (earlier === "backup") return "This device joined the conversation. The messages above came from your message backup.";
+    if (earlier === "restorable") return "This device joined the conversation. To read what came before, restore your message backup in Settings, under Devices.";
+    return "This device joined the conversation. Messages from before it can't be read here.";
+  }
   if (item.kind === "unreadable") return `A message from ${name(item.senderId)} couldn't be opened on this device.`;
   // The conversation's first record is the commit that made its group.
   if (item.seq === 1) return `${capital(name(item.senderId))} started this encrypted conversation.`;
@@ -852,6 +873,7 @@ export function EncryptedComposer({
                 </motion.span>
               )}
             </AnimatePresence>
+            <TimestampPicker onPick={(token) => insertAtCaret(box, setText, token)} />
             <motion.button
               type="button"
               onClick={send}

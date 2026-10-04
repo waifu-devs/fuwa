@@ -1,18 +1,21 @@
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
-import type { AccountFilter, AutoModProviderSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
+import type { AccountFilter, AutoModProviderSettings, GifSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
+import type { McpAccessMode } from "@/gen/fuwa/v1/agent_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
-import type { ChannelPlacement, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
-import type { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
+import type { ChannelPlacement, CreateChannelRequest, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
+import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
   ApplicationStatus,
   ChannelType,
+  EventSchema,
   JoinFormSchema,
   WelcomeScreenSchema,
   type AnnouncementTone,
+  type Attachment,
   type AutoModRule,
   type Emoji,
   type WelcomeScreen,
@@ -32,22 +35,29 @@ import { canReturnTo, newSecret, savePending, sha256Hex, type PendingSignIn } fr
 import { rememberServerSignIn, savePendingSso, type PendingSso } from "@/lib/sso";
 import type { IdentityProvider } from "@/gen/fuwa/v1/sso_pb";
 import { arranged } from "@/lib/arrange";
+import { fromItems, sameRail, toItems, type RailLayout } from "@/lib/rail";
+import type { SetServerArrangementRequest } from "@/gen/fuwa/v1/account_pb";
 import { accessOf, canSee, sortRoles } from "@/lib/permissions";
 import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
 import { instanceKey, normalizeUrl } from "./saved";
 import { wipeDms } from "@/e2ee/engine";
+import { outsideEmojis } from "@/lib/emoji-catalog";
 import { reportUsage } from "@/lib/reports";
 import { addInstance, engine, follow, removeInstance } from "./sync";
 import {
   addServer,
+  applyEvent,
   notificationKey,
   removeServer,
   sortChannels,
   sortMembers,
   store,
+  threadKey,
   updateInstance,
   upsertMessage,
+  withThreadSummary,
+  without,
   withSharedAuthors,
   withUpdatedUser,
   withUsers,
@@ -67,6 +77,16 @@ export function run<A>(effect: Effect.Effect<A, FuwaError>): Promise<A> {
     if (result._tag === "Left") throw result.left;
     return result.right;
   });
+}
+
+/** [`run`], with a way to stop it partway (an upload's bytes stop going). */
+export function runCancelable<A>(effect: Effect.Effect<A, FuwaError>): { done: Promise<A>; cancel: () => void } {
+  const fiber = Effect.runFork(effect.pipe(Effect.mapError(toFuwaError), Effect.either));
+  const done = Effect.runPromise(Fiber.join(fiber)).then((result) => {
+    if (result._tag === "Left") throw result.left;
+    return result.right;
+  });
+  return { done, cancel: () => void Effect.runFork(Fiber.interrupt(fiber)) };
 }
 
 const api = (key: string) => engine(key).api;
@@ -275,7 +295,7 @@ export const forget = (key: string) =>
   });
 
 export type ProfilePatch = Partial<
-  Pick<UpdateProfileRequest, "displayName" | "avatarUrl" | "pronouns" | "bio" | "bannerUrl" | "accentColor" | "status">
+  Pick<UpdateProfileRequest, "displayName" | "avatarUrl" | "pronouns" | "bio" | "bannerUrl" | "accentColor" | "status" | "effect">
 > & { statusExpiresAt?: Date | null };
 
 /** Changes your profile; only the fields given change. */
@@ -312,6 +332,22 @@ const PUT_FAILURES: Record<number, Code> = {
 export const uploadPicture = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent: number) => void, serverId = "") =>
   Effect.gen(function* () {
     reportUsage("upload.picture");
+    return yield* upload(key, purpose, file, progress, serverId);
+  });
+
+/**
+ * Uploads a file to attach to a message in `serverId` and resolves to its
+ * link, ready to send. Any kind of file; the server tells what it is from
+ * its bytes.
+ */
+export const uploadAttachment = (key: string, serverId: string, file: Blob, progress?: (sent: number) => void) =>
+  Effect.gen(function* () {
+    reportUsage("upload.attachment");
+    return yield* upload(key, MediaPurpose.ATTACHMENT, file, progress, serverId);
+  });
+
+const upload = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent: number) => void, serverId = "") =>
+  Effect.gen(function* () {
     const { uploadUrl, media } = yield* call((signal) =>
       api(key).media.createUpload({ purpose, contentType: file.type, size: BigInt(file.size), serverId }, { signal }),
     );
@@ -428,9 +464,43 @@ export const refreshNotifications = (key: string) =>
     updateInstance(key, (i) => ({ ...i, notifications }));
   });
 
+/** Reads how you arranged your servers again, for changes made on another device. */
+export const refreshRail = (key: string) =>
+  Effect.gen(function* () {
+    const sentBefore = railWrites.get(key) ?? 0;
+    const r = yield* call((signal) => api(key).account.getServerArrangement({}, { signal }));
+    // A change made here meanwhile is newer than what this read saw.
+    if ((railWrites.get(key) ?? 0) !== sentBefore) return;
+    const rail = r.updatedAt ? fromItems(r.items) : null;
+    updateInstance(key, (i) => (i.rail && rail && sameRail(i.rail, rail) ? i : { ...i, rail }));
+  });
+
+/** Arrangements sent per instance, so only the latest answer lands. */
+const railWrites = new Map<string, number>();
+
+/**
+ * Arranges your servers on an instance's rail, on every device: shown at
+ * once, put back if the instance refuses it.
+ */
+export const arrangeServers = (key: string, layout: RailLayout) =>
+  Effect.gen(function* () {
+    const before = store.get().instances[key]?.rail ?? null;
+    const n = (railWrites.get(key) ?? 0) + 1;
+    railWrites.set(key, n);
+    updateInstance(key, (i) => ({ ...i, rail: layout }));
+    const res = yield* call((signal) =>
+      api(key).account.setServerArrangement({ items: toItems(layout) as SetServerArrangementRequest["items"] }, { signal }),
+    ).pipe(Effect.tapError(() => Effect.sync(() => railWrites.get(key) === n && updateInstance(key, (i) => ({ ...i, rail: before })))));
+    if (railWrites.get(key) !== n) return;
+    const saved = fromItems(res.items);
+    // The instance drops servers you left meanwhile; anything else stays as shown.
+    updateInstance(key, (i) => (i.rail && sameRail(i.rail, saved) ? i : { ...i, rail: saved }));
+  });
+
 /**
  * Picks up what changed without an event while you were away: notification
- * settings from another device, and the instance's details and announcement.
+ * settings and server arrangement from another device, and the instance's
+ * details and announcement.
  */
 export function refreshOnFocus() {
   let last = Date.now();
@@ -440,6 +510,7 @@ export function refreshOnFocus() {
     for (const [key, i] of Object.entries(store.get().instances)) {
       if (i.me && i.connection === "live") {
         run(refreshNotifications(key)).catch(() => {});
+        run(refreshRail(key)).catch(() => {});
         run(refreshNode(key)).catch(() => {});
       }
     }
@@ -924,6 +995,10 @@ export const endServerShare = (key: string, serverId: string, connectionId: stri
 export const testAutoModProvider = (key: string, provider: AutoModProviderSettings, content: string) =>
   call((signal) => api(key).admin.testAutoModProvider({ provider, content }, { signal }));
 
+/** Asks a GIF provider for a few trending GIFs with settings not saved yet. */
+export const testGifProvider = (key: string, settings: GifSettings) =>
+  call((signal) => api(key).gifs.testGifProvider({ settings }, { signal }));
+
 /** This instance as other instances see it, and the instances it knows. */
 export const getFederation = (key: string) => call((signal) => api(key).admin.getFederation({}, { signal }));
 
@@ -1019,10 +1094,13 @@ export const refreshNode = (key: string) =>
 
 // ───────────────────────── Channels ─────────────────────────
 
-export const createChannel = (key: string, serverId: string, name: string, type: ChannelType, parentId = "") =>
+/** What else a new channel starts with, in the same write: a copy's topic, slow mode and permissions. */
+export type NewChannelExtras = Partial<Pick<CreateChannelRequest, "topic" | "slowmodeSeconds" | "permissionOverwrites">>;
+
+export const createChannel = (key: string, serverId: string, name: string, type: ChannelType, parentId = "", extras: NewChannelExtras = {}) =>
   Effect.gen(function* () {
     const { channel } = yield* call((signal) =>
-      api(key).channels.createChannel({ serverId, name, type, parentId }, { signal }),
+      api(key).channels.createChannel({ serverId, name, type, parentId, ...extras }, { signal }),
     );
     // So opening it right away doesn't race its event.
     if (channel) storeChannels(key, serverId, [channel]);
@@ -1080,56 +1158,92 @@ export const deleteChannel = (key: string, serverId: string, channelId: string) 
 
 const PAGE = 50;
 
-/** Loads the latest messages of a channel the first time it's opened, or older ones when scrolling up. */
-export const loadMessages = (key: string, serverId: string, channelId: string, older = false) =>
+/**
+ * Loads the latest messages of a channel the first time it's opened, or older ones when scrolling up. With
+ * `threadId`, the replies in the thread under that message instead, and the message itself.
+ */
+export const loadMessages = (key: string, serverId: string, channelId: string, older = false, threadId = "") =>
   Effect.gen(function* () {
-    const current = store.get().instances[key]?.messages[channelId];
+    const at = threadId ? threadKey(threadId) : channelId;
+    const current = store.get().instances[key]?.messages[at];
     if (current?.loading || (current && !older) || (older && !current?.hasMore)) return;
     const beforeId = older ? (current?.items[0]?.id ?? "") : "";
     updateInstance(key, (i) => ({
       ...i,
       messages: {
         ...i.messages,
-        [channelId]: { ...(i.messages[channelId] ?? { items: [], hasMore: false }), loading: true },
+        [at]: { ...(i.messages[at] ?? { items: [], hasMore: false }), loading: true },
       },
     }));
     const res = yield* call((signal) =>
-      api(key).messages.listMessages({ serverId, channelId, limit: PAGE, beforeId }, { signal }),
+      api(key).messages.listMessages({ serverId, channelId, limit: PAGE, beforeId, threadId }, { signal }),
     ).pipe(
       Effect.tapError(() =>
         Effect.sync(() =>
           updateInstance(key, (i) => {
-            const { [channelId]: _, ...messages } = i.messages;
-            return { ...i, messages: current ? { ...messages, [channelId]: { ...current, loading: false } } : messages };
+            const { [at]: _, ...messages } = i.messages;
+            return { ...i, messages: current ? { ...messages, [at]: { ...current, loading: false } } : messages };
           }),
         ),
       ),
     );
     updateInstance(key, (i) => {
-      const existing = i.messages[channelId]?.items ?? [];
+      const existing = i.messages[at]?.items ?? [];
       const items = res.messages.reduce(upsertMessage, existing);
-      return {
+      const next = {
         ...i,
-        users: withSharedAuthors(withUsers(i.users, res.authors), res.messages),
+        users: withSharedAuthors(withUsers(i.users, res.authors), [...res.messages, res.parent]),
         messages: {
           ...i.messages,
-          [channelId]: { items, hasMore: older || !current ? res.hasMore : (current?.hasMore ?? false), loading: false },
+          [at]: { items, hasMore: older || !current ? res.hasMore : (current?.hasMore ?? false), loading: false },
         },
       };
+      return res.parent ? { ...next, threadParents: { ...next.threadParents, [res.parent.id]: res.parent } } : next;
     });
   });
 
 let nonce = 0;
 
-/** Sends a message. It shows up right away, dimmed until the server confirms it. */
-export const sendMessage = (key: string, serverId: string, channelId: string, content: string) =>
+/** Where a reply goes: the thread under a message, and whether the channel shows it too. */
+export type ThreadTarget = { threadId: string; alsoToChannel?: boolean };
+
+/**
+ * Sends a message, or a reply in a thread, with any files already uploaded
+ * for it. It shows up right away, dimmed until the server confirms it.
+ */
+export const sendMessage = (
+  key: string,
+  serverId: string,
+  channelId: string,
+  content: string,
+  files: Attachment[] = [],
+  thread?: ThreadTarget,
+) =>
   Effect.gen(function* () {
-    reportUsage("message.send");
-    const pending: PendingMessage = { nonce: `n${++nonce}`, content, createdAt: Date.now(), failed: null };
+    reportUsage(thread ? "thread.reply" : "message.send");
+    if (files.length) reportUsage("message.send_files");
+    const at = thread ? threadKey(thread.threadId) : channelId;
+    const pending: PendingMessage = { nonce: `n${++nonce}`, content, files, createdAt: Date.now(), failed: null };
     const setPending = (fn: (list: PendingMessage[]) => PendingMessage[]) =>
-      updateInstance(key, (i) => ({ ...i, pending: { ...i.pending, [channelId]: fn(i.pending[channelId] ?? []) } }));
+      updateInstance(key, (i) => ({ ...i, pending: { ...i.pending, [at]: fn(i.pending[at] ?? []) } }));
     setPending((list) => [...list, pending]);
-    const res = yield* call((signal) => api(key).messages.sendMessage({ serverId, channelId, content }, { signal })).pipe(
+    const attachments = files.map((f) => ({ url: f.url, filename: f.filename, width: f.width, height: f.height }));
+    // Other servers' emoji go along so the instance can check them and keep their pictures with the message.
+    const emojis = outsideEmojis(store.get().instances[key]?.emojis, serverId, content);
+    const res = yield* call((signal) =>
+      api(key).messages.sendMessage(
+        {
+          serverId,
+          channelId,
+          content,
+          attachments,
+          emojis,
+          threadId: thread?.threadId ?? "",
+          alsoSendToChannel: !!thread?.alsoToChannel,
+        },
+        { signal },
+      ),
+    ).pipe(
       Effect.tapError((err) =>
         Effect.sync(() =>
           setPending((list) => list.map((p) => (p.nonce === pending.nonce ? { ...p, failed: err.message } : p))),
@@ -1137,50 +1251,115 @@ export const sendMessage = (key: string, serverId: string, channelId: string, co
       ),
     );
     updateInstance(key, (i) => {
-      const loaded = i.messages[channelId];
+      const loaded = i.messages[at];
+      const shown = res.message?.alsoInChannel ? i.messages[channelId] : undefined;
+      let messages =
+        loaded && res.message ? { ...i.messages, [at]: { ...loaded, items: upsertMessage(loaded.items, res.message) } } : i.messages;
+      if (shown && res.message) messages = { ...messages, [channelId]: { ...shown, items: upsertMessage(shown.items, res.message) } };
       return {
         ...i,
         users: withSharedAuthors(i.users, [res.message]),
-        pending: { ...i.pending, [channelId]: (i.pending[channelId] ?? []).filter((p) => p.nonce !== pending.nonce) },
-        messages:
-          loaded && res.message
-            ? { ...i.messages, [channelId]: { ...loaded, items: upsertMessage(loaded.items, res.message) } }
-            : i.messages,
+        pending: { ...i.pending, [at]: (i.pending[at] ?? []).filter((p) => p.nonce !== pending.nonce) },
+        messages,
       };
     });
+    // Replying follows a thread unless you unfollowed it once, which only the server knows: ask it again.
+    const followed = store.get().instances[key]?.followed[serverId];
+    if (thread && followed && !followed[thread.threadId]) {
+      updateInstance(key, (i) => ({ ...i, followed: without(i.followed, serverId) }));
+      yield* loadFollowed(key, serverId);
+    }
   });
 
-export const dismissPending = (key: string, channelId: string, pendingNonce: string) =>
+export const dismissPending = (key: string, at: string, pendingNonce: string) =>
   updateInstance(key, (i) => ({
     ...i,
-    pending: { ...i.pending, [channelId]: (i.pending[channelId] ?? []).filter((p) => p.nonce !== pendingNonce) },
+    pending: { ...i.pending, [at]: (i.pending[at] ?? []).filter((p) => p.nonce !== pendingNonce) },
   }));
 
 export const editMessage = (key: string, serverId: string, channelId: string, messageId: string, content: string) =>
   Effect.gen(function* () {
     reportUsage("message.edit");
     const { message } = yield* call((signal) =>
-      api(key).messages.updateMessage({ serverId, messageId, content, channelId }, { signal }),
+      api(key).messages.updateMessage({ serverId, messageId, content, channelId, emojis: outsideEmojis(store.get().instances[key]?.emojis, serverId, content) }, { signal }),
     );
+    if (!message) return;
     updateInstance(key, (i) => {
-      const loaded = i.messages[channelId];
-      if (!loaded || !message) return i;
-      return { ...i, messages: { ...i.messages, [channelId]: { ...loaded, items: upsertMessage(loaded.items, message) } } };
+      let messages = i.messages;
+      for (const at of [channelId, message.threadId && threadKey(message.threadId)]) {
+        const loaded = at ? messages[at] : undefined;
+        if (loaded?.items.some((m) => m.id === message.id)) messages = { ...messages, [at!]: { ...loaded, items: upsertMessage(loaded.items, message) } };
+      }
+      const parent = i.threadParents[message.id];
+      const threadParents = parent ? { ...i.threadParents, [message.id]: { ...message, thread: message.thread ?? parent.thread } } : i.threadParents;
+      return { ...i, messages, threadParents };
     });
   });
 
 export const deleteMessage = (key: string, serverId: string, channelId: string, messageId: string) =>
   Effect.gen(function* () {
     yield* call((signal) => api(key).messages.deleteMessage({ serverId, messageId, channelId }, { signal }));
+    // As the server's event will: off the channel, out of any thread, and a thread under it gone too.
+    updateInstance(key, (i) =>
+      applyEvent(
+        i,
+        create(EventSchema, { serverId, payload: { case: "messageDeleted", value: { channelId, messageId } } }),
+        null,
+      ),
+    );
+  });
+
+/** A channel's threads, the latest reply first, matching `query` when there is one. */
+export const listThreads = (key: string, serverId: string, channelId: string, opts: { query?: string; archived?: boolean; afterThreadId?: string } = {}) =>
+  Effect.gen(function* () {
+    const res = yield* call((signal) =>
+      api(key).messages.listThreads(
+        { serverId, channelId, query: opts.query ?? "", archived: !!opts.archived, afterThreadId: opts.afterThreadId ?? "", limit: 25 },
+        { signal },
+      ),
+    );
+    updateInstance(key, (i) => ({ ...i, users: withSharedAuthors(withUsers(i.users, res.authors), res.threads) }));
+    return res;
+  });
+
+/** Locks or unlocks a thread, for people who manage messages. */
+export const lockThread = (key: string, serverId: string, channelId: string, threadId: string, locked: boolean) =>
+  Effect.gen(function* () {
+    const { thread } = yield* call((signal) => api(key).messages.updateThread({ serverId, channelId, threadId, locked }, { signal }));
+    updateInstance(key, (i) => withThreadSummary(i, channelId, threadId, thread));
+  });
+
+/** The threads you follow in a server, once per session (replying and following keep it current after). */
+export const loadFollowed = (key: string, serverId: string) =>
+  Effect.gen(function* () {
+    if (store.get().instances[key]?.followed[serverId]) return;
+    const { threadIds } = yield* call((signal) => api(key).messages.listFollowedThreads({ serverId }, { signal }));
+    updateInstance(key, (i) => ({
+      ...i,
+      followed: { ...i.followed, [serverId]: Object.fromEntries(threadIds.map((id) => [id, true as const])) },
+    }));
+  });
+
+export const followThread = (key: string, serverId: string, channelId: string, threadId: string, follow: boolean) =>
+  Effect.gen(function* () {
+    yield* call((signal) => api(key).messages.followThread({ serverId, channelId, threadId, follow }, { signal }));
     updateInstance(key, (i) => {
-      const loaded = i.messages[channelId];
-      if (!loaded) return i;
-      return {
-        ...i,
-        messages: { ...i.messages, [channelId]: { ...loaded, items: loaded.items.filter((m) => m.id !== messageId) } },
-      };
+      const { [threadId]: _, ...rest } = i.followed[serverId] ?? {};
+      return { ...i, followed: { ...i.followed, [serverId]: follow ? { ...rest, [threadId]: true } : rest } };
     });
   });
+
+/** Marks a thread as open beside its channel and clears its unread count; null when it closes. */
+export function focusThread(key: string, threadId: string | null) {
+  store.update((s) => {
+    if (s.focus?.instance !== key || (s.focus.thread ?? null) === threadId) return s;
+    const focus = { ...s.focus, thread: threadId ?? undefined };
+    const inst = s.instances[key];
+    if (!inst || !threadId || !inst.threadUnread[threadId]) return { ...s, focus };
+    const { [threadId]: _, ...threadUnread } = inst.threadUnread;
+    return { ...s, focus, instances: { ...s.instances, [key]: { ...inst, threadUnread } } };
+  });
+}
 
 /** Marks a channel as the one on screen and clears its unread count. */
 export function focusChannel(key: string | null, channelId: string | null) {
@@ -1204,6 +1383,21 @@ export function markServerRead(key: string, serverId: string): number {
     for (const channel of i.channels[serverId] ?? []) {
       if (!unread[channel.id]) continue;
       delete unread[channel.id];
+      cleared++;
+    }
+    return cleared ? { ...i, unread } : i;
+  });
+  return cleared;
+}
+
+/** Clears the unread counts of some channels, such as one channel or a category's. Returns how many had some. */
+export function markChannelsRead(key: string, channelIds: string[]): number {
+  let cleared = 0;
+  updateInstance(key, (i) => {
+    const unread = { ...i.unread };
+    for (const id of channelIds) {
+      if (!unread[id]) continue;
+      delete unread[id];
       cleared++;
     }
     return cleared ? { ...i, unread } : i;
@@ -1298,6 +1492,15 @@ export const addAgent = (key: string, serverId: string, username: string) =>
     Effect.map((r) => r.member!),
   );
 
+/** Which of a server's agents may use the instance's MCP endpoint (docs/mcp.md). */
+export const getMcpAccess = (key: string, serverId: string) =>
+  call((signal) => api(key).agents.getMcpAccess({ serverId }, { signal })).pipe(Effect.map((r) => r.access!));
+
+export const setMcpAccess = (key: string, serverId: string, mode: McpAccessMode, agentIds: string[]) =>
+  call((signal) => api(key).agents.setMcpAccess({ serverId, access: { mode, agentIds } }, { signal })).pipe(
+    Effect.map((r) => r.access!),
+  );
+
 // ───────────────────────── Webhooks ─────────────────────────
 
 export const listWebhooks = (key: string, serverId: string) => call((signal) => api(key).webhooks.listWebhooks({ serverId }, { signal }));
@@ -1348,8 +1551,8 @@ export const listConnections = (key: string, serverId: string) =>
 /** Reads the list again after a change here, without waiting for the event. */
 const relistShared = (key: string, serverId: string) => listConnections(key, serverId).pipe(Effect.ignore);
 
-export const createShareCode = (key: string, serverId: string, channelId: string) =>
-  call((signal) => api(key).shared.createShareCode({ serverId, channelId }, { signal })).pipe(
+export const createShareCode = (key: string, serverId: string, channelId: string, otherInstances = false) =>
+  call((signal) => api(key).shared.createShareCode({ serverId, channelId, otherInstances }, { signal })).pipe(
     Effect.map((r) => r.code!),
     Effect.tap(() => relistShared(key, serverId)),
   );

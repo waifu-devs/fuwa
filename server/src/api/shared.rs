@@ -23,6 +23,7 @@ use crate::app::App;
 use crate::cpb::{self, shared_call::Call};
 use crate::db::{query_all, query_one};
 use crate::error::{Error, Result};
+use crate::federation;
 use crate::id::{new_id, now_ms, parse_id, timestamp};
 use crate::node::Account;
 use crate::pb::{self, Permission, shared_channel_service_server::SharedChannelService};
@@ -32,8 +33,12 @@ use crate::servers::{self as store, Audit, Payload, ServerDb, load_channel};
 /// What a guest server's people may be let do in a shared channel, at most;
 /// the home picks which. Seeing it comes with being shown it.
 pub const SHAREABLE: Bits = bit(Permission::SendMessages) | bit(Permission::EmbedLinks) | bit(Permission::AttachFiles);
+/// The same for a server on another instance: files don't cross instances yet.
+const SHAREABLE_ELSEWHERE: Bits = SHAREABLE & !bit(Permission::AttachFiles);
 /// How long a share code works.
 const CODE_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+/// Requests from one other instance a server keeps waiting, at most.
+const MAX_WAITING_FROM_INSTANCE: i64 = 20;
 /// How many servers one channel is shown in besides its home, for now.
 const MAX_GUESTS: usize = 1;
 /// Letters and digits that read the same in any font, as invite codes use.
@@ -55,9 +60,11 @@ struct GuestRow {
     active: bool,
     allowed: Bits,
     created_at: i64,
+    /// The guest's instance, when it's another one.
+    instance: Instance,
 }
 
-const GUEST_COLUMNS: &str = "id, channel_id, guest_server_id, guest_name, guest_icon_url, active, allowed, created_at";
+const GUEST_COLUMNS: &str = "id, channel_id, guest_server_id, guest_name, guest_icon_url, active, allowed, created_at, instance, instance_fingerprint";
 
 fn guest_row(r: &turso::Row) -> turso::Result<GuestRow> {
     Ok(GuestRow {
@@ -67,6 +74,7 @@ fn guest_row(r: &turso::Row) -> turso::Result<GuestRow> {
         active: r.get::<i64>(5)? != 0,
         allowed: r.get::<i64>(6)? as Bits,
         created_at: r.get(7)?,
+        instance: Instance::read(r, 8)?,
     })
 }
 
@@ -99,9 +107,11 @@ pub(super) struct LinkRow {
     home_channel_name: String,
     allowed: Bits,
     created_at: i64,
+    /// The home's instance, when it's another one.
+    instance: Instance,
 }
 
-const LINK_COLUMNS: &str = "id, channel_id, active, home_server_id, home_server_name, home_server_icon_url, home_channel_name, allowed, created_at";
+const LINK_COLUMNS: &str = "id, channel_id, active, home_server_id, home_server_name, home_server_icon_url, home_channel_name, allowed, created_at, instance, instance_fingerprint";
 
 fn link_row(r: &turso::Row) -> turso::Result<LinkRow> {
     Ok(LinkRow {
@@ -112,6 +122,7 @@ fn link_row(r: &turso::Row) -> turso::Result<LinkRow> {
         home_channel_name: r.get(6)?,
         allowed: r.get::<i64>(7)? as Bits,
         created_at: r.get(8)?,
+        instance: Instance::read(r, 9)?,
     })
 }
 
@@ -152,6 +163,8 @@ fn home_connection(row: &GuestRow, channel_name: &str) -> pb::SharedConnection {
         allowed: permissions::to_list(row.allowed),
         created_at: Some(timestamp(row.created_at)),
         checked_by: vec![],
+        instance: row.instance.shown(),
+        fingerprint: row.instance.fingerprint.clone().unwrap_or_default(),
     }
 }
 
@@ -166,6 +179,8 @@ fn guest_connection(row: &LinkRow) -> pb::SharedConnection {
         allowed: permissions::to_list(row.allowed),
         created_at: Some(timestamp(row.created_at)),
         checked_by: vec![],
+        instance: row.instance.shown(),
+        fingerprint: row.instance.fingerprint.clone().unwrap_or_default(),
     }
 }
 
@@ -192,6 +207,185 @@ async fn channel_changed(
     Ok(())
 }
 
+// ─────────────── Other instances ───────────────
+
+/// The instance at the other end of a connection, when it isn't this one.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Instance {
+    /// Its origin (https://chat.example.com).
+    origin: Option<String>,
+    /// Its key's fingerprint, as pinned when the share was asked.
+    fingerprint: Option<String>,
+}
+
+impl Instance {
+    fn read(r: &turso::Row, at: usize) -> turso::Result<Self> {
+        Ok(Self { origin: r.get(at)?, fingerprint: r.get(at + 1)? })
+    }
+
+    /// Where a call came from: this instance, or the one that sent it.
+    fn of(call: &cpb::SharedCall) -> Self {
+        if call.from_instance.is_empty() {
+            return Self::default();
+        }
+        Self { origin: Some(call.from_instance.clone()), fingerprint: Some(call.from_fingerprint.clone()) }
+    }
+
+    /// What a server there may be let do, at most.
+    fn shareable(&self) -> Bits {
+        if self.origin.is_some() { SHAREABLE_ELSEWHERE } else { SHAREABLE }
+    }
+
+    /// Its host as people read it; empty for this instance.
+    fn shown(&self) -> String {
+        self.origin.as_deref().map(federation::display).unwrap_or_default().to_string()
+    }
+}
+
+/// A server on another instance as this one keeps it: its id under that
+/// instance's address, its name on one line and clipped, and no icon, since
+/// apps here never fetch anything from another instance.
+fn their_server(server: Option<&mut pb::SharedServer>, at: &str) -> Result<()> {
+    let server = server.ok_or_else(|| Error::invalid("server is required"))?;
+    server.id = format!("{}@{at}", parse_id("server", &server.id)?);
+    server.name = one_line(&server.name, 100);
+    server.icon_url.clear();
+    Ok(())
+}
+
+/// Text another instance sent, on one line and clipped.
+fn one_line(text: &str, max: usize) -> String {
+    text.chars().filter(|c| !c.is_control()).take(max).collect::<String>().trim().to_string()
+}
+
+/// What a home on another instance lets this one's people do, at most.
+fn elsewhere_allowed(list: &[i32]) -> Result<Vec<i32>> {
+    Ok(permissions::to_list(permissions::from_list(list)? & SHAREABLE_ELSEWHERE))
+}
+
+/// A call from another instance, as this one reads it: every server and
+/// person it names is that instance's ("<id>@<instance>"), so it can't
+/// speak for this instance's own or a third one's. Only asking for,
+/// approving and ending shares cross instances so far.
+pub fn arrived(mut call: cpb::SharedCall, origin: &str, fingerprint: &str) -> Result<cpb::SharedCall> {
+    let at = federation::address(origin);
+    let theirs = |id: &str| -> Result<String> { Ok(format!("{}@{at}", parse_id("id", id)?)) };
+    // An instance admin there acting with the operator's token has no account.
+    let actor = |id: &str| if id.is_empty() { Ok(format!("@{at}")) } else { theirs(id) };
+    parse_id("server", &call.server_id)?;
+    match call.call.as_mut() {
+        Some(Call::Lookup(lookup)) => lookup.guest_server_id = theirs(&lookup.guest_server_id)?,
+        Some(Call::Ask(ask)) => {
+            ask.asked_by_id = actor(&ask.asked_by_id)?;
+            their_server(ask.guest.as_mut(), at)?;
+        }
+        Some(Call::Left(left)) => {
+            left.guest_server_id = theirs(&left.guest_server_id)?;
+            left.actor_id = actor(&left.actor_id)?;
+        }
+        Some(Call::Readers(readers)) => readers.guest_server_id = theirs(&readers.guest_server_id)?,
+        Some(Call::Approved(approved)) => {
+            let connection = approved.connection.as_mut().ok_or_else(|| Error::invalid("connection is required"))?;
+            their_server(connection.server.as_mut(), at)?;
+            connection.allowed = elsewhere_allowed(&connection.allowed)?;
+            connection.home_channel_name = one_line(&connection.home_channel_name, 100);
+            approved.actor_id = actor(&approved.actor_id)?;
+        }
+        Some(Call::Ended(ended)) => ended.actor_id = actor(&ended.actor_id)?,
+        Some(Call::Updated(updated)) => {
+            let connection = updated.connection.as_mut().ok_or_else(|| Error::invalid("connection is required"))?;
+            their_server(connection.server.as_mut(), at)?;
+            connection.allowed = elsewhere_allowed(&connection.allowed)?;
+            connection.home_channel_name = one_line(&connection.home_channel_name, 100);
+        }
+        _ => {
+            return Err(Error::FailedPrecondition(
+                "channels shared between instances can't do that yet; this instance may run an older fuwa".into(),
+            ));
+        }
+    }
+    call.from_instance = origin.to_string();
+    call.from_fingerprint = fingerprint.to_string();
+    Ok(call)
+}
+
+/// For a share asked from another instance, as [`arrived`] read it: the
+/// call that takes the request back, should this instance not keep it.
+pub fn undo(call: &cpb::SharedCall) -> Option<cpb::SharedCall> {
+    let Some(Call::Ask(ask)) = &call.call else { return None };
+    let left = cpb::GuestLeft {
+        connection_id: ask.connection_id.clone(),
+        guest_server_id: ask.guest.as_ref().map(|g| g.id.clone()).unwrap_or_default(),
+        actor_id: ask.asked_by_id.clone(),
+    };
+    Some(cpb::SharedCall { call: Some(Call::Left(left)), ..call.clone() })
+}
+
+/// Another instance's answer to `call`, as this one reads it: its servers
+/// under its address, and only what that call answers with.
+pub fn returned(
+    call: &cpb::SharedCall,
+    reply: cpb::SharedReply,
+    origin: &str,
+    fingerprint: &str,
+) -> Result<cpb::SharedReply> {
+    let at = federation::address(origin);
+    let mut out = cpb::SharedReply::default();
+    match (&call.call, reply.preview, reply.connection) {
+        (Some(Call::Lookup(_)), Some(mut preview), _) => {
+            their_server(preview.home_server.as_mut(), at)?;
+            // Its regions are that instance's, which this one can't name.
+            preview.region.clear();
+            preview.allowed = elsewhere_allowed(&preview.allowed)?;
+            preview.channel_name = one_line(&preview.channel_name, 100);
+            preview.channel_topic = preview.channel_topic.chars().take(1024).collect();
+            preview.instance = federation::display(origin).to_string();
+            preview.fingerprint = fingerprint.to_string();
+            out.preview = Some(preview);
+        }
+        (Some(Call::Ask(_)), _, Some(mut connection)) => {
+            their_server(connection.server.as_mut(), at)?;
+            connection.allowed = elsewhere_allowed(&connection.allowed)?;
+            connection.home_channel_name = one_line(&connection.home_channel_name, 100);
+            connection.instance = federation::display(origin).to_string();
+            connection.fingerprint = fingerprint.to_string();
+            out.connection = Some(connection);
+        }
+        (Some(Call::Readers(_)), _, _) => {
+            out.checked_by = reply.checked_by.into_iter().take(20).map(|name| one_line(&name, 200)).collect();
+        }
+        _ => {}
+    }
+    Ok(out)
+}
+
+/// Checks a call from another instance is one it may make here: federation
+/// is on (and sharing, for a new share), and a call to a guest comes from
+/// its home's instance.
+async fn from_elsewhere(app: &App, sdb: &ServerDb, call: &cpb::SharedCall, from: &Instance) -> Result<()> {
+    let settings = app.settings();
+    let asking = matches!(call.call, Some(Call::Lookup(_) | Call::Ask(_)));
+    if !settings.federation || (asking && !settings.shared_channels) {
+        return Err(Error::FailedPrecondition("this instance doesn't share channels with other instances".into()));
+    }
+    let connection_id = match &call.call {
+        Some(Call::Approved(cpb::HomeApproved { connection: Some(connection), .. })) => &connection.id,
+        Some(Call::Updated(cpb::HomeUpdated { connection: Some(connection) })) => &connection.id,
+        Some(Call::Ended(ended)) => &ended.connection_id,
+        // At the home, the guest's server id (under its instance) is checked.
+        _ => return Ok(()),
+    };
+    let link = link_by_id(&*sdb.read()?, connection_id).await?;
+    let home = match &call.call {
+        Some(Call::Approved(cpb::HomeApproved { connection: Some(c), .. })) => c.server.as_ref().map(|s| s.id.as_str()),
+        _ => None,
+    };
+    match link {
+        Some(link) if link.instance.origin == from.origin && home.is_none_or(|home| home == link.home.id) => Ok(()),
+        _ => Err(Error::NotFound(GONE)),
+    }
+}
+
 // ─────────────── Codes ───────────────
 
 /// A fresh share code. It starts with the home server's id, so any server
@@ -203,17 +397,68 @@ fn new_code(server_id: &str) -> String {
     format!("{server_id}-{random}")
 }
 
-/// The home server a code is for.
-fn code_home(code: &str) -> Result<String> {
+/// What a pasted code names.
+#[derive(Debug, PartialEq)]
+struct Pasted {
+    /// The code as the home keeps it, without its instance.
+    code: String,
+    /// The home server: its id, or "<id>@<instance>" on another instance.
+    home: String,
+    /// The home's instance, as an origin, when it's another one.
+    origin: Option<String>,
+}
+
+/// The home server a code is for, and its instance when the code names
+/// another one ("<code>@<host>").
+fn code_home(app: &App, code: &str) -> Result<Pasted> {
+    let (code, server, at) = split_code(code)?;
+    let origin = match at {
+        None => None,
+        Some(at) => {
+            // Only read here: the part that keeps the instance's key refuses
+            // private addresses (unless it allows them) before calling.
+            let origin = federation::origin(at, true).map_err(Error::invalid)?;
+            // A code for this instance, pasted with its host.
+            (federation::named_origin(app).as_deref() != Some(origin.as_str())).then_some(origin)
+        }
+    };
+    if origin.is_some() && !app.settings().federation {
+        return Err(Error::FailedPrecondition("this instance doesn't share channels with other instances".into()));
+    }
+    let home = match &origin {
+        Some(origin) => format!("{server}@{}", federation::address(origin)),
+        None => server,
+    };
+    Ok(Pasted { code: code.to_string(), home, origin })
+}
+
+/// A code's parts: the code as its home keeps it, the home server's id, and
+/// the instance it names, if any.
+fn split_code(code: &str) -> Result<(&str, String, Option<&str>)> {
     let invalid = || Error::invalid("that isn't a share code");
-    let (server, rest) = code.trim().split_once('-').ok_or_else(invalid)?;
+    let (code, at) = match code.trim().split_once('@') {
+        Some((code, at)) => (code, Some(at)),
+        None => (code.trim(), None),
+    };
+    let (server, rest) = code.split_once('-').ok_or_else(invalid)?;
     if rest.len() != CODE_LENGTH || !rest.bytes().all(|b| b.is_ascii_alphanumeric()) {
         return Err(invalid());
     }
-    parse_id("share code", server).map_err(|_| invalid())
+    let server = parse_id("share code", server).map_err(|_| invalid())?;
+    Ok((code, server, at))
 }
 
-fn code_row(r: &turso::Row) -> turso::Result<(pb::ShareCode, String)> {
+/// A code as admins copy it: with this instance's host when servers on
+/// other instances may use it.
+fn shown_code(app: &App, code: &str, other_instances: bool) -> String {
+    match federation::named_origin(app) {
+        Some(own) if other_instances => format!("{code}@{}", federation::address(&own)),
+        _ => code.to_string(),
+    }
+}
+
+/// A stored code, the channel it's for and whether other instances may use it.
+fn code_row(r: &turso::Row) -> turso::Result<(pb::ShareCode, String, bool)> {
     Ok((
         pb::ShareCode {
             code: r.get(0)?,
@@ -224,18 +469,31 @@ fn code_row(r: &turso::Row) -> turso::Result<(pb::ShareCode, String)> {
             expires_at: Some(timestamp(r.get(4)?)),
         },
         r.get(1)?,
+        r.get::<i64>(5)? != 0,
     ))
 }
 
-async fn load_code(conn: &turso::Connection, code: &str) -> Result<Option<pb::ShareCode>> {
+const CODE_COLUMNS: &str = "code, channel_id, creator_id, created_at, expires_at, other_instances";
+
+/// A code that still works, and whether servers on other instances may use it.
+async fn load_code(conn: &turso::Connection, code: &str) -> Result<Option<(pb::ShareCode, bool)>> {
     let found = query_one(
         conn,
-        "SELECT code, channel_id, creator_id, created_at, expires_at FROM share_codes WHERE code = ?1 AND expires_at > ?2",
+        &format!("SELECT {CODE_COLUMNS} FROM share_codes WHERE code = ?1 AND expires_at > ?2"),
         (code.trim(), now_ms()),
         code_row,
     )
     .await?;
-    Ok(found.map(|(code, _)| code))
+    Ok(found.map(|(code, _, other_instances)| (code, other_instances)))
+}
+
+/// A code that works for the server asking: any code for a server on this
+/// instance, only one made for other instances for a server on another.
+async fn usable_code(conn: &turso::Connection, code: &str, from: &Instance) -> Result<pb::ShareCode> {
+    match load_code(conn, code).await? {
+        Some((code, other_instances)) if other_instances || from.origin.is_none() => Ok(code),
+        _ => Err(Error::NotFound("share code")),
+    }
 }
 
 /// Whether messages can go in a channel of this type, and so whether it can be shared.
@@ -426,7 +684,7 @@ fn gone(err: &Error) -> bool {
 /// A call from a guest to the home. When the home says the connection is
 /// gone, the guest lets go of it too.
 async fn to_home(app: &Arc<App>, server_id: &str, link: &LinkRow, call: Call) -> Result<cpb::SharedReply> {
-    let call = cpb::SharedCall { server_id: link.home.id.clone(), call: Some(call) };
+    let call = cpb::SharedCall { server_id: link.home.id.clone(), call: Some(call), ..Default::default() };
     match app.shared(call).await {
         Err(err) if gone(&err) => {
             let sdb = app.servers.get(server_id).await?;
@@ -531,7 +789,11 @@ pub(super) async fn locate(
         }
         let guest = guest_of(conn, server_id, account, access, &link).await?;
         let call = Call::Get(cpb::GuestGet { guest: Some(guest.clone()), message_id: message_id.to_string() });
-        if app.shared(cpb::SharedCall { server_id: link.home.id.clone(), call: Some(call) }).await.is_ok() {
+        if app
+            .shared(cpb::SharedCall { server_id: link.home.id.clone(), call: Some(call), ..Default::default() })
+            .await
+            .is_ok()
+        {
             return Ok(Some((link, guest)));
         }
     }
@@ -631,20 +893,26 @@ pub(super) async fn guest_delete(
 /// shared channels.
 pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::SharedReply> {
     let sdb = app.servers.get(&call.server_id).await?;
+    let from = Instance::of(&call);
+    if from.origin.is_some() {
+        from_elsewhere(app, &sdb, &call, &from).await?;
+    }
     match call.call.ok_or_else(|| Error::invalid("call is required"))? {
-        Call::Lookup(lookup) => home_lookup(app, &sdb, lookup).await,
-        Call::Ask(ask) => home_ask(&sdb, ask).await,
+        Call::Lookup(lookup) => home_lookup(app, &sdb, lookup, &from).await,
+        Call::Ask(ask) => home_ask(&sdb, ask, &from).await,
         Call::Send(send) => home_send(app, &sdb, send).await,
         Call::List(list) => home_list(&sdb, list).await,
         Call::Get(get) => home_get(&sdb, get).await,
         Call::Edit(edit) => home_edit(app, &sdb, edit).await,
-        Call::Delete(delete) => home_delete(&sdb, delete).await,
+        Call::Delete(delete) => home_delete(app, &sdb, delete).await,
         Call::Left(left) => home_left(&sdb, left).await,
         Call::Approved(approved) => guest_approved(app, &sdb, approved).await,
         Call::Ended(ended) => guest_ended(app, &sdb, ended).await,
         Call::Events(events) => guest_events(app, &sdb, events).await,
         Call::Updated(updated) => guest_updated(&sdb, updated).await,
         Call::Readers(readers) => home_readers(app, &sdb, readers).await,
+        // Only an instance admin here asks these; never another instance.
+        Call::AdminList(_) | Call::AdminEnd(_) if from.origin.is_some() => Err(Error::NotFound(GONE)),
         Call::AdminList(_) => {
             Ok(cpb::SharedReply { connections: Box::pin(connections_of(app, &sdb)).await?, ..Default::default() })
         }
@@ -670,9 +938,9 @@ async fn connection(conn: &turso::Connection, guest: &cpb::Guest) -> Result<(Gue
     Ok((row, user, server))
 }
 
-async fn home_lookup(app: &App, sdb: &ServerDb, lookup: cpb::ShareLookup) -> Result<cpb::SharedReply> {
+async fn home_lookup(app: &App, sdb: &ServerDb, lookup: cpb::ShareLookup, from: &Instance) -> Result<cpb::SharedReply> {
     let conn = sdb.read()?;
-    let code = load_code(&conn, &lookup.code).await?.ok_or(Error::NotFound("share code"))?;
+    let code = usable_code(&conn, &lookup.code, from).await?;
     let channel = load_channel(&conn, &sdb.id, &code.channel_id).await?.ok_or(Error::NotFound("share code"))?;
     let guests = guests_of(&conn, &channel.id).await?;
     if guests.iter().any(|g| g.server.id == lookup.guest_server_id) {
@@ -690,9 +958,11 @@ async fn home_lookup(app: &App, sdb: &ServerDb, lookup: cpb::ShareLookup) -> Res
             channel_topic: channel.topic,
             region,
             checked_by,
-            allowed: permissions::to_list(SHAREABLE),
+            allowed: permissions::to_list(from.shareable()),
             expires_at: code.expires_at,
             guest_count: guests.iter().filter(|g| g.active).count() as i32,
+            instance: String::new(),
+            fingerprint: String::new(),
         }),
         ..Default::default()
     })
@@ -723,6 +993,7 @@ async fn ask_readers(app: &Arc<App>, server_id: &str, connections: &mut [pb::Sha
                     connection_id: c.id.clone(),
                     guest_server_id: server_id.to_string(),
                 })),
+                ..Default::default()
             };
             tokio::time::timeout(READERS_WAIT, app.shared(call))
         })
@@ -738,7 +1009,7 @@ async fn ask_readers(app: &Arc<App>, server_id: &str, connections: &mut [pb::Sha
 /// How long the Shared channels page waits for each home's providers.
 const READERS_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
-async fn home_ask(sdb: &ServerDb, ask: cpb::ShareAsk) -> Result<cpb::SharedReply> {
+async fn home_ask(sdb: &ServerDb, ask: cpb::ShareAsk, from: &Instance) -> Result<cpb::SharedReply> {
     let guest = ask.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
     if guest.id == sdb.id {
         return Err(Error::invalid("a server can't show its own channel twice"));
@@ -746,14 +1017,35 @@ async fn home_ask(sdb: &ServerDb, ask: cpb::ShareAsk) -> Result<cpb::SharedReply
     parse_id("connection id", &ask.connection_id)?;
     let connection = sdb
         .write(&ask.asked_by_id, async |conn, events| {
-            let code = load_code(conn, &ask.code).await?.ok_or(Error::NotFound("share code"))?;
+            let code = usable_code(conn, &ask.code, from).await?;
             let channel = load_channel(conn, &sdb.id, &code.channel_id).await?.ok_or(Error::NotFound("share code"))?;
+            // The guest picks the connection's id; it can't be one this
+            // server already has the other way round.
+            if link_by_id(conn, &ask.connection_id).await?.is_some() {
+                return Err(Error::AlreadyExists("that connection id is taken".into()));
+            }
             if !shareable(&channel) || link_of(conn, &channel.id).await?.is_some() {
                 return Err(Error::FailedPrecondition("that channel can't be shared".into()));
             }
             let guests = guests_of(conn, &channel.id).await?;
             if guests.iter().any(|g| g.server.id == guest.id) {
                 return Err(Error::AlreadyExists("this server already shows that channel, or has asked to".into()));
+            }
+            if let Some(origin) = &from.origin {
+                let waiting = query_one(
+                    conn,
+                    "SELECT count(*) FROM channel_guests WHERE instance = ?1 AND active = 0",
+                    [origin.as_str()],
+                    |r| r.get::<i64>(0),
+                )
+                .await?
+                .unwrap_or(0);
+                if waiting >= MAX_WAITING_FROM_INSTANCE {
+                    return Err(Error::ResourceExhausted(
+                        "this server has too many requests waiting from your instance; its admins have to answer some first"
+                            .into(),
+                    ));
+                }
             }
             if guests.len() >= MAX_GUESTS {
                 return Err(Error::FailedPrecondition(
@@ -763,17 +1055,19 @@ async fn home_ask(sdb: &ServerDb, ask: cpb::ShareAsk) -> Result<cpb::SharedReply
             }
             let now = now_ms();
             conn.execute(
-                "INSERT INTO channel_guests (id, channel_id, guest_server_id, guest_name, guest_icon_url, active, allowed, asked_by_id, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?8)",
+                "INSERT INTO channel_guests (id, channel_id, guest_server_id, guest_name, guest_icon_url, active, allowed, asked_by_id, created_at, instance, instance_fingerprint)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?8, ?9, ?10)",
                 (
                     ask.connection_id.as_str(),
                     channel.id.as_str(),
                     guest.id.as_str(),
                     guest.name.as_str(),
                     guest.icon_url.as_str(),
-                    SHAREABLE as i64,
+                    from.shareable() as i64,
                     ask.asked_by_id.as_str(),
                     now,
+                    from.origin.as_deref(),
+                    from.fingerprint.as_deref(),
                 ),
             )
             .await?;
@@ -787,9 +1081,11 @@ async fn home_ask(sdb: &ServerDb, ask: cpb::ShareAsk) -> Result<cpb::SharedReply
                 home_channel_name: channel.name.clone(),
                 server: Some(this_server(conn, &sdb.id).await?),
                 state: pb::SharedConnectionState::Waiting as i32,
-                allowed: permissions::to_list(SHAREABLE),
+                allowed: permissions::to_list(from.shareable()),
                 created_at: Some(timestamp(now)),
                 checked_by: vec![],
+                instance: String::new(),
+                fingerprint: String::new(),
             })
         })
         .await?;
@@ -816,7 +1112,9 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
             let access = Access::guest(&channel.id, row.allowed);
             access.require_in(&channel.id, Permission::SendMessages)?;
             if !send.attachments.is_empty() {
-                access.require_in(&channel.id, Permission::AttachFiles)?;
+                // Files stay with the server they were uploaded for; the
+                // shared channels' design doesn't carry them across yet.
+                return Err(Error::invalid(super::messages::NO_SHARED_FILES));
             }
             if !send.embeds.is_empty() {
                 access.require_in(&channel.id, Permission::EmbedLinks)?;
@@ -867,11 +1165,15 @@ async fn home_list(sdb: &ServerDb, list: cpb::GuestList) -> Result<cpb::SharedRe
         return Err(Error::denied(KEPT_OUT));
     }
     let (mut messages, has_more) =
-        messages::page(&conn, &sdb.id, &row.channel_id, list.limit, &list.before_id, &list.after_id, true).await?;
+        messages::page(&conn, &sdb.id, &row.channel_id, "", list.limit, &list.before_id, &list.after_id, true).await?;
+    messages.iter_mut().for_each(no_threads);
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), &mut messages).await?;
     let authors = users(&conn, &messages.iter().map(|m| m.author_id.as_str()).collect::<Vec<_>>()).await?;
-    Ok(cpb::SharedReply { page: Some(pb::ListMessagesResponse { messages, authors, has_more }), ..Default::default() })
+    Ok(cpb::SharedReply {
+        page: Some(pb::ListMessagesResponse { messages, authors, has_more, parent: None }),
+        ..Default::default()
+    })
 }
 
 async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply> {
@@ -883,8 +1185,9 @@ async fn home_get(sdb: &ServerDb, get: cpb::GuestGet) -> Result<cpb::SharedReply
     }
     let mut message = load_message(&conn, &sdb.id, &get.message_id)
         .await?
-        .filter(|m| m.channel_id == row.channel_id && m.kind == pb::MessageKind::Unspecified as i32)
+        .filter(|m| m.channel_id == row.channel_id && m.kind == pb::MessageKind::Unspecified as i32 && in_channel(m))
         .ok_or(Error::NotFound("message"))?;
+    no_threads(&mut message);
     let home = this_server(&conn, &sdb.id).await?;
     decorate(&conn, Some(&home), std::slice::from_mut(&mut message)).await?;
     let author = store::user(&conn, &message.author_id).await?;
@@ -986,39 +1289,46 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
     Ok(cpb::SharedReply { message: Some(message), ..Default::default() })
 }
 
-async fn home_delete(sdb: &ServerDb, delete: cpb::GuestDelete) -> Result<cpb::SharedReply> {
+async fn home_delete(app: &Arc<App>, sdb: &ServerDb, delete: cpb::GuestDelete) -> Result<cpb::SharedReply> {
     let guest = delete.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
     let actor_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
-    sdb.write(&actor_id, async |conn, events| {
-        let (row, user, server) = connection(conn, &guest).await?;
-        let message = load_message(conn, &sdb.id, &delete.message_id)
-            .await?
-            .filter(|m| m.channel_id == row.channel_id)
-            .ok_or(Error::NotFound("message"))?;
-        if message.author_id != user.id {
-            // A guest's moderators delete their own server's people's messages.
-            let theirs = guest.moderator
-                && guests_among(conn, &[message.author_id.as_str()]).await?.get(&message.author_id) == Some(&server.id);
-            if !theirs {
-                return Err(Error::denied("you can only delete your own messages here, or your server's people's"));
+    let files = sdb
+        .write(&actor_id, async |conn, events| {
+            let (row, user, server) = connection(conn, &guest).await?;
+            let message = load_message(conn, &sdb.id, &delete.message_id)
+                .await?
+                .filter(|m| m.channel_id == row.channel_id)
+                .ok_or(Error::NotFound("message"))?;
+            if message.author_id != user.id {
+                // A guest's moderators delete their own server's people's messages.
+                let theirs = guest.moderator
+                    && guests_among(conn, &[message.author_id.as_str()]).await?.get(&message.author_id)
+                        == Some(&server.id);
+                if !theirs {
+                    return Err(Error::denied("you can only delete your own messages here, or your server's people's"));
+                }
+                remember(conn, &user, &server).await?;
+                let channel = load_channel(conn, &sdb.id, &row.channel_id).await?.map(|c| c.name).unwrap_or_default();
+                store::audit(
+                    conn,
+                    &user.id,
+                    Audit::new(pb::AuditAction::MessageDelete, &message.author_id).channel(channel),
+                )
+                .await?;
             }
-            remember(conn, &user, &server).await?;
-            let channel = load_channel(conn, &sdb.id, &row.channel_id).await?.map(|c| c.name).unwrap_or_default();
-            store::audit(
-                conn,
-                &user.id,
-                Audit::new(pb::AuditAction::MessageDelete, &message.author_id).channel(channel),
-            )
-            .await?;
-        }
-        messages::remove_message(conn, &message).await?;
-        events.push(Payload::MessageDeleted(pb::MessageDeleted {
-            channel_id: message.channel_id.clone(),
-            message_id: message.id.clone(),
-        }));
-        Ok(())
-    })
-    .await?;
+            let mut files = messages::remove_message(conn, &message).await?;
+            events.push(Payload::MessageDeleted(pb::MessageDeleted {
+                channel_id: message.channel_id.clone(),
+                message_id: message.id.clone(),
+            }));
+            files.extend(
+                super::threads::after_delete(conn, &message.channel_id, &message.id, &message.thread_id, events)
+                    .await?,
+            );
+            Ok(files)
+        })
+        .await?;
+    crate::attachments::drop_soon(app, &sdb.id, files);
     Ok(cpb::SharedReply::default())
 }
 
@@ -1322,7 +1632,9 @@ pub(super) async fn take_server(conn: &turso::Connection) -> Result<Ended> {
 pub(super) async fn tell_ended(app: &Arc<App>, server_id: &str, actor_id: &str, ended: Ended) {
     for (connection_id, guest_server_id) in ended.guests {
         let call = Call::Ended(cpb::HomeEnded { connection_id, actor_id: actor_id.to_string() });
-        if let Err(err) = app.shared(cpb::SharedCall { server_id: guest_server_id, call: Some(call) }).await {
+        if let Err(err) =
+            app.shared(cpb::SharedCall { server_id: guest_server_id, call: Some(call), ..Default::default() }).await
+        {
             crate::reports::server_error("shared_ended", Some("SharedChannels/ended"));
             tracing::info!(error = %err, "couldn't tell a server a shared channel ended");
         }
@@ -1330,7 +1642,9 @@ pub(super) async fn tell_ended(app: &Arc<App>, server_id: &str, actor_id: &str, 
     for (connection_id, home_server_id) in ended.links {
         let left =
             cpb::GuestLeft { connection_id, guest_server_id: server_id.to_string(), actor_id: actor_id.to_string() };
-        if let Err(err) = app.shared(cpb::SharedCall { server_id: home_server_id, call: Some(Call::Left(left)) }).await
+        if let Err(err) = app
+            .shared(cpb::SharedCall { server_id: home_server_id, call: Some(Call::Left(left)), ..Default::default() })
+            .await
         {
             crate::reports::server_error("shared_ended", Some("SharedChannels/ended"));
             tracing::info!(error = %err, "couldn't tell a server a shared channel ended");
@@ -1358,7 +1672,8 @@ async fn targets(app: &App, server_id: &str) -> HashMap<String, Vec<Target>> {
     let mut targets: HashMap<String, Vec<Target>> = HashMap::new();
     match loaded {
         Ok(rows) => {
-            for row in rows.into_iter().filter(|r| r.active) {
+            // Guests on other instances aren't sent the channel yet.
+            for row in rows.into_iter().filter(|r| r.active && r.instance.origin.is_none()) {
                 targets
                     .entry(row.channel_id)
                     .or_default()
@@ -1370,13 +1685,27 @@ async fn targets(app: &App, server_id: &str) -> HashMap<String, Vec<Target>> {
     targets
 }
 
+/// Whether a message shows in its channel: not a thread reply kept to its thread.
+fn in_channel(m: &pb::Message) -> bool {
+    m.thread_id.is_empty() || m.also_in_channel
+}
+
+/// A message without its thread: threads stay with the home server, so a
+/// channel shared after threads were started doesn't hand guests who
+/// replied in them, and a reply also sent to the channel reads as a message.
+fn no_threads(m: &mut pb::Message) {
+    m.thread = None;
+    m.thread_id.clear();
+    m.also_in_channel = false;
+}
+
 /// The channel a message event is about, for the messages guests are shown:
 /// ones people wrote, not join messages or AutoMod alerts.
 fn message_channel(payload: &Payload) -> Option<&str> {
     match payload {
         Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
         | Payload::MessageUpdated(pb::MessageUpdated { message: Some(m) })
-            if m.kind == pb::MessageKind::Unspecified as i32 =>
+            if m.kind == pb::MessageKind::Unspecified as i32 && in_channel(m) =>
         {
             Some(&m.channel_id)
         }
@@ -1395,6 +1724,7 @@ async fn for_guests(app: &App, event: &pb::Event) -> Option<pb::Event> {
     ) = event.payload.as_mut()
     {
         no_pings(m);
+        no_threads(m);
     }
     if let Some(
         Payload::MessageCreated(pb::MessageCreated { message: Some(m) })
@@ -1501,6 +1831,7 @@ pub fn spawn_shared_fanout(app: Arc<App>) {
                         connection_id: target.connection_id.clone(),
                         events: vec![shown.clone()],
                     })),
+                    ..Default::default()
                 };
                 let queue = queues.entry(target.guest_server_id.clone()).or_insert_with(|| spawn_queue(app.clone()));
                 let outgoing = (event.server_id.clone(), target.connection_id.clone(), call);
@@ -1552,6 +1883,11 @@ impl SharedChannelService for Api {
                 let req = request.into_inner();
                 let Seat { sdb, access, .. } = self.with(&account, &req.server_id, Permission::ManageServer).await?;
                 access.require_in(&req.channel_id, Permission::ManageChannels)?;
+                if req.other_instances && (!self.app.settings().federation || federation::named_origin(&self.app).is_none()) {
+                    return Err(Error::FailedPrecondition(
+                        "this instance doesn't share channels with other instances".into(),
+                    ));
+                }
                 let code = sdb
                     .write(&account.id, async |conn, _events| {
                         let channel =
@@ -1577,8 +1913,15 @@ impl SharedChannelService for Api {
                             expires_at: Some(timestamp(now + CODE_TTL_MS)),
                         };
                         conn.execute(
-                            "INSERT INTO share_codes (code, channel_id, creator_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                            (code.code.as_str(), channel.id.as_str(), account.id.as_str(), now, now + CODE_TTL_MS),
+                            "INSERT INTO share_codes (code, channel_id, creator_id, created_at, expires_at, other_instances) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            (
+                                code.code.as_str(),
+                                channel.id.as_str(),
+                                account.id.as_str(),
+                                now,
+                                now + CODE_TTL_MS,
+                                i64::from(req.other_instances),
+                            ),
                         )
                         .await?;
                         // Codes are secrets, like invites: an audit entry, no event.
@@ -1591,6 +1934,7 @@ impl SharedChannelService for Api {
                         Ok(code)
                     })
                     .await?;
+                let code = pb::ShareCode { code: shown_code(&self.app, &code.code, req.other_instances), ..code };
                 Ok(pb::CreateShareCodeResponse { code: Some(code) })
             }
             .await,
@@ -1606,23 +1950,21 @@ impl SharedChannelService for Api {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
                 let Seat { sdb, .. } = self.with(&account, &req.server_id, Permission::ManageServer).await?;
+                // As copied, it may end with this instance's host.
+                let code = req.code.trim().split_once('@').map_or(req.code.trim(), |(code, _)| code);
                 sdb.write(&account.id, async |conn, _events| {
-                    let (_, channel_id) = query_one(
+                    let (_, channel_id, _) = query_one(
                         conn,
-                        "SELECT code, channel_id, creator_id, created_at, expires_at FROM share_codes WHERE code = ?1",
-                        [req.code.trim()],
+                        &format!("SELECT {CODE_COLUMNS} FROM share_codes WHERE code = ?1"),
+                        [code],
                         code_row,
                     )
                     .await?
                     .ok_or(Error::NotFound("share code"))?;
-                    conn.execute("DELETE FROM share_codes WHERE code = ?1", [req.code.trim()]).await?;
+                    conn.execute("DELETE FROM share_codes WHERE code = ?1", [code]).await?;
                     let channel = load_channel(conn, &sdb.id, &channel_id).await?.map(|c| c.name).unwrap_or_default();
-                    store::audit(
-                        conn,
-                        &account.id,
-                        Audit::new(pb::AuditAction::ShareCodeDelete, req.code.trim()).channel(channel),
-                    )
-                    .await
+                    store::audit(conn, &account.id, Audit::new(pb::AuditAction::ShareCodeDelete, code).channel(channel))
+                        .await
                 })
                 .await?;
                 Ok(pb::DeleteShareCodeResponse {})
@@ -1641,14 +1983,18 @@ impl SharedChannelService for Api {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
                 let Seat { sdb, .. } = self.with(&account, &req.server_id, Permission::ManageServer).await?;
-                let home = code_home(&req.code)?;
-                if home == sdb.id {
+                let pasted = code_home(&self.app, &req.code)?;
+                if pasted.home == sdb.id {
                     return Err(Error::invalid("that code is for one of this server's own channels"));
                 }
-                let lookup = cpb::ShareLookup { code: req.code.trim().to_string(), guest_server_id: sdb.id.clone() };
+                let lookup = cpb::ShareLookup { code: pasted.code, guest_server_id: sdb.id.clone() };
                 let reply = self
                     .app
-                    .shared(cpb::SharedCall { server_id: home, call: Some(Call::Lookup(lookup)) })
+                    .shared(cpb::SharedCall {
+                        server_id: pasted.home,
+                        call: Some(Call::Lookup(lookup)),
+                        ..Default::default()
+                    })
                     .await
                     .map_err(|err| if gone(&err) { Error::NotFound("share code") } else { err })?;
                 reply.preview.ok_or(Error::NotFound("share code"))
@@ -1672,7 +2018,8 @@ impl SharedChannelService for Api {
                 } else {
                     access.require_in(&req.parent_id, Permission::ManageChannels)?;
                 }
-                let home = code_home(&req.code)?;
+                let pasted = code_home(&self.app, &req.code)?;
+                let home = pasted.home;
                 if home == sdb.id {
                     return Err(Error::invalid("that code is for one of this server's own channels"));
                 }
@@ -1685,7 +2032,7 @@ impl SharedChannelService for Api {
                     }
                 }
                 let ask = cpb::ShareAsk {
-                    code: req.code.trim().to_string(),
+                    code: pasted.code,
                     connection_id: new_id(),
                     guest: Some(this_server(&conn, &sdb.id).await?),
                     asked_by_id: account.id.clone(),
@@ -1693,7 +2040,7 @@ impl SharedChannelService for Api {
                 drop(conn);
                 let reply = self
                     .app
-                    .shared(cpb::SharedCall { server_id: home.clone(), call: Some(Call::Ask(ask)) })
+                    .shared(cpb::SharedCall { server_id: home.clone(), call: Some(Call::Ask(ask)), ..Default::default() })
                     .await
                     .map_err(|err| if gone(&err) { Error::NotFound("share code") } else { err })?;
                 let asked = reply.connection.ok_or_else(|| Error::internal("the home server didn't say what it took"))?;
@@ -1702,8 +2049,8 @@ impl SharedChannelService for Api {
                     .write(&account.id, async |conn, events| {
                         let now = now_ms();
                         conn.execute(
-                            "INSERT INTO channel_links (id, active, home_server_id, home_server_name, home_server_icon_url, home_channel_id, home_channel_name, allowed, name, parent_id, asked_by_id, created_at)
-                             VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                            "INSERT INTO channel_links (id, active, home_server_id, home_server_name, home_server_icon_url, home_channel_id, home_channel_name, allowed, name, parent_id, asked_by_id, created_at, instance, instance_fingerprint)
+                             VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                             (
                                 asked.id.as_str(),
                                 home.as_str(),
@@ -1716,6 +2063,8 @@ impl SharedChannelService for Api {
                                 (!req.parent_id.is_empty()).then_some(req.parent_id.as_str()),
                                 account.id.as_str(),
                                 now,
+                                pasted.origin.as_deref(),
+                                pasted.origin.is_some().then_some(asked.fingerprint.as_str()),
                             ),
                         )
                         .await?;
@@ -1740,7 +2089,7 @@ impl SharedChannelService for Api {
                             guest_server_id: sdb.id.clone(),
                             actor_id: account.id.clone(),
                         };
-                        let _ = self.app.shared(cpb::SharedCall { server_id: home, call: Some(Call::Left(left)) }).await;
+                        let _ = self.app.shared(cpb::SharedCall { server_id: home, call: Some(Call::Left(left)), ..Default::default() }).await;
                         return Err(err);
                     }
                 };
@@ -1794,7 +2143,7 @@ impl SharedChannelService for Api {
                 offered.server = Some(this_server(&*sdb.read()?, &sdb.id).await?);
                 let approved = cpb::HomeApproved { connection: Some(offered), actor_id: account.id.clone() };
                 self.app
-                    .shared(cpb::SharedCall { server_id: row.server.id.clone(), call: Some(Call::Approved(approved)) })
+                    .shared(cpb::SharedCall { server_id: row.server.id.clone(), call: Some(Call::Approved(approved)), ..Default::default() })
                     .await?;
                 let saved = sdb
                     .write(&account.id, async |conn, events| {
@@ -1848,14 +2197,15 @@ impl SharedChannelService for Api {
                 let name = |id: &str| names.get(id).cloned().unwrap_or_default();
                 let codes = query_all(
                     &conn,
-                    "SELECT code, channel_id, creator_id, created_at, expires_at FROM share_codes WHERE expires_at > ?1 ORDER BY created_at DESC",
+                    &format!("SELECT {CODE_COLUMNS} FROM share_codes WHERE expires_at > ?1 ORDER BY created_at DESC"),
                     [now_ms()],
                     code_row,
                 )
                 .await?
                 .into_iter()
-                .map(|(mut code, channel_id)| {
+                .map(|(mut code, channel_id, other_instances)| {
                     code.channel_name = name(&channel_id);
+                    code.code = shown_code(&self.app, &code.code, other_instances);
                     code
                 })
                 .collect();
@@ -1908,6 +2258,7 @@ impl SharedChannelService for Api {
                 let (row, channel_name) = sdb
                     .write(&account.id, async |conn, events| {
                         let before = guest_by_id(conn, &req.connection_id).await?.ok_or(Error::NotFound("connection"))?;
+                        let allowed = allowed & before.instance.shareable();
                         conn.execute(
                             "UPDATE channel_guests SET allowed = ?2 WHERE id = ?1",
                             (before.id.as_str(), allowed as i64),
@@ -1936,7 +2287,7 @@ impl SharedChannelService for Api {
                 if row.active {
                     let call = Call::Updated(cpb::HomeUpdated { connection: Some(connection.clone()) });
                     if let Err(err) =
-                        self.app.shared(cpb::SharedCall { server_id: row.server.id.clone(), call: Some(call) }).await
+                        self.app.shared(cpb::SharedCall { server_id: row.server.id.clone(), call: Some(call), ..Default::default() }).await
                     {
                         tracing::info!(error = %err, "couldn't tell a server what its people may do in a shared channel");
                     }
@@ -2019,11 +2370,99 @@ mod tests {
     fn codes_name_their_home() {
         let server = new_id();
         let code = new_code(&server);
-        assert_eq!(code_home(&code).unwrap(), server);
-        assert_eq!(code_home(&format!("  {code} ")).unwrap(), server);
-        assert!(code_home("nope").is_err());
-        assert!(code_home(&format!("{server}-short")).is_err());
-        assert!(code_home(&format!("not-an-id-{}", "a".repeat(CODE_LENGTH))).is_err());
+        let home = |code: &str| split_code(code).map(|(_, home, _)| home);
+        assert_eq!(home(&code).unwrap(), server);
+        assert_eq!(home(&format!("  {code} ")).unwrap(), server);
+        assert!(home("nope").is_err());
+        assert!(home(&format!("{server}-short")).is_err());
+        assert!(home(&format!("not-an-id-{}", "a".repeat(CODE_LENGTH))).is_err());
+        // And their instance, when they name one.
+        let pasted = format!("{code}@chat.example.com");
+        let (bare, home, at) = split_code(&pasted).unwrap();
+        assert_eq!((bare, home.as_str(), at), (code.as_str(), server.as_str(), Some("chat.example.com")));
+    }
+
+    #[test]
+    fn calls_from_other_instances_speak_only_for_their_own() {
+        let origin = "https://night-owls.example";
+        let (home, guest, person, connection) = (new_id(), new_id(), new_id(), new_id());
+        let ask = cpb::SharedCall {
+            server_id: home.clone(),
+            call: Some(Call::Ask(cpb::ShareAsk {
+                code: "x".into(),
+                connection_id: connection.clone(),
+                guest: Some(pb::SharedServer {
+                    id: guest.clone(),
+                    name: "Night\nOwls".into(),
+                    icon_url: "https://night-owls.example/icon.png".into(),
+                }),
+                asked_by_id: person.clone(),
+            })),
+            // Whatever the sender says it is, the receiver says who sent it.
+            from_instance: String::new(),
+            from_fingerprint: "forged".into(),
+        };
+        let read = arrived(ask, origin, "abcd").unwrap();
+        assert_eq!(read.from_instance, origin);
+        assert_eq!(read.from_fingerprint, "abcd");
+        let Some(Call::Ask(ask)) = read.call else { panic!("not an ask") };
+        let server = ask.guest.unwrap();
+        assert_eq!(server.id, format!("{guest}@night-owls.example"));
+        assert_eq!(server.name, "NightOwls");
+        assert!(server.icon_url.is_empty(), "apps here never fetch from another instance");
+        assert_eq!(ask.asked_by_id, format!("{person}@night-owls.example"));
+
+        // Ids naming another instance's, or this one's own as theirs, are refused.
+        let left = |guest_server_id: String| cpb::SharedCall {
+            server_id: home.clone(),
+            call: Some(Call::Left(cpb::GuestLeft {
+                connection_id: connection.clone(),
+                guest_server_id,
+                actor_id: String::new(),
+            })),
+            ..Default::default()
+        };
+        assert!(arrived(left(format!("{guest}@third.example")), origin, "abcd").is_err());
+        let Some(Call::Left(read)) = arrived(left(guest.clone()), origin, "abcd").unwrap().call else { panic!() };
+        assert_eq!(read.actor_id, "@night-owls.example");
+        let elsewhere = cpb::SharedCall { server_id: format!("{home}@night-owls.example"), ..left(guest.clone()) };
+        assert!(arrived(elsewhere, origin, "abcd").is_err());
+
+        // Messages and instance admins' calls don't cross instances.
+        for call in [
+            Call::Send(cpb::GuestSend::default()),
+            Call::Events(cpb::HomeEvents::default()),
+            Call::AdminList(cpb::AdminShares {}),
+            Call::AdminEnd(cpb::AdminEnd::default()),
+        ] {
+            let call = cpb::SharedCall { server_id: home.clone(), call: Some(call), ..Default::default() };
+            assert!(arrived(call, origin, "abcd").is_err());
+        }
+    }
+
+    #[test]
+    fn answers_from_other_instances_keep_to_what_was_asked() {
+        let origin = "https://night-owls.example";
+        let home = new_id();
+        let lookup = cpb::SharedCall { call: Some(Call::Lookup(cpb::ShareLookup::default())), ..Default::default() };
+        let reply = cpb::SharedReply {
+            preview: Some(pb::PreviewShareResponse {
+                home_server: Some(pb::SharedServer { id: home.clone(), name: "Owls".into(), icon_url: "x".into() }),
+                region: "eu".into(),
+                ..Default::default()
+            }),
+            author: Some(pb::User::default()),
+            ..Default::default()
+        };
+        let read = returned(&lookup, reply.clone(), origin, "abcd").unwrap();
+        let preview = read.preview.unwrap();
+        assert_eq!(preview.home_server.unwrap().id, format!("{home}@night-owls.example"));
+        assert_eq!((preview.instance.as_str(), preview.fingerprint.as_str()), ("night-owls.example", "abcd"));
+        assert!(preview.region.is_empty());
+        assert!(read.author.is_none());
+        // An answer to another call keeps none of it.
+        let left = cpb::SharedCall { call: Some(Call::Left(cpb::GuestLeft::default())), ..Default::default() };
+        assert_eq!(returned(&left, reply, origin, "abcd").unwrap(), cpb::SharedReply::default());
     }
 
     #[test]

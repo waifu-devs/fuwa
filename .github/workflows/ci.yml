@@ -32,6 +32,7 @@ jobs:
       desktop: ${{ steps.changes.outputs.desktop }}
       proto: ${{ steps.changes.outputs.proto }}
       docker: ${{ steps.changes.outputs.docker }}
+      sdk: ${{ steps.changes.outputs.sdk }}
     steps:
       - uses: actions/checkout@v4
       - id: changes
@@ -121,7 +122,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev \
-            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev
+            libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -183,10 +184,63 @@ jobs:
           docker logs fuwa
           exit 1
 
+  sdk:
+    # The TypeScript SDK (sdk/): its generated code matches proto/, it builds
+    # (ES modules and CommonJS), and its tests drive a real instance built here.
+    name: SDK (generate, build, tests against an instance)
+    needs: changes
+    if: needs.changes.outputs.sdk == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: sdk/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: sdk/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Generated protocol code matches proto/
+        run: |
+          pnpm run generate
+          git diff --exit-code -- src/gen
+          test -z "$(git status --porcelain -- src/gen)"
+      - run: pnpm run build
+      - run: pnpm run typecheck
+      - run: pnpm test
+      - name: Packs as it would publish
+        run: npm pack --dry-run
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sdk
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Build the instance the tests run
+        working-directory: .
+        run: cargo build --locked -p fuwa-server --bin fuwa
+      - name: Tests against the instance
+        run: pnpm run test:instance
+        env:
+          FUWA_BIN: ${{ github.workspace }}/target/debug/fuwa
+      # The oldest Node the package supports loads both builds.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Loads on Node 20, as ES modules and CommonJS
+        run: |
+          node --version
+          node -e 'const f = require("@waifu-devs/fuwa"); if (typeof f.Agent !== "function") process.exit(1)'
+          node --input-type=module -e 'import { Agent } from "@waifu-devs/fuwa"; if (typeof Agent !== "function") process.exit(1)'
+
   # The one check to require: it passes when every job this change needed passed.
   passed:
     name: CI passed
-    needs: [changes, server, desktop, proto, docker]
+    needs: [changes, server, desktop, proto, docker, sdk]
     if: always() && github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:

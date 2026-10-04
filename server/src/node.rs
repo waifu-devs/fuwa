@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
+use prost::Message as _;
 use tokio::sync::Mutex;
 use turso::{Connection, Row};
 
@@ -26,6 +27,10 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0010_sso.sql"),
     include_str!("../migrations/node/0011_regions.sql"),
     include_str!("../migrations/node/0012_federation.sql"),
+    include_str!("../migrations/node/0013_profile_effects.sql"),
+    include_str!("../migrations/node/0014_server_arrangements.sql"),
+    include_str!("../migrations/node/0018_gifs.sql"),
+    include_str!("../migrations/node/0019_attachment_days.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
@@ -157,6 +162,8 @@ pub struct ProfileChange {
     pub accent_color: Option<Option<i32>>,
     /// The status and when it runs out, set together.
     pub status: Option<(String, Option<i64>)>,
+    /// A profile effect's id; empty for none.
+    pub effect: Option<String>,
 }
 
 /// A device signed in to an account.
@@ -635,7 +642,7 @@ impl NodeDb {
                    accent_color = CASE WHEN ?7 IS NULL THEN accent_color WHEN ?7 < 0 THEN NULL ELSE ?7 END,
                    status = coalesce(?8, status),
                    status_expires_at = CASE WHEN ?8 IS NULL THEN status_expires_at ELSE ?9 END,
-                   updated_at = ?10
+                   updated_at = ?10, profile_effect = coalesce(?11, profile_effect)
                  WHERE id = ?1",
                 (
                     id,
@@ -648,6 +655,7 @@ impl NodeDb {
                     status,
                     status_expires_at,
                     now_ms(),
+                    change.effect.as_deref(),
                 ),
             )
             .await?;
@@ -662,7 +670,9 @@ impl NodeDb {
         let conn = self.read()?;
         query_one(
             &conn,
-            &format!("SELECT {ACCOUNT_COLUMNS}, pronouns, bio, banner_url, accent_color FROM accounts WHERE id = ?1"),
+            &format!(
+                "SELECT {ACCOUNT_COLUMNS}, pronouns, bio, banner_url, accent_color, profile_effect FROM accounts WHERE id = ?1"
+            ),
             [id],
             |row| {
                 let account = account(row)?;
@@ -673,6 +683,7 @@ impl NodeDb {
                     banner_url: row.get(ACCOUNT_COLUMN_COUNT + 2)?,
                     accent_color: row.get(ACCOUNT_COLUMN_COUNT + 3)?,
                     created_at: Some(timestamp(account.created_at)),
+                    effect: row.get(ACCOUNT_COLUMN_COUNT + 4)?,
                 })
             },
         )
@@ -878,6 +889,7 @@ impl NodeDb {
             conn.execute("DELETE FROM sign_in_tickets WHERE expires_at <= ?1", [now]).await?;
             conn.execute("DELETE FROM linked_sign_ins WHERE expires_at <= ?1", [now]).await?;
             conn.execute("DELETE FROM upload_days WHERE day < ?1", [now / DAY_MS]).await?;
+            conn.execute("DELETE FROM attachment_days WHERE day < ?1", [now / DAY_MS]).await?;
             Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now]).await?)
         })
         .await
@@ -1129,6 +1141,51 @@ impl NodeDb {
             Ok(())
         })
         .await
+    }
+
+    // ───────────────────────── Server arrangement ─────────────────────────
+
+    /// How someone arranged their servers, and when (ms), as stored: it can
+    /// still name servers they left since.
+    pub async fn server_arrangement(&self, account_id: &str) -> Result<(Vec<pb::ServerRailItem>, Option<i64>)> {
+        let conn = self.read()?;
+        let row = query_one(
+            &conn,
+            "SELECT items, updated_at FROM server_arrangements WHERE account_id = ?1",
+            [account_id],
+            |r| Ok((r.get::<Vec<u8>>(0)?, r.get::<i64>(1)?)),
+        )
+        .await?;
+        let Some((items, updated_at)) = row else { return Ok((Vec::new(), None)) };
+        // Written by this code from a checked request, so it always decodes;
+        // if it ever doesn't, the person just starts from the default order.
+        let items = pb::SetServerArrangementRequest::decode(items.as_slice()).map(|r| r.items).unwrap_or_default();
+        Ok((items, Some(updated_at)))
+    }
+
+    /// Replaces someone's arrangement (already checked); an empty one is
+    /// forgotten. Returns when it changed (ms).
+    pub async fn set_server_arrangement(&self, account_id: &str, items: Vec<pb::ServerRailItem>) -> Result<i64> {
+        let now = now_ms();
+        let encoded = (!items.is_empty()).then(|| pb::SetServerArrangementRequest { items }.encode_to_vec());
+        db::write(&self.db, async |conn| {
+            match &encoded {
+                Some(bytes) => {
+                    conn.execute(
+                        "INSERT INTO server_arrangements (account_id, items, updated_at) VALUES (?1, ?2, ?3)
+                         ON CONFLICT (account_id) DO UPDATE SET items = excluded.items, updated_at = excluded.updated_at",
+                        (account_id, bytes.clone(), now),
+                    )
+                    .await?;
+                }
+                None => {
+                    conn.execute("DELETE FROM server_arrangements WHERE account_id = ?1", [account_id]).await?;
+                }
+            }
+            Ok(())
+        })
+        .await?;
+        Ok(now)
     }
 
     // ───────────────────────── Split instances ─────────────────────────
@@ -1436,7 +1493,8 @@ impl NodeDb {
     // ───────────────────────── Uploaded pictures ─────────────────────────
 
     /// Reserves an upload, unless the account has too many going already or
-    /// has used up `bytes_per_day` today.
+    /// has used up `bytes_per_day` today (of pictures, or of attachments for
+    /// an attachment, which are counted apart).
     pub async fn reserve_media(
         &self,
         row: &MediaRow,
@@ -1444,21 +1502,27 @@ impl NodeDb {
         expires_at: i64,
         bytes_per_day: Option<i64>,
     ) -> Result<()> {
+        let (days, what) = match row.purpose {
+            pb::MediaPurpose::Attachment => ("attachment_days", "files"),
+            _ => ("upload_days", "pictures"),
+        };
         db::write(&self.db, async |conn| {
             let now = now_ms();
             // Every reservation writes the account's row for the day, so ones
             // made at once clash here and the counts below hold.
             let day = now / DAY_MS;
             conn.execute(
-                "INSERT INTO upload_days (account_id, day, bytes) VALUES (?1, ?2, ?3)
-                 ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes",
+                &format!(
+                    "INSERT INTO {days} (account_id, day, bytes) VALUES (?1, ?2, ?3)
+                     ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes"
+                ),
                 (row.account_id.as_str(), day, row.size),
             )
             .await?;
             if let Some(cap) = bytes_per_day {
                 let today = query_one(
                     conn,
-                    "SELECT bytes FROM upload_days WHERE account_id = ?1 AND day = ?2",
+                    &format!("SELECT bytes FROM {days} WHERE account_id = ?1 AND day = ?2"),
                     (row.account_id.as_str(), day),
                     |r| r.get::<i64>(0),
                 )
@@ -1466,7 +1530,7 @@ impl NodeDb {
                 .unwrap_or(0);
                 if today > cap {
                     return Err(Error::ResourceExhausted(format!(
-                        "you can upload {} of pictures a day here; try again tomorrow",
+                        "you can upload {} of {what} a day here; try again tomorrow",
                         crate::media::size_label(cap)
                     )));
                 }
@@ -1583,22 +1647,32 @@ impl NodeDb {
         .await
     }
 
-    /// A server's pictures in use: its icon, emoji and webhooks' pictures.
+    /// A server's files in use: its icon, emoji, webhooks' pictures and
+    /// messages' attachments.
     pub async fn server_media(&self, server_id: &str) -> Result<Vec<String>> {
         let conn = self.read()?;
         query_all(
             &conn,
             "SELECT id FROM media WHERE server_id = ?1 AND stored_at IS NOT NULL AND used_at IS NOT NULL
-             AND purpose IN (?2, ?3, ?4) ORDER BY id",
+             AND purpose IN (?2, ?3, ?4, ?5) ORDER BY id",
             (
                 server_id,
                 pb::MediaPurpose::ServerIcon as i64,
                 pb::MediaPurpose::Emoji as i64,
                 pb::MediaPurpose::Avatar as i64,
+                pb::MediaPurpose::Attachment as i64,
             ),
             |r| r.get::<String>(0),
         )
         .await
+    }
+
+    /// Every picture uploaded for or used by a server, whatever its state:
+    /// they go when the server is deleted.
+    pub async fn media_of_server(&self, server_id: &str) -> Result<Vec<String>> {
+        let conn = self.read()?;
+        query_all(&conn, "SELECT id FROM media WHERE server_id = ?1 ORDER BY id", [server_id], |r| r.get::<String>(0))
+            .await
     }
 
     pub async fn delete_media(&self, ids: &[String]) -> Result<()> {
@@ -1686,7 +1760,16 @@ impl NodeDb {
     /// Deletes an account and everything node.db keeps about it.
     pub async fn delete_account(&self, account_id: &str) -> Result<()> {
         db::write(&self.db, async |conn| {
-            for table in ["sessions", "backup_codes", "sign_in_tickets", "notification_settings", "upload_days"] {
+            for table in [
+                "sessions",
+                "backup_codes",
+                "sign_in_tickets",
+                "notification_settings",
+                "upload_days",
+                "server_arrangements",
+                "attachment_days",
+                "saved_gifs",
+            ] {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
             }
             conn.execute("DELETE FROM accounts WHERE id = ?1", [account_id]).await?;
