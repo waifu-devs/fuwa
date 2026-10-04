@@ -339,8 +339,10 @@ impl ServerService for Api {
                 }
                 // Servers its channels are shown in, and that show its own, let go too.
                 let ended = super::shared::take_server(&sdb.read()?).await?;
+                let files = crate::attachments::all(&sdb.read()?).await?;
                 self.app.servers.delete(&sdb.id, &actor).await?;
                 self.app.server_gone(&sdb.id).await;
+                crate::attachments::drop_soon(&self.app, &sdb.id, files);
                 super::shared::tell_ended(&self.app, &sdb.id, &actor, ended).await;
                 tracing::info!(server = %sdb.id, by = %actor, "server deleted");
                 Ok(pb::DeleteServerResponse {})
@@ -653,6 +655,7 @@ impl ServerService for Api {
                     let was_member = remove_member(conn, &sdb.id, &req.user_id, pb::LeaveReason::Banned, events).await?;
                     store::drop_application(conn, &sdb.id, &req.user_id, &account.id, events).await?;
                     let mut deleted = 0;
+                    let mut files = Vec::new();
                     if req.delete_message_seconds > 0 {
                         let messages = query_all(
                             conn,
@@ -664,6 +667,7 @@ impl ServerService for Api {
                         let mut change = UsageChange::default();
                         for (id, channel_id, size, attachments) in messages {
                             conn.execute("DELETE FROM messages WHERE id = ?1", [id.as_str()]).await?;
+                            files.extend(crate::attachments::forget_message(conn, &id).await?);
                             change.messages -= 1;
                             change.message_bytes -= size;
                             change.attachments -= attachments;
@@ -684,14 +688,15 @@ impl ServerService for Api {
                         banned_by_id: account.id.clone(),
                         created_at: Some(timestamp(now)),
                     };
-                    Ok((ban, deleted, was_member))
+                    Ok((ban, deleted, was_member, files))
                 };
                 // Taking their messages sweeps rows they could still be adding to.
-                let (ban, deleted, was_member) = if req.delete_message_seconds > 0 {
+                let (ban, deleted, was_member, files) = if req.delete_message_seconds > 0 {
                     sdb.write_alone(&account.id, ban).await?
                 } else {
                     sdb.write(&account.id, ban).await?
                 };
+                crate::attachments::drop_soon(&self.app, &sdb.id, files);
                 if was_member {
                     self.app.membership_changed(&req.user_id, &sdb.id, false).await;
                     self.forget_notifications(&sdb.id, None, Some(&req.user_id)).await;

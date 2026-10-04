@@ -245,8 +245,13 @@ impl App {
         let belongs = match owner {
             PictureOwner::Account(account_id, purpose) => row.account_id == account_id && row.purpose == purpose,
             PictureOwner::Server(server_id) => {
-                matches!(row.purpose, pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji | pb::MediaPurpose::Avatar)
-                    && row.server_id.as_deref() == Some(server_id)
+                matches!(
+                    row.purpose,
+                    pb::MediaPurpose::ServerIcon
+                        | pb::MediaPurpose::Emoji
+                        | pb::MediaPurpose::Avatar
+                        | pb::MediaPurpose::Attachment
+                ) && row.server_id.as_deref() == Some(server_id)
             }
         };
         if belongs && let Err(err) = self.delete_media(&[id]).await {

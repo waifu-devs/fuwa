@@ -3,9 +3,11 @@ use tonic::{Request, Response, Status};
 
 use super::{Api, Seat, automod, respond, shared, url, users};
 use crate::app::App;
+use crate::attachments;
 use crate::db::{is_unique_violation, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{new_id, now_ms, timestamp};
+use crate::media;
 use crate::pb::{self, Permission, message_service_server::MessageService};
 use crate::permissions::{self, Access};
 use crate::servers::{self as store, Audit, Payload, UsageChange, load_channel};
@@ -13,6 +15,8 @@ use crate::servers::{self as store, Audit, Payload, UsageChange, load_channel};
 /// The longest a message can be, in characters.
 pub const MAX_MESSAGE_LENGTH: usize = 4000;
 const MAX_ATTACHMENTS: usize = 10;
+/// Why a file can't go in a channel shared from another server.
+pub(super) const NO_SHARED_FILES: &str = "files can't be sent in a channel shared with another server yet";
 const MAX_EMBEDS: usize = 10;
 /// Most roles one message pings.
 const MAX_ROLE_MENTIONS: usize = 50;
@@ -190,14 +194,50 @@ pub(super) fn check_extras(attachments: &mut [pb::Attachment], embeds: &[pb::Emb
             "at most {MAX_ATTACHMENTS} attachments and {MAX_EMBEDS} embeds per message"
         )));
     }
-    for attachment in attachments.iter_mut() {
-        attachment.url = url("attachment url", &attachment.url)?;
-        if attachment.url.is_empty() || attachment.filename.chars().count() > 255 {
+    for attachment in attachments.iter() {
+        if attachment.url.trim().is_empty() || attachment.filename.chars().count() > attachments::MAX_NAME {
             return Err(Error::invalid("attachments need a URL and a filename of at most 255 characters"));
         }
-        attachment.id = new_id();
     }
     Ok(())
+}
+
+impl Api {
+    /// Checks the files a message is sent with: each one an upload of the
+    /// sender's for this server, whole, in it once. Fills in what the server
+    /// knows of each (its id, kind and size, its link where it's served, a
+    /// safe name) and says how many bytes they come to.
+    async fn check_attachments(&self, account_id: &str, server_id: &str, files: &mut [pb::Attachment]) -> Result<i64> {
+        let mut total = 0;
+        let mut seen = Vec::with_capacity(files.len());
+        for file in files.iter_mut() {
+            let Some(id) = media::id_in_url(file.url.trim()) else {
+                return Err(Error::invalid("attach files by uploading them here first"));
+            };
+            if seen.contains(&id) {
+                return Err(Error::invalid("that file is attached twice"));
+            }
+            let upload = self
+                .app
+                .check_upload(account_id, pb::MediaPurpose::Attachment, file.url.trim(), Some(server_id))
+                .await?
+                .ok_or(Error::NotFound("uploaded file; upload it again"))?;
+            let sized = upload.content_type.starts_with("image/") || upload.content_type.starts_with("video/");
+            let pixels = |n: i32| if sized { n.clamp(0, 65_535) } else { 0 };
+            *file = pb::Attachment {
+                url: attachments::link(&self.app, server_id, &id),
+                filename: attachments::clean_name(&file.filename),
+                content_type: upload.content_type,
+                size: upload.size,
+                width: pixels(file.width),
+                height: pixels(file.height),
+                id: id.clone(),
+            };
+            total += upload.size;
+            seen.push(id);
+        }
+        Ok(total)
+    }
 }
 
 /// Refuses members who are timed out.
@@ -409,6 +449,10 @@ pub(super) async fn insert_message(conn: &turso::Connection, message: &pb::Messa
         ),
     )
     .await?;
+    attachments::add(conn, message, now).await.map_err(|err| match err {
+        err if is_unique_violation(&err) => Error::AlreadyExists("that file is already in a message".into()),
+        err => err,
+    })?;
     store::add_usage(
         conn,
         UsageChange {
@@ -436,9 +480,11 @@ pub(super) async fn save_edit(conn: &turso::Connection, message: &pb::Message, o
 }
 
 /// Deletes a message, inside a write, and takes it off the totals. The
-/// caller sends its event.
-pub(super) async fn remove_message(conn: &turso::Connection, message: &pb::Message) -> Result<()> {
+/// caller sends its event, and drops the files it had (their ids come back)
+/// once the write is done.
+pub(super) async fn remove_message(conn: &turso::Connection, message: &pb::Message) -> Result<Vec<String>> {
     conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
+    let files = attachments::forget_message(conn, &message.id).await?;
     store::add_usage(
         conn,
         UsageChange {
@@ -448,7 +494,8 @@ pub(super) async fn remove_message(conn: &turso::Connection, message: &pb::Messa
             ..Default::default()
         },
     )
-    .await
+    .await?;
+    Ok(files)
 }
 
 /// A page of a channel's messages, oldest first, and whether there are more
@@ -515,6 +562,9 @@ impl MessageService for Api {
                 check_extras(&mut req.attachments, &req.embeds)?;
                 check_embed_links(&self.app, &mut req.embeds)?;
                 if let Some(link) = shared::link_of(&sdb.read()?, &req.channel_id).await? {
+                    if !req.attachments.is_empty() {
+                        return Err(Error::invalid(NO_SHARED_FILES));
+                    }
                     let message = shared::guest_send(&self.app, &sdb, &account, &member, &access, &link, req).await?;
                     return Ok(pb::SendMessageResponse { message: Some(message) });
                 }
@@ -523,6 +573,16 @@ impl MessageService for Api {
                     && sdb.storage_bytes() >= limit
                 {
                     return Err(Error::ResourceExhausted("this server is out of storage".into()));
+                }
+                let file_bytes = self.check_attachments(&account.id, &sdb.id, &mut req.attachments).await?;
+                if file_bytes > 0
+                    && let Some(limit) = limits.attachment_bytes
+                    && sdb.usage().await?.attachment_bytes + file_bytes > limit
+                {
+                    return Err(Error::ResourceExhausted(format!(
+                        "this server is out of room for files ({} in all)",
+                        media::size_label(limit)
+                    )));
                 }
                 let pictures = automod::picture_links(&req.attachments, &req.embeds);
                 let (asked, later) =
@@ -590,8 +650,11 @@ impl MessageService for Api {
                     })
                     .await?
                     .map_err(Error::denied)?;
+                for file in &message.attachments {
+                    self.app.keep_picture(Some(&file.id), Some(&sdb.id)).await;
+                }
                 if let Some(checking) = later {
-                    checking.later(sdb.clone(), member, message.id.clone(), message.content.clone());
+                    checking.later(self.app.clone(), sdb.clone(), member, message.id.clone(), message.content.clone());
                 }
                 Ok(pb::SendMessageResponse { message: Some(message) })
             }
@@ -742,7 +805,7 @@ impl MessageService for Api {
                     .await?
                     .map_err(Error::denied)?;
                 if let Some(checking) = later {
-                    checking.later(sdb.clone(), member, message.id.clone(), message.content.clone());
+                    checking.later(self.app.clone(), sdb.clone(), member, message.id.clone(), message.content.clone());
                 }
                 Ok(pb::UpdateMessageResponse { message: Some(message) })
             }
@@ -774,44 +837,49 @@ impl MessageService for Api {
                     shared::guest_delete(&self.app, &sdb.id, &link, guest, &req.message_id).await?;
                     return Ok(pb::DeleteMessageResponse {});
                 }
-                sdb.write(&account.id, async |conn, events| {
-                    let message = load_message(conn, &sdb.id, &req.message_id)
-                        .await?
-                        .filter(|m| access.can_see(&m.channel_id))
-                        .ok_or(Error::NotFound("message"))?;
-                    if message.author_id != account.id
-                        && !access.has_in(&message.channel_id, Permission::ManageMessages)
-                    {
-                        return Err(Error::denied("you can only delete your own messages"));
-                    }
-                    conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
-                    if message.author_id != account.id {
-                        let channel =
-                            load_channel(conn, &sdb.id, &message.channel_id).await?.map(|c| c.name).unwrap_or_default();
-                        store::audit(
+                let files = sdb
+                    .write(&account.id, async |conn, events| {
+                        let message = load_message(conn, &sdb.id, &req.message_id)
+                            .await?
+                            .filter(|m| access.can_see(&m.channel_id))
+                            .ok_or(Error::NotFound("message"))?;
+                        if message.author_id != account.id
+                            && !access.has_in(&message.channel_id, Permission::ManageMessages)
+                        {
+                            return Err(Error::denied("you can only delete your own messages"));
+                        }
+                        conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
+                        let files = attachments::forget_message(conn, &message.id).await?;
+                        if message.author_id != account.id {
+                            let channel = load_channel(conn, &sdb.id, &message.channel_id)
+                                .await?
+                                .map(|c| c.name)
+                                .unwrap_or_default();
+                            store::audit(
+                                conn,
+                                &account.id,
+                                Audit::new(pb::AuditAction::MessageDelete, &message.author_id).channel(channel),
+                            )
+                            .await?;
+                        }
+                        store::add_usage(
                             conn,
-                            &account.id,
-                            Audit::new(pb::AuditAction::MessageDelete, &message.author_id).channel(channel),
+                            UsageChange {
+                                messages: -1,
+                                message_bytes: -(message.content.len() as i64),
+                                attachments: -(message.attachments.len() as i64),
+                                ..Default::default()
+                            },
                         )
                         .await?;
-                    }
-                    store::add_usage(
-                        conn,
-                        UsageChange {
-                            messages: -1,
-                            message_bytes: -(message.content.len() as i64),
-                            attachments: -(message.attachments.len() as i64),
-                            ..Default::default()
-                        },
-                    )
+                        events.push(Payload::MessageDeleted(pb::MessageDeleted {
+                            channel_id: message.channel_id.clone(),
+                            message_id: message.id.clone(),
+                        }));
+                        Ok(files)
+                    })
                     .await?;
-                    events.push(Payload::MessageDeleted(pb::MessageDeleted {
-                        channel_id: message.channel_id.clone(),
-                        message_id: message.id.clone(),
-                    }));
-                    Ok(())
-                })
-                .await?;
+                attachments::drop_soon(&self.app, &sdb.id, files);
                 Ok(pb::DeleteMessageResponse {})
             }
             .await,

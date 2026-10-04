@@ -424,6 +424,7 @@ impl Checking {
     /// is checked again).
     pub(super) fn later(
         self,
+        app: std::sync::Arc<crate::app::App>,
         sdb: std::sync::Arc<store::ServerDb>,
         member: pb::Member,
         message_id: String,
@@ -437,8 +438,9 @@ impl Checking {
                     review_sent(conn, &sdb.id, &member, &message_id, &content, &asked, events).await
                 })
                 .await;
-            if reviewed.is_err() {
-                crate::reports::server_error("automod_late_review_failed", None);
+            match reviewed {
+                Ok(files) => crate::attachments::drop_soon(&app, &sdb.id, files),
+                Err(_) => crate::reports::server_error("automod_late_review_failed", None),
             }
         });
     }
@@ -781,36 +783,29 @@ async fn review_sent(
     content: &str,
     asked: &Asked,
     events: &mut Vec<Payload>,
-) -> Result<()> {
-    let Some(message) = super::messages::load_message(conn, server_id, message_id).await? else { return Ok(()) };
+) -> Result<Vec<String>> {
+    let Some(message) = super::messages::load_message(conn, server_id, message_id).await? else { return Ok(vec![]) };
     if message.content != content {
-        return Ok(());
+        return Ok(vec![]);
     }
-    let Some(channel) = load_channel(conn, server_id, &message.channel_id).await? else { return Ok(()) };
+    let Some(channel) = load_channel(conn, server_id, &message.channel_id).await? else { return Ok(vec![]) };
     let rules = store::load_automod(conn).await?;
-    let Some(rule) = rules.into_iter().find(|r| r.id == asked.rule_id && r.enabled) else { return Ok(()) };
+    let Some(rule) = rules.into_iter().find(|r| r.id == asked.rule_id && r.enabled) else { return Ok(vec![]) };
     let exempt = rule.exempt_channel_ids.iter().any(|id| *id == channel.id || *id == channel.parent_id)
         || rule.exempt_role_ids.iter().any(|id| member.role_ids.contains(id));
-    let Some((level, hit)) = automod::provider_hit(&rule, &asked.scores).filter(|_| !exempt) else { return Ok(()) };
+    let Some((level, hit)) = automod::provider_hit(&rule, &asked.scores).filter(|_| !exempt) else {
+        return Ok(vec![]);
+    };
     let caught = [(effective(&rule, Some(level)), hit)];
-    if act(conn, server_id, member, &channel, content, Some(asked), &caught, events).await?.is_some() {
-        conn.execute("DELETE FROM messages WHERE id = ?1", [message.id.as_str()]).await?;
-        store::add_usage(
-            conn,
-            UsageChange {
-                messages: -1,
-                message_bytes: -(message.content.len() as i64),
-                attachments: -(message.attachments.len() as i64),
-                ..Default::default()
-            },
-        )
-        .await?;
-        events.push(Payload::MessageDeleted(pb::MessageDeleted {
-            channel_id: message.channel_id.clone(),
-            message_id: message.id.clone(),
-        }));
+    if act(conn, server_id, member, &channel, content, Some(asked), &caught, events).await?.is_none() {
+        return Ok(vec![]);
     }
-    Ok(())
+    let files = super::messages::remove_message(conn, &message).await?;
+    events.push(Payload::MessageDeleted(pb::MessageDeleted {
+        channel_id: message.channel_id.clone(),
+        message_id: message.id.clone(),
+    }));
+    Ok(files)
 }
 
 #[tonic::async_trait]

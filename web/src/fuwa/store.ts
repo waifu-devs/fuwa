@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type {
   Application,
+  Attachment,
   Channel,
   Emoji,
   Event,
@@ -40,7 +41,14 @@ export type ChannelMessages = {
 };
 
 /** A message this browser sent that the server hasn't confirmed yet. */
-export type PendingMessage = { nonce: string; content: string; createdAt: number; failed: string | null };
+export type PendingMessage = {
+  nonce: string;
+  content: string;
+  /** Files sent with it, already uploaded. */
+  files?: Attachment[];
+  createdAt: number;
+  failed: string | null;
+};
 
 /** A device in an encrypted conversation, as its group says. */
 export type DmMember = { userId: string; deviceId: string; signatureKey: Uint8Array };

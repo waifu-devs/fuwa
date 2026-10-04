@@ -638,7 +638,7 @@ pub async fn shared_call(app: &Arc<App>, call: cpb::SharedCall) -> Result<cpb::S
         Call::List(list) => home_list(&sdb, list).await,
         Call::Get(get) => home_get(&sdb, get).await,
         Call::Edit(edit) => home_edit(app, &sdb, edit).await,
-        Call::Delete(delete) => home_delete(&sdb, delete).await,
+        Call::Delete(delete) => home_delete(app, &sdb, delete).await,
         Call::Left(left) => home_left(&sdb, left).await,
         Call::Approved(approved) => guest_approved(app, &sdb, approved).await,
         Call::Ended(ended) => guest_ended(app, &sdb, ended).await,
@@ -816,7 +816,9 @@ async fn home_send(app: &Arc<App>, sdb: &ServerDb, send: cpb::GuestSend) -> Resu
             let access = Access::guest(&channel.id, row.allowed);
             access.require_in(&channel.id, Permission::SendMessages)?;
             if !send.attachments.is_empty() {
-                access.require_in(&channel.id, Permission::AttachFiles)?;
+                // Files stay with the server they were uploaded for; the
+                // shared channels' design doesn't carry them across yet.
+                return Err(Error::invalid(super::messages::NO_SHARED_FILES));
             }
             if !send.embeds.is_empty() {
                 access.require_in(&channel.id, Permission::EmbedLinks)?;
@@ -986,39 +988,42 @@ async fn home_edit(app: &Arc<App>, sdb: &ServerDb, edit: cpb::GuestEdit) -> Resu
     Ok(cpb::SharedReply { message: Some(message), ..Default::default() })
 }
 
-async fn home_delete(sdb: &ServerDb, delete: cpb::GuestDelete) -> Result<cpb::SharedReply> {
+async fn home_delete(app: &Arc<App>, sdb: &ServerDb, delete: cpb::GuestDelete) -> Result<cpb::SharedReply> {
     let guest = delete.guest.clone().ok_or_else(|| Error::invalid("guest is required"))?;
     let actor_id = guest.user.as_ref().map(|u| u.id.clone()).unwrap_or_default();
-    sdb.write(&actor_id, async |conn, events| {
-        let (row, user, server) = connection(conn, &guest).await?;
-        let message = load_message(conn, &sdb.id, &delete.message_id)
-            .await?
-            .filter(|m| m.channel_id == row.channel_id)
-            .ok_or(Error::NotFound("message"))?;
-        if message.author_id != user.id {
-            // A guest's moderators delete their own server's people's messages.
-            let theirs = guest.moderator
-                && guests_among(conn, &[message.author_id.as_str()]).await?.get(&message.author_id) == Some(&server.id);
-            if !theirs {
-                return Err(Error::denied("you can only delete your own messages here, or your server's people's"));
+    let files = sdb
+        .write(&actor_id, async |conn, events| {
+            let (row, user, server) = connection(conn, &guest).await?;
+            let message = load_message(conn, &sdb.id, &delete.message_id)
+                .await?
+                .filter(|m| m.channel_id == row.channel_id)
+                .ok_or(Error::NotFound("message"))?;
+            if message.author_id != user.id {
+                // A guest's moderators delete their own server's people's messages.
+                let theirs = guest.moderator
+                    && guests_among(conn, &[message.author_id.as_str()]).await?.get(&message.author_id)
+                        == Some(&server.id);
+                if !theirs {
+                    return Err(Error::denied("you can only delete your own messages here, or your server's people's"));
+                }
+                remember(conn, &user, &server).await?;
+                let channel = load_channel(conn, &sdb.id, &row.channel_id).await?.map(|c| c.name).unwrap_or_default();
+                store::audit(
+                    conn,
+                    &user.id,
+                    Audit::new(pb::AuditAction::MessageDelete, &message.author_id).channel(channel),
+                )
+                .await?;
             }
-            remember(conn, &user, &server).await?;
-            let channel = load_channel(conn, &sdb.id, &row.channel_id).await?.map(|c| c.name).unwrap_or_default();
-            store::audit(
-                conn,
-                &user.id,
-                Audit::new(pb::AuditAction::MessageDelete, &message.author_id).channel(channel),
-            )
-            .await?;
-        }
-        messages::remove_message(conn, &message).await?;
-        events.push(Payload::MessageDeleted(pb::MessageDeleted {
-            channel_id: message.channel_id.clone(),
-            message_id: message.id.clone(),
-        }));
-        Ok(())
-    })
-    .await?;
+            let files = messages::remove_message(conn, &message).await?;
+            events.push(Payload::MessageDeleted(pb::MessageDeleted {
+                channel_id: message.channel_id.clone(),
+                message_id: message.id.clone(),
+            }));
+            Ok(files)
+        })
+        .await?;
+    crate::attachments::drop_soon(app, &sdb.id, files);
     Ok(cpb::SharedReply::default())
 }
 

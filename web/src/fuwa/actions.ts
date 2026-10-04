@@ -1,11 +1,11 @@
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
 import type { AccountFilter, AutoModProviderSettings, InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { UpdateProfileRequest } from "@/gen/fuwa/v1/auth_pb";
 import type { ChannelPlacement, ListConnectionsResponse } from "@/gen/fuwa/v1/channel_pb";
-import type { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
+import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import type { AuditAction } from "@/gen/fuwa/v1/server_pb";
 import {
   ApplicationStatus,
@@ -13,6 +13,7 @@ import {
   JoinFormSchema,
   WelcomeScreenSchema,
   type AnnouncementTone,
+  type Attachment,
   type AutoModRule,
   type Emoji,
   type WelcomeScreen,
@@ -67,6 +68,16 @@ export function run<A>(effect: Effect.Effect<A, FuwaError>): Promise<A> {
     if (result._tag === "Left") throw result.left;
     return result.right;
   });
+}
+
+/** [`run`], with a way to stop it partway (an upload's bytes stop going). */
+export function runCancelable<A>(effect: Effect.Effect<A, FuwaError>): { done: Promise<A>; cancel: () => void } {
+  const fiber = Effect.runFork(effect.pipe(Effect.mapError(toFuwaError), Effect.either));
+  const done = Effect.runPromise(Fiber.join(fiber)).then((result) => {
+    if (result._tag === "Left") throw result.left;
+    return result.right;
+  });
+  return { done, cancel: () => void Effect.runFork(Fiber.interrupt(fiber)) };
 }
 
 const api = (key: string) => engine(key).api;
@@ -312,6 +323,22 @@ const PUT_FAILURES: Record<number, Code> = {
 export const uploadPicture = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent: number) => void, serverId = "") =>
   Effect.gen(function* () {
     reportUsage("upload.picture");
+    return yield* upload(key, purpose, file, progress, serverId);
+  });
+
+/**
+ * Uploads a file to attach to a message in `serverId` and resolves to its
+ * link, ready to send. Any kind of file; the server tells what it is from
+ * its bytes.
+ */
+export const uploadAttachment = (key: string, serverId: string, file: Blob, progress?: (sent: number) => void) =>
+  Effect.gen(function* () {
+    reportUsage("upload.attachment");
+    return yield* upload(key, MediaPurpose.ATTACHMENT, file, progress, serverId);
+  });
+
+const upload = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent: number) => void, serverId = "") =>
+  Effect.gen(function* () {
     const { uploadUrl, media } = yield* call((signal) =>
       api(key).media.createUpload({ purpose, contentType: file.type, size: BigInt(file.size), serverId }, { signal }),
     );
@@ -1121,15 +1148,20 @@ export const loadMessages = (key: string, serverId: string, channelId: string, o
 
 let nonce = 0;
 
-/** Sends a message. It shows up right away, dimmed until the server confirms it. */
-export const sendMessage = (key: string, serverId: string, channelId: string, content: string) =>
+/**
+ * Sends a message, with any files already uploaded for it. It shows up right
+ * away, dimmed until the server confirms it.
+ */
+export const sendMessage = (key: string, serverId: string, channelId: string, content: string, files: Attachment[] = []) =>
   Effect.gen(function* () {
     reportUsage("message.send");
-    const pending: PendingMessage = { nonce: `n${++nonce}`, content, createdAt: Date.now(), failed: null };
+    if (files.length) reportUsage("message.send_files");
+    const pending: PendingMessage = { nonce: `n${++nonce}`, content, files, createdAt: Date.now(), failed: null };
     const setPending = (fn: (list: PendingMessage[]) => PendingMessage[]) =>
       updateInstance(key, (i) => ({ ...i, pending: { ...i.pending, [channelId]: fn(i.pending[channelId] ?? []) } }));
     setPending((list) => [...list, pending]);
-    const res = yield* call((signal) => api(key).messages.sendMessage({ serverId, channelId, content }, { signal })).pipe(
+    const attachments = files.map((f) => ({ url: f.url, filename: f.filename, width: f.width, height: f.height }));
+    const res = yield* call((signal) => api(key).messages.sendMessage({ serverId, channelId, content, attachments }, { signal })).pipe(
       Effect.tapError((err) =>
         Effect.sync(() =>
           setPending((list) => list.map((p) => (p.nonce === pending.nonce ? { ...p, failed: err.message } : p))),

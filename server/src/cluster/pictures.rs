@@ -253,7 +253,9 @@ async fn upload(app: &App, server_id: &str, token: &str, body: Body) -> Response
     let kept = async {
         std::fs::create_dir_all(&dir).map_err(|err| failed_io(&id, err))?;
         let wait = std::time::Duration::from_millis(crate::media::RECEIVE_TTL_MS as u64);
-        let (kind, size) = tokio::time::timeout(wait, crate::media::receive_file(&id, started.size, &temp, body))
+        let purpose = pb::MediaPurpose::try_from(started.purpose).unwrap_or(pb::MediaPurpose::Unspecified);
+        let received = crate::media::receive_file(&id, purpose, started.size, &temp, body);
+        let (kind, size) = tokio::time::timeout(wait, received)
             .await
             .map_err(|_| (StatusCode::REQUEST_TIMEOUT, "the upload took too long".to_string()))??;
         std::fs::rename(&temp, &dest).map_err(|err| failed_io(&id, err))?;
@@ -369,16 +371,39 @@ async fn serve(app: &App, server_id: &str, id: &str, headers: &HeaderMap) -> Res
     if !path.exists() && !(matches!(uses(app, &server_id, &id).await, Ok(true)) && restore(app, &key, &path).await) {
         return plain(StatusCode::NOT_FOUND, "not found");
     }
+    // A message's file is served while a message has it, by what it is.
+    match crate::attachments::find(app, &server_id, &id).await {
+        Ok(Some(file)) => return crate::media::serve_file(&path, &file, headers).await,
+        Ok(None) => {}
+        Err(_) => {
+            tracing::warn!(media = %id, "couldn't look up an attachment");
+            return plain(StatusCode::SERVICE_UNAVAILABLE, "that file can't be reached right now; try again soon");
+        }
+    }
     let etag = format!("\"{id}\"");
     let fresh = headers.get(header::IF_NONE_MATCH).is_some_and(|value| value.as_bytes() == etag.as_bytes());
     let mut response = if fresh {
         StatusCode::NOT_MODIFIED.into_response()
     } else {
-        let Ok(bytes) = tokio::fs::read(&path).await else { return plain(StatusCode::NOT_FOUND, "not found") };
-        let Some(kind) = crate::media::sniff(&bytes[..bytes.len().min(16)]) else {
+        // Only its first bytes are read to tell what it is, so a big file
+        // (an attachment no message has yet) never sits in memory.
+        let Ok(mut file) = tokio::fs::File::open(&path).await else { return plain(StatusCode::NOT_FOUND, "not found") };
+        let mut head = [0u8; 16];
+        let mut read = 0;
+        while read < head.len() {
+            match tokio::io::AsyncReadExt::read(&mut file, &mut head[read..]).await {
+                Ok(0) => break,
+                Ok(n) => read += n,
+                Err(_) => return plain(StatusCode::NOT_FOUND, "not found"),
+            }
+        }
+        let Some(kind) = crate::media::sniff(&head[..read]) else {
             return plain(StatusCode::NOT_FOUND, "not found");
         };
-        let mut response = Response::new(Body::from(bytes));
+        if tokio::io::AsyncSeekExt::rewind(&mut file).await.is_err() {
+            return plain(StatusCode::NOT_FOUND, "not found");
+        }
+        let mut response = Response::new(Body::from_stream(tokio_util::io::ReaderStream::new(file)));
         response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(kind));
         response
     };
@@ -399,8 +424,8 @@ fn unused(used: Result<bool>, media_id: &str) -> bool {
     }
 }
 
-/// Whether the server links to the picture: its icon, an emoji or a
-/// webhook's picture.
+/// Whether the server links to the file: its icon, an emoji, a webhook's
+/// picture or a message's attachment.
 async fn uses(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
     let used = async {
         let sdb = app.servers.get(server_id).await?;
@@ -411,8 +436,9 @@ async fn uses(app: &App, server_id: &str, media_id: &str) -> Result<bool> {
             &conn,
             "SELECT 1 FROM server WHERE icon_url LIKE ?1
              UNION ALL SELECT 1 FROM emojis WHERE url LIKE ?1
-             UNION ALL SELECT 1 FROM webhooks WHERE avatar_url LIKE ?1 LIMIT 1",
-            [link.as_str()],
+             UNION ALL SELECT 1 FROM webhooks WHERE avatar_url LIKE ?1
+             UNION ALL SELECT 1 FROM attachments WHERE media_id = ?2 LIMIT 1",
+            (link.as_str(), media_id),
             |r| r.get::<i64>(0),
         )
         .await
@@ -451,8 +477,13 @@ fn plain(status: StatusCode, message: &str) -> Response {
 /// picture it uses, still kept here.
 async fn takeable(app: &App, server_id: &str, media_id: &str) -> Result<crate::media::MediaRow> {
     let row = app.node()?.media(media_id).await?.ok_or(Error::NotFound("picture"))?;
-    let purpose =
-        matches!(row.purpose, pb::MediaPurpose::ServerIcon | pb::MediaPurpose::Emoji | pb::MediaPurpose::Avatar);
+    let purpose = matches!(
+        row.purpose,
+        pb::MediaPurpose::ServerIcon
+            | pb::MediaPurpose::Emoji
+            | pb::MediaPurpose::Avatar
+            | pb::MediaPurpose::Attachment
+    );
     if !row.stored || !row.used || !purpose || row.server_id.as_deref() != Some(server_id) {
         return Err(Error::FailedPrecondition("that picture isn't the server's".into()));
     }
@@ -473,7 +504,7 @@ pub async fn start_upload(app: &App, upload_hash: &str, server_id: &str) -> Resu
         app.delete_media(std::slice::from_ref(&row.id)).await?;
         return Err(Error::NotFound("upload link"));
     }
-    Ok(cpb::StartServerUploadResponse { media_id: row.id, size: row.size })
+    Ok(cpb::StartServerUploadResponse { media_id: row.id, size: row.size, purpose: row.purpose as i32 })
 }
 
 /// Records a server picture's upload its shard received, or drops it
@@ -492,11 +523,19 @@ pub async fn finish_upload(
     }
     match content_type {
         // Taking out its metadata only ever makes it smaller.
-        Some(kind) if crate::media::PICTURE_TYPES.contains(&kind) && (1..=row.size).contains(&size) => {
+        Some(kind) if kinds(row.purpose).contains(&kind) && (1..=row.size).contains(&size) => {
             node.finish_upload(&row.id, kind, size, crate::id::now_ms()).await
         }
         Some(_) => Err(Error::invalid("that isn't the picture that was reserved")),
         None => app.delete_media(std::slice::from_ref(&row.id)).await,
+    }
+}
+
+/// What an upload for this purpose may turn out to be.
+fn kinds(purpose: pb::MediaPurpose) -> &'static [&'static str] {
+    match purpose {
+        pb::MediaPurpose::Attachment => crate::media::ATTACHMENT_TYPES,
+        _ => crate::media::PICTURE_TYPES,
     }
 }
 

@@ -27,7 +27,7 @@ mod embedded {
     /// WebAssembly (the encryption direct messages use), and nothing else.
     /// Forms only ever submit here.
     const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; \
-        style-src 'self' 'unsafe-inline'; img-src * data: blob:; connect-src *; font-src 'self' data:; \
+        style-src 'self' 'unsafe-inline'; img-src * data: blob:; media-src * blob:; connect-src *; font-src 'self' data:; \
         object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 
     pub async fn serve(uri: Uri, headers: HeaderMap) -> Response {

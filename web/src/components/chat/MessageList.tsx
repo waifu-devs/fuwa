@@ -52,6 +52,7 @@ import { RoleName } from "@/components/RoleName";
 import { UserAvatar } from "@/components/Icons";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { Embeds } from "@/components/chat/Embeds";
+import { Attachments, PendingFiles } from "@/components/chat/Attachments";
 import { AppBadge } from "@/components/AppBadge";
 import { ServerTag, SharedNote } from "@/components/chat/Shared";
 import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
@@ -178,7 +179,7 @@ export const MessageList = forwardRef<
       wave: (username) => run(sendMessage(instanceKey, serverId, channel.id, `👋 @${username}`)),
       retry: (p) => {
         dismissPending(instanceKey, channel.id, p.nonce);
-        run(sendMessage(instanceKey, serverId, channel.id, p.content)).catch(() => {});
+        run(sendMessage(instanceKey, serverId, channel.id, p.content, p.files)).catch(() => {});
       },
       dismiss: (nonce) => dismissPending(instanceKey, channel.id, nonce),
       keepOut: async (userId, name) => {
@@ -653,6 +654,7 @@ const MessageRow = memo(function MessageRow({
                 (edited)
               </span>
             )}
+            <Attachments files={message.attachments} animate={animate} />
             <Embeds embeds={message.embeds} animate={animate} />
           </>
         )}
@@ -1115,7 +1117,10 @@ const PendingRow = memo(function PendingRow({
       className={cn("message-row flex gap-3 px-4", first && "first", display === "compact" && "compact")}
     >
       <MessageLine display={display} first={first} author={me} member={member} status="sending…">
-        <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive", blocked && "line-through decoration-destructive/50")} />
+        {pending.content && (
+          <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive", blocked && "line-through decoration-destructive/50")} />
+        )}
+        <PendingFiles files={pending.files ?? EMPTY} />
         {blocked ? (
           <motion.div
             initial={{ opacity: 0, y: -4, scale: 0.97 }}

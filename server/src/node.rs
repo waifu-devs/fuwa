@@ -26,6 +26,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/node/0010_sso.sql"),
     include_str!("../migrations/node/0011_regions.sql"),
     include_str!("../migrations/node/0012_federation.sql"),
+    include_str!("../migrations/node/0013_attachment_days.sql"),
 ];
 
 /// A server being moved from one shard to another (docs/regions.md).
@@ -878,6 +879,7 @@ impl NodeDb {
             conn.execute("DELETE FROM sign_in_tickets WHERE expires_at <= ?1", [now]).await?;
             conn.execute("DELETE FROM linked_sign_ins WHERE expires_at <= ?1", [now]).await?;
             conn.execute("DELETE FROM upload_days WHERE day < ?1", [now / DAY_MS]).await?;
+            conn.execute("DELETE FROM attachment_days WHERE day < ?1", [now / DAY_MS]).await?;
             Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now]).await?)
         })
         .await
@@ -1436,7 +1438,8 @@ impl NodeDb {
     // ───────────────────────── Uploaded pictures ─────────────────────────
 
     /// Reserves an upload, unless the account has too many going already or
-    /// has used up `bytes_per_day` today.
+    /// has used up `bytes_per_day` today (of pictures, or of attachments for
+    /// an attachment, which are counted apart).
     pub async fn reserve_media(
         &self,
         row: &MediaRow,
@@ -1444,21 +1447,27 @@ impl NodeDb {
         expires_at: i64,
         bytes_per_day: Option<i64>,
     ) -> Result<()> {
+        let (days, what) = match row.purpose {
+            pb::MediaPurpose::Attachment => ("attachment_days", "files"),
+            _ => ("upload_days", "pictures"),
+        };
         db::write(&self.db, async |conn| {
             let now = now_ms();
             // Every reservation writes the account's row for the day, so ones
             // made at once clash here and the counts below hold.
             let day = now / DAY_MS;
             conn.execute(
-                "INSERT INTO upload_days (account_id, day, bytes) VALUES (?1, ?2, ?3)
-                 ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes",
+                &format!(
+                    "INSERT INTO {days} (account_id, day, bytes) VALUES (?1, ?2, ?3)
+                     ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes"
+                ),
                 (row.account_id.as_str(), day, row.size),
             )
             .await?;
             if let Some(cap) = bytes_per_day {
                 let today = query_one(
                     conn,
-                    "SELECT bytes FROM upload_days WHERE account_id = ?1 AND day = ?2",
+                    &format!("SELECT bytes FROM {days} WHERE account_id = ?1 AND day = ?2"),
                     (row.account_id.as_str(), day),
                     |r| r.get::<i64>(0),
                 )
@@ -1466,7 +1475,7 @@ impl NodeDb {
                 .unwrap_or(0);
                 if today > cap {
                     return Err(Error::ResourceExhausted(format!(
-                        "you can upload {} of pictures a day here; try again tomorrow",
+                        "you can upload {} of {what} a day here; try again tomorrow",
                         crate::media::size_label(cap)
                     )));
                 }
@@ -1583,18 +1592,20 @@ impl NodeDb {
         .await
     }
 
-    /// A server's pictures in use: its icon, emoji and webhooks' pictures.
+    /// A server's files in use: its icon, emoji, webhooks' pictures and
+    /// messages' attachments.
     pub async fn server_media(&self, server_id: &str) -> Result<Vec<String>> {
         let conn = self.read()?;
         query_all(
             &conn,
             "SELECT id FROM media WHERE server_id = ?1 AND stored_at IS NOT NULL AND used_at IS NOT NULL
-             AND purpose IN (?2, ?3, ?4) ORDER BY id",
+             AND purpose IN (?2, ?3, ?4, ?5) ORDER BY id",
             (
                 server_id,
                 pb::MediaPurpose::ServerIcon as i64,
                 pb::MediaPurpose::Emoji as i64,
                 pb::MediaPurpose::Avatar as i64,
+                pb::MediaPurpose::Attachment as i64,
             ),
             |r| r.get::<String>(0),
         )
@@ -1686,7 +1697,14 @@ impl NodeDb {
     /// Deletes an account and everything node.db keeps about it.
     pub async fn delete_account(&self, account_id: &str) -> Result<()> {
         db::write(&self.db, async |conn| {
-            for table in ["sessions", "backup_codes", "sign_in_tickets", "notification_settings", "upload_days"] {
+            for table in [
+                "sessions",
+                "backup_codes",
+                "sign_in_tickets",
+                "notification_settings",
+                "upload_days",
+                "attachment_days",
+            ] {
                 conn.execute(&format!("DELETE FROM {table} WHERE account_id = ?1"), [account_id]).await?;
             }
             conn.execute("DELETE FROM accounts WHERE id = ?1", [account_id]).await?;

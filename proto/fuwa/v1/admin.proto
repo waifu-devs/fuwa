@@ -160,6 +160,12 @@ message InstanceSettings {
   bool federation = 34;
   // Instances this one never talks to, by host name (chat.example.com).
   repeated string federation_blocked_hosts = 35;
+  // The largest file one attachment upload may be; unset for no cap.
+  // FUWA_LIMIT_ATTACHMENT_UPLOAD.
+  optional int64 attachment_upload_bytes = 36;
+  // How many bytes of attachments one account may upload in a day (UTC);
+  // unset for no cap. FUWA_LIMIT_ATTACHMENT_UPLOADS_PER_DAY.
+  optional int64 attachment_upload_bytes_per_day = 37;
 }
 
 // One moderation provider, as the instance's admins set it up: one fuwa
