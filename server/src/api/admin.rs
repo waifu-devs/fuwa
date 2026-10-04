@@ -296,8 +296,8 @@ impl AdminService for Api {
                 if req.admin == Some(true) {
                     self.app.node()?.set_admin(&req.account_id, true).await?;
                 }
-                let by = viewer.account().map(|a| a.id.clone()).unwrap_or_else(|_| "operator".into());
-                tracing::info!(account = %req.account_id, admin = ?req.admin, disabled = ?req.disabled, by = %by, "account updated by an admin");
+                // No account ids: these logs can be public.
+                tracing::info!(admin = ?req.admin, disabled = ?req.disabled, "account updated by an admin");
                 let summary = self.app.node()?.account_summary(&req.account_id).await?.ok_or(Error::NotFound("account"))?;
                 Ok(pb::UpdateAccountResponse { account: Some(self.account_summary_pb(summary)) })
             }
@@ -323,7 +323,7 @@ impl AdminService for Api {
                 let password = auth::temporary_password();
                 let hash = auth::hash_password(password.clone()).await?;
                 self.app.node()?.reset_password(&account.id, &hash, req.turn_off_two_factor).await?;
-                tracing::info!(account = %account.id, two_factor_off = req.turn_off_two_factor, "password reset by an admin");
+                tracing::info!(two_factor_off = req.turn_off_two_factor, "password reset by an admin");
                 Ok(pb::ResetAccountPasswordResponse { password })
             }
             .await,
