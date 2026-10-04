@@ -137,7 +137,17 @@ pub fn message(m: &pb::Message, authors: &HashMap<&str, &pb::User>) -> Value {
     let attachments: Vec<Value> = m
         .attachments
         .iter()
-        .map(|a| trim(json!({ "filename": a.filename, "content_type": a.content_type, "size": a.size, "url": a.url })))
+        .map(|a| {
+            trim(json!({
+                "filename": a.filename,
+                "content_type": a.content_type,
+                "size": a.size,
+                "url": a.url,
+                // 0 is unknown.
+                "width": (a.width > 0).then_some(a.width),
+                "height": (a.height > 0).then_some(a.height),
+            }))
+        })
         .collect();
     let embeds: Vec<Value> = m
         .embeds
@@ -293,5 +303,38 @@ mod tests {
         let shown = message(&m, &HashMap::new());
         assert_eq!(shown["gif"], json!({ "url": "/media/g", "width": 320, "height": 240, "provider": "giphy" }));
         assert!(!shown.to_string().contains("secret"), "never the seal");
+    }
+
+    #[test]
+    fn attachments_show_as_members_see_them() {
+        let file = |name: &str, width: i32| pb::Attachment {
+            id: "f".into(),
+            filename: name.into(),
+            content_type: "image/png".into(),
+            size: 2048,
+            url: "https://fuwa.example/media/f".into(),
+            width,
+            height: width / 2,
+        };
+        let m = pb::Message {
+            id: "m".into(),
+            attachments: vec![file("cat.png", 640), file("dog.png", 0)],
+            ..Default::default()
+        };
+        let shown = message(&m, &HashMap::new());
+        assert_eq!(
+            shown["attachments"],
+            json!([
+                {
+                    "filename": "cat.png",
+                    "content_type": "image/png",
+                    "size": 2048,
+                    "url": "https://fuwa.example/media/f",
+                    "width": 640,
+                    "height": 320,
+                },
+                { "filename": "dog.png", "content_type": "image/png", "size": 2048, "url": "https://fuwa.example/media/f" },
+            ])
+        );
     }
 }
