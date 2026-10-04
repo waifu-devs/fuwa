@@ -60,6 +60,26 @@ service DirectMessageService {
   // listening; anything from before then, read with ListConversations and
   // ListRecords. A response with nothing set is a heartbeat.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
+
+  // Message backup: what the account's devices read here and in secure
+  // channels, encrypted on the device with a recovery key the instance never
+  // sees, kept as parts in order so a new device can read what came before
+  // it. See docs/e2ee.md.
+  //
+  // Whether the account has one, and its key check.
+  rpc GetBackup(GetBackupRequest) returns (GetBackupResponse);
+  // Starts a backup with a new recovery key. One the account already has is
+  // only replaced (its parts deleted) when the request says so.
+  rpc StartBackup(StartBackupRequest) returns (StartBackupResponse);
+  // Adds a part at the backup's next place. Refused with FAILED_PRECONDITION
+  // if the key check isn't the backup's current one (another device started
+  // it over), ALREADY_EXISTS if that place was taken (get the backup and seal
+  // the part again for the next one), RESOURCE_EXHAUSTED if it's full.
+  rpc AddBackupPart(AddBackupPartRequest) returns (AddBackupPartResponse);
+  // Parts after a sequence, oldest first.
+  rpc ListBackupParts(ListBackupPartsRequest) returns (ListBackupPartsResponse);
+  // Deletes the backup and every part of it.
+  rpc DeleteBackup(DeleteBackupRequest) returns (DeleteBackupResponse);
 }
 
 // A device that takes part in encrypted conversations: one per signed-in
@@ -338,4 +358,130 @@ message DirectMessageText {
 message DirectMessageEdit {
   int64 sequence = 1;
   string content = 2;
+}
+
+// ───────────────────────── Message backup ─────────────────────────
+
+message Backup {
+  // HKDF-SHA256 of the recovery key (salt "fuwa backup v1", info "check"):
+  // lets a device tell it has the right key without the instance learning it.
+  bytes key_check = 1;
+  // Bytes in its parts, and how many there are.
+  int64 size = 2;
+  int64 parts = 3;
+  // The most it may hold, in bytes.
+  int64 max_size = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  // The place the next part takes: parts are numbered from 1, one after
+  // another, and each is sealed for its place.
+  int64 next_sequence = 7;
+}
+
+message GetBackupRequest {}
+
+message GetBackupResponse {
+  // Unset if the account has no backup.
+  Backup backup = 1;
+}
+
+message StartBackupRequest {
+  // 32 bytes.
+  bytes key_check = 1;
+  // Delete a backup the account already has and start over. An account can
+  // start a backup at most 6 times an hour.
+  bool replace = 2;
+}
+
+message StartBackupResponse {
+  Backup backup = 1;
+}
+
+message AddBackupPartRequest {
+  // The key check of the backup this part is for.
+  bytes key_check = 1;
+  // At most 256 KiB: a 12-byte nonce, then AES-256-GCM of a BackupPart.
+  bytes data = 2;
+  // Its place: the backup's next_sequence.
+  int64 sequence = 3;
+}
+
+message AddBackupPartResponse {
+  int64 sequence = 1;
+  Backup backup = 2;
+}
+
+message ListBackupPartsRequest {
+  int64 after_sequence = 1;
+  // 1 to 100; defaults to 50. Fewer come back if they'd pass 3 MiB.
+  int32 limit = 2;
+}
+
+message ListBackupPartsResponse {
+  repeated BackupPartData parts = 1;
+  bool has_more = 2;
+}
+
+message BackupPartData {
+  int64 sequence = 1;
+  bytes data = 2;
+}
+
+message DeleteBackupRequest {}
+
+message DeleteBackupResponse {}
+
+// What a backup part holds once a device opens it; never sent unencrypted.
+// Encrypted with AES-256-GCM under HKDF-SHA256 of the recovery key (salt
+// "fuwa backup v1", info "encrypt"), with "fuwa backup v1|<account id>|<its
+// sequence>" as associated data, so the instance can't move a part to
+// another place or account without it failing to open.
+message BackupPart {
+  repeated BackupItem items = 1;
+  // Zeros, so parts come in a few sizes and say little about what's in them.
+  bytes padding = 15;
+}
+
+// One line of a direct message or secure channel, as the device that read it
+// kept it. A later copy of the same line (same conversation and sequence)
+// replaces an earlier one if it was edited later or deleted.
+message BackupItem {
+  // The direct message's or secure channel's id.
+  string conversation_id = 1;
+  int64 sequence = 2;
+  // Unix ms, as the instance stamped the record.
+  int64 at_ms = 3;
+  string sender_id = 4;
+  string device_id = 5;
+  BackupItemKind kind = 6;
+  string content = 7;
+  int64 reply_to_sequence = 8;
+  int64 edited_at_ms = 9;
+  bool deleted = 10;
+  repeated BackupDevice added = 11;
+  repeated BackupDevice removed = 12;
+  // A secure channel message's signed form, for sharing history later.
+  SignedForm signed = 13;
+  SignedForm edit_signed = 14;
+  // Who passed it on, if it came as shared history.
+  string shared_by = 15;
+}
+
+enum BackupItemKind {
+  BACKUP_ITEM_KIND_UNSPECIFIED = 0;
+  BACKUP_ITEM_KIND_TEXT = 1;
+  BACKUP_ITEM_KIND_DEVICES = 2;
+  BACKUP_ITEM_KIND_RESET = 3;
+  BACKUP_ITEM_KIND_SETTING = 4;
+}
+
+message BackupDevice {
+  string user_id = 1;
+  string device_id = 2;
+}
+
+message SignedForm {
+  bytes payload = 1;
+  bytes signature = 2;
+  bytes signature_key = 3;
 }

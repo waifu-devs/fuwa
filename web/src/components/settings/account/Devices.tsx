@@ -8,6 +8,7 @@ import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { Count, SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
+import { MessageBackup } from "./MessageBackup";
 import { activeAgo, describeDevice, deviceName, type DeviceKind } from "@/lib/devices";
 import { useNow } from "@/lib/notifications";
 import { toast } from "@/lib/ui";
@@ -201,6 +202,8 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
           </motion.section>
         )}
       </AnimatePresence>
+
+      <MessageBackup instanceKey={instanceKey} />
     </div>
   );
 }

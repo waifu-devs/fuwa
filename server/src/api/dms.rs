@@ -30,6 +30,14 @@ const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_COMMIT_BYTES: usize = 512 * 1024;
 /// The most people or devices one call asks about.
 const MAX_LOOKUPS: usize = 100;
+/// The most one account's message backup holds.
+pub const MAX_BACKUP_BYTES: i64 = 64 * 1024 * 1024;
+/// The largest backup part.
+const MAX_BACKUP_PART_BYTES: usize = 256 * 1024;
+/// The most backup part bytes one ListBackupParts call returns.
+const MAX_BACKUP_LIST_BYTES: usize = 3 * 1024 * 1024;
+/// How long a key check is.
+const KEY_CHECK_BYTES: usize = 32;
 /// How often an idle stream gets a heartbeat, so proxies don't close it.
 const HEARTBEAT: Duration = Duration::from_secs(25);
 /// What an open stream gets when the instance stops.
@@ -96,6 +104,16 @@ fn deleted_user(id: &str) -> pb::User {
 }
 
 impl Api {
+    /// The caller, for message backups: people only (an agent reads nothing
+    /// encrypted).
+    async fn backup_owner(&self, metadata: &MetadataMap) -> Result<Account> {
+        let account = self.account(metadata).await?;
+        if account.kind == pb::AccountKind::Agent {
+            return Err(Error::FailedPrecondition(AGENTS_HAVE_NO_DMS.into()));
+        }
+        Ok(account)
+    }
+
     /// The caller and the device their session registered.
     async fn on_device(&self, metadata: &MetadataMap) -> Result<OnDevice> {
         let caller = self.caller(metadata).await?;
@@ -542,6 +560,94 @@ impl DirectMessageService for Api {
                 let conversation = dms.conversation_of(&account.id, &req.conversation_id).await?;
                 dms.delete_record(&account.id, &conversation.id, req.sequence).await?;
                 Ok(pb::DeleteRecordResponse {})
+            }
+            .await,
+        )
+    }
+
+    async fn get_backup(
+        &self,
+        request: Request<pb::GetBackupRequest>,
+    ) -> Result<Response<pb::GetBackupResponse>, Status> {
+        respond(
+            async {
+                let account = self.backup_owner(request.metadata()).await?;
+                let backup = self.app.dms()?.backup(&account.id).await?;
+                Ok(pb::GetBackupResponse { backup: backup.map(|b| b.to_pb(MAX_BACKUP_BYTES)) })
+            }
+            .await,
+        )
+    }
+
+    async fn start_backup(
+        &self,
+        request: Request<pb::StartBackupRequest>,
+    ) -> Result<Response<pb::StartBackupResponse>, Status> {
+        respond(
+            async {
+                let account = self.backup_owner(request.metadata()).await?;
+                let req = request.get_ref();
+                if req.key_check.len() != KEY_CHECK_BYTES {
+                    return Err(Error::invalid(format!("a key check is {KEY_CHECK_BYTES} bytes")));
+                }
+                let backup = self.app.dms()?.start_backup(&account.id, &req.key_check, req.replace).await?;
+                Ok(pb::StartBackupResponse { backup: Some(backup.to_pb(MAX_BACKUP_BYTES)) })
+            }
+            .await,
+        )
+    }
+
+    async fn add_backup_part(
+        &self,
+        request: Request<pb::AddBackupPartRequest>,
+    ) -> Result<Response<pb::AddBackupPartResponse>, Status> {
+        respond(
+            async {
+                let account = self.backup_owner(request.metadata()).await?;
+                let req = request.get_ref();
+                if req.data.is_empty() || req.data.len() > MAX_BACKUP_PART_BYTES {
+                    return Err(Error::invalid(format!("a backup part is 1 to {} KiB", MAX_BACKUP_PART_BYTES / 1024)));
+                }
+                let backup = self
+                    .app
+                    .dms()?
+                    .add_backup_part(&account.id, &req.key_check, req.sequence, &req.data, MAX_BACKUP_BYTES)
+                    .await?;
+                Ok(pb::AddBackupPartResponse { sequence: req.sequence, backup: Some(backup.to_pb(MAX_BACKUP_BYTES)) })
+            }
+            .await,
+        )
+    }
+
+    async fn list_backup_parts(
+        &self,
+        request: Request<pb::ListBackupPartsRequest>,
+    ) -> Result<Response<pb::ListBackupPartsResponse>, Status> {
+        respond(
+            async {
+                let account = self.backup_owner(request.metadata()).await?;
+                let req = request.get_ref();
+                let limit = match req.limit {
+                    0 => 50,
+                    n => i64::from(n.clamp(1, 100)),
+                };
+                let (parts, has_more) =
+                    self.app.dms()?.backup_parts(&account.id, req.after_sequence, limit, MAX_BACKUP_LIST_BYTES).await?;
+                Ok(pb::ListBackupPartsResponse { parts, has_more })
+            }
+            .await,
+        )
+    }
+
+    async fn delete_backup(
+        &self,
+        request: Request<pb::DeleteBackupRequest>,
+    ) -> Result<Response<pb::DeleteBackupResponse>, Status> {
+        respond(
+            async {
+                let account = self.backup_owner(request.metadata()).await?;
+                self.app.dms()?.delete_backup(&account.id).await?;
+                Ok(pb::DeleteBackupResponse {})
             }
             .await,
         )
