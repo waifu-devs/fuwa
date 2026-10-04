@@ -31,6 +31,10 @@ like, hosted or self-hosted, over the same protocol.
   channel, like Slack Connect: both admins agree, the messages live only on
   the server that shared it, and each side keeps its own roles and
   moderators. See [docs/shared-channels.md](docs/shared-channels.md).
+- **Profile effects.** Petals, starfall, sparkles, confetti and more over
+  your profile card: a short intro when it opens, then a gentle loop, drawn
+  by the app in your theme's colors. Viewers and instances can turn them off.
+  See [docs/profile-effects.md](docs/profile-effects.md).
 - **Usage tracked, limits optional.** Every server counts its members, channels,
   messages and storage. Limits are off unless the operator sets them.
 - **Live by design.** Every change is an event in the server's log; clients
@@ -127,6 +131,7 @@ the log filter are read only from the environment.
 | `FUWA_SERVER_CREATION` | `everyone` | Who can create servers: `everyone`, `admins`, `off` |
 | `FUWA_AGENT_CREATION` | `everyone` | Who can make agents (accounts programs drive): `everyone`, `admins`, `off` |
 | `FUWA_SHARED_CHANNELS` | `on` | Servers sharing a text channel with another server on this instance ([docs/shared-channels.md](docs/shared-channels.md)); `off` stops new shares |
+| `FUWA_PROFILE_EFFECTS` | `on` | People putting an animated effect on their profile card ([docs/profile-effects.md](docs/profile-effects.md)); `off` hides everyone's |
 | `FUWA_FEDERATION` | `off` | Talking to other fuwa instances with signed calls, for sharing channels across instances ([docs/federation.md](docs/federation.md)); needs an https `FUWA_PUBLIC_URL` |
 | `FUWA_FEDERATION_ALLOW_PRIVATE` | `off` | Lets federation reach private, loopback and internal addresses and plain http, for tests and private deployments |
 | `FUWA_ADMIN_TOKEN` | unset | A bearer token with instance-admin rights, for scripts or a control plane (32+ characters) |
@@ -332,6 +337,10 @@ until their owner marks them public: then any server's managers can add them
 by username. They talk with the roles they're given, show an AGENT badge,
 can't own servers or use direct messages, and go away with the person who
 made them.
+
+For JavaScript and TypeScript, the [`@waifu-devs/fuwa`](sdk/) SDK does the
+rest: typed clients, commands and mentions, and an event stream that
+reconnects and catches up by itself. See [docs/sdk.md](docs/sdk.md).
 
 Agents can be in voice channels too, hearing each person and talking back,
 without WebRTC: `CallService.ListenVoice` streams everyone's sound as Opus
@@ -650,6 +659,9 @@ someone else. Releases attach an installer for each system (`.deb` and
 AppImage, `.dmg`, `-setup.exe`) and the bare `fuwa-desktop` program; to make
 the installers yourself, `cargo install cargo-packager --locked` and then
 `cargo build --release && cargo packager --release` in `desktop/`.
+
+The TypeScript SDK lives in [`sdk/`](sdk), generated from the same protocol;
+[docs/sdk.md](docs/sdk.md#working-on-the-sdk) has its commands.
 
 See [AGENTS.md](AGENTS.md) for how the code is laid out.
 
