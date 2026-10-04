@@ -165,6 +165,17 @@ message InstanceSettings {
   bool federation = 34;
   // Instances this one never talks to, by host name (chat.example.com).
   repeated string federation_blocked_hosts = 35;
+  // The longest voice message in direct messages, in seconds; unset for no
+  // cap. Apps stop recording there (the instance can't check, since it
+  // can't open them). FUWA_LIMIT_VOICE_MESSAGE_SECONDS.
+  optional int64 voice_message_seconds = 37;
+  // The biggest voice message, sealed, in bytes; unset for no cap.
+  // FUWA_LIMIT_VOICE_MESSAGE_BYTES.
+  optional int64 voice_message_bytes = 38;
+  // How many bytes of voice messages one account may upload a day (UTC);
+  // unset for no cap. Counted apart from pictures.
+  // FUWA_LIMIT_VOICE_MESSAGES_PER_DAY.
+  optional int64 voice_message_bytes_per_day = 45;
   // Agents may use this instance through MCP, at /mcp (docs/mcp.md). On
   // unless changed. FUWA_MCP.
   bool mcp = 36;
