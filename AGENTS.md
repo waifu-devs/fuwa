@@ -382,7 +382,10 @@
     (`instance_settings/sso.rs`: the identity provider, SAML metadata read
     by `core/sso.rs`, a test sign-in in the browser), Limits, Privacy,
     Calls and Moderation, where the providers servers' smart filters ask are set up
-    and tried, over `core/instance_admin.rs`, which names every setting's
+    and tried, and Other instances (`instance_settings/federation.rs`: the
+    switch for sharing channels with other instances, this instance's key,
+    checking another instance, who it has heard from and the blocked hosts),
+    over `core/instance_admin.rs`, which names every setting's
     path and keeps unsaved edits across a save; the pages are built from
     `instance_settings/controls.rs`, the web's `settings/controls.tsx`:
     a setting with its default and reset, option cards, caps; a cached view
