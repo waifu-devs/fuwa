@@ -1572,7 +1572,7 @@ impl NodeDb {
 
     /// Reserves an upload, unless the account has too many going already or
     /// has used up `bytes_per_day` today (of pictures, or of attachments for
-    /// an attachment, which are counted apart).
+    /// an attachment or a sealed file, which are counted apart).
     pub async fn reserve_media(
         &self,
         row: &MediaRow,
@@ -1581,7 +1581,9 @@ impl NodeDb {
         bytes_per_day: Option<i64>,
     ) -> Result<()> {
         let (days, what) = match row.purpose {
-            pb::MediaPurpose::Attachment => ("attachment_days", "files"),
+            // A sealed file may be anything (the instance can't open it), so
+            // it counts with attachments, whatever the app says it is.
+            pb::MediaPurpose::Attachment | pb::MediaPurpose::Sealed => ("attachment_days", "files"),
             _ => ("upload_days", "pictures"),
         };
         db::write(&self.db, async |conn| {
@@ -1589,17 +1591,14 @@ impl NodeDb {
             // Every reservation writes the account's row for the day, so ones
             // made at once clash here and the counts below hold.
             let day = now / DAY_MS;
-            // Sealed files are counted apart, in dms.db (Dms::count_sealed).
-            if row.purpose != pb::MediaPurpose::Sealed {
-                conn.execute(
-                    &format!(
-                        "INSERT INTO {days} (account_id, day, bytes) VALUES (?1, ?2, ?3)
-                         ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes"
-                    ),
-                    (row.account_id.as_str(), day, row.size),
-                )
-                .await?;
-            }
+            conn.execute(
+                &format!(
+                    "INSERT INTO {days} (account_id, day, bytes) VALUES (?1, ?2, ?3)
+                     ON CONFLICT (account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes"
+                ),
+                (row.account_id.as_str(), day, row.size),
+            )
+            .await?;
             if let Some(cap) = bytes_per_day {
                 let today = query_one(
                     conn,

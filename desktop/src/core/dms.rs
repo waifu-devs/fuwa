@@ -561,6 +561,15 @@ impl DmEngine {
             Some(Body::Text(text)) => {
                 let mut item = Item::new(seq, ItemKind::Text, at, sender_id, device_id);
                 item.content = clip(&text.content);
+                // Files open in the web app for now; here a line says they came.
+                if !text.files.is_empty() {
+                    let files = match text.files.len() {
+                        1 => "A file".to_string(),
+                        n => format!("{n} files"),
+                    };
+                    let line = format!("{files} came with this message, open it in the web app to see them");
+                    item.content = clip(&if item.content.is_empty() { line } else { format!("{}\n{line}", item.content) });
+                }
                 item.reply_to = text.reply_to_sequence;
                 let had = inner.vault.items(&id)?.iter().any(|i| i.seq == seq);
                 if !had && sender_id != self.me.id {

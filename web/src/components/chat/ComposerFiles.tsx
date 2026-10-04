@@ -141,7 +141,19 @@ function StagedCard({ where, staged }: { where: Where; staged: Staged }) {
  * Dropping them anywhere adds them to the next message. Off while a dialog
  * is open, which may take files of its own (a picture, a theme).
  */
-export function DropOverlay({ where, channelName }: { where: Where; channelName: string }) {
+export function DropOverlay({
+  where,
+  channelName,
+  onFiles,
+  note = "Up to 10 files with your next message.",
+}: {
+  where?: Where;
+  /** The channel they'll go to, or (starting with "@") the person. */
+  channelName: string;
+  /** Takes the dropped files instead of staging them for a channel. */
+  onFiles?: (files: File[]) => void;
+  note?: string;
+}) {
   const [over, setOver] = useState(false);
   useEffect(() => {
     let depth = 0;
@@ -166,7 +178,9 @@ export function DropOverlay({ where, channelName }: { where: Where; channelName:
       setOver(false);
       if (e.defaultPrevented || !files(e)) return;
       e.preventDefault();
-      addFiles(where.instanceKey, where.serverId, where.channelId, Array.from(e.dataTransfer?.files ?? []));
+      const dropped = Array.from(e.dataTransfer?.files ?? []);
+      if (onFiles) onFiles(dropped);
+      else if (where) addFiles(where.instanceKey, where.serverId, where.channelId, dropped);
     };
     window.addEventListener("dragenter", enter);
     window.addEventListener("dragleave", leave);
@@ -178,7 +192,7 @@ export function DropOverlay({ where, channelName }: { where: Where; channelName:
       window.removeEventListener("dragover", hover);
       window.removeEventListener("drop", drop);
     };
-  }, [where.instanceKey, where.serverId, where.channelId]);
+  }, [where?.instanceKey, where?.serverId, where?.channelId, onFiles]);
   return (
     <AnimatePresence>
       {over && (
@@ -203,8 +217,8 @@ export function DropOverlay({ where, channelName }: { where: Where; channelName:
             >
               <UploadIcon className="size-7" />
             </motion.span>
-            <p className="text-lg font-extrabold">Drop to send in #{channelName}</p>
-            <p className="text-sm text-muted-foreground">Up to 10 files with your next message.</p>
+            <p className="text-lg font-extrabold">Drop to send in {channelName.startsWith("@") ? channelName : `#${channelName}`}</p>
+            <p className="text-sm text-muted-foreground">{note}</p>
           </motion.div>
         </motion.div>
       )}

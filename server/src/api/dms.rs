@@ -538,13 +538,20 @@ impl Api {
             return Err(Error::invalid("that file is too small to be sealed"));
         }
         let settings = self.app.settings();
-        if let Some(cap) = settings.limits.voice_message_bytes
+        let limits = &settings.limits;
+        // The instance can't tell a voice message from any other file, so
+        // every sealed file is held to the attachment caps; a voice message
+        // to its own as well.
+        let voice = req.kind() != pb::SealedKind::File;
+        let caps = [
+            (limits.attachment_upload_bytes, "files"),
+            (if voice { limits.voice_message_bytes } else { None }, "voice messages"),
+        ];
+        if let Some((cap, what)) =
+            caps.into_iter().filter_map(|(cap, what)| Some((cap?, what))).min_by_key(|(cap, _)| *cap)
             && req.size > cap
         {
-            return Err(Error::ResourceExhausted(format!(
-                "voice messages can be at most {} here",
-                media::size_label(cap)
-            )));
+            return Err(Error::ResourceExhausted(format!("{what} can be at most {} here", media::size_label(cap))));
         }
         let row = MediaRow {
             id: media::new_id(),
@@ -558,9 +565,12 @@ impl Api {
         };
         let token = crate::auth::new_token();
         let expires_at = now_ms() + media::UPLOAD_TTL_MS;
-        // Under their own daily cap, apart from pictures'.
-        self.app.dms()?.count_sealed(&account.id, req.size, settings.limits.voice_message_bytes_per_day).await?;
-        self.app.node()?.reserve_media(&row, &crate::auth::hash_token(&token), expires_at, None).await?;
+        // Voice messages under their own daily cap too, apart from pictures'.
+        if voice {
+            self.app.dms()?.count_sealed(&account.id, req.size, limits.voice_message_bytes_per_day).await?;
+        }
+        let per_day = limits.attachment_upload_bytes_per_day;
+        self.app.node()?.reserve_media(&row, &crate::auth::hash_token(&token), expires_at, per_day).await?;
         let base = &settings.public_url;
         Ok(pb::CreateSealedUploadResponse {
             upload_url: format!("{base}/media/upload/{token}"),

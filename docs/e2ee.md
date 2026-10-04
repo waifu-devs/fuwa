@@ -117,9 +117,11 @@ private keys are. It does see, and has to, to deliver:
 - which devices each account has (a label from the browser, like "Chrome on
   Windows", and their public keys);
 - which records are commits and which are messages, and when one is deleted;
-- which messages carry a sealed file (a voice message), and that file's size,
-  padded to 32 KiB steps: roughly how long it is, to within about eight
-  seconds.
+- which messages carry a sealed file (a voice message or files), how many,
+  and each file's size, padded: a voice message to 32 KiB steps (roughly how
+  long it is, to within about eight seconds), other files to steps of at most
+  about 6% (see [Files](#files)). Never their names, types, picture sizes or
+  contents.
 
 Deleting a message removes its ciphertext from the instance and leaves a gap;
 copies already on devices are removed from the screen when they see the
@@ -246,6 +248,62 @@ nothing behind for good; the app sends it again with the same file. The server s
 `web/src/components/voice/`, written so a server channel's composer and
 messages can use the same recorder and player.
 
+## Files
+
+Any file can go in an encrypted message (up to ten with one message, with an
+optional caption), sealed on the device like a voice message but **in
+chunks**, so a big file never has to be opened all at once:
+
+- a new random AES-256-GCM key for that file alone, never used for anything
+  else;
+- the file is padded first (a 0x80 byte, then zeros): up to 64 KiB to the
+  next 4 KiB, above that to the next 1/16 of the power of two below its
+  size, so padding costs at most about 6% and the instance learns only which
+  step a file falls in;
+- the padded file is split into chunks (1 MiB from the web app; devices take
+  64 KiB to 8 MiB), and chunk *i* is sealed with the nonce of 4 zero bytes
+  then *i* as 8 big-endian bytes, with the top bit set on the last chunk (the
+  STREAM construction). The stored bytes are the sealed chunks one after
+  another, so a file cut short, extended, reordered or changed doesn't open.
+
+The file's id, key, the SHA-256 of the stored bytes, the chunk size, its name,
+type, size before padding and (for pictures) its width and height go in the
+encrypted text (`DirectMessageText.files`, `SealedFile`), so edits, replies,
+threads, signing in secure channels, shared history and the message backup
+(`BackupItem.files`) work as for any text. Uploads are reserved with
+`CreateSealedUpload` (`kind: SEALED_KIND_FILE`) in direct messages and as
+ordinary attachment uploads in secure channels; both take a PUT of the sealed
+bytes, served as `application/octet-stream`. Like every upload, a sealed file
+can be fetched by anyone who has its link; what they get is ciphertext.
+
+A device checks a file before fetching anything: the chunk size, that the
+stored size fits it, and at most 256 MiB from the web app (it holds the file
+in memory while it opens it). It fetches by id from its own instance, never
+from a link in the message, reads no more than the size the message gave,
+checks the hash, then opens it chunk by chunk. File names lose any folders
+and any control or text-turning characters (such as the one that makes
+`gnp.exe` look like a picture) before they're shown or saved.
+
+Pictures and videos show inline once opened (on their own when they come on
+screen, up to 25 MiB; bigger ones on a click), but only when the opened
+file's own first bytes say it's PNG, JPEG, GIF, WebP, AVIF, MP4 or WebM:
+never by the type the sender gave. SVG, HTML, PDF and everything else is a
+card to download, saved as plain bytes under its cleaned name and never
+opened in a tab. With reduce motion on, a GIF or animated WebP shows its
+first frame until it's clicked. Nothing is ever made of a file by anyone
+else: no thumbnails, no scanning (AutoMod can't open them).
+
+Every sealed upload, voice message or file, counts toward the instance's
+caps on files (`attachment_upload_bytes` for one file on its sealed size,
+and `attachment_upload_bytes_per_day`, in node.db's `attachment_days` with
+ordinary attachments), since the instance can't tell what's inside; voice
+messages also keep their own caps. In a secure channel the files count
+toward the server's storage for files (`FUWA_LIMIT_ATTACHMENT_STORAGE`) and
+need Attach files. None is capped unless an admin sets it. The web app's side
+is `web/src/files/sealed.ts`, `web/src/e2ee/files.ts` and
+`web/src/components/dm/SealedFiles.tsx`; the desktop app says a message has
+files and leaves opening them to the web app for now.
+
 ## Calls
 
 Calls in direct messages are end-to-end encrypted with the same groups: each
@@ -268,5 +326,4 @@ devices of everyone the channel's permissions let see it. See
   changing what you need to compare.
 - **Backup cleanup.** A backup only grows until someone starts it over;
   rewriting it without deleted lines would keep it small and forget them.
-- **Group DMs**, search (it can only ever happen on the device), and
-  attachments other than voice messages (sealed files are the way in).
+- **Group DMs** and search (it can only ever happen on the device).

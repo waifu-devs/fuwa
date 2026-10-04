@@ -17,6 +17,7 @@ import {
 } from "@/gen/fuwa/v1/dm_pb";
 import { deriveKeys, formatRecoveryKey, newer, newRecoveryKey, open, paddingFor, parseRecoveryKey, sameBytes, seal, type BackupKeys } from "./backupkey";
 import * as vault from "./vault";
+import { filesOf, toSealedFiles } from "./files";
 import { toVoiceMessage, voiceOf } from "./voice";
 
 /**
@@ -82,6 +83,8 @@ function toBackup(i: vault.Item): BackupItem | null {
     inChannel: !!i.inChannel,
     locked: i.kind === "thread" && i.content === "locked",
     voice: i.voice ? toVoiceMessage(i.voice) : undefined,
+    // A deleted line's files are gone from the instance too.
+    files: i.deleted ? [] : toSealedFiles(i.files),
   });
 }
 
@@ -116,6 +119,7 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
     ...(threaded ? { thread, inChannel: b.inChannel } : {}),
     ...(kind === "thread" ? { content: b.locked ? "locked" : "unlocked" } : {}),
     voice: voice ?? undefined,
+    ...(kind === "text" && !b.deleted && b.files.length ? { files: filesOf(b.files) } : {}),
   };
 }
 

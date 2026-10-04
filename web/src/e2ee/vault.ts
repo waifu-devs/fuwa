@@ -87,6 +87,26 @@ export type Item = {
   inChannel?: boolean;
   /** A voice message: what fetching, opening and showing it takes. */
   voice?: Voice;
+  /** Files a text carries (its content is then their caption, maybe empty). */
+  files?: FileRef[];
+};
+
+/** A file inside an encrypted message, sealed in chunks: what fetching, opening and showing it takes. */
+export type FileRef = {
+  mediaId: string;
+  key: Uint8Array;
+  sha256: Uint8Array;
+  /** The stored (sealed) bytes. */
+  size: number;
+  chunkBytes: number;
+  /** Its name, cleaned. */
+  name: string;
+  /** What the sender said it is: shown as a hint, never trusted for previews. */
+  type: string;
+  width: number;
+  height: number;
+  /** Its size before padding, as the sender said (0: unknown). */
+  fileSize: number;
 };
 
 /** A voice message's sealed file and what it sounds like, from inside the encrypted message. */
@@ -98,6 +118,12 @@ export type Voice = {
   durationMs: number;
   waveform: Uint8Array;
 };
+
+/** What a line says, for previews and notifications: its text, or what files it carries. */
+export function lineText(i: Pick<Item, "content" | "files">): string {
+  if (i.content || !i.files?.length) return i.content;
+  return i.files.length === 1 ? `File: ${i.files[0]!.name}` : `${i.files.length} files`;
+}
 
 /** Something someone said: text or a voice message. */
 export const isMessage = (i: Pick<Item, "kind">) => i.kind === "text" || i.kind === "voice";

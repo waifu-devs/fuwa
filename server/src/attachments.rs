@@ -111,6 +111,49 @@ pub async fn add(conn: &turso::Connection, message: &pb::Message, now: i64) -> R
     Ok(())
 }
 
+/// What a secure channel's record is called in `attachments.message_id`:
+/// its files are kept like any message's, though only devices can open them.
+pub fn secure_key(channel_id: &str, sequence: i64) -> String {
+    format!("secure/{channel_id}/{sequence}")
+}
+
+/// Notes the sealed files a secure channel's new record carries, inside the
+/// write that stores it, and counts their bytes: [`add`] for a message the
+/// server can't read. Each is named by its id (its real name is sealed).
+pub async fn add_secure(
+    conn: &turso::Connection,
+    channel_id: &str,
+    sequence: i64,
+    files: &[Attached],
+    now: i64,
+) -> Result<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let key = secure_key(channel_id, sequence);
+    for file in files {
+        conn.execute("DELETE FROM loose_files WHERE media_id = ?1", [file.media_id.as_str()]).await?;
+        conn.execute(
+            "INSERT INTO attachments (media_id, message_id, channel_id, filename, content_type, size, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            (
+                file.media_id.as_str(),
+                key.as_str(),
+                channel_id,
+                file.filename.as_str(),
+                file.content_type.as_str(),
+                file.size,
+                now,
+            ),
+        )
+        .await?;
+    }
+    // Only their bytes: the count of attachments goes by messages, and these
+    // go with [`forget_message`] or [`forget_channel`], which take off bytes.
+    let bytes = files.iter().map(|f| f.size).sum();
+    store::add_usage(conn, UsageChange { attachment_bytes: bytes, ..Default::default() }).await
+}
+
 /// Lets go of a message's files, inside the write that deletes it, and takes
 /// their bytes off the totals. The files themselves go after the write
 /// ([`drop_soon`]).

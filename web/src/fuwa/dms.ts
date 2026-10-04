@@ -3,7 +3,9 @@ import { Effect } from "effect";
 import { dmEngine, DmError, type Content } from "@/e2ee/engine";
 import { engine } from "./sync";
 import { reportError, reportTiming, reportUsage } from "@/lib/reports";
-import type { Voice as VoiceFile } from "@/e2ee/vault";
+import type { FileRef, Voice as VoiceFile } from "@/e2ee/vault";
+import { cleanName, MAX_FILE_BYTES, MAX_FILES, openFile, sealFile } from "@/files/sealed";
+import { formatBytes } from "@/lib/format";
 import type { Loader } from "@/voice/player";
 import type { Clip } from "@/voice/recorder";
 import { open, seal } from "@/voice/seal";
@@ -132,12 +134,12 @@ type Outgoing = { clip: Clip; replyTo: number; uploaded?: VoiceFile };
 const clips = new Map<string, Outgoing>();
 
 /** Why a sealed upload's PUT failed, in words. */
-async function put(key: string, uploadUrl: string, bytes: Uint8Array<ArrayBuffer>) {
+async function put(key: string, uploadUrl: string, bytes: Uint8Array<ArrayBuffer>, what = "the voice message") {
   const path = URL.canParse(uploadUrl) ? new URL(uploadUrl).pathname : `/media/upload/${uploadUrl.slice(uploadUrl.lastIndexOf("/") + 1)}`;
   // Always to the instance's own address, whatever name it gave the link.
   const target = `${engine(key).url.replace(/\/+$/, "")}${path}`;
   const res = await fetch(target, { method: "PUT", body: bytes, credentials: "omit", referrerPolicy: "no-referrer" });
-  if (!res.ok) throw new DmError((await res.text().catch(() => "")).trim() || "the voice message didn't upload");
+  if (!res.ok) throw new DmError((await res.text().catch(() => "")).trim() || `${what} didn't upload`);
 }
 
 /**
@@ -199,8 +201,14 @@ async function sendVoice(key: string, id: string, out: Outgoing) {
   }
 }
 
-/** Sends a voice message that failed again, or text if it was text. */
+/** Sends a voice message or files that failed again, or text if it was text. */
 export async function retryPending(key: string, id: string, pending: PendingMessage) {
+  const files = outgoingFiles.get(pending.nonce);
+  if (pending.sealed) {
+    dismissPending(key, id, pending.nonce);
+    if (files) await sendFiles(key, id, files);
+    return;
+  }
   const saved = clips.get(pending.nonce);
   if (!pending.voice) return retryDm(key, id, pending);
   dismissDm(key, id, pending.nonce);
@@ -211,6 +219,7 @@ export async function retryPending(key: string, id: string, pending: PendingMess
 /** Drops a message that didn't send, and its recording. */
 export function dismissPending(key: string, id: string, nonce: string) {
   clips.delete(nonce);
+  outgoingFiles.delete(nonce);
   dismissDm(key, id, nonce);
 }
 
@@ -269,6 +278,155 @@ export function voiceLoader(key: string, voice: VoiceFile): Loader {
     reportTiming("dm.voice_open", performance.now() - started);
     return ogg;
   };
+}
+
+// ───────────────────────── Files ─────────────────────────
+
+/** Files waiting to go, by pending nonce, with what each already uploaded, so a failed send can try again. */
+type OutgoingFiles = { files: File[]; text: string; target?: ThreadTarget; uploaded: (FileRef | undefined)[] };
+const outgoingFiles = new Map<string, OutgoingFiles>();
+
+/** A picture's size in pixels, so its place is kept while it opens; 0s for anything else. */
+async function measure(file: File): Promise<{ width: number; height: number }> {
+  if (!file.type.startsWith("image/") || typeof createImageBitmap === "undefined") return { width: 0, height: 0 };
+  try {
+    const bitmap = await createImageBitmap(file);
+    const size = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return size;
+  } catch {
+    return { width: 0, height: 0 };
+  }
+}
+
+/** Why files can't go in one message, or null when they can. */
+export function cantSendFiles(files: File[]): string | null {
+  if (files.length > MAX_FILES) return `A message can carry at most ${MAX_FILES} files.`;
+  const big = files.find((f) => f.size > MAX_FILE_BYTES);
+  if (big) return `${cleanName(big.name)} is too big to send encrypted (at most ${formatBytes(MAX_FILE_BYTES)}).`;
+  return null;
+}
+
+/**
+ * Sends files (and a caption) in an encrypted conversation or secure
+ * channel: each sealed on this device under a key of its own, the sealed
+ * bytes uploaded, and the keys, names and types sent inside the encrypted
+ * message. It shows at once, faded, like text.
+ */
+export async function sendDmFiles(key: string, id: string, files: File[], text: string, target?: ThreadTarget) {
+  reportUsage("dm.files");
+  await sendFiles(key, id, { files, text, target, uploaded: [] });
+}
+
+async function sendFiles(key: string, id: string, out: OutgoingFiles) {
+  const nonce = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+  outgoingFiles.set(nonce, out);
+  setPending(key, id, (list) => [
+    ...list,
+    {
+      nonce,
+      content: out.text,
+      createdAt: Date.now(),
+      failed: null,
+      ...out.target,
+      sealed: out.files.map((f) => ({ name: cleanName(f.name), size: f.size })),
+    },
+  ]);
+  const started = performance.now();
+  try {
+    const problem = cantSendFiles(out.files);
+    if (problem) throw new DmError(problem);
+    const dms = ready(key);
+    const refs: FileRef[] = [];
+    for (const [n, file] of out.files.entries()) {
+      let ref = out.uploaded[n];
+      if (!ref) {
+        const [sealed, size] = await Promise.all([sealFile(file), measure(file)]);
+        const reserved = await dms.reserveUpload(id, sealed.bytes.length);
+        await put(key, reserved.uploadUrl, sealed.bytes, cleanName(file.name));
+        ref = {
+          mediaId: reserved.mediaId,
+          key: sealed.key,
+          sha256: sealed.sha256,
+          size: sealed.bytes.length,
+          chunkBytes: sealed.chunkBytes,
+          name: cleanName(file.name),
+          type: file.type.slice(0, 100),
+          width: size.width,
+          height: size.height,
+          fileSize: file.size,
+        };
+        out.uploaded[n] = ref;
+        // This device already has it: no need to fetch it back to show it.
+        keepOpenedFile(reserved.mediaId, file);
+      }
+      refs.push(ref);
+    }
+    try {
+      await dms.send(id, { text: out.text, files: refs, ...out.target });
+    } catch (err) {
+      // Swept (it waited over a day) or otherwise gone: upload them anew next time.
+      const code = err instanceof DmError ? null : toFuwaError(err).code;
+      if (code === Code.NotFound || code === Code.InvalidArgument || code === Code.AlreadyExists || code === Code.PermissionDenied) {
+        out.uploaded = [];
+      }
+      throw err;
+    }
+    reportTiming("dm.files_send", performance.now() - started);
+    outgoingFiles.delete(nonce);
+    setPending(key, id, (list) => list.filter((p) => p.nonce !== nonce));
+  } catch (err) {
+    reportError("files_send", "dm.files");
+    const problem = dmProblem(err);
+    setPending(key, id, (list) => list.map((p) => (p.nonce === nonce ? { ...p, failed: problem } : p)));
+  }
+}
+
+/** Files this device sent or opened lately, by media id, so showing them again doesn't fetch them again. */
+const openedFiles = new Map<string, Blob>();
+const OPENED_BYTES = 64 * 1024 * 1024;
+function keepOpenedFile(mediaId: string, blob: Blob) {
+  openedFiles.delete(mediaId);
+  openedFiles.set(mediaId, blob);
+  let total = 0;
+  for (const b of openedFiles.values()) total += b.size;
+  for (const [id, b] of openedFiles) {
+    if (total <= OPENED_BYTES || openedFiles.size <= 1) break;
+    openedFiles.delete(id);
+    total -= b.size;
+  }
+}
+
+/** Reads exactly `size` bytes of a file, stopping as soon as there are more. */
+async function readFile(body: ReadableStream<Uint8Array>, size: number): Promise<Uint8Array<ArrayBuffer>> {
+  try {
+    return await readExactly(body, size);
+  } catch {
+    throw new Error("this file isn't the one that was sent");
+  }
+}
+
+/**
+ * Fetches a file's sealed bytes from this instance (by id, never a link
+ * from the message) and opens them on this device. The size and chunks are
+ * checked before anything's fetched, so a message can't make this fetch
+ * more than it says.
+ */
+export async function openDmFile(key: string, file: FileRef): Promise<Blob> {
+  const mine = openedFiles.get(file.mediaId);
+  if (mine) return mine;
+  const started = performance.now();
+  const res = await fetch(`${engine(key).url.replace(/\/+$/, "")}/media/${file.mediaId}`, {
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+  });
+  if (res.status === 404) throw new Error("this file was deleted");
+  if (!res.ok || !res.body) throw new Error("this file couldn't be fetched");
+  const bytes = await readFile(res.body, file.size);
+  const blob = await openFile(bytes, file.key, file.sha256, file.chunkBytes);
+  reportTiming("dm.file_open", performance.now() - started);
+  keepOpenedFile(file.mediaId, blob);
+  return blob;
 }
 
 /** The instance's caps on voice messages (0 for none), asked once in a while. */

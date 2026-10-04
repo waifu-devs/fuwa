@@ -35,6 +35,7 @@ import {
   prepareConversation,
   retryPending,
   sendDm,
+  sendDmFiles,
   sendVoiceDm,
   voiceLimits,
   voiceLoader,
@@ -57,6 +58,9 @@ import { usePrefs, type MessageDisplay } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { VoiceMessage, VoiceProblem } from "@/components/voice/VoiceMessage";
 import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
+import { PendingFiles, SealedFiles } from "@/components/dm/SealedFiles";
+import { clearPicked, EncryptedAttach, PickedTray, pickFiles, usePicked } from "@/components/dm/EncryptedFiles";
+import { DropOverlay } from "@/components/chat/ComposerFiles";
 
 /** Messages from one person closer together than this share a header. */
 const GROUP_GAP_MS = 7 * 60 * 1000;
@@ -136,6 +140,8 @@ export function DmView({ instanceKey, conversationId }: { instanceKey: string; c
             placeholder={`Message @${partner?.username ?? "them"}`}
             promise="Only you two can read this"
             voice
+            files
+            dropTo={`@${partner?.username ?? "them"}`}
           />
           <EncryptionDialog open={sheet} onOpenChange={setSheet} instanceKey={instanceKey} conversation={conversation} />
         </>
@@ -592,7 +598,7 @@ const DmRow = memo(function DmRow({
           <EditBox initial={item.content} onCancel={actions.cancelEdit} onSave={(text) => actions.save(item.seq, text)} />
         ) : (
           <>
-            <MessageBody content={item.content} display={display} />
+            {(item.content || !item.files) && <MessageBody content={item.content} display={display} />}
             {item.editedAt > 0 && (
               <span className="text-[0.7rem] text-muted-foreground" title={formatFull(new Date(item.editedAt))}>
                 {" "}
@@ -608,6 +614,7 @@ const DmRow = memo(function DmRow({
                 shared
               </span>
             )}
+            {item.files && <SealedFiles instanceKey={instanceKey} files={item.files} animate={animate} />}
           </>
         )}
         {!editing && threads?.under(item)}
@@ -631,7 +638,7 @@ const DmRow = memo(function DmRow({
             </motion.span>
           ) : (
             <>
-              {item.kind === "text" && (
+              {item.kind === "text" && !!item.content && (
                 <ToolButton
                   label={copied ? "Copied" : "Copy text"}
                   onClick={() => {
@@ -788,8 +795,9 @@ function PendingDm({
         {pending.voice ? (
           <VoiceMessage id={`pending:${pending.nonce}`} durationMs={pending.voice.durationMs} waveform={pending.voice.waveform} load={null} pending />
         ) : (
-          <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive")} />
+          pending.content && <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive")} />
         )}
+        {pending.sealed && <PendingFiles files={pending.sealed} />}
         {pending.failed && (
           <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
             <span className="text-destructive first-letter:uppercase">{pending.failed.replace(/\.$/, "")}.</span>
@@ -820,6 +828,8 @@ export function EncryptedComposer({
   action,
   thread,
   voice = false,
+  files = false,
+  dropTo = "",
 }: {
   instanceKey: string;
   id: string;
@@ -828,6 +838,10 @@ export function EncryptedComposer({
   locked?: string;
   /** Offers voice messages (direct messages): the mic takes the send button's place while there's no text. */
   voice?: boolean;
+  /** Offers files, sealed on this device (where you may attach them). */
+  files?: boolean;
+  /** Where dropped files go, as shown ("@mika", or a channel's name); "" takes no drops (a thread panel). */
+  dropTo?: string;
   /** Shown where "Try again" is when you can't write; null for nothing. */
   action?: ReactNode;
   /** In a secure channel's thread: the thread's message, and the channel's name for "Also send to #channel". */
@@ -859,9 +873,11 @@ export function EncryptedComposer({
     el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`;
   }, [text]);
 
+  const picked = usePicked(draft);
   const content = text.trim();
   const tooLong = text.length > MAX_DM;
-  const ready = !!content && !tooLong && status === "ready";
+  const ready = (!!content || picked.length > 0) && !tooLong && status === "ready";
+  const takeFiles = useCallback((list: File[]) => pickFiles(draft, list), [draft]);
 
   function send() {
     if (!ready) return;
@@ -878,7 +894,12 @@ export function EncryptedComposer({
     });
     const target: ThreadTarget | undefined = thread && { thread: thread.parent, inChannel: alsoChannel };
     setAlsoChannel(false);
-    sendDm(instanceKey, id, content, target).catch((err: unknown) => setError(dmProblem(err)));
+    if (picked.length) {
+      clearPicked(draft);
+      void sendDmFiles(instanceKey, id, picked, content, target);
+    } else {
+      sendDm(instanceKey, id, content, target).catch((err: unknown) => setError(dmProblem(err)));
+    }
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -891,6 +912,10 @@ export function EncryptedComposer({
 
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
+      {files && dropTo && !blocked && status === "ready" && (
+        <DropOverlay channelName={dropTo} onFiles={takeFiles} note="Up to 10 files, encrypted on this device before they're sent." />
+      )}
+      <AnimatePresence initial={false}>{files && !blocked && picked.length > 0 && <PickedTray key="picked" draft={draft} files={picked} />}</AnimatePresence>
       <AnimatePresence mode="popLayout" initial={false}>
         {blocked ? (
           <motion.div
@@ -965,8 +990,9 @@ export function EncryptedComposer({
                 </motion.span>
               )}
             </AnimatePresence>
+            {files && <EncryptedAttach draft={draft} disabled={status !== "ready"} />}
             <TimestampPicker onPick={(token) => insertAtCaret(box, setText, token)} />
-            {voice && !content ? (
+            {voice && !content && !picked.length ? (
               <VoiceRecorder
                 maxMs={() => voiceLimits(instanceKey).then((l) => l.maxMs)}
                 onSend={(clip) => void sendVoiceDm(instanceKey, id, clip)}

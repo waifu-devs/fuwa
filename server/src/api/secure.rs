@@ -13,10 +13,12 @@ use tonic::{Request, Response, Status};
 
 use super::messages::{check_not_timed_out, check_slowmode};
 use super::{Api, Seat, respond};
+use crate::attachments;
 use crate::auth::Caller;
-use crate::db::{query_all, query_one};
+use crate::db::{is_unique_violation, query_all, query_one};
 use crate::error::{Error, Result};
 use crate::id::{millis, now_ms, timestamp};
+use crate::media;
 use crate::pb::{self, Permission, secure_channel_service_server::SecureChannelService};
 use crate::permissions;
 use crate::servers::{self as store, Audit, MEMBER_COLUMNS, Payload, ServerDb, UsageChange, load_channel, member_row};
@@ -359,6 +361,26 @@ impl Api {
         {
             return Err(Error::ResourceExhausted("this server is out of storage".into()));
         }
+        let files = match req.media_ids.is_empty() {
+            true => vec![],
+            false => {
+                seat.access.require_in(&channel.id, Permission::AttachFiles)?;
+                self.secure_files(&caller.account.id, &seat.sdb.id, &req.media_ids).await?
+            }
+        };
+        let file_bytes: i64 = files.iter().map(|f| f.size).sum();
+        let out_of_room = |limit: i64| {
+            Error::ResourceExhausted(format!(
+                "this server is out of room for files ({} in all)",
+                media::size_label(limit)
+            ))
+        };
+        if file_bytes > 0
+            && let Some(limit) = limits.attachment_bytes
+            && seat.sdb.usage().await?.attachment_bytes + file_bytes > limit
+        {
+            return Err(out_of_room(limit));
+        }
         let exempt = seat.access.has_in(&channel.id, Permission::ManageMessages)
             || seat.access.has_in(&channel.id, Permission::ManageChannels);
         let record = seat
@@ -370,6 +392,13 @@ impl Api {
                 }
                 if !exempt {
                     check_slowmode(conn, &channel, &caller.account.id, now_ms()).await?;
+                }
+                // Checked again here, where no other message can take the room meanwhile.
+                if file_bytes > 0
+                    && let Some(limit) = limits.attachment_bytes
+                    && store::usage_count(conn, "attachment_bytes").await? + file_bytes > limit
+                {
+                    return Err(out_of_room(limit));
                 }
                 let record = append(
                     conn,
@@ -386,6 +415,14 @@ impl Api {
                     events,
                 )
                 .await?;
+                attachments::add_secure(conn, &channel.id, record.sequence, &files, now_ms()).await.map_err(|err| {
+                    match err {
+                        err if is_unique_violation(&err) => {
+                            Error::AlreadyExists("that file is already in a message".into())
+                        }
+                        err => err,
+                    }
+                })?;
                 store::add_usage(
                     conn,
                     UsageChange {
@@ -399,7 +436,55 @@ impl Api {
                 Ok(record)
             })
             .await?;
+        // Kept past the sweep for unused uploads, like any message's files.
+        for file in &files {
+            self.app.keep_picture(Some(&file.media_id), Some(&seat.sdb.id)).await;
+        }
         Ok(pb::PostSecureMessageResponse { record: Some(record) })
+    }
+}
+
+impl Api {
+    /// Checks the sealed files a secure message carries: each one an
+    /// attachment upload of the sender's for this server, whole, in it once.
+    /// The server can't open them, so each is kept under its id alone.
+    async fn secure_files(
+        &self,
+        account_id: &str,
+        server_id: &str,
+        ids: &[String],
+    ) -> Result<Vec<attachments::Attached>> {
+        if ids.len() > crate::sealed::MAX_PER_MESSAGE {
+            return Err(Error::invalid(format!(
+                "a message can carry at most {} files",
+                crate::sealed::MAX_PER_MESSAGE
+            )));
+        }
+        let base = self.app.settings().public_url.clone();
+        let mut files: Vec<attachments::Attached> = Vec::with_capacity(ids.len());
+        for id in ids {
+            let Some(id) = media::parse_id(id) else {
+                return Err(Error::invalid("attach files by uploading them here first"));
+            };
+            if files.iter().any(|f| f.media_id == id) {
+                return Err(Error::invalid("that file is attached twice"));
+            }
+            let upload = self
+                .app
+                .check_upload(account_id, pb::MediaPurpose::Attachment, &format!("{base}/media/{id}"), Some(server_id))
+                .await?
+                .ok_or(Error::NotFound("uploaded file; upload it again"))?;
+            if upload.size < crate::sealed::MIN_BYTES {
+                return Err(Error::invalid("that file is too small to be sealed"));
+            }
+            files.push(attachments::Attached {
+                filename: id.clone(),
+                media_id: id,
+                content_type: upload.content_type,
+                size: upload.size,
+            });
+        }
+        Ok(files)
     }
 }
 
@@ -790,7 +875,7 @@ impl SecureChannelService for Api {
                 let seat = self.membership(&account, &req.server_id).await?;
                 let channel = secure_channel(&seat.sdb.read()?, &seat, &req.channel_id).await?;
                 let moderator = seat.access.has_in(&channel.id, Permission::ManageMessages);
-                seat.sdb
+                let files = seat.sdb
                     .write(&account.id, async |conn, events| {
                         let record = query_one(
                             conn,
@@ -813,7 +898,7 @@ impl SecureChannelService for Api {
                             return Err(Error::invalid("only messages can be deleted"));
                         }
                         if record.deleted_at.is_some() {
-                            return Ok(());
+                            return Ok(vec![]);
                         }
                         let deleted_by = (!own).then_some(account.id.as_str());
                         conn.execute(
@@ -821,6 +906,10 @@ impl SecureChannelService for Api {
                             (channel.id.as_str(), req.sequence, now_ms(), deleted_by),
                         )
                         .await?;
+                        // Its sealed files go with it, right after the write.
+                        let files =
+                            attachments::forget_message(conn, &attachments::secure_key(&channel.id, req.sequence))
+                                .await?;
                         if !own {
                             store::audit(
                                 conn,
@@ -839,9 +928,10 @@ impl SecureChannelService for Api {
                             sequence: req.sequence,
                             deleted_by: deleted_by.unwrap_or_default().to_string(),
                         }));
-                        Ok(())
+                        Ok(files)
                     })
                     .await?;
+                attachments::drop_soon(&self.app, &seat.sdb.id, files);
                 Ok(pb::DeleteSecureRecordResponse {})
             }
             .await,

@@ -36,9 +36,9 @@ service SecureChannelService {
   // VIEW_CHANNELS.
   rpc PostSecureCommit(PostSecureCommitRequest) returns (PostSecureCommitResponse);
   // Adds an encrypted message, for the current epoch like a commit.
-  // SEND_MESSAGES; slow mode applies.
+  // SEND_MESSAGES (and ATTACH_FILES with files); slow mode applies.
   rpc PostSecureMessage(PostSecureMessageRequest) returns (PostSecureMessageResponse);
-  // Deletes a message: its ciphertext goes, a gap stays. Your own, or anyone's
+  // Deletes a message: its ciphertext and files go, a gap stays. Your own, or anyone's
   // with MANAGE_MESSAGES.
   rpc DeleteSecureRecord(DeleteSecureRecordRequest) returns (DeleteSecureRecordResponse);
   // Starts the channel's encryption over, for when its group can't be
@@ -176,6 +176,12 @@ message PostSecureMessageRequest {
   string channel_id = 2;
   // An MLSMessage carrying an encrypted application message.
   bytes message = 3;
+  // Files the message carries, at most 10 (ATTACH_FILES): your own
+  // attachment uploads for this server (MediaService.CreateUpload with
+  // MEDIA_PURPOSE_ATTACHMENT), each sealed on the device first, not in
+  // another message yet. They count toward the server's room for files and
+  // go with the message, its channel or the server.
+  repeated string media_ids = 4;
 }
 
 message PostSecureMessageResponse {

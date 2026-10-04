@@ -23,6 +23,8 @@ import {
 } from "@/gen/fuwa/v1/dm_pb";
 import type { DmCall } from "@/gen/fuwa/v1/call_pb";
 import type { Device as DeviceInfo } from "@/gen/fuwa/v1/dm_pb";
+import { SealedKind } from "@/gen/fuwa/v1/dm_pb";
+import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
 import { SecureRecordKind } from "@/gen/fuwa/v1/secure_pb";
 import { Permission, type Event, type User } from "@/gen/fuwa/v1/types_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
@@ -32,6 +34,7 @@ import { BackupSync } from "./backup";
 import * as history from "./history";
 import * as threads from "./threads";
 import * as vault from "./vault";
+import { filesOf, toSealedFiles } from "./files";
 import { toVoiceMessage, voiceLength, voiceOf } from "./voice";
 import { loadE2ee, type Commit, type Device, type E2ee, type Processed, type WasmMember } from "./wasm";
 
@@ -61,6 +64,8 @@ const PAGE = 200;
 /** The server sends a heartbeat every 25 seconds; this long without anything means the stream is gone. */
 const SILENCE_MS = 70_000;
 const CALL = { timeoutMs: 20_000 };
+/** Reserving an upload can wait on the instance's daily counts. */
+const UPLOAD = { timeoutMs: 20_000 };
 /** The longest message, in characters, as the composer allows. */
 export const MAX_DM = 4000;
 
@@ -116,8 +121,10 @@ type Room = {
   welcome(): Promise<{ sequence: bigint; data: Uint8Array } | undefined>;
   groupInfo(): Promise<{ epoch: bigint; groupInfo: Uint8Array }>;
   commit(commit: Commit, welcome: boolean): Promise<Rec | undefined>;
-  /** Sends an encrypted message, with the sealed files it carries (direct messages only). */
+  /** Sends an encrypted message, with the sealed files it carries. */
   message(ciphertext: Uint8Array, mediaIds?: string[]): Promise<void>;
+  /** Reserves an upload for a sealed file of `size` stored bytes, to send here. */
+  upload(size: number): Promise<{ mediaId: string; uploadUrl: string }>;
   /** Whether earlier messages are passed on to devices added later (secure channels only), asked fresh. */
   shares(): Promise<boolean>;
   /** Passes earlier messages on, right after this device's commit that added devices. */
@@ -176,7 +183,7 @@ const ref = (m: WasmMember): vault.DeviceRef => ({ userId: m.userId, deviceId: m
 
 /** The plaintext of a message: what only the conversation's devices see. */
 export type Content =
-  | { text: string; replyTo?: number; thread?: number; inChannel?: boolean }
+  | { text: string; replyTo?: number; thread?: number; inChannel?: boolean; files?: vault.FileRef[] }
   | { edit: number; text: string }
   | { lock: number; locked: boolean }
   | { voice: vault.Voice; replyTo?: number };
@@ -196,9 +203,16 @@ function contentOf(content: Content): DirectMessageContent {
                 replyToSequence: BigInt(content.replyTo ?? 0),
                 threadSequence: BigInt(content.thread ?? 0),
                 inChannel: !!content.inChannel,
+                files: toSealedFiles(content.files),
               }),
             };
   return create(DirectMessageContentSchema, { body });
+}
+
+/** The files a text carries, checked; nothing for a text without any. */
+function filesField(list: Parameters<typeof filesOf>[0]): Pick<vault.Item, "files"> {
+  const files = filesOf(list);
+  return files.length ? { files } : {};
 }
 
 /** A thread reply's place, from what its sender wrote; nothing for a line that isn't one. */
@@ -564,12 +578,16 @@ export class DmEngine {
       message: async (message, mediaIds = []) => {
         await dms.postMessage({ conversationId: id, message, mediaIds }, CALL);
       },
+      upload: async (size) => {
+        const r = await dms.createSealedUpload({ conversationId: id, size: BigInt(size), kind: SealedKind.FILE }, UPLOAD);
+        return { mediaId: r.mediaId, uploadUrl: r.uploadUrl };
+      },
       shares: async () => false,
       history: async () => {},
       remove: async (seq) => {
         await dms.deleteRecord({ conversationId: id, sequence: BigInt(seq) }, CALL);
       },
-      notify: (i) => onDirectMessage(this.key, id, c.users.find((u) => u.id === i.senderId), i.content, i.at),
+      notify: (i) => onDirectMessage(this.key, id, c.users.find((u) => u.id === i.senderId), vault.lineText(i), i.at),
     };
   }
 
@@ -609,8 +627,16 @@ export class DmEngine {
             CALL,
           )
         ).record,
-      message: async (message) => {
-        await secure.postSecureMessage({ ...at, message }, CALL);
+      message: async (message, mediaIds = []) => {
+        await secure.postSecureMessage({ ...at, message, mediaIds }, CALL);
+      },
+      // An attachment upload for the server, like any channel's: only ever ciphertext here.
+      upload: async (size) => {
+        const r = await this.api.media.createUpload(
+          { purpose: MediaPurpose.ATTACHMENT, contentType: "application/octet-stream", size: BigInt(size), serverId: sc.serverId },
+          UPLOAD,
+        );
+        return { mediaId: r.media?.id ?? "", uploadUrl: r.uploadUrl };
       },
       shares: async () => {
         const { shareHistory } = await secure.getSecureChannel(at, CALL);
@@ -624,7 +650,7 @@ export class DmEngine {
       remove: async (seq) => {
         await secure.deleteSecureRecord({ ...at, sequence: BigInt(seq) }, CALL);
       },
-      notify: (i) => onSecureMessage(this.key, sc.serverId, id, i.senderId, i.content, i.at),
+      notify: (i) => onSecureMessage(this.key, sc.serverId, id, i.senderId, vault.lineText(i), i.at),
     };
   }
 
@@ -821,6 +847,7 @@ export class DmEngine {
           content: body.value.content.slice(0, MAX_DM),
           replyTo: Number(body.value.replyToSequence),
           ...(c.channel ? threadFields(body.value) : {}),
+          ...filesField(body.value.files),
           signed,
         }),
       );
@@ -944,6 +971,7 @@ export class DmEngine {
             content: body.value.content.slice(0, MAX_DM),
             replyTo: Number(body.value.replyToSequence),
             ...threadFields(body.value),
+            ...filesField(body.value.files),
             signed: o.signed,
             sharedBy: by,
           }),
@@ -1166,7 +1194,7 @@ export class DmEngine {
       if (c.channel && "voice" in content) throw new DmError("Voice messages can't be sent in secure channels yet.");
       await this.reconcile(c);
       const plaintext = c.channel ? this.signedContent(id, content) : encode(content);
-      const mediaIds = "voice" in content ? [content.voice.mediaId] : [];
+      const mediaIds = "voice" in content ? [content.voice.mediaId] : "files" in content ? (content.files ?? []).map((f) => f.mediaId) : [];
       for (let attempt = 0; ; attempt++) {
         const ciphertext = this.device.encrypt(id, plaintext);
         const hash = this.e2ee.sha256(ciphertext);
@@ -1183,6 +1211,13 @@ export class DmEngine {
       }
       await this.catchUp(id);
     }).finally(() => this.refresh(id).catch(() => {}));
+  }
+
+  /** Reserves an upload for a sealed file to send in a conversation or secure channel. */
+  async reserveUpload(id: string, size: number): Promise<{ mediaId: string; uploadUrl: string }> {
+    const c = this.room(id);
+    if (!c) throw new DmError("that conversation isn't here");
+    return c.upload(size);
   }
 
   /** Deletes a message you sent: from the instance, and from every device's copy. */
