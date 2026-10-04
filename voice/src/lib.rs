@@ -224,7 +224,12 @@ impl Speaker {
         while frames.peek().is_some() {
             let batch: Vec<Vec<u8>> = frames.by_ref().take(BATCH).collect();
             let session_id = self.session.lock().await.clone();
-            let request = pb::SpeakVoiceRequest { server_id: self.server_id.clone(), session_id, frames: batch, interrupt: false };
+            let request = pb::SpeakVoiceRequest {
+                server_id: self.server_id.clone(),
+                session_id,
+                frames: batch,
+                interrupt: false,
+            };
             let queued = match calls.speak_voice(request.clone()).await {
                 Ok(response) => response.into_inner().queued,
                 // Rejoining after a restart: give it a moment, once.
