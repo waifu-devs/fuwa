@@ -9,6 +9,7 @@
     { "id": "compatibility-dates", "date": "2026-10-04", "title": "Compatibility dates" },
     { "id": "polls", "date": "2026-10-04", "title": "Polls" },
     { "id": "rich-presence", "date": "2026-10-04", "title": "Showing what people are playing" },
-    { "id": "voice-messages", "date": "2026-10-04", "title": "Voice messages" }
+    { "id": "voice-messages", "date": "2026-10-04", "title": "Voice messages" },
+    { "id": "secure-threads", "date": "2026-10-04", "title": "Threads in secure channels" }
   ]
 }
