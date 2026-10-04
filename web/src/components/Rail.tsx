@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { CompassIcon, GlobeIcon, PlusIcon } from "lucide-react";
+import { CompassIcon, FolderMinusIcon, FolderPlusIcon, GlobeIcon, PlusIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
@@ -12,6 +12,9 @@ import { AppliedButton } from "@/components/join/Applied";
 import { Count, SPRING } from "@/components/motion";
 import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
+import { useContextMenu } from "@/components/ContextMenu";
+import { serverMenu } from "@/components/menus/server";
+import type { MenuIcon } from "@/lib/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -282,6 +285,18 @@ function ArrangedServers({ inst, active }: { inst: RailInstance; active?: string
     setMenuOpen(true);
   };
 
+  const newFolder = (id: string) => {
+    const next = folderOf(layout, id);
+    arrange(next, "rail.folder_create");
+    const made = next.find((e) => e.kind === "folder" && e.folder.servers[0] === id && e.folder.servers.length === 1);
+    if (made?.kind === "folder") setFolderOpen(inst.key, made.folder.id, true);
+  };
+  const leaveFolder = (id: string) => {
+    const at = layout.findIndex((e) => e.kind === "folder" && e.folder.servers.includes(id));
+    const after = layout[at + 1];
+    arrange(moveRail(layout, { kind: "server", id, folder: "", before: after ? keyOf(after) : null }), "rail.arrange");
+  };
+
   const server = (id: string, folder: string, n = 0) => {
     const s = byId.get(id);
     if (!s) return null;
@@ -294,9 +309,19 @@ function ArrangedServers({ inst, active }: { inst: RailInstance; active?: string
           data-folder={folder}
           data-rail-lifted={landingId() === id ? "" : undefined}
           className="w-full"
-          onContextMenu={(e) => openMenu(e, { kind: "server", id, folder })}
         >
-          <ServerButton inst={inst} server={s} active={active === id} />
+          <ServerButton
+            inst={inst}
+            server={s}
+            active={active === id}
+            folder={
+              inst.me
+                ? folder
+                  ? { label: "Take out of folder", icon: FolderMinusIcon, onSelect: () => leaveFolder(id) }
+                  : { label: "Put in a new folder", icon: FolderPlusIcon, onSelect: () => newFolder(id) }
+                : undefined
+            }
+          />
         </div>
       </Pop>
     );
@@ -341,17 +366,8 @@ function ArrangedServers({ inst, active }: { inst: RailInstance; active?: string
         onToggle={(id) => setFolderOpen(inst.key, id, !isOpen(id))}
         onEdit={setEditing}
         onDissolve={(id) => arrange(editFolder(layout, id, null), "rail.folder_dissolve")}
-        onNewFolder={(id) => {
-          const next = folderOf(layout, id);
-          arrange(next, "rail.folder_create");
-          const made = next.find((e) => e.kind === "folder" && e.folder.servers[0] === id && e.folder.servers.length === 1);
-          if (made?.kind === "folder") setFolderOpen(inst.key, made.folder.id, true);
-        }}
-        onLeaveFolder={(id) => {
-          const at = layout.findIndex((e) => e.kind === "folder" && e.folder.servers.includes(id));
-          const after = layout[at + 1];
-          arrange(moveRail(layout, { kind: "server", id, folder: "", before: after ? keyOf(after) : null }), "rail.arrange");
-        }}
+        onNewFolder={newFolder}
+        onLeaveFolder={leaveFolder}
       />
       <FolderDialog
         folder={editingFolder?.kind === "folder" ? editingFolder.folder : null}
@@ -396,10 +412,21 @@ function Folder({
   );
 }
 
-function ServerButton({ inst, server, active }: { inst: RailInstance; server: Server; active: boolean }) {
+/** What a server's menu offers for your folders: put it in one, or take it out. */
+type FolderItem = { label: string; icon: MenuIcon; onSelect: () => void };
+
+function ServerButton({ inst, server, active, folder }: { inst: RailInstance; server: Server; active: boolean; folder?: FolderItem }) {
   const unread = useUnread(inst.key, [server.id]);
+  const menu = useContextMenu("server", () => {
+    const sections = serverMenu({ instanceKey: inst.key, server });
+    if (!folder) return sections;
+    // Your folders sit with the server's own settings, before its ID and Leave.
+    const at = sections.findIndex((s) => s.id === "developer" || s.id === "danger");
+    const entry = { id: "folder", items: [{ id: "folder", ...folder }] };
+    return at === -1 ? [...sections, entry] : [...sections.slice(0, at), entry, ...sections.slice(at)];
+  });
   return (
-    <RailItem label={server.name} active={active} unread={unread > 0} to="/$instance/$server" params={{ instance: inst.key, server: server.id }}>
+    <RailItem label={server.name} active={active} unread={unread > 0} to="/$instance/$server" params={{ instance: inst.key, server: server.id }} menu={menu}>
       <span className="relative">
         <ServerIcon server={server} active={active} />
         <AnimatePresence>
@@ -429,7 +456,10 @@ function RailItem({
   children,
   to,
   params,
+  menu,
 }: {
+  /** Right-click handlers, for a server's menu. */
+  menu?: ReturnType<typeof useContextMenu>;
   label: string;
   active: boolean;
   unread?: boolean;
@@ -458,7 +488,11 @@ function RailItem({
             aria-label={label}
             aria-current={active ? "page" : undefined}
             onClick={() => compact && setNavOpen(true)}
-            className={cn("rounded-[50%] outline-none focus-visible:ring-2 focus-visible:ring-ring", small && "my-0.5")}
+            {...menu}
+            className={cn(
+              "rounded-[50%] outline-none focus-visible:ring-2 focus-visible:ring-ring data-[menu-open]:ring-2 data-[menu-open]:ring-primary/60",
+              small && "my-0.5",
+            )}
           >
             {children}
           </Link>

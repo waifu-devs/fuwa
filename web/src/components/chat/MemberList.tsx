@@ -16,6 +16,7 @@ import { ProfilePopover } from "@/components/ProfilePopover";
 import { AppBadge } from "@/components/AppBadge";
 import { ActivityLine, PresenceDot } from "@/components/Presence";
 import { useOnline, usePresence } from "@/fuwa/presence";
+import { useMemberMenu } from "@/components/menus/member";
 import { displayName, formatStamp, isAgent, memberName, shownStatus, timedOutUntil } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
 import { colorOf, hoistedRole } from "@/lib/permissions";
@@ -195,6 +196,7 @@ const MemberRow = memo(function MemberRow({
   // Only this row redraws when this person's presence changes.
   const presence = usePresence(instanceKey, m.user?.id);
   const tracked = useOnline(instanceKey) !== null;
+  const menu = useMemberMenu(instanceKey, m.serverId, m.user, m);
   return (
     <motion.div
       initial={enter ? { opacity: 0, x: 16 } : false}
@@ -206,11 +208,11 @@ const MemberRow = memo(function MemberRow({
           present.has(m.user?.id ?? "") ? { opacity: 1, transition: { duration: 0 } } : { opacity: 0, x: 16 },
       }}
       transition={{ type: "spring", stiffness: 500, damping: 36 }}
-      className="row-y group flex items-center gap-1 rounded-lg px-2 transition hover:bg-muted/70"
+      className="row-y group flex items-center gap-1 rounded-lg px-2 transition hover:bg-muted/70 has-[[data-menu-open]]:bg-muted/70"
     >
       <span className={tracked && !presence ? "flex min-w-0 flex-1 items-center opacity-45 transition-opacity duration-300 group-hover:opacity-100" : "flex min-w-0 flex-1 items-center transition-opacity duration-300"}>
       <ProfilePopover instanceKey={instanceKey} user={m.user} member={m} side="left">
-        <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+        <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" {...menu}>
           <span className="relative shrink-0 transition duration-300 ease-[cubic-bezier(0.3,1.6,0.5,1)] group-hover:scale-105 group-active:scale-95">
             <UserAvatar user={m.user} className="size-8" />
             {tracked && <PresenceDot instanceKey={instanceKey} userId={m.user?.id} hideOffline className="absolute -right-0.5 -bottom-0.5" />}

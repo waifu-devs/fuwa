@@ -601,11 +601,25 @@ body {
   transition: opacity 0.15s ease, transform 0.2s cubic-bezier(0.3, 1.6, 0.5, 1), display 0.2s allow-discrete;
 }
 .message-row:hover .message-tools,
-.message-row:focus-within .message-tools { display: flex; opacity: 1; transform: none; }
+.message-row:focus-within .message-tools,
+.message-row[data-confirming] .message-tools { display: flex; opacity: 1; transform: none; }
+/* The message a right-click menu is open for stays lit while you pick. */
+.message-row[data-menu-open] { background: color-mix(in srgb, var(--muted) 70%, transparent); }
 @starting-style {
   .message-row:hover .gutter-time { opacity: 0; }
   .message-row:hover .message-tools,
-  .message-row:focus-within .message-tools { opacity: 0; transform: translateY(4px) scale(0.96); }
+  .message-row:focus-within .message-tools,
+  .message-row[data-confirming] .message-tools { opacity: 0; transform: translateY(4px) scale(0.96); }
+}
+
+/*
+ * Things with a right-click menu: a held finger opens it, so phones don't
+ * also pop their own callout, and holding a message doesn't start selecting
+ * its text (the menu copies it).
+ */
+[data-context-menu] { -webkit-touch-callout: none; }
+@media (pointer: coarse) {
+  .message-row[data-context-menu] { -webkit-user-select: none; user-select: none; }
 }
 
 /* Chat Markdown is tighter than a profile bio. */
