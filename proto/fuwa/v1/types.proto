@@ -29,6 +29,8 @@ message Node {
   AgentCreation agent_creation = 9;
   // Servers may share channels with each other here.
   bool shared_channels = 12;
+  // And with servers on other instances (docs/federation.md).
+  bool federation = 13;
   // Where this instance keeps community servers, the home region first.
   // Empty, or one region, when there's no choice to make (an instance run
   // as one process, or one whose parts are all in one place).
@@ -36,7 +38,7 @@ message Node {
   // A newer fuwa than this instance runs, when its check found one
   // (docs/self-hosting.md, "Updating"). Apps show it to instance admins;
   // nothing is ever updated by itself.
-  Release newer_release = 13;
+  Release newer_release = 14;
 }
 
 // A fuwa release, as GitHub lists it.

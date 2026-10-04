@@ -359,6 +359,71 @@ fn updates_are_found_through_the_instance_but_need_a_signature() {
     drop(instance.runtime);
 }
 
+#[test]
+fn instance_admins_manage_every_server() {
+    // SAFETY: set before anything reads it.
+    unsafe { std::env::set_var("FUWA_DESKTOP_KEYCHAIN", "off") };
+    let data = tempfile::tempdir().unwrap();
+    let instance = start_instance(data.path());
+    let home = tempfile::tempdir().unwrap();
+    let app = Core::start(Paths::under(home.path())).unwrap();
+    // The first account on an instance is its admin.
+    let key = {
+        let (core, url) = (app.clone(), instance.url.clone());
+        wait(&app, async move { core.sign_up(&url, "dana", "correct horse battery", "Dana").await }).unwrap()
+    };
+    until(&app, "signed in", |s| s.instance(&key).is_some_and(|i| i.me.is_some()));
+    let server = {
+        let (core, key) = (app.clone(), key.clone());
+        wait(&app, async move { core.create_server(&key, "Book Nook").await }).unwrap()
+    };
+    let listed = {
+        let (core, key) = (app.clone(), key.clone());
+        wait(&app, async move { core.list_instance_servers(&key).await }).unwrap()
+    };
+    assert_eq!(listed.len(), 1);
+    assert!(listed[0].member, "Dana made it");
+
+    // Its own caps; the ones left unset follow the instance's.
+    let (core, k, id) = (app.clone(), key.clone(), server.id.clone());
+    let own = wait(&app, async move {
+        let mut own = core.server_own_limits(&k, &id).await.unwrap();
+        own.members = Some(25);
+        own.storage_bytes = Some(1 << 30);
+        core.set_server_limits(&k, &id, own).await.unwrap();
+        core.server_own_limits(&k, &id).await.unwrap()
+    });
+    assert_eq!((own.members, own.storage_bytes, own.channels), (Some(25), Some(1 << 30), None));
+
+    // Its whole file arrives as a SQLite database, with progress on the way.
+    let path = home.path().join("book-nook.db");
+    let (core, k, id, to) = (app.clone(), key.clone(), server.id.clone(), path.clone());
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let progress = seen.clone();
+    let size = wait(&app, async move {
+        core.export_server(&k, &id, &to, move |f| progress.lock().unwrap().push(f)).await.unwrap()
+    });
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes.len() as u64, size);
+    assert!(bytes.starts_with(b"SQLite format 3\0"));
+    assert_eq!(seen.lock().unwrap().last().copied(), Some(1.0));
+
+    // A save that fails leaves the file it would have replaced as it was, and nothing beside it.
+    let (core, k, to) = (app.clone(), key.clone(), path.clone());
+    assert!(wait(&app, async move { core.export_server(&k, "01NOPE", &to, |_| {}).await }).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert!(!home.path().join("book-nook.db.part").exists());
+
+    // Deleting it takes it off the list.
+    let (core, k, id) = (app.clone(), key.clone(), server.id.clone());
+    wait(&app, async move { core.delete_any_server(&k, &id).await }).unwrap();
+    let (core, k) = (app.clone(), key.clone());
+    assert!(wait(&app, async move { core.list_instance_servers(&k).await }).unwrap().is_empty());
+
+    instance.app.shutdown.cancel();
+    drop(instance.runtime);
+}
+
 fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
     for entry in std::fs::read_dir(dir).unwrap().flatten() {

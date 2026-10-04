@@ -882,9 +882,14 @@ impl FuwaApp {
         self.menu = None;
         let core = self.core.clone();
         let view = cx.new(|cx| InstanceSettingsView::new(core, key.to_owned(), window, cx));
-        self._subscriptions.push(cx.subscribe_in(&view, window, |this: &mut Self, _, event, _, cx| {
+        let key = key.to_owned();
+        self._subscriptions.push(cx.subscribe_in(&view, window, move |this: &mut Self, _, event, window, cx| {
             match event {
                 InstanceSettingsEvent::Close => this.instance_settings = None,
+                InstanceSettingsEvent::OpenServer(server) => {
+                    this.instance_settings = None;
+                    this.navigate(Nav::Server { key: key.clone(), server: server.clone() }, window, cx);
+                }
                 InstanceSettingsEvent::Toast { icon, title } => {
                     this.toast(icon, title.clone(), String::new(), None, None, cx)
                 }
