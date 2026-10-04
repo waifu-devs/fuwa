@@ -4,8 +4,7 @@
 //! error (the way TCP finds a link's speed). Checks past that wait their
 //! turn; past [`MAX_WAITING`] waiting, a check isn't asked at all, and the
 //! message goes through the Smart filter unchecked, as when the provider is
-//! down. Each lane also learns how long its provider usually takes, which is
-//! how long a message waits for an answer before it's sent (see [`budget`]).
+//! down.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -20,10 +19,6 @@ const MOST: f64 = 64.0;
 pub const MAX_WAITING: usize = 256;
 /// An answer slower than this counts against the provider, like a timeout.
 const SLOW: Duration = Duration::from_secs(2);
-/// How long a message waits for its answer before it's sent: what the
-/// provider usually takes, plus a little, within these.
-const LEAST_WAIT: Duration = Duration::from_millis(150);
-const MOST_WAIT: Duration = Duration::from_millis(1000);
 
 #[derive(Debug)]
 struct State {
@@ -31,8 +26,6 @@ struct State {
     limit: f64,
     in_flight: usize,
     waiting: usize,
-    /// What answers usually take, in milliseconds; `None` before the first.
-    typical_ms: Option<f64>,
 }
 
 #[derive(Debug)]
@@ -48,10 +41,7 @@ fn lane(provider: &str) -> Arc<Lane> {
     lanes
         .entry(provider.to_string())
         .or_insert_with(|| {
-            Arc::new(Lane {
-                state: Mutex::new(State { limit: START, in_flight: 0, waiting: 0, typical_ms: None }),
-                freed: Notify::new(),
-            })
+            Arc::new(Lane { state: Mutex::new(State { limit: START, in_flight: 0, waiting: 0 }), freed: Notify::new() })
         })
         .clone()
 }
@@ -142,8 +132,6 @@ impl Turn {
         let mut state = self.lane.state();
         if ok && took <= SLOW {
             state.limit = (state.limit + 1.0 / state.limit).min(MOST);
-            let ms = took.as_secs_f64() * 1000.0;
-            state.typical_ms = Some(state.typical_ms.map_or(ms, |typical| typical * 0.8 + ms * 0.2));
         } else {
             state.limit = (state.limit / 2.0).max(1.0);
         }
@@ -160,14 +148,6 @@ impl Drop for Turn {
             self.lane.freed.notify_one();
         }
     }
-}
-
-/// How long a message waits for `provider`'s answer before it's sent
-/// without one (then it's checked right after): what the provider usually
-/// takes and a quarter more, from [`LEAST_WAIT`] to [`MOST_WAIT`].
-pub fn budget(provider: &str) -> Duration {
-    let typical = lane(provider).state().typical_ms;
-    typical.map_or(MOST_WAIT, |ms| Duration::from_secs_f64(ms * 1.25 / 1000.0).clamp(LEAST_WAIT, MOST_WAIT))
 }
 
 /// How many checks `provider` may have in flight now, for tests.
@@ -195,7 +175,6 @@ mod tests {
             turn(p, Duration::from_secs(1)).await.unwrap().finish(false);
         }
         assert_eq!(limit(p), 1);
-        assert!(budget(p) >= LEAST_WAIT && budget(p) <= MOST_WAIT);
     }
 
     #[tokio::test]
@@ -234,10 +213,5 @@ mod tests {
         assert_eq!(lane(p).state().waiting, 0);
         drop(held);
         assert_eq!(lane(p).state().in_flight, 0);
-    }
-
-    #[test]
-    fn a_new_provider_gets_the_longest_wait() {
-        assert_eq!(budget("test-new"), MOST_WAIT);
     }
 }
