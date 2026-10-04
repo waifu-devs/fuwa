@@ -912,10 +912,14 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
                 ..Default::default()
             },
         );
+        // It stops on the first failed keep and hands back why; the end of
+        // the test fails on it.
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(3)).await;
-                let _ = calls.keep_voice(authed(&juan, request.clone())).await;
+                if let Err(status) = calls.keep_voice(authed(&juan, request.clone())).await {
+                    return status;
+                }
             }
         })
     };
@@ -1087,6 +1091,7 @@ async fn cameras_come_in_the_size_each_viewer_wants() {
     let state = c.calls.keep_voice(authed(&mika, record)).await.unwrap().into_inner().state.unwrap();
     assert!(state.self_record && !state.record_suppress, "everyone sees Mika recording");
 
+    assert!(!keeper.is_finished(), "Juan lost his place: {:?}", keeper.await);
     keeper.abort();
     instance.app.shutdown.cancel();
     instance.serving.await.unwrap();
