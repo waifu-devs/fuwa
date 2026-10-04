@@ -10,6 +10,12 @@
 
 import type { Item, Note } from "./vault";
 
+/**
+ * A line once it's deleted: no text, and no signed copies either, since those
+ * hold the plaintext too.
+ */
+export const emptied = (i: Item): Item => ({ ...i, deleted: true, content: "", signed: undefined, editSigned: undefined });
+
 /** What a thread is, as this device can tell from the lines it has. */
 export type SecureThread = {
   /** The record of the message it's under. */
@@ -134,7 +140,7 @@ export function orphaned(items: Iterable<Item>, bySeq: ReadonlyMap<number, Item>
   const out: Item[] = [];
   for (const i of items) {
     if (i.kind !== "text" || i.deleted || !i.thread) continue;
-    if (bySeq.get(i.thread)?.deleted) out.push({ ...i, deleted: true, content: "" });
+    if (bySeq.get(i.thread)?.deleted) out.push(emptied(i));
   }
   return out;
 }
@@ -172,7 +178,7 @@ export async function forgetLine(io: Omit<Deleting, "remove">, seq: number, secu
     const all = await io.load();
     const before = all.find((i) => i.seq === seq);
     if (!before || before.deleted) return;
-    const gone = { ...before, deleted: true, content: "" };
+    const gone = emptied(before);
     const bySeq = new Map(all.map((i) => [i.seq, i]));
     bySeq.set(seq, gone);
     await io.write([gone, ...(secure ? orphaned(all, bySeq) : [])]);

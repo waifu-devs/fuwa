@@ -711,7 +711,7 @@ export class DmEngine {
     if (record.data.length === 0) {
       // Deleted before this device read it.
       const before = known.get(seq);
-      if (before && !before.deleted) put({ ...before, deleted: true, content: "" });
+      if (before && !before.deleted) put(threads.emptied(before));
       return;
     }
     const own = record.senderDeviceId === this.device.deviceId;

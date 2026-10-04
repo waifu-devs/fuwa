@@ -71,8 +71,9 @@ function toBackup(i: vault.Item): BackupItem | null {
     deleted: i.deleted,
     added: i.added.map((d) => create(BackupDeviceSchema, d)),
     removed: i.removed.map((d) => create(BackupDeviceSchema, d)),
-    signed: signedForm(i.signed),
-    editSigned: signedForm(i.editSigned),
+    // A deleted line's signed copies hold its text, so they never go in the backup.
+    signed: i.deleted ? undefined : signedForm(i.signed),
+    editSigned: i.deleted ? undefined : signedForm(i.editSigned),
     sharedBy: i.sharedBy ?? "",
     threadSequence: BigInt(i.thread ?? 0),
     inChannel: !!i.inChannel,
@@ -85,9 +86,10 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
   const seq = Number(b.sequence);
   const thread = Number(b.threadSequence);
   if (!kind || !b.conversationId || !(seq > 0)) return null;
-  // Thread replies and locks only exist in secure channels, whose lines are signed; a device takes a lock only signed.
-  const threaded = thread > 0 && !!b.signed;
-  if (kind === "thread" && !threaded) return null;
+  // Thread replies and locks only exist in secure channels, whose lines are signed (a deleted reply keeps its thread
+  // but not its signed copy); a device takes a lock only signed.
+  const threaded = thread > 0 && (!!b.signed || b.deleted);
+  if (kind === "thread" && !(thread > 0 && b.signed)) return null;
   return {
     vault: vaultKey,
     conversation: b.conversationId,
@@ -102,8 +104,8 @@ function fromBackup(vaultKey: string, b: BackupItem): vault.Item | null {
     deleted: b.deleted,
     added: b.added.map((d) => ({ userId: d.userId, deviceId: d.deviceId })),
     removed: b.removed.map((d) => ({ userId: d.userId, deviceId: d.deviceId })),
-    signed: fromSigned(b.signed),
-    editSigned: fromSigned(b.editSigned),
+    signed: b.deleted ? undefined : fromSigned(b.signed),
+    editSigned: b.deleted ? undefined : fromSigned(b.editSigned),
     sharedBy: b.sharedBy || undefined,
     ...(threaded ? { thread, inChannel: b.inChannel } : {}),
     ...(kind === "thread" ? { content: b.locked ? "locked" : "unlocked" } : {}),

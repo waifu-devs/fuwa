@@ -230,3 +230,12 @@ test("a lock on a deleted or missing message makes no thread", () => {
   assert.equal(organize([lock(5, "mod", 3)], mods).threads.size, 0);
   assert.equal(organize([line(1, "aoi", "parent"), lock(2, "mod", 1)], mods).threads.get(1)?.locked, true);
 });
+
+test("a deleted line keeps no signed copy of what it said", () => {
+  const signed = { payload: new Uint8Array([1]), signature: new Uint8Array([2]), key: new Uint8Array([3]) };
+  const items = [line(1, "aoi", "parent", { deleted: true }), line(2, "mika", "secret", { thread: 1, signed, editSigned: signed })];
+  const [dropped] = orphaned(items, new Map(items.map((i) => [i.seq, i])));
+  assert.equal(dropped.content, "");
+  assert.equal(dropped.signed, undefined);
+  assert.equal(dropped.editSigned, undefined);
+});
