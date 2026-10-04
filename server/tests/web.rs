@@ -14,6 +14,7 @@ async fn start(dir: &Path, web: &str) -> (std::sync::Arc<App>, SocketAddr) {
     let config = Config::from_lookup(|key| match key {
         "FUWA_DATA_PATH" => Some(dir.clone()),
         "FUWA_TELEMETRY" => Some("off".into()),
+        "FUWA_UPDATE_CHECK" => Some("off".into()),
         "FUWA_WEB" => Some(web.clone()),
         _ => None,
     })

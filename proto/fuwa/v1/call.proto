@@ -67,14 +67,17 @@ service CallService {
   // and closing it leaves. It ends with FAILED_PRECONDITION when you were
   // taken out of the call, or joined it from somewhere else; any other end
   // (the instance restarting) is worth opening again with the same
-  // `session_id`. The media part restarting doesn't end it. Voice channels
-  // only: calls in direct messages are end-to-end encrypted.
+  // `session_id`. The media part restarting doesn't end it. When nobody has
+  // said anything for a while a keepalive comes every 15 seconds, so a
+  // stream that stays quiet for much longer than that is gone. Voice
+  // channels only: calls in direct messages are end-to-end encrypted.
   rpc ListenVoice(ListenVoiceRequest) returns (stream ListenVoiceResponse);
   // Says something in the voice channel ListenVoice put you in: frames of
   // Opus, 48 kHz, 20 ms each (mono or stereo), which go out to everyone one
   // every 20 ms, in order. At most a second's worth (50 frames) may be
-  // waiting; send them about as fast as they play. Needs SPEAK and not
-  // being server muted (PERMISSION_DENIED otherwise).
+  // waiting; send them about as fast as they play. `interrupt` drops what's
+  // still waiting first, to stop talking when someone talks over you. Needs
+  // SPEAK and not being server muted (PERMISSION_DENIED otherwise).
   rpc SpeakVoice(SpeakVoiceRequest) returns (SpeakVoiceResponse);
 
   // A voice channel's recordings on the server, newest first, the one going
@@ -224,8 +227,13 @@ message ListenVoiceResponse {
     VoiceJoined joined = 1;
     // Someone's sound.
     VoiceFrame frame = 2;
+    // Nothing to pass on: sent every 15 seconds while no sound came, so
+    // the program can tell a quiet call from a stream that's gone.
+    VoiceKeepalive keepalive = 3;
   }
 }
+
+message VoiceKeepalive {}
 
 message VoiceJoined {
   string session_id = 1;
@@ -249,6 +257,9 @@ message SpeakVoiceRequest {
   string session_id = 2;
   // Each one Opus packet, 20 ms of sound.
   repeated bytes frames = 3;
+  // Drops the frames still waiting to go out before queueing these; with
+  // no frames, just stops talking.
+  bool interrupt = 4;
 }
 
 message SpeakVoiceResponse {
