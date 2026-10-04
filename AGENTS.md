@@ -527,6 +527,12 @@
     `<mark>` inside the one Markdown component. Jumping to a result goes
     through `requestJump`, which `MessageList` takes by loading older pages
     until the message is there.
+  - Right-click menus (`docs/context-menus.md` lists them for every app): one
+    menu at a time, `components/ContextMenu.tsx` (`useContextMenu` on the
+    element, `ContextMenuHost` draws it with the animated dropdown menu);
+    what's in each is data built in `components/menus/`, from the same
+    actions and permission checks as the buttons. Later features add items
+    with `extendMenu` (`lib/context-menu.ts`) instead of editing the menus.
   - `src/lib/prefs.ts`: app settings, which belong to this device and apply to
     every instance (theme, density, keybinds, streamer mode...). Settings of
     an instance or a server live on that instance instead.
