@@ -64,6 +64,7 @@ const FIELDS: { path: string; get: (s: InstanceSettings) => unknown }[] = [
   { path: "server_creation", get: (s) => s.serverCreation },
   { path: "agent_creation", get: (s) => s.agentCreation },
   { path: "shared_channels", get: (s) => s.sharedChannels },
+  { path: "mcp", get: (s) => s.mcp },
   { path: "profile_effects", get: (s) => s.profileEffects },
   { path: "servers_per_account", get: (s) => s.serversPerAccount },
   { path: "default_limits.members", get: (s) => s.defaultLimits?.members },
@@ -205,6 +206,7 @@ export function InstanceSettingsDialog({
                 { id: "server-creation", label: "Who can create servers" },
                 { id: "servers-per-account", label: "Servers per account" },
                 { id: "agent-creation", label: "Who can make agents", keywords: "bots integrations" },
+                { id: "mcp", label: "Agents through MCP", keywords: "mcp claude ai model context protocol" },
                 { id: "shared-channels", label: "Shared channels", keywords: "share connect servers slack connect" },
                 { id: "profile-effects", label: "Profile effects", keywords: "sparkles petals animation card decoration" },
               ],
@@ -478,6 +480,20 @@ export function InstanceSettingsDialog({
                 />
               </Setting>
               <Setting
+                id="mcp"
+                title="Agents through MCP"
+                defaultLabel={defaults.mcp ? "on" : "off"}
+                delay={0.22}
+                {...resetter("mcp")}
+              >
+                <Toggle
+                  checked={draft.mcp}
+                  onChange={(on) => patch((d) => (d.mcp = on))}
+                  label="Agents can use this instance as an MCP server"
+                  hint="AI apps such as Claude reach it at /mcp with an agent's token and get the same permissions the agent has. Server managers can still pick which agents may use theirs."
+                />
+              </Setting>
+              <Setting
                 id="shared-channels"
                 title="Shared channels"
                 defaultLabel={defaults.sharedChannels ? "on" : "off"}
@@ -723,6 +739,7 @@ const CREATION_LABEL: Record<number, string> = {
 const COPIED = [
   ...CALL_FIELDS,
   { path: "shared_channels", copy: (into: InstanceSettings, from: InstanceSettings) => (into.sharedChannels = from.sharedChannels) },
+  { path: "mcp", copy: (into: InstanceSettings, from: InstanceSettings) => (into.mcp = from.mcp) },
   { path: "profile_effects", copy: (into: InstanceSettings, from: InstanceSettings) => (into.profileEffects = from.profileEffects) },
 ];
 

@@ -7,11 +7,12 @@
  * and nowhere else. Signing out wipes it.
  *
  * Everything for one account on one instance shares a vault key,
- * "<instance>|<account id>".
+ * "<instance>|<account id>". With a message backup on, this device's
+ * recovery key is kept here too, with the lines the backup hasn't taken yet.
  */
 
 const DB = "fuwa-e2ee";
-const VERSION = 1;
+const VERSION = 2;
 
 /** One account's device on one instance. */
 export type StoredDevice = {
@@ -75,6 +76,12 @@ export type Item = {
   sharedBy?: string;
 };
 
+/** This device's hold on the account's message backup: the recovery key, which never leaves the browser. */
+export type StoredBackup = { vault: string; key: Uint8Array; check: Uint8Array };
+
+/** A line written since the backup last took it. */
+type Unbacked = { vault: string; conversation: string; seq: number };
+
 /** What this device sent, by the SHA-256 of its ciphertext: it can't open its own messages. */
 type Sent = { vault: string; hash: string; plaintext: Uint8Array; at: number };
 
@@ -83,12 +90,18 @@ let opening: Promise<IDBDatabase> | null = null;
 function open(): Promise<IDBDatabase> {
   opening ??= new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB, VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (e) => {
       const db = request.result;
-      db.createObjectStore("devices", { keyPath: "vault" });
-      db.createObjectStore("notes", { keyPath: ["vault", "conversation"] });
-      db.createObjectStore("items", { keyPath: ["vault", "conversation", "seq"] });
-      db.createObjectStore("sent", { keyPath: ["vault", "hash"] });
+      if (e.oldVersion < 1) {
+        db.createObjectStore("devices", { keyPath: "vault" });
+        db.createObjectStore("notes", { keyPath: ["vault", "conversation"] });
+        db.createObjectStore("items", { keyPath: ["vault", "conversation", "seq"] });
+        db.createObjectStore("sent", { keyPath: ["vault", "hash"] });
+      }
+      if (e.oldVersion < 2) {
+        db.createObjectStore("backup", { keyPath: "vault" });
+        db.createObjectStore("unbacked", { keyPath: ["vault", "conversation", "seq"] });
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("IndexedDB wouldn't open"));
@@ -156,34 +169,129 @@ export type Batch = {
   forgetSent?: string[];
 };
 
+/** Vaults whose new lines go to the message backup, and what to tell when some are written. */
+const backingUp = new Map<string, () => void>();
+
+/** Notes a vault's new lines for the message backup, calling `written` after each write that has some (or stops, with null). */
+export function setBackingUp(vault: string, written: (() => void) | null) {
+  if (written) backingUp.set(vault, written);
+  else backingUp.delete(vault);
+}
+
 export async function write(vault: string, batch: Batch): Promise<void> {
   const db = await open();
-  const tx = db.transaction(["devices", "notes", "items", "sent"], "readwrite");
+  const tx = db.transaction(["devices", "notes", "items", "sent", "unbacked"], "readwrite");
   if (batch.device) tx.objectStore("devices").put(batch.device);
   for (const note of batch.notes ?? []) tx.objectStore("notes").put(note);
-  for (const item of batch.items ?? []) tx.objectStore("items").put(item);
+  for (const item of batch.items ?? []) {
+    tx.objectStore("items").put(item);
+    if (backingUp.has(vault)) {
+      tx.objectStore("unbacked").put({ vault, conversation: item.conversation, seq: item.seq } satisfies Unbacked);
+    }
+  }
   const now = Date.now();
   for (const { hash, plaintext } of batch.sent ?? []) tx.objectStore("sent").put({ vault, hash, plaintext, at: now } satisfies Sent);
   for (const hash of batch.forgetSent ?? []) tx.objectStore("sent").delete([vault, hash]);
   await done(tx);
+  if (batch.items?.length) backingUp.get(vault)?.();
 }
 
 /** Forgets what was kept for one conversation or secure channel: how far it was read, and what it said. */
 export async function forget(vault: string, conversation: string): Promise<void> {
   const db = await open();
-  const tx = db.transaction(["notes", "items"], "readwrite");
+  const tx = db.transaction(["notes", "items", "unbacked"], "readwrite");
   tx.objectStore("notes").delete([vault, conversation]);
   tx.objectStore("items").delete(inConversation(vault, conversation));
+  tx.objectStore("unbacked").delete(inConversation(vault, conversation));
   await done(tx);
+}
+
+// ───────────────────────── Message backup ─────────────────────────
+
+export async function loadBackup(vault: string): Promise<StoredBackup | undefined> {
+  const db = await open();
+  return result(db.transaction("backup").objectStore("backup").get(vault) as IDBRequest<StoredBackup | undefined>);
+}
+
+/** Keeps this device's recovery key, and notes every line it has so far for the backup. */
+export async function keepBackup(backup: StoredBackup, everything: boolean): Promise<void> {
+  const db = await open();
+  const tx = db.transaction(["backup", "items", "unbacked"], "readwrite");
+  tx.objectStore("backup").put(backup);
+  if (everything) {
+    const keys = await result(tx.objectStore("items").getAllKeys(inVault(backup.vault)));
+    for (const key of keys as [string, string, number][]) {
+      tx.objectStore("unbacked").put({ vault: backup.vault, conversation: key[1], seq: key[2] } satisfies Unbacked);
+    }
+  }
+  await done(tx);
+}
+
+/** Forgets this device's recovery key and what was waiting for the backup. */
+export async function dropBackup(vault: string): Promise<void> {
+  const db = await open();
+  const tx = db.transaction(["backup", "unbacked"], "readwrite");
+  tx.objectStore("backup").delete(vault);
+  tx.objectStore("unbacked").delete(inVault(vault));
+  await done(tx);
+}
+
+/** Up to `limit` lines waiting for the backup, with what they say now (gone ones as null). */
+export async function loadUnbacked(vault: string, limit: number): Promise<{ key: [string, string, number]; item: Item | null }[]> {
+  const db = await open();
+  const tx = db.transaction(["unbacked", "items"]);
+  const keys = (await result(tx.objectStore("unbacked").getAllKeys(inVault(vault), limit))) as [string, string, number][];
+  return Promise.all(
+    keys.map(async (key) => ({ key, item: ((await result(tx.objectStore("items").get(key))) as Item | undefined) ?? null })),
+  );
+}
+
+/** Notes lines as taken by the backup. */
+export async function markBacked(keys: [string, string, number][]): Promise<void> {
+  const db = await open();
+  const tx = db.transaction("unbacked", "readwrite");
+  for (const key of keys) tx.objectStore("unbacked").delete(key);
+  await done(tx);
+}
+
+/**
+ * Keeps lines from the backup and counts them as read (another device read
+ * them), changing nothing else about where this device stands, in one go.
+ */
+export async function writeRestored(vault: string, items: Item[]): Promise<void> {
+  const db = await open();
+  const tx = db.transaction(["notes", "items"], "readwrite");
+  const latest = new Map<string, number>();
+  for (const item of items) {
+    tx.objectStore("items").put(item);
+    latest.set(item.conversation, Math.max(latest.get(item.conversation) ?? 0, item.seq));
+  }
+  for (const [conversation, seq] of latest) {
+    const request = tx.objectStore("notes").get([vault, conversation]) as IDBRequest<Note | undefined>;
+    request.onsuccess = () => {
+      const note = request.result;
+      if (!note) tx.objectStore("notes").put({ vault, conversation, cursor: 0, read: seq, verified: "" } satisfies Note);
+      else if (note.read < seq) tx.objectStore("notes").put({ ...note, read: seq });
+    };
+  }
+  await done(tx);
+}
+
+/** Items for `keys`, as this device has them now. */
+export async function loadItemsAt(keys: [string, string, number][]): Promise<(Item | undefined)[]> {
+  const db = await open();
+  const tx = db.transaction("items");
+  return Promise.all(keys.map((key) => result(tx.objectStore("items").get(key)) as Promise<Item | undefined>));
 }
 
 /** Forgets everything kept for vaults whose key starts with `prefix`: one account, or every account on an instance. */
 export async function wipe(prefix: string): Promise<void> {
   const db = await open();
-  const tx = db.transaction(["devices", "notes", "items", "sent"], "readwrite");
+  const tx = db.transaction(["devices", "notes", "items", "sent", "backup", "unbacked"], "readwrite");
   const range = IDBKeyRange.bound(prefix, `${prefix}￿`);
   tx.objectStore("devices").delete(range);
-  for (const store of ["notes", "items", "sent"] as const) {
+  tx.objectStore("backup").delete(range);
+  for (const store of ["notes", "items", "sent", "unbacked"] as const) {
     tx.objectStore(store).delete(IDBKeyRange.bound([prefix], [`${prefix}￿`, []]));
   }
   await done(tx);
