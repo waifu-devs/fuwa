@@ -28,6 +28,7 @@ import {
   useState,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   AutoModTrigger,
@@ -291,50 +292,7 @@ export const MessageList = forwardRef<
     setMissed(0);
   };
 
-  // ── Opening a search result: load back to its message, bring it into view and let it glow a moment.
-  const jumpTo = useJump(instanceKey, channel.id);
-  const [jumped, setJumped] = useState<{ id: string; at: number } | null>(null);
-  useEffect(() => {
-    if (!jumpTo) return;
-    let cancelled = false;
-    const current = () => store.get().instances[instanceKey]?.messages[channel.id];
-    const found = () => !!current()?.items.some((m) => m.id === jumpTo.messageId);
-    void (async () => {
-      const deadline = Date.now() + 20_000;
-      for (let pages = 0; pages < JUMP_PAGES && !cancelled && !found() && Date.now() < deadline; ) {
-        const s = current();
-        if (!s || s.loading) {
-          await new Promise((r) => setTimeout(r, 40));
-          continue;
-        }
-        if (!s.hasMore) break;
-        await run(loadMessages(instanceKey, serverId, channel.id, true)).catch(() => {});
-        pages++;
-      }
-      if (cancelled) return;
-      doneJumping(jumpTo);
-      if (found()) setJumped({ id: jumpTo.messageId, at: jumpTo.at });
-      else toast("That message is too far back to open here yet; scroll up to find it");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [jumpTo, instanceKey, serverId, channel.id]);
-  // Its row has to be drawn first.
-  const jumpRow = jumped ? rows.findIndex((r) => r.key === jumped.id) : -1;
-  if (jumpRow !== -1 && jumpRow < skipped) setHidden(Math.max(0, jumpRow - 20));
-  useLayoutEffect(() => {
-    if (!jumped || jumpRow === -1 || jumpRow < skipped) return;
-    const el = scroller.current?.querySelector<HTMLElement>(`[data-message-id="${jumped.id}"]`);
-    if (!el) return;
-    atBottom.current = false;
-    el.scrollIntoView({ block: "center" });
-    // The glow fades out by itself (its animation ends at no opacity); taking the class off first plays it again.
-    el.classList.remove("jumped");
-    void el.offsetWidth;
-    el.classList.add("jumped");
-    setJumped(null);
-  }, [jumped, jumpRow, skipped]);
+  useSearchJump({ instanceKey, serverId, channelId: channel.id, rows, skipped, setHidden, scroller, atBottom });
 
   const beginning = state && !state.loading && !state.hasMore && skipped === 0;
   const meId = me?.id;
@@ -636,6 +594,71 @@ export function MessageBody({ content, display, className }: { content: string; 
 
 /** A row's `clock` is only there so a new clock setting redraws its times. */
 type Redraw = { clock: Clock };
+
+/** Opening a search result: loads back to its message, brings it into view and lets it glow a moment. */
+function useSearchJump({
+  instanceKey,
+  serverId,
+  channelId,
+  rows,
+  skipped,
+  setHidden,
+  scroller,
+  atBottom,
+}: {
+  instanceKey: string;
+  serverId: string;
+  channelId: string;
+  rows: { key: string }[];
+  skipped: number;
+  setHidden: (n: number) => void;
+  scroller: RefObject<HTMLDivElement | null>;
+  atBottom: RefObject<boolean>;
+}) {
+  const jumpTo = useJump(instanceKey, channelId);
+  const [jumped, setJumped] = useState<{ id: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!jumpTo) return;
+    let cancelled = false;
+    const current = () => store.get().instances[instanceKey]?.messages[channelId];
+    const found = () => !!current()?.items.some((m) => m.id === jumpTo.messageId);
+    void (async () => {
+      const deadline = Date.now() + 20_000;
+      for (let pages = 0; pages < JUMP_PAGES && !cancelled && !found() && Date.now() < deadline; ) {
+        const s = current();
+        if (!s || s.loading) {
+          await new Promise((r) => setTimeout(r, 40));
+          continue;
+        }
+        if (!s.hasMore) break;
+        await run(loadMessages(instanceKey, serverId, channelId, true)).catch(() => {});
+        pages++;
+      }
+      if (cancelled) return;
+      doneJumping(jumpTo);
+      if (found()) setJumped({ id: jumpTo.messageId, at: jumpTo.at });
+      else toast("That message is too far back to open here yet; scroll up to find it");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jumpTo, instanceKey, serverId, channelId]);
+  // Its row has to be drawn first.
+  const jumpRow = jumped ? rows.findIndex((r) => r.key === jumped.id) : -1;
+  if (jumpRow !== -1 && jumpRow < skipped) setHidden(Math.max(0, jumpRow - 20));
+  useLayoutEffect(() => {
+    if (!jumped || jumpRow === -1 || jumpRow < skipped) return;
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-message-id="${jumped.id}"]`);
+    if (!el) return;
+    atBottom.current = false;
+    el.scrollIntoView({ block: "center" });
+    // The glow fades out by itself (its animation ends at no opacity); taking the class off first plays it again.
+    el.classList.remove("jumped");
+    void el.offsetWidth;
+    el.classList.add("jumped");
+    setJumped(null);
+  }, [jumped, jumpRow, skipped, scroller, atBottom]);
+}
 
 const MessageRow = memo(function MessageRow({
   message,

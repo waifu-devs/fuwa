@@ -1,6 +1,6 @@
 import { CalendarIcon, ClockIcon, HashIcon, PaperclipIcon, SearchIcon, UserIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useFuwa } from "@/fuwa/store";
 import { closeSearch, openSearch, runSearch, searchableChannel, searchPlace, useSearch } from "@/fuwa/search";
 import { UserAvatar } from "@/components/Icons";
@@ -156,6 +156,7 @@ export function SearchField({
   const [active, setActive] = useState(-1);
   const [recentVersion, setRecentVersion] = useState(0);
   const field = useRef<HTMLInputElement>(null);
+  const listId = useId();
   const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? EMPTY);
   const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId] ?? EMPTY);
   const channelNames = useMemo(() => channels.filter(searchableChannel).map((c) => c.name), [channels]);
@@ -248,6 +249,7 @@ export function SearchField({
       {open && (
         <motion.div
           key="suggestions"
+          id={listId}
           role="listbox"
           initial={{ opacity: 0, y: -6, scale: 0.97 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -344,6 +346,8 @@ export function SearchField({
           onKeyDown={onKeyDown}
           placeholder="Search"
           aria-label="Search this server's messages"
+          role="combobox"
+          aria-controls={listId}
           aria-autocomplete="list"
           aria-expanded={open}
           spellCheck={false}

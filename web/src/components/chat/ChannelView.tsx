@@ -30,8 +30,6 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
   const unslowed = hasIn(access, channel.id, Permission.MANAGE_MESSAGES) || hasIn(access, channel.id, Permission.MANAGE_CHANNELS);
   const list = useRef<MessageListHandle>(null);
   const { compact, setNavOpen, membersOpen, setMembersOpen } = useLayout();
-  const docked = useMediaQuery("(min-width: 1024px)");
-  const wide = useMediaQuery("(min-width: 640px)");
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
 
   useEffect(() => {
@@ -142,68 +140,78 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
           onEditLast={() => list.current?.editLast()}
         />
       </div>
-      <AnimatePresence initial={false}>
-        {searching &&
-          (docked ? (
-            <motion.aside
-              key="search"
-              initial={{ x: 32, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 32, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 400, damping: 40 }}
-              className="surface-side h-full w-[24rem] shrink-0 overflow-hidden border-l"
-            >
-              <SearchPanel instanceKey={instanceKey} serverId={serverId} />
-            </motion.aside>
-          ) : (
-            <motion.aside
-              key="search-sheet"
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", stiffness: 420, damping: 40 }}
-              className={cn(
-                "surface-side absolute inset-y-0 right-0 z-30 h-full",
-                wide ? "w-[24rem] max-w-[85vw] border-l shadow-2xl" : "inset-x-0",
-              )}
-            >
-              <SearchPanel instanceKey={instanceKey} serverId={serverId} sheet={!wide} />
-            </motion.aside>
-          ))}
-        {membersOpen &&
-          !searching &&
-          (docked ? (
-            // The panel takes its width at once and slides in on the compositor: growing its width every frame would
-            // lay the whole message list out again each frame.
-            <motion.aside
-              key="members"
-              initial={{ x: 32, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 32, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 400, damping: 40 }}
-              className="surface-side h-full w-60 shrink-0 overflow-hidden border-l"
-            >
-              <MemberList instanceKey={instanceKey} serverId={serverId} />
-            </motion.aside>
-          ) : (
-            <motion.div key="members-sheet" className="absolute inset-0 z-30 flex justify-end" initial="closed" animate="open" exit="closed">
-              <motion.button
-                type="button"
-                aria-label="Close members"
-                className="absolute inset-0 bg-black/40"
-                variants={{ open: { opacity: 1 }, closed: { opacity: 0 } }}
-                onClick={() => setMembersOpen(false)}
-              />
-              <motion.aside
-                className="surface-side relative h-full w-72 max-w-[85vw] border-l shadow-2xl"
-                variants={{ open: { x: 0 }, closed: { x: "100%" } }}
-                transition={{ type: "spring", stiffness: 420, damping: 40 }}
-              >
-                <MemberList instanceKey={instanceKey} serverId={serverId} />
-              </motion.aside>
-            </motion.div>
-          ))}
-      </AnimatePresence>
+      <SidePanel instanceKey={instanceKey} serverId={serverId} searching={searching} />
     </div>
+  );
+}
+
+/** The panel beside the messages: search results while searching, else the members (docked on wide screens, a sheet otherwise). */
+function SidePanel({ instanceKey, serverId, searching }: { instanceKey: string; serverId: string; searching: boolean }) {
+  const { membersOpen, setMembersOpen } = useLayout();
+  const docked = useMediaQuery("(min-width: 1024px)");
+  const wide = useMediaQuery("(min-width: 640px)");
+  return (
+  <AnimatePresence initial={false}>
+    {searching &&
+      (docked ? (
+        <motion.aside
+          key="search"
+          initial={{ x: 32, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={{ x: 32, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 400, damping: 40 }}
+          className="surface-side h-full w-[24rem] shrink-0 overflow-hidden border-l"
+        >
+          <SearchPanel instanceKey={instanceKey} serverId={serverId} />
+        </motion.aside>
+      ) : (
+        <motion.aside
+          key="search-sheet"
+          initial={{ x: "100%" }}
+          animate={{ x: 0 }}
+          exit={{ x: "100%" }}
+          transition={{ type: "spring", stiffness: 420, damping: 40 }}
+          className={cn(
+            "surface-side absolute inset-y-0 right-0 z-30 h-full",
+            wide ? "w-[24rem] max-w-[85vw] border-l shadow-2xl" : "inset-x-0",
+          )}
+        >
+          <SearchPanel instanceKey={instanceKey} serverId={serverId} sheet={!wide} />
+        </motion.aside>
+      ))}
+    {membersOpen &&
+      !searching &&
+      (docked ? (
+        // The panel takes its width at once and slides in on the compositor: growing its width every frame would
+        // lay the whole message list out again each frame.
+        <motion.aside
+          key="members"
+          initial={{ x: 32, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={{ x: 32, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 400, damping: 40 }}
+          className="surface-side h-full w-60 shrink-0 overflow-hidden border-l"
+        >
+          <MemberList instanceKey={instanceKey} serverId={serverId} />
+        </motion.aside>
+      ) : (
+        <motion.div key="members-sheet" className="absolute inset-0 z-30 flex justify-end" initial="closed" animate="open" exit="closed">
+          <motion.button
+            type="button"
+            aria-label="Close members"
+            className="absolute inset-0 bg-black/40"
+            variants={{ open: { opacity: 1 }, closed: { opacity: 0 } }}
+            onClick={() => setMembersOpen(false)}
+          />
+          <motion.aside
+            className="surface-side relative h-full w-72 max-w-[85vw] border-l shadow-2xl"
+            variants={{ open: { x: 0 }, closed: { x: "100%" } }}
+            transition={{ type: "spring", stiffness: 420, damping: 40 }}
+          >
+            <MemberList instanceKey={instanceKey} serverId={serverId} />
+          </motion.aside>
+        </motion.div>
+      ))}
+  </AnimatePresence>
   );
 }

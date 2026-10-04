@@ -83,7 +83,99 @@ export function SearchPanel({ instanceKey, serverId, sheet = false }: { instance
     return out;
   }, [results, channels]);
 
-  // ── Drawing only the rows in view.
+  const { scroller, layout, visible, measure, setView } = useWindowedRows(rows, run);
+
+  const onScroll = () => {
+    const el = scroller.current;
+    if (!el) return;
+    setView({ top: el.scrollTop, height: el.clientHeight });
+    if (cursor && !loading && el.scrollHeight - el.scrollTop - el.clientHeight < 800) void loadMoreResults();
+  };
+
+  const jump = useCallback(
+    (result: SearchResult) => {
+      const message = result.message;
+      if (!message) return;
+      const started = performance.now();
+      requestJump(instanceKey, message.channelId, message.id);
+      void navigate({ to: "/$instance/$server/$channel", params: { instance: instanceKey, server: serverId, channel: message.channelId } }).then(
+        () => reportTiming("search.open_result", performance.now() - started),
+      );
+      if (sheet) closeSearch();
+    },
+    [instanceKey, serverId, navigate, sheet],
+  );
+
+  // Arrow keys walk the results; Enter opens one.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const buttons = [...(scroller.current?.querySelectorAll<HTMLButtonElement>("[data-result]") ?? [])];
+    const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const next = buttons[e.key === "ArrowDown" ? Math.min(buttons.length - 1, at + 1) : Math.max(0, at - 1)];
+    if (next) {
+      e.preventDefault();
+      next.focus();
+      next.scrollIntoView({ block: "nearest" });
+    }
+  };
+
+  return (
+    <ServerLookProvider value={look}>
+      <div className="flex h-full min-h-0 flex-col" onKeyDown={onKeyDown}>
+        <PanelHeader instanceKey={instanceKey} serverId={serverId} sheet={sheet} />
+        {sheet && query && !loading && !error && (
+          <p className="px-4 pt-2 text-sm font-bold">
+            <Count value={total} /> {total === 1 ? "result" : "results"}
+          </p>
+        )}
+        <AnimatePresence initial={false}>
+          {indexing && (
+            <motion.p
+              key="indexing"
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="mx-3 mt-2 flex items-center gap-2 rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground"
+            >
+              <HourglassIcon className="size-3.5 shrink-0" />
+              <span>
+                Older messages are still being added to search ({indexedPercent}%). Recent ones are all here.
+              </span>
+            </motion.p>
+          )}
+        </AnimatePresence>
+        <div ref={scroller} onScroll={onScroll} className="scroll-thin relative min-h-0 flex-1 overflow-y-auto">
+          <PanelState sheet={sheet} />
+          <div className="relative" style={{ height: loading && !loadingMore ? 0 : layout.height }}>
+            {visible.map(({ row, top }) => (
+              <div key={row.key} ref={(el) => measure(row.key, el)} className="absolute inset-x-0 top-0" style={{ transform: `translateY(${top}px)` }}>
+                {row.kind === "channel" ? (
+                  <div className="flex items-center gap-1.5 px-4 pt-3 pb-1 text-xs font-extrabold text-muted-foreground">
+                    <HashIcon className="size-3.5" />
+                    {row.name}
+                  </div>
+                ) : (
+                  <ResultRow
+                    result={row.result}
+                    stagger={row.index < STAGGER_ROWS ? row.index : -1}
+                    run={run}
+                    author={authorOf(row.result, memberById, users)}
+                    member={memberById.get(row.result.message?.authorId ?? "")}
+                    onOpen={jump}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+          {loadingMore && <Skeleton rows={2} />}
+        </div>
+      </div>
+    </ServerLookProvider>
+  );
+}
+
+/** Draws only the rows in view, placed by their measured heights. */
+function useWindowedRows(rows: Row[], run: number) {
   const scroller = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ top: 0, height: 800 });
   const [heights, setHeights] = useState<Record<string, number>>({});
@@ -120,124 +212,59 @@ export function SearchPanel({ instanceKey, serverId, sheet = false }: { instance
     scroller.current?.scrollTo({ top: 0 });
     setView((v) => ({ ...v, top: 0 }));
   }, [run]);
+  return { scroller, layout, visible, measure, setView };
+}
 
-  const onScroll = () => {
-    const el = scroller.current;
-    if (!el) return;
-    setView({ top: el.scrollTop, height: el.clientHeight });
-    if (cursor && !loading && el.scrollHeight - el.scrollTop - el.clientHeight < 800) void loadMoreResults();
-  };
-
-  const jump = useCallback(
-    (result: SearchResult) => {
-      const message = result.message;
-      if (!message) return;
-      const started = performance.now();
-      requestJump(instanceKey, message.channelId, message.id);
-      void navigate({ to: "/$instance/$server/$channel", params: { instance: instanceKey, server: serverId, channel: message.channelId } }).then(
-        () => reportTiming("search.open_result", performance.now() - started),
-      );
-      if (sheet) closeSearch();
-    },
-    [instanceKey, serverId, navigate, sheet],
-  );
-
-  // Arrow keys walk the results; Enter opens one.
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    const buttons = [...(scroller.current?.querySelectorAll<HTMLButtonElement>("[data-result]") ?? [])];
-    const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    const next = buttons[e.key === "ArrowDown" ? Math.min(buttons.length - 1, at + 1) : Math.max(0, at - 1)];
-    if (next) {
-      e.preventDefault();
-      next.focus();
-      next.scrollIntoView({ block: "nearest" });
-    }
-  };
-
-  const nothing = !loading && !error && results.length === 0 && !!query;
-
+function PanelHeader({ instanceKey, serverId, sheet }: { instanceKey: string; serverId: string; sheet: boolean }) {
+  const total = useSearch((s) => s.total);
+  const loading = useSearch((s) => s.loading);
+  const loadingMore = useSearch((s) => s.more);
+  const query = useSearch((s) => s.query);
   return (
-    <ServerLookProvider value={look}>
-      <div className="flex h-full min-h-0 flex-col" onKeyDown={onKeyDown}>
-        <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
-          {sheet ? (
-            <SearchField instanceKey={instanceKey} serverId={serverId} inline autoFocus={!query} className="min-w-0 flex-1" />
+    <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
+      {sheet ? (
+        <SearchField instanceKey={instanceKey} serverId={serverId} inline autoFocus={!query} className="min-w-0 flex-1" />
+      ) : (
+        <h2 className="flex min-w-0 flex-1 items-baseline gap-1.5 font-extrabold">
+          {loading && !loadingMore ? (
+            <span className="text-muted-foreground">Searching…</span>
           ) : (
-            <h2 className="flex min-w-0 flex-1 items-baseline gap-1.5 font-extrabold">
-              {loading && !loadingMore ? (
-                <span className="text-muted-foreground">Searching…</span>
-              ) : (
-                <>
-                  <Count value={total} />
-                  <span>{total === 1 ? "result" : "results"}</span>
-                </>
-              )}
-            </h2>
+            <>
+              <Count value={total} />
+              <span>{total === 1 ? "result" : "results"}</span>
+            </>
           )}
-          <motion.button
-            type="button"
-            aria-label="Close search"
-            onClick={closeSearch}
-            whileTap={{ scale: 0.85 }}
-            className="grid size-8 shrink-0 place-items-center self-start rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <XIcon className="size-4" />
-          </motion.button>
-        </header>
-        {sheet && query && !loading && !error && (
-          <p className="px-4 pt-2 text-sm font-bold">
-            <Count value={total} /> {total === 1 ? "result" : "results"}
-          </p>
-        )}
-        <AnimatePresence initial={false}>
-          {indexing && (
-            <motion.p
-              key="indexing"
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="mx-3 mt-2 flex items-center gap-2 rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground"
-            >
-              <HourglassIcon className="size-3.5 shrink-0" />
-              <span>
-                Older messages are still being added to search ({indexedPercent}%). Recent ones are all here.
-              </span>
-            </motion.p>
-          )}
-        </AnimatePresence>
-        <div ref={scroller} onScroll={onScroll} className="scroll-thin relative min-h-0 flex-1 overflow-y-auto">
-          {loading && !loadingMore && <Skeleton />}
-          {error && <Empty icon={<SearchXIcon className="size-6" />} title="Couldn't search" text={error} />}
-          {nothing && <Empty icon={<SearchXIcon className="size-6" />} title="Nothing found" text="Try other words, or fewer filters." />}
-          {!sheet && !query && !loading && !error && (
-            <Empty icon={<HashIcon className="size-6" />} title="Search this server" text="Type words, or filters like from:, in: and has:, then press Enter." />
-          )}
-          <div className="relative" style={{ height: loading && !loadingMore ? 0 : layout.height }}>
-            {visible.map(({ row, top }) => (
-              <div key={row.key} ref={(el) => measure(row.key, el)} className="absolute inset-x-0 top-0" style={{ transform: `translateY(${top}px)` }}>
-                {row.kind === "channel" ? (
-                  <div className="flex items-center gap-1.5 px-4 pt-3 pb-1 text-xs font-extrabold text-muted-foreground">
-                    <HashIcon className="size-3.5" />
-                    {row.name}
-                  </div>
-                ) : (
-                  <ResultRow
-                    result={row.result}
-                    stagger={row.index < STAGGER_ROWS ? row.index : -1}
-                    run={run}
-                    author={authorOf(row.result, memberById, users)}
-                    member={memberById.get(row.result.message?.authorId ?? "")}
-                    onOpen={jump}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-          {loadingMore && <Skeleton rows={2} />}
-        </div>
-      </div>
-    </ServerLookProvider>
+        </h2>
+      )}
+      <motion.button
+        type="button"
+        aria-label="Close search"
+        onClick={closeSearch}
+        whileTap={{ scale: 0.85 }}
+        className="grid size-8 shrink-0 place-items-center self-start rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <XIcon className="size-4" />
+      </motion.button>
+    </header>
+  );
+}
+
+/** What the list shows besides results: loading, an error, nothing found, or how to start. */
+function PanelState({ sheet }: { sheet: boolean }) {
+  const loading = useSearch((s) => s.loading && !s.more);
+  const error = useSearch((s) => s.error);
+  const query = useSearch((s) => s.query);
+  const empty = useSearch((s) => s.results.length === 0);
+  const nothing = !loading && !error && empty && !!query;
+  return (
+    <>
+      {loading && <Skeleton />}
+      {error && <Empty icon={<SearchXIcon className="size-6" />} title="Couldn't search" text={error} />}
+      {nothing && <Empty icon={<SearchXIcon className="size-6" />} title="Nothing found" text="Try other words, or fewer filters." />}
+      {!sheet && !query && !loading && !error && (
+        <Empty icon={<HashIcon className="size-6" />} title="Search this server" text="Type words, or filters like from:, in: and has:, then press Enter." />
+      )}
+    </>
   );
 }
 
