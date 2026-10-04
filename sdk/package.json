@@ -1,0 +1,77 @@
+{
+  "name": "@waifu-devs/fuwa",
+  "version": "0.1.0",
+  "description": "The official TypeScript SDK for fuwa: typed clients for every service, and agents (bots) that follow events, answer commands and post messages.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/waifu-devs/fuwa.git",
+    "directory": "sdk"
+  },
+  "homepage": "https://github.com/waifu-devs/fuwa/blob/master/docs/sdk.md",
+  "keywords": [
+    "fuwa",
+    "chat",
+    "bot",
+    "agent",
+    "grpc-web"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./gen/*": {
+      "import": {
+        "types": "./dist/esm/gen/fuwa/v1/*_pb.d.ts",
+        "default": "./dist/esm/gen/fuwa/v1/*_pb.js"
+      },
+      "require": {
+        "types": "./dist/cjs/gen/fuwa/v1/*_pb.d.ts",
+        "default": "./dist/cjs/gen/fuwa/v1/*_pb.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "generate": "buf generate --template buf.gen.yaml",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "node --experimental-strip-types --test test/unit.test.ts",
+    "example": "node --experimental-strip-types examples/echo-agent.ts",
+    "test:instance": "node --experimental-strip-types --test --test-concurrency=1 test/agent.test.ts"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.15.0",
+    "@connectrpc/connect": "^2.2.0",
+    "@connectrpc/connect-web": "^2.2.0"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.73.0",
+    "@bufbuild/protoc-gen-es": "^2.15.0",
+    "@types/node": "^22.15.0",
+    "typescript": "^7.0.2"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "packageManager": "pnpm@10.33.0"
+}

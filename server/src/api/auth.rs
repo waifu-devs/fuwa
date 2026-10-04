@@ -1,7 +1,7 @@
 use tonic::{Request, Response, Status};
 
 use super::media::PictureOwner;
-use super::{Api, respond, text, url};
+use super::{Api, effect_id, respond, text, url};
 use crate::auth::{self, Viewer};
 use crate::error::{Error, Result};
 use crate::id::millis;
@@ -316,6 +316,10 @@ impl Api {
             }
             None => None,
         };
+        let effect = req.effect.as_deref().map(effect_id).transpose()?;
+        if effect.as_deref().is_some_and(|effect| !effect.is_empty()) && !self.app.settings().profile_effects {
+            return Err(Error::FailedPrecondition("profile effects are off on this instance".into()));
+        }
         // Pictures from other sites come through the instance, so nobody
         // who looks at them is seen by that site.
         let avatar_url = req
@@ -357,6 +361,7 @@ impl Api {
                 Some(_) => return Err(Error::invalid("accent_color is a 0xRRGGBB color")),
             },
             status,
+            effect,
         };
         let shows_everywhere = change.display_name.is_some() || change.avatar_url.is_some() || change.status.is_some();
         let old_avatar = account.avatar_url.clone();
@@ -370,13 +375,23 @@ impl Api {
             self.drop_picture(&old_banner, banner, PictureOwner::Account(&account.id, pb::MediaPurpose::Banner)).await;
         }
         let user = account.user();
-        let profile = self.app.node()?.profile(&account.id).await?.ok_or(Error::NotFound("account"))?;
+        let profile =
+            self.shown_profile(self.app.node()?.profile(&account.id).await?.ok_or(Error::NotFound("account"))?);
         if !shows_everywhere {
             return Ok((user, profile));
         }
         // Every server the account belongs to keeps its own copy of the profile.
         self.app.update_user(&user, self.app.index.joined_ids(&account.id)).await;
         Ok((user, profile))
+    }
+
+    /// A profile as apps get it: without its effect while the instance has
+    /// profile effects off (the pick stays saved for when they're back on).
+    fn shown_profile(&self, mut profile: pb::Profile) -> pb::Profile {
+        if !self.app.settings().profile_effects {
+            profile.effect.clear();
+        }
+        profile
     }
 
     /// Whether `viewer` may see `user_id`'s profile: their own, someone they
@@ -454,6 +469,7 @@ impl AuthService for Api {
                     return Err(Error::NotFound("profile"));
                 }
                 let profile = self.app.node()?.profile(user_id).await?.ok_or(Error::NotFound("profile"))?;
+                let profile = self.shown_profile(profile);
                 Ok(pb::GetProfileResponse { profile: Some(profile) })
             }
             .await,

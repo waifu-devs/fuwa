@@ -6395,6 +6395,55 @@ async fn shared_channels_can_be_turned_off() {
 }
 
 #[tokio::test]
+async fn profile_effects_save_and_hide_while_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = start(dir.path(), &[]).await;
+    let mut c = clients(&instance).await;
+    let (admin, admin_user, _) = sign_up(&mut c, "admin").await;
+    let (mika, _, _) = sign_up(&mut c, "mika").await;
+    let effect = |id: &str| pb::UpdateProfileRequest { effect: Some(id.into()), ..Default::default() };
+    let saved = c.auth.update_profile(authed(&admin, effect(" sakura "))).await.unwrap().into_inner();
+    assert_eq!(saved.profile.unwrap().effect, "sakura");
+    for bad in ["Sakura", "-sakura", "sak ura", "../x", &"a".repeat(33)] {
+        let refused = c.auth.update_profile(authed(&admin, effect(bad))).await.unwrap_err();
+        assert_eq!(refused.code(), Code::InvalidArgument, "{bad}");
+    }
+    // Changing something else keeps it.
+    let kept = c
+        .auth
+        .update_profile(authed(
+            &admin,
+            pb::UpdateProfileRequest { pronouns: Some("they/them".into()), ..Default::default() },
+        ))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(kept.profile.unwrap().effect, "sakura");
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert!(node.profile_effects);
+
+    // Off: everyone's is hidden and new ones are refused, but the pick stays.
+    let off = pb::InstanceSettings { profile_effects: false, ..Default::default() };
+    c.admin.update_settings(authed(&admin, settings_update(off, &["profile_effects"], &[]))).await.unwrap();
+    let node = c.node.get_node(pb::GetNodeRequest {}).await.unwrap().into_inner().node.unwrap();
+    assert!(!node.profile_effects);
+    let get = || pb::GetProfileRequest { user_id: admin_user.id.clone() };
+    let hidden = c.auth.get_profile(authed(&admin, get())).await.unwrap().into_inner().profile.unwrap();
+    assert!(hidden.effect.is_empty());
+    let refused = c.auth.update_profile(authed(&mika, effect("stars"))).await.unwrap_err();
+    assert_eq!(refused.code(), Code::FailedPrecondition);
+    c.auth.update_profile(authed(&mika, effect(""))).await.unwrap();
+
+    c.admin
+        .update_settings(authed(&admin, settings_update(Default::default(), &[], &["profile_effects"])))
+        .await
+        .unwrap();
+    let back = c.auth.get_profile(authed(&admin, get())).await.unwrap().into_inner().profile.unwrap();
+    assert_eq!(back.effect, "sakura");
+    instance.stop().await;
+}
+
+#[tokio::test]
 async fn shared_preview_names_outside_providers() {
     use pb::{AutoModActionKind as Kind, AutoModTrigger as Trigger};
     let dir = tempfile::tempdir().unwrap();
