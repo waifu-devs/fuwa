@@ -438,7 +438,7 @@ async fn seal(conn: &turso::Connection, message_id: &str) -> Result<()> {
 /// everyone their counts. Runs every minute where servers are kept.
 pub(crate) async fn close_due(sdb: &ServerDb, now: i64) -> Result<()> {
     let due = query_all(
-        &sdb.read()?,
+        &*sdb.read()?,
         "SELECT message_id FROM polls WHERE voter_key IS NOT NULL AND ends_at <= ?1 LIMIT 100",
         [now],
         |r| r.get::<String>(0),
@@ -530,7 +530,7 @@ impl Api {
         // polls never say, and a poll's anonymity never changes. A poll's
         // answers don't change either, so the vote is checked here too,
         // before it counts against the voter's pace.
-        let before_write = load(&sdb.read()?, &req.message_id)
+        let before_write = load(&*sdb.read()?, &req.message_id)
             .await?
             .filter(|row| access.can_see(&row.channel_id))
             .ok_or(Error::NotFound("poll"))?;

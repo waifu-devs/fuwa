@@ -411,7 +411,7 @@ impl Api {
     ) -> Result<pb::ResetSecureChannelResponse> {
         let account = self.account(metadata).await?;
         let seat = self.membership(&account, &req.server_id).await?;
-        let channel = secure_channel(&seat.sdb.read()?, &seat, &req.channel_id).await?;
+        let channel = secure_channel(&*seat.sdb.read()?, &seat, &req.channel_id).await?;
         seat.access.require_in(&channel.id, Permission::ManageChannels)?;
         let record = seat
             .sdb
@@ -476,7 +476,7 @@ impl Api {
     ) -> Result<pb::SetSecureHistoryResponse> {
         let account = self.account(metadata).await?;
         let seat = self.membership(&account, &req.server_id).await?;
-        let channel = secure_channel(&seat.sdb.read()?, &seat, &req.channel_id).await?;
+        let channel = secure_channel(&*seat.sdb.read()?, &seat, &req.channel_id).await?;
         seat.access.require_in(&channel.id, Permission::ManageChannels)?;
         let record = seat
             .sdb
@@ -703,7 +703,7 @@ impl SecureChannelService for Api {
                 let account = self.account(request.metadata()).await?;
                 let req = request.get_ref();
                 let seat = self.membership(&account, &req.server_id).await?;
-                let channel = secure_channel(&seat.sdb.read()?, &seat, &req.channel_id).await?;
+                let channel = secure_channel(&*seat.sdb.read()?, &seat, &req.channel_id).await?;
                 let limit = match req.limit {
                     0 => 100,
                     limit @ 1..=500 => i64::from(limit),
@@ -788,7 +788,7 @@ impl SecureChannelService for Api {
                 let account = self.account(request.metadata()).await?;
                 let req = request.into_inner();
                 let seat = self.membership(&account, &req.server_id).await?;
-                let channel = secure_channel(&seat.sdb.read()?, &seat, &req.channel_id).await?;
+                let channel = secure_channel(&*seat.sdb.read()?, &seat, &req.channel_id).await?;
                 let moderator = seat.access.has_in(&channel.id, Permission::ManageMessages);
                 seat.sdb
                     .write(&account.id, async |conn, events| {

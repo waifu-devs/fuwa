@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -172,8 +172,12 @@ pub struct Gateway {
     directory: DirectoryClient,
     settings: watch::Sender<Arc<Settings>>,
     placements: RwLock<HashMap<String, Placement>>,
-    /// Connections to shards, by URL.
+    /// Connections to shards for calls, by URL.
     shards: RwLock<HashMap<String, Channel>>,
+    /// Connections to shards for followers' streams, by URL.
+    streams: Mutex<HashMap<String, Vec<StreamLink>>>,
+    /// Followers' streams held open, per account and in all.
+    followers: Arc<crate::streams::Streams>,
     /// Whether it has heard from the directory yet: until then it isn't
     /// healthy, so a deploy keeps the gateways before it running meanwhile.
     followed: AtomicBool,
@@ -203,7 +207,7 @@ pub async fn run(config: Config, address: SocketAddr) -> Result<(), String> {
     crate::app::spawn_signal_handler(gateway.shutdown.clone());
     let reports = crate::reports::spawn(gateway.clone(), &gateway.config, None, gateway.shutdown.clone());
     let shutdown = gateway.shutdown.clone();
-    let served = axum::serve(listener, gateway.router())
+    let served = axum::serve(crate::app::no_delay(listener), gateway.router())
         .with_graceful_shutdown(async move { shutdown.cancelled().await })
         .await
         .map_err(|err| format!("server error: {err}"));
@@ -223,6 +227,7 @@ impl Gateway {
             directory_channel.clone(),
             WithKey(key.clone()),
         );
+        let followers = crate::streams::Streams::new(config.max_streams);
         let config_update_check = config.update_check;
         let release_cache = config.data_path.join("release-cache");
         let gateway = Arc::new(Self {
@@ -234,6 +239,8 @@ impl Gateway {
             directory,
             placements: RwLock::new(HashMap::new()),
             shards: RwLock::new(HashMap::new()),
+            streams: Mutex::new(HashMap::new()),
+            followers,
             followed: AtomicBool::new(false),
             parts: Default::default(),
             releases: crate::releases::Releases::new(config_update_check, release_cache),
@@ -292,11 +299,13 @@ impl Gateway {
             .route(
                 // Which parts behind the gateways are up, as the directory sees them (status pages).
                 "/healthz/parts",
-                get(move || {
+                get(move |headers: http::HeaderMap| {
                     let gateway = parts.clone();
                     async move {
                         let key = gateway.key.to_str().unwrap_or_default();
-                        super::status::from_directory(&gateway.parts, &gateway.directory_url, key).await
+                        let admin = super::status::is_admin(&headers, gateway.config.admin_token.as_deref());
+                        let streams = gateway.followers.count();
+                        super::status::from_directory(&gateway.parts, &gateway.directory_url, key, streams, admin).await
                     }
                 }),
             )
@@ -525,9 +534,38 @@ impl Gateway {
     }
 
     fn shard_client(&self, url: &str) -> Result<pb::event_service_client::EventServiceClient<Keyed>, Status> {
-        let channel =
-            tonic::service::interceptor::InterceptedService::new(self.shard_channel(url)?, WithKey(self.key.clone()));
-        Ok(pb::event_service_client::EventServiceClient::new(channel).max_decoding_message_size(MAX_EVENT))
+        Ok(self.event_client(self.shard_channel(url)?))
+    }
+
+    fn event_client(&self, channel: Channel) -> pb::event_service_client::EventServiceClient<Keyed> {
+        let channel = tonic::service::interceptor::InterceptedService::new(channel, WithKey(self.key.clone()));
+        pb::event_service_client::EventServiceClient::new(channel).max_decoding_message_size(MAX_EVENT)
+    }
+
+    /// A connection to a shard with room for one more follower's stream, kept
+    /// apart from the one calls use. A shard takes 200 streams at once per
+    /// connection (hyper's default): when followers filled the shared one,
+    /// every call through it waited out its deadline, so a gateway broke at
+    /// 200 people online (measured, docs/capacity.md).
+    fn stream_channel(&self, url: &str) -> Result<(Channel, StreamSlot), Status> {
+        let mut streams = self.streams.lock().unwrap_or_else(|p| p.into_inner());
+        let links = streams.entry(url.to_string()).or_default();
+        // Connections nobody follows through any more are closed, but one stays.
+        let mut kept = false;
+        links.retain(|link| {
+            let keep = !kept || link.streams.load(Ordering::Acquire) > 0;
+            kept = true;
+            keep
+        });
+        if let Some(link) = links.iter().find(|link| link.streams.load(Ordering::Acquire) < STREAMS_PER_CONNECTION) {
+            link.streams.fetch_add(1, Ordering::AcqRel);
+            return Ok((link.channel.clone(), StreamSlot(link.streams.clone())));
+        }
+        let link =
+            StreamLink { channel: super::channel(url).map_err(Status::from)?, streams: Arc::new(AtomicUsize::new(1)) };
+        let taken = (link.channel.clone(), StreamSlot(link.streams.clone()));
+        links.push(link);
+        Ok(taken)
     }
 
     /// Where these servers are: remembered, or asked of the directory (always,
@@ -725,6 +763,25 @@ fn gone_event(server_id: String) -> pb::SubscribeResponse {
 struct Opened {
     stream: Streaming<pb::SubscribeResponse>,
     cursors: Vec<pb::ServerCursor>,
+    slot: StreamSlot,
+}
+
+/// Followers' streams carried by one connection to a shard, half of what a
+/// shard takes per connection so a burst of new ones never waits.
+const STREAMS_PER_CONNECTION: usize = 100;
+
+struct StreamLink {
+    channel: Channel,
+    streams: Arc<AtomicUsize>,
+}
+
+/// One stream's place on a [`StreamLink`], given back when the stream ends.
+struct StreamSlot(Arc<AtomicUsize>);
+
+impl Drop for StreamSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 /// Why streams couldn't be opened.
@@ -790,8 +847,9 @@ impl Events {
         for (url, cursors) in by_shard {
             let request =
                 forward_metadata(metadata, pb::SubscribeRequest { servers: cursors.clone(), ..Default::default() });
-            match gateway.shard_client(&url).map_err(NotOpened::Refused)?.subscribe(request).await {
-                Ok(stream) => opened.push(Opened { stream: stream.into_inner(), cursors }),
+            let (channel, slot) = gateway.stream_channel(&url).map_err(NotOpened::Refused)?;
+            match gateway.event_client(channel).subscribe(request).await {
+                Ok(stream) => opened.push(Opened { stream: stream.into_inner(), cursors, slot }),
                 Err(status) if status.metadata().get(MISROUTED).is_some() || super::unreachable(&status) => {
                     return Err(NotOpened::Again(status));
                 }
@@ -806,7 +864,7 @@ impl Events {
 /// `following`: the servers it follows, each with the last sequence the
 /// client has of it.
 fn follow(opened: Opened, merged: &mut SelectAll<Tagged>, following: &mut Vec<HashMap<String, Option<i64>>>) {
-    merged.push(tag(following.len(), opened.stream));
+    merged.push(tag(following.len(), opened.stream, opened.slot));
     following.push(opened.cursors.into_iter().map(|cursor| (cursor.server_id, cursor.after_sequence)).collect());
 }
 
@@ -834,6 +892,11 @@ impl EventService for Events {
         for cursor in &mut cursors {
             cursor.server_id = parse_id("server_id", &cursor.server_id).map_err(Status::from)?;
         }
+        let ticket = gateway.followers.open(
+            crate::streams::Kind::Events,
+            &account_id,
+            gateway.settings().streams_per_account(),
+        )?;
         // Listening before opening, so nothing said in between is missed.
         let mut ended = gateway.ended.subscribe();
         let mut joined = gateway.joined.subscribe();
@@ -845,6 +908,7 @@ impl EventService for Events {
         let (tx, rx) = mpsc::channel::<Result<pb::SubscribeResponse, Status>>(256);
         let shutdown = gateway.shutdown();
         tokio::spawn(async move {
+            let _ticket = ticket;
             for event in gone {
                 if tx.send(Ok(event)).await.is_err() {
                     return;
@@ -1102,8 +1166,16 @@ impl EventService for Events {
     }
 }
 
-fn tag(index: usize, stream: Streaming<pb::SubscribeResponse>) -> Tagged {
-    Box::pin(stream.map(move |item| (index, Some(item))).chain(futures::stream::once(async move { (index, None) })))
+fn tag(index: usize, stream: Streaming<pb::SubscribeResponse>, slot: StreamSlot) -> Tagged {
+    // The slot goes with the stream, so its place is given back when it ends.
+    Box::pin(
+        stream
+            .map(move |item| {
+                let _slot = &slot;
+                (index, Some(item))
+            })
+            .chain(futures::stream::once(async move { (index, None) })),
+    )
 }
 
 #[cfg(test)]

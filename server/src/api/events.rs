@@ -181,6 +181,15 @@ impl EventService for Api {
         if cursors.len() > MAX_SERVERS || (cursors.is_empty() && !follow_new_servers) {
             return Err(Error::invalid(format!("follow 1 to {MAX_SERVERS} servers per stream")).into());
         }
+        // On a split instance a shard's streams come from gateways, which hold
+        // the per-account limit themselves: one client stream there can open
+        // several here (one more for each server an agent following new
+        // servers joins). So a shard counts only toward its instance total.
+        let per_account = match self.app.config.cluster.is_split() {
+            true => None,
+            false => self.app.settings().streams_per_account(),
+        };
+        let ticket = self.app.streams.open(crate::streams::Kind::Events, &account.id, per_account)?;
         // A split instance's gateway follows new servers itself, from the
         // directory, and asks shards only for the ones it knows of.
         let follow_new = follow_new_servers && !self.app.config.cluster.is_split();
@@ -224,6 +233,7 @@ impl EventService for Api {
         let account_id = account.id.clone();
         let api = self.clone();
         tokio::spawn(async move {
+            let _ticket = ticket;
             let send = async |item| tx.send(item).await.is_ok();
             for event in gone {
                 if !send(Ok(pb::SubscribeResponse { event: Some(event), ..Default::default() })).await {

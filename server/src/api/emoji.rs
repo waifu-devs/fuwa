@@ -57,7 +57,7 @@ impl EmojiService for Api {
             async {
                 let account = self.account(request.metadata()).await?;
                 let sdb = self.membership(&account, &request.get_ref().server_id).await?.sdb;
-                Ok(pb::ListEmojisResponse { emojis: store::load_emojis(&sdb.read()?, &sdb.id).await? })
+                Ok(pb::ListEmojisResponse { emojis: store::load_emojis(&*sdb.read()?, &sdb.id).await? })
             }
             .await,
         )

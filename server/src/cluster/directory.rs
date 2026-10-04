@@ -256,6 +256,11 @@ impl Shards {
         all
     }
 
+    /// Where each registered shard is, by id, for asking it over HTTP.
+    pub fn urls(&self) -> HashMap<String, String> {
+        self.read().iter().map(|(id, shard)| (id.clone(), shard.url.clone())).collect()
+    }
+
     /// The shards up now.
     pub fn up(&self) -> Vec<(String, ShardClient)> {
         self.all().into_iter().filter_map(|(id, client)| client.map(|client| (id, client))).collect()

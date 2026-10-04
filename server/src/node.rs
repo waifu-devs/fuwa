@@ -271,7 +271,7 @@ pub struct AccountCounts {
 
 impl NodeDb {
     pub async fn open(path: &Path, key: Option<&EncryptionKey>) -> Result<Self> {
-        let db = Arc::new(db::open(path, key, MIGRATIONS).await?);
+        let db = Arc::new(db::open(path, key, MIGRATIONS).await?.keep(32));
         Ok(Self { db, sign_ups: Mutex::new(()), admin_changes: Mutex::new(()) })
     }
 
@@ -280,8 +280,8 @@ impl NodeDb {
         &self.db
     }
 
-    fn read(&self) -> Result<Connection> {
-        db::connect(&self.db)
+    fn read(&self) -> Result<db::Pooled> {
+        self.db.conn()
     }
 
     /// The key links to pictures from other sites are signed with (see
@@ -589,7 +589,7 @@ impl NodeDb {
     /// Holds a single sign-on to the instance until the provider answers.
     /// A single sign-on to the instance that hasn't run out.
     pub async fn sso_sign_in(&self, state: &str) -> Result<Option<crate::sso::SignIn>> {
-        crate::sso::load(&self.read()?, state).await
+        crate::sso::load(&*self.read()?, state).await
     }
 
     /// Records who the provider signed in, once.
@@ -1707,7 +1707,7 @@ impl NodeDb {
     }
 
     pub async fn media(&self, id: &str) -> Result<Option<MediaRow>> {
-        media_by_id(&self.read()?, id).await
+        media_by_id(&*self.read()?, id).await
     }
 
     /// Marks a picture as in use, so it isn't swept; a server's pictures
