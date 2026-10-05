@@ -2,8 +2,18 @@ import { createFuwa, type Fuwa, type FuwaOptions } from "./client.js";
 import { Code, FuwaError, UnauthenticatedError, toFuwaError } from "./errors.js";
 import { EventFollower, type EventKind, type EventPayload } from "./events.js";
 import type { ServerHead } from "./gen/fuwa/v1/event_pb.js";
-import type { SendMessageRequest } from "./gen/fuwa/v1/message_pb.js";
-import { AccountKind, MessageKind, type Event, type Message, type User } from "./gen/fuwa/v1/types_pb.js";
+import type { MessageInitShape } from "@bufbuild/protobuf";
+import type { Command, CommandSchema } from "./gen/fuwa/v1/command_pb.js";
+import type { SendMessageRequestSchema } from "./gen/fuwa/v1/message_pb.js";
+import {
+  AccountKind,
+  InteractionKind,
+  MessageKind,
+  type Event,
+  type Interaction,
+  type Message,
+  type User,
+} from "./gen/fuwa/v1/types_pb.js";
 import type { Media } from "./gen/fuwa/v1/media_pb.js";
 import { messages, type MessagePagesOptions, type MessageWithAuthor } from "./pages.js";
 import { parseCommand, mentions, type ParsedCommand } from "./text.js";
@@ -44,7 +54,7 @@ export interface AgentOptions extends Omit<FuwaOptions, "token"> {
 }
 
 /** What to send: text, or the whole request (attachments, embeds, a reply). */
-export type Outgoing = string | Partial<Omit<SendMessageRequest, "$typeName" | "serverId" | "channelId">>;
+export type Outgoing = string | Omit<MessageInitShape<typeof SendMessageRequestSchema>, "$typeName" | "serverId" | "channelId">;
 
 /** A message someone sent, and ways to answer it. */
 export interface MessageContext {
@@ -72,6 +82,42 @@ export interface CommandContext extends MessageContext {
   rest: string;
 }
 
+/**
+ * Someone ran one of the agent's slash commands or pressed a button on one of
+ * its messages (CommandService).
+ */
+export interface InteractionContext {
+  agent: Agent;
+  interaction: Interaction;
+  serverId: string;
+  channelId: string;
+  /** Who used it. */
+  userId: string;
+  kind: InteractionKind;
+  /** A command: its name. */
+  command: string;
+  /**
+   * A command: what was filled in, by option name, as text (integers as
+   * digits, booleans as "true" or "false", members, channels and roles as
+   * ids). The instance keeps these only while the interaction can be
+   * answered, so keep what you need yourself.
+   */
+  options: Record<string, string>;
+  /** A button: its custom_id, and the message it's on. */
+  customId: string;
+  messageId: string;
+  /** Who used it (from the instance, cached). */
+  user(): Promise<User | undefined>;
+  /**
+   * Answers it with a message in its channel that shows who used what. Up
+   * to five times, within 15 minutes of it.
+   */
+  reply(content: Outgoing): Promise<Message>;
+}
+
+/** How long an interaction can be answered, and its arguments are kept. */
+const INTERACTION_MS = 15 * 60_000;
+
 export interface CommandInfo {
   name: string;
   description: string;
@@ -90,6 +136,13 @@ export interface AgentHandlers {
   mention: Handler<[MessageContext]>;
   /** A command no handler is registered for. */
   unknownCommand: Handler<[CommandContext]>;
+  /**
+   * Someone ran one of the agent's slash commands (see `setCommands`) or
+   * pressed one of its buttons, and it can still be answered. Ones older
+   * than 15 minutes, caught up after a restart, come only as
+   * "interactionCreated".
+   */
+  interaction: Handler<[InteractionContext]>;
   /** Every event, before the handlers for its kind. */
   event: Handler<[Event]>;
   /** Added to a server (noticed by the server refresh). */
@@ -269,6 +322,15 @@ export class Agent {
     return message;
   }
 
+  /**
+   * Replaces the agent's slash commands in a server: what members see when
+   * they type "/". Runs come to `on("interaction")`.
+   */
+  async setCommands(serverId: string, commands: MessageInitShape<typeof CommandSchema>[]): Promise<Command[]> {
+    const res = await this.api.commands.setCommands({ serverId, commands });
+    return res.commands;
+  }
+
   /** Answers a message in its channel. */
   reply(to: Message, content: Outgoing): Promise<Message> {
     const req = typeof content === "string" ? { content } : content;
@@ -405,6 +467,13 @@ export class Agent {
   async #handle(event: Event): Promise<void> {
     await this.#call("event", event);
     if (event.payload.case) await this.#call(event.payload.case, event.payload.value, event);
+    if (event.payload.case === "interactionCreated") {
+      const interaction = event.payload.value.interaction;
+      if (interaction && interaction.agentId === this.#me!.id && answerable(interaction)) {
+        await this.#call("interaction", this.#interactionContext(interaction));
+      }
+      return;
+    }
     if (event.payload.case !== "messageCreated") return;
     const message = event.payload.value.message;
     if (!message || message.kind !== MessageKind.UNSPECIFIED) return;
@@ -437,6 +506,26 @@ export class Agent {
       author: () => (message.webhook ? Promise.resolve(undefined) : message.shared?.user ? Promise.resolve(message.shared.user) : this.user(message.authorId)),
       reply: (content) => this.reply(message, content),
       send: (content) => this.send(message.serverId, message.channelId, content),
+    };
+  }
+
+  #interactionContext(interaction: Interaction): InteractionContext {
+    return {
+      agent: this,
+      interaction,
+      serverId: interaction.serverId,
+      channelId: interaction.channelId,
+      userId: interaction.userId,
+      kind: interaction.kind,
+      command: interaction.command,
+      options: Object.fromEntries(interaction.arguments.map((a) => [a.name, a.value])),
+      customId: interaction.customId,
+      messageId: interaction.messageId,
+      user: () => this.user(interaction.userId),
+      reply: (content) => {
+        const req = typeof content === "string" ? { content } : content;
+        return this.send(interaction.serverId, interaction.channelId, { ...req, interactionId: interaction.id });
+      },
     };
   }
 
@@ -478,4 +567,12 @@ export class Agent {
     await Promise.allSettled([...this.#chains.values()]);
     this.#stop = undefined;
   }
+}
+
+/** Whether an interaction is recent enough to answer (and still has its arguments). */
+function answerable(interaction: Interaction): boolean {
+  const at = interaction.createdAt;
+  if (!at) return true;
+  const ms = Number(at.seconds) * 1000 + Math.floor(at.nanos / 1e6);
+  return Date.now() - ms < INTERACTION_MS;
 }

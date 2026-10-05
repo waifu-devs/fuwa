@@ -7,6 +7,9 @@ import {
   Agent,
   ChannelType,
   Code,
+  CommandOptionType,
+  InteractionKind,
+  type InteractionContext,
   MediaPurpose,
   FuwaError,
   NotFoundError,
@@ -176,6 +179,64 @@ test("an agent follows servers it's added to straight away", async () => {
   await until("the answer there", async () =>
     (await agentMessages(agent, channel!.id, server!.id)).some((m) => m.content === "in the second server") || undefined,
   );
+  await agent.stop();
+});
+
+test("an agent answers slash commands and buttons", async () => {
+  const agent = newAgent();
+  const used: InteractionContext[] = [];
+  agent.on("interaction", async (ctx) => {
+    used.push(ctx);
+    if (ctx.kind === InteractionKind.COMMAND) {
+      await ctx.reply({
+        content: `rolled a d${ctx.options.sides}`,
+        components: [{ buttons: [{ customId: "again", label: "Roll again" }] }],
+      });
+    } else {
+      await ctx.reply(`pressed ${ctx.customId}`);
+    }
+  });
+  await agent.start();
+  const set = await agent.setCommands(serverId, [
+    {
+      name: "roll",
+      description: "Rolls dice",
+      options: [{ name: "sides", description: "How many sides", type: CommandOptionType.INTEGER, required: true }],
+    },
+  ]);
+  assert.deepEqual(set.map((c) => c.name), ["roll"]);
+
+  // A member sees it and runs it; the agent answers with a button.
+  const { commands, agents: owners } = await person.commands.listCommands({ serverId });
+  assert.deepEqual(commands.map((c) => [c.agentId, c.command?.name]), [[agent.me.id, "roll"]]);
+  assert.equal(owners[0]?.id, agent.me.id);
+  const ran = await person.commands.runCommand({
+    serverId,
+    channelId,
+    agentId: agent.me.id,
+    command: "roll",
+    arguments: [{ name: "sides", value: "20" }],
+  });
+  const answer = await until("the answer", async () =>
+    (await agentMessages(agent)).find((m) => m.interaction?.id === ran.interactionId),
+  );
+  assert.equal(answer.content, "rolled a d20");
+  assert.equal(answer.interaction?.kind, InteractionKind.COMMAND);
+  assert.equal(answer.interaction?.command, "roll");
+  assert.equal(answer.components[0]?.buttons[0]?.customId, "again");
+  assert.equal(used[0]?.userId, (await person.auth.getMe({})).user?.id);
+  assert.deepEqual(used[0]?.options, { sides: "20" });
+
+  // Pressing the button is an interaction too.
+  const pressed = await person.commands.pressButton({ serverId, messageId: answer.id, customId: "again" });
+  const second = await until("the button's answer", async () =>
+    (await agentMessages(agent)).find((m) => m.interaction?.id === pressed.interactionId),
+  );
+  assert.equal(second.content, "pressed again");
+  assert.equal(used[1]?.kind, InteractionKind.BUTTON);
+  assert.equal(used[1]?.messageId, answer.id);
+
+  await agent.setCommands(serverId, []);
   await agent.stop();
 });
 

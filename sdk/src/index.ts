@@ -19,6 +19,7 @@ export {
   type AgentOptions,
   type CommandContext,
   type CommandInfo,
+  type InteractionContext,
   type MessageContext,
   type Outgoing,
 } from "./agent.js";
@@ -82,16 +83,20 @@ export * from "./gen/fuwa/v1/auth_pb.js";
 export * from "./gen/fuwa/v1/automod_pb.js";
 export * from "./gen/fuwa/v1/call_pb.js";
 export * from "./gen/fuwa/v1/channel_pb.js";
+export * from "./gen/fuwa/v1/command_pb.js";
 export * from "./gen/fuwa/v1/dm_pb.js";
 export * from "./gen/fuwa/v1/emoji_pb.js";
 export * from "./gen/fuwa/v1/event_pb.js";
 export * from "./gen/fuwa/v1/friend_pb.js";
+export * from "./gen/fuwa/v1/gif_pb.js";
 export * from "./gen/fuwa/v1/invite_pb.js";
 export * from "./gen/fuwa/v1/join_pb.js";
 export * from "./gen/fuwa/v1/media_pb.js";
 export * from "./gen/fuwa/v1/message_pb.js";
 export * from "./gen/fuwa/v1/node_pb.js";
+export * from "./gen/fuwa/v1/presence_pb.js";
 export * from "./gen/fuwa/v1/role_pb.js";
+export * from "./gen/fuwa/v1/search_pb.js";
 export * from "./gen/fuwa/v1/secure_pb.js";
 export * from "./gen/fuwa/v1/server_pb.js";
 export * from "./gen/fuwa/v1/sso_pb.js";
