@@ -56,11 +56,11 @@ export function zoomAround(crop: Crop, factor: number, at: { x: number; y: numbe
 
 export const centered = (image: Size): Crop => ({ cx: image.width / 2, cy: image.height / 2, zoom: 1 });
 
-export function loadImage(src: string): Promise<HTMLImageElement> {
+export function loadImage(t: I18n["t"], src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("that file isn't a picture this browser can open"));
+    image.onerror = () => reject(new Error(t("system.picture.cantOpen")));
     image.src = src;
   });
 }
@@ -96,11 +96,11 @@ export const BACKGROUND_MAX = 2560;
  * saved as WebP where the browser can (GIFs go as they are, so they keep
  * moving). Small pictures that are already WebP go untouched.
  */
-export async function backgroundPicture(file: Blob): Promise<Blob> {
+export async function backgroundPicture(t: I18n["t"], file: Blob): Promise<Blob> {
   if (file.type === "image/gif") return file;
   const url = URL.createObjectURL(file);
   try {
-    const image = await loadImage(url);
+    const image = await loadImage(t, url);
     const scale = Math.min(1, BACKGROUND_MAX / Math.max(image.naturalWidth, image.naturalHeight));
     if (scale === 1 && file.type === "image/webp") return file;
     const canvas = document.createElement("canvas");

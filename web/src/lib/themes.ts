@@ -107,12 +107,13 @@ export function seedsOf(tokens: ThemeTokens): ThemeSeeds {
   return Object.fromEntries(SEEDS.map((k) => [k, tokens[k]])) as ThemeSeeds;
 }
 
-function builtin(id: string, name: string, description: string, radius: number, seeds: ThemeSeeds): Theme {
-  return { id, name, description, builtin: true, variant: { tokens: deriveTokens(seeds), radius } };
+/** A built-in theme. Its line is in the catalog (appsettings.themes.builtin.*), shown by the theme picker. */
+function builtin(id: string, name: string, radius: number, seeds: ThemeSeeds): Theme {
+  return { id, name, description: null, builtin: true, variant: { tokens: deriveTokens(seeds), radius } };
 }
 
 export const BUILTIN_THEMES: Theme[] = [
-  builtin("sakura", "Sakura", "Soft cherry blossom pink. The default.", 1, {
+  builtin("sakura", "Sakura", 1, {
     background: "#fff5f8",
     foreground: "#3b2330",
     card: "#ffffff",
@@ -121,7 +122,7 @@ export const BUILTIN_THEMES: Theme[] = [
     "muted-foreground": "#8a6577",
     border: "#f8d3e0",
   }),
-  builtin("yoru", "Yoru", "Late night coding under neon signs.", 0.75, {
+  builtin("yoru", "Yoru", 0.75, {
     background: "#14111f",
     foreground: "#ece6ff",
     card: "#1f1a2e",
@@ -130,7 +131,7 @@ export const BUILTIN_THEMES: Theme[] = [
     "muted-foreground": "#9a90b8",
     border: "#342b4d",
   }),
-  builtin("matcha", "Matcha", "Calm green tea and warm paper.", 0.5, {
+  builtin("matcha", "Matcha", 0.5, {
     background: "#f4f6ec",
     foreground: "#243021",
     card: "#fffef7",
@@ -139,7 +140,7 @@ export const BUILTIN_THEMES: Theme[] = [
     "muted-foreground": "#66735f",
     border: "#d9e2c8",
   }),
-  builtin("sora", "Sora", "Clear skies and summer clouds.", 1.25, {
+  builtin("sora", "Sora", 1.25, {
     background: "#f0f7ff",
     foreground: "#1a2b44",
     card: "#ffffff",
@@ -148,7 +149,7 @@ export const BUILTIN_THEMES: Theme[] = [
     "muted-foreground": "#5f7391",
     border: "#cfe2f7",
   }),
-  builtin("tsundere", "Tsundere", "It's not like I made this theme for you or anything.", 0.25, {
+  builtin("tsundere", "Tsundere", 0.25, {
     background: "#1a0f12",
     foreground: "#ffe9ec",
     card: "#2a171c",

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { i18n } from "@/i18n/i18n";
 import { reportError, reportUsage } from "@/lib/reports";
 import { oggToWav, playsOgg } from "./wav";
 
@@ -88,7 +89,7 @@ function element(): HTMLAudioElement {
   a.addEventListener("error", () => {
     if (!state.current) return;
     reportError("voice_play", "voice.play");
-    set({ playing: false, failed: { ...state.failed, [state.current]: "This voice message couldn't be played here." } });
+    set({ playing: false, failed: { ...state.failed, [state.current]: i18n().t("system.voice.cantPlayHereShort") } });
   });
   audio = a;
   return a;
@@ -167,7 +168,7 @@ export async function toggle(id: string, load: Loader, at?: number) {
     if (state.loading === id) set({ loading: null });
     if (err instanceof DOMException && err.name === "AbortError") return;
     reportError("voice_open", "voice.play");
-    const failed = err instanceof Error && err.message ? err.message : "This voice message couldn't be played.";
+    const failed = err instanceof Error && err.message ? err.message : i18n().t("system.voice.cantPlay");
     set({ failed: { ...state.failed, [id]: failed.charAt(0).toUpperCase() + failed.slice(1).replace(/\.?$/, ".") } });
   }
 }

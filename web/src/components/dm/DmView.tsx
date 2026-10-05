@@ -27,6 +27,7 @@ import { isMessage, type Item } from "@/e2ee/vault";
 import { MAX_DM } from "@/e2ee/engine";
 import { focusChannel } from "@/fuwa/actions";
 import {
+  blockedText,
   deleteDm,
   dismissPending,
   dmProblem,
@@ -858,7 +859,7 @@ export function EncryptedComposer({
   thread?: { parent: number; channelName: string };
 }) {
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
-  const stuck = useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] ?? "");
+  const stuck = blockedText(useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] ?? ""));
   const blocked = locked || stuck;
   const draft = thread ? `${id}#${thread.parent}` : id;
   const [text, setText] = useState(() => drafts.get(draft) ?? "");

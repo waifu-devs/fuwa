@@ -1,5 +1,6 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Data, Effect } from "effect";
+import { i18n } from "@/i18n/i18n";
 
 /** Anything that went wrong talking to a fuwa server, in words a person can read. */
 export class FuwaError extends Data.TaggedError("FuwaError")<{ code: Code; message: string }> {
@@ -24,9 +25,9 @@ export function toFuwaError(cause: unknown): FuwaError {
   if (cause instanceof FuwaError) return cause;
   const err = ConnectError.from(cause);
   if (err.code === Code.Unknown && /fetch|network|load failed/i.test(err.rawMessage)) {
-    return new FuwaError({ code: Code.Unavailable, message: "can't reach this server right now" });
+    return new FuwaError({ code: Code.Unavailable, message: i18n().t("system.connection.unreachable") });
   }
-  return new FuwaError({ code: err.code, message: err.rawMessage || "something went wrong" });
+  return new FuwaError({ code: err.code, message: err.rawMessage || i18n().t("system.error.unknown") });
 }
 
 /** Runs one RPC as an Effect. The call is cancelled if the Effect is interrupted. */

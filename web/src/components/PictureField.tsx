@@ -255,7 +255,7 @@ export function PictureField({
                     }}
                     className="group rounded-xl text-muted-foreground hover:text-destructive"
                   >
-                    <Trash2Icon className="transition-transform group-hover:-rotate-12" /> Remove
+                    <Trash2Icon className="transition-transform group-hover:-rotate-12" /> {t("system.picture.remove")}
                   </Button>
                 </motion.span>
               )}

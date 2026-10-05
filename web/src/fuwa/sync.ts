@@ -250,7 +250,7 @@ const followEvents = (key: string, api: Api, followed: SubscriptionRef.Subscript
           Stream.ensuring(Effect.sync(() => controller.abort())),
         );
       }).pipe(
-        Stream.timeoutFail(() => new FuwaError({ code: Code.Unavailable, message: "lost the connection" }), SILENCE),
+        Stream.timeoutFail(() => new FuwaError({ code: Code.Unavailable, message: i18n().t("system.connection.lost") }), SILENCE),
         Stream.tapError((err) =>
           Effect.sync(
             () => err !== ENDED && err.retryable && patchInstance(key, { connection: "reconnecting", problem: err.message }),

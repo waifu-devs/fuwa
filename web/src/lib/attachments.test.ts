@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { fill, flatten, type Namespace, template } from "../i18n/core.ts";
+import type { I18n } from "../i18n/i18n.ts";
 import { cantAdd, extensionOf, familyOf, fitBox, localLook, lookOf, MAX_FILES, shortName } from "./attachments.ts";
 
 // Run with `pnpm test` (node's own test runner; no extra dependencies).
+
+/** English as the page has it (i18n/i18n.ts needs Vite, so this reads the catalog itself). */
+const english = flatten({ system: JSON.parse(readFileSync(new URL("../../../locales/en/system.json", import.meta.url), "utf8")) as Namespace });
+const t: I18n["t"] = (key, values = {}) =>
+  fill(template("en", english, english, key, typeof values.count === "number" ? values.count : undefined), Object.fromEntries(Object.entries(values).map(([k, v]) => [k, String(v)])));
 
 test("files are shown by the kind the server found", () => {
   assert.equal(lookOf("image/png"), "picture");
@@ -43,6 +51,6 @@ test("pictures keep their shape in their box", () => {
 });
 
 test("at most ten files go at once", () => {
-  assert.equal(cantAdd(0, MAX_FILES), "");
-  assert.match(cantAdd(9, 2), /up to 10/);
+  assert.equal(cantAdd(t, 0, MAX_FILES), "");
+  assert.match(cantAdd(t, 9, 2), /up to 10/);
 });

@@ -1,5 +1,6 @@
 import { CODES, english, languageOf, loadCatalog, type Namespaces, shipped } from "./catalogs.ts";
 import { type Catalog, fill, negotiate, template } from "./core.ts";
+import { Problem } from "./problem.ts";
 
 /**
  * The app's language: the Language setting (lib/prefs), or the browser's own
@@ -59,6 +60,9 @@ const listeners = new Set<() => void>();
 
 /** The app's language now. Components read it with useI18n, which re-renders them when it changes. */
 export const i18n = () => current;
+
+/** A Problem (i18n/problem.ts) as an Error in the app's language; anything else as it was. */
+export const inWords = (err: unknown): unknown => (err instanceof Problem ? new Error(current.t(err.key)) : err);
 
 export function subscribeI18n(listener: () => void) {
   listeners.add(listener);

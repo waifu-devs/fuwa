@@ -16,7 +16,8 @@ export type KeyGroup = "Navigation" | "Messages" | "Chat" | "Voice" | "App";
 
 export type KeyAction = {
   id: string;
-  label: string;
+  /** Its name in the catalog (locales/, appsettings.keybinds.action.*). */
+  name: Key;
   group: KeyGroup;
   /** Null when the action has no shortcut until someone gives it one. */
   combo: string | null;
@@ -25,55 +26,30 @@ export type KeyAction = {
 };
 
 export const ACTIONS: KeyAction[] = [
-  { id: "quickSwitcher", label: "Find a server or channel", group: "Navigation", combo: "Mod+K", whileTyping: true },
-  { id: "searchServer", label: "Search this server's messages", group: "Navigation", combo: "Mod+F", whileTyping: true },
-  { id: "previousServer", label: "Previous server", group: "Navigation", combo: "Mod+Alt+ArrowUp", whileTyping: true },
-  { id: "nextServer", label: "Next server", group: "Navigation", combo: "Mod+Alt+ArrowDown", whileTyping: true },
-  { id: "previousChannel", label: "Previous channel", group: "Navigation", combo: "Alt+ArrowUp", whileTyping: true },
-  { id: "nextChannel", label: "Next channel", group: "Navigation", combo: "Alt+ArrowDown", whileTyping: true },
-  { id: "previousUnread", label: "Previous unread channel", group: "Navigation", combo: "Alt+Shift+ArrowUp", whileTyping: true },
-  { id: "nextUnread", label: "Next unread channel", group: "Navigation", combo: "Alt+Shift+ArrowDown", whileTyping: true },
-  { id: "markServerRead", label: "Mark the server as read", group: "Messages", combo: "Shift+Escape", whileTyping: true },
-  { id: "focusComposer", label: "Start typing a message", group: "Chat", combo: "Tab" },
-  { id: "insertTimestamp", label: "Insert a timestamp", group: "Chat", combo: "Alt+Shift+T", whileTyping: true },
-  { id: "toggleMembers", label: "Show or hide members", group: "Chat", combo: "Mod+U", whileTyping: true },
-  { id: "toggleMute", label: "Mute or unmute yourself", group: "Voice", combo: "Mod+Shift+M", whileTyping: true },
-  { id: "toggleDeafen", label: "Deafen or undeafen yourself", group: "Voice", combo: "Mod+Shift+D", whileTyping: true },
-  { id: "pushToTalk", label: "Push to talk (hold)", group: "Voice", combo: null },
-  { id: "toggleCamera", label: "Turn your camera on or off", group: "Voice", combo: null, whileTyping: true },
-  { id: "toggleScreen", label: "Share your screen, or stop", group: "Voice", combo: null, whileTyping: true },
-  { id: "toggleRecording", label: "Record the call, or stop and save it", group: "Voice", combo: null, whileTyping: true },
-  { id: "openSettings", label: "Open settings", group: "App", combo: "Mod+Comma", whileTyping: true },
-  { id: "shortcuts", label: "Show keyboard shortcuts", group: "App", combo: "Mod+Slash", whileTyping: true },
-  { id: "toggleStreamer", label: "Turn streamer mode on or off", group: "App", combo: null, whileTyping: true },
+  { id: "quickSwitcher", name: "appsettings.keybinds.action.quickSwitcher", group: "Navigation", combo: "Mod+K", whileTyping: true },
+  { id: "searchServer", name: "appsettings.keybinds.action.searchServer", group: "Navigation", combo: "Mod+F", whileTyping: true },
+  { id: "previousServer", name: "appsettings.keybinds.action.previousServer", group: "Navigation", combo: "Mod+Alt+ArrowUp", whileTyping: true },
+  { id: "nextServer", name: "appsettings.keybinds.action.nextServer", group: "Navigation", combo: "Mod+Alt+ArrowDown", whileTyping: true },
+  { id: "previousChannel", name: "appsettings.keybinds.action.previousChannel", group: "Navigation", combo: "Alt+ArrowUp", whileTyping: true },
+  { id: "nextChannel", name: "appsettings.keybinds.action.nextChannel", group: "Navigation", combo: "Alt+ArrowDown", whileTyping: true },
+  { id: "previousUnread", name: "appsettings.keybinds.action.previousUnread", group: "Navigation", combo: "Alt+Shift+ArrowUp", whileTyping: true },
+  { id: "nextUnread", name: "appsettings.keybinds.action.nextUnread", group: "Navigation", combo: "Alt+Shift+ArrowDown", whileTyping: true },
+  { id: "markServerRead", name: "appsettings.keybinds.action.markServerRead", group: "Messages", combo: "Shift+Escape", whileTyping: true },
+  { id: "focusComposer", name: "appsettings.keybinds.action.focusComposer", group: "Chat", combo: "Tab" },
+  { id: "insertTimestamp", name: "appsettings.keybinds.action.insertTimestamp", group: "Chat", combo: "Alt+Shift+T", whileTyping: true },
+  { id: "toggleMembers", name: "appsettings.keybinds.action.toggleMembers", group: "Chat", combo: "Mod+U", whileTyping: true },
+  { id: "toggleMute", name: "appsettings.keybinds.action.toggleMute", group: "Voice", combo: "Mod+Shift+M", whileTyping: true },
+  { id: "toggleDeafen", name: "appsettings.keybinds.action.toggleDeafen", group: "Voice", combo: "Mod+Shift+D", whileTyping: true },
+  { id: "pushToTalk", name: "appsettings.keybinds.action.pushToTalk", group: "Voice", combo: null },
+  { id: "toggleCamera", name: "appsettings.keybinds.action.toggleCamera", group: "Voice", combo: null, whileTyping: true },
+  { id: "toggleScreen", name: "appsettings.keybinds.action.toggleScreen", group: "Voice", combo: null, whileTyping: true },
+  { id: "toggleRecording", name: "appsettings.keybinds.action.toggleRecording", group: "Voice", combo: null, whileTyping: true },
+  { id: "openSettings", name: "appsettings.keybinds.action.openSettings", group: "App", combo: "Mod+Comma", whileTyping: true },
+  { id: "shortcuts", name: "appsettings.keybinds.action.shortcuts", group: "App", combo: "Mod+Slash", whileTyping: true },
+  { id: "toggleStreamer", name: "appsettings.keybinds.action.toggleStreamer", group: "App", combo: null, whileTyping: true },
 ];
 
 export const GROUPS: KeyGroup[] = ["Navigation", "Messages", "Chat", "Voice", "App"];
-
-/** Each action's name in the catalog (locales/, appsettings.keybinds.action.*). */
-const ACTION_NAMES: Record<string, Key> = {
-  quickSwitcher: "appsettings.keybinds.action.quickSwitcher",
-  searchServer: "appsettings.keybinds.action.searchServer",
-  previousServer: "appsettings.keybinds.action.previousServer",
-  nextServer: "appsettings.keybinds.action.nextServer",
-  previousChannel: "appsettings.keybinds.action.previousChannel",
-  nextChannel: "appsettings.keybinds.action.nextChannel",
-  previousUnread: "appsettings.keybinds.action.previousUnread",
-  nextUnread: "appsettings.keybinds.action.nextUnread",
-  markServerRead: "appsettings.keybinds.action.markServerRead",
-  focusComposer: "appsettings.keybinds.action.focusComposer",
-  insertTimestamp: "appsettings.keybinds.action.insertTimestamp",
-  toggleMembers: "appsettings.keybinds.action.toggleMembers",
-  toggleMute: "appsettings.keybinds.action.toggleMute",
-  toggleDeafen: "appsettings.keybinds.action.toggleDeafen",
-  pushToTalk: "appsettings.keybinds.action.pushToTalk",
-  toggleCamera: "appsettings.keybinds.action.toggleCamera",
-  toggleScreen: "appsettings.keybinds.action.toggleScreen",
-  toggleRecording: "appsettings.keybinds.action.toggleRecording",
-  openSettings: "appsettings.keybinds.action.openSettings",
-  shortcuts: "appsettings.keybinds.action.shortcuts",
-  toggleStreamer: "appsettings.keybinds.action.toggleStreamer",
-};
 
 const GROUP_NAMES: Record<KeyGroup, Key> = {
   Navigation: "appsettings.keybinds.group.navigation",
@@ -83,11 +59,8 @@ const GROUP_NAMES: Record<KeyGroup, Key> = {
   App: "appsettings.keybinds.group.app",
 };
 
-/** An action's name in the app's language (its English label if the catalog doesn't name it). */
-export const actionName = (t: I18n["t"], action: KeyAction) => {
-  const key = ACTION_NAMES[action.id];
-  return key ? t(key) : action.label;
-};
+/** An action's name in the app's language. */
+export const actionName = (t: I18n["t"], action: KeyAction) => t(action.name);
 
 /** A group's heading in the app's language. */
 export const groupName = (t: I18n["t"], group: KeyGroup) => t(GROUP_NAMES[group]);
