@@ -1,6 +1,6 @@
-import { clone, create } from "@bufbuild/protobuf";
+import { clone } from "@bufbuild/protobuf";
 import { CircleCheckIcon, CircleXIcon, FilmIcon, KeyRoundIcon, LoaderCircleIcon, PowerOffIcon, ShieldIcon, SparklesIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import { GifSettingsSchema, type GifSettings as GifSetup, type InstanceSettings } from "@/gen/fuwa/v1/admin_pb";
 import type { TestGifProviderResponse } from "@/gen/fuwa/v1/gif_pb";
@@ -14,38 +14,9 @@ import { formatBytes } from "@/lib/format";
 import { type I18n, useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { Cap, Choice, Setting, SPRING } from "../controls";
+import { gifsOf } from "./gif-fields";
 
 type Reset = { changed: boolean; onReset: () => void; resetting: boolean };
-
-const gifsOf = (s: InstanceSettings) => s.gifs ?? create(GifSettingsSchema);
-
-/** The instance settings this page reads: all of GIFs is one setting. */
-export const GIF_FIELDS: { path: string; get: (s: InstanceSettings) => unknown; copy: (into: InstanceSettings, from: InstanceSettings) => void }[] = [
-  {
-    path: "gifs",
-    get: (s) => {
-      const g = gifsOf(s);
-      // The key is never sent back: an empty field keeps the saved one.
-      return [g.provider, g.apiKey.trim(), g.rating || "pg-13", g.gifBytes, g.searchesPerMinute, g.providerCallsPerDay].join("|");
-    },
-    copy: (into, from) => (into.gifs = clone(GifSettingsSchema, gifsOf(from))),
-  },
-];
-
-/** The GIFs page in the settings menu, in the app's language. */
-export const gifSection = (t: I18n["t"]) => ({
-  id: "gifs",
-  label: t("instancesettings.nav.gifs"),
-  icon: FilmIcon,
-  description: t("instancesettings.nav.gifsAbout"),
-  keywords: "gif giphy klipy tenor search animated",
-  settings: [
-    { id: "gif-provider", label: t("instancesettings.nav.gifProvider"), keywords: "giphy klipy" },
-    { id: "gif-key", label: t("instancesettings.nav.gifKey"), keywords: "api key secret" },
-    { id: "gif-rating", label: t("instancesettings.nav.gifRating"), keywords: "nsfw safe content filter" },
-    { id: "gif-caps", label: t("instancesettings.nav.gifCaps"), keywords: "size limit rate searches per day" },
-  ],
-});
 
 const RATING_LABEL: Record<string, string> = { g: "G", pg: "PG", "pg-13": "PG-13", r: "R" };
 
@@ -80,9 +51,6 @@ export function GifSettings({
       fn(d.gifs);
     });
   const reset = resetter("gifs");
-  const privateField = usePrivateField();
-  const name = g.provider === GifProvider.GIPHY ? "GIPHY" : g.provider === GifProvider.KLIPY ? "Klipy" : "";
-  const keyMissing = g.provider !== GifProvider.UNSPECIFIED && !g.apiKey.trim() && !(was.apiKeySet && was.provider === g.provider);
 
   return (
     <>
@@ -106,34 +74,7 @@ export function GifSettings({
       <AnimatePresence initial={false}>
         {g.provider !== GifProvider.UNSPECIFIED && (
           <motion.div key="on" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={SPRING}>
-            <Setting
-              id="gif-key"
-              title={t("instancesettings.gifs.keyTitle", { name })}
-              hint={t("instancesettings.gifs.keyHint", { name })}
-              delay={0.02}
-              defaultLabel={t(def.apiKeySet ? "instancesettings.shared.set" : "instancesettings.shared.none")}
-              {...reset}
-            >
-              <div className="relative">
-                <KeyRoundIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type="password"
-                  autoComplete="off"
-                  value={g.apiKey}
-                  onChange={(e) => edit((x) => (x.apiKey = e.target.value))}
-                  placeholder={
-                    was.apiKeySet && was.provider === g.provider
-                      ? was.apiKeyHint
-                        ? t("instancesettings.shared.savedEnding", { hint: was.apiKeyHint })
-                        : t("instancesettings.shared.saved")
-                      : t("instancesettings.gifs.paste", { name })
-                  }
-                  className={cn("h-10 rounded-xl pl-9 font-mono text-sm", privateField, keyMissing && "ring-2 ring-amber-500/50")}
-                />
-              </div>
-              {keyMissing && <p className="text-xs text-amber-600 dark:text-amber-400">{t("instancesettings.gifs.keyMissing")}</p>}
-              <TryIt instanceKey={instanceKey} settings={g} />
-            </Setting>
+            <GifKeySetting instanceKey={instanceKey} g={g} was={was} def={def} reset={reset} edit={edit} />
             <Setting
               id="gif-rating"
               title={t("instancesettings.nav.gifRating")}
@@ -176,6 +117,59 @@ export function GifSettings({
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+/** The provider's API key: saved ones are never shown, only how they end. */
+function GifKeySetting({
+  instanceKey,
+  g,
+  was,
+  def,
+  reset,
+  edit,
+}: {
+  instanceKey: string;
+  g: GifSetup;
+  was: GifSetup;
+  def: GifSetup;
+  reset: Reset;
+  edit: (fn: (g: GifSetup) => void) => void;
+}) {
+  const { t } = useI18n();
+  const privateField = usePrivateField();
+  const name = g.provider === GifProvider.GIPHY ? "GIPHY" : g.provider === GifProvider.KLIPY ? "Klipy" : "";
+  const keptKey = was.apiKeySet && was.provider === g.provider;
+  const keyMissing = g.provider !== GifProvider.UNSPECIFIED && !g.apiKey.trim() && !keptKey;
+  return (
+    <Setting
+      id="gif-key"
+      title={t("instancesettings.gifs.keyTitle", { name })}
+      hint={t("instancesettings.gifs.keyHint", { name })}
+      delay={0.02}
+      defaultLabel={t(def.apiKeySet ? "instancesettings.shared.set" : "instancesettings.shared.none")}
+      {...reset}
+    >
+      <div className="relative">
+        <KeyRoundIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="password"
+          autoComplete="off"
+          value={g.apiKey}
+          onChange={(e) => edit((x) => (x.apiKey = e.target.value))}
+          placeholder={
+            keptKey
+              ? was.apiKeyHint
+                ? t("instancesettings.shared.savedEnding", { hint: was.apiKeyHint })
+                : t("instancesettings.shared.saved")
+              : t("instancesettings.gifs.paste", { name })
+          }
+          className={cn("h-10 rounded-xl pl-9 font-mono text-sm", privateField, keyMissing && "ring-2 ring-amber-500/50")}
+        />
+      </div>
+      {keyMissing && <p className="text-xs text-amber-600 dark:text-amber-400">{t("instancesettings.gifs.keyMissing")}</p>}
+      <TryIt instanceKey={instanceKey} settings={g} />
+    </Setting>
   );
 }
 

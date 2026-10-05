@@ -12,7 +12,7 @@ import {
   ShieldOffIcon,
   UserPlusIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Permission, type Channel, type Member, type User } from "@/gen/fuwa/v1/types_pb";
 import { SECURE_BROKEN, secureModerates } from "@/e2ee/engine";
@@ -23,13 +23,16 @@ import { dmProblem, markDmRead, prepareSecureChannel, resetSecureChannel, setSec
 import { useAccess } from "@/fuwa/hooks";
 import { useFuwa, type DmMember, type DmState, type PendingMessage } from "@/fuwa/store";
 import { NotificationBell } from "@/components/chat/NotificationBell";
-import { EncryptedComposer, EncryptedMessages, earlierFrom, Starting, Unavailable, type Earlier, type ThreadHooks } from "@/components/dm/DmView";
+import { EncryptedComposer, EncryptedMessages, Starting, Unavailable, type ThreadHooks } from "@/components/dm/DmView";
+import { earlierFrom, type Earlier } from "@/components/dm/earlier";
 import { SecureAlsoSent, SecureRepliesRow, SecureThreadList, SecureThreadPanel, useArchiveHours, useThreadNote } from "@/components/chat/SecureThreads";
 import { ThreadsButton } from "@/components/chat/Threads";
 import { Padlock } from "@/components/dm/Padlock";
-import { ConnDot, connectionLabel, UserAvatar } from "@/components/Icons";
+import { ConnDot, UserAvatar } from "@/components/Icons";
+import { connectionLabel } from "@/components/icons-utils";
 import { InlineMarkdown } from "@/components/Markdown";
-import { SPRING, SwapText } from "@/components/motion";
+import { SwapText } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { useLayout } from "@/components/Shell";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
@@ -71,32 +74,18 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
   const lang = useI18n();
   const { t } = lang;
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
-  const problem = useFuwa((s) => s.instances[instanceKey]?.dms.problem ?? null);
   const me = useFuwa((s) => s.instances[instanceKey]?.me ?? undefined);
   const users = useFuwa((s) => s.instances[instanceKey]?.users);
   const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? NO_SERVER_MEMBERS);
-  const connection = useFuwa((s) => s.instances[instanceKey]?.connection ?? "connecting");
-  const serverName = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.name);
   const access = useAccess(instanceKey, serverId);
-  const { compact, setNavOpen } = useLayout();
   const [info, setInfo] = useState(false);
   const id = channel.id;
-  const docked = useMediaQuery("(min-width: 1024px)");
 
-  useEffect(() => {
-    focusChannel(instanceKey, id);
-    void markDmRead(instanceKey, id);
-    return () => focusChannel(null, null);
-  }, [instanceKey, id]);
-  useEffect(() => {
-    setTitle(t("chat.channel.pageTitle", { channel: channel.name, server: serverName ?? "fuwa" }));
-  }, [channel.name, serverName, t]);
-  useEffect(() => () => setTitle("fuwa"), []);
+  useFocused(instanceKey, serverId, channel);
 
   const canSend = hasIn(access, id, Permission.SEND_MESSAGES);
   const canAttach = canSend && hasIn(access, id, Permission.ATTACH_FILES);
   const canReset = hasIn(access, id, Permission.MANAGE_CHANNELS);
-  const broken = useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] === SECURE_BROKEN);
   const sharesHistory = useFuwa((s) => !!s.instances[instanceKey]?.dms.secureHistory[id]);
 
   // Once encryption is running here: catch up, and if you may write, bring in everyone who can see the channel.
@@ -136,9 +125,131 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
   const closePanel = useCallback(() => setPanel(null), []);
   const canStart = hasIn(access, id, Permission.CREATE_THREADS);
   const canModerate = hasIn(access, id, Permission.MANAGE_MESSAGES);
+  const hooks = useThreadHooks({ instanceKey, serverId, id, org, items, me, openThread, canSend, canStart });
+
+  const ready = !!me && status === "ready";
+  const side =
+    panel?.kind === "thread" && me ? (
+      <SecureThreadPanel
+        key={panel.id}
+        instanceKey={instanceKey}
+        serverId={serverId}
+        channel={channel}
+        parent={Number(panel.id)}
+        org={org}
+        me={me}
+        userOf={userOf}
+        memberOf={memberOf}
+        describe={describe}
+        canSend={canSend}
+        canAttach={canAttach}
+        canModerate={canModerate}
+        onClose={closePanel}
+      />
+    ) : panel && me ? (
+      <SecureThreadList
+        instanceKey={instanceKey}
+        serverId={serverId}
+        channel={channel}
+        org={org}
+        me={me}
+        userOf={userOf}
+        onOpen={openThread}
+        onClose={closePanel}
+      />
+    ) : null;
+
+  return (
+    <div className="relative flex h-full min-h-0">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <SecureHeader
+          instanceKey={instanceKey}
+          serverId={serverId}
+          channel={channel}
+          threads={status === "ready"}
+          panel={panel}
+          onPanel={setPanel}
+          onInfo={() => setInfo(true)}
+        />
+        {ready && me ? (
+          <>
+            <EncryptedMessages
+              instanceKey={instanceKey}
+              id={id}
+              me={me}
+              userOf={userOf}
+              memberOf={memberOf}
+              describe={describe}
+              beginning={<SecureBeginning channel={channel} sharesHistory={sharesHistory} />}
+              canModerate={canModerate}
+              deleteQuestion={t("chat.secure.deleteQuestion")}
+              joiningText={t("chat.secure.joining")}
+              lines={org.channel}
+              pendingIn={inChannel}
+              threads={hooks}
+            />
+            <SecureComposer instanceKey={instanceKey} serverId={serverId} channel={channel} canSend={canSend} canAttach={canAttach} canReset={canReset} />
+            <SecureChannelDialog
+              open={info}
+              onOpenChange={setInfo}
+              instanceKey={instanceKey}
+              serverId={serverId}
+              channel={channel}
+              byId={byId}
+              canReset={canReset}
+              canSend={canSend}
+            />
+          </>
+        ) : (
+          <NotReady instanceKey={instanceKey} />
+        )}
+      </div>
+      <Side>{ready && side}</Side>
+    </div>
+  );
+}
+
+/** While it's open: the channel is the one in focus, read, and named in the page's title. */
+function useFocused(instanceKey: string, serverId: string, channel: Channel) {
+  const { t } = useI18n();
+  const serverName = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.name);
+  const id = channel.id;
+  useEffect(() => {
+    focusChannel(instanceKey, id);
+    void markDmRead(instanceKey, id);
+    return () => focusChannel(null, null);
+  }, [instanceKey, id]);
+  useEffect(() => {
+    setTitle(t("chat.channel.pageTitle", { channel: channel.name, server: serverName ?? "fuwa" }));
+  }, [channel.name, serverName, t]);
+  useEffect(() => () => setTitle("fuwa"), []);
+}
+
+/** How the channel's lines show their threads: the replies row under a parent, and who may start one. */
+function useThreadHooks({
+  instanceKey,
+  serverId,
+  id,
+  org,
+  items,
+  me,
+  openThread,
+  canSend,
+  canStart,
+}: {
+  instanceKey: string;
+  serverId: string;
+  id: string;
+  org: ReturnType<typeof organize>;
+  items: Item[];
+  me: User | undefined;
+  openThread: (parent: number) => void;
+  canSend: boolean;
+  canStart: boolean;
+}) {
   const note = useThreadNote(instanceKey, id);
   const hours = useArchiveHours(instanceKey, serverId);
-  const hooks = useMemo<ThreadHooks>(() => {
+  return useMemo<ThreadHooks>(() => {
     const threadNote = { follows: note.follows, threadRead: note.read };
     return {
       under: (item): ReactNode => {
@@ -157,183 +268,177 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
       kept: (item) => (org.inThread.get(item.seq) ?? NO_ITEMS).some((r) => r.kind === "text" && !r.deleted && r.senderId !== item.senderId),
     };
   }, [org, items, note, me, instanceKey, hours, openThread, canSend, canStart]);
+}
 
-  const side =
-    panel && me && status === "ready" ? (
-      panel.kind === "thread" ? (
-        <SecureThreadPanel
-          key={panel.id}
-          instanceKey={instanceKey}
-          serverId={serverId}
-          channel={channel}
-          parent={Number(panel.id)}
-          org={org}
-          me={me}
-          userOf={userOf}
-          memberOf={memberOf}
-          describe={describe}
-          canSend={canSend}
-          canAttach={canAttach}
-          canModerate={canModerate}
-          onClose={closePanel}
-        />
-      ) : (
-        <SecureThreadList
-          instanceKey={instanceKey}
-          serverId={serverId}
-          channel={channel}
-          org={org}
-          me={me}
-          userOf={userOf}
-          onOpen={openThread}
-          onClose={closePanel}
-        />
-      )
-    ) : null;
-
+/** The channel's name and topic, the connection when it isn't live, and its buttons. */
+function SecureHeader({
+  instanceKey,
+  serverId,
+  channel,
+  threads,
+  panel,
+  onPanel,
+  onInfo,
+}: {
+  instanceKey: string;
+  serverId: string;
+  channel: Channel;
+  /** Whether threads can be shown yet (encryption is running). */
+  threads: boolean;
+  panel: ThreadPanelState;
+  onPanel: (panel: ThreadPanelState) => void;
+  onInfo: () => void;
+}) {
+  const { t } = useI18n();
+  const { compact, setNavOpen } = useLayout();
+  const connection = useFuwa((s) => s.instances[instanceKey]?.connection ?? "connecting");
+  const id = channel.id;
   return (
-    <div className="relative flex h-full min-h-0">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4">
-          {compact && (
-            <button
-              type="button"
-              aria-label={t("chat.channel.channels")}
-              onClick={() => setNavOpen(true)}
-              className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted"
-            >
-              <ChevronLeftIcon className="size-5" />
-            </button>
-          )}
-          <AnimatePresence mode="popLayout" initial={false}>
-            <motion.span
-              key={id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={SPRING}
-              className="flex min-w-0 shrink items-center gap-2"
-            >
-              <ShieldCheckIcon className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-              <h1 className="truncate font-extrabold">
-                <SwapText className="truncate align-bottom">{channel.name}</SwapText>
-              </h1>
-            </motion.span>
-          </AnimatePresence>
-          {channel.topic && (
-            <>
-              <span className="hidden h-5 w-px bg-border sm:block" />
-              <InlineMarkdown className="hidden min-w-0 truncate text-sm text-muted-foreground sm:block">{channel.topic}</InlineMarkdown>
-            </>
-          )}
-          <span className="flex-1" />
-          <AnimatePresence>
-            {connection !== "live" && (
-              <motion.span
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground"
-              >
-                <ConnDot state={connection} /> {connectionLabel(connection)}
-              </motion.span>
-            )}
-          </AnimatePresence>
-          <NotificationBell instanceKey={instanceKey} serverId={serverId} channel={channel} />
-          {status === "ready" && (
-            <ThreadsButton
-              open={panel?.kind === "threads"}
-              active={!!panel}
-              onClick={() => setPanel(panel?.kind === "threads" ? null : { kind: "threads" })}
-            />
-          )}
-          <motion.button
-            type="button"
-            onClick={() => setInfo(true)}
-            whileTap={{ scale: 0.92 }}
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={SPRING}
-            title={t("chat.secure.seeWho")}
-            className="group relative flex shrink-0 items-center gap-1.5 overflow-hidden rounded-full bg-emerald-500/12 px-2.5 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
+  <header className="flex h-14 shrink-0 items-center gap-2 border-b px-2 sm:px-4">
+    {compact && (
+      <button
+        type="button"
+        aria-label={t("chat.channel.channels")}
+        onClick={() => setNavOpen(true)}
+        className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted"
+      >
+        <ChevronLeftIcon className="size-5" />
+      </button>
+    )}
+    <AnimatePresence mode="popLayout" initial={false}>
+      <motion.span
+        key={id}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        transition={SPRING}
+        className="flex min-w-0 shrink items-center gap-2"
+      >
+        <ShieldCheckIcon className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <h1 className="truncate font-extrabold">
+          <SwapText className="truncate align-bottom">{channel.name}</SwapText>
+        </h1>
+      </motion.span>
+    </AnimatePresence>
+    {channel.topic && (
+      <>
+        <span className="hidden h-5 w-px bg-border sm:block" />
+        <InlineMarkdown className="hidden min-w-0 truncate text-sm text-muted-foreground sm:block">{channel.topic}</InlineMarkdown>
+      </>
+    )}
+    <span className="flex-1" />
+    <AnimatePresence>
+      {connection !== "live" && (
+        <motion.span
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.9 }}
+          className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-muted-foreground"
+        >
+          <ConnDot state={connection} /> {connectionLabel(connection)}
+        </motion.span>
+      )}
+    </AnimatePresence>
+    <NotificationBell instanceKey={instanceKey} serverId={serverId} channel={channel} />
+    {threads && (
+      <ThreadsButton
+        open={panel?.kind === "threads"}
+        active={!!panel}
+        onClick={() => onPanel(panel?.kind === "threads" ? null : { kind: "threads" })}
+      />
+    )}
+    <motion.button
+      type="button"
+      onClick={onInfo}
+      whileTap={{ scale: 0.92 }}
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={SPRING}
+      title={t("chat.secure.seeWho")}
+      className="group relative flex shrink-0 items-center gap-1.5 overflow-hidden rounded-full bg-emerald-500/12 px-2.5 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
+    >
+      <span aria-hidden className="shine pointer-events-none absolute inset-0" />
+      <LockKeyholeIcon className="size-3.5 transition-transform duration-300 group-hover:-rotate-12 group-hover:scale-110" />
+      <span className="hidden sm:inline">{t("chat.secure.encrypted")}</span>
+    </motion.button>
+  </header>
+  );
+}
+
+/** The composer, or why you can't write; a broken channel offers starting over to those who may. */
+function SecureComposer({
+  instanceKey,
+  serverId,
+  channel,
+  canSend,
+  canAttach,
+  canReset,
+}: {
+  instanceKey: string;
+  serverId: string;
+  channel: Channel;
+  canSend: boolean;
+  canAttach: boolean;
+  canReset: boolean;
+}) {
+  const { t } = useI18n();
+  const id = channel.id;
+  const broken = useFuwa((s) => s.instances[instanceKey]?.dms.blocked[id] === SECURE_BROKEN);
+  const reset = canReset ? <ResetButton instanceKey={instanceKey} serverId={serverId} channelId={id} write={canSend} /> : null;
+  return (
+    <EncryptedComposer
+      instanceKey={instanceKey}
+      id={id}
+      placeholder={t("chat.channel.placeholder", { channel: channel.name })}
+      promise={t("chat.secure.promise")}
+      files={canAttach}
+      dropTo={channel.name}
+      locked={canSend || broken ? "" : t("chat.secure.noPermission")}
+      action={broken ? reset : undefined}
+    />
+  );
+}
+
+/** Before encryption runs here: starting, or why it can't. */
+function NotReady({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
+  const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
+  const problem = useFuwa((s) => s.instances[instanceKey]?.dms.problem ?? null);
+  if (status === "unsupported" || status === "failed") return <Unavailable text={problem ?? t("chat.secure.unavailable")} />;
+  return <Starting />;
+}
+
+/** Threads beside the channel on a wide screen, or over it on a narrow one. */
+function Side({ children }: { children: ReactNode }) {
+  const docked = useMediaQuery("(min-width: 1024px)");
+  return (
+    <AnimatePresence initial={false} mode="popLayout">
+      {children &&
+        (docked ? (
+          <motion.aside
+            key="threads"
+            initial={{ x: 32, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 32, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 400, damping: 40 }}
+            className="surface-side h-full w-[400px] shrink-0 overflow-hidden border-l xl:w-[440px]"
           >
-            <span aria-hidden className="shine pointer-events-none absolute inset-0" />
-            <LockKeyholeIcon className="size-3.5 transition-transform duration-300 group-hover:-rotate-12 group-hover:scale-110" />
-            <span className="hidden sm:inline">{t("chat.secure.encrypted")}</span>
-          </motion.button>
-        </header>
-        {me && status === "ready" ? (
-          <>
-            <EncryptedMessages
-              instanceKey={instanceKey}
-              id={id}
-              me={me}
-              userOf={userOf}
-              memberOf={memberOf}
-              describe={describe}
-              beginning={<SecureBeginning channel={channel} sharesHistory={sharesHistory} />}
-              canModerate={canModerate}
-              deleteQuestion={t("chat.secure.deleteQuestion")}
-              joiningText={t("chat.secure.joining")}
-              lines={org.channel}
-              pendingIn={inChannel}
-              threads={hooks}
-            />
-            <EncryptedComposer
-              instanceKey={instanceKey}
-              id={id}
-              placeholder={t("chat.channel.placeholder", { channel: channel.name })}
-              promise={t("chat.secure.promise")}
-              files={canAttach}
-              dropTo={channel.name}
-              locked={canSend || broken ? "" : t("chat.secure.noPermission")}
-              action={broken ? canReset ? <ResetButton instanceKey={instanceKey} serverId={serverId} channelId={id} write={canSend} /> : null : undefined}
-            />
-            <SecureChannelDialog
-              open={info}
-              onOpenChange={setInfo}
-              instanceKey={instanceKey}
-              serverId={serverId}
-              channel={channel}
-              byId={byId}
-              canReset={canReset}
-              canSend={canSend}
-            />
-          </>
-        ) : status === "unsupported" || status === "failed" ? (
-          <Unavailable text={problem ?? t("chat.secure.unavailable")} />
+            {children}
+          </motion.aside>
         ) : (
-          <Starting />
-        )}
-      </div>
-      <AnimatePresence initial={false} mode="popLayout">
-        {side &&
-          (docked ? (
-            <motion.aside
-              key="threads"
-              initial={{ x: 32, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 32, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 400, damping: 40 }}
-              className="surface-side h-full w-[400px] shrink-0 overflow-hidden border-l xl:w-[440px]"
-            >
-              {side}
-            </motion.aside>
-          ) : (
-            // On a narrow screen a thread takes the whole width, sliding over the channel.
-            <motion.aside
-              key="threads-sheet"
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", stiffness: 420, damping: 40 }}
-              className="surface-side absolute inset-0 z-30 flex flex-col shadow-2xl"
-            >
-              {side}
-            </motion.aside>
-          ))}
-      </AnimatePresence>
-    </div>
+          // On a narrow screen a thread takes the whole width, sliding over the channel.
+          <motion.aside
+            key="threads-sheet"
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={{ type: "spring", stiffness: 420, damping: 40 }}
+            className="surface-side absolute inset-0 z-30 flex flex-col shadow-2xl"
+          >
+            {children}
+          </motion.aside>
+        ))}
+    </AnimatePresence>
   );
 }
 
@@ -343,7 +448,7 @@ function nameIn(byId: Map<string, Member>, users: Record<string, User> | undefin
 }
 
 /** What changed about the channel's devices, in words, from the commit itself (not from the server). */
-export function channelLine(lang: Lang, item: Item, nameOf: (userId: string) => string, me: User, earlier: Earlier = null): string {
+function channelLine(lang: Lang, item: Item, nameOf: (userId: string) => string, me: User, earlier: Earlier = null): string {
   const { t } = lang;
   const capital = (text: string) => `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
   const mine = item.senderId === me.id;

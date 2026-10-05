@@ -1,5 +1,5 @@
 import { GavelIcon, LoaderCircleIcon, SearchIcon, ShieldCheckIcon, UndoIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import type { Ban } from "@/gen/fuwa/v1/server_pb";
 import type { User } from "@/gen/fuwa/v1/types_pb";
@@ -7,7 +7,8 @@ import { listBans, run, unbanMember } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { T, useI18n } from "@/i18n/react";

@@ -1,6 +1,6 @@
 import * as Popover from "@radix-ui/react-popover";
 import { CircleDotIcon, HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon, MonitorUpIcon, PhoneOffIcon, ServerIcon, ShieldOffIcon, VideoIcon, VideoOffIcon, Volume2Icon, VolumeXIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState, type ReactNode } from "react";
 import type { User, VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { Permission } from "@/gen/fuwa/v1/types_pb";
@@ -10,7 +10,7 @@ import { toFuwaError } from "@/fuwa/errors";
 import { useAccess, useInstance } from "@/fuwa/hooks";
 import { engine } from "@/fuwa/sync";
 import { UserAvatar } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Slider } from "@/components/ui/slider";
 import { displayName, memberName } from "@/lib/format";
 import { actionById, bindingOf, comboLabel } from "@/lib/keybinds";
@@ -186,21 +186,12 @@ export function ParticipantMenu({
   state?: VoiceState;
   children: ReactNode;
 }) {
-  const inst = useInstance(instanceKey);
-  const me = inst?.me?.id;
   const userId = user?.id ?? "";
   const key = `${instanceKey}/${userId}`;
   const volume = usePrefs((p) => p.userVolumes[key] ?? 100);
-  const access = useAccess(instanceKey, serverId ?? "");
-  const server = inst?.servers.find((s) => s.id === serverId);
-  const member = serverId ? inst?.members[serverId]?.find((m) => m.user?.id === userId) : undefined;
-  const ranked = server ? outranks(access, standing(server.ownerId, inst?.roles[serverId!] ?? [], member)) : false;
-  const canMute = !!channelId && ranked && hasIn(access, channelId, Permission.MUTE_MEMBERS);
-  const canMove = !!channelId && ranked && hasIn(access, channelId, Permission.MOVE_MEMBERS);
+  const { self, member, canMute, canMove } = useModeration(instanceKey, serverId, channelId, userId);
   const [open, setOpen] = useState(false);
   const narrow = useMediaQuery("(max-width: 640px)");
-  const { t, number } = useI18n();
-  const self = userId === me;
 
   const setVolume = (v: number) => {
     setPrefs((p) => {
@@ -210,7 +201,7 @@ export function ParticipantMenu({
     applyVolumes();
   };
 
-  const moderate = async (change: { serverMute?: boolean; serverDeaf?: boolean; serverVideoOff?: boolean; disconnect?: boolean }) => {
+  const moderate = async (change: Moderation) => {
     try {
       await engine(instanceKey).api.calls.moderateVoice({ serverId: serverId!, userId, ...change });
       if (change.disconnect) setOpen(false);
@@ -238,66 +229,98 @@ export function ParticipantMenu({
                   <UserAvatar user={user} className="size-8" />
                   <span className="min-w-0 flex-1 truncate text-sm font-bold">{member ? memberName(member) : displayName(user)}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setVolume(volume === 0 ? 100 : 0)}
-                    aria-label={volume === 0 ? t("dms-calls.calls.participant.unmuteForMe") : t("dms-calls.calls.participant.muteForMe")}
-                    title={volume === 0 ? t("dms-calls.calls.participant.unmuteForMe") : t("dms-calls.calls.participant.muteForMe")}
-                    className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90"
-                  >
-                    {volume === 0 ? <VolumeXIcon className="size-4 text-destructive" /> : <Volume2Icon className="size-4" />}
-                  </button>
-                  <Slider
-                    label={t("dms-calls.calls.participant.volume")}
-                    className="flex-1"
-                    value={volume}
-                    min={0}
-                    max={200}
-                    step={5}
-                    format={(n) => number(n / 100, { style: "percent" })}
-                    marks={[{ value: 100, label: number(1, { style: "percent" }) }]}
-                    onChange={setVolume}
-                  />
-                </div>
-                {(canMute || canMove) && state && (
-                  <div className="mt-3 flex flex-col gap-1 border-t pt-2">
-                    {canMute && (
-                      <ModItem on={state.serverMute} onClick={() => void moderate({ serverMute: !state.serverMute })} icon={MicOffIcon}>
-                        {state.serverMute ? t("dms-calls.calls.participant.unmuteAll") : t("dms-calls.calls.participant.muteAll")}
-                      </ModItem>
-                    )}
-                    {canMute && (
-                      <ModItem on={state.serverDeaf} onClick={() => void moderate({ serverDeaf: !state.serverDeaf })} icon={HeadphoneOffIcon}>
-                        {state.serverDeaf ? t("dms-calls.calls.participant.undeafenAll") : t("dms-calls.calls.participant.deafenAll")}
-                      </ModItem>
-                    )}
-                    {canMute && (
-                      <ModItem on={state.serverVideoOff} onClick={() => void moderate({ serverVideoOff: !state.serverVideoOff })} icon={VideoOffIcon}>
-                        {t(
-                          state.serverVideoOff
-                            ? "dms-calls.calls.participant.allowVideo"
-                            : state.selfStream && !state.selfVideo
-                              ? "dms-calls.calls.participant.stopScreen"
-                              : state.selfVideo && !state.selfStream
-                                ? "dms-calls.calls.participant.stopCamera"
-                                : "dms-calls.calls.participant.stopVideo",
-                        )}
-                      </ModItem>
-                    )}
-                    {canMove && (
-                      <ModItem danger onClick={() => void moderate({ disconnect: true })} icon={ShieldOffIcon}>
-                        {t("dms-calls.calls.participant.disconnect")}
-                      </ModItem>
-                    )}
-                  </div>
-                )}
+                <VolumeRow volume={volume} onChange={setVolume} />
+                {(canMute || canMove) && state && <ModActions state={state} canMute={canMute} canMove={canMove} onModerate={moderate} />}
               </motion.div>
             </Popover.Content>
           </Popover.Portal>
         )}
       </AnimatePresence>
     </Popover.Root>
+  );
+}
+
+/** Who someone is to you in a voice channel, and whether you may mute or disconnect them there. */
+function useModeration(instanceKey: string, serverId: string | undefined, channelId: string | undefined, userId: string) {
+  const inst = useInstance(instanceKey);
+  const access = useAccess(instanceKey, serverId ?? "");
+  const server = inst?.servers.find((s) => s.id === serverId);
+  const member = serverId ? inst?.members[serverId]?.find((m) => m.user?.id === userId) : undefined;
+  const ranked = server ? outranks(access, standing(server.ownerId, inst?.roles[serverId!] ?? [], member)) : false;
+  const may = (permission: Permission) => !!channelId && ranked && hasIn(access, channelId, permission);
+  return {
+    self: userId === inst?.me?.id,
+    member,
+    canMute: may(Permission.MUTE_MEMBERS),
+    canMove: may(Permission.MOVE_MEMBERS),
+  };
+}
+
+/** How loud someone is for you, with a button to silence them. */
+function VolumeRow({ volume, onChange }: { volume: number; onChange: (volume: number) => void }) {
+  const { t, number } = useI18n();
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => onChange(volume === 0 ? 100 : 0)}
+        aria-label={volume === 0 ? t("dms-calls.calls.participant.unmuteForMe") : t("dms-calls.calls.participant.muteForMe")}
+        title={volume === 0 ? t("dms-calls.calls.participant.unmuteForMe") : t("dms-calls.calls.participant.muteForMe")}
+        className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90"
+      >
+        {volume === 0 ? <VolumeXIcon className="size-4 text-destructive" /> : <Volume2Icon className="size-4" />}
+      </button>
+      <Slider
+        label={t("dms-calls.calls.participant.volume")}
+        className="flex-1"
+        value={volume}
+        min={0}
+        max={200}
+        step={5}
+        format={(n) => number(n / 100, { style: "percent" })}
+        marks={[{ value: 100, label: number(1, { style: "percent" }) }]}
+        onChange={onChange}
+      />
+    </div>
+  );
+}
+
+type Moderation = { serverMute?: boolean; serverDeaf?: boolean; serverVideoOff?: boolean; disconnect?: boolean };
+
+/** Stopping someone's video says what it stops: their screen, their camera, or both. */
+function videoLabel(state: VoiceState) {
+  if (state.serverVideoOff) return "dms-calls.calls.participant.allowVideo";
+  if (state.selfStream && !state.selfVideo) return "dms-calls.calls.participant.stopScreen";
+  if (state.selfVideo && !state.selfStream) return "dms-calls.calls.participant.stopCamera";
+  return "dms-calls.calls.participant.stopVideo";
+}
+
+/** Muting, deafening, stopping video or disconnecting someone, for everyone. */
+function ModActions({ state, canMute, canMove, onModerate }: { state: VoiceState; canMute: boolean; canMove: boolean; onModerate: (change: Moderation) => Promise<void> }) {
+  const { t } = useI18n();
+  return (
+    <div className="mt-3 flex flex-col gap-1 border-t pt-2">
+      {canMute && (
+        <ModItem on={state.serverMute} onClick={() => void onModerate({ serverMute: !state.serverMute })} icon={MicOffIcon}>
+          {state.serverMute ? t("dms-calls.calls.participant.unmuteAll") : t("dms-calls.calls.participant.muteAll")}
+        </ModItem>
+      )}
+      {canMute && (
+        <ModItem on={state.serverDeaf} onClick={() => void onModerate({ serverDeaf: !state.serverDeaf })} icon={HeadphoneOffIcon}>
+          {state.serverDeaf ? t("dms-calls.calls.participant.undeafenAll") : t("dms-calls.calls.participant.deafenAll")}
+        </ModItem>
+      )}
+      {canMute && (
+        <ModItem on={state.serverVideoOff} onClick={() => void onModerate({ serverVideoOff: !state.serverVideoOff })} icon={VideoOffIcon}>
+          {t(videoLabel(state))}
+        </ModItem>
+      )}
+      {canMove && (
+        <ModItem danger onClick={() => void onModerate({ disconnect: true })} icon={ShieldOffIcon}>
+          {t("dms-calls.calls.participant.disconnect")}
+        </ModItem>
+      )}
+    </div>
   );
 }
 

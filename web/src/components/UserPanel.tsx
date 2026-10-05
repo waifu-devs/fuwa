@@ -6,12 +6,14 @@ import { run, updateProfile } from "@/fuwa/actions";
 import { PresenceStatus } from "@/gen/fuwa/v1/presence_pb";
 import { savePresenceSettings, usePresence, usePresenceSettings } from "@/fuwa/presence";
 import { engine } from "@/fuwa/sync";
-import { ConnDot, UserAvatar, connectionLabel } from "@/components/Icons";
+import { ConnDot, UserAvatar } from "@/components/Icons";
+import { connectionLabel } from "@/components/icons-utils";
 import { MuteButtons } from "@/components/calls/parts";
 import { SwapText } from "@/components/motion";
 import { AccountItems, AddAccountDialog } from "@/components/AccountSwitcher";
 import { Private } from "@/components/Private";
-import { STATUS_LABEL, StatusDot, shownOf } from "@/components/Presence";
+import { StatusDot } from "@/components/Presence";
+import { STATUS_LABEL, shownOf } from "@/components/presence-status";
 import {
   DropdownMenu,
   DropdownMenuContent,

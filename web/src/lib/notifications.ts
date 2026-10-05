@@ -75,7 +75,8 @@ export function pingsUser(
   if (mentions(message.content, me.username)) return true;
   if (message.mentionsEveryone && !suppressEveryone) return true;
   if (!message.mentionRoleIds.length) return false;
-  return message.mentionRoleIds.some((id) => myRoleIds.includes(id));
+  const mine = new Set(myRoleIds);
+  return message.mentionRoleIds.some((id) => mine.has(id));
 }
 
 /** A clock that ticks every `ms`, so timed mutes run out on screen. */

@@ -1,13 +1,14 @@
 import { Link } from "@tanstack/react-router";
 import { LockKeyholeIcon, PhoneCallIcon, ShieldAlertIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useMemo, type Ref } from "react";
 import type { Conversation } from "@/gen/fuwa/v1/dm_pb";
 import { isMessage, lineText, type Item } from "@/e2ee/vault";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
 import { useLayout } from "@/components/Shell";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { useContextMenu } from "@/components/ContextMenu";
 import { dmMenu } from "@/components/menus/dm";
 import { displayName } from "@/lib/format";

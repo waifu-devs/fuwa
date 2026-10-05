@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import type { Embed } from "@/gen/fuwa/v1/types_pb";
 import { InlineMarkdown, Markdown } from "@/components/Markdown";
 import { colorCss } from "@/lib/format";

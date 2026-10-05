@@ -1,7 +1,7 @@
 
 import * as React from 'react';
 import {
-  motion,
+  m as motion,
   useMotionValue,
   useSpring,
   type SpringOptions,
@@ -74,12 +74,14 @@ function Magnetic({
     [active, onlyOnHover, range, strength, rawX, rawY],
   );
 
+  const onWindowMove = React.useEffectEvent((e: MouseEvent) => compute(e));
+
   React.useEffect(() => {
     if (disableOnTouch && isTouchDevice) return;
-    const handle = (e: MouseEvent) => compute(e);
+    const handle = (e: MouseEvent) => onWindowMove(e);
     window.addEventListener('mousemove', handle);
     return () => window.removeEventListener('mousemove', handle);
-  }, [compute, disableOnTouch, isTouchDevice]);
+  }, [disableOnTouch, isTouchDevice]);
 
   const Component = asChild ? Slot : motion.div;
 

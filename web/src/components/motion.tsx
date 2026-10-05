@@ -1,13 +1,9 @@
 
-import { animate, AnimatePresence, motion } from "motion/react";
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { animate, AnimatePresence, m as motion } from "motion/react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, type ReactNode } from "react";
+import { EASE_OUT, SPRING } from "@/lib/motion";
 import { reduceMotion } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
-
-/** The app's springs and easing, so things move alike everywhere. */
-export const SPRING = { type: "spring", stiffness: 520, damping: 34 } as const;
-export const SOFT_SPRING = { type: "spring", stiffness: 380, damping: 32 } as const;
-export const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 
 /** Whether to calm motion down: the Accessibility setting, which follows the system by default. */
 const reducedMotion = () => reduceMotion();
@@ -187,12 +183,11 @@ export function CountUp({
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const shown = useRef(0);
-  const formatRef = useRef(format);
-  formatRef.current = format;
+  const formatted = useEffectEvent((n: number) => format(n));
 
   // React never owns the text, so re-renders can't cut the count short.
   useLayoutEffect(() => {
-    if (ref.current) ref.current.textContent = formatRef.current(shown.current);
+    if (ref.current) ref.current.textContent = formatted(shown.current);
   }, []);
 
   useEffect(() => {
@@ -200,7 +195,7 @@ export function CountUp({
     if (!el) return;
     if (reducedMotion()) {
       shown.current = value;
-      el.textContent = formatRef.current(value);
+      el.textContent = formatted(value);
       return;
     }
     const controls = animate(shown.current, value, {
@@ -209,7 +204,7 @@ export function CountUp({
       ease: EASE_OUT,
       onUpdate: (n) => {
         shown.current = n;
-        el.textContent = formatRef.current(n);
+        el.textContent = formatted(n);
       },
     });
     return () => controls.stop();

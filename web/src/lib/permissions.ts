@@ -219,7 +219,7 @@ function channelBits(
   base: Bits,
   everyoneId: string,
   userId: string,
-  roleIds: readonly string[],
+  roleIds: ReadonlySet<string>,
   channel: Channel,
   byId: ReadonlyMap<string, Channel>,
 ): Bits {
@@ -232,7 +232,7 @@ function channelBits(
     let allow = 0;
     let deny = 0;
     for (const o of layer.permissionOverwrites) {
-      if (!isRole(o) || !roleIds.includes(o.targetId)) continue;
+      if (!isRole(o) || !roleIds.has(o.targetId)) continue;
       allow |= fromList(o.allow);
       deny |= fromList(o.deny);
     }
@@ -260,7 +260,8 @@ export function accessOf(
   timedOut = false,
 ): Access {
   const owner = userId === ownerId;
-  const held = roles.filter((r) => roleIds.includes(r.id));
+  const mine = new Set(roleIds);
+  const held = roles.filter((r) => mine.has(r.id));
   const everyone = roles.find((r) => r.id === everyoneId);
   const base = held.reduce((bits, r) => bits | fromList(r.permissions), everyone ? fromList(everyone.permissions) : 0);
   const rank = owner ? Number.MAX_SAFE_INTEGER : Math.max(0, ...held.map((r) => r.position));
@@ -268,7 +269,7 @@ export function accessOf(
   const byId = new Map(channels.map((c) => [c.id, c]));
   const visible = new Map<string, Bits>();
   for (const c of channels) {
-    const bits = unbound ? ALL : channelBits(base, everyoneId, userId, roleIds, c, byId);
+    const bits = unbound ? ALL : channelBits(base, everyoneId, userId, mine, c, byId);
     if (bits & bit(P.VIEW_CHANNELS)) visible.set(c.id, bits);
   }
   // A category shows while any channel in it does.
@@ -311,8 +312,11 @@ export const sortRoles = (roles: readonly Role[]) =>
   [...roles].sort((a, b) => b.position - a.position || (a.id < b.id ? -1 : 1));
 
 /** A member's roles, highest first (without @everyone). */
-export const rolesOf = (roles: readonly Role[], member: Pick<Member, "roleIds"> | undefined) =>
-  member ? roles.filter((r) => member.roleIds.includes(r.id)) : [];
+export const rolesOf = (roles: readonly Role[], member: Pick<Member, "roleIds"> | undefined) => {
+  if (!member) return [];
+  const mine = new Set(member.roleIds);
+  return roles.filter((r) => mine.has(r.id));
+};
 
 /** The color a member's name takes: their highest role that has one. */
 export const colorOf = (roles: readonly Role[], member: Pick<Member, "roleIds"> | undefined) =>

@@ -10,14 +10,15 @@ import {
   ShieldOffIcon,
   SmartphoneIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { encode } from "uqr";
 import { disableTwoFactor, enableTwoFactor, getTwoFactor, regenerateBackupCodes, run, setUpTwoFactor } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { CodeInput } from "@/components/CodeInput";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { PasswordInput, Row, useShake } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -213,18 +214,18 @@ function SetUp({ instanceKey, where, onCancel, onDone }: { instanceKey: string; 
               <p className="text-sm text-muted-foreground">{t("accountsettings.security.typeCodeHint")}</p>
             </div>
             <CodeInput id="two-step-enable" label={t("accountsettings.security.codeLabel")} onComplete={(code) => void verify(code)} disabled={enable.pending} shake={shakeCode} />
-            <AnimatePresence initial={false}>
+            <AnimatePresence initial={false} mode="popLayout">
               {enable.error && (
-                <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-sm font-bold text-destructive first-letter:uppercase">
+                <motion.p {...SLIDE_IN} transition={SPRING} className="text-sm font-bold text-destructive first-letter:uppercase">
                   {enable.error}
                 </motion.p>
               )}
             </AnimatePresence>
-            <div className="flex gap-2">
+            <motion.div layout="position" transition={SPRING} className="flex gap-2">
               <Button type="button" variant="ghost" className="rounded-xl" onClick={() => setStep(1)}>
                 {t("common.back")}
               </Button>
-            </div>
+            </motion.div>
           </motion.div>
         )}
         {step === 3 && (
@@ -286,7 +287,7 @@ function Steps({ step }: { step: number }) {
           </span>
           {n < STEPS.length - 1 && (
             <span className="h-0.5 min-w-4 flex-1 overflow-hidden rounded-full bg-muted">
-              <motion.span className="block h-full rounded-full bg-primary" initial={false} animate={{ width: n < step ? "100%" : "0%" }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }} />
+              <motion.span className="block h-full rounded-full bg-primary" initial={false} animate={{ x: n < step ? "0%" : "-100%" }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }} />
             </span>
           )}
         </li>
@@ -300,8 +301,14 @@ function Secret({ uri, children }: { uri: string; children: ReactNode }) {
   const { t } = useI18n();
   const streaming = usePrefs((p) => p.streamer);
   const [revealed, setRevealed] = useState(false);
+  // A new secret, or streamer mode turned on or off, veils it again (before it can show).
+  const shownFor = `${uri}|${streaming}`;
+  const [lastShownFor, setLastShownFor] = useState(shownFor);
+  if (lastShownFor !== shownFor) {
+    setLastShownFor(shownFor);
+    setRevealed(false);
+  }
   const hidden = streaming && !revealed;
-  useEffect(() => setRevealed(false), [uri, streaming]);
   return (
     <div className="relative shrink-0">
       <div className={cn("transition-[filter] duration-300", hidden && "blur-md")}>{children}</div>
@@ -591,21 +598,21 @@ function Confirm({
           </label>
         )}
       </motion.div>
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {error && (
-          <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-sm font-bold text-destructive first-letter:uppercase">
+          <motion.p {...SLIDE_IN} transition={SPRING} className="text-sm font-bold text-destructive first-letter:uppercase">
             {error}
           </motion.p>
         )}
       </AnimatePresence>
-      <div className="flex gap-2">
+      <motion.div layout="position" transition={SPRING} className="flex gap-2">
         <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={onCancel} disabled={pending}>
           {t("common.cancel")}
         </Button>
         <Button type="submit" size="sm" variant={danger ? "destructive" : "default"} className={cn("rounded-xl font-bold", !danger && "btn")} disabled={pending}>
           {pending ? t("accountsettings.shared.checking") : action}
         </Button>
-      </div>
+      </motion.div>
     </motion.form>
   );
 }

@@ -1,5 +1,5 @@
 import { EyeIcon, EyeOffIcon, ListChecksIcon, LoaderCircleIcon, PlusIcon, SmilePlusIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { Channel } from "@/gen/fuwa/v1/types_pb";
 import { sendPoll, type PollDraft } from "@/fuwa/actions";
@@ -7,7 +7,8 @@ import { useAction } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { EmojiGlyph } from "@/components/EmojiGlyph";
 import { EmojiPicker } from "@/components/EmojiPicker";
-import { SPRING, SwapText } from "@/components/motion";
+import { SwapText } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";

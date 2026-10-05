@@ -2,7 +2,7 @@
 import * as React from 'react';
 import * as SwitchPrimitives from '@radix-ui/react-switch';
 import {
-  motion,
+  m as motion,
   type TargetAndTransition,
   type VariantLabels,
   type HTMLMotionProps,

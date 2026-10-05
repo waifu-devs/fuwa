@@ -1,7 +1,7 @@
 
 import * as React from 'react';
 import {
-  motion,
+  m as motion,
   type HTMLMotionProps,
   type LegacyAnimationControls,
   type TargetAndTransition,

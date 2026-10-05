@@ -314,8 +314,8 @@ export class BackupSync {
   async restore(text: string) {
     const key = await parseRecoveryKey(text);
     if (!key) throw new BackupError(i18n().t("system.backup.notAKey"));
-    const keys = await deriveKeys(key);
-    const { backup } = await this.api.dms.getBackup({}, CALL);
+    // Working out the keys takes a moment; fetch the backup meanwhile.
+    const [keys, { backup }] = await Promise.all([deriveKeys(key), this.api.dms.getBackup({}, CALL)]);
     if (!backup) throw new BackupError(i18n().t("system.backup.gone"));
     if (!sameBytes(backup.keyCheck, keys.check)) throw new BackupError(i18n().t("system.backup.wrongKey"));
     this.show({ status: "restoring", restored: 0, total: Number(backup.parts), problem: null });

@@ -1,38 +1,21 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { ExternalLinkIcon, Gamepad2Icon, HeadphonesIcon, RadioIcon, TrophyIcon, TvIcon, type LucideIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { ActivityKind, PresenceStatus, type Activity, type Presence } from "@/gen/fuwa/v1/presence_pb";
+import { ActivityKind, type Activity } from "@/gen/fuwa/v1/presence_pb";
 import { usePresence } from "@/fuwa/presence";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { i18n, type Key } from "@/i18n/i18n";
 import { T, useI18n } from "@/i18n/react";
 import { shownPicture } from "@/lib/shown";
 import { reportUsage } from "@/lib/reports";
+import { STATUS_LABEL, shownOf, type Shown } from "@/components/presence-status";
 import { cn } from "@/lib/utils";
 
 /**
  * Presence on screen (docs/presence.md): the dot on avatars, the one line
  * under a name in the member list, and activity cards on profile cards.
  */
-
-type Shown = "online" | "idle" | "dnd" | "offline";
-
-const SHOWN: Record<number, Shown> = {
-  [PresenceStatus.ONLINE]: "online",
-  [PresenceStatus.IDLE]: "idle",
-  [PresenceStatus.DO_NOT_DISTURB]: "dnd",
-};
-
-export const STATUS_LABEL: Record<Shown | "invisible", Key> = {
-  online: "workspace.presence.status.online",
-  idle: "workspace.presence.status.idle",
-  dnd: "workspace.presence.status.dnd",
-  offline: "workspace.presence.status.offline",
-  invisible: "workspace.presence.status.invisible",
-};
-
-export const shownOf = (presence: Presence | undefined): Shown => (presence ? (SHOWN[presence.status] ?? "offline") : "offline");
 
 /** The dot itself, for a status already known. */
 export function StatusDot({ status, className }: { status: Shown; className?: string }) {

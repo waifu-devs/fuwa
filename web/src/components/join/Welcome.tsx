@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
-import { LoaderCircleIcon, PartyPopperIcon, ScrollTextIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls, useScroll } from "motion/react";
+import { ScrollTextIcon } from "lucide-react";
+import { m as motion, useAnimationControls, useScroll } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Permission, type Channel, type Emoji, type Server, type WelcomeScreen } from "@/gen/fuwa/v1/types_pb";
 import { agreeToRules, getJoinForm, getWelcomeScreen, run } from "@/fuwa/actions";
@@ -8,11 +8,11 @@ import { useAccess, useAction, useInstance, useMyMember } from "@/fuwa/hooks";
 import { accountKey } from "@/fuwa/saved";
 import { WELCOMED } from "@/lib/account-keys";
 import { BannerHero } from "@/components/join/Banner";
-import { AgreeCheck, RulesList } from "@/components/join/Rules";
-import { StartHere, suggestedChannels } from "@/components/join/StartHere";
+import { AgreeAndTalk, RulesList } from "@/components/join/Rules";
+import { StartHere } from "@/components/join/StartHere";
+import { suggestedChannels } from "@/components/join/suggested";
 import { InlineMarkdown } from "@/components/Markdown";
-import { SPRING } from "@/components/motion";
-import { Button } from "@/components/ui/button";
+import { SPRING } from "@/lib/motion";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { accentVars, type BannerServer } from "@/lib/banner";
@@ -120,44 +120,13 @@ export function WelcomeGate({
 }) {
   const inst = useInstance(instanceKey);
   const me = useMyMember(instanceKey, server.id);
-  const access = useAccess(instanceKey, server.id);
   const navigate = useNavigate();
-  const [screen, setScreen] = useState<WelcomeScreen | null>(null);
-  const [greeting, setGreeting] = useState(false);
-  // Closed partway: it comes back next time, not straight away.
-  const [dismissed, setDismissed] = useState(false);
-  const channels = inst?.channels[server.id] ?? [];
   const account = accountKey(instanceKey, inst?.me?.id ?? "");
-
-  const fresh = !!me && !has(access, Permission.MANAGE_SERVER) && Date.now() - toDate(me.joinedAt).getTime() < NEW_FOR;
-  const due = server.hasOnboarding && (asked || (fresh && !me?.onboardedAt && !dismissed));
-  // Once it opens it stays until it's closed: finishing sets onboardedAt
-  // before its last step (where to start) has been seen.
-  const [started, setStarted] = useState(false);
-  if (due && !started) setStarted(true);
-  const onboarding = due || started;
+  const { fresh, onboarding, endOnboarding } = useOnboardingDue(instanceKey, account, server, asked);
   // Onboarding ends with the welcome screen's channels, so it isn't shown again after.
   const newcomer = fresh && !seen(account, server.id) && !(server.hasOnboarding && me?.onboardedAt);
   const wanted = !onboarding && (asked || (server.hasWelcomeScreen && newcomer));
-
-  useEffect(() => {
-    if (!wanted) return;
-    let cancelled = false;
-    run(getWelcomeScreen(instanceKey, server.id)).then(
-      (s) => {
-        if (cancelled) return;
-        setScreen(s);
-        if (!asked) {
-          markSeen(account, server.id);
-          if (s.enabled) setGreeting(true);
-        }
-      },
-      () => {},
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [wanted, asked, instanceKey, account, server.id]);
+  const { screen, greeting, setGreeting } = useWelcomeScreen(instanceKey, account, server.id, asked, wanted);
 
   function go(channel: string) {
     void navigate({ to: "/$instance/$server/$channel", params: { instance: instanceKey, server: server.id, channel } });
@@ -171,9 +140,7 @@ export function WelcomeGate({
         open
         onOpenChange={(o) => {
           if (!o) {
-            setStarted(false);
-            setDismissed(true);
-            markSeen(account, server.id);
+            endOnboarding();
             onOpenChange(false);
           }
         }}
@@ -195,7 +162,7 @@ export function WelcomeGate({
             instanceKey={instanceKey}
             server={server}
             screen={screen}
-            channels={channels}
+            channels={inst?.channels[server.id] ?? []}
             emojis={inst?.emojis[server.id]}
             agree={!!me?.pending && server.hasRules}
             onPick={(channel) => {
@@ -208,6 +175,54 @@ export function WelcomeGate({
       </DialogContent>
     </Dialog>
   );
+}
+
+/** Whether you're new here (and not someone who can change all this), and whether onboarding is open. */
+function useOnboardingDue(instanceKey: string, account: string, server: Server, asked: boolean) {
+  const me = useMyMember(instanceKey, server.id);
+  const access = useAccess(instanceKey, server.id);
+  // Closed partway: it comes back next time, not straight away.
+  const [dismissed, setDismissed] = useState(false);
+  const fresh = !!me && !has(access, Permission.MANAGE_SERVER) && Date.now() - toDate(me.joinedAt).getTime() < NEW_FOR;
+  const due = server.hasOnboarding && (asked || (fresh && !me?.onboardedAt && !dismissed));
+  // Once it opens it stays until it's closed: finishing sets onboardedAt
+  // before its last step (where to start) has been seen.
+  const [started, setStarted] = useState(false);
+  if (due && !started) setStarted(true);
+  return {
+    fresh,
+    onboarding: due || started,
+    endOnboarding: () => {
+      setStarted(false);
+      setDismissed(true);
+      markSeen(account, server.id);
+    },
+  };
+}
+
+/** The welcome screen, fetched once it's wanted; greeting a newcomer marks it seen. */
+function useWelcomeScreen(instanceKey: string, account: string, serverId: string, asked: boolean, wanted: boolean) {
+  const [screen, setScreen] = useState<WelcomeScreen | null>(null);
+  const [greeting, setGreeting] = useState(false);
+  useEffect(() => {
+    if (!wanted) return;
+    let cancelled = false;
+    run(getWelcomeScreen(instanceKey, serverId)).then(
+      (s) => {
+        if (cancelled) return;
+        setScreen(s);
+        if (!asked) {
+          markSeen(account, serverId);
+          if (s.enabled) setGreeting(true);
+        }
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [wanted, asked, instanceKey, account, serverId]);
+  return { screen, greeting, setGreeting };
 }
 
 /** The welcome screen in its dialog: scrolls under the banner, with the rules to agree to at the end when there are. */
@@ -292,27 +307,7 @@ function AgreeRules({ instanceKey, server, onDone }: { instanceKey: string; serv
       ) : (
         <RulesList rules={rules} className="scroll-thin max-h-56 overflow-y-auto pr-1" />
       )}
-      <motion.div animate={nudge} className="flex flex-col gap-3">
-        <AgreeCheck checked={checked} onChange={setChecked}>
-          {t("join.rules.agree")}
-        </AgreeCheck>
-        {accept.error && <p className="text-sm text-destructive first-letter:uppercase">{accept.error}</p>}
-        <Button size="lg" onClick={() => void submit()} disabled={accept.pending} className={cn("h-11 rounded-xl font-bold transition-opacity", checked ? "btn" : "opacity-60")}>
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.span
-              key={accept.pending ? "busy" : "agree"}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={SPRING}
-              className="flex items-center gap-2"
-            >
-              {accept.pending ? <LoaderCircleIcon className="animate-spin" /> : <PartyPopperIcon />}
-              {t("join.rules.agreeAndTalk")}
-            </motion.span>
-          </AnimatePresence>
-        </Button>
-      </motion.div>
+      <AgreeAndTalk nudge={nudge} checked={checked} onChange={setChecked} error={accept.error} pending={accept.pending} onAgree={() => void submit()} />
     </motion.section>
   );
 }

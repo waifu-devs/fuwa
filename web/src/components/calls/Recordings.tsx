@@ -1,5 +1,5 @@
 import { AudioLinesIcon, DownloadIcon, FileArchiveIcon, HourglassIcon, LoaderCircleIcon, MonitorIcon, ServerIcon, Trash2Icon, VideoIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Permission, type Channel, type VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { RecordingPart, type Recording, type RecordingTrack } from "@/gen/fuwa/v1/call_pb";
@@ -7,7 +7,7 @@ import { useAccess } from "@/fuwa/hooks";
 import { toFuwaError } from "@/fuwa/errors";
 import { useFuwa, type FuwaState } from "@/fuwa/store";
 import { engine } from "@/fuwa/sync";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { UserAvatar } from "@/components/Icons";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
@@ -267,8 +267,6 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
     return Object.fromEntries(rec.tracks.map((t, i) => [t.userId, list[i] ?? t.userId]));
   }, [joinedNames, rec.tracks]);
   const [progress, setProgress] = useState<Record<string, number>>({});
-  const [confirming, setConfirming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const busy = Object.keys(progress).length > 0;
 
   /** One of a person's files, plain: Ogg Opus, or WebM. */
@@ -290,7 +288,10 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
     return data;
   };
   const fileName = (track: RecordingTrack, part: FilePart) => `${baseName(channel, rec)} - ${safe(names[track.userId] ?? track.userId)}${part.suffix}`;
-  const done = (keys: string[]) => setProgress((p) => Object.fromEntries(Object.entries(p).filter(([key]) => !keys.includes(key))));
+  const done = (keys: string[]) => {
+    const finished = new Set(keys);
+    setProgress((p) => Object.fromEntries(Object.entries(p).filter(([key]) => !finished.has(key))));
+  };
   const everything = rec.tracks.flatMap((track) => filesOf(track).map((part) => ({ track, part })));
 
   const downloadOne = async (track: RecordingTrack, part: FilePart) => {
@@ -316,18 +317,6 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
       done(everything.map(({ track, part }) => fileKey(track, part)));
     }
   };
-  const remove = async () => {
-    setDeleting(true);
-    try {
-      await engine(instanceKey).api.calls.deleteRecording({ serverId, recordingId: rec.id });
-      onDeleted();
-      toast(lang.t("dms-calls.calls.recordings.deleted"));
-    } catch (err) {
-      toast(lang.t("dms-calls.calls.recordings.deleteFailed", { problem: toFuwaError(err).message }));
-      setDeleting(false);
-    }
-  };
-
   return (
     <motion.li
       layout
@@ -338,122 +327,225 @@ function RecordingCard({ instanceKey, serverId, channel, rec, index, onDeleted }
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-3.5 pb-2">
         <Wave live={live} />
-        <div className="min-w-40 flex-1">
-          <p className="flex items-center gap-1.5 font-extrabold">
-            <span className="truncate">{lang.date(started, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-            {rec.video && (
-              <motion.span
-                initial={{ opacity: 0, scale: 0.7 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={SPRING}
-                title={lang.t("dms-calls.calls.recordings.videoTitle")}
-                className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[0.7rem] font-bold text-primary"
-              >
-                <VideoIcon className="size-3.5" /> <span className="hidden sm:inline">{lang.t("dms-calls.calls.recordings.withVideo")}</span>
-              </motion.span>
-            )}
-          </p>
-          <p className="truncate text-xs text-muted-foreground">
-            {live ? (
-              <T
-                k="dms-calls.calls.recordings.liveLine"
-                values={{ now: <span className="font-bold text-[#ed4245]">{lang.t("dms-calls.calls.recordings.now", { time: clock(length) })}</span>, name: starter }}
-              />
-            ) : (
-              lang.t("dms-calls.calls.recordings.doneLine", { time: clock(length), size: formatBytes(lang, Number(rec.sizeBytes)), name: starter })
-            )}
-          </p>
-        </div>
+        <RecordingSummary rec={rec} started={started} length={length} starter={starter} />
         {!live && (
           <div className="ml-auto flex shrink-0 items-center gap-1">
             <Button size="sm" variant="secondary" className="group h-8 rounded-xl font-bold" disabled={busy || !everything.length} onClick={() => void downloadAll()}>
               <FileArchiveIcon className="transition-transform group-hover:-translate-y-0.5" /> <span className="hidden sm:inline">{lang.t("dms-calls.calls.recordings.all")}</span> .zip
             </Button>
-            <AnimatePresence mode="wait" initial={false}>
-              {!mayDelete ? null : confirming ? (
-                <motion.div key="sure" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={SPRING} className="flex items-center gap-1">
-                  <Button size="sm" variant="destructive" className="h-8 rounded-xl font-bold" disabled={deleting} onClick={() => void remove()}>
-                    {deleting ? lang.t("dms-calls.calls.recordings.deleting") : lang.t("dms-calls.calls.recordings.delete")}
-                  </Button>
-                  <Button size="sm" variant="ghost" className="h-8 rounded-xl" disabled={deleting} onClick={() => setConfirming(false)}>
-                    {lang.t("dms-calls.calls.recordings.keepIt")}
-                  </Button>
-                </motion.div>
-              ) : (
-                <motion.button
-                  key="bin"
-                  type="button"
-                  initial={{ opacity: 0, scale: 0.6 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.6 }}
-                  whileTap={{ scale: 0.85 }}
-                  onClick={() => setConfirming(true)}
-                  aria-label={lang.t("dms-calls.calls.recordings.deleteLabel")}
-                  title={lang.t("dms-calls.calls.recordings.deleteTitle")}
-                  className="group grid size-8 place-items-center rounded-xl text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-                >
-                  <Trash2Icon className="size-4 transition-transform group-hover:-rotate-12" />
-                </motion.button>
-              )}
-            </AnimatePresence>
+            <DeleteControl show={mayDelete} instanceKey={instanceKey} serverId={serverId} recordingId={rec.id} onDeleted={onDeleted} />
           </div>
         )}
       </div>
       <ul className="flex flex-col px-2 pb-2">
         {rec.tracks.map((track, n) => (
-          <motion.li
+          <TrackRow
             key={track.userId}
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0, transition: { ...SPRING, delay: 0.05 + n * 0.04 } }}
-            className="relative flex items-center gap-2.5 overflow-hidden rounded-2xl px-2 py-1.5 transition-colors hover:bg-muted/60"
-          >
-            <AnimatePresence>
-              {filesOf(track).some((part) => progress[fileKey(track, part)] !== undefined) && (
-                <motion.span
-                  aria-hidden
-                  className="absolute inset-y-0 left-0 w-full origin-left bg-primary/12"
-                  initial={{ scaleX: 0, opacity: 1 }}
-                  animate={{ scaleX: Math.max(...filesOf(track).map((part) => progress[fileKey(track, part)] ?? 0)) }}
-                  exit={{ scaleX: 1, opacity: 0, transition: { duration: 0.35 } }}
-                  transition={{ type: "spring", stiffness: 200, damping: 30 }}
-                />
-              )}
-            </AnimatePresence>
-            <TrackAvatar instanceKey={instanceKey} userId={track.userId} />
-            <span className="relative min-w-0 flex-1 truncate text-sm font-bold">{names[track.userId]}</span>
-            <span className="relative shrink-0 text-xs text-muted-foreground tabular-nums">{formatBytes(lang, Number(track.sizeBytes + track.cameraBytes + track.screenBytes))}</span>
-            {live
-              ? filesOf(track)
-                  .filter((part) => part.part !== RecordingPart.UNSPECIFIED)
-                  .map((part) => (
-                    <motion.span key={part.part} initial={{ scale: 0 }} animate={{ scale: 1 }} transition={SPRING} title={lang.t(part.live)} className="relative text-muted-foreground">
-                      <part.icon className="size-3.5" />
-                    </motion.span>
-                  ))
-              : filesOf(track).map((part) => {
-                  const getting = progress[fileKey(track, part)] !== undefined;
-                  return (
-                    <motion.button
-                      key={part.part}
-                      type="button"
-                      initial={{ opacity: 0, scale: 0.6 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={SPRING}
-                      whileTap={{ scale: 0.85 }}
-                      disabled={getting}
-                      onClick={() => void downloadOne(track, part)}
-                      aria-label={lang.t(part.named, { name: names[track.userId] ?? track.userId })}
-                      title={lang.t(part.their)}
-                      className="group relative grid size-8 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-primary/10 hover:text-primary disabled:opacity-60"
-                    >
-                      {getting ? <LoaderCircleIcon className="size-4 animate-spin" /> : <part.icon className="size-4 transition-transform group-hover:translate-y-0.5" />}
-                    </motion.button>
-                  );
-                })}
-          </motion.li>
+            instanceKey={instanceKey}
+            track={track}
+            index={n}
+            name={names[track.userId]}
+            live={live}
+            progress={progress}
+            onDownload={(part) => void downloadOne(track, part)}
+          />
         ))}
         {!rec.tracks.length && <li className="px-2 py-1.5 text-sm text-muted-foreground">{live ? lang.t("dms-calls.calls.recordings.silentLive") : lang.t("dms-calls.calls.recordings.silent")}</li>}
       </ul>
+    </motion.li>
+  );
+}
+
+/** When a recording started, whether it has video, and how long and big it is (or that it's still going). */
+function RecordingSummary({ rec, started, length, starter }: { rec: Recording; started: Date; length: number; starter: string }) {
+  const lang = useI18n();
+  const live = !rec.endedAt;
+  return (
+    <div className="min-w-40 flex-1">
+      <p className="flex items-center gap-1.5 font-extrabold">
+        <span className="truncate">{lang.date(started, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+        {rec.video && (
+          <motion.span
+            initial={{ opacity: 0, scale: 0.7 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={SPRING}
+            title={lang.t("dms-calls.calls.recordings.videoTitle")}
+            className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[0.7rem] font-bold text-primary"
+          >
+            <VideoIcon className="size-3.5" /> <span className="hidden sm:inline">{lang.t("dms-calls.calls.recordings.withVideo")}</span>
+          </motion.span>
+        )}
+      </p>
+      <p className="truncate text-xs text-muted-foreground">
+        {live ? (
+          <T
+            k="dms-calls.calls.recordings.liveLine"
+            values={{
+              now: <span className="font-bold text-[#ed4245]">{lang.t("dms-calls.calls.recordings.now", { time: clock(length) })}</span>,
+              name: starter,
+            }}
+          />
+        ) : (
+          lang.t("dms-calls.calls.recordings.doneLine", { time: clock(length), size: formatBytes(lang, Number(rec.sizeBytes)), name: starter })
+        )}
+      </p>
+    </div>
+  );
+}
+
+/** The bin, asking once more before it deletes the recording. */
+function DeleteControl({
+  show,
+  instanceKey,
+  serverId,
+  recordingId,
+  onDeleted,
+}: {
+  show: boolean;
+  instanceKey: string;
+  serverId: string;
+  recordingId: string;
+  onDeleted: () => void;
+}) {
+  const lang = useI18n();
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [gone, setGone] = useState(false);
+  const removing = deleting || gone;
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      await engine(instanceKey).api.calls.deleteRecording({ serverId, recordingId });
+      // It stays "deleting" while the card leaves.
+      setGone(true);
+      onDeleted();
+      toast(lang.t("dms-calls.calls.recordings.deleted"));
+    } catch (err) {
+      toast(lang.t("dms-calls.calls.recordings.deleteFailed", { problem: toFuwaError(err).message }));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      {!show ? null : confirming ? (
+        <motion.div
+          key="sure"
+          initial={{ opacity: 0, x: 10 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 10 }}
+          transition={SPRING}
+          className="flex items-center gap-1"
+        >
+          <Button size="sm" variant="destructive" className="h-8 rounded-xl font-bold" disabled={removing} onClick={() => void remove()}>
+            {removing ? lang.t("dms-calls.calls.recordings.deleting") : lang.t("dms-calls.calls.recordings.delete")}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8 rounded-xl" disabled={removing} onClick={() => setConfirming(false)}>
+            {lang.t("dms-calls.calls.recordings.keepIt")}
+          </Button>
+        </motion.div>
+      ) : (
+        <motion.button
+          key="bin"
+          type="button"
+          initial={{ opacity: 0, scale: 0.6 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.6 }}
+          whileTap={{ scale: 0.85 }}
+          onClick={() => setConfirming(true)}
+          aria-label={lang.t("dms-calls.calls.recordings.deleteLabel")}
+          title={lang.t("dms-calls.calls.recordings.deleteTitle")}
+          className="group grid size-8 place-items-center rounded-xl text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+        >
+          <Trash2Icon className="size-4 transition-transform group-hover:-rotate-12" />
+        </motion.button>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** A person in a recording: their files to download (or what's recording while it goes on), filling as they download. */
+function TrackRow({
+  instanceKey,
+  track,
+  index,
+  name,
+  live,
+  progress,
+  onDownload,
+}: {
+  instanceKey: string;
+  track: RecordingTrack;
+  index: number;
+  name: string | undefined;
+  live: boolean;
+  progress: Record<string, number>;
+  onDownload: (part: FilePart) => void;
+}) {
+  const lang = useI18n();
+  return (
+    <motion.li
+      initial={{ opacity: 0, x: -8 }}
+      animate={{ opacity: 1, x: 0, transition: { ...SPRING, delay: 0.05 + index * 0.04 } }}
+      className="relative flex items-center gap-2.5 overflow-hidden rounded-2xl px-2 py-1.5 transition-colors hover:bg-muted/60"
+    >
+      <AnimatePresence>
+        {filesOf(track).some((part) => progress[fileKey(track, part)] !== undefined) && (
+          <motion.span
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-full origin-left bg-primary/12"
+            initial={{ scaleX: 0, opacity: 1 }}
+            animate={{ scaleX: Math.max(...filesOf(track).map((part) => progress[fileKey(track, part)] ?? 0)) }}
+            exit={{ scaleX: 1, opacity: 0, transition: { duration: 0.35 } }}
+            transition={{ type: "spring", stiffness: 200, damping: 30 }}
+          />
+        )}
+      </AnimatePresence>
+      <TrackAvatar instanceKey={instanceKey} userId={track.userId} />
+      <span className="relative min-w-0 flex-1 truncate text-sm font-bold">{name}</span>
+      <span className="relative shrink-0 text-xs text-muted-foreground tabular-nums">
+        {formatBytes(lang, Number(track.sizeBytes + track.cameraBytes + track.screenBytes))}
+      </span>
+      {live
+        ? filesOf(track)
+            .filter((part) => part.part !== RecordingPart.UNSPECIFIED)
+            .map((part) => (
+              <motion.span
+                key={part.part}
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={SPRING}
+                title={lang.t(part.live)}
+                className="relative text-muted-foreground"
+              >
+                <part.icon className="size-3.5" />
+              </motion.span>
+            ))
+        : filesOf(track).map((part) => {
+            const getting = progress[fileKey(track, part)] !== undefined;
+            return (
+              <motion.button
+                key={part.part}
+                type="button"
+                initial={{ opacity: 0, scale: 0.6 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={SPRING}
+                whileTap={{ scale: 0.85 }}
+                disabled={getting}
+                onClick={() => onDownload(part)}
+                aria-label={lang.t(part.named, { name: name ?? track.userId })}
+                title={lang.t(part.their)}
+                className="group relative grid size-8 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-primary/10 hover:text-primary disabled:opacity-60"
+              >
+                {getting ? (
+                  <LoaderCircleIcon className="size-4 animate-spin" />
+                ) : (
+                  <part.icon className="size-4 transition-transform group-hover:translate-y-0.5" />
+                )}
+              </motion.button>
+            );
+          })}
     </motion.li>
   );
 }
@@ -465,7 +557,7 @@ function Wave({ live }: { live: boolean }) {
       <span className="flex h-4 items-center gap-[3px]">
         {[0.55, 1, 0.7, 0.4].map((h, i) => (
           <motion.span
-            key={i}
+            key={h}
             className="w-[3px] rounded-full bg-current"
             style={{ height: "100%", originY: 0.5 }}
             initial={false}

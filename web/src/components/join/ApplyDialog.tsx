@@ -1,6 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ClipboardPenIcon, LoaderCircleIcon, SendIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls, useScroll } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls, useScroll } from "motion/react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { JoinForm, Server } from "@/gen/fuwa/v1/types_pb";
 import { applyToJoin, getJoinForm, run } from "@/fuwa/actions";
@@ -9,7 +9,7 @@ import { useAction } from "@/fuwa/hooks";
 import { ApplicationCard } from "@/components/join/ApplicationStatus";
 import { BannerHero } from "@/components/join/Banner";
 import { AgreeCheck, RulesList } from "@/components/join/Rules";
-import { SPRING } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -52,7 +52,7 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
   const [problem, setProblem] = useState<string | null>(null);
   const [answers, setAnswers] = useState<string[]>([]);
   const [agreed, setAgreed] = useState(false);
-  const [missing, setMissing] = useState<number[]>([]);
+  const [missing, setMissing] = useState<ReadonlySet<number>>(() => new Set());
   const [sent, setSent] = useState(false);
   const [reload, setReload] = useState(0);
   const apply = useAction(applyToJoin);
@@ -81,7 +81,7 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
     e.preventDefault();
     if (!form) return;
     const empty = form.questions.flatMap((q, n) => (q.required && !answers[n]?.trim() ? [n] : []));
-    setMissing(empty);
+    setMissing(new Set(empty));
     if (empty.length || (form.rules.length > 0 && !agreed)) {
       void nudge.start({ x: [0, -8, 8, -5, 5, 0], transition: { duration: 0.4 } });
       return;
@@ -136,7 +136,7 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
               {form.questions.map((q, n) => {
                 const max = q.paragraph ? PARAGRAPH_MAX : LINE_MAX;
                 const value = answers[n] ?? "";
-                const bad = missing.includes(n) && !value.trim();
+                const bad = missing.has(n) && !value.trim();
                 const props = {
                   id: `apply-${n}`,
                   value,
@@ -147,9 +147,10 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
                 return (
                   <motion.div
                     key={`${n}:${q.prompt}`}
+                    layout="position"
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ ...SPRING, delay: 0.05 * n }}
+                    transition={{ ...SPRING, delay: 0.05 * n, layout: SPRING }}
                     className="flex flex-col gap-1.5"
                   >
                     <label htmlFor={`apply-${n}`} className="flex items-baseline justify-between gap-2 text-sm font-bold">
@@ -164,12 +165,11 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
                     ) : (
                       <Input {...props} className={cn("h-11 rounded-xl", bad && "border-destructive")} />
                     )}
-                    <AnimatePresence initial={false}>
+                    <AnimatePresence initial={false} mode="popLayout">
                       {(bad || value.length > max - 100) && (
                         <motion.p
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
+                          {...SLIDE_IN}
+                          transition={SPRING}
                           className={cn("text-xs", bad ? "text-destructive" : "text-muted-foreground")}
                         >
                           {bad ? t("join.applyDialog.needsAnswer") : t("join.applyDialog.charactersLeft", { count: max - value.length })}
@@ -181,7 +181,7 @@ function ApplyBody({ instanceKey, server, inviteCode, onDone }: { instanceKey: s
               })}
             </section>
           )}
-          <motion.div animate={nudge} className="flex flex-col gap-3">
+          <motion.div layout="position" transition={SPRING} animate={nudge} className="flex flex-col gap-3">
             {form.rules.length > 0 && (
               <AgreeCheck checked={agreed} onChange={setAgreed}>
                 {t("join.rules.agree")}

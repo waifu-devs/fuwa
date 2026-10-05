@@ -1,5 +1,5 @@
 import { CheckIcon, FolderIcon, FolderMinusIcon, FolderOpenIcon, FolderPlusIcon, PaletteIcon, Trash2Icon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { ServerIcon } from "@/components/Icons";

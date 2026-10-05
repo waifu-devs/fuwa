@@ -1,7 +1,7 @@
 import { CheckIcon, EyeIcon, EyeOffIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useId, type ReactNode } from "react";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useI18n } from "@/i18n/react";
@@ -148,9 +148,9 @@ export function Chips<T extends string | number>({
               active ? "border-primary bg-primary text-primary-foreground" : "text-muted-foreground hover:border-primary/40 hover:text-foreground",
             )}
           >
-            <AnimatePresence initial={false}>
+            <AnimatePresence initial={false} mode="popLayout">
               {active && (
-                <motion.span initial={{ width: 0, opacity: 0 }} animate={{ width: "auto", opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={SPRING} className="inline-flex overflow-hidden align-middle">
+                <motion.span initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }} transition={SPRING} className="inline-flex align-middle">
                   <CheckIcon className="mr-1 size-3" strokeWidth={3} />
                 </motion.span>
               )}

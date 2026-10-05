@@ -1,4 +1,3 @@
-import { clone, create } from "@bufbuild/protobuf";
 import {
   BuildingIcon,
   CheckIcon,
@@ -12,46 +11,18 @@ import {
   PowerOffIcon,
   XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
-import {
-  IdentityProviderSchema,
-  OidcProviderSchema,
-  SamlProviderSchema,
-  SsoProtocol,
-  type IdentityProvider,
-  type ServiceProvider,
-} from "@/gen/fuwa/v1/sso_pb";
+import { SsoProtocol, type IdentityProvider, type ServiceProvider } from "@/gen/fuwa/v1/sso_pb";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/react";
 import { copy } from "@/lib/ui";
+import { SLIDE_IN } from "@/lib/motion";
 import { cleanDomain, readSamlMetadata } from "@/lib/sso";
 import { cn } from "@/lib/utils";
 import { Choice, Setting, SPRING } from "./controls";
-
-/** A copy of a provider with every part present, so the form can edit any field. */
-export function fullProvider(p: IdentityProvider | undefined): IdentityProvider {
-  const next = p ? clone(IdentityProviderSchema, p) : create(IdentityProviderSchema);
-  next.oidc ??= create(OidcProviderSchema);
-  next.saml ??= create(SamlProviderSchema);
-  next.emailDomains = [...next.emailDomains];
-  return next;
-}
-
-/** Everything a save would send about a provider, as one string to compare. */
-export function providerFingerprint(p: IdentityProvider | undefined) {
-  if (!p || p.protocol === SsoProtocol.UNSPECIFIED) return "";
-  return [
-    p.protocol,
-    p.name.trim(),
-    p.emailDomains.join(","),
-    ...(p.protocol === SsoProtocol.OIDC
-      ? [p.oidc?.issuer.trim(), p.oidc?.clientId.trim(), p.oidc?.clientSecret ?? "", p.oidc?.extraScopes.trim()]
-      : [p.saml?.entityId.trim(), p.saml?.ssoUrl.trim(), p.saml?.certificates.trim()]),
-  ].join("\n");
-}
 
 /**
  * The identity provider people sign in through, the same for an instance
@@ -220,7 +191,7 @@ function SamlFields({ value, onChange }: { value: IdentityProvider; onChange: (f
       <Setting id="sso-metadata" title={t("instancesettings.provider.metadata")} hint={t("instancesettings.provider.metadataHint")} badge={false} delay={0.06}>
         <AnimatePresence initial={false} mode="popLayout">
           {pasting ? (
-            <motion.div key="paste" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="flex flex-col gap-2 overflow-hidden">
+            <motion.div key="paste" {...SLIDE_IN} transition={SPRING} className="flex flex-col gap-2">
               <Textarea autoFocus rows={5} value={xml} onChange={(e) => setXml(e.target.value)} placeholder="<EntityDescriptor …>" className="rounded-xl font-mono text-xs" />
               <div className="flex gap-2">
                 <Button type="button" onClick={fill} disabled={!xml.trim()} className="btn rounded-xl font-bold">
@@ -246,7 +217,11 @@ function SamlFields({ value, onChange }: { value: IdentityProvider; onChange: (f
             </motion.div>
           )}
         </AnimatePresence>
-        {problem && <p className="text-xs text-amber-600 dark:text-amber-400">{problem}</p>}
+        {problem && (
+          <motion.p layout="position" transition={SPRING} className="text-xs text-amber-600 dark:text-amber-400">
+            {problem}
+          </motion.p>
+        )}
       </Setting>
       <Setting id="sso-entity" title={t("instancesettings.provider.entity")} hint={t("instancesettings.provider.entityHint")} badge={false} delay={0.09}>
         <Glow key={`e${filled}`} on={filled > 0}>
@@ -299,7 +274,8 @@ function Domains({ value, onChange }: { value: string[]; onChange: (domains: str
   const { t } = useI18n();
   const [text, setText] = useState("");
   function add() {
-    const fresh = text.split(/[\s,]+/).map(cleanDomain).filter((d) => d && !value.includes(d));
+    const have = new Set(value);
+    const fresh = text.split(/[\s,]+/).map(cleanDomain).filter((d) => d && !have.has(d));
     if (fresh.length) onChange([...value, ...fresh].slice(0, 20));
     setText("");
   }

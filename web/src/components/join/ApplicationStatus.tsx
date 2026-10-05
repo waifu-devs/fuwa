@@ -1,15 +1,15 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { CheckIcon, ClipboardPenIcon, EyeIcon, HourglassIcon, PartyPopperIcon, SendIcon, Undo2Icon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import type { ReactNode } from "react";
 import { ApplicationStatus, type Server } from "@/gen/fuwa/v1/types_pb";
 import { withdrawApplication } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
 import { BannerHero } from "@/components/join/Banner";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { useI18n } from "@/i18n/react";
+import { type I18n, useI18n } from "@/i18n/react";
 import { accentVars } from "@/lib/banner";
 import { ago } from "@/lib/format";
 import { toast } from "@/lib/ui";
@@ -27,16 +27,13 @@ export function useStanding(instanceKey: string, serverId: string): { standing: 
   return { standing: "waiting", appliedAt: applied?.appliedAt ?? null, reason: "" };
 }
 
-/**
- * Where an application stands, as three stops on a line: sent, being read,
- * and the answer. The line fills as it moves on, the stop it's at pulses
- * while it waits, and the answer pops in with the reason when there is one.
- */
-export function ApplicationTimeline({ standing, appliedAt, reason }: { standing: Standing; appliedAt: number | null; reason: string }) {
-  const lang = useI18n();
+type Stop = { id: string; icon: ReactNode; title: string; note: string; state: "done" | "now" | "later" | "no" };
+
+/** The three stops, as far as the application has got. */
+function timelineStops(lang: I18n, standing: Standing, appliedAt: number | null, reason: string): Stop[] {
   const { t } = lang;
   const done = standing !== "waiting";
-  const stops: { id: string; icon: ReactNode; title: string; note: string; state: "done" | "now" | "later" | "no" }[] = [
+  return [
     { id: "sent", icon: <SendIcon className="size-3.5" />, title: t("join.timeline.sent"), note: appliedAt ? t("join.timeline.appliedAgo", { when: ago(lang, new Date(appliedAt)) }) : t("join.timeline.applied"), state: "done" },
     {
       id: "read",
@@ -55,6 +52,16 @@ export function ApplicationTimeline({ standing, appliedAt, reason }: { standing:
           state: standing === "accepted" ? "done" : "later",
         },
   ];
+}
+
+/**
+ * Where an application stands, as three stops on a line: sent, being read,
+ * and the answer. The line fills as it moves on, the stop it's at pulses
+ * while it waits, and the answer pops in with the reason when there is one.
+ */
+export function ApplicationTimeline({ standing, appliedAt, reason }: { standing: Standing; appliedAt: number | null; reason: string }) {
+  const lang = useI18n();
+  const stops = timelineStops(lang, standing, appliedAt, reason);
   const filled = standing === "waiting" ? 0.5 : 1;
   return (
     <ol className="relative flex flex-col gap-4">
@@ -67,46 +74,53 @@ export function ApplicationTimeline({ standing, appliedAt, reason }: { standing:
         className={cn("absolute top-3 bottom-3 left-3 w-0.5 origin-top -translate-x-1/2 rounded-full", standing === "declined" ? "bg-destructive/60" : "bg-[var(--accent-server)]")}
       />
       {stops.map((s, n) => (
-        <motion.li
-          key={`${s.id}:${s.state}`}
-          initial={{ opacity: 0, x: -10 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ ...SPRING, delay: 0.1 + n * 0.08 }}
-          className="relative flex items-start gap-3"
-        >
-          <span
-            className={cn(
-              "relative z-10 grid size-6 shrink-0 place-items-center rounded-full ring-4 ring-card",
-              s.state === "done" && "bg-[var(--accent-server)] text-white",
-              s.state === "now" && "bg-amber-500 text-white",
-              s.state === "later" && "bg-muted text-muted-foreground",
-              s.state === "no" && "bg-destructive text-white",
-            )}
-          >
-            {s.state === "now" && <span className="absolute inset-0 animate-ping rounded-full bg-amber-500/50 motion-reduce:hidden" />}
-            <AnimatePresence mode="popLayout" initial={false}>
-              <motion.span key={s.state} initial={{ scale: 0, rotate: -60 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 16 }} className="relative grid">
-                {s.icon}
-              </motion.span>
-            </AnimatePresence>
-          </span>
-          <div className="min-w-0 pt-0.5">
-            <p className={cn("text-sm font-extrabold", s.state === "later" && "text-muted-foreground")}>{s.title}</p>
-            {s.note && <p className="text-xs text-muted-foreground">{s.note}</p>}
-            {s.state === "no" && reason && (
-              <motion.blockquote
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ ...SPRING, delay: 0.35 }}
-                className="mt-1.5 rounded-xl border-l-4 border-destructive/60 bg-destructive/5 px-3 py-2 text-sm break-words"
-              >
-                {t("join.quoted", { text: reason })}
-              </motion.blockquote>
-            )}
-          </div>
-        </motion.li>
+        <TimelineStop key={`${s.id}:${s.state}`} stop={s} n={n} reason={reason} />
       ))}
     </ol>
+  );
+}
+
+/** One stop on the timeline: its dot, what it is, and the reason under a turn-down. */
+function TimelineStop({ stop, n, reason }: { stop: Stop; n: number; reason: string }) {
+  const { t } = useI18n();
+  return (
+    <motion.li
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ ...SPRING, delay: 0.1 + n * 0.08 }}
+      className="relative flex items-start gap-3"
+    >
+      <span
+        className={cn(
+          "relative z-10 grid size-6 shrink-0 place-items-center rounded-full ring-4 ring-card",
+          stop.state === "done" && "bg-[var(--accent-server)] text-white",
+          stop.state === "now" && "bg-amber-500 text-white",
+          stop.state === "later" && "bg-muted text-muted-foreground",
+          stop.state === "no" && "bg-destructive text-white",
+        )}
+      >
+        {stop.state === "now" && <span className="absolute inset-0 animate-ping rounded-full bg-amber-500/50 motion-reduce:hidden" />}
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span key={stop.state} initial={{ scale: 0, rotate: -60 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 600, damping: 16 }} className="relative grid">
+            {stop.icon}
+          </motion.span>
+        </AnimatePresence>
+      </span>
+      <div className="min-w-0 pt-0.5">
+        <p className={cn("text-sm font-extrabold", stop.state === "later" && "text-muted-foreground")}>{stop.title}</p>
+        {stop.note && <p className="text-xs text-muted-foreground">{stop.note}</p>}
+        {stop.state === "no" && reason && (
+          <motion.blockquote
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...SPRING, delay: 0.35 }}
+            className="mt-1.5 rounded-xl border-l-4 border-destructive/60 bg-destructive/5 px-3 py-2 text-sm break-words"
+          >
+            {t("join.quoted", { text: reason })}
+          </motion.blockquote>
+        )}
+      </div>
+    </motion.li>
   );
 }
 

@@ -1,14 +1,14 @@
 import { BellIcon, BellOffIcon, ChevronDownIcon, HashIcon, PlusIcon, ServerIcon as ServerGlyph, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { NotificationLevel, type Channel, type NotificationSettings, type Server } from "@/gen/fuwa/v1/types_pb";
 import { run, updateNotifications, type NotificationPatch } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { notificationKey, useFuwa } from "@/fuwa/store";
-import { CHANNEL_ICON, openableChannels } from "@/components/ChannelSidebar";
+import { CHANNEL_ICON, openableChannels } from "@/components/channel-groups";
 import { ServerIcon } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Segmented } from "@/components/settings/account/common";
 import { Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
@@ -46,11 +46,12 @@ export function ServerNotifications({ instanceKey }: { instanceKey: string }) {
   const inst = useInstance(instanceKey);
   const target = useUi((u) => u.settingsTarget);
   const servers = inst?.servers ?? [];
-  const [open, setOpen] = useState<string | null>(() => (target && servers.some((s) => s.id === target) ? target : null));
+  const targetHere = !!target && servers.some((s) => s.id === target);
+  const [open, setOpen] = useState<string | null>(() => (targetHere ? target : null));
 
   useEffect(() => {
-    if (target && servers.some((s) => s.id === target)) setOpen(target);
-  }, [target, servers]);
+    if (targetHere) setOpen(target);
+  }, [target, targetHere]);
 
   if (!servers.length) {
     return (
@@ -121,7 +122,8 @@ function ServerCard({
       ref={ref}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ ...SPRING, delay }}
+      transition={{ ...SPRING, delay, layout: SPRING }}
+      layout="position"
       className={cn("scroll-mt-4 overflow-hidden rounded-2xl border bg-card transition-colors", open && "border-primary/40")}
     >
       <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 p-3 text-left transition hover:bg-muted/50">
@@ -148,7 +150,7 @@ function ServerCard({
       </button>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ ...SPRING, opacity: { duration: 0.2 } }} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={{ ...SPRING, opacity: { duration: 0.2 } }}>
             <ServerBody instanceKey={instanceKey} server={server} settings={settings} muted={muted} now={now} />
           </motion.div>
         )}
@@ -161,10 +163,11 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
   const { t } = useI18n();
   const channels = useFuwa((s) => s.instances[instanceKey]?.channels[server.id]);
   const all = useFuwa((s) => s.instances[instanceKey]?.notifications);
-  const [added, setAdded] = useState<string[]>([]);
+  const [added, setAdded] = useState<ReadonlySet<string>>(() => new Set());
   const openable = openableChannels(channels ?? []);
-  const withSettings = openable.filter((c) => all?.[notificationKey(server.id, c.id)] || added.includes(c.id));
-  const rest = openable.filter((c) => !withSettings.includes(c));
+  const withSettings = openable.filter((c) => all?.[notificationKey(server.id, c.id)] || added.has(c.id));
+  const shown = new Set(withSettings);
+  const rest = openable.filter((c) => !shown.has(c));
 
   return (
     <div className="flex flex-col gap-5 border-t p-4">
@@ -178,13 +181,12 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
           options={levelOptions(t)}
           className="w-full max-w-md"
         />
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="popLayout">
           {!settings?.level && server.defaultNotifications === NotificationLevel.MENTIONS && (
             <motion.p
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden text-xs text-muted-foreground"
+              {...SLIDE_IN}
+              transition={SPRING}
+              className="text-xs text-muted-foreground"
             >
               {t("accountsettings.serverNotifications.mentionsDefault")}
             </motion.p>
@@ -211,7 +213,7 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
               {rest.map((c) => {
                 const Icon = CHANNEL_ICON[c.type] ?? HashIcon;
                 return (
-                  <DropdownMenuItem key={c.id} onSelect={() => setAdded((a) => [...a, c.id])}>
+                  <DropdownMenuItem key={c.id} onSelect={() => setAdded((a) => new Set(a).add(c.id))}>
                     <Icon /> {c.name}
                   </DropdownMenuItem>
                 );
@@ -230,11 +232,15 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
                   now={now}
                   // Kept on screen even when it goes back to all defaults, until removed.
                   onChange={(patch) => {
-                    setAdded((a) => (a.includes(c.id) ? a : [...a, c.id]));
+                    setAdded((a) => (a.has(c.id) ? a : new Set(a).add(c.id)));
                     change(instanceKey, server.id, c.id, patch);
                   }}
                   onRemove={() => {
-                    setAdded((a) => a.filter((id) => id !== c.id));
+                    setAdded((a) => {
+                      const next = new Set(a);
+                      next.delete(c.id);
+                      return next;
+                    });
                     if (all?.[notificationKey(server.id, c.id)]) change(instanceKey, server.id, c.id, { level: NotificationLevel.UNSPECIFIED, mutedUntil: false });
                   }}
                 />

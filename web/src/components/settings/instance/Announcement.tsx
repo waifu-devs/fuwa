@@ -1,13 +1,14 @@
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { LoaderCircleIcon, MegaphoneIcon, MegaphoneOffIcon, SirenIcon, TriangleAlertIcon } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { useState, type FormEvent } from "react";
-import { AnnouncementSchema, AnnouncementTone } from "@/gen/fuwa/v1/types_pb";
+import { AnnouncementSchema, AnnouncementTone, type Announcement as AnnouncementMessage } from "@/gen/fuwa/v1/types_pb";
 import { setAnnouncement } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";
-import { BannerBody, endsLabel, isLive, toneOf } from "@/components/AnnouncementBanner";
-import { SPRING } from "@/components/motion";
+import { BannerBody } from "@/components/AnnouncementBanner";
+import { endsLabel, isLive, toneOf } from "@/lib/announcement";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Chips } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -50,13 +51,8 @@ export function Announcement({ instanceKey }: { instanceKey: string }) {
   const shout = useAnimationControls();
 
   const trimmed = text.trim();
-  const endsAt =
-    ends === "keep" ? (live?.endsAt ? toDate(live.endsAt) : undefined) : ends === "never" ? undefined : new Date(now + ends);
-  const changed =
-    !live ||
-    trimmed !== live.text ||
-    tone !== toneOf(live) ||
-    (ends !== "keep" && (ends === "never" ? !!live.endsAt : true));
+  const endsAt = endTime(ends, live, now);
+  const changed = !live || trimmed !== live.text || tone !== toneOf(live) || endChanged(ends, live);
   const draft = create(AnnouncementSchema, {
     id: trimmed === live?.text ? live.id : "draft",
     text: trimmed || t("instancesettings.announcement.previewText"),
@@ -81,10 +77,6 @@ export function Announcement({ instanceKey }: { instanceKey: string }) {
     toast(t("instancesettings.announcement.down"));
   }
 
-  const fixed = LENGTHS.map((l) => ({ value: l.value, label: t(l.label) }));
-  const lengths: { value: Ends; label: string }[] =
-    live?.endsAt ? [{ value: "keep", label: t("instancesettings.announcement.until", { time: endsLabel(toDate(live.endsAt)) }) }, ...fixed] : fixed;
-
   return (
     <form onSubmit={submit} className="flex flex-col">
       <Setting id="announcement-preview" title={t("settings.controls.preview")} hint={t("instancesettings.announcement.previewHint")} badge={false}>
@@ -99,25 +91,7 @@ export function Announcement({ instanceKey }: { instanceKey: string }) {
             </span>
           </div>
         </div>
-        <AnimatePresence mode="popLayout" initial={false}>
-          <motion.p
-            key={live ? `live-${live.id}` : "none"}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={SPRING}
-            className="flex items-center gap-2 text-xs text-muted-foreground"
-          >
-            <span className={cn("relative size-2 rounded-full", live ? "bg-emerald-500" : "bg-muted-foreground/40")}>
-              {live && <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500/60" />}
-            </span>
-            {live
-              ? live.endsAt
-                ? t("instancesettings.announcement.upSinceUntil", { time: formatStamp(toDate(live.createdAt)), end: endsLabel(toDate(live.endsAt)) })
-                : t("instancesettings.announcement.upSince", { time: formatStamp(toDate(live.createdAt)) })
-              : t("instancesettings.announcement.nothingUp")}
-          </motion.p>
-        </AnimatePresence>
+        <LiveStatus live={live} />
       </Setting>
 
       <Setting id="announcement-text" title={t("instancesettings.announcement.message")} hint={t("instancesettings.announcement.messageHint")} badge={false} delay={0.04}>
@@ -150,46 +124,112 @@ export function Announcement({ instanceKey }: { instanceKey: string }) {
         />
       </Setting>
 
-      <Setting id="announcement-ends" title={t("instancesettings.announcement.comesDown")} hint={t("instancesettings.announcement.comesDownHint")} badge={false} delay={0.12}>
-        <Chips label={t("instancesettings.announcement.comesDown")} value={ends} onChange={setEnds} options={lengths} />
-        <AnimatePresence initial={false}>
-          {endsAt && ends !== "keep" && (
-            <motion.p
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={SPRING}
-              className="overflow-hidden text-xs text-muted-foreground"
-            >
-              <T k="instancesettings.announcement.comesDownAt" values={{ time: <b>{formatStamp(endsAt)}</b> }} />
-            </motion.p>
-          )}
-        </AnimatePresence>
-      </Setting>
+      <EndsSetting live={live} ends={ends} onChange={setEnds} endsAt={endsAt} />
 
       {save.error && <p className="mb-3 text-sm text-destructive first-letter:uppercase">{save.error}</p>}
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <AnimatePresence initial={false}>
-          {live && (
-            <motion.span initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={SPRING} className="mr-auto">
-              <Button type="button" variant="ghost" disabled={save.pending} onClick={takeDown} className="group rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive">
-                <MegaphoneOffIcon className="transition-transform group-hover:-rotate-12" /> {t("instancesettings.announcement.takeDown")}
-              </Button>
-            </motion.span>
-          )}
-        </AnimatePresence>
-        <Button type="submit" disabled={!trimmed || !changed || save.pending} className="btn group rounded-xl px-4 font-bold">
-          {save.pending ? (
-            <LoaderCircleIcon className="animate-spin" />
-          ) : (
-            <motion.span animate={shout} className="inline-flex transition-transform group-hover:-rotate-12">
-              <MegaphoneIcon />
-            </motion.span>
-          )}
-          {t(live ? "instancesettings.announcement.update" : "instancesettings.announcement.putUp")}
-        </Button>
+        <AnnouncementActions live={!!live} pending={save.pending} canSave={!!trimmed && changed} shout={shout} onTakeDown={takeDown} />
       </div>
     </form>
+  );
+}
+
+/** When it would come down: where it was, never, or that long from now. */
+function endTime(ends: Ends, live: AnnouncementMessage | undefined, now: number): Date | undefined {
+  if (ends === "keep") return live?.endsAt ? toDate(live.endsAt) : undefined;
+  return ends === "never" ? undefined : new Date(now + ends);
+}
+
+/** Whether the end picked differs from the one it has. */
+const endChanged = (ends: Ends, live: AnnouncementMessage) => ends !== "keep" && (ends === "never" ? !!live.endsAt : true);
+
+/** Whether one is up, since when and until when. */
+function LiveStatus({ live }: { live: AnnouncementMessage | undefined }) {
+  const { t } = useI18n();
+  return (
+    <AnimatePresence mode="popLayout" initial={false}>
+      <motion.p
+        key={live ? `live-${live.id}` : "none"}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -6 }}
+        transition={SPRING}
+        className="flex items-center gap-2 text-xs text-muted-foreground"
+      >
+        <span className={cn("relative size-2 rounded-full", live ? "bg-emerald-500" : "bg-muted-foreground/40")}>
+          {live && <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500/60" />}
+        </span>
+        {live
+          ? live.endsAt
+            ? t("instancesettings.announcement.upSinceUntil", { time: formatStamp(toDate(live.createdAt)), end: endsLabel(toDate(live.endsAt)) })
+            : t("instancesettings.announcement.upSince", { time: formatStamp(toDate(live.createdAt)) })
+          : t("instancesettings.announcement.nothingUp")}
+      </motion.p>
+    </AnimatePresence>
+  );
+}
+
+/** How long it stays up, with the time it would come down. */
+function EndsSetting({ live, ends, onChange, endsAt }: { live: AnnouncementMessage | undefined; ends: Ends; onChange: (ends: Ends) => void; endsAt: Date | undefined }) {
+  const { t } = useI18n();
+  const fixed = LENGTHS.map((l) => ({ value: l.value, label: t(l.label) }));
+  const lengths: { value: Ends; label: string }[] =
+    live?.endsAt ? [{ value: "keep", label: t("instancesettings.announcement.until", { time: endsLabel(toDate(live.endsAt)) }) }, ...fixed] : fixed;
+  return (
+    <Setting id="announcement-ends" title={t("instancesettings.announcement.comesDown")} hint={t("instancesettings.announcement.comesDownHint")} badge={false} delay={0.12}>
+      <Chips label={t("instancesettings.announcement.comesDown")} value={ends} onChange={onChange} options={lengths} />
+      <AnimatePresence initial={false} mode="popLayout">
+        {endsAt && ends !== "keep" && (
+          <motion.p
+            {...SLIDE_IN}
+            transition={SPRING}
+            className="text-xs text-muted-foreground"
+          >
+            <T k="instancesettings.announcement.comesDownAt" values={{ time: <b>{formatStamp(endsAt)}</b> }} />
+          </motion.p>
+        )}
+      </AnimatePresence>
+    </Setting>
+  );
+}
+
+/** Taking it down, and putting it up (or updating it). */
+function AnnouncementActions({
+  live,
+  pending,
+  canSave,
+  shout,
+  onTakeDown,
+}: {
+  live: boolean;
+  pending: boolean;
+  canSave: boolean;
+  shout: ReturnType<typeof useAnimationControls>;
+  onTakeDown: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <>
+    <AnimatePresence initial={false}>
+      {live && (
+        <motion.span initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={SPRING} className="mr-auto">
+          <Button type="button" variant="ghost" disabled={pending} onClick={onTakeDown} className="group rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive">
+            <MegaphoneOffIcon className="transition-transform group-hover:-rotate-12" /> {t("instancesettings.announcement.takeDown")}
+          </Button>
+        </motion.span>
+      )}
+    </AnimatePresence>
+    <Button type="submit" disabled={!canSave || pending} className="btn group rounded-xl px-4 font-bold">
+      {pending ? (
+        <LoaderCircleIcon className="animate-spin" />
+      ) : (
+        <motion.span animate={shout} className="inline-flex transition-transform group-hover:-rotate-12">
+          <MegaphoneIcon />
+        </motion.span>
+      )}
+      {t(live ? "instancesettings.announcement.update" : "instancesettings.announcement.putUp")}
+    </Button>
+    </>
   );
 }
 

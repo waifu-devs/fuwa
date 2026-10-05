@@ -1,11 +1,12 @@
 import { BarChart3Icon, CheckIcon, EyeIcon, EyeOffIcon, FlagIcon, LoaderCircleIcon, TrophyIcon, UndoIcon, UsersIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Emoji, Message, Poll, PollAnswer, User } from "@/gen/fuwa/v1/types_pb";
 import { endPoll, listPollVoters, run, votePoll } from "@/fuwa/actions";
 import { EmojiGlyph } from "@/components/EmojiGlyph";
 import { UserAvatar } from "@/components/Icons";
-import { CountUp, SPRING } from "@/components/motion";
+import { CountUp } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { type I18n, T, useI18n } from "@/i18n/react";
 import { displayName, formatFull, toDate } from "@/lib/format";
@@ -55,60 +56,16 @@ export function PollCard({ message, mine, animate }: { message: Message; mine: b
   const place = useContext(PollPlace);
   const { t } = useI18n();
   const poll = message.poll!;
-  const endsAt = poll.endsAt ? toDate(poll.endsAt).getTime() : 0;
-  const now = useNow(poll.endedAt ? 0 : endsAt);
-  const closed = !!poll.endedAt || (!!endsAt && endsAt <= now);
-  const [picking, setPicking] = useState<number[] | null>(null);
+  const { endsAt, now, closed } = useClock(poll);
   const [peek, setPeek] = useState(false);
-  const chosen = picking ?? poll.myAnswerIds;
-  const picked = new Set(chosen);
   const voted = poll.myAnswerIds.length > 0;
   // Anonymous polls show counts only once they're over (the server sends none before).
   const hidden = poll.anonymous && !closed;
   const results = !hidden && (voted || closed || peek);
   const canVote = !!place?.canVote && !closed;
+  const { picking, picked, vote, pick } = useVoting(place, message.id, poll, canVote);
   const total = poll.answers.reduce((n, a) => n + Number(a.votes), 0);
-  const top = Math.max(0, ...poll.answers.map((a) => Number(a.votes)));
-
-  // Clicks queue up: only the newest pick goes out after the one in flight, so answers never land out of order.
-  const want = useRef<number[] | null>(null);
-  const sending = useRef(false);
-  async function flush() {
-    if (!place || sending.current) return;
-    sending.current = true;
-    try {
-      while (want.current) {
-        const ids = want.current;
-        want.current = null;
-        await run(votePoll(place.instanceKey, place.serverId, place.channelId, message.id, ids)).catch((err: Error) => toast(err.message));
-      }
-    } finally {
-      sending.current = false;
-      setPicking(null);
-    }
-  }
-  function vote(ids: number[]) {
-    setPicking(ids);
-    want.current = ids;
-    void flush();
-  }
-  function pick(answer: PollAnswer) {
-    if (!canVote) return;
-    if (poll.multiple) vote(picked.has(answer.id) ? chosen.filter((id) => id !== answer.id) : [...chosen, answer.id].sort((a, b) => a - b));
-    else vote(chosen.length === 1 && chosen[0] === answer.id ? [] : [answer.id]);
-  }
-
-  const counting = closed && poll.anonymous && total === 0 && poll.voters > 0n;
-  const running = endsAt ? left(t, endsAt - now) : t("chattools.poll.noEnd");
-  const status = counting
-    ? t("chattools.poll.counting")
-    : poll.endedAt
-      ? t("chattools.poll.ended", { time: formatFull(toDate(poll.endedAt)) })
-      : closed
-        ? t("chattools.poll.ended", { time: formatFull(new Date(endsAt)) })
-        : hidden
-          ? t("chattools.poll.hiddenUntilEnd", { status: running })
-          : running;
+  const status = statusLine(t, poll, { closed, hidden, total, endsAt, now });
 
   return (
     <motion.section
@@ -120,25 +77,7 @@ export function PollCard({ message, mine, animate }: { message: Message; mine: b
     >
       <PollHeader poll={poll} closed={closed} />
 
-      <div role={poll.multiple ? "group" : "radiogroup"} aria-label={t("chattools.poll.answers")} className="flex flex-col gap-1.5">
-        {poll.answers.map((answer, n) => (
-          <AnswerRow
-            key={answer.id}
-            answer={answer}
-            index={n}
-            multiple={poll.multiple}
-            chosen={picked.has(answer.id)}
-            results={results}
-            share={total ? Number(answer.votes) / total : 0}
-            winner={closed && top > 0 && Number(answer.votes) === top}
-            dim={closed && top > 0 && Number(answer.votes) !== top}
-            disabled={!canVote}
-            emojis={place?.emojis}
-            animate={animate}
-            onPick={() => pick(answer)}
-          />
-        ))}
-      </div>
+      <Answers poll={poll} picked={picked} results={results} total={total} closed={closed} canVote={canVote} emojis={place?.emojis} animate={animate} onPick={pick} />
 
       <PollFooter
         poll={poll}
@@ -155,6 +94,107 @@ export function PollCard({ message, mine, animate }: { message: Message; mine: b
       />
     </motion.section>
   );
+}
+
+/** When the poll ends, the time now (ticking while it counts down), and whether it's over. */
+function useClock(poll: Poll) {
+  const endsAt = poll.endsAt ? toDate(poll.endsAt).getTime() : 0;
+  const now = useNow(poll.endedAt ? 0 : endsAt);
+  return { endsAt, now, closed: !!poll.endedAt || (!!endsAt && endsAt <= now) };
+}
+
+/** The answers, as one group of checkboxes or radios; once it's over the most voted are crowned and the rest dimmed. */
+function Answers({
+  poll,
+  picked,
+  results,
+  total,
+  closed,
+  canVote,
+  emojis,
+  animate,
+  onPick,
+}: {
+  poll: Poll;
+  picked: Set<number>;
+  results: boolean;
+  total: number;
+  closed: boolean;
+  canVote: boolean;
+  emojis: Emoji[] | undefined;
+  animate: boolean;
+  onPick: (answer: PollAnswer) => void;
+}) {
+  const { t } = useI18n();
+  const top = Math.max(0, ...poll.answers.map((a) => Number(a.votes)));
+  return (
+    <div role={poll.multiple ? "group" : "radiogroup"} aria-label={t("chattools.poll.answers")} className="flex flex-col gap-1.5">
+      {poll.answers.map((answer, n) => (
+        <AnswerRow
+          key={answer.id}
+          answer={answer}
+          index={n}
+          multiple={poll.multiple}
+          chosen={picked.has(answer.id)}
+          results={results}
+          share={total ? Number(answer.votes) / total : 0}
+          winner={closed && top > 0 && Number(answer.votes) === top}
+          dim={closed && top > 0 && Number(answer.votes) !== top}
+          disabled={!canVote}
+          emojis={emojis}
+          animate={animate}
+          onPick={() => onPick(answer)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Your picks as they go out. Clicks queue up: only the newest pick goes out
+ * after the one in flight, so answers never land out of order.
+ */
+function useVoting(place: PollPlaceValue | null, messageId: string, poll: Poll, canVote: boolean) {
+  const [picking, setPicking] = useState<number[] | null>(null);
+  const chosen = picking ?? poll.myAnswerIds;
+  const picked = new Set(chosen);
+  const want = useRef<number[] | null>(null);
+  const sending = useRef(false);
+  async function flush() {
+    if (!place || sending.current) return;
+    sending.current = true;
+    try {
+      while (want.current) {
+        const ids = want.current;
+        want.current = null;
+        await run(votePoll(place.instanceKey, place.serverId, place.channelId, messageId, ids)).catch((err: Error) => toast(err.message));
+      }
+    } finally {
+      sending.current = false;
+      setPicking(null);
+    }
+  }
+  function vote(ids: number[]) {
+    setPicking(ids);
+    want.current = ids;
+    void flush();
+  }
+  function pick(answer: PollAnswer) {
+    if (!canVote) return;
+    if (poll.multiple) vote(picked.has(answer.id) ? chosen.filter((id) => id !== answer.id) : [...chosen, answer.id].sort((a, b) => a - b));
+    else vote(chosen.length === 1 && chosen[0] === answer.id ? [] : [answer.id]);
+  }
+  return { picking, picked, vote, pick };
+}
+
+/** The footer's words: still counting, when it ended, or how long it has left (and that counts wait for the end). */
+function statusLine(t: I18n["t"], poll: Poll, at: { closed: boolean; hidden: boolean; total: number; endsAt: number; now: number }): string {
+  const { closed, hidden, total, endsAt, now } = at;
+  if (closed && poll.anonymous && total === 0 && poll.voters > 0n) return t("chattools.poll.counting");
+  if (poll.endedAt) return t("chattools.poll.ended", { time: formatFull(toDate(poll.endedAt)) });
+  if (closed) return t("chattools.poll.ended", { time: formatFull(new Date(endsAt)) });
+  const running = endsAt ? left(t, endsAt - now) : t("chattools.poll.noEnd");
+  return hidden ? t("chattools.poll.hiddenUntilEnd", { status: running }) : running;
 }
 
 /** What kind of poll it is, shown before you vote: one or many, anonymous or public, and once it's over. */
@@ -352,7 +392,6 @@ function AnswerRow({
   onPick: () => void;
 }) {
   const percent = Math.round(share * 100);
-  const { t } = useI18n();
   return (
     <motion.button
       type="button"
@@ -379,62 +418,83 @@ function AnswerRow({
         transition={BAR}
         className={cn("absolute inset-0 -z-10 origin-left", winner ? "bg-primary/30" : chosen ? "bg-primary/22" : "bg-foreground/8")}
       />
-      {/* A ring that flashes out when your pick lands. */}
-      <AnimatePresence>
-        {chosen && (
-          <motion.span
-            key="flash"
-            aria-hidden
-            initial={{ opacity: 0.9, scale: 1 }}
-            animate={{ opacity: 0, scale: 1.04 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.55, ease: "easeOut" }}
-            className="pointer-events-none absolute inset-0 rounded-xl ring-2 ring-primary"
-          />
-        )}
-      </AnimatePresence>
+      <PickFlash chosen={chosen} />
       <span className="flex items-center gap-2.5">
-        <span
-          className={cn(
-            "grid size-[18px] shrink-0 place-items-center border-2 transition-colors",
-            multiple ? "rounded-md" : "rounded-full",
-            chosen ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40",
-          )}
-        >
-          <AnimatePresence initial={false}>
-            {chosen && (
-              <motion.span
-                key="check"
-                initial={{ scale: 0, rotate: -45 }}
-                animate={{ scale: 1, rotate: 0 }}
-                exit={{ scale: 0 }}
-                transition={{ type: "spring", stiffness: 700, damping: 18 }}
-                className="grid place-items-center"
-              >
-                <CheckIcon className="size-3" strokeWidth={3.5} />
-              </motion.span>
-            )}
-          </AnimatePresence>
-        </span>
+        <PickMark multiple={multiple} chosen={chosen} />
         {answer.emoji && <EmojiGlyph value={answer.emoji} emojis={emojis} className="size-5 shrink-0 text-base" />}
         <span className="min-w-0 flex-1 font-bold break-words">{answer.text}</span>
-        <AnimatePresence initial={false}>
-          {winner && (
-            <motion.span
-              key="trophy"
-              initial={{ scale: 0, rotate: -40, y: 4 }}
-              animate={{ scale: 1, rotate: [0, -12, 8, 0], y: 0 }}
-              transition={{ ...SPRING, rotate: { duration: 0.6, delay: 0.15 } }}
-              className="text-amber-500"
-              aria-label={t("chattools.poll.mostVotes")}
-            >
-              <TrophyIcon className="size-4" />
-            </motion.span>
-          )}
-        </AnimatePresence>
+        <WinnerMark winner={winner} />
         <Numbers shown={results} votes={answer.votes} percent={percent} />
       </span>
     </motion.button>
+  );
+}
+
+/** A ring that flashes out when your pick lands. */
+function PickFlash({ chosen }: { chosen: boolean }) {
+  return (
+    <AnimatePresence>
+      {chosen && (
+        <motion.span
+          key="flash"
+          aria-hidden
+          initial={{ opacity: 0.9, scale: 1 }}
+          animate={{ opacity: 0, scale: 1.04 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.55, ease: "easeOut" }}
+          className="pointer-events-none absolute inset-0 rounded-xl ring-2 ring-primary"
+        />
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** The box (or circle, for one pick) with its check popping in. */
+function PickMark({ multiple, chosen }: { multiple: boolean; chosen: boolean }) {
+  return (
+    <span
+      className={cn(
+        "grid size-[18px] shrink-0 place-items-center border-2 transition-colors",
+        multiple ? "rounded-md" : "rounded-full",
+        chosen ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40",
+      )}
+    >
+      <AnimatePresence initial={false}>
+        {chosen && (
+          <motion.span
+            key="check"
+            initial={{ scale: 0, rotate: -45 }}
+            animate={{ scale: 1, rotate: 0 }}
+            exit={{ scale: 0 }}
+            transition={{ type: "spring", stiffness: 700, damping: 18 }}
+            className="grid place-items-center"
+          >
+            <CheckIcon className="size-3" strokeWidth={3.5} />
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </span>
+  );
+}
+
+/** The trophy on an ended poll's winning answer. */
+function WinnerMark({ winner }: { winner: boolean }) {
+  const { t } = useI18n();
+  return (
+    <AnimatePresence initial={false}>
+      {winner && (
+        <motion.span
+          key="trophy"
+          initial={{ scale: 0, rotate: -40, y: 4 }}
+          animate={{ scale: 1, rotate: [0, -12, 8, 0], y: 0 }}
+          transition={{ ...SPRING, rotate: { duration: 0.6, delay: 0.15 } }}
+          className="text-amber-500"
+          aria-label={t("chattools.poll.mostVotes")}
+        >
+          <TrophyIcon className="size-4" />
+        </motion.span>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -532,7 +592,7 @@ function VoterList({ place, messageId, answerId }: { place: PollPlaceValue; mess
     return () => {
       live = false;
     };
-  }, [place.instanceKey, place.serverId, messageId, answerId]);
+  }, [place.instanceKey, place.serverId, place.channelId, messageId, answerId]);
 
   async function loadMore() {
     const last = users?.at(-1);

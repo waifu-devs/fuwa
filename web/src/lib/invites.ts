@@ -1,4 +1,5 @@
 import type { Invite } from "@/gen/fuwa/v1/types_pb";
+import { getInstance } from "@/fuwa/hooks";
 import { instanceKey, normalizeUrl } from "@/fuwa/saved";
 import type { Key } from "@/i18n/i18n";
 import { formatDuration, type Lang, toDate } from "@/lib/format";
@@ -34,6 +35,12 @@ export const ACCOUNT_AGES: readonly { value: number; label: Key }[] = [
  * with or without fuwa, and leads straight to the invite page.
  */
 export const inviteLink = (base: string, code: string) => `${base.replace(/\/+$/, "")}/invite/${code}`;
+
+/** An instance's own address, as links to it should read. */
+export const publicBase = (key: string) => {
+  const inst = getInstance(key);
+  return inst?.node?.publicUrl || inst?.url || "";
+};
 
 /** When an invite stops working, or null if it doesn't. */
 export const expiresAt = (invite: Invite): Date | null => (invite.expiresAt ? toDate(invite.expiresAt) : null);

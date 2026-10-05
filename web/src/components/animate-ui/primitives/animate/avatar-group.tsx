@@ -1,6 +1,6 @@
 
 import * as React from 'react';
-import { type HTMLMotionProps, motion, type Transition } from 'motion/react';
+import { type HTMLMotionProps, m as motion, type Transition } from 'motion/react';
 
 import {
   TooltipProvider,
@@ -100,9 +100,8 @@ function AvatarGroup({
         }}
         {...props}
       >
-        {children?.map((child, index) => (
+        {React.Children.map(children, (child, index) => (
           <AvatarContainer
-            key={index}
             zIndex={
               invertOverlap ? React.Children.count(children) - index : index
             }

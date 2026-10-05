@@ -1,7 +1,7 @@
 
 import * as React from 'react';
 import {
-  motion,
+  m as motion,
   AnimatePresence,
   LayoutGroup,
   type Transition,
@@ -232,14 +232,36 @@ function TooltipPortal(props: TooltipPortalProps) {
   return <FloatingPortal {...props} />;
 }
 
+type ShownTooltip = { data: TooltipData | null; open: boolean };
+
+function useShownTooltip(currentTooltip: TooltipData | null) {
+  const [rendered, setRendered] = React.useState<ShownTooltip>({
+    data: null,
+    open: false,
+  });
+
+  // Follow the current tooltip while rendering; on close the last one stays
+  // until its exit animation is done.
+  const [shownTooltip, setShownTooltip] = React.useState<TooltipData | null>(
+    null,
+  );
+  if (currentTooltip !== shownTooltip) {
+    setShownTooltip(currentTooltip);
+    if (currentTooltip) {
+      setRendered({ data: currentTooltip, open: true });
+    } else {
+      setRendered((p) => (p.data ? { ...p, open: false } : p));
+    }
+  }
+
+  return [rendered, setRendered] as const;
+}
+
 function TooltipOverlay() {
   const { currentTooltip, transition, globalId, referenceElRef } =
     useGlobalTooltip();
 
-  const [rendered, setRendered] = React.useState<{
-    data: TooltipData | null;
-    open: boolean;
-  }>({ data: null, open: false });
+  const [rendered, setRendered] = useShownTooltip(currentTooltip);
 
   const arrowRef = React.useRef<SVGSVGElement | null>(null);
 
@@ -260,13 +282,6 @@ function TooltipOverlay() {
     ],
   });
 
-  React.useEffect(() => {
-    if (currentTooltip) {
-      setRendered({ data: currentTooltip, open: true });
-    } else {
-      setRendered((p) => (p.data ? { ...p, open: false } : p));
-    }
-  }, [currentTooltip]);
 
   React.useLayoutEffect(() => {
     if (referenceElRef.current) {
@@ -395,7 +410,8 @@ function shallowEqualWithoutChildren(
   b?: HTMLMotionProps<'div'>,
 ) {
   if (a === b) return true;
-  if (!a || !b) return false;
+  if (!a) return false;
+  if (!b) return false;
   const keysA = Object.keys(a).filter((k) => k !== 'children');
   const keysB = Object.keys(b).filter((k) => k !== 'children');
   if (keysA.length !== keysB.length) return false;

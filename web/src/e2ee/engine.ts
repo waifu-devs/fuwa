@@ -946,7 +946,8 @@ export class DmEngine {
       }
     }
     if (!opened.length) return;
-    const senders = unique(opened.map((e) => e.opened.payload.senderId)).filter((id) => c.allowed.includes(id));
+    const allowedIds = new Set(c.allowed);
+    const senders = unique(opened.map((e) => e.opened.payload.senderId)).filter((id) => allowedIds.has(id));
     const devices = new Set<string>();
     for (const userIds of chunks(senders, LOOKUPS)) {
       for (const d of (await this.api.dms.listDevices({ userIds }, CALL)).devices) devices.add(`${d.userId}/${d.id}`);
@@ -1128,6 +1129,7 @@ export class DmEngine {
    */
   private async reconcile(c: Room, attempt = 0): Promise<void> {
     const belong = await c.belong();
+    // One lookup at a time: every client runs this on each membership change, so a big channel mustn't fan out.
     const devices: DeviceInfo[] = [];
     for (const userIds of chunks(belong, LOOKUPS)) devices.push(...(await this.api.dms.listDevices({ userIds }, CALL)).devices);
     c.check(devices, belong);

@@ -1,13 +1,15 @@
 import { Link } from "@tanstack/react-router";
 import { CompassIcon, HashIcon, SettingsIcon, UsersIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState, type Ref } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa, type InstanceState } from "@/fuwa/store";
-import { ConnDot, ServerIcon, connectionLabel } from "@/components/Icons";
+import { ConnDot, ServerIcon } from "@/components/Icons";
+import { connectionLabel } from "@/components/icons-utils";
 import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
-import { Count, SPRING, SwapText } from "@/components/motion";
+import { Count, SwapText } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { waitingForYou } from "@/lib/friends";
 import { UserPanel } from "@/components/UserPanel";
 import { CallPanel } from "@/components/calls/CallPanel";

@@ -1,5 +1,5 @@
 import { BuildingIcon, ChevronLeftIcon, LockKeyholeIcon, GlobeIcon } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { m as motion, useReducedMotion } from "motion/react";
 import { AccountKind, type Server } from "@/gen/fuwa/v1/types_pb";
 import { startServerSso } from "@/fuwa/actions";
 import { useAction, useInstance } from "@/fuwa/hooks";

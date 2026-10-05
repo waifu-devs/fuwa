@@ -1,5 +1,5 @@
 import { ArrowLeftIcon, ClockIcon, LoaderCircleIcon, SearchIcon, StarIcon, TrendingUpIcon, UploadIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { GifCategory, GifResult } from "@/gen/fuwa/v1/gif_pb";
 import { MediaPurpose } from "@/gen/fuwa/v1/media_pb";
@@ -7,7 +7,7 @@ import type { MessageGif } from "@/gen/fuwa/v1/types_pb";
 import { run, uploadPicture } from "@/fuwa/actions";
 import { gifCategories, isSaved, prepareGif, saveGif, searchGifs, unsaveGif, useRecentGifs, useSavedGifs } from "@/fuwa/gifs";
 import { GifImage } from "@/components/chat/GifImage";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { useI18n } from "@/i18n/react";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
 import { toast } from "@/lib/ui";
@@ -108,64 +108,21 @@ export function GifPanel({ instanceKey, credit, onSend }: { instanceKey: string;
 
   return (
     <>
-      <div className="flex items-center gap-1.5 border-b p-2">
-        <div className="relative flex-1">
-          {/* Back takes the search glass's place, so nothing beside it moves. */}
-          <AnimatePresence initial={false} mode="popLayout">
-            {searching ? (
-              <motion.button
-                key="back"
-                type="button"
-                initial={{ opacity: 0, scale: 0.6, rotate: 45 }}
-                animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                exit={{ opacity: 0, scale: 0.6 }}
-                transition={SPRING}
-                onClick={() => {
-                  setTyped("");
-                  setQuery("");
-                  setTrending(false);
-                }}
-                aria-label={t("chattools.gifs.back")}
-                className="absolute top-1.5 left-1 z-10 grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <ArrowLeftIcon className="size-4" />
-              </motion.button>
-            ) : (
-              <motion.span
-                key="glass"
-                initial={{ opacity: 0, scale: 0.6 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.6 }}
-                transition={SPRING}
-                className="pointer-events-none absolute top-2.5 left-2.5 text-muted-foreground"
-              >
-                <SearchIcon className="size-4" />
-              </motion.span>
-            )}
-          </AnimatePresence>
-          <input
-            value={typed}
-            onChange={(e) => {
-              setTyped(e.target.value);
-              setTrending(false);
-            }}
-            maxLength={100}
-            placeholder={credit ? t("chattools.gifs.searchProvider", { provider: credit }) : t("chattools.gifs.search")}
-            aria-label={t("chattools.gifs.search")}
-            className="h-9 w-full rounded-xl bg-muted/60 pr-8 pl-8 text-sm outline-none focus:ring-2 focus:ring-primary/40"
-          />
-          {typed && (
-            <button
-              type="button"
-              onClick={() => setTyped("")}
-              aria-label={t("chattools.gifs.clear")}
-              className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-            >
-              <XIcon className="size-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
+      <SearchBox
+        typed={typed}
+        credit={credit}
+        searching={searching}
+        onType={(text) => {
+          setTyped(text);
+          setTrending(false);
+        }}
+        onClear={() => setTyped("")}
+        onBack={() => {
+          setTyped("");
+          setQuery("");
+          setTrending(false);
+        }}
+      />
       {!searching && <Tabs tab={tab} onTab={setTab} savedCount={saved.list.length} />}
       <div className="relative min-h-0 flex-1">
         <AnimatePresence mode="popLayout" initial={false}>
@@ -177,29 +134,21 @@ export function GifPanel({ instanceKey, credit, onSend }: { instanceKey: string;
             transition={SPRING}
             className="absolute inset-0"
           >
-            {shown === "search" ? (
-              <Results instanceKey={instanceKey} query={trending ? "" : query} saved={saved.list} sending={sending} onPick={pick} onSave={toggleSave} />
-            ) : shown === "browse" ? (
-              <Browse
-                instanceKey={instanceKey}
-                onTrending={() => setTrending(true)}
-                onCategory={(c) => {
-                  setTyped(c.query);
-                  setQuery(c.query);
-                }}
-              />
-            ) : shown === "saved" ? (
-              <Saved instanceKey={instanceKey} sending={sending} onPick={pick} onSave={toggleSave} />
-            ) : (
-              <Grid
-                tiles={recent.map(fromGif)}
-                saved={saved.list}
-                sending={sending}
-                onPick={pick}
-                onSave={toggleSave}
-                empty={<Empty icon={<ClockIcon className="size-6" />} title={t("chattools.gifs.nothingSent")} text={t("chattools.gifs.nothingSentAbout")} />}
-              />
-            )}
+            <TabBody
+              instanceKey={instanceKey}
+              shown={shown}
+              query={trending ? "" : query}
+              saved={saved.list}
+              recent={recent}
+              sending={sending}
+              onPick={pick}
+              onSave={toggleSave}
+              onTrending={() => setTrending(true)}
+              onCategory={(c) => {
+                setTyped(c.query);
+                setQuery(c.query);
+              }}
+            />
           </motion.div>
         </AnimatePresence>
       </div>
@@ -209,6 +158,118 @@ export function GifPanel({ instanceKey, credit, onSend }: { instanceKey: string;
         </p>
       )}
     </>
+  );
+}
+
+/** The search field: a back arrow takes the glass's place while searching, and a clear button shows once something's typed. */
+function SearchBox({
+  typed,
+  credit,
+  searching,
+  onType,
+  onClear,
+  onBack,
+}: {
+  typed: string;
+  credit: string;
+  searching: boolean;
+  onType: (text: string) => void;
+  onClear: () => void;
+  onBack: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="flex items-center gap-1.5 border-b p-2">
+      <div className="relative flex-1">
+        {/* Back takes the search glass's place, so nothing beside it moves. */}
+        <AnimatePresence initial={false} mode="popLayout">
+          {searching ? (
+            <motion.button
+              key="back"
+              type="button"
+              initial={{ opacity: 0, scale: 0.6, rotate: 45 }}
+              animate={{ opacity: 1, scale: 1, rotate: 0 }}
+              exit={{ opacity: 0, scale: 0.6 }}
+              transition={SPRING}
+              onClick={onBack}
+              aria-label={t("chattools.gifs.back")}
+              className="absolute top-1.5 left-1 z-10 grid size-6 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <ArrowLeftIcon className="size-4" />
+            </motion.button>
+          ) : (
+            <motion.span
+              key="glass"
+              initial={{ opacity: 0, scale: 0.6 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.6 }}
+              transition={SPRING}
+              className="pointer-events-none absolute top-2.5 left-2.5 text-muted-foreground"
+            >
+              <SearchIcon className="size-4" />
+            </motion.span>
+          )}
+        </AnimatePresence>
+        <input
+          value={typed}
+          onChange={(e) => onType(e.target.value)}
+          maxLength={100}
+          placeholder={credit ? t("chattools.gifs.searchProvider", { provider: credit }) : t("chattools.gifs.search")}
+          aria-label={t("chattools.gifs.search")}
+          className="h-9 w-full rounded-xl bg-muted/60 pr-8 pl-8 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+        />
+        {typed && (
+          <button
+            type="button"
+            onClick={onClear}
+            aria-label={t("chattools.gifs.clear")}
+            className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** What a tab (or a search) shows. */
+function TabBody({
+  instanceKey,
+  shown,
+  query,
+  saved,
+  recent,
+  sending,
+  onPick,
+  onSave,
+  onTrending,
+  onCategory,
+}: {
+  instanceKey: string;
+  shown: Tab | "search";
+  query: string;
+  saved: { gif?: MessageGif }[];
+  recent: MessageGif[];
+  sending: string | null;
+  onPick: (tile: Tile) => void;
+  onSave: (tile: Tile) => void;
+  onTrending: () => void;
+  onCategory: (category: GifCategory) => void;
+}) {
+  const { t } = useI18n();
+  if (shown === "search") return <Results instanceKey={instanceKey} query={query} saved={saved} sending={sending} onPick={onPick} onSave={onSave} />;
+  if (shown === "browse") return <Browse instanceKey={instanceKey} onTrending={onTrending} onCategory={onCategory} />;
+  if (shown === "saved") return <Saved instanceKey={instanceKey} sending={sending} onPick={onPick} onSave={onSave} />;
+  return (
+    <Grid
+      tiles={recent.map(fromGif)}
+      saved={saved}
+      sending={sending}
+      onPick={onPick}
+      onSave={onSave}
+      empty={<Empty icon={<ClockIcon className="size-6" />} title={t("chattools.gifs.nothingSent")} text={t("chattools.gifs.nothingSentAbout")} />}
+    />
   );
 }
 

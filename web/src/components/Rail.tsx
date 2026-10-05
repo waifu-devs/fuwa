@@ -1,6 +1,6 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { CompassIcon, FolderMinusIcon, FolderPlusIcon, GlobeIcon, PlusIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import type { Server } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";
@@ -9,7 +9,8 @@ import { AddInstanceDialog } from "@/components/dialogs/AddInstanceDialog";
 import { CreateServerDialog } from "@/components/dialogs/CreateServerDialog";
 import { ConnDot, FuwaMark, ServerIcon } from "@/components/Icons";
 import { AppliedButton } from "@/components/join/Applied";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Private, useAddress } from "@/components/Private";
 import { useLayout } from "@/components/Shell";
 import { useContextMenu } from "@/components/ContextMenu";

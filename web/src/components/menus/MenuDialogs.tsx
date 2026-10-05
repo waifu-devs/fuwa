@@ -1,5 +1,5 @@
 import { LoaderCircleIcon, TriangleAlertIcon } from "lucide-react";
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import { useState, useSyncExternalStore } from "react";
 import { InviteDialog } from "@/components/dialogs/InviteDialog";
 import { lazyComponent } from "@/components/lazy";

@@ -1,7 +1,7 @@
 import { CheckIcon, CopyIcon, DownloadIcon, HistoryIcon, KeyRoundIcon, LockKeyholeIcon, RotateCcwIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { dmEngine } from "@/e2ee/engine";
@@ -16,139 +16,22 @@ import { cn } from "@/lib/utils";
 
 const problemOf = (err: unknown) => (err instanceof Error && err.name === "Error" ? err.message : toFuwaError(err).message);
 
+const useBackup = (instanceKey: string) => useFuwa((s) => s.instances[instanceKey]?.dms.backup);
+type Backup = NonNullable<ReturnType<typeof useBackup>>;
+
 /**
  * The account's message backup: what this browser reads in direct messages
  * and secure channels, encrypted with a recovery key only you hold, so a new
  * device or browser can read what came before it.
  */
 export function MessageBackup({ instanceKey }: { instanceKey: string }) {
-  const lang = useI18n();
-  const { t } = lang;
-  const backup = useFuwa((s) => s.instances[instanceKey]?.dms.backup);
+  const { t } = useI18n();
+  const backup = useBackup(instanceKey);
   const dmsReady = useFuwa((s) => s.instances[instanceKey]?.dms.status === "ready");
-  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [asking, setAsking] = useState<"replace" | "off" | null>(null);
-  const now = useNow(60_000);
+  const actions = useBackupActions(instanceKey);
+  const { recoveryKey } = actions;
 
   if (!backup || backup.status === "unsupported" || (!dmsReady && backup.status === "unknown")) return null;
-  const engine = dmEngine(instanceKey);
-
-  async function act(fn: () => Promise<void>) {
-    setBusy(true);
-    try {
-      await fn();
-    } catch (err) {
-      toast(problemOf(err));
-    } finally {
-      setBusy(false);
-      setAsking(null);
-    }
-  }
-
-  const create = (replace: boolean) =>
-    act(async () => {
-      if (!engine) return;
-      setRecoveryKey(await engine.backup.create(replace));
-    });
-
-  let body: ReactNode;
-  if (recoveryKey) {
-    body = <KeyPanel recoveryKey={recoveryKey} onDone={() => setRecoveryKey(null)} />;
-  } else if (backup.status === "unknown") {
-    body = <div className="shimmer h-24 rounded-2xl" />;
-  } else if (backup.status === "off") {
-    body = (
-      <Card icon={<HistoryIcon className="size-5" />} title={t("accountsettings.backup.off")} tone="muted">
-        <p className="text-sm text-muted-foreground">{t("accountsettings.backup.offHint")}</p>
-        <div className="mt-3">
-          <Button type="button" size="sm" className="rounded-xl font-bold" disabled={busy || !engine} onClick={() => void create(false)}>
-            <KeyRoundIcon className="size-4" /> {busy ? t("accountsettings.backup.settingUp") : t("accountsettings.backup.setUp")}
-          </Button>
-        </div>
-      </Card>
-    );
-  } else if (backup.status === "locked") {
-    body = (
-      <Card icon={<LockKeyholeIcon className="size-5" />} title={t("accountsettings.backup.locked")} tone="primary">
-        <p className="text-sm text-muted-foreground">{t("accountsettings.backup.lockedHint")}</p>
-        <RestoreForm busy={busy} onRestore={(text) => act(async () => engine && (await engine.backup.restore(text)))} />
-        <Ask
-          open={asking === "replace"}
-          question={t("accountsettings.backup.lostAsk")}
-          confirm={t("accountsettings.backup.startOver")}
-          busy={busy}
-          onCancel={() => setAsking(null)}
-          onConfirm={() => void create(true)}
-        >
-          <button type="button" className="mt-2 text-xs font-bold text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={() => setAsking("replace")}>
-            {t("accountsettings.backup.lost")}
-          </button>
-        </Ask>
-      </Card>
-    );
-  } else if (backup.status === "restoring") {
-    const share = backup.total ? Math.min(1, backup.restored / backup.total) : 0;
-    body = (
-      <Card icon={<HistoryIcon className="size-5 animate-spin [animation-duration:2.5s]" />} title={t("accountsettings.backup.restoring")} tone="primary">
-        <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted">
-          <motion.div className="h-full origin-left rounded-full bg-primary" initial={{ scaleX: 0 }} animate={{ scaleX: share }} transition={SPRING} />
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground tabular-nums">
-          {t("accountsettings.backup.parts", { restored: backup.restored, count: backup.total })}
-        </p>
-      </Card>
-    );
-  } else {
-    const share = backup.maxSize ? Math.min(1, backup.size / backup.maxSize) : 0;
-    const full = backup.status === "full";
-    const saved = backup.updatedAt > 0 ? activeWhen(lang, new Date(backup.updatedAt), now) : undefined;
-    body = (
-      <Card icon={<CheckIcon className="size-5" />} title={full ? t("accountsettings.backup.full") : t("accountsettings.backup.on")} tone={full ? "warn" : "ok"}>
-        <p className="text-sm text-muted-foreground">
-          {t("accountsettings.backup.onHint")}
-          {saved !== undefined && ` ${saved === null ? t("accountsettings.backup.lastSavedNow") : t("accountsettings.backup.lastSaved", { when: saved })}`}
-        </p>
-        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
-          <motion.div
-            className={cn("h-full origin-left rounded-full", full ? "bg-amber-500" : "bg-emerald-500")}
-            initial={false}
-            animate={{ scaleX: share }}
-            transition={SPRING}
-          />
-        </div>
-        <p className="mt-1.5 text-xs text-muted-foreground tabular-nums">
-          {t("accountsettings.backup.size", { used: formatBytes(lang, backup.size), total: formatBytes(lang, backup.maxSize) })}
-        </p>
-        <Ask
-          open={asking !== null}
-          question={
-            asking === "off" ? t("accountsettings.backup.offAsk") : t("accountsettings.backup.newKeyAsk")
-          }
-          confirm={asking === "off" ? t("accountsettings.shared.turnOff") : t("accountsettings.backup.startOver")}
-          busy={busy}
-          onCancel={() => setAsking(null)}
-          onConfirm={() => void (asking === "off" ? act(async () => engine && (await engine.backup.remove())) : create(true))}
-        >
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button type="button" variant="outline" size="sm" className="rounded-xl" disabled={busy} onClick={() => setAsking("replace")}>
-              <RotateCcwIcon className="size-4" /> {full ? t("accountsettings.backup.startOverHere") : t("accountsettings.backup.newKey")}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              disabled={busy}
-              onClick={() => setAsking("off")}
-            >
-              {t("accountsettings.shared.turnOff")}
-            </Button>
-          </div>
-        </Ask>
-      </Card>
-    );
-  }
 
   return (
     <section>
@@ -161,11 +44,163 @@ export function MessageBackup({ instanceKey }: { instanceKey: string }) {
           exit={{ opacity: 0, y: -8, scale: 0.98 }}
           transition={SPRING}
         >
-          {body}
+          {recoveryKey ? <KeyPanel recoveryKey={recoveryKey} onDone={actions.forgetKey} /> : <StatusCard backup={backup} actions={actions} />}
         </motion.div>
       </AnimatePresence>
       {backup.problem && !recoveryKey && <p className="mt-2 text-xs font-bold text-amber-600 first-letter:uppercase dark:text-amber-400">{backup.problem}</p>}
     </section>
+  );
+}
+
+type Actions = ReturnType<typeof useBackupActions>;
+
+/** What the buttons do, with the one thing at a time they may be doing and the question being asked. */
+function useBackupActions(instanceKey: string) {
+  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState<"replace" | "off" | null>(null);
+  const engine = dmEngine(instanceKey);
+
+  async function act<T>(fn: () => Promise<T>): Promise<T | undefined> {
+    setBusy(true);
+    try {
+      return await fn();
+    } catch (err) {
+      toast(problemOf(err));
+      return undefined;
+    } finally {
+      setBusy(false);
+      setAsking(null);
+    }
+  }
+
+  async function create(replace: boolean) {
+    const key = await act(async () => engine && (await engine.backup.create(replace)));
+    if (key) setRecoveryKey(key);
+  }
+
+  return {
+    ready: !!engine,
+    recoveryKey,
+    busy,
+    asking,
+    setAsking,
+    forgetKey: () => setRecoveryKey(null),
+    create,
+    restore: (text: string) => act(async () => engine && (await engine.backup.restore(text))),
+    remove: () => act(async () => engine && (await engine.backup.remove())),
+  };
+}
+
+/** The backup as it stands: loading, off, waiting for its key, restoring, or on. */
+function StatusCard({ backup, actions }: { backup: Backup; actions: Actions }) {
+  const { t } = useI18n();
+  const { busy, asking, setAsking } = actions;
+  switch (backup.status) {
+    case "unknown":
+      return <div className="shimmer h-24 rounded-2xl" />;
+    case "off":
+      return (
+        <Card icon={<HistoryIcon className="size-5" />} title={t("accountsettings.backup.off")} tone="muted">
+          <p className="text-sm text-muted-foreground">{t("accountsettings.backup.offHint")}</p>
+          <div className="mt-3">
+            <Button type="button" size="sm" className="rounded-xl font-bold" disabled={busy || !actions.ready} onClick={() => void actions.create(false)}>
+              <KeyRoundIcon className="size-4" /> {busy ? t("accountsettings.backup.settingUp") : t("accountsettings.backup.setUp")}
+            </Button>
+          </div>
+        </Card>
+      );
+    case "locked":
+      return (
+        <Card icon={<LockKeyholeIcon className="size-5" />} title={t("accountsettings.backup.locked")} tone="primary">
+          <p className="text-sm text-muted-foreground">{t("accountsettings.backup.lockedHint")}</p>
+          <RestoreForm busy={busy} onRestore={actions.restore} />
+          <Ask
+            open={asking === "replace"}
+            question={t("accountsettings.backup.lostAsk")}
+            confirm={t("accountsettings.backup.startOver")}
+            busy={busy}
+            onCancel={() => setAsking(null)}
+            onConfirm={() => void actions.create(true)}
+          >
+            <button type="button" className="mt-2 text-xs font-bold text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={() => setAsking("replace")}>
+              {t("accountsettings.backup.lost")}
+            </button>
+          </Ask>
+        </Card>
+      );
+    case "restoring":
+      return <RestoringCard restored={backup.restored} total={backup.total} />;
+    default:
+      return <OnCard backup={backup} actions={actions} />;
+  }
+}
+
+function RestoringCard({ restored, total }: { restored: number; total: number }) {
+  const { t } = useI18n();
+  const share = total ? Math.min(1, restored / total) : 0;
+  return (
+    <Card icon={<HistoryIcon className="size-5 animate-spin [animation-duration:2.5s]" />} title={t("accountsettings.backup.restoring")} tone="primary">
+      <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted">
+        <motion.div className="h-full origin-left rounded-full bg-primary" initial={{ scaleX: 0 }} animate={{ scaleX: share }} transition={SPRING} />
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground tabular-nums">{t("accountsettings.backup.parts", { restored, count: total })}</p>
+    </Card>
+  );
+}
+
+/** On (or full): when it last saved, how much room it uses, and starting over or turning it off. */
+function OnCard({ backup, actions }: { backup: Backup; actions: Actions }) {
+  const lang = useI18n();
+  const { t } = lang;
+  const now = useNow(60_000);
+  const { busy, asking, setAsking } = actions;
+  const share = backup.maxSize ? Math.min(1, backup.size / backup.maxSize) : 0;
+  const full = backup.status === "full";
+  const saved = backup.updatedAt > 0 ? activeWhen(lang, new Date(backup.updatedAt), now) : undefined;
+  const off = asking === "off";
+  return (
+    <Card icon={<CheckIcon className="size-5" />} title={full ? t("accountsettings.backup.full") : t("accountsettings.backup.on")} tone={full ? "warn" : "ok"}>
+      <p className="text-sm text-muted-foreground">
+        {t("accountsettings.backup.onHint")}
+        {saved !== undefined && ` ${saved === null ? t("accountsettings.backup.lastSavedNow") : t("accountsettings.backup.lastSaved", { when: saved })}`}
+      </p>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+        <motion.div
+          className={cn("h-full origin-left rounded-full", full ? "bg-amber-500" : "bg-emerald-500")}
+          initial={false}
+          animate={{ scaleX: share }}
+          transition={SPRING}
+        />
+      </div>
+      <p className="mt-1.5 text-xs text-muted-foreground tabular-nums">
+        {t("accountsettings.backup.size", { used: formatBytes(lang, backup.size), total: formatBytes(lang, backup.maxSize) })}
+      </p>
+      <Ask
+        open={asking !== null}
+        question={off ? t("accountsettings.backup.offAsk") : t("accountsettings.backup.newKeyAsk")}
+        confirm={off ? t("accountsettings.shared.turnOff") : t("accountsettings.backup.startOver")}
+        busy={busy}
+        onCancel={() => setAsking(null)}
+        onConfirm={() => void (off ? actions.remove() : actions.create(true))}
+      >
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" className="rounded-xl" disabled={busy} onClick={() => setAsking("replace")}>
+            <RotateCcwIcon className="size-4" /> {full ? t("accountsettings.backup.startOverHere") : t("accountsettings.backup.newKey")}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            disabled={busy}
+            onClick={() => setAsking("off")}
+          >
+            {t("accountsettings.shared.turnOff")}
+          </Button>
+        </div>
+      </Ask>
+    </Card>
   );
 }
 

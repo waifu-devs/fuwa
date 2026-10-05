@@ -11,18 +11,20 @@ import {
   SparklesIcon,
   GlobeIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { Node } from "@/gen/fuwa/v1/types_pb";
 import { probe, run, signIn, signUp, startLinkedSignIn, startSsoSignIn, verifyTwoFactor } from "@/fuwa/actions";
+import type { FuwaError } from "@/fuwa/errors";
 import { useAction } from "@/fuwa/hooks";
 import { instanceKey } from "@/fuwa/saved";
 import { AutoHeight } from "@/components/animate-ui/primitives/effects/auto-height";
 import { BuildLabel } from "@/components/BuildLabel";
+import { MotionButton } from "@/components/motion-button";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { CodeInput } from "@/components/CodeInput";
 import { Private, usePrivateField } from "@/components/Private";
 import { Tabs, TabsContent, TabsContents, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { issuerName } from "@/lib/linked";
@@ -120,12 +122,11 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
             className={cn("h-11 rounded-xl pl-9 text-base", privateField)}
           />
         </div>
-        <AnimatePresence>
+        <AnimatePresence mode="popLayout">
           {lookup.error && (
             <motion.p
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
+              {...SLIDE_IN}
+              transition={SPRING}
               className="text-sm text-destructive"
             >
               {t("connect.where.notFound", { problem: lookup.error })}
@@ -161,11 +162,11 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
         )}
       </AnimatePresence>
 
-      <Button type="submit" size="lg" disabled={lookup.pending || !address.trim()} className="btn h-11 rounded-xl font-bold">
+      <MotionButton layout="position" transition={SPRING} type="submit" size="lg" disabled={lookup.pending || !address.trim()} className="btn h-11 rounded-xl font-bold">
         {lookup.pending ? <LoaderCircleIcon className="animate-spin" /> : null}
         {lookup.pending ? t("connect.where.looking") : t("common.continue")}
-      </Button>
-      <p className="text-center text-xs text-muted-foreground">
+      </MotionButton>
+      <motion.p layout="position" transition={SPRING} className="text-center text-xs text-muted-foreground">
         <T
           k="connect.where.anyServer"
           values={{
@@ -176,7 +177,7 @@ function Where({ initialUrl, onFound }: { initialUrl?: string; onFound: (f: { ur
             ),
           }}
         />
-      </p>
+      </motion.p>
     </form>
   );
 }
@@ -257,10 +258,7 @@ export function Account({
       <div className="flex flex-col gap-4">
         <Header url={url} node={node} onBack={onBack} />
         {linked || sso ? (
-          <>
-            {sso && <SsoButton url={url} node={node} returnTo={returnTo} />}
-            {linked && <LinkedButton url={url} node={node} returnTo={returnTo} />}
-          </>
+          <ProviderButtons url={url} node={node} returnTo={returnTo} />
         ) : (
           <p className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
             {t("connect.account.noSignIns")}
@@ -275,8 +273,7 @@ export function Account({
       <Header url={url} node={node} onBack={onBack} />
       {(linked || sso) && (
         <>
-          {sso && <SsoButton url={url} node={node} returnTo={returnTo} />}
-          {linked && <LinkedButton url={url} node={node} returnTo={returnTo} />}
+          <ProviderButtons url={url} node={node} returnTo={returnTo} />
           <div className="flex items-center gap-3 text-xs font-bold text-muted-foreground uppercase">
             <span className="h-px flex-1 bg-border" /> {t("connect.account.orPassword")} <span className="h-px flex-1 bg-border" />
           </div>
@@ -321,53 +318,92 @@ export function Account({
           </TabsContent>
         </TabsContents>
       </Tabs>
-      <div key={`u${shake}`} className={cn("flex flex-col gap-2", shake > 0 && "shake")}>
-        <Label htmlFor="username" className="font-bold">
-          {t("connect.account.username")}
-        </Label>
-        <Input
-          id="username"
-          autoFocus
-          autoComplete="username"
-          autoCapitalize="none"
-          spellCheck={false}
-          placeholder={t("connect.account.usernameHint")}
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          className="h-11 rounded-xl"
-          required
-        />
-        <Label htmlFor="password" className="mt-2 font-bold">
-          {t("connect.account.password")}
-        </Label>
-        <Input
-          id="password"
-          type="password"
-          autoComplete={tab === "sign-in" ? "current-password" : "new-password"}
-          placeholder={tab === "sign-in" ? "" : t("connect.account.passwordHint")}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="h-11 rounded-xl"
-          required
-        />
-      </div>
-      <AnimatePresence>
+      <Credentials
+        key={`u${shake}`}
+        shake={shake}
+        signingIn={tab === "sign-in"}
+        username={username}
+        onUsername={setUsername}
+        password={password}
+        onPassword={setPassword}
+      />
+      <AnimatePresence mode="popLayout">
         {action.error && (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
+            {...SLIDE_IN}
+            transition={SPRING}
             className="text-sm text-destructive first-letter:uppercase"
           >
             {action.error}
           </motion.p>
         )}
       </AnimatePresence>
-      <Button type="submit" size="lg" disabled={action.pending} className="btn h-11 rounded-xl font-bold">
+      <MotionButton layout="position" transition={SPRING} type="submit" size="lg" disabled={action.pending} className="btn h-11 rounded-xl font-bold">
         {action.pending ? <LoaderCircleIcon className="animate-spin" /> : null}
         {tab === "sign-in" ? t("connect.account.signIn") : t("connect.account.signUp")}
-      </Button>
+      </MotionButton>
     </form>
+  );
+}
+
+/** The other ways to sign in this instance offers: single sign-on, then waifu.dev. */
+function ProviderButtons({ url, node, returnTo }: { url: string; node: Node; returnTo?: string }) {
+  return (
+    <>
+      {node.auth?.ssoSignIn && <SsoButton url={url} node={node} returnTo={returnTo} />}
+      {node.auth?.linkedSignIn && <LinkedButton url={url} node={node} returnTo={returnTo} />}
+    </>
+  );
+}
+
+/** Username and password; a new key shakes them after a failed try. */
+function Credentials({
+  shake,
+  signingIn,
+  username,
+  onUsername,
+  password,
+  onPassword,
+}: {
+  shake: number;
+  signingIn: boolean;
+  username: string;
+  onUsername: (value: string) => void;
+  password: string;
+  onPassword: (value: string) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className={cn("flex flex-col gap-2", shake > 0 && "shake")}>
+      <Label htmlFor="username" className="font-bold">
+        {t("connect.account.username")}
+      </Label>
+      <Input
+        id="username"
+        autoFocus
+        autoComplete="username"
+        autoCapitalize="none"
+        spellCheck={false}
+        placeholder={t("connect.account.usernameHint")}
+        value={username}
+        onChange={(e) => onUsername(e.target.value)}
+        className="h-11 rounded-xl"
+        required
+      />
+      <Label htmlFor="password" className="mt-2 font-bold">
+        {t("connect.account.password")}
+      </Label>
+      <Input
+        id="password"
+        type="password"
+        autoComplete={signingIn ? "current-password" : "new-password"}
+        placeholder={signingIn ? "" : t("connect.account.passwordHint")}
+        value={password}
+        onChange={(e) => onPassword(e.target.value)}
+        className="h-11 rounded-xl"
+        required
+      />
+    </div>
   );
 }
 
@@ -389,19 +425,25 @@ function TwoFactorStep({
   const [backup, setBackup] = useState(false);
   const [code, setCode] = useState("");
   const [shake, setShake] = useState(0);
-  const verify = useAction(verifyTwoFactor);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { t } = useI18n();
 
   async function send(value: string) {
-    const key = await verify.go(url, ticket, value);
-    if (key) return onDone(key);
-    setShake((n) => n + 1);
+    setPending(true);
+    setError(null);
+    try {
+      onDone(await run(verifyTwoFactor(url, ticket, value)));
+    } catch (err) {
+      const problem = (err as FuwaError).message;
+      // A sign-in that ran out goes back to the password.
+      if (/ran out/.test(problem)) return onBack(problem);
+      setError(problem);
+      setShake((n) => n + 1);
+    } finally {
+      setPending(false);
+    }
   }
-
-  useEffect(() => {
-    // A sign-in that ran out goes back to the password.
-    if (verify.error && /ran out/.test(verify.error)) onBack(verify.error);
-  }, [verify.error, onBack]);
 
   return (
     <motion.form
@@ -465,39 +507,40 @@ function TwoFactorStep({
             transition={{ duration: 0.2, ease: EASE }}
             className="flex justify-center"
           >
-            <CodeInput id="sign-in-code" label={t("connect.twoStep.code")} onComplete={(value) => void send(value)} disabled={verify.pending} shake={shake} />
+            <CodeInput id="sign-in-code" label={t("connect.twoStep.code")} onComplete={(value) => void send(value)} disabled={pending} shake={shake} />
           </motion.div>
         )}
       </AnimatePresence>
-      <AnimatePresence>
-        {verify.error && (
+      <AnimatePresence mode="popLayout">
+        {error && (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
+            {...SLIDE_IN}
+            transition={SPRING}
             className="text-center text-sm text-destructive first-letter:uppercase"
           >
-            {verify.error}
+            {error}
           </motion.p>
         )}
       </AnimatePresence>
       {backup && (
-        <Button type="submit" size="lg" disabled={verify.pending || !code.trim()} className="btn h-11 rounded-xl font-bold">
-          {verify.pending ? <LoaderCircleIcon className="animate-spin" /> : <KeyRoundIcon />}
+        <MotionButton layout="position" transition={SPRING} type="submit" size="lg" disabled={pending || !code.trim()} className="btn h-11 rounded-xl font-bold">
+          {pending ? <LoaderCircleIcon className="animate-spin" /> : <KeyRoundIcon />}
           {t("connect.account.signIn")}
-        </Button>
+        </MotionButton>
       )}
-      <button
+      <motion.button
+        layout="position"
+        transition={SPRING}
         type="button"
         onClick={() => {
           setBackup((b) => !b);
           setCode("");
-          verify.setError(null);
+          setError(null);
         }}
         className="self-center text-sm font-bold text-primary hover:underline"
       >
         {backup ? t("connect.twoStep.useApp") : t("connect.twoStep.useBackup")}
-      </button>
+      </motion.button>
     </motion.form>
   );
 }
@@ -620,12 +663,11 @@ export function ProviderButton({
         </AnimatePresence>
         <ArrowRightIcon className={cn("size-4 transition group-hover:translate-x-1", leaving && "translate-x-2 opacity-0")} />
       </motion.button>
-      <AnimatePresence>
+      <AnimatePresence mode="popLayout">
         {error ? (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
+            {...SLIDE_IN}
+            transition={SPRING}
             className="text-center text-sm text-destructive first-letter:uppercase"
           >
             {error}

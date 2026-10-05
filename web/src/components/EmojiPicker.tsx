@@ -25,7 +25,7 @@ import {
   TrophyIcon,
   type LucideIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import {
   memo,
   useCallback,
@@ -43,7 +43,7 @@ import {
 import type { Emoji } from "@/gen/fuwa/v1/types_pb";
 import { EmojiImage } from "@/components/EmojiImage";
 import { ServerIcon } from "@/components/Icons";
-import { SPRING } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { type Key, useI18n } from "@/i18n/react";
 import { emojiToken } from "@/lib/emoji";
 import {
@@ -233,29 +233,11 @@ export function EmojiPicker({
   );
 }
 
-/** What's inside the picker, mounted while it's open. */
-function PickerPanel({ catalog, onPick }: { catalog: Catalog; onPick: (picked: PickedEmoji) => void }) {
-  const [query, setQuery] = useState("");
-  const [active, setActive] = useState<number | null>(null);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [intro, setIntro] = useState(true);
-  const groups = useStandard();
-  // As they were when it opened, so picking a few in a row doesn't shift the grid under the pointer.
-  const [recentKeys] = useState(recentEmoji);
-  const tone = useSkinTone();
-  const calm = usePrefs(reduceMotion);
-  const scroller = useRef<HTMLDivElement>(null);
-  const frame = useRef(0);
-  const id = useId();
+/** The picker's sections: search results while searching, otherwise recent, server and standard emoji. */
+function useSections(query: string, catalog: Catalog, groups: ReturnType<typeof useStandard>, recentKeys: string[]) {
   const { t } = useI18n();
   const searching = query.trim().length > 0;
-
-  useEffect(() => {
-    const t = window.setTimeout(() => setIntro(false), 450);
-    return () => window.clearTimeout(t);
-  }, []);
-
-  const sections = useMemo<Section[]>(() => {
+  return useMemo<Section[]>(() => {
     if (searching) {
       const found = searchCatalog(query, catalog, groups);
       return [
@@ -287,6 +269,38 @@ function PickerPanel({ catalog, onPick }: { catalog: Catalog; onPick: (picked: P
     ];
   }, [searching, query, catalog, groups, recentKeys, t]);
 
+}
+
+/** The highlighted cell: its emoji, its row and its column. */
+function activeCell(layout: ReturnType<typeof layOut>, active: number | null) {
+  if (active === null) return { shown: undefined, activeRow: undefined, activeCol: 0 };
+  const activeRow = layout.rows[layout.cellRow[active] ?? -1];
+  return { shown: layout.flat[active], activeRow, activeCol: activeRow?.kind === "cells" ? active - activeRow.start : 0 };
+}
+
+/** What's inside the picker, mounted while it's open. */
+function PickerPanel({ catalog, onPick }: { catalog: Catalog; onPick: (picked: PickedEmoji) => void }) {
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState<number | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [intro, setIntro] = useState(true);
+  const groups = useStandard();
+  // As they were when it opened, so picking a few in a row doesn't shift the grid under the pointer.
+  const [recentKeys] = useState(recentEmoji);
+  const tone = useSkinTone();
+  const calm = usePrefs(reduceMotion);
+  const scroller = useRef<HTMLDivElement>(null);
+  const frame = useRef(0);
+  const id = useId();
+  const { t } = useI18n();
+  const searching = query.trim().length > 0;
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setIntro(false), 450);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  const sections = useSections(query, catalog, groups, recentKeys);
   const layout = useMemo(() => layOut(sections), [sections]);
   const viewport = 18 * 16 - PAD * 2;
 
@@ -338,9 +352,7 @@ function PickerPanel({ catalog, onPick }: { catalog: Catalog; onPick: (picked: P
     el.scrollTo({ top, behavior: "smooth" });
   }
 
-  const shown = active !== null ? layout.flat[active] : undefined;
-  const activeRow = active !== null ? layout.rows[layout.cellRow[active] ?? -1] : undefined;
-  const activeCol = active !== null && activeRow?.kind === "cells" ? active - activeRow.start : 0;
+  const { shown, activeRow, activeCol } = activeCell(layout, active);
   const listId = `${id}-emoji`;
 
   return (

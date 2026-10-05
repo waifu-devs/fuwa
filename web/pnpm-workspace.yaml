@@ -5,3 +5,7 @@ ignoredBuiltDependencies:
   - "@bufbuild/buf"
   - "@vgpu/adapter-node"
   - "webgpu"
+# A new release waits a week before installs pick it up, and a package whose provenance or signatures
+# weaken between versions is refused.
+minimumReleaseAge: 10080
+trustPolicy: no-downgrade

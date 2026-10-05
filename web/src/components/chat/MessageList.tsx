@@ -19,7 +19,7 @@ import {
   UserXIcon,
   XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import {
   forwardRef,
   memo,
@@ -56,12 +56,14 @@ import { PinMark } from "@/components/chat/Pins";
 import { doneJumping, useJump } from "@/fuwa/search";
 import { AlsoSentNote, RepliesRow } from "@/components/chat/Threads";
 import { useThreadOpener } from "@/lib/threads";
-import { sendsMessage } from "@/components/chat/Composer";
-import { Mention, MessageEmojis, remarkMentions, ServerLookProvider, useRoleColor, useServerLook, type ServerLook } from "@/components/chat/mentions";
+import { sendsMessage } from "@/components/chat/send-keys";
+import { Mention, MessageEmojis, ServerLookProvider, useRoleColor, useServerLook, type ServerLook } from "@/components/chat/mentions";
+import { remarkMentions } from "@/components/chat/remark-mentions";
 import { Markdown, type MarkdownExtension } from "@/components/Markdown";
 import { EMOJI_TOKEN, onlyEmoji } from "@/lib/emoji";
 import { encodeEmoji, useCatalog } from "@/lib/emoji-catalog";
 import { RoleName } from "@/components/RoleName";
+import { joinLine } from "@/components/chat/join-line";
 import { UserAvatar } from "@/components/Icons";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { useContextMenu } from "@/components/ContextMenu";
@@ -150,6 +152,11 @@ type RowActions = {
   pin: (message: Message) => void;
 };
 
+/**
+ * One channel's messages, or one thread's. Each list belongs to one channel
+ * (and thread) for its whole life: callers key it by them, so switching
+ * starts a fresh list scrolled to the bottom.
+ */
 export const MessageList = forwardRef<
   MessageListHandle,
   {
@@ -167,41 +174,13 @@ export const MessageList = forwardRef<
   // Only the pieces this list draws, so events elsewhere on the instance don't re-render it.
   const state = useFuwa((s) => s.instances[instanceKey]?.messages[at]);
   const pending = useFuwa((s) => s.instances[instanceKey]?.pending[at] ?? EMPTY);
-  const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? EMPTY);
-  const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[serverId] ?? EMPTY);
-  const catalog = useCatalog(instanceKey, serverId, channel);
-  const otherEmojis = useMemo(
-    () => new Map([...catalog.byId].filter(([, c]) => !c.here).map(([id, c]) => [id, c.emoji])),
-    [catalog],
-  );
-  const users = useFuwa((s) => s.instances[instanceKey]?.users);
   const me = useFuwa((s) => s.instances[instanceKey]?.me ?? undefined);
-  const ownerId = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.ownerId ?? "");
-  const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId] ?? EMPTY);
-  const access = useAccess(instanceKey, serverId);
-  const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
-  const canSend = hasIn(access, channel.id, Permission.SEND_MESSAGES);
-  // Threads go under messages in the channel itself, not under replies; in a shared one, once this instance takes them there.
-  const threadsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-threads"));
-  const threads = !threadId && (!channel.shared || threadsShared);
-  const canStart = threads && hasIn(access, channel.id, Permission.CREATE_THREADS);
-  const canReply = threads && canSend;
-  // Pins are the home's in a shared channel, and need this instance to keep them.
-  const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins"));
-  const canPin = pinsHere && manager && !(channel.shared && !channel.shared.home);
-  const openThread = useThreadOpener();
-  // In a shared channel each side moderates its own people: a guest's moderators can't delete the home's, and
-  // only the home keeps someone from another server out.
-  const guestSide = !!channel.shared && !channel.shared.home;
-  const keepsOut = !!channel.shared?.home && has(access, Permission.KICK_MEMBERS);
-  const roles = useRoles(instanceKey, serverId);
   const items = state?.items ?? EMPTY;
   const [editing, setEditing] = useState<string | null>(null);
-  const display = usePrefs((p) => p.messageDisplay);
-  const developer = usePrefs((p) => p.developerMode);
-  const suppressEveryone = useNotificationSettings(instanceKey, serverId)?.suppressEveryone ?? false;
-  // Times follow the clock setting: a new clock re-renders every row.
-  const clock = usePrefs((p) => p.clock);
+  const { look, pollPlace, catalog, memberById, myRoleIds } = useListLook(instanceKey, serverId, channel, me);
+  const actions = useRowActions(instanceKey, serverId, channel, threadId, at, catalog, setEditing);
+  const rows = useMemo(() => buildRows(items, pending, me?.id), [items, pending, me?.id]);
+  const scroll = useListScroll({ instanceKey, serverId, channel, threadId, state, items, rows });
   const { t } = useI18n();
 
   useImperativeHandle(ref, () => ({
@@ -209,30 +188,57 @@ export const MessageList = forwardRef<
       const mine = [...items].reverse().find((m) => m.authorId === me?.id && m.kind === MessageKind.UNSPECIFIED);
       if (mine) setEditing(mine.id);
     },
-    jumpTo(id) {
-      const index = rowsRef.current.findIndex((r) => r.key === id);
-      if (index === -1) return false;
-      // Draw the rows down to it first if they're hidden above.
-      if (index < skippedRef.current) setHidden(Math.max(0, index - 10));
-      atBottom.current = false;
-      const light = (tries: number) =>
-        requestAnimationFrame(() => {
-          const el = scroller.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
-          if (!el) return tries > 0 && light(tries - 1);
-          el.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-          el.classList.remove("jumped");
-          void el.offsetWidth;
-          el.classList.add("jumped");
-        });
-      light(5);
-      return true;
-    },
+    jumpTo: scroll.jumpTo,
   }));
 
   useEffect(() => {
     run(loadMessages(instanceKey, serverId, channel.id, false, threadId)).catch(() => {});
   }, [instanceKey, serverId, channel.id, threadId]);
 
+  const draw = useRowContext({ instanceKey, serverId, channel, threadId, me, memberById, myRoleIds, editing, initial: scroll.initial, actions });
+  const beginning = state && !state.loading && !state.hasMore && scroll.skipped === 0;
+
+  return (
+    <ServerLookProvider value={look}>
+    <PollPlace.Provider value={pollPlace}>
+    <div className="relative min-h-0 flex-1">
+      <div ref={scroll.scroller} onScroll={scroll.onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="flex min-h-full flex-col justify-end pb-3"
+        >
+          {state?.loading && items.length > 0 && <Skeleton rows={2} />}
+          {beginning && (threadId ? header : <Beginning channel={channel} />)}
+          {(!state || (state.loading && items.length === 0)) && <Skeleton rows={6} />}
+          {/* Rows don't animate their layout, so a new arrival needn't re-render every row (the default does). */}
+          <AnimatePresence initial={false} presenceAffectsLayout={false}>
+            {scroll.shown.map((row) => drawRow(row, draw))}
+          </AnimatePresence>
+        </motion.div>
+      </div>
+      <JumpButton shown={scroll.showJump || scroll.missed > 0} onClick={scroll.jump} label={scroll.missed > 0 ? t("chat.messages.newMessages", { count: scroll.missed }) : t("chat.messages.jumpToPresent")} />
+    </div>
+    </PollPlace.Provider>
+    </ServerLookProvider>
+  );
+});
+
+/** The server's look for names and mentions, where polls are voted on, and who's who. */
+function useListLook(instanceKey: string, serverId: string, channel: Channel, me: User | undefined) {
+  const members = useFuwa((s) => s.instances[instanceKey]?.members[serverId] ?? EMPTY);
+  const emojis = useFuwa((s) => s.instances[instanceKey]?.emojis[serverId] ?? EMPTY);
+  const catalog = useCatalog(instanceKey, serverId, channel);
+  const otherEmojis = useMemo(
+    () => new Map([...catalog.byId].filter(([, c]) => !c.here).map(([id, c]) => [id, c.emoji])),
+    [catalog],
+  );
+  const ownerId = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.ownerId ?? "");
+  const access = useAccess(instanceKey, serverId);
+  const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
+  const guestSide = !!channel.shared && !channel.shared.home;
+  const roles = useRoles(instanceKey, serverId);
   const memberById = useMemo(() => new Map(members.map((m) => [m.user?.id ?? "", m])), [members]);
   const myRoleIds = memberById.get(me?.id ?? "")?.roleIds;
   // Polls in a channel shown from another server are voted on at its home, once this instance takes votes there.
@@ -260,8 +266,22 @@ export const MessageList = forwardRef<
     }),
     [instanceKey, ownerId, roles, members, emojis, otherEmojis, me, myRoleIds],
   );
+  return { look, pollPlace, catalog, memberById, myRoleIds };
+}
 
-  const actions = useMemo<RowActions>(
+/** What rows do to their messages, one object for the whole list. */
+function useRowActions(
+  instanceKey: string,
+  serverId: string,
+  channel: Channel,
+  threadId: string,
+  at: string,
+  catalog: ReturnType<typeof useCatalog>,
+  setEditing: (id: string | null) => void,
+) {
+  const openThread = useThreadOpener();
+  const { t } = useI18n();
+  return useMemo<RowActions>(
     () => ({
       serverId,
       channel,
@@ -290,43 +310,69 @@ export const MessageList = forwardRef<
           )
           .catch((err: FuwaError) => toast(err.message)),
     }),
-    [instanceKey, serverId, channel, catalog, at, threadId, openThread, t],
+    [instanceKey, serverId, channel, catalog, at, threadId, openThread, t, setEditing],
   );
+}
 
-  const rows = useMemo(() => {
-    const out: Row[] = [];
-    let prev: { author: string; at: Date } | null = null;
-    for (const message of items) {
-      const date = dateOf(message);
-      if (!prev || !sameDay(prev.at, date)) {
-        out.push({ kind: "day", key: `day-${date.toDateString()}`, date });
-        prev = null;
-      }
-      if (message.kind === MessageKind.MEMBER_JOINED || message.kind === MessageKind.AUTO_MOD_ALERT) {
-        out.push({ kind: message.kind === MessageKind.MEMBER_JOINED ? "join" : "automod", key: message.id, message, date });
-        // The next message starts a run of its own.
-        prev = { author: "", at: date };
-        continue;
-      }
-      const author = runKey(message);
-      const first = !prev || prev.author !== author || date.getTime() - prev.at.getTime() > GROUP_GAP_MS;
-      out.push({ kind: "message", key: message.id, message, first, date });
-      prev = { author, at: date };
+/** The rows: a divider for each day, runs of one author's messages under one header, then what's still sending. */
+function buildRows(items: Message[], pending: PendingMessage[], meId: string | undefined): Row[] {
+  const out: Row[] = [];
+  let prev: { author: string; at: Date } | null = null;
+  for (const message of items) {
+    const date = dateOf(message);
+    if (!prev || !sameDay(prev.at, date)) {
+      out.push({ kind: "day", key: `day-${date.toDateString()}`, date });
+      prev = null;
     }
-    for (const p of pending) {
-      const first = !prev || prev.author !== me?.id || p.createdAt - prev.at.getTime() > GROUP_GAP_MS;
-      out.push({ kind: "pending", key: p.nonce, pending: p, first });
-      prev = { author: me?.id ?? "", at: new Date(p.createdAt) };
+    if (message.kind === MessageKind.MEMBER_JOINED || message.kind === MessageKind.AUTO_MOD_ALERT) {
+      out.push({ kind: message.kind === MessageKind.MEMBER_JOINED ? "join" : "automod", key: message.id, message, date });
+      // The next message starts a run of its own.
+      prev = { author: "", at: date };
+      continue;
     }
-    return out;
-  }, [items, pending, me?.id]);
+    const author = runKey(message);
+    const first = !prev || prev.author !== author || date.getTime() - prev.at.getTime() > GROUP_GAP_MS;
+    out.push({ kind: "message", key: message.id, message, first, date });
+    prev = { author, at: date };
+  }
+  for (const p of pending) {
+    const first = !prev || prev.author !== meId || p.createdAt - prev.at.getTime() > GROUP_GAP_MS;
+    out.push({ kind: "pending", key: p.nonce, pending: p, first });
+    prev = { author: meId ?? "", at: new Date(p.createdAt) };
+  }
+  return out;
+}
 
-  // ── Drawing only the latest rows: a long channel opens with FIRST_ROWS, and scrolling up reveals the rest.
+/**
+ * Scrolling: draws only the latest rows (a long channel opens with
+ * FIRST_ROWS, and scrolling up reveals the rest), sticks to the bottom while
+ * you're there, and keeps your place when older messages load above.
+ */
+function useListScroll({
+  instanceKey,
+  serverId,
+  channel,
+  threadId,
+  state,
+  items,
+  rows,
+}: {
+  instanceKey: string;
+  serverId: string;
+  channel: Channel;
+  threadId: string;
+  state: { loading: boolean; hasMore: boolean } | undefined;
+  items: Message[];
+  rows: Row[];
+}) {
   const [hidden, setHidden] = useState<number | null>(null);
   const ready = !!state && !state.loading;
   const skipped = hidden ?? (ready ? Math.max(0, rows.length - FIRST_ROWS) : 0);
   if (hidden === null && ready) setHidden(skipped);
   const shown = skipped ? rows.slice(skipped) : rows;
+  // Ids already on screen when the list opened, so only new arrivals animate in.
+  const [initial, setInitial] = useState<Set<string> | null>(null);
+  if (initial === null && ready) setInitial(new Set(items.map((m) => m.id)));
   const rowCount = useRef(rows.length);
   // What jumpTo reads, kept as of the last render.
   const rowsRef = useRef(rows);
@@ -336,7 +382,6 @@ export const MessageList = forwardRef<
     skippedRef.current = skipped;
   }, [rows, skipped]);
 
-  // ── Scrolling: stick to the bottom while you're there, keep your place when older messages load above.
   const scroller = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const fromBottom = useRef(0);
@@ -345,16 +390,6 @@ export const MessageList = forwardRef<
   const lastCount = useRef(0);
   const firstKey = useRef<string | undefined>(undefined);
   const lastShown = useRef(0);
-
-  /** Ids already on screen when the channel opened, so only new arrivals animate in. */
-  const initial = useRef<Set<string> | null>(null);
-  useEffect(() => {
-    initial.current = null;
-    atBottom.current = true;
-    setMissed(0);
-    setShowJump(false);
-  }, [channel.id]);
-  if (initial.current === null && state && !state.loading) initial.current = new Set(items.map((m) => m.id));
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -399,130 +434,216 @@ export const MessageList = forwardRef<
     setMissed(0);
   };
 
+  /** Scrolls to a message and lights it up. False when it isn't loaded here. */
+  const jumpTo = (id: string) => {
+    const index = rowsRef.current.findIndex((r) => r.key === id);
+    if (index === -1) return false;
+    // Draw the rows down to it first if they're hidden above.
+    if (index < skippedRef.current) setHidden(Math.max(0, index - 10));
+    atBottom.current = false;
+    const light = (tries: number) =>
+      requestAnimationFrame(() => {
+        const el = scroller.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
+        if (!el) return tries > 0 && light(tries - 1);
+        el.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        el.classList.remove("jumped");
+        void el.offsetWidth;
+        el.classList.add("jumped");
+      });
+    light(5);
+    return true;
+  };
+
   useSearchJump({ instanceKey, serverId, channelId: channel.id, rows, skipped, setHidden, scroller, atBottom });
 
-  const beginning = state && !state.loading && !state.hasMore && skipped === 0;
-  const meId = me?.id;
-  const meMember = memberById.get(meId ?? "");
+  return { scroller, onScroll, shown, skipped, initial, showJump, missed, jump, jumpTo };
+}
 
+/** Everything drawing a row needs beyond the row itself. */
+type RowContext = {
+  instanceKey: string;
+  serverId: string;
+  threadId: string;
+  me: User | undefined;
+  meMember: Member | undefined;
+  memberById: Map<string, Member>;
+  users: Record<string, User> | undefined;
+  channels: Channel[];
+  myRoleIds: string[];
+  editing: string | null;
+  initial: Set<string> | null;
+  actions: RowActions;
+  display: MessageDisplay;
+  developer: boolean;
+  suppressEveryone: boolean;
+  clock: Clock;
+  manager: boolean;
+  canSend: boolean;
+  canStart: boolean;
+  canReply: boolean;
+  canPin: boolean;
+  guestSide: boolean;
+  keepsOut: boolean;
+};
+
+function useRowContext({
+  instanceKey,
+  serverId,
+  channel,
+  threadId,
+  me,
+  memberById,
+  myRoleIds,
+  editing,
+  initial,
+  actions,
+}: {
+  instanceKey: string;
+  serverId: string;
+  channel: Channel;
+  threadId: string;
+  me: User | undefined;
+  memberById: Map<string, Member>;
+  myRoleIds: string[] | undefined;
+  editing: string | null;
+  initial: Set<string> | null;
+  actions: RowActions;
+}): RowContext {
+  const users = useFuwa((s) => s.instances[instanceKey]?.users);
+  const channels = useFuwa((s) => s.instances[instanceKey]?.channels[serverId] ?? EMPTY);
+  const access = useAccess(instanceKey, serverId);
+  const canSend = hasIn(access, channel.id, Permission.SEND_MESSAGES);
+  // Threads go under messages in the channel itself, not under replies; in a shared one, once this instance takes them there.
+  const threadsShared = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "shared-threads"));
+  const threads = !threadId && (!channel.shared || threadsShared);
+  const manager = hasIn(access, channel.id, Permission.MANAGE_MESSAGES);
+  // Pins are the home's in a shared channel, and need this instance to keep them.
+  const pinsHere = useFuwa((s) => instanceHas(s.instances[instanceKey]?.node?.versions, "pins"));
+  const display = usePrefs((p) => p.messageDisplay);
+  const developer = usePrefs((p) => p.developerMode);
+  const suppressEveryone = useNotificationSettings(instanceKey, serverId)?.suppressEveryone ?? false;
+  // Times follow the clock setting: a new clock re-renders every row.
+  const clock = usePrefs((p) => p.clock);
+  return {
+    instanceKey,
+    serverId,
+    threadId,
+    me,
+    meMember: memberById.get(me?.id ?? ""),
+    memberById,
+    users,
+    channels,
+    myRoleIds: myRoleIds ?? EMPTY,
+    editing,
+    initial,
+    actions,
+    display,
+    developer,
+    suppressEveryone,
+    clock,
+    manager,
+    canSend,
+    canStart: threads && hasIn(access, channel.id, Permission.CREATE_THREADS),
+    canReply: threads && canSend,
+    canPin: pinsHere && manager && !(channel.shared && !channel.shared.home),
+    // In a shared channel each side moderates its own people: a guest's moderators can't delete the home's, and
+    // only the home keeps someone from another server out.
+    guestSide: !!channel.shared && !channel.shared.home,
+    keepsOut: !!channel.shared?.home && has(access, Permission.KICK_MEMBERS),
+  };
+}
+
+/** One row of the list, as its own memoized component. */
+function drawRow(row: Row, c: RowContext): ReactNode {
+  if (row.kind === "day") return <DayDivider key={row.key} date={row.date} />;
+  if (row.kind === "pending")
+    return <PendingRow key={row.key} pending={row.pending} first={row.first} display={c.display} me={c.me} member={c.meMember} actions={c.actions} />;
+  const message = row.message;
+  const author = message.webhook ? webhookAuthorOf(message.webhook) : (c.memberById.get(message.authorId)?.user ?? c.users?.[message.authorId]);
+  const member = c.memberById.get(message.authorId);
+  const animate = !c.initial?.has(message.id);
+  if (row.kind === "automod")
+    return (
+      <AutoModAlertRow
+        key={row.key}
+        message={message}
+        date={row.date}
+        author={author}
+        member={member}
+        instanceKey={c.instanceKey}
+        channelName={c.channels.find((ch) => ch.id === message.autoMod?.channelId)?.name}
+        animate={animate}
+        canDelete={c.manager}
+        actions={c.actions}
+        clock={c.clock}
+      />
+    );
+  if (row.kind === "join")
+    return (
+      <JoinRow
+        key={row.key}
+        message={message}
+        date={row.date}
+        author={author}
+        member={member}
+        instanceKey={c.instanceKey}
+        mine={message.authorId === c.me?.id}
+        animate={animate}
+        canDelete={c.manager}
+        canWave={c.canSend}
+        actions={c.actions}
+        clock={c.clock}
+      />
+    );
+  const from = foreignServer(message, c.serverId);
   return (
-    <ServerLookProvider value={look}>
-    <PollPlace.Provider value={pollPlace}>
-    <div className="relative min-h-0 flex-1">
-      <div ref={scroller} onScroll={onScroll} className="scroll-thin h-full overflow-y-auto [overflow-anchor:none]">
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-          className="flex min-h-full flex-col justify-end pb-3"
-        >
-          {state?.loading && items.length > 0 && <Skeleton rows={2} />}
-          {beginning && (threadId ? header : <Beginning channel={channel} />)}
-          {!state && <Skeleton rows={6} />}
-          {state?.loading && items.length === 0 && <Skeleton rows={6} />}
-          {/* Rows don't animate their layout, so a new arrival needn't re-render every row (the default does). */}
-          <AnimatePresence initial={false} presenceAffectsLayout={false}>
-            {shown.map((row) => {
-              if (row.kind === "day") return <DayDivider key={row.key} date={row.date} />;
-              if (row.kind === "pending")
-                return (
-                  <PendingRow
-                    key={row.key}
-                    pending={row.pending}
-                    first={row.first}
-                    display={display}
-                    me={me}
-                    member={meMember}
-                    actions={actions}
-                  />
-                );
-              const author = row.message.webhook
-                ? webhookAuthorOf(row.message.webhook)
-                : (memberById.get(row.message.authorId)?.user ?? users?.[row.message.authorId]);
-              if (row.kind === "automod")
-                return (
-                  <AutoModAlertRow
-                    key={row.key}
-                    message={row.message}
-                    date={row.date}
-                    author={author}
-                    member={memberById.get(row.message.authorId)}
-                    instanceKey={instanceKey}
-                    channelName={channels.find((c) => c.id === row.message.autoMod?.channelId)?.name}
-                    animate={!initial.current?.has(row.message.id)}
-                    canDelete={manager}
-                    actions={actions}
-                    clock={clock}
-                  />
-                );
-              if (row.kind === "join")
-                return (
-                  <JoinRow
-                    key={row.key}
-                    message={row.message}
-                    date={row.date}
-                    author={author}
-                    member={memberById.get(row.message.authorId)}
-                    instanceKey={instanceKey}
-                    mine={row.message.authorId === meId}
-                    animate={!initial.current?.has(row.message.id)}
-                    canDelete={manager}
-                    canWave={canSend}
-                    actions={actions}
-                    clock={clock}
-                  />
-                );
-              const from = foreignServer(row.message, serverId);
-              return (
-                <MessageRow
-                  key={row.key}
-                  from={from}
-                  canKeepOut={keepsOut && !!from}
-                  message={row.message}
-                  first={row.first}
-                  display={display}
-                  developer={developer}
-                  date={row.date}
-                  author={author}
-                  member={memberById.get(row.message.authorId)}
-                  mine={row.message.authorId === meId}
-                  mentionsMe={pingsUser(me, myRoleIds ?? EMPTY, row.message, suppressEveryone)}
-                  instanceKey={instanceKey}
-                  canDelete={row.message.authorId === meId || (manager && !(guestSide && from))}
-                  animate={!initial.current?.has(row.message.id)}
-                  editing={editing === row.message.id}
-                  canThread={!row.message.threadId && (row.message.thread ? canReply : canStart)}
-                  canPin={canPin && row.message.kind === MessageKind.UNSPECIFIED}
-                  inThread={!!threadId}
-                  actions={actions}
-                  clock={clock}
-                />
-              );
-            })}
-          </AnimatePresence>
-        </motion.div>
-      </div>
-      <AnimatePresence>
-        {(showJump || missed > 0) && (
-          <motion.button
-            type="button"
-            onClick={jump}
-            initial={{ opacity: 0, y: 16, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 16, scale: 0.9 }}
-            transition={{ type: "spring", stiffness: 500, damping: 30 }}
-            className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-primary-foreground shadow-lg"
-          >
-            <ArrowDownIcon className="size-4 animate-bounce" />
-            {missed > 0 ? t("chat.messages.newMessages", { count: missed }) : t("chat.messages.jumpToPresent")}
-          </motion.button>
-        )}
-      </AnimatePresence>
-    </div>
-    </PollPlace.Provider>
-    </ServerLookProvider>
+    <MessageRow
+      key={row.key}
+      from={from}
+      canKeepOut={c.keepsOut && !!from}
+      message={message}
+      first={row.first}
+      display={c.display}
+      developer={c.developer}
+      date={row.date}
+      author={author}
+      member={member}
+      mine={message.authorId === c.me?.id}
+      mentionsMe={pingsUser(c.me, c.myRoleIds, message, c.suppressEveryone)}
+      instanceKey={c.instanceKey}
+      canDelete={message.authorId === c.me?.id || (c.manager && !(c.guestSide && from))}
+      animate={animate}
+      editing={c.editing === message.id}
+      canThread={!message.threadId && (message.thread ? c.canReply : c.canStart)}
+      canPin={c.canPin && message.kind === MessageKind.UNSPECIFIED}
+      inThread={!!c.threadId}
+      actions={c.actions}
+      clock={c.clock}
+    />
   );
-});
+}
+
+/** Back to the newest messages, counting the ones that came in while you were up there. */
+function JumpButton({ shown, label, onClick }: { shown: boolean; label: string; onClick: () => void }) {
+  return (
+    <AnimatePresence>
+      {shown && (
+        <motion.button
+          type="button"
+          onClick={onClick}
+          initial={{ opacity: 0, y: 16, scale: 0.9 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 16, scale: 0.9 }}
+          transition={{ type: "spring", stiffness: 500, damping: 30 }}
+          className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-primary-foreground shadow-lg"
+        >
+          <ArrowDownIcon className="size-4 animate-bounce" />
+          {label}
+        </motion.button>
+      )}
+    </AnimatePresence>
+  );
+}
 
 export function DayDivider({ date }: { date: Date }) {
   return (
@@ -587,7 +708,7 @@ export function AuthorName({ user, member, app = false }: { user: User | undefin
 }
 
 /** Who a webhook message says it's from, as a profile to draw. */
-export const webhookAuthor = (w: MessageWebhook): User =>
+const webhookAuthor = (w: MessageWebhook): User =>
   ({ id: w.webhookId, displayName: w.name, username: w.name, avatarUrl: w.avatarUrl }) as User;
 
 /** What makes a run of messages one author's: a webhook posting under another name starts a new one. */
@@ -838,8 +959,6 @@ const MessageRow = memo(function MessageRow({
 }) {
   const { t } = useI18n();
   const [confirming, setConfirming] = useState<"delete" | "keep-out" | false>(false);
-  const [copied, setCopied] = useState(false);
-  const edited = !!message.editedAt;
   const menu = useContextMenu("message", (trigger) =>
     messageMenu({ instanceKey, serverId: actions.serverId, channel: actions.channel, message, mine }, trigger, {
       thread: canThread ? { open: !!message.thread, go: () => actions.thread(message.id) } : undefined,
@@ -855,7 +974,7 @@ const MessageRow = memo(function MessageRow({
       {...(animate ? enter : {})}
       {...menu}
       data-confirming={confirming ? "" : undefined}
-      exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
+      exit={{ opacity: 0, y: -6, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       data-message-id={message.id}
       className={cn(
@@ -870,113 +989,210 @@ const MessageRow = memo(function MessageRow({
         {editing ? (
           <EditBox initial={message.content.replace(EMOJI_TOKEN, ":$2:")} onCancel={actions.cancelEdit} onSave={(content) => actions.save(message.id, content)} />
         ) : (
-          <>
-            {message.threadId && <AlsoSentNote message={message} inThread={inThread} onOpen={actions.thread} />}
-            {message.interaction && <UsedCommand message={message} instanceKey={instanceKey} serverId={actions.serverId} />}
-            {message.content && <MessageBody content={message.content} emojis={message.emojis} display={display} />}
-            {edited && (
-              <span className="text-[0.7rem] text-muted-foreground" title={formatFull(toDate(message.editedAt))}>
-                {" "}
-                {t("chat.messages.edited")}
-              </span>
-            )}
-            {message.pinnedAt && <PinMark />}
-            <Attachments files={message.attachments} animate={animate} />
-            <Embeds embeds={message.embeds} animate={animate} />
-            <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
-            {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
-            {message.poll && <PollCard message={message} mine={mine} animate={animate} />}
-            <MessageButtons message={message} />
-          </>
+          <MessageContent message={message} instanceKey={instanceKey} display={display} mine={mine} animate={animate} inThread={inThread} actions={actions} />
         )}
       </MessageLine>
       {!editing && (
-        <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
-          {confirming ? (
-            <motion.span
-              key="confirm"
-              initial={{ opacity: 0, x: 8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ type: "spring", stiffness: 600, damping: 32 }}
-              className="flex items-center gap-0.5"
-            >
-              <span className="px-2 text-xs font-bold text-destructive">{confirming === "keep-out" ? t("chat.messages.keepOutAsk", { name: displayName(author) }) : t("chat.messages.deleteAsk")}</span>
-              <ToolButton
-                label={confirming === "keep-out" ? t("chat.messages.keepOut") : t("chat.messages.delete")}
-                danger
-                onClick={() =>
-                  (confirming === "keep-out" ? actions.keepOut(message.authorId, displayName(author)) : actions.remove(message.id)).catch((err: Error) => {
-                    if (confirming === "keep-out") toast(err.message);
-                    setConfirming(false);
-                  })
-                }
-              >
-                <CheckIcon />
-              </ToolButton>
-              <ToolButton label={t("common.cancel")} onClick={() => setConfirming(false)}>
-                <XIcon />
-              </ToolButton>
-            </motion.span>
-          ) : (
-            <>
-              <ToolButton
-                label={copied ? t("chat.messages.copied") : t("chat.messages.copyText")}
-                onClick={() => {
-                  void navigator.clipboard?.writeText(message.content);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1200);
-                }}
-              >
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span
-                    key={copied ? "copied" : "copy"}
-                    initial={{ scale: 0.3, rotate: copied ? -45 : 0, opacity: 0 }}
-                    animate={{ scale: 1, rotate: 0, opacity: 1 }}
-                    exit={{ scale: 0.3, opacity: 0 }}
-                    transition={{ type: "spring", stiffness: 700, damping: 22 }}
-                    className="grid place-items-center"
-                  >
-                    {copied ? <CheckIcon className="text-primary" /> : <CopyIcon />}
-                  </motion.span>
-                </AnimatePresence>
-              </ToolButton>
-              {canThread && (
-                <ToolButton label={message.thread ? t("chat.messages.openThread") : t("chat.messages.replyInThread")} onClick={() => actions.thread(message.id)}>
-                  <MessageSquareReplyIcon />
-                </ToolButton>
-              )}
-              {canPin && (
-                <ToolButton label={message.pinnedAt ? t("chattools.pins.unpinMessage") : t("chattools.pins.pin")} onClick={() => actions.pin(message)}>
-                  {message.pinnedAt ? <PinOffIcon /> : <PinIcon />}
-                </ToolButton>
-              )}
-              {developer && (
-                <ToolButton label={t("chat.messages.copyId")} onClick={() => copy(t, message.id, t("common.copy.messageId"))}>
-                  <FingerprintIcon />
-                </ToolButton>
-              )}
-              {mine && (
-                <ToolButton label={t("chat.messages.edit")} onClick={() => actions.edit(message.id)}>
-                  <PencilIcon />
-                </ToolButton>
-              )}
-              {canKeepOut && (
-                <ToolButton label={t("chat.messages.keepOut")} danger onClick={() => setConfirming("keep-out")}>
-                  <UserXIcon />
-                </ToolButton>
-              )}
-              {canDelete && (
-                <ToolButton label={t("chat.messages.delete")} danger onClick={() => setConfirming("delete")}>
-                  <Trash2Icon />
-                </ToolButton>
-              )}
-            </>
-          )}
-        </div>
+        <MessageTools
+          message={message}
+          author={author}
+          confirming={confirming}
+          setConfirming={setConfirming}
+          canThread={canThread}
+          canPin={canPin}
+          developer={developer}
+          mine={mine}
+          canKeepOut={canKeepOut}
+          canDelete={canDelete}
+          actions={actions}
+        />
       )}
     </motion.div>
   );
 });
+
+/** What a message holds: its text, files, embeds, GIF, poll and buttons, and its thread when it has one. */
+function MessageContent({
+  message,
+  instanceKey,
+  display,
+  mine,
+  animate,
+  inThread,
+  actions,
+}: {
+  message: Message;
+  instanceKey: string;
+  display: MessageDisplay;
+  mine: boolean;
+  animate: boolean;
+  inThread: boolean;
+  actions: RowActions;
+}) {
+  const { t } = useI18n();
+  return (
+    <>
+      {message.threadId && <AlsoSentNote message={message} inThread={inThread} onOpen={actions.thread} />}
+      {message.interaction && <UsedCommand message={message} instanceKey={instanceKey} serverId={actions.serverId} />}
+      {message.content && <MessageBody content={message.content} emojis={message.emojis} display={display} />}
+      {!!message.editedAt && (
+        <span className="text-[0.7rem] text-muted-foreground" title={formatFull(toDate(message.editedAt))}>
+          {" "}
+          {t("chat.messages.edited")}
+        </span>
+      )}
+      {message.pinnedAt && <PinMark />}
+      <Attachments files={message.attachments} animate={animate} />
+      <Embeds embeds={message.embeds} animate={animate} />
+      <GifMessage gif={message.gif} instanceKey={instanceKey} animate={animate} />
+      {!inThread && message.thread && <RepliesRow instanceKey={instanceKey} message={message} onOpen={actions.thread} />}
+      {message.poll && <PollCard message={message} mine={mine} animate={animate} />}
+      <MessageButtons message={message} />
+    </>
+  );
+}
+
+/** The tools over a hovered message, or the question when deleting it (or keeping its author out) needs a yes. */
+function MessageTools({
+  message,
+  author,
+  confirming,
+  setConfirming,
+  canThread,
+  canPin,
+  developer,
+  mine,
+  canKeepOut,
+  canDelete,
+  actions,
+}: {
+  message: Message;
+  author: User | undefined;
+  confirming: "delete" | "keep-out" | false;
+  setConfirming: (confirming: "delete" | "keep-out" | false) => void;
+  canThread: boolean;
+  canPin: boolean;
+  developer: boolean;
+  mine: boolean;
+  canKeepOut: boolean;
+  canDelete: boolean;
+  actions: RowActions;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
+      {confirming ? (
+        <ConfirmTools message={message} author={author} confirming={confirming} setConfirming={setConfirming} actions={actions} />
+      ) : (
+        <>
+          <CopyTextButton content={message.content} />
+          {canThread && (
+            <ToolButton label={message.thread ? t("chat.messages.openThread") : t("chat.messages.replyInThread")} onClick={() => actions.thread(message.id)}>
+              <MessageSquareReplyIcon />
+            </ToolButton>
+          )}
+          {canPin && (
+            <ToolButton label={message.pinnedAt ? t("chattools.pins.unpinMessage") : t("chattools.pins.pin")} onClick={() => actions.pin(message)}>
+              {message.pinnedAt ? <PinOffIcon /> : <PinIcon />}
+            </ToolButton>
+          )}
+          {developer && (
+            <ToolButton label={t("chat.messages.copyId")} onClick={() => copy(t, message.id, t("common.copy.messageId"))}>
+              <FingerprintIcon />
+            </ToolButton>
+          )}
+          {mine && (
+            <ToolButton label={t("chat.messages.edit")} onClick={() => actions.edit(message.id)}>
+              <PencilIcon />
+            </ToolButton>
+          )}
+          {canKeepOut && (
+            <ToolButton label={t("chat.messages.keepOut")} danger onClick={() => setConfirming("keep-out")}>
+              <UserXIcon />
+            </ToolButton>
+          )}
+          {canDelete && (
+            <ToolButton label={t("chat.messages.delete")} danger onClick={() => setConfirming("delete")}>
+              <Trash2Icon />
+            </ToolButton>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The question over a message when deleting it (or keeping its author out) needs a yes. */
+function ConfirmTools({
+  message,
+  author,
+  confirming,
+  setConfirming,
+  actions,
+}: {
+  message: Message;
+  author: User | undefined;
+  confirming: "delete" | "keep-out";
+  setConfirming: (confirming: "delete" | "keep-out" | false) => void;
+  actions: RowActions;
+}) {
+  const { t } = useI18n();
+  return (
+    <motion.span
+      key="confirm"
+      initial={{ opacity: 0, x: 8 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ type: "spring", stiffness: 600, damping: 32 }}
+      className="flex items-center gap-0.5"
+    >
+      <span className="px-2 text-xs font-bold text-destructive">{confirming === "keep-out" ? t("chat.messages.keepOutAsk", { name: displayName(author) }) : t("chat.messages.deleteAsk")}</span>
+      <ToolButton
+        label={confirming === "keep-out" ? t("chat.messages.keepOut") : t("chat.messages.delete")}
+        danger
+        onClick={() =>
+          (confirming === "keep-out" ? actions.keepOut(message.authorId, displayName(author)) : actions.remove(message.id)).catch((err: Error) => {
+            if (confirming === "keep-out") toast(err.message);
+            setConfirming(false);
+          })
+        }
+      >
+        <CheckIcon />
+      </ToolButton>
+      <ToolButton label={t("common.cancel")} onClick={() => setConfirming(false)}>
+        <XIcon />
+      </ToolButton>
+    </motion.span>
+  );
+}
+
+/** Copies a message's text, its icon turning to a check for a moment. */
+function CopyTextButton({ content }: { content: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  return (
+    <ToolButton
+      label={copied ? t("chat.messages.copied") : t("chat.messages.copyText")}
+      onClick={() => {
+        void navigator.clipboard?.writeText(content);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      }}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={copied ? "copied" : "copy"}
+          initial={{ scale: 0.3, rotate: copied ? -45 : 0, opacity: 0 }}
+          animate={{ scale: 1, rotate: 0, opacity: 1 }}
+          exit={{ scale: 0.3, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 700, damping: 22 }}
+          className="grid place-items-center"
+        >
+          {copied ? <CheckIcon className="text-primary" /> : <CopyIcon />}
+        </motion.span>
+      </AnimatePresence>
+    </ToolButton>
+  );
+}
 
 /** The words in `text` that set a rule off, marked. */
 function marked(text: string, matched: string[]): ReactNode {
@@ -1045,7 +1261,7 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
       {...(animate ? enter : {})}
       {...menu}
       data-confirming={confirming ? "" : undefined}
-      exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
+      exit={{ opacity: 0, y: -6, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className="message-row group relative flex gap-3 px-4 py-1.5"
     >
@@ -1120,42 +1336,10 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
         </div>
         )}
       </div>
-      {canDelete && (
-        <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
-          {confirming ? (
-            <span className="flex items-center gap-0.5">
-              <span className="px-2 text-xs font-bold text-destructive">{t("chat.messages.deleteAsk")}</span>
-              <ToolButton label={t("chat.messages.delete")} danger onClick={() => actions.remove(message.id).catch(() => setConfirming(false))}>
-                <CheckIcon />
-              </ToolButton>
-              <ToolButton label={t("chat.messages.keep")} onClick={() => setConfirming(false)}>
-                <XIcon />
-              </ToolButton>
-            </span>
-          ) : (
-            <ToolButton label={t("chat.messages.delete")} danger onClick={() => setConfirming(true)}>
-              <Trash2Icon />
-            </ToolButton>
-          )}
-        </div>
-      )}
+      {canDelete && <DeleteTools confirming={confirming} setConfirming={setConfirming} onDelete={() => actions.remove(message.id).catch(() => setConfirming(false))} />}
     </motion.div>
   );
 });
-
-/** Ways to say someone joined, picked by who they are so each join keeps its line. */
-const JOIN_LINES: Key[] = [
-  "chat.join.line1",
-  "chat.join.line2",
-  "chat.join.line3",
-  "chat.join.line4",
-  "chat.join.line5",
-  "chat.join.line6",
-  "chat.join.line7",
-  "chat.join.line8",
-];
-
-export const joinLine = (userId: string, name: ReactNode) => <T k={JOIN_LINES[hueOf(userId) % JOIN_LINES.length]!} values={{ name }} />;
 
 /** Waves already sent this session, so the button remembers. */
 const waved = new Set<string>();
@@ -1219,7 +1403,7 @@ const JoinRow = memo(function JoinRow({
       {...(animate ? enter : {})}
       {...menu}
       data-confirming={confirming ? "" : undefined}
-      exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
+      exit={{ opacity: 0, y: -6, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className="message-row join-row group relative flex items-center gap-3 px-4 py-1.5"
     >
@@ -1255,28 +1439,34 @@ const JoinRow = memo(function JoinRow({
           {done ? t("chat.join.waved") : t("chat.join.wave")}
         </motion.button>
       )}
-      {canDelete && (
-        <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
-          {confirming ? (
-            <span className="flex items-center gap-0.5">
-              <span className="px-2 text-xs font-bold text-destructive">{t("chat.messages.deleteAsk")}</span>
-              <ToolButton label={t("chat.messages.delete")} danger onClick={() => actions.remove(message.id).catch(() => setConfirming(false))}>
-                <CheckIcon />
-              </ToolButton>
-              <ToolButton label={t("chat.messages.keep")} onClick={() => setConfirming(false)}>
-                <XIcon />
-              </ToolButton>
-            </span>
-          ) : (
-            <ToolButton label={t("chat.messages.delete")} danger onClick={() => setConfirming(true)}>
-              <Trash2Icon />
-            </ToolButton>
-          )}
-        </div>
-      )}
+      {canDelete && <DeleteTools confirming={confirming} setConfirming={setConfirming} onDelete={() => actions.remove(message.id).catch(() => setConfirming(false))} />}
     </motion.div>
   );
 });
+
+/** Deleting a row that isn't an ordinary message, asked once more in place. */
+function DeleteTools({ confirming, setConfirming, onDelete }: { confirming: boolean; setConfirming: (on: boolean) => void; onDelete: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
+      {confirming ? (
+        <span className="flex items-center gap-0.5">
+          <span className="px-2 text-xs font-bold text-destructive">{t("chat.messages.deleteAsk")}</span>
+          <ToolButton label={t("chat.messages.delete")} danger onClick={onDelete}>
+            <CheckIcon />
+          </ToolButton>
+          <ToolButton label={t("chat.messages.keep")} onClick={() => setConfirming(false)}>
+            <XIcon />
+          </ToolButton>
+        </span>
+      ) : (
+        <ToolButton label={t("chat.messages.delete")} danger onClick={() => setConfirming(true)}>
+          <Trash2Icon />
+        </ToolButton>
+      )}
+    </div>
+  );
+}
 
 export function ToolButton({
   label,
@@ -1346,6 +1536,7 @@ export function EditBox({ initial, onCancel, onSave }: { initial: string; onCanc
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
+        aria-label={t("chat.edit.label")}
         className="composer w-full resize-none rounded-xl border bg-card px-3 py-2 text-[0.95rem] leading-6 outline-none"
       />
       <p className="text-xs text-muted-foreground">

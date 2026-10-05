@@ -1,5 +1,5 @@
 import { BotIcon } from "lucide-react";
-import { motion } from "motion/react";
+import { m as motion } from "motion/react";
 import { useI18n } from "@/i18n/react";
 
 /** Marks what isn't a person: an app posting through a webhook, or an agent (an account a program drives). */

@@ -12,15 +12,16 @@ import {
   UserPlusIcon,
   UsersIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { AnimatePresence, m as motion, Reorder, useDragControls } from "motion/react";
+import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Permission, type Member, type Role } from "@/gen/fuwa/v1/types_pb";
 import { createRole, deleteRole, giveRole, reorderRoles, run, takeRole, updateRole } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useAccess, useAction, useInstance, useRoles } from "@/fuwa/hooks";
 import { RoleDot } from "@/components/chat/mentions";
 import { UserAvatar } from "@/components/Icons";
-import { Count, SPRING, SwapText } from "@/components/motion";
+import { Count, SwapText } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { RoleName } from "@/components/RoleName";
 import { Row, Segmented } from "@/components/settings/account/common";
 import { SaveBar, Toggle } from "@/components/settings/controls";
@@ -54,6 +55,45 @@ const SWATCHES = [
 type Tab = "display" | "permissions" | "members";
 
 /**
+ * The roles' order as shown: the store's, or one moved here until the roles
+ * change (the server took it, or something else did), but never mid-drag.
+ */
+function useRankOrder(instanceKey: string, serverId: string, ranked: Role[]) {
+  const rankedIds = useMemo(() => ranked.map((r) => r.id), [ranked]);
+  const [moved, setMoved] = useState<{ order: string[]; over: string[] } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const order = moved && (dragging || moved.over === rankedIds) ? moved.order : rankedIds;
+  const latest = useRef(order);
+  useLayoutEffect(() => {
+    latest.current = order;
+  });
+
+  const commit = (next: string[]) => {
+    setDragging(false);
+    setMoved({ order: next, over: rankedIds });
+    if (next.join() === rankedIds.join()) return;
+    run(reorderRoles(instanceKey, serverId, next)).catch((err: FuwaError) => {
+      toast(err.message);
+      setMoved(null);
+    });
+  };
+  const nudge = (id: string, by: -1 | 1) => {
+    const at = order.indexOf(id);
+    const to = at + by;
+    if (at === -1 || to < 0 || to >= order.length) return;
+    const next = [...order];
+    [next[at], next[to]] = [next[to]!, next[at]!];
+    commit(next);
+  };
+  const reorder = (next: string[]) => {
+    setDragging(true);
+    setMoved({ order: next, over: rankedIds });
+  };
+
+  return { order, reorder, drop: () => commit(latest.current), nudge };
+}
+
+/**
  * Every role, highest first, dragged into rank by its handle (only those
  * below your own move), and the chosen one beside the list: how it looks,
  * what it can do and who has it. @everyone sits at the bottom and holds
@@ -66,12 +106,9 @@ export function Roles({ instanceKey, serverId, initial }: { instanceKey: string;
   const members = useInstance(instanceKey)?.members[serverId];
   const ranked = useMemo(() => roles.filter((r) => r.id !== serverId), [roles, serverId]);
   const everyone = roles.find((r) => r.id === serverId);
-  const [order, setOrder] = useState(() => ranked.map((r) => r.id));
-  const latest = useRef(order);
-  latest.current = order;
-  const dragging = useRef(false);
-  const [selected, setSelected] = useState<string>(initial ?? ranked[0]?.id ?? serverId);
-  const [tab, setTab] = useState<Tab>("display");
+  const { order, reorder, drop, nudge } = useRankOrder(instanceKey, serverId, ranked);
+  const [picked, setSelected] = useState<string>(initial ?? ranked[0]?.id ?? serverId);
+  const [chosenTab, setTab] = useState<Tab>("display");
   const creating = useAction(createRole);
   const editor = useRef<HTMLDivElement>(null);
   const byId = useMemo(() => new Map(roles.map((r) => [r.id, r])), [roles]);
@@ -81,37 +118,13 @@ export function Roles({ instanceKey, serverId, initial }: { instanceKey: string;
     return out;
   }, [members]);
 
-  // Follow changes from elsewhere, except mid-drag.
-  useEffect(() => {
-    if (!dragging.current) setOrder(ranked.map((r) => r.id));
-  }, [ranked]);
-  useEffect(() => {
-    if (!byId.has(selected)) setSelected(ranked[0]?.id ?? serverId);
-  }, [byId, selected, ranked, serverId]);
-  useEffect(() => {
-    if (selected === serverId && tab === "members") setTab("permissions");
-  }, [selected, serverId, tab]);
-
-  const commit = (next: string[]) => {
-    dragging.current = false;
-    if (next.join() === ranked.map((r) => r.id).join()) return;
-    run(reorderRoles(instanceKey, serverId, next)).catch((err: FuwaError) => {
-      toast(err.message);
-      setOrder(ranked.map((r) => r.id));
-    });
-  };
-  const nudge = (id: string, by: -1 | 1) => {
-    const at = order.indexOf(id);
-    const to = at + by;
-    if (at === -1 || to < 0 || to >= order.length) return;
-    const next = [...order];
-    [next[at], next[to]] = [next[to]!, next[at]!];
-    setOrder(next);
-    commit(next);
-  };
+  // A role deleted elsewhere falls back to the first; @everyone has no members tab.
+  const selected = byId.has(picked) ? picked : (ranked[0]?.id ?? serverId);
+  const tab = selected === serverId && chosenTab === "members" ? "permissions" : chosenTab;
 
   const pick = (id: string) => {
     setSelected(id);
+    if (id === serverId && tab === "members") setTab("permissions");
     if (window.matchMedia("(max-width: 1023px)").matches) setTimeout(() => editor.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
 
@@ -140,10 +153,7 @@ export function Roles({ instanceKey, serverId, initial }: { instanceKey: string;
           <Reorder.Group
             axis="y"
             values={order}
-            onReorder={(next) => {
-              dragging.current = true;
-              setOrder(next);
-            }}
+            onReorder={reorder}
             className="flex flex-col gap-0.5"
           >
             <AnimatePresence initial={false}>
@@ -159,7 +169,7 @@ export function Roles({ instanceKey, serverId, initial }: { instanceKey: string;
                     active={selected === id}
                     position={t("serversettings.shared.position", { index: n + 1, total: order.length })}
                     onPick={() => pick(id)}
-                    onDragEnd={() => commit(latest.current)}
+                    onDragEnd={drop}
                     onKeyMove={(e) => {
                       if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
                       e.preventDefault();
@@ -291,6 +301,60 @@ const draftOf = (r: Role): Draft => ({
   permissions: fromList(r.permissions),
 });
 
+/**
+ * Your edits over the role as saved. A change saved elsewhere shows at once,
+ * except in fields being edited here.
+ */
+function useRoleDraft(instanceKey: string, serverId: string, role: Role) {
+  const { t } = useI18n();
+  const base = useMemo(() => draftOf(role), [role]);
+  const [edits, setEdits] = useState<Partial<Draft>>({});
+  const save = useAction(updateRole);
+  const draft: Draft = { ...base, ...edits };
+
+  const changed = (Object.keys(base) as (keyof Draft)[]).filter((k) => draft[k] !== base[k]);
+  const set = (patch: Partial<Draft>) => {
+    setEdits((e) => {
+      const next: Partial<Draft> = { ...e, ...patch };
+      // A field put back as it's saved isn't being edited any more.
+      for (const k of Object.keys(patch) as (keyof Draft)[]) if (next[k] === base[k]) delete next[k];
+      return next;
+    });
+    save.setError(null);
+  };
+
+  async function submit() {
+    const name = draft.name.trim();
+    if (!name) return save.setError(t("serversettings.roles.needsName"));
+    const done = await save.go(instanceKey, serverId, role.id, {
+      ...(draft.name !== base.name && { name }),
+      ...(draft.color !== base.color && { color: draft.color }),
+      ...(draft.hoist !== base.hoist && { hoist: draft.hoist }),
+      ...(draft.mentionable !== base.mentionable && { mentionable: draft.mentionable }),
+      ...(draft.permissions !== base.permissions && { permissions: toList(draft.permissions) }),
+    });
+    // The saved role is in the store already, so it's the base now.
+    if (done) setEdits({});
+  }
+
+  return { draft, set, changed, submit, discard: () => setEdits({}), save };
+}
+
+/** The role's dot and name as they'll look. */
+function RoleTitle({ draft }: { draft: Draft }) {
+  const { t } = useI18n();
+  return (
+    <span className="inline-flex items-center gap-2">
+      <motion.span key={draft.color ?? "none"} initial={{ scale: 0.3, rotate: -90 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 14 }}>
+        <RoleDot role={{ color: draft.color ?? undefined }} className="size-4" />
+      </motion.span>
+      <span className="truncate" style={draft.color !== null ? { color: cssColor(draft.color) } : undefined}>
+        {draft.name || t("serversettings.roles.newRole")}
+      </span>
+    </span>
+  );
+}
+
 function RoleEditor({
   instanceKey,
   serverId,
@@ -311,40 +375,7 @@ function RoleEditor({
   const { t } = useI18n();
   const everyone = role.id === serverId;
   const locked = !everyone && !above(access, role.position);
-  const base = useMemo(() => draftOf(role), [role]);
-  const [draft, setDraft] = useState(base);
-  const save = useAction(updateRole);
-
-  // A change saved elsewhere lands in the draft, except in fields being edited here.
-  const previous = useRef(base);
-  useEffect(() => {
-    const before = previous.current;
-    previous.current = base;
-    setDraft((d) => {
-      const next = { ...base };
-      for (const k of Object.keys(d) as (keyof Draft)[]) if (d[k] !== before[k]) (next as Record<string, unknown>)[k] = d[k];
-      return next;
-    });
-  }, [base]);
-
-  const changed = (Object.keys(base) as (keyof Draft)[]).filter((k) => draft[k] !== base[k]);
-  const set = (patch: Partial<Draft>) => {
-    setDraft((d) => ({ ...d, ...patch }));
-    save.setError(null);
-  };
-
-  async function submit() {
-    const name = draft.name.trim();
-    if (!name) return save.setError(t("serversettings.roles.needsName"));
-    const done = await save.go(instanceKey, serverId, role.id, {
-      ...(draft.name !== base.name && { name }),
-      ...(draft.color !== base.color && { color: draft.color }),
-      ...(draft.hoist !== base.hoist && { hoist: draft.hoist }),
-      ...(draft.mentionable !== base.mentionable && { mentionable: draft.mentionable }),
-      ...(draft.permissions !== base.permissions && { permissions: toList(draft.permissions) }),
-    });
-    if (done) setDraft(draftOf(done));
-  }
+  const { draft, set, changed, submit, discard, save } = useRoleDraft(instanceKey, serverId, role);
 
   const holders = members.filter((m) => m.roleIds.includes(role.id));
   const tabs = [
@@ -356,29 +387,15 @@ function RoleEditor({
   return (
     <div className="flex flex-col">
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <h3 className="min-w-0 flex-1 truncate text-lg font-extrabold">
-          {everyone ? (
-            "@everyone"
-          ) : (
-            <span className="inline-flex items-center gap-2">
-              <motion.span key={draft.color ?? "none"} initial={{ scale: 0.3, rotate: -90 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 14 }}>
-                <RoleDot role={{ color: draft.color ?? undefined }} className="size-4" />
-              </motion.span>
-              <span className="truncate" style={draft.color !== null ? { color: cssColor(draft.color) } : undefined}>
-                {draft.name || t("serversettings.roles.newRole")}
-              </span>
-            </span>
-          )}
-        </h3>
+        <h3 className="min-w-0 flex-1 truncate text-lg font-extrabold">{everyone ? "@everyone" : <RoleTitle draft={draft} />}</h3>
         {tabs.length > 1 && <Segmented label={t("serversettings.roles.settings")} value={tab} onChange={onTab} options={tabs} />}
       </div>
-      <AnimatePresence>
+      <AnimatePresence mode="popLayout">
         {locked && (
           <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mb-4 flex items-center gap-2 overflow-hidden rounded-xl bg-muted/60 px-3 py-2 text-sm text-muted-foreground"
+            {...SLIDE_IN}
+            transition={SPRING}
+            className="mb-4 flex items-center gap-2 rounded-xl bg-muted/60 px-3 py-2 text-sm text-muted-foreground"
           >
             <LockIcon className="size-4 shrink-0" /> {t("serversettings.roles.locked")}
           </motion.p>
@@ -390,7 +407,8 @@ function RoleEditor({
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.18 }}
+          transition={{ duration: 0.18, layout: SPRING }}
+          layout="position"
         >
           {tab === "display" && !everyone && (
             <Display instanceKey={instanceKey} serverId={serverId} role={role} draft={draft} set={set} locked={locked} />
@@ -401,7 +419,7 @@ function RoleEditor({
           )}
         </motion.div>
       </AnimatePresence>
-      <SaveBar count={changed.length} saving={save.pending} error={save.error} onSave={() => void submit()} onDiscard={() => setDraft(base)} />
+      <SaveBar count={changed.length} saving={save.pending} error={save.error} onSave={() => void submit()} onDiscard={discard} />
     </div>
   );
 }
@@ -422,41 +440,13 @@ function Display({
   locked: boolean;
 }) {
   const { t } = useI18n();
-  const [confirming, setConfirming] = useState(false);
-  const remove = useAction(deleteRole);
-  const custom = draft.color !== null && !SWATCHES.includes(draft.color);
-  const me = useInstance(instanceKey)?.me;
   return (
     <div className="flex flex-col">
       <Row label={t("serversettings.roles.name")} htmlFor="role-name">
         <Input id="role-name" maxLength={100} value={draft.name} disabled={locked} onChange={(e) => set({ name: e.target.value })} className="h-11 rounded-xl" />
       </Row>
       <Row label={t("serversettings.roles.color")} hint={t("serversettings.roles.colorHint")}>
-        <div role="radiogroup" aria-label={t("serversettings.roles.colorLabel")} className="flex flex-wrap gap-2">
-          <Swatch label={t("serversettings.roles.noColor")} selected={draft.color === null} disabled={locked} onPick={() => set({ color: null })} />
-          {SWATCHES.map((c) => (
-            <Swatch key={c} color={c} label={cssColor(c)} selected={draft.color === c} disabled={locked} onPick={() => set({ color: c })} />
-          ))}
-          <label
-            className={cn(
-              "relative grid size-9 cursor-pointer place-items-center overflow-hidden rounded-full border-2 border-dashed transition hover:scale-110",
-              custom ? "border-transparent ring-2 ring-foreground ring-offset-2 ring-offset-background" : "border-muted-foreground/40",
-              locked && "pointer-events-none opacity-50",
-            )}
-            style={custom ? { background: cssColor(draft.color!) } : { background: "conic-gradient(#f472b6, #fbbf24, #34d399, #38bdf8, #a78bfa, #f472b6)" }}
-            title={t("serversettings.roles.anyColor")}
-          >
-            <input
-              type="color"
-              aria-label={t("serversettings.roles.customColor")}
-              disabled={locked}
-              value={draft.color !== null ? cssColor(draft.color) : "#f472b6"}
-              onChange={(e) => set({ color: parseInt(e.target.value.slice(1), 16) })}
-              className="absolute inset-0 cursor-pointer opacity-0"
-            />
-            {custom && <CheckIcon className="size-4 text-white mix-blend-difference" strokeWidth={3} />}
-          </label>
-        </div>
+        <ColorChoice color={draft.color} locked={locked} onPick={(color) => set({ color })} />
       </Row>
       <Row label={t("serversettings.roles.howItShows")}>
         <div className="flex flex-col gap-4">
@@ -477,90 +467,139 @@ function Display({
         </div>
       </Row>
       <Row label={t("settings.controls.preview")}>
-        <div className="flex flex-col gap-3 rounded-2xl bg-muted/50 p-3">
-          <div className="flex items-center gap-2.5">
-            <UserAvatar user={me ?? undefined} className="size-9" />
-            <div className="min-w-0">
-              <RoleName id={me?.id ?? ""} name={me?.displayName || me?.username || t("serversettings.shared.you")} color={draft.color ?? undefined} />
-              <p className="text-sm text-muted-foreground">
-                <T
-                  k="serversettings.roles.previewLine"
-                  values={{
-                    role: (
-                      <span
-                        className="mention rounded-md px-1 font-bold"
-                        style={
-                          draft.color !== null
-                            ? { color: cssColor(draft.color), backgroundColor: `color-mix(in srgb, ${cssColor(draft.color)} 15%, transparent)` }
-                            : undefined
-                        }
-                      >
-                        @{draft.name || t("serversettings.roles.newRole")}
-                      </span>
-                    ),
-                  }}
-                />
-              </p>
-            </div>
-          </div>
-          <AnimatePresence initial={false}>
-            {draft.hoist && (
-              <motion.p
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="flex items-center gap-1.5 overflow-hidden text-xs font-bold tracking-wide text-muted-foreground uppercase"
-              >
-                <RoleDot role={{ color: draft.color ?? undefined }} className="size-2" /> {draft.name || t("serversettings.roles.newRole")} — 1
-              </motion.p>
-            )}
-          </AnimatePresence>
-        </div>
+        <RolePreview instanceKey={instanceKey} draft={draft} />
       </Row>
-      {!locked && (
-        <div className="py-5">
-          <AnimatePresence mode="wait" initial={false}>
-            {confirming ? (
-              <motion.div
-                key="confirm"
-                initial={{ opacity: 0, y: 8, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 8 }}
-                transition={SPRING}
-                className="flex flex-col gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 p-4"
-              >
-                <p className="flex items-center gap-2 font-bold text-destructive">
-                  <TriangleAlertIcon className="size-4" /> {t("serversettings.roles.deleteAsk", { role: role.name })}
-                </p>
-                <p className="text-sm text-muted-foreground">{t("serversettings.roles.deleteHint")}</p>
-                {remove.error && <p className="text-sm text-destructive first-letter:uppercase">{remove.error}</p>}
-                <div className="flex justify-end gap-2">
-                  <Button type="button" variant="ghost" onClick={() => setConfirming(false)} className="rounded-xl">
-                    {t("serversettings.shared.keepIt")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    disabled={remove.pending}
-                    onClick={async () => {
-                      if ((await remove.go(instanceKey, serverId, role.id)) !== undefined) toast(t("serversettings.shared.deleted", { name: role.name }));
-                    }}
-                    className="rounded-xl font-bold"
+      <DeleteRole instanceKey={instanceKey} serverId={serverId} role={role} locked={locked} />
+    </div>
+  );
+}
+
+/** No color, the swatches, or any color at all. */
+function ColorChoice({ color, locked, onPick }: { color: number | null; locked: boolean; onPick: (color: number | null) => void }) {
+  const { t } = useI18n();
+  const custom = color !== null && !SWATCHES.includes(color);
+  return (
+    <div role="radiogroup" aria-label={t("serversettings.roles.colorLabel")} className="flex flex-wrap gap-2">
+      <Swatch label={t("serversettings.roles.noColor")} selected={color === null} disabled={locked} onPick={() => onPick(null)} />
+      {SWATCHES.map((c) => (
+        <Swatch key={c} color={c} label={cssColor(c)} selected={color === c} disabled={locked} onPick={() => onPick(c)} />
+      ))}
+      <label
+        className={cn(
+          "relative grid size-9 cursor-pointer place-items-center overflow-hidden rounded-full border-2 border-dashed transition hover:scale-110",
+          custom ? "border-transparent ring-2 ring-foreground ring-offset-2 ring-offset-background" : "border-muted-foreground/40",
+          locked && "pointer-events-none opacity-50",
+        )}
+        style={custom ? { background: cssColor(color!) } : { background: "conic-gradient(#f472b6, #fbbf24, #34d399, #38bdf8, #a78bfa, #f472b6)" }}
+        title={t("serversettings.roles.anyColor")}
+      >
+        <input
+          type="color"
+          aria-label={t("serversettings.roles.customColor")}
+          disabled={locked}
+          value={color !== null ? cssColor(color) : "#f472b6"}
+          onChange={(e) => onPick(parseInt(e.target.value.slice(1), 16))}
+          className="absolute inset-0 cursor-pointer opacity-0"
+        />
+        {custom && <CheckIcon className="size-4 text-white mix-blend-difference" strokeWidth={3} />}
+      </label>
+    </div>
+  );
+}
+
+/** How the role shows: your name in its color, a mention of it, and its heading in the member list. */
+function RolePreview({ instanceKey, draft }: { instanceKey: string; draft: Draft }) {
+  const { t } = useI18n();
+  const me = useInstance(instanceKey)?.me;
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl bg-muted/50 p-3">
+      <div className="flex items-center gap-2.5">
+        <UserAvatar user={me ?? undefined} className="size-9" />
+        <div className="min-w-0">
+          <RoleName id={me?.id ?? ""} name={me?.displayName || me?.username || t("serversettings.shared.you")} color={draft.color ?? undefined} />
+          <p className="text-sm text-muted-foreground">
+            <T
+              k="serversettings.roles.previewLine"
+              values={{
+                role: (
+                  <span
+                    className="mention rounded-md px-1 font-bold"
+                    style={
+                      draft.color !== null
+                        ? { color: cssColor(draft.color), backgroundColor: `color-mix(in srgb, ${cssColor(draft.color)} 15%, transparent)` }
+                        : undefined
+                    }
                   >
-                    {remove.pending ? <LoaderCircleIcon className="animate-spin" /> : <Trash2Icon />} {t("serversettings.shared.delete")}
-                  </Button>
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div key="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <Button type="button" variant="ghost" onClick={() => setConfirming(true)} className="group rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive">
-                  <Trash2Icon className="transition-transform group-hover:-rotate-12" /> {t("serversettings.roles.delete")}
-                </Button>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                    @{draft.name || t("serversettings.roles.newRole")}
+                  </span>
+                ),
+              }}
+            />
+          </p>
         </div>
-      )}
+      </div>
+      <AnimatePresence initial={false} mode="popLayout">
+        {draft.hoist && (
+          <motion.p
+            {...SLIDE_IN}
+            transition={SPRING}
+            className="flex items-center gap-1.5 text-xs font-bold tracking-wide text-muted-foreground uppercase"
+          >
+            <RoleDot role={{ color: draft.color ?? undefined }} className="size-2" /> {draft.name || t("serversettings.roles.newRole")} — 1
+          </motion.p>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/** Deleting the role, asked once more first. Hidden from those who can't change it. */
+function DeleteRole({ instanceKey, serverId, role, locked }: { instanceKey: string; serverId: string; role: Role; locked: boolean }) {
+  const { t } = useI18n();
+  const [confirming, setConfirming] = useState(false);
+  const remove = useAction(deleteRole);
+  return (
+    <div className="py-5 empty:hidden">
+      <AnimatePresence mode="wait" initial={false}>
+        {locked ? null : confirming ? (
+          <motion.div
+            key="confirm"
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={SPRING}
+            className="flex flex-col gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 p-4"
+          >
+            <p className="flex items-center gap-2 font-bold text-destructive">
+              <TriangleAlertIcon className="size-4" /> {t("serversettings.roles.deleteAsk", { role: role.name })}
+            </p>
+            <p className="text-sm text-muted-foreground">{t("serversettings.roles.deleteHint")}</p>
+            {remove.error && <p className="text-sm text-destructive first-letter:uppercase">{remove.error}</p>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setConfirming(false)} className="rounded-xl">
+                {t("serversettings.shared.keepIt")}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={remove.pending}
+                onClick={async () => {
+                  if ((await remove.go(instanceKey, serverId, role.id)) !== undefined) toast(t("serversettings.shared.deleted", { name: role.name }));
+                }}
+                className="rounded-xl font-bold"
+              >
+                {remove.pending ? <LoaderCircleIcon className="animate-spin" /> : <Trash2Icon />} {t("serversettings.shared.delete")}
+              </Button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div key="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <Button type="button" variant="ghost" onClick={() => setConfirming(true)} className="group rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive">
+              <Trash2Icon className="transition-transform group-hover:-rotate-12" /> {t("serversettings.roles.delete")}
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -726,52 +765,49 @@ function RoleMembers({
 
   return (
     <div data-setting="role-members" className="flex flex-col gap-3">
-      {!locked && (
-        <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 empty:hidden">
+        {!locked && (
           <Button type="button" variant={adding ? "secondary" : "outline"} onClick={() => setAdding((a) => !a)} className="self-start rounded-xl font-bold">
             <UserPlusIcon className={cn("transition-transform duration-300", adding && "rotate-12")} /> {t("serversettings.roles.addMembers")}
           </Button>
-          <AnimatePresence initial={false}>
-            {adding && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-                className="overflow-hidden"
-              >
-                <div className="flex flex-col gap-2 rounded-2xl border bg-background/40 p-2">
-                  <div className="relative">
-                    <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("serversettings.shared.findSomeone")} aria-label={t("serversettings.shared.findSomeone")} className="h-10 rounded-xl pl-9" />
-                  </div>
-                  <ul className="scroll-thin flex max-h-60 flex-col gap-0.5 overflow-y-auto">
-                    <AnimatePresence initial={false} mode="popLayout">
-                      {others.map((m) => (
-                        <motion.li key={m.user?.id} layout initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24, transition: { duration: 0.15 } }} transition={SPRING}>
-                          <button
-                            type="button"
-                            disabled={!!busy}
-                            onClick={() => void toggle(m, true)}
-                            className="group flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-sm transition hover:bg-primary/10"
-                          >
-                            <UserAvatar user={m.user} className="size-7" />
-                            <span className="min-w-0 flex-1 truncate font-bold">{memberName(m)}</span>
-                            <span className="truncate text-xs text-muted-foreground">@{m.user?.username}</span>
-                            <PlusIcon className="size-4 text-primary opacity-0 transition group-hover:rotate-90 group-hover:opacity-100" />
-                          </button>
-                        </motion.li>
-                      ))}
-                    </AnimatePresence>
-                    {!others.length && <li className="px-2 py-3 text-center text-sm text-muted-foreground">{q ? t("serversettings.shared.nobodyMatches") : t("serversettings.roles.everyoneHas")}</li>}
-                  </ul>
+        )}
+        <AnimatePresence initial={false} mode="popLayout">
+          {!locked && adding && (
+            <motion.div
+              {...SLIDE_IN}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <div className="flex flex-col gap-2 rounded-2xl border bg-background/40 p-2">
+                <div className="relative">
+                  <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("serversettings.shared.findSomeone")} aria-label={t("serversettings.shared.findSomeone")} className="h-10 rounded-xl pl-9" />
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      )}
-      <ul className="flex flex-col gap-1.5">
+                <ul className="scroll-thin flex max-h-60 flex-col gap-0.5 overflow-y-auto">
+                  <AnimatePresence initial={false} mode="popLayout">
+                    {others.map((m) => (
+                      <motion.li key={m.user?.id} layout initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24, transition: { duration: 0.15 } }} transition={SPRING}>
+                        <button
+                          type="button"
+                          disabled={!!busy}
+                          onClick={() => void toggle(m, true)}
+                          className="group flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-sm transition hover:bg-primary/10"
+                        >
+                          <UserAvatar user={m.user} className="size-7" />
+                          <span className="min-w-0 flex-1 truncate font-bold">{memberName(m)}</span>
+                          <span className="truncate text-xs text-muted-foreground">@{m.user?.username}</span>
+                          <PlusIcon className="size-4 text-primary opacity-0 transition group-hover:rotate-90 group-hover:opacity-100" />
+                        </button>
+                      </motion.li>
+                    ))}
+                  </AnimatePresence>
+                  {!others.length && <li className="px-2 py-3 text-center text-sm text-muted-foreground">{q ? t("serversettings.shared.nobodyMatches") : t("serversettings.roles.everyoneHas")}</li>}
+                </ul>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+      <motion.ul layout="position" transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }} className="flex flex-col gap-1.5">
         <AnimatePresence initial={false} mode="popLayout">
           {holders.map((m, n) => (
             <motion.li
@@ -802,10 +838,10 @@ function RoleMembers({
             </motion.li>
           ))}
         </AnimatePresence>
-      </ul>
+      </motion.ul>
       <AnimatePresence>
         {!holders.length && (
-          <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="py-6 text-center text-sm text-muted-foreground">
+          <motion.p layout="position" transition={{ layout: { duration: 0.25, ease: [0.22, 1, 0.36, 1] } }} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="py-6 text-center text-sm text-muted-foreground">
             {t("serversettings.roles.nobody")}
           </motion.p>
         )}

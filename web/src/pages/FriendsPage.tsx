@@ -15,7 +15,7 @@ import {
   UsersIcon,
   XIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, useAnimationControls } from "motion/react";
+import { AnimatePresence, m as motion, useAnimationControls } from "motion/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Friend } from "@/gen/fuwa/v1/friend_pb";
 import { run } from "@/fuwa/actions";
@@ -24,7 +24,8 @@ import { acceptFriend, blockUser, removeFriend, sendFriendRequest, unblockUser }
 import { openConversation } from "@/fuwa/dms";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { ProfilePopover } from "@/components/ProfilePopover";
 import { useLayout } from "@/components/Shell";
 import {
@@ -42,12 +43,13 @@ import { type Key, T, useI18n } from "@/i18n/react";
 
 const NONE: Friend[] = [];
 
-const TABS: { id: FriendsTab; label: Key }[] = [
-  { id: "online", label: "dms-calls.friends.tab.online" },
-  { id: "all", label: "dms-calls.friends.tab.all" },
-  { id: "pending", label: "dms-calls.friends.tab.pending" },
-  { id: "blocked", label: "dms-calls.friends.tab.blocked" },
-];
+const TAB_LABEL: Record<FriendsTab, Key> = {
+  online: "dms-calls.friends.tab.online",
+  all: "dms-calls.friends.tab.all",
+  pending: "dms-calls.friends.tab.pending",
+  blocked: "dms-calls.friends.tab.blocked",
+};
+const TABS = (Object.keys(TAB_LABEL) as FriendsTab[]).map((id) => ({ id, label: TAB_LABEL[id] }));
 
 /** Lines drawn past the edges, so a quick scroll doesn't show blank space. */
 const OVERSCAN = 6;
@@ -173,7 +175,7 @@ function FriendsList({
           </AnimatePresence>
         </label>
         <p className="mt-4 mb-1 px-1 text-xs font-bold tracking-wide text-muted-foreground uppercase">
-          <T k="dms-calls.friends.page.heading" values={{ tab: t(TABS.find((x) => x.id === tab)!.label), count: <Count value={shown.length} /> }} count={shown.length} />
+          <T k="dms-calls.friends.page.heading" values={{ tab: t(TAB_LABEL[tab]), count: <Count value={shown.length} /> }} count={shown.length} />
         </p>
       </div>
       <AnimatePresence mode="wait" initial={false}>

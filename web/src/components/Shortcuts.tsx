@@ -1,8 +1,8 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon, EyeOffIcon, HashIcon, KeyboardIcon, SearchIcon, SparklesIcon, TvMinimalPlayIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, m as motion } from "motion/react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Channel, Server } from "@/gen/fuwa/v1/types_pb";
 import { markServerRead } from "@/fuwa/actions";
 import { toggleCamera, toggleDeafen, toggleMute, toggleRecording, toggleScreen } from "@/calls/engine";
@@ -10,10 +10,11 @@ import { watchPushToTalk } from "@/calls/keys";
 import { IncomingCalls } from "@/components/calls/IncomingCalls";
 import { PopOuts, RecordingWatch } from "@/components/calls/Video";
 import { store, useFuwa, type FuwaState } from "@/fuwa/store";
-import { CHANNEL_ICON, openableChannels } from "@/components/ChannelSidebar";
+import { CHANNEL_ICON, openableChannels } from "@/components/channel-groups";
 import { ContextMenuHost } from "@/components/ContextMenu";
 import { ServerIcon } from "@/components/Icons";
-import { Count, EASE_OUT, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { EASE_OUT, SLIDE_IN, SPRING } from "@/lib/motion";
 import { Keycaps } from "@/components/settings/app/common";
 import { i18n } from "@/i18n/i18n";
 import { T, useI18n } from "@/i18n/react";
@@ -75,8 +76,11 @@ export function AppOverlays() {
   const here = useHere();
   const navigate = useNavigate();
   const router = useRouter();
+  // Where you are, for the shortcuts below to read when pressed.
   const hereRef = useRef(here);
-  hereRef.current = here;
+  useLayoutEffect(() => {
+    hereRef.current = here;
+  });
 
   // Clicking a desktop notification opens its channel or conversation.
   useEffect(() => {
@@ -474,7 +478,6 @@ function Switcher({ here }: { here: Here }) {
       <label className="flex items-center gap-3 border-b px-4">
         <SearchIcon className="size-5 shrink-0 text-muted-foreground" />
         <input
-          autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
@@ -619,14 +622,12 @@ export function StreamerBanner() {
   const show = on && !hiddenBanner;
   const { t } = useI18n();
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       {show && (
         <motion.div
-          initial={{ height: 0 }}
-          animate={{ height: "auto" }}
-          exit={{ height: 0 }}
+          {...SLIDE_IN}
           transition={{ type: "spring", stiffness: 420, damping: 40 }}
-          className="shrink-0 overflow-hidden"
+          className="shrink-0"
         >
           <div className="streamer-banner flex items-center justify-center gap-3 px-3 py-1.5 text-sm font-bold text-primary-foreground">
             <motion.span initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 500, damping: 14, delay: 0.1 }}>

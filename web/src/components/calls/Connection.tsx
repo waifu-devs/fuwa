@@ -1,13 +1,14 @@
 import * as Popover from "@radix-ui/react-popover";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import type { ActiveCall } from "@/calls/state";
 import { formatPing, useQualityEffect, useQualityLevel, useQualityText, type Level, type Quality, type Route } from "@/calls/quality";
-import { SPRING, SwapText } from "@/components/motion";
+import { SwapText } from "@/components/motion";
+import { SPRING } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { type Key, useI18n } from "@/i18n/react";
 
-export const COLOR: Record<Level, string> = { good: "#3ba55d", okay: "#f0b232", poor: "#ed4245" };
+const COLOR: Record<Level, string> = { good: "#3ba55d", okay: "#f0b232", poor: "#ed4245" };
 const LIT: Record<Level, number> = { good: 3, okay: 2, poor: 1 };
 const LABEL: Record<Level, Key> = { good: "dms-calls.calls.connection.good", okay: "dms-calls.calls.connection.okay", poor: "dms-calls.calls.connection.poor" };
 const ROUTE: Record<Route, Key> = {

@@ -1,11 +1,13 @@
-import { MegaphoneIcon, SirenIcon, TriangleAlertIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { XIcon } from "lucide-react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useState } from "react";
 import { AnnouncementTone, type Announcement } from "@/gen/fuwa/v1/types_pb";
 import { useFuwa } from "@/fuwa/store";
 import { InlineMarkdown } from "@/components/Markdown";
 import { useI18n } from "@/i18n/react";
-import { formatStamp, formatTime, sameDay, toDate } from "@/lib/format";
+import { endsLabel, isLive, TONES, toneOf } from "@/lib/announcement";
+import { formatStamp, toDate } from "@/lib/format";
+import { SLIDE_IN } from "@/lib/motion";
 import { useNow } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 
@@ -25,20 +27,6 @@ function closedId(instanceKey: string) {
     return null;
   }
 }
-
-/** Whether an announcement is up now: set, with text, and not past its end. */
-export function isLive(a: Announcement | undefined, now = Date.now()): a is Announcement {
-  return !!a?.text && (!a.endsAt || toDate(a.endsAt).getTime() > now);
-}
-
-export const TONES = {
-  [AnnouncementTone.INFO]: { icon: MegaphoneIcon, className: "announcement-info" },
-  [AnnouncementTone.WARNING]: { icon: TriangleAlertIcon, className: "announcement-warning" },
-  [AnnouncementTone.CRITICAL]: { icon: SirenIcon, className: "announcement-critical" },
-} as const;
-
-export const toneOf = (a: Pick<Announcement, "tone">) =>
-  a.tone === AnnouncementTone.WARNING || a.tone === AnnouncementTone.CRITICAL ? a.tone : AnnouncementTone.INFO;
 
 export function AnnouncementBanner({ instanceKey }: { instanceKey: string | undefined }) {
   const announcement = useFuwa((s) => (instanceKey ? s.instances[instanceKey]?.node?.announcement : undefined));
@@ -60,15 +48,13 @@ export function AnnouncementBanner({ instanceKey }: { instanceKey: string | unde
   }
 
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence mode="popLayout" initial={false}>
       {show && (
         <motion.div
           key={key}
-          initial={{ height: 0 }}
-          animate={{ height: "auto" }}
-          exit={{ height: 0 }}
+          {...SLIDE_IN}
           transition={{ type: "spring", stiffness: 420, damping: 40 }}
-          className="shrink-0 overflow-hidden"
+          className="shrink-0"
         >
           <BannerBody announcement={a} onClose={toneOf(a) === AnnouncementTone.CRITICAL ? undefined : close} />
         </motion.div>
@@ -76,9 +62,6 @@ export function AnnouncementBanner({ instanceKey }: { instanceKey: string | unde
     </AnimatePresence>
   );
 }
-
-/** When it comes down: a time today, or a day and time. */
-export const endsLabel = (d: Date) => (sameDay(d, new Date()) ? formatTime(d) : formatStamp(d));
 
 /** The banner itself, also used as the live preview in the Announcement settings. */
 export function BannerBody({ announcement: a, onClose, preview = false }: { announcement: Announcement; onClose?: () => void; preview?: boolean }) {

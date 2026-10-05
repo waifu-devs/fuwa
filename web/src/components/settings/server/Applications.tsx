@@ -1,12 +1,13 @@
 import { CheckIcon, InboxIcon, LoaderCircleIcon, SparklesIcon, UserCheckIcon, UserXIcon } from "lucide-react";
-import { AnimatePresence, motion, type Variants } from "motion/react";
+import { AnimatePresence, m as motion, type Variants } from "motion/react";
 import { useEffect, useState, type Ref } from "react";
 import type { Application } from "@/gen/fuwa/v1/types_pb";
 import { listApplications, reviewApplication, run } from "@/fuwa/actions";
 import type { FuwaError } from "@/fuwa/errors";
 import { useFuwa } from "@/fuwa/store";
 import { UserAvatar } from "@/components/Icons";
-import { Count, SPRING } from "@/components/motion";
+import { Count } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ago, displayName, roughly, toDate } from "@/lib/format";
@@ -188,9 +189,9 @@ function Card({
         </dl>
       )}
 
-      <AnimatePresence initial={false}>
+      <AnimatePresence initial={false} mode="popLayout">
         {declining && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
+          <motion.div {...SLIDE_IN} transition={SPRING}>
             <label htmlFor={`reason-${a.user?.id}`} className="mt-4 flex items-center justify-between text-sm font-bold">
               {t("serversettings.applications.whyNot")} <span className="text-xs font-normal text-muted-foreground">{t("serversettings.applications.whyNotHint")}</span>
             </label>
@@ -207,7 +208,7 @@ function Card({
         )}
       </AnimatePresence>
 
-      <footer className="mt-4 flex flex-wrap items-center justify-end gap-2">
+      <motion.footer layout="position" transition={SPRING} className="mt-4 flex flex-wrap items-center justify-end gap-2">
         {declining ? (
           <>
             <Button variant="ghost" disabled={!!busy} onClick={() => setDeclining(false)} className="rounded-xl">
@@ -234,7 +235,7 @@ function Card({
             </Button>
           </>
         )}
-      </footer>
+      </motion.footer>
     </motion.article>
   );
 }

@@ -1,5 +1,5 @@
 import { ChevronLeftIcon, HeadphonesIcon, MicOffIcon, Volume2Icon } from "lucide-react";
-import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import { AnimatePresence, LayoutGroup, m as motion } from "motion/react";
 import { useEffect } from "react";
 import { Permission, type Channel, type VoiceState } from "@/gen/fuwa/v1/types_pb";
 import { hangUp, joinCall } from "@/calls/engine";
@@ -7,7 +7,8 @@ import { useCalls, useInVoice } from "@/calls/state";
 import { useAccess, useInstance } from "@/fuwa/hooks";
 import { useFuwa } from "@/fuwa/store";
 import { CopyId } from "@/components/CopyId";
-import { SPRING, SwapText } from "@/components/motion";
+import { SwapText } from "@/components/motion";
+import { SLIDE_IN, SPRING } from "@/lib/motion";
 import { useLayout } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { AppBadge } from "@/components/AppBadge";
@@ -87,29 +88,31 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
       </header>
 
       <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
-        {states.length === 0 ? (
-          <Empty name={channel.name} />
-        ) : (
-          <LayoutGroup>
-            <AnimatePresence initial={false}>
-              {sharing.length > 0 && (
-                <motion.ul
-                  key="screens"
-                  layout
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={SPRING}
-                  className={cn("mx-auto mb-4 grid w-full max-w-5xl shrink-0 gap-3 sm:gap-4", sharing.length > 1 && "lg:grid-cols-2")}
-                >
-                  <AnimatePresence initial={false} mode="popLayout">
-                    {sharing.map((state) => (
-                      <ScreenTile key={state.userId} instanceKey={instanceKey} serverId={serverId} state={state} self={state.userId === me} />
-                    ))}
-                  </AnimatePresence>
-                </motion.ul>
-              )}
-            </AnimatePresence>
+        <LayoutGroup>
+          {/* Mounted even when the call empties, so the screens can still play their exit. */}
+          <AnimatePresence initial={false} mode="popLayout">
+            {sharing.length > 0 && (
+              <motion.ul
+                key="screens"
+                layout
+                initial={SLIDE_IN.initial}
+                animate={{ ...SLIDE_IN.animate, pointerEvents: "auto" }}
+                // Leaving screens stop taking clicks straight away.
+                exit={{ ...SLIDE_IN.exit, pointerEvents: "none" }}
+                transition={SPRING}
+                className={cn("mx-auto mb-4 grid w-full max-w-5xl shrink-0 gap-3 sm:gap-4", sharing.length > 1 && "lg:grid-cols-2")}
+              >
+                <AnimatePresence initial={false} mode="popLayout">
+                  {sharing.map((state) => (
+                    <ScreenTile key={state.userId} instanceKey={instanceKey} serverId={serverId} state={state} self={state.userId === me} />
+                  ))}
+                </AnimatePresence>
+              </motion.ul>
+            )}
+          </AnimatePresence>
+          {states.length === 0 ? (
+            <Empty name={channel.name} />
+          ) : (
             <motion.ul layout className={cn("m-auto grid w-full max-w-5xl gap-3 sm:gap-4", sharing.length > 0 && "mt-0", gridFor(states.length))}>
               <AnimatePresence initial={false} mode="popLayout">
                 {states.map((state, n) => (
@@ -117,8 +120,8 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
                 ))}
               </AnimatePresence>
             </motion.ul>
-          </LayoutGroup>
-        )}
+          )}
+        </LayoutGroup>
       </div>
 
       <footer className="flex shrink-0 flex-col items-center gap-2 border-t bg-card/60 px-4 py-3 backdrop-blur">
@@ -148,9 +151,9 @@ export function VoiceStage({ instanceKey, serverId, channel }: { instanceKey: st
             </motion.div>
           )}
         </AnimatePresence>
-        <AnimatePresence>
+        <AnimatePresence mode="popLayout">
           {joined && status !== "connected" && (
-            <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="text-xs font-bold text-muted-foreground">
+            <motion.p {...SLIDE_IN} transition={SPRING} className="text-xs font-bold text-muted-foreground">
               {t(status === "reconnecting" ? "dms-calls.calls.status.reconnecting" : "dms-calls.calls.status.connecting")}
             </motion.p>
           )}

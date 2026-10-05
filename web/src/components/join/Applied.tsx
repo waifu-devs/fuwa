@@ -1,5 +1,5 @@
 import { ClipboardPenIcon, EyeIcon, HourglassIcon, Undo2Icon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { ApplicationStatus } from "@/gen/fuwa/v1/types_pb";
 import { checkApplied, dismissApplied, run, withdrawApplication } from "@/fuwa/actions";

@@ -1,6 +1,6 @@
 import { autoUpdate, flip, FloatingPortal, offset, shift, useDismiss, useFloating, useInteractions } from "@floating-ui/react";
 import { CalendarClockIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, m as motion } from "motion/react";
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { formatFull, formatRelative, formatTimestamp, parseToken, refreshEvery, type TimestampStyle } from "@/lib/timestamps";
 
