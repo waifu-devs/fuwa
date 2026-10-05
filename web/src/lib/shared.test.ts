@@ -9,9 +9,16 @@ import { codeLeft, findShareCode, foreignServer, listNames, shareCodeInstance, s
 /** The server settings strings in a language, as the page has them (i18n/i18n.ts needs Vite, so this reads the catalogs itself). */
 const serversettings = (code: string) =>
   JSON.parse(readFileSync(new URL(`../../../locales/${code}/serversettings.json`, import.meta.url), "utf8")) as Namespace;
-const english = flatten({ serversettings: serversettings("en") });
+const chat = (code: string) => {
+  try {
+    return JSON.parse(readFileSync(new URL(`../../../locales/${code}/chat.json`, import.meta.url), "utf8")) as Namespace;
+  } catch {
+    return {};
+  }
+};
+const english = flatten({ serversettings: serversettings("en"), chat: chat("en") });
 function lang(locale: string): Lang {
-  const catalog = locale === "en" ? english : flatten({ serversettings: serversettings(locale) });
+  const catalog = locale === "en" ? english : flatten({ serversettings: serversettings(locale), chat: chat(locale) });
   const t: I18n["t"] = (key, values = {}) =>
     fill(
       template(locale, catalog, english, key, typeof values.count === "number" ? values.count : undefined),
@@ -45,22 +52,22 @@ test("a code for other instances keeps the instance it names", () => {
 });
 
 test("names read like a sentence", () => {
-  assert.equal(listNames([]), "");
-  assert.equal(listNames(["Cats"]), "Cats");
-  assert.equal(listNames(["Cats", "Dogs"]), "Cats and Dogs");
-  assert.equal(listNames(["Cats", "Dogs", "Birds"]), "Cats, Dogs and Birds");
+  assert.equal(listNames(en, []), "");
+  assert.equal(listNames(en, ["Cats"]), "Cats");
+  assert.equal(listNames(en, ["Cats", "Dogs"]), "Cats and Dogs");
+  assert.equal(listNames(en, ["Cats", "Dogs", "Birds"]), "Cats, Dogs and Birds");
 });
 
 const server = (id: string, name: string) => ({ id, name, iconUrl: "" }) as never;
 
 test("the label says which way a channel is shared", () => {
-  assert.equal(sharedLabel({ shared: undefined }), null);
-  assert.deepEqual(sharedLabel({ shared: { home: true, guests: [server("g", "Guests")], homeChannelName: "", homeServer: undefined } as never }), {
+  assert.equal(sharedLabel(en, { shared: undefined }), null);
+  assert.deepEqual(sharedLabel(en, { shared: { home: true, guests: [server("g", "Guests")], homeChannelName: "", homeServer: undefined } as never }), {
     home: true,
     names: "Guests",
     text: "Shared with Guests",
   });
-  assert.equal(sharedLabel({ shared: { home: false, guests: [], homeServer: server("h", "Home"), homeChannelName: "general" } as never })?.text, "Shared from Home");
+  assert.equal(sharedLabel(en, { shared: { home: false, guests: [], homeServer: server("h", "Home"), homeChannelName: "general" } as never })?.text, "Shared from Home");
 });
 
 test("only authors from another server get a tag", () => {

@@ -1,6 +1,7 @@
 import { type Catalog, flatten, isTag, type Meta, type Namespace } from "./core.ts";
 import englishAccountsettings from "../../../locales/en/accountsettings.json";
 import englishAppsettings from "../../../locales/en/appsettings.json";
+import englishChat from "../../../locales/en/chat.json";
 import englishChattools from "../../../locales/en/chattools.json";
 import englishCommon from "../../../locales/en/common.json";
 import englishConnect from "../../../locales/en/connect.json";
@@ -24,7 +25,7 @@ const files = import.meta.glob<Namespace>(["../../../locales/*/*.json", "!../../
 
 const codeOf = (path: string) => path.split("/").at(-2)!;
 
-export const ENGLISH = { accountsettings: englishAccountsettings, appsettings: englishAppsettings, chattools: englishChattools, common: englishCommon, connect: englishConnect, "dms-calls": englishDmsCalls, instancesettings: englishInstancesettings, join: englishJoin, serversettings: englishServersettings, settings: englishSettings, shell: englishShell, tiles: englishTiles } as const;
+export const ENGLISH = { accountsettings: englishAccountsettings, appsettings: englishAppsettings, chat: englishChat, chattools: englishChattools, common: englishCommon, connect: englishConnect, "dms-calls": englishDmsCalls, instancesettings: englishInstancesettings, join: englishJoin, serversettings: englishServersettings, settings: englishSettings, shell: englishShell, tiles: englishTiles } as const;
 export type Namespaces = typeof ENGLISH;
 export const english: Catalog = flatten(ENGLISH);
 

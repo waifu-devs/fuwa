@@ -33,8 +33,10 @@ import { SPRING, SwapText } from "@/components/motion";
 import { useLayout } from "@/components/Shell";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { displayName, memberName } from "@/lib/format";
+import { type Key, T, useI18n } from "@/i18n/react";
+import { displayName, memberName, type Lang } from "@/lib/format";
 import { hasIn } from "@/lib/permissions";
+import { listNames } from "@/lib/shared";
 import { setTitle } from "@/lib/notify";
 import type { ThreadPanelState } from "@/lib/threads";
 import { useMediaQuery } from "@/lib/use-media-query";
@@ -47,16 +49,16 @@ const NO_ITEMS: Item[] = [];
 const inChannel = (p: PendingMessage) => !p.thread || !!p.inChannel;
 
 /** What a secure channel can't do, said once: the server can't read it, so nothing that needs to can work. */
-const CANT = [
-  { icon: ShieldOffIcon, text: "AutoMod can't check messages here" },
-  { icon: SearchXIcon, text: "Search can't find them" },
-  { icon: BotOffIcon, text: "Bots, agents and webhooks can't post or read" },
-  { icon: ImageOffIcon, text: "Links stay links: no previews or pictures from links" },
+const CANT: { icon: typeof ShieldOffIcon; text: Key }[] = [
+  { icon: ShieldOffIcon, text: "chat.secure.cant.automod" },
+  { icon: SearchXIcon, text: "chat.secure.cant.search" },
+  { icon: BotOffIcon, text: "chat.secure.cant.bots" },
+  { icon: ImageOffIcon, text: "chat.secure.cant.links" },
 ];
 
-const LATER = {
-  off: "People added later only see what's sent after they join",
-  on: "People added later get recent messages from members' devices, each checked against its sender's signature",
+const LATER: Record<"on" | "off", Key> = {
+  off: "chat.secure.later.off",
+  on: "chat.secure.later.on",
 };
 
 /**
@@ -66,6 +68,8 @@ const LATER = {
  * direct message, and never through the server's messages.
  */
 export function SecureChannelView({ instanceKey, serverId, channel }: { instanceKey: string; serverId: string; channel: Channel }) {
+  const lang = useI18n();
+  const { t } = lang;
   const status = useFuwa((s) => s.instances[instanceKey]?.dms.status ?? "off");
   const problem = useFuwa((s) => s.instances[instanceKey]?.dms.problem ?? null);
   const me = useFuwa((s) => s.instances[instanceKey]?.me ?? undefined);
@@ -85,8 +89,8 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
     return () => focusChannel(null, null);
   }, [instanceKey, id]);
   useEffect(() => {
-    setTitle(`#${channel.name} · ${serverName ?? "fuwa"}`);
-  }, [channel.name, serverName]);
+    setTitle(t("chat.channel.pageTitle", { channel: channel.name, server: serverName ?? "fuwa" }));
+  }, [channel.name, serverName, t]);
   useEffect(() => () => setTitle("fuwa"), []);
 
   const canSend = hasIn(access, id, Permission.SEND_MESSAGES);
@@ -108,8 +112,8 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
     return earlierFrom(dms?.items[id], dms?.backup.status === "locked");
   });
   const describe = useCallback(
-    (item: Item) => (me ? channelLine(item, (u) => nameIn(byId, users, u), me, item.kind === "joined" ? earlier : null) : ""),
-    [byId, users, me, earlier],
+    (item: Item) => (me ? channelLine(lang, item, (u) => nameIn(byId, users, u), me, item.kind === "joined" ? earlier : null) : ""),
+    [lang, byId, users, me, earlier],
   );
 
   // ── Threads, worked out from what this device opened (the server can't tell a reply from any other line).
@@ -139,10 +143,12 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
     return {
       under: (item): ReactNode => {
         if (item.thread) return <SecureAlsoSent item={item} inThread={false} onOpen={openThread} />;
-        const t = org.threads.get(item.seq);
-        if (!t || !me) return null;
-        const unread = following(threadNote, t.parent, items, me.id) ? unreadIn(threadNote, t.parent, org.inThread.get(t.parent) ?? NO_ITEMS, me.id) : 0;
-        return <SecureRepliesRow instanceKey={instanceKey} thread={t} unread={unread} hours={hours} onOpen={openThread} />;
+        const thread = org.threads.get(item.seq);
+        if (!thread || !me) return null;
+        const unread = following(threadNote, thread.parent, items, me.id)
+          ? unreadIn(threadNote, thread.parent, org.inThread.get(thread.parent) ?? NO_ITEMS, me.id)
+          : 0;
+        return <SecureRepliesRow instanceKey={instanceKey} thread={thread} unread={unread} hours={hours} onOpen={openThread} />;
       },
       // A thread starts with Start threads; replying in one that's there takes only Send messages.
       canStart: (item) => canHaveThread(item) && canSend && (canStart || org.threads.has(item.seq)),
@@ -192,7 +198,7 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
           {compact && (
             <button
               type="button"
-              aria-label="Channels"
+              aria-label={t("chat.channel.channels")}
               onClick={() => setNavOpen(true)}
               className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted"
             >
@@ -248,12 +254,12 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={SPRING}
-            title="See who can read this channel"
+            title={t("chat.secure.seeWho")}
             className="group relative flex shrink-0 items-center gap-1.5 overflow-hidden rounded-full bg-emerald-500/12 px-2.5 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
           >
             <span aria-hidden className="shine pointer-events-none absolute inset-0" />
             <LockKeyholeIcon className="size-3.5 transition-transform duration-300 group-hover:-rotate-12 group-hover:scale-110" />
-            <span className="hidden sm:inline">End-to-end encrypted</span>
+            <span className="hidden sm:inline">{t("chat.secure.encrypted")}</span>
           </motion.button>
         </header>
         {me && status === "ready" ? (
@@ -267,8 +273,8 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
               describe={describe}
               beginning={<SecureBeginning channel={channel} sharesHistory={sharesHistory} />}
               canModerate={canModerate}
-              deleteQuestion="Delete for everyone?"
-              joiningText="Unlocking the channel on this device…"
+              deleteQuestion={t("chat.secure.deleteQuestion")}
+              joiningText={t("chat.secure.joining")}
               lines={org.channel}
               pendingIn={inChannel}
               threads={hooks}
@@ -276,11 +282,11 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
             <EncryptedComposer
               instanceKey={instanceKey}
               id={id}
-              placeholder={`Message #${channel.name}`}
-              promise="Only people in this channel can read this"
+              placeholder={t("chat.channel.placeholder", { channel: channel.name })}
+              promise={t("chat.secure.promise")}
               files={canAttach}
               dropTo={channel.name}
-              locked={canSend || broken ? "" : "You don't have permission to send messages in this channel."}
+              locked={canSend || broken ? "" : t("chat.secure.noPermission")}
               action={broken ? canReset ? <ResetButton instanceKey={instanceKey} serverId={serverId} channelId={id} write={canSend} /> : null : undefined}
             />
             <SecureChannelDialog
@@ -295,7 +301,7 @@ export function SecureChannelView({ instanceKey, serverId, channel }: { instance
             />
           </>
         ) : status === "unsupported" || status === "failed" ? (
-          <Unavailable text={problem ?? "Encrypted messages aren't available here."} />
+          <Unavailable text={problem ?? t("chat.secure.unavailable")} />
         ) : (
           <Starting />
         )}
@@ -337,48 +343,56 @@ function nameIn(byId: Map<string, Member>, users: Record<string, User> | undefin
 }
 
 /** What changed about the channel's devices, in words, from the commit itself (not from the server). */
-export function channelLine(item: Item, nameOf: (userId: string) => string, me: User, earlier: Earlier = null): string {
-  const name = (id: string) => (id === me.id ? "you" : nameOf(id));
-  const whose = (id: string) => (id === me.id ? "your" : `${nameOf(id)}'s`);
+export function channelLine(lang: Lang, item: Item, nameOf: (userId: string) => string, me: User, earlier: Earlier = null): string {
+  const { t } = lang;
   const capital = (text: string) => `${text[0]?.toUpperCase() ?? ""}${text.slice(1)}`;
+  const mine = item.senderId === me.id;
+  /** A line about what the sender did: theirs by name, or yours. */
+  const said = (theirs: Key, yours: Key, values: Record<string, string> = {}) =>
+    capital(mine ? t(yours, values) : t(theirs, { ...values, name: nameOf(item.senderId) }));
   if (item.kind === "joined") {
-    if (earlier === "shared") return "This device joined the channel. The messages above were passed on by a member's device.";
-    if (earlier === "backup") return "This device joined the channel. The messages above came from your message backup.";
-    if (earlier === "restorable") return "This device joined the channel. To read what came before, restore your message backup in Settings, under Devices.";
-    return "This device joined the channel. Messages from before it can't be read here.";
+    if (earlier === "shared") return t("chat.secure.line.joinedShared");
+    if (earlier === "backup") return t("chat.secure.line.joinedBackup");
+    if (earlier === "restorable") return t("chat.secure.line.joinedRestorable");
+    return t("chat.secure.line.joined");
   }
-  if (item.kind === "unreadable") return `A message from ${name(item.senderId)} couldn't be opened on this device.`;
+  if (item.kind === "unreadable") return mine ? t("chat.secure.line.unreadableMine") : t("chat.secure.line.unreadable", { name: nameOf(item.senderId) });
   if (item.kind === "setting") {
     return item.content === "on"
-      ? `${capital(name(item.senderId))} turned on sharing earlier messages: people added from now on get recent history, passed on by members' devices.`
-      : `${capital(name(item.senderId))} turned off sharing earlier messages: people added from now on only see what's sent after they join.`;
+      ? said("chat.secure.line.historyOn", "chat.secure.line.historyOnMine")
+      : said("chat.secure.line.historyOff", "chat.secure.line.historyOffMine");
   }
   if (item.kind === "thread") {
-    return `${capital(name(item.senderId))} ${item.content === "locked" ? "locked this thread: only people who can manage messages can reply" : "unlocked this thread"}.`;
+    return item.content === "locked"
+      ? said("chat.secure.line.locked", "chat.secure.line.lockedMine")
+      : said("chat.secure.line.unlocked", "chat.secure.line.unlockedMine");
   }
-  if (item.kind === "reset") {
-    return `${capital(name(item.senderId))} started this channel's encryption over. What came before stays on the devices that already read it.`;
-  }
+  if (item.kind === "reset") return said("chat.secure.line.reset", "chat.secure.line.resetMine");
   const devices = (list: Item["added"]) =>
-    [...new Set(list.map((d) => d.userId))].map((userId) => {
-      const n = list.filter((d) => d.userId === userId).length;
-      return `${whose(userId)} ${n === 1 ? "device" : `${n} devices`}`;
-    });
+    listNames(
+      lang,
+      [...new Set(list.map((d) => d.userId))].map((userId) => {
+        const count = list.filter((d) => d.userId === userId).length;
+        return userId === me.id ? t("chat.secure.line.yourDevices", { count }) : t("chat.secure.line.theirDevices", { count, name: nameOf(userId) });
+      }),
+    );
   const added = devices(item.added);
   const removed = devices(item.removed);
-  const by = name(item.senderId);
   const alone = item.added.length === 1 && item.added[0].userId === item.senderId && !item.removed.length;
   if (item.seq === 1) {
-    return added.length ? `${capital(by)} started this secure channel and added ${list(added)}.` : `${capital(by)} started this secure channel.`;
+    return added
+      ? said("chat.secure.line.started", "chat.secure.line.startedMine", { added })
+      : said("chat.secure.line.startedAlone", "chat.secure.line.startedAloneMine");
   }
-  if (alone) return `${capital(by)} came in on a new device.`;
-  const parts = [added.length ? `added ${list(added)}` : "", removed.length ? `removed ${list(removed)}` : ""].filter(Boolean);
-  return parts.length ? `${capital(by)} ${parts.join(", and ")}.` : `${capital(by)} refreshed the channel's keys.`;
+  if (alone) return said("chat.secure.line.newDevice", "chat.secure.line.newDeviceMine");
+  if (added && removed) return said("chat.secure.line.addedRemoved", "chat.secure.line.addedRemovedMine", { added, removed });
+  if (added) return said("chat.secure.line.added", "chat.secure.line.addedMine", { added });
+  if (removed) return said("chat.secure.line.removed", "chat.secure.line.removedMine", { removed });
+  return said("chat.secure.line.refreshed", "chat.secure.line.refreshedMine");
 }
 
-const list = (parts: string[]) => (parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`);
-
 function SecureBeginning({ channel, sharesHistory }: { channel: Channel; sharesHistory: boolean }) {
+  const { t } = useI18n();
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: 0.05 }} className="px-4 pt-10 pb-4">
       <span className="relative inline-grid size-16 place-items-center rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
@@ -392,15 +406,12 @@ function SecureBeginning({ channel, sharesHistory }: { channel: Channel; sharesH
           <LockKeyholeIcon className="size-3.5" />
         </motion.span>
       </span>
-      <h2 className="mt-3 text-2xl font-extrabold sm:text-3xl">Welcome to #{channel.name}</h2>
+      <h2 className="mt-3 text-2xl font-extrabold sm:text-3xl">{t("chat.beginning.title", { channel: channel.name })}</h2>
       <p className="mt-3 flex max-w-xl items-start gap-2 rounded-2xl bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-900 dark:text-emerald-100">
         <LockKeyholeIcon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
         <span>
-          This is a <b>secure channel</b>. Messages here are end-to-end encrypted: only the people in this channel can read them, on their own
-          devices. Not this fuwa server, and not whoever runs it. That means AutoMod, search, link previews, bots and agents don't work here.{" "}
-          {sharesHistory
-            ? "People added later get recent messages, passed on by members' devices."
-            : "People who join later only see messages sent after they join."}
+          <T k="chat.secure.beginning.about" values={{ secure: <b>{t("chat.secure.beginning.secureChannel")}</b> }} />{" "}
+          {sharesHistory ? t("chat.secure.beginning.history") : t("chat.secure.beginning.noHistory")}
         </span>
       </p>
     </motion.div>
@@ -441,6 +452,7 @@ function SecureChannelDialog({
   canReset: boolean;
   canSend: boolean;
 }) {
+  const { t } = useI18n();
   const me = useFuwa((s) => s.instances[instanceKey]?.me);
   const users = useFuwa((s) => s.instances[instanceKey]?.users);
   const dms = useFuwa((s) => s.instances[instanceKey]?.dms);
@@ -469,10 +481,7 @@ function SecureChannelDialog({
         <div className="mb-4 flex justify-center">
           <Padlock delay={0.1} />
         </div>
-        <DialogHeader
-          title={`#${channel.name} is end-to-end encrypted`}
-          description="Messages are locked on the sender's device and only open on the devices below. This fuwa server keeps and passes along what it can't read."
-        />
+        <DialogHeader title={t("chat.secure.dialog.title", { channel: channel.name })} description={t("chat.secure.dialog.description")} />
         <ul className="grid gap-1.5 rounded-2xl border bg-muted/40 p-3 text-sm">
           {lines.map(({ icon: Icon, text }, n) => (
             <motion.li
@@ -482,12 +491,15 @@ function SecureChannelDialog({
               transition={{ ...SPRING, delay: 0.1 + n * 0.04 }}
               className="flex items-center gap-2.5 text-muted-foreground"
             >
-              <Icon className="size-4 shrink-0" /> {text}
+              <Icon className="size-4 shrink-0" /> {t(text)}
             </motion.li>
           ))}
         </ul>
         <p className="mt-5 mb-2 text-sm font-extrabold">
-          Who can read it <span className="font-bold text-muted-foreground">· {people.length}</span>
+          <T
+            k="chat.secure.dialog.whoCanRead"
+            values={{ count: <span className="font-bold text-muted-foreground">{t("chat.secure.dialog.peopleCount", { count: people.length })}</span> }}
+          />
         </p>
         <ul className="scroll-thin -mx-1 max-h-64 overflow-y-auto px-1">
           {people.map(([userId, count], n) => {
@@ -503,14 +515,13 @@ function SecureChannelDialog({
                 <UserAvatar user={user} className="size-8 text-xs" />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5 truncate font-bold">
-                    {userId === me?.id ? "You" : nameIn(byId, users, userId)}
+                    {userId === me?.id ? t("chat.secure.dialog.you") : nameIn(byId, users, userId)}
                     {verified.has(userId) && (
-                      <BadgeCheckIcon className="size-4 text-emerald-500" aria-label="Verified in your direct messages" />
+                      <BadgeCheckIcon className="size-4 text-emerald-500" aria-label={t("chat.secure.dialog.verified")} />
                     )}
                   </span>
                   <span className="block text-xs text-muted-foreground">
-                    {count === 1 ? "1 device" : `${count} devices`}
-                    {verified.has(userId) && " · verified in your direct messages"}
+                    {verified.has(userId) ? t("chat.secure.dialog.devicesVerified", { count }) : t("chat.secure.dialog.devices", { count })}
                   </span>
                 </span>
               </motion.li>
@@ -518,26 +529,23 @@ function SecureChannelDialog({
           })}
         </ul>
         <p className={cn("mt-4 text-xs text-muted-foreground")}>
-          Who's in it follows the channel's permissions. Compare safety numbers in a direct message to verify someone's devices.
+          {t("chat.secure.dialog.whoNote")}
         </p>
         {canReset && (
           <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border px-3 py-2.5 transition-colors hover:bg-muted/40">
             <HistoryIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1">
-              <span className="block text-sm font-bold">Share earlier messages with people added later</span>
-              <span className="block text-xs text-muted-foreground">
-                The device that adds someone passes on recent messages, still end-to-end encrypted. Each one is checked against the signature of
-                the device that sent it, so nobody can change or make one up. Turning it on doesn't send anything to people already here.
-              </span>
+              <span className="block text-sm font-bold">{t("chat.secure.dialog.shareHistory")}</span>
+              <span className="block text-xs text-muted-foreground">{t("chat.secure.dialog.shareHistoryAbout")}</span>
               {historyError && <span className="mt-1 block text-xs text-destructive">{historyError}</span>}
             </span>
-            <Switch checked={sharesHistory} disabled={saving} onCheckedChange={toggleHistory} aria-label="Share earlier messages with people added later" />
+            <Switch checked={sharesHistory} disabled={saving} onCheckedChange={toggleHistory} aria-label={t("chat.secure.dialog.shareHistory")} />
           </label>
         )}
         {canReset && (
           <div className="mt-3 flex items-center gap-3 rounded-2xl border border-dashed px-3 py-2.5">
             <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-              If the channel's encryption stops working for everyone, start it over. Messages already read stay on the devices that read them.
+              {t("chat.secure.dialog.resetAbout")}
             </p>
             <ResetButton instanceKey={instanceKey} serverId={serverId} channelId={channel.id} write={canSend} onDone={() => onOpenChange(false)} />
           </div>
@@ -561,6 +569,7 @@ function ResetButton({
   write: boolean;
   onDone?: () => void;
 }) {
+  const { t } = useI18n();
   const [stage, setStage] = useState<"idle" | "ask" | "busy">("idle");
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -597,7 +606,7 @@ function ResetButton({
         ) : (
           <RotateCcwKeyIcon className="size-3.5 transition-transform duration-500 group-hover:-rotate-45" />
         )}
-        <SwapText>{stage === "ask" ? "Start over for everyone?" : "Start encryption over"}</SwapText>
+        <SwapText>{stage === "ask" ? t("chat.secure.resetAsk") : t("chat.secure.reset")}</SwapText>
       </motion.button>
       {error && <span className="max-w-56 text-right text-[0.7rem] text-destructive">{error}</span>}
     </span>

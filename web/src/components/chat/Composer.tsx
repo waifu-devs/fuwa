@@ -25,7 +25,7 @@ import { RulesDialog } from "@/components/join/Rules";
 import { SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
 import { formatDuration, formatLeft, timedOutUntil, toDate } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { T, useI18n } from "@/i18n/react";
 import { hasIn } from "@/lib/permissions";
 import { comboLabel, isMac } from "@/lib/keybinds";
 import { usePrefs, type SendWith } from "@/lib/prefs";
@@ -130,6 +130,7 @@ export function Composer({
   onEditLast: () => void;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const channelId = channel.id;
   // Drafts are kept per channel, and per thread apart from their channel.
   const draftKey = thread ? `thread:${thread.id}` : channelId;
@@ -283,7 +284,7 @@ export function Composer({
         run(sendMessage(instanceKey, serverId, channelId, "", [file], target)).catch(() => {
           // The message stays in the list, marked as failed, with a retry.
         }),
-      (err: Error) => setVoiceProblem(`Your voice message didn't upload: ${err.message || "try again"}`),
+      (err: Error) => setVoiceProblem(t("chat.composer.voiceFailed", { error: err.message || t("chat.composer.tryAgain") })),
     );
   }
 
@@ -312,12 +313,12 @@ export function Composer({
         ) : timedOut ? (
           <TimedOut key="timed-out" left={gate.timedOutUntil - gate.now} />
         ) : thread?.locked ? (
-          <ReadOnly key="locked" title="This thread is locked" about="A moderator locked it: you can read along, not reply." />
+          <ReadOnly key="locked" title={t("chat.composer.lockedTitle")} about={t("chat.composer.lockedAbout")} />
         ) : !gate.canSend || (thread && !thread.started && !gate.canStartThreads) ? (
           <ReadOnly
             key="read-only"
-            title={gate.canSend ? `You can't start threads in #${channel.name}` : `You can't send messages in #${channel.name}`}
-            about="Your roles let you read along here, not write."
+            title={gate.canSend ? t("chat.composer.noThreads", { channel: channel.name }) : t("chat.composer.noMessages", { channel: channel.name })}
+            about={t("chat.composer.readOnlyAbout")}
           />
         ) : (
           <motion.div
@@ -368,7 +369,7 @@ export function Composer({
               exit={{ opacity: 0, scale: 0.8 }}
               className={cn("mb-2 text-xs tabular-nums", tooLong ? "font-bold text-destructive" : "text-muted-foreground")}
             >
-              {MAX - text.length}
+              {lang.number(MAX - text.length)}
             </motion.span>
           )}
         </AnimatePresence>
@@ -383,7 +384,7 @@ export function Composer({
           {(open) => (
             <motion.button
               type="button"
-              aria-label="Emoji"
+              aria-label={t("chat.composer.emoji")}
               data-composer-emoji
               whileHover={{ scale: 1.12, rotate: -10 }}
               whileTap={{ scale: 0.85 }}
@@ -397,8 +398,8 @@ export function Composer({
         {canPoll && (
           <motion.button
             type="button"
-            aria-label="Make a poll"
-            title="Make a poll"
+            aria-label={t("chat.composer.makePoll")}
+            title={t("chat.composer.makePoll")}
             onClick={() => setPolling(true)}
             whileHover={{ scale: 1.12, y: -1 }}
             whileTap={{ scale: 0.85 }}
@@ -421,7 +422,13 @@ export function Composer({
           onClick={send}
           disabled={!ready}
           aria-label={
-            chosen ? `Run /${chosen.command.name}` : cooling ? `Slow mode: send again in ${formatLeft(lang, gate.cooldownUntil - gate.now)}` : uploading ? `Uploading files: ${Math.round(uploaded * 100)}%` : "Send"
+            chosen
+              ? t("chat.composer.run", { command: chosen.command.name })
+              : cooling
+                ? t("chat.composer.slowSendAgain", { time: formatLeft(lang, gate.cooldownUntil - gate.now) })
+                : uploading
+                  ? t("chat.composer.uploading", { percent: lang.number(uploaded, { style: "percent", maximumFractionDigits: 0 }) })
+                  : t("chat.composer.send")
           }
           whileTap={{ scale: 0.85 }}
           initial={false}
@@ -468,7 +475,7 @@ export function Composer({
               onChange={(e) => setAlsoToChannel(e.target.checked)}
               className="size-3.5 accent-[var(--primary)]"
             />
-            Also send to #{channel.name}
+            {t("chat.composer.alsoSend", { channel: channel.name })}
           </label>
         )}
         {voiceProblem ? (
@@ -478,15 +485,15 @@ export function Composer({
         ) : (
         <p className={cn("hidden min-w-0 flex-1 truncate", !thread && "sm:block")}>
           {chosen ? (
-            <>
-              <b>{comboLabel("Enter")}</b> to run /{chosen.command.name} · <b>Esc</b> to go back to typing
-            </>
+            <T k="chat.composer.hintCommand" values={{ keys: <b>{comboLabel("Enter")}</b>, command: chosen.command.name, esc: <b>Esc</b> }} />
           ) : (
-            <>
-              <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b> to send ·{" "}
-              <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b> for a new line · Markdown works
-              {commandsHere && " · / for commands"}
-            </>
+            <T
+              k={commandsHere ? "chat.composer.hintCommands" : "chat.composer.hint"}
+              values={{
+                send: <b>{sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")}</b>,
+                newLine: <b>{sendWith === "enter" ? comboLabel("Shift+Enter") : comboLabel("Enter")}</b>,
+              }}
+            />
           )}
         </p>
         )}
@@ -498,14 +505,14 @@ export function Composer({
               exit={{ opacity: 0, x: 8 }}
               transition={SPRING}
               className={cn("ml-auto flex shrink-0 items-center gap-1 font-bold tabular-nums", cooling && "text-amber-600 dark:text-amber-400")}
-              title={gate.exempt ? "You can manage messages here, so slow mode doesn't hold you back" : undefined}
+              title={gate.exempt ? t("chat.composer.slowExempt") : undefined}
             >
               <SnailIcon className={cn("size-3.5", cooling && "animate-[crawl_1.6s_ease-in-out_infinite]")} />
               {gate.exempt
-                ? `Slow mode is on for others: ${formatDuration(lang, channel.slowmodeSeconds)}`
+                ? t("chat.composer.slowOthers", { duration: formatDuration(lang, channel.slowmodeSeconds) })
                 : cooling
-                  ? `Slow mode · send again in ${formatLeft(lang, gate.cooldownUntil - gate.now)}`
-                  : `Slow mode · one message every ${formatDuration(lang, gate.slowmode)}`}
+                  ? t("chat.composer.slowCooling", { time: formatLeft(lang, gate.cooldownUntil - gate.now) })
+                  : t("chat.composer.slowEvery", { duration: formatDuration(lang, gate.slowmode) })}
             </motion.p>
           )}
         </AnimatePresence>
@@ -518,6 +525,7 @@ export function Composer({
 
 /** In place of the box until you agree to the server's rules: one button to read them. */
 function AgreeFirst({ onRead }: { onRead: () => void }) {
+  const { t } = useI18n();
   return (
     <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -536,11 +544,11 @@ function AgreeFirst({ onRead }: { onRead: () => void }) {
         <ScrollTextIcon className="size-[18px]" />
       </motion.span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-bold">Agree to the rules to start talking</p>
-        <p className="text-xs text-muted-foreground">You can read along until then.</p>
+        <p className="text-sm font-bold">{t("chat.composer.agreeTitle")}</p>
+        <p className="text-xs text-muted-foreground">{t("chat.composer.agreeAbout")}</p>
       </div>
       <Button size="sm" onClick={onRead} className="btn h-9 shrink-0 rounded-xl px-4 font-bold max-sm:w-full">
-        Read the rules
+        {t("chat.composer.readRules")}
       </Button>
     </motion.div>
   );
@@ -620,6 +628,7 @@ function ReadOnly({ title, about }: { title: string; about: string }) {
 /** In place of the box while you're timed out: how long until you can talk again. */
 function TimedOut({ left }: { left: number }) {
   const lang = useI18n();
+  const { t } = lang;
   return (
     <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -633,8 +642,8 @@ function TimedOut({ left }: { left: number }) {
         <HourglassIcon className="size-[18px] animate-[flip_3s_ease-in-out_infinite]" />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-bold">You're timed out</p>
-        <p className="text-xs text-muted-foreground">You can still read along. Messages and edits open up again when it ends.</p>
+        <p className="text-sm font-bold">{t("chat.composer.timedOutTitle")}</p>
+        <p className="text-xs text-muted-foreground">{t("chat.composer.timedOutAbout")}</p>
       </div>
       <span className="shrink-0 rounded-full bg-amber-500/15 px-2.5 py-1 text-sm font-extrabold text-amber-600 tabular-nums dark:text-amber-400">
         {formatLeft(lang, left)}

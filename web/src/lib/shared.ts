@@ -26,22 +26,23 @@ export function shareCodeInstance(code: string): string {
 }
 
 /** Who's on the other end of a shared channel, as the sidebar and header say it. */
-export function sharedLabel(channel: Pick<Channel, "shared"> | undefined): { home: boolean; names: string; text: string } | null {
+export function sharedLabel(lang: Lang, channel: Pick<Channel, "shared"> | undefined): { home: boolean; names: string; text: string } | null {
+  const { t } = lang;
   const shared = channel?.shared;
   if (!shared) return null;
   if (shared.home) {
-    const names = listNames(shared.guests.map((g) => g.name));
-    return { home: true, names, text: names ? `Shared with ${names}` : "Shared" };
+    const names = listNames(lang, shared.guests.map((g) => g.name));
+    return { home: true, names, text: names ? t("chat.shared.with", { names }) : t("chat.shared.shared") };
   }
   const names = shared.homeServer?.name ?? "";
-  return { home: false, names, text: names ? `Shared from ${names}` : "Shared" };
+  return { home: false, names, text: names ? t("chat.shared.from", { names }) : t("chat.shared.shared") };
 }
 
 /** "A", "A and B", "A, B and C". */
-export function listNames(names: string[]): string {
+export function listNames({ t }: Lang, names: string[]): string {
   const clean = names.filter(Boolean);
   if (clean.length <= 1) return clean[0] ?? "";
-  return `${clean.slice(0, -1).join(", ")} and ${clean.at(-1)}`;
+  return t("chat.shared.names", { rest: clean.slice(0, -1).join(t("chat.shared.namesSeparator")), last: clean.at(-1)! });
 }
 
 /**

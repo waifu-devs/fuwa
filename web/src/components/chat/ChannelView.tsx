@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 
 export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: string; serverId: string; channel: Channel }) {
   const lang = useI18n();
+  const { t } = lang;
   const access = useAccess(instanceKey, serverId);
   const unslowed = hasIn(access, channel.id, Permission.MANAGE_MESSAGES) || hasIn(access, channel.id, Permission.MANAGE_CHANNELS);
   const list = useRef<MessageListHandle>(null);
@@ -45,8 +46,8 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
 
   const serverName = useFuwa((s) => s.instances[instanceKey]?.servers.find((x) => x.id === serverId)?.name);
   useEffect(() => {
-    setTitle(`#${channel.name} · ${serverName ?? "fuwa"}`);
-  }, [channel.name, serverName]);
+    setTitle(t("chat.channel.pageTitle", { channel: channel.name, server: serverName ?? "fuwa" }));
+  }, [channel.name, serverName, t]);
   useEffect(() => () => setTitle("fuwa"), []);
 
   const connection = useFuwa((s) => s.instances[instanceKey]?.connection ?? "connecting");
@@ -83,7 +84,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
           {compact && (
             <button
               type="button"
-              aria-label="Channels"
+              aria-label={t("chat.channel.channels")}
               onClick={() => setNavOpen(true)}
               className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:-translate-x-0.5 hover:bg-muted"
             >
@@ -121,7 +122,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.6 }}
                 transition={SPRING}
-                title={`Slow mode: one message every ${formatDuration(lang, channel.slowmodeSeconds)}${unslowed ? " (not for you)" : ""}`}
+                title={t(unslowed ? "chat.channel.slowModeNotYou" : "chat.channel.slowMode", { duration: formatDuration(lang, channel.slowmodeSeconds) })}
                 className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-muted-foreground tabular-nums"
               >
                 <SnailIcon className="size-3.5" />
@@ -153,7 +154,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
           )}
           <motion.button
             type="button"
-            aria-label={membersOpen ? "Hide members" : "Show members"}
+            aria-label={membersOpen ? t("chat.channel.hideMembers") : t("chat.channel.showMembers")}
             aria-pressed={membersShown}
             onClick={() => {
               setPanel(null);
@@ -182,7 +183,7 @@ export function ChannelView({ instanceKey, serverId, channel }: { instanceKey: s
           instanceKey={instanceKey}
           serverId={serverId}
           channel={channel}
-          placeholder={`Message #${channel.name}`}
+          placeholder={t("chat.channel.placeholder", { channel: channel.name })}
           onEditLast={() => list.current?.editLast()}
         />
       </div>
@@ -208,6 +209,7 @@ function SidePanel({
   searching: boolean;
   side: ReactNode;
 }) {
+  const { t } = useI18n();
   const { membersOpen, setMembersOpen } = useLayout();
   const docked = useMediaQuery("(min-width: 1024px)");
   const wide = useMediaQuery("(min-width: 640px)");
@@ -267,7 +269,7 @@ function SidePanel({
           <motion.div key="members-sheet" className="absolute inset-0 z-30 flex justify-end" initial="closed" animate="open" exit="closed">
             <motion.button
               type="button"
-              aria-label="Close members"
+              aria-label={t("chat.channel.closeMembers")}
               className="absolute inset-0 bg-black/40"
               variants={{ open: { opacity: 1 }, closed: { opacity: 0 } }}
               onClick={() => setMembersOpen(false)}

@@ -73,7 +73,8 @@ import { GifMessage } from "@/components/chat/GifMessage";
 import { AppBadge } from "@/components/AppBadge";
 import { ServerTag, SharedNote } from "@/components/chat/Shared";
 import { displayName, isAgent, formatDuration, formatDay, formatFull, formatStamp, formatTime, hueOf, sameDay, toDate } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { i18n } from "@/i18n/i18n";
+import { type Key, T, useI18n } from "@/i18n/react";
 import { comboLabel } from "@/lib/keybinds";
 import { pingsUser, useNotificationSettings } from "@/lib/notifications";
 import { has, hasIn } from "@/lib/permissions";
@@ -191,6 +192,7 @@ export const MessageList = forwardRef<
   const suppressEveryone = useNotificationSettings(instanceKey, serverId)?.suppressEveryone ?? false;
   // Times follow the clock setting: a new clock re-renders every row.
   const clock = usePrefs((p) => p.clock);
+  const { t } = useI18n();
 
   useImperativeHandle(ref, () => ({
     editLast() {
@@ -268,11 +270,11 @@ export const MessageList = forwardRef<
       dismiss: (nonce) => dismissPending(instanceKey, at, nonce),
       keepOut: async (userId, name) => {
         await run(blockFromChannel(instanceKey, serverId, channel.id, userId, true));
-        toast(`${name} can't see #${channel.name} anymore`);
+        toast(t("chat.messages.keptOut", { name, channel: channel.name }));
       },
       thread: (id) => openThread?.(id),
     }),
-    [instanceKey, serverId, channel, catalog, at, threadId, openThread],
+    [instanceKey, serverId, channel, catalog, at, threadId, openThread, t],
   );
 
   const rows = useMemo(() => {
@@ -495,7 +497,7 @@ export const MessageList = forwardRef<
             className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-bold text-primary-foreground shadow-lg"
           >
             <ArrowDownIcon className="size-4 animate-bounce" />
-            {missed > 0 ? `${missed} new ${missed === 1 ? "message" : "messages"}` : "Jump to present"}
+            {missed > 0 ? t("chat.messages.newMessages", { count: missed }) : t("chat.messages.jumpToPresent")}
           </motion.button>
         )}
       </AnimatePresence>
@@ -516,6 +518,7 @@ export function DayDivider({ date }: { date: Date }) {
 }
 
 function Beginning({ channel }: { channel: Channel }) {
+  const { t } = useI18n();
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -526,9 +529,10 @@ function Beginning({ channel }: { channel: Channel }) {
       <span className="float mb-4 grid size-16 place-items-center rounded-full bg-primary/15 text-primary">
         <SparklesIcon className="size-8" />
       </span>
-      <h2 className="text-2xl font-extrabold sm:text-3xl">Welcome to #{channel.name}</h2>
+      <h2 className="text-2xl font-extrabold sm:text-3xl">{t("chat.beginning.title", { channel: channel.name })}</h2>
       <p className="mt-1 text-muted-foreground">
-        This is the start of #{channel.name}.{channel.topic ? ` ${channel.topic}` : ""}
+        {t("chat.beginning.start", { channel: channel.name })}
+        {channel.topic ? ` ${channel.topic}` : ""}
       </p>
       <SharedNote channel={channel} />
     </motion.div>
@@ -554,11 +558,12 @@ function Skeleton({ rows }: { rows: number }) {
 /** Someone's name in chat, in their role's color, with a crown for the server's owner. */
 export function AuthorName({ user, member, app = false }: { user: User | undefined; member: Member | undefined; app?: boolean }) {
   const { ownerId } = useServerLook();
+  const { t } = useI18n();
   const color = useRoleColor(member);
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
       <RoleName id={user?.id ?? ""} name={member?.nickname || displayName(user)} color={color} />
-      {!!ownerId && user?.id === ownerId && <CrownIcon aria-label="Owner" className="size-3.5 shrink-0 text-amber-400" />}
+      {!!ownerId && user?.id === ownerId && <CrownIcon aria-label={t("chat.author.owner")} className="size-3.5 shrink-0 text-amber-400" />}
       {(app || isAgent(user)) && <AppBadge agent={!app} />}
     </span>
   );
@@ -606,6 +611,7 @@ export function MessageLine({
   instanceKey?: string;
   children: React.ReactNode;
 }) {
+  const { t } = useI18n();
   const profiled = !!instanceKey && !!author && !app;
   const menu = useMemberMenu(instanceKey ?? "", member?.serverId ?? "", profiled ? author : undefined, member);
   const card = (child: React.ReactElement) =>
@@ -642,7 +648,7 @@ export function MessageLine({
       <div className="w-10 shrink-0">
         {first ? (
           card(
-            <button type="button" aria-label="Open profile" className="mt-0.5 block rounded-full transition hover:brightness-110 active:scale-95" {...menu}>
+            <button type="button" aria-label={t("chat.author.openProfile")} className="mt-0.5 block rounded-full transition hover:brightness-110 active:scale-95" {...menu}>
               <UserAvatar user={author} />
             </button>,
           )
@@ -745,7 +751,7 @@ function useSearchJump({
       if (cancelled) return;
       doneJumping(jumpTo);
       if (found()) setJumped({ id: jumpTo.messageId, at: jumpTo.at });
-      else toast("That message is too far back to open here yet; scroll up to find it");
+      else toast(i18n().t("chat.messages.tooFarBack"));
     })();
     return () => {
       cancelled = true;
@@ -850,7 +856,7 @@ const MessageRow = memo(function MessageRow({
             {edited && (
               <span className="text-[0.7rem] text-muted-foreground" title={formatFull(toDate(message.editedAt))}>
                 {" "}
-                (edited)
+                {t("chat.messages.edited")}
               </span>
             )}
             <Attachments files={message.attachments} animate={animate} />
@@ -872,9 +878,9 @@ const MessageRow = memo(function MessageRow({
               transition={{ type: "spring", stiffness: 600, damping: 32 }}
               className="flex items-center gap-0.5"
             >
-              <span className="px-2 text-xs font-bold text-destructive">{confirming === "keep-out" ? `Keep ${displayName(author)} out?` : "Delete?"}</span>
+              <span className="px-2 text-xs font-bold text-destructive">{confirming === "keep-out" ? t("chat.messages.keepOutAsk", { name: displayName(author) }) : t("chat.messages.deleteAsk")}</span>
               <ToolButton
-                label={confirming === "keep-out" ? "Keep out of this channel" : "Delete"}
+                label={confirming === "keep-out" ? t("chat.messages.keepOut") : t("chat.messages.delete")}
                 danger
                 onClick={() =>
                   (confirming === "keep-out" ? actions.keepOut(message.authorId, displayName(author)) : actions.remove(message.id)).catch((err: Error) => {
@@ -885,14 +891,14 @@ const MessageRow = memo(function MessageRow({
               >
                 <CheckIcon />
               </ToolButton>
-              <ToolButton label="Cancel" onClick={() => setConfirming(false)}>
+              <ToolButton label={t("common.cancel")} onClick={() => setConfirming(false)}>
                 <XIcon />
               </ToolButton>
             </motion.span>
           ) : (
             <>
               <ToolButton
-                label={copied ? "Copied" : "Copy text"}
+                label={copied ? t("chat.messages.copied") : t("chat.messages.copyText")}
                 onClick={() => {
                   void navigator.clipboard?.writeText(message.content);
                   setCopied(true);
@@ -913,27 +919,27 @@ const MessageRow = memo(function MessageRow({
                 </AnimatePresence>
               </ToolButton>
               {canThread && (
-                <ToolButton label={message.thread ? "Open thread" : "Reply in thread"} onClick={() => actions.thread(message.id)}>
+                <ToolButton label={message.thread ? t("chat.messages.openThread") : t("chat.messages.replyInThread")} onClick={() => actions.thread(message.id)}>
                   <MessageSquareReplyIcon />
                 </ToolButton>
               )}
               {developer && (
-                <ToolButton label="Copy message ID" onClick={() => copy(t, message.id, t("common.copy.messageId"))}>
+                <ToolButton label={t("chat.messages.copyId")} onClick={() => copy(t, message.id, t("common.copy.messageId"))}>
                   <FingerprintIcon />
                 </ToolButton>
               )}
               {mine && (
-                <ToolButton label="Edit" onClick={() => actions.edit(message.id)}>
+                <ToolButton label={t("chat.messages.edit")} onClick={() => actions.edit(message.id)}>
                   <PencilIcon />
                 </ToolButton>
               )}
               {canKeepOut && (
-                <ToolButton label="Keep out of this channel" danger onClick={() => setConfirming("keep-out")}>
+                <ToolButton label={t("chat.messages.keepOut")} danger onClick={() => setConfirming("keep-out")}>
                   <UserXIcon />
                 </ToolButton>
               )}
               {canDelete && (
-                <ToolButton label="Delete" danger onClick={() => setConfirming("delete")}>
+                <ToolButton label={t("chat.messages.delete")} danger onClick={() => setConfirming("delete")}>
                   <Trash2Icon />
                 </ToolButton>
               )}
@@ -961,11 +967,18 @@ function marked(text: string, matched: string[]): ReactNode {
   );
 }
 
-const TRIGGER_LABEL: Record<number, string> = {
-  [AutoModTrigger.KEYWORDS]: "blocked words",
-  [AutoModTrigger.MENTION_SPAM]: "mention spam",
-  [AutoModTrigger.LINKS]: "a link",
+const TRIGGER_LABEL: Record<number, Key> = {
+  [AutoModTrigger.KEYWORDS]: "chat.automod.reason.keywords",
+  [AutoModTrigger.MENTION_SPAM]: "chat.automod.reason.mentionSpam",
+  [AutoModTrigger.LINKS]: "chat.automod.reason.links",
 };
+const triggerLabel = (trigger: number): Key => (Object.hasOwn(TRIGGER_LABEL, trigger) ? TRIGGER_LABEL[trigger] : "chat.automod.reason.other");
+
+/** What an alert says AutoMod did: blocked or flagged, and in which channel when it's known. */
+function alertLine(blocked: boolean, inChannel: boolean): Key {
+  if (blocked) return inChannel ? "chat.automod.blockedIn" : "chat.automod.blocked";
+  return inChannel ? "chat.automod.flaggedIn" : "chat.automod.flagged";
+}
 
 /** What AutoMod caught, for the mods in the alert channel: who, where, what it said and what was done. */
 const AutoModAlertRow = memo(function AutoModAlertRow({
@@ -990,13 +1003,14 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
   actions: RowActions;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const alert = message.autoMod;
   const color = useRoleColor(member);
   const [confirming, setConfirming] = useState(false);
   const nameMenu = useMemberMenu(instanceKey, member?.serverId ?? actions.serverId, author, member);
   const menu = useContextMenu("automod_alert", () => [
     { id: "developer", items: items(copyIdItem(message.id, "message")) },
-    { id: "danger", items: items(canDelete && { id: "delete", label: "Delete alert", icon: Trash2Icon, danger: true, onSelect: () => setConfirming(true) }) },
+    { id: "danger", items: items(canDelete && { id: "delete", label: t("chat.automod.deleteAlert"), icon: Trash2Icon, danger: true, onSelect: () => setConfirming(true) }) },
   ]);
   if (!alert) return null;
   return (
@@ -1020,8 +1034,8 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
       </span>
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
-          <span className="font-extrabold">AutoMod</span>
-          <span className="rounded bg-primary/15 px-1 text-[0.6rem] font-extrabold text-primary uppercase">Bot</span>
+          <span className="font-extrabold">{t("chat.automod.name")}</span>
+          <span className="rounded bg-primary/15 px-1 text-[0.6rem] font-extrabold text-primary uppercase">{t("chat.automod.bot")}</span>
           <time className="text-xs text-muted-foreground" dateTime={date.toISOString()} title={formatFull(date)}>
             {formatStamp(date)}
           </time>
@@ -1029,34 +1043,34 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
         {alert.cappedPerDay > 0 ? (
           <div className="mt-1 overflow-hidden rounded-2xl border border-l-4 border-l-amber-500 bg-card/70 p-3">
             <p className="text-sm">
-              The Smart filter used up today's <b>{alert.cappedPerDay.toLocaleString()}</b> checks, so messages go
-              through it unchecked until midnight UTC. Your other rules still apply.
+              <T k="chat.automod.capped" values={{ count: <b>{lang.number(Number(alert.cappedPerDay))}</b> }} count={Number(alert.cappedPerDay)} />
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
               <span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-bold">
                 <ShieldIcon className="size-3" /> {alert.ruleName}
               </span>
               <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-bold text-amber-600 dark:text-amber-400">
-                <TimerIcon className="size-3" /> Back at midnight UTC
+                <TimerIcon className="size-3" /> {t("chat.automod.backAtMidnight")}
               </span>
             </div>
           </div>
         ) : (
         <div className="mt-1 overflow-hidden rounded-2xl border border-l-4 border-l-amber-500 bg-card/70 p-3">
           <p className="text-sm">
-            {alert.blocked ? "Blocked a message from " : "Flagged a message from "}
-            <ProfilePopover instanceKey={instanceKey} user={author} member={member}>
-              <button type="button" className="inline-flex align-bottom font-bold hover:underline" {...nameMenu}>
-                <RoleName id={message.authorId} name={member?.nickname || displayName(author)} color={color} />
-              </button>
-            </ProfilePopover>
-            {channelName && (
-              <>
-                {" "}
-                in <b>#{channelName}</b>
-              </>
-            )}{" "}
-            for {TRIGGER_LABEL[alert.trigger] ?? "breaking a rule"}.
+            <T
+              k={alertLine(alert.blocked, !!channelName)}
+              values={{
+                name: (
+                  <ProfilePopover instanceKey={instanceKey} user={author} member={member}>
+                    <button type="button" className="inline-flex align-bottom font-bold hover:underline" {...nameMenu}>
+                      <RoleName id={message.authorId} name={member?.nickname || displayName(author)} color={color} />
+                    </button>
+                  </ProfilePopover>
+                ),
+                channel: <b>#{channelName}</b>,
+                reason: t(triggerLabel(alert.trigger)),
+              }}
+            />
           </p>
           <blockquote className="mt-2 max-h-40 overflow-y-auto rounded-xl bg-muted/60 px-3 py-2 text-sm break-words whitespace-pre-wrap text-muted-foreground">
             {marked(alert.content, alert.matched)}
@@ -1072,7 +1086,7 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
             ))}
             {alert.timedOutSeconds > 0 && (
               <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-bold text-amber-600 dark:text-amber-400">
-                <TimerIcon className="size-3" /> Timed out for {formatDuration(lang, alert.timedOutSeconds)}
+                <TimerIcon className="size-3" /> {t("chat.automod.timedOutFor", { duration: formatDuration(lang, alert.timedOutSeconds) })}
               </span>
             )}
           </div>
@@ -1083,16 +1097,16 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
         <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
           {confirming ? (
             <span className="flex items-center gap-0.5">
-              <span className="px-2 text-xs font-bold text-destructive">Delete?</span>
-              <ToolButton label="Delete" danger onClick={() => actions.remove(message.id).catch(() => setConfirming(false))}>
+              <span className="px-2 text-xs font-bold text-destructive">{t("chat.messages.deleteAsk")}</span>
+              <ToolButton label={t("chat.messages.delete")} danger onClick={() => actions.remove(message.id).catch(() => setConfirming(false))}>
                 <CheckIcon />
               </ToolButton>
-              <ToolButton label="Keep" onClick={() => setConfirming(false)}>
+              <ToolButton label={t("chat.messages.keep")} onClick={() => setConfirming(false)}>
                 <XIcon />
               </ToolButton>
             </span>
           ) : (
-            <ToolButton label="Delete" danger onClick={() => setConfirming(true)}>
+            <ToolButton label={t("chat.messages.delete")} danger onClick={() => setConfirming(true)}>
               <Trash2Icon />
             </ToolButton>
           )}
@@ -1103,18 +1117,18 @@ const AutoModAlertRow = memo(function AutoModAlertRow({
 });
 
 /** Ways to say someone joined, picked by who they are so each join keeps its line. */
-const JOIN_LINES: ((name: ReactNode) => ReactNode)[] = [
-  (n) => <>{n} just landed.</>,
-  (n) => <>Welcome, {n}. Say hi!</>,
-  (n) => <>{n} joined the party.</>,
-  (n) => <>A wild {n} appeared.</>,
-  (n) => <>{n} hopped into the server.</>,
-  (n) => <>Everyone, welcome {n}!</>,
-  (n) => <>{n} is here. Glad you made it!</>,
-  (n) => <>Good to see you, {n}.</>,
+const JOIN_LINES: Key[] = [
+  "chat.join.line1",
+  "chat.join.line2",
+  "chat.join.line3",
+  "chat.join.line4",
+  "chat.join.line5",
+  "chat.join.line6",
+  "chat.join.line7",
+  "chat.join.line8",
 ];
 
-export const joinLine = (userId: string, name: ReactNode) => JOIN_LINES[hueOf(userId) % JOIN_LINES.length]!(name);
+export const joinLine = (userId: string, name: ReactNode) => <T k={JOIN_LINES[hueOf(userId) % JOIN_LINES.length]!} values={{ name }} />;
 
 /** Waves already sent this session, so the button remembers. */
 const waved = new Set<string>();
@@ -1144,6 +1158,7 @@ const JoinRow = memo(function JoinRow({
   canWave: boolean;
   actions: RowActions;
 }) {
+  const { t } = useI18n();
   const [done, setDone] = useState(() => waved.has(message.id));
   const [waving, setWaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -1160,9 +1175,9 @@ const JoinRow = memo(function JoinRow({
     }
   };
   const menu = useContextMenu("join", () => [
-    { id: "primary", items: items(!mine && !!author && canWave && !done && !waving && { id: "wave", label: "Wave", icon: HandIcon, onSelect: () => void wave().catch(() => {}) }) },
+    { id: "primary", items: items(!mine && !!author && canWave && !done && !waving && { id: "wave", label: t("chat.join.wave"), icon: HandIcon, onSelect: () => void wave().catch(() => {}) }) },
     { id: "developer", items: items(copyIdItem(message.id, "message")) },
-    { id: "danger", items: items(canDelete && { id: "delete", label: "Delete message", icon: Trash2Icon, danger: true, onSelect: () => setConfirming(true) }) },
+    { id: "danger", items: items(canDelete && { id: "delete", label: t("chat.join.deleteMessage"), icon: Trash2Icon, danger: true, onSelect: () => setConfirming(true) }) },
   ]);
   const nameMenu = useMemberMenu(instanceKey, member?.serverId ?? actions.serverId, author, member);
   const name = (
@@ -1210,23 +1225,23 @@ const JoinRow = memo(function JoinRow({
           >
             👋
           </motion.span>
-          {done ? "Waved" : "Wave"}
+          {done ? t("chat.join.waved") : t("chat.join.wave")}
         </motion.button>
       )}
       {canDelete && (
         <div className="message-tools absolute -top-3 right-4 z-10 flex items-center gap-0.5 rounded-xl border bg-card p-0.5 shadow-md">
           {confirming ? (
             <span className="flex items-center gap-0.5">
-              <span className="px-2 text-xs font-bold text-destructive">Delete?</span>
-              <ToolButton label="Delete" danger onClick={() => actions.remove(message.id).catch(() => setConfirming(false))}>
+              <span className="px-2 text-xs font-bold text-destructive">{t("chat.messages.deleteAsk")}</span>
+              <ToolButton label={t("chat.messages.delete")} danger onClick={() => actions.remove(message.id).catch(() => setConfirming(false))}>
                 <CheckIcon />
               </ToolButton>
-              <ToolButton label="Keep" onClick={() => setConfirming(false)}>
+              <ToolButton label={t("chat.messages.keep")} onClick={() => setConfirming(false)}>
                 <XIcon />
               </ToolButton>
             </span>
           ) : (
-            <ToolButton label="Delete" danger onClick={() => setConfirming(true)}>
+            <ToolButton label={t("chat.messages.delete")} danger onClick={() => setConfirming(true)}>
               <Trash2Icon />
             </ToolButton>
           )}
@@ -1264,6 +1279,7 @@ export function ToolButton({
 }
 
 export function EditBox({ initial, onCancel, onSave }: { initial: string; onCancel: () => void; onSave: (c: string) => Promise<void> }) {
+  const { t } = useI18n();
   const [text, setText] = useState(initial);
   const sendWith = usePrefs((p) => p.sendWith);
   const [error, setError] = useState<string | null>(null);
@@ -1307,9 +1323,22 @@ export function EditBox({ initial, onCancel, onSave }: { initial: string; onCanc
       />
       <p className="text-xs text-muted-foreground">
         {error ? <span className="text-destructive">{error} · </span> : null}
-        Escape to <button type="button" className="font-bold text-primary hover:underline" onClick={onCancel}>cancel</button> ·{" "}
-        {sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter")} to{" "}
-        <button type="button" className="font-bold text-primary hover:underline" onClick={() => void save()}>save</button>
+        <T
+          k="chat.edit.hint"
+          values={{
+            cancel: (
+              <button type="button" className="font-bold text-primary hover:underline" onClick={onCancel}>
+                {t("chat.edit.cancel")}
+              </button>
+            ),
+            keys: sendWith === "enter" ? comboLabel("Enter") : comboLabel("Mod+Enter"),
+            save: (
+              <button type="button" className="font-bold text-primary hover:underline" onClick={() => void save()}>
+                {t("chat.edit.save")}
+              </button>
+            ),
+          }}
+        />
       </p>
     </div>
   );
@@ -1339,11 +1368,11 @@ const PendingRow = memo(function PendingRow({
     {
       id: "primary",
       items: items(
-        !!pending.failed && !blocked && { id: "retry", label: "Retry", icon: RotateCwIcon, onSelect: onRetry },
-        { id: "copy-text", label: "Copy text", icon: CopyIcon, onSelect: () => copy(t, pending.content, t("common.copy.text")) },
+        !!pending.failed && !blocked && { id: "retry", label: t("chat.pending.retry"), icon: RotateCwIcon, onSelect: onRetry },
+        { id: "copy-text", label: t("chat.messages.copyText"), icon: CopyIcon, onSelect: () => copy(t, pending.content, t("common.copy.text")) },
       ),
     },
-    { id: "danger", items: items(!!pending.failed && { id: "dismiss", label: "Dismiss", icon: XIcon, onSelect: onDismiss }) },
+    { id: "danger", items: items(!!pending.failed && { id: "dismiss", label: t("chat.pending.dismiss"), icon: XIcon, onSelect: onDismiss }) },
   ]);
   return (
     <motion.div
@@ -1354,7 +1383,7 @@ const PendingRow = memo(function PendingRow({
       transition={{ type: "spring", stiffness: 500, damping: 34 }}
       className={cn("message-row flex gap-3 px-4", first && "first", display === "compact" && "compact")}
     >
-      <MessageLine display={display} first={first} author={me} member={member} status="sending…">
+      <MessageLine display={display} first={first} author={me} member={member} status={t("chat.pending.sending")}>
         {pending.content && (
           <MessageBody content={pending.content} display={display} className={cn(pending.failed && "text-destructive", blocked && "line-through decoration-destructive/50")} />
         )}
@@ -1370,27 +1399,27 @@ const PendingRow = memo(function PendingRow({
               <ShieldAlertIcon className="size-4 text-amber-600 dark:text-amber-400" />
             </motion.span>
             <span className="min-w-0 flex-1">
-              <b>AutoMod didn't send this.</b> <span className="text-muted-foreground first-letter:uppercase">{blocked}</span>
+              <b>{t("chat.pending.blocked")}</b> <span className="text-muted-foreground first-letter:uppercase">{blocked}</span>
             </span>
             <button
               type="button"
               onClick={() => void navigator.clipboard?.writeText(pending.content)}
               className="inline-flex items-center gap-1 font-bold text-primary hover:underline"
             >
-              <CopyIcon className="size-3" /> Copy text
+              <CopyIcon className="size-3" /> {t("chat.messages.copyText")}
             </button>
             <button type="button" onClick={onDismiss} className="font-bold text-muted-foreground hover:underline">
-              Dismiss
+              {t("chat.pending.dismiss")}
             </button>
           </motion.div>
         ) : pending.failed && (
           <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
             <span className="text-destructive first-letter:uppercase">{pending.failed}.</span>
             <button type="button" onClick={onRetry} className="inline-flex items-center gap-1 font-bold text-primary hover:underline">
-              <RotateCwIcon className="size-3" /> Retry
+              <RotateCwIcon className="size-3" /> {t("chat.pending.retry")}
             </button>
             <button type="button" onClick={onDismiss} className="font-bold text-muted-foreground hover:underline">
-              Dismiss
+              {t("chat.pending.dismiss")}
             </button>
           </p>
         )}

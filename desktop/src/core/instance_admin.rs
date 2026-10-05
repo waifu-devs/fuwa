@@ -135,7 +135,7 @@ fn lines(list: &[String]) -> Vec<&str> {
 }
 
 /// Every setting the desktop changes, as the API names it, in the web's order.
-pub const PATHS: [&str; 40] = [
+pub const PATHS: [&str; 41] = [
     "name",
     "public_url",
     "allowed_origins",
@@ -167,6 +167,7 @@ pub const PATHS: [&str; 40] = [
     "web",
     "calls",
     "call_recordings",
+    "call_recording_video",
     "call_recordings_keep_days",
     "ice_urls",
     "turn_secret",
@@ -268,6 +269,7 @@ fn differs(a: &pb::InstanceSettings, b: &pb::InstanceSettings, path: &str) -> bo
         "web" => a.web != b.web,
         "calls" => a.calls != b.calls,
         "call_recordings" => a.call_recordings != b.call_recordings,
+        "call_recording_video" => a.call_recording_video != b.call_recording_video,
         "ice_urls" => lines(&a.ice_urls) != lines(&b.ice_urls),
         "turn_secret" => a.turn_secret.trim() != b.turn_secret.trim(),
         "automod_providers" => prints(a) != prints(b),
@@ -308,6 +310,7 @@ pub fn copy_field(into: &mut pb::InstanceSettings, from: &pb::InstanceSettings, 
         "web" => into.web = from.web,
         "calls" => into.calls = from.calls,
         "call_recordings" => into.call_recordings = from.call_recordings,
+        "call_recording_video" => into.call_recording_video = from.call_recording_video,
         "ice_urls" => into.ice_urls = from.ice_urls.clone(),
         // The instance never sends the secret back, only whether one is saved and its end.
         "turn_secret" => {

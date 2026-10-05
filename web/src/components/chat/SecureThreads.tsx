@@ -7,12 +7,12 @@ import { lineText, type Item } from "@/e2ee/vault";
 import { dmProblem, followSecureThread, lockSecureThread, markSecureThreadRead } from "@/fuwa/dms";
 import { useFuwa, type PendingMessage, type ThreadNote } from "@/fuwa/store";
 import { EncryptedComposer, EncryptedMessages, type ThreadHooks } from "@/components/dm/DmView";
-import { Faces, PanelButton, SWAP } from "@/components/chat/Threads";
+import { Faces, PanelButton, SWAP, ThreadListHeader } from "@/components/chat/Threads";
 import { MessageBody, MessageLine } from "@/components/chat/MessageList";
 import { UserAvatar } from "@/components/Icons";
 import { Count, SPRING } from "@/components/motion";
 import { ago, displayName } from "@/lib/format";
-import { useI18n } from "@/i18n/react";
+import { T, useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -49,6 +49,7 @@ export const SecureRepliesRow = memo(function SecureRepliesRow({
   onOpen: (parent: number) => void;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   return (
     <motion.button
       type="button"
@@ -61,7 +62,7 @@ export const SecureRepliesRow = memo(function SecureRepliesRow({
     >
       <Faces instanceKey={instanceKey} ids={thread.participants} />
       <span className="flex shrink-0 items-center gap-1 font-bold text-primary">
-        <Count value={thread.replies} /> {thread.replies === 1 ? "reply" : "replies"}
+        <T k="chat.threads.replies" values={{ count: <Count value={thread.replies} /> }} count={thread.replies} />
       </span>
       <AnimatePresence initial={false}>
         {unread > 0 && (
@@ -72,17 +73,21 @@ export const SecureRepliesRow = memo(function SecureRepliesRow({
             transition={SPRING}
             className="rounded-full bg-primary px-1.5 text-[0.65rem] font-extrabold text-primary-foreground tabular-nums"
           >
-            {unread > 99 ? "99+" : unread} new
+            {unread > 99 ? t("chat.threads.newMany") : t("chat.threads.newCount", { count: unread })}
           </motion.span>
         )}
       </AnimatePresence>
-      {thread.locked && <LockIcon aria-label="Locked" className="size-3 shrink-0 text-muted-foreground" />}
+      {thread.locked && <LockIcon aria-label={t("chat.threads.locked")} className="size-3 shrink-0 text-muted-foreground" />}
       <span className="grid min-w-0 text-muted-foreground">
         <span className={cn(SWAP, "group-hover/replies:-translate-y-1 group-hover/replies:opacity-0 group-focus-visible/replies:-translate-y-1 group-focus-visible/replies:opacity-0")}>
-          {archived(thread, hours) ? "Archived" : thread.lastAt ? `Last reply ${ago(lang, new Date(thread.lastAt))}` : "No replies"}
+          {archived(thread, hours)
+            ? t("chat.threads.archived")
+            : thread.lastAt
+              ? t("chat.threads.lastReply", { time: ago(lang, new Date(thread.lastAt)) })
+              : t("chat.secureThreads.noReplies")}
         </span>
         <span aria-hidden className={cn(SWAP, "translate-y-1 opacity-0 group-hover/replies:translate-y-0 group-hover/replies:opacity-100 group-focus-visible/replies:translate-y-0 group-focus-visible/replies:opacity-100")}>
-          View thread
+          {t("chat.threads.view")}
         </span>
       </span>
     </motion.button>
@@ -91,15 +96,16 @@ export const SecureRepliesRow = memo(function SecureRepliesRow({
 
 /** On a reply also sent to the channel: in the channel, a way into its thread; in the thread, that it went to the channel too. */
 export function SecureAlsoSent({ item, inThread, onOpen }: { item: Item; inThread: boolean; onOpen: (parent: number) => void }) {
+  const { t } = useI18n();
   if (!item.inChannel || !item.thread) return null;
-  if (inThread) return <p className="text-[0.7rem] font-bold text-muted-foreground">Also sent to the channel</p>;
+  if (inThread) return <p className="text-[0.7rem] font-bold text-muted-foreground">{t("chat.threads.alsoSent")}</p>;
   return (
     <button
       type="button"
       onClick={() => onOpen(item.thread!)}
       className="flex items-center gap-1 text-[0.7rem] font-bold text-muted-foreground transition-colors hover:text-primary"
     >
-      <CornerDownRightIcon className="size-3" /> Replied in a thread
+      <CornerDownRightIcon className="size-3" /> {t("chat.threads.repliedInThread")}
     </button>
   );
 }
@@ -118,6 +124,7 @@ function SecureThreadStart({
   author: User | undefined;
   member: Member | undefined;
 }) {
+  const { t } = useI18n();
   const display = usePrefs((p) => p.messageDisplay);
   return (
     <div className="pt-3">
@@ -129,18 +136,12 @@ function SecureThreadStart({
         </div>
       ) : (
         <p className="mx-4 rounded-2xl border border-dashed px-3 py-2.5 text-sm text-muted-foreground">
-          The message this thread is under isn't on this device.
+          {t("chat.secureThreads.parentMissing")}
         </p>
       )}
       <div role="separator" className="my-3 flex items-center gap-3 px-4 text-xs font-bold text-muted-foreground">
         <span>
-          {count === 0 ? (
-            "No replies yet. Start the thread!"
-          ) : (
-            <>
-              <Count value={count} /> {count === 1 ? "reply" : "replies"}
-            </>
-          )}
+          {count === 0 ? t("chat.threads.noReplies") : <T k="chat.threads.replies" values={{ count: <Count value={count} /> }} count={count} />}
         </span>
         <span className="h-px flex-1 bg-border" />
       </div>
@@ -182,6 +183,7 @@ export function SecureThreadPanel({
   canModerate: boolean;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const id = channel.id;
   const items = useFuwa((s) => s.instances[instanceKey]?.dms.items[id] ?? NO_ITEMS);
   const note = useThreadNote(instanceKey, id);
@@ -212,7 +214,7 @@ export function SecureThreadPanel({
   const fail = (err: unknown) => toast(dmProblem(err));
   const follow = () =>
     followSecureThread(instanceKey, id, parent, !followed)
-      .then(() => toast(followed ? "You won't hear about this thread anymore" : "You'll hear about new replies here"))
+      .then(() => toast(followed ? t("chat.threads.unfollowed") : t("chat.threads.followed")))
       .catch(fail);
   const lock = () => lockSecureThread(instanceKey, id, parent, !locked).catch(fail);
 
@@ -221,14 +223,21 @@ export function SecureThreadPanel({
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <MessagesSquareIcon className="size-5 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
-          <h2 className="truncate leading-tight font-extrabold">Thread</h2>
+          <h2 className="truncate leading-tight font-extrabold">{t("chat.threads.thread")}</h2>
           <p className="truncate text-xs text-muted-foreground">
-            #{channel.name}
-            {archived(thread, hours) && " · archived"}
-            {locked && " · locked"}
+            {t(
+              archived(thread, hours) && locked
+                ? "chat.threads.whereArchivedLocked"
+                : archived(thread, hours)
+                  ? "chat.threads.whereArchived"
+                  : locked
+                    ? "chat.threads.whereLocked"
+                    : "chat.threads.where",
+              { channel: channel.name },
+            )}
           </p>
         </div>
-        <PanelButton label={followed ? "Unfollow thread" : "Follow thread"} active={followed} onClick={follow}>
+        <PanelButton label={followed ? t("chat.threads.unfollow") : t("chat.threads.follow")} active={followed} onClick={follow}>
           <motion.span
             key={followed ? "on" : "off"}
             initial={{ rotate: -25, scale: 0.6, opacity: 0 }}
@@ -240,11 +249,11 @@ export function SecureThreadPanel({
           </motion.span>
         </PanelButton>
         {canModerate && canSend && (
-          <PanelButton label={locked ? "Unlock thread" : "Lock thread"} active={locked} onClick={lock}>
+          <PanelButton label={locked ? t("chat.threads.unlock") : t("chat.threads.lock")} active={locked} onClick={lock}>
             {locked ? <LockIcon /> : <LockOpenIcon />}
           </PanelButton>
         )}
-        <PanelButton label="Close thread" onClick={onClose}>
+        <PanelButton label={t("chat.threads.close")} onClick={onClose}>
           <XIcon />
         </PanelButton>
       </header>
@@ -266,8 +275,8 @@ export function SecureThreadPanel({
           />
         }
         canModerate={canModerate}
-        deleteQuestion="Delete for everyone?"
-        joiningText="Unlocking the channel on this device…"
+        deleteQuestion={t("chat.secure.deleteQuestion")}
+        joiningText={t("chat.secure.joining")}
         lines={lines}
         pendingIn={pendingIn}
         threads={hooks}
@@ -275,14 +284,14 @@ export function SecureThreadPanel({
       <EncryptedComposer
         instanceKey={instanceKey}
         id={id}
-        placeholder="Reply in thread"
-        promise="Only people in this channel can read this"
+        placeholder={t("chat.threads.placeholder")}
+        promise={t("chat.secure.promise")}
         files={canAttach}
         locked={
           !canSend
-            ? "You don't have permission to send messages in this channel."
+            ? t("chat.secure.noPermission")
             : locked && !canModerate
-              ? "This thread is locked. Only people who can manage messages can reply."
+              ? t("chat.secureThreads.locked")
               : ""
         }
         action={null}
@@ -320,6 +329,7 @@ export function SecureThreadList({
   onClose: () => void;
 }) {
   const lang = useI18n();
+  const { t } = lang;
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const hours = useArchiveHours(instanceKey, serverId);
@@ -327,31 +337,22 @@ export function SecureThreadList({
   const note = useThreadNote(instanceKey, channel.id);
   const bySeq = useMemo(() => new Map(items.map((i) => [i.seq, i])), [items]);
   const threads = useMemo(
-    () => search(org, bySeq, query).filter((t) => archived(t, hours) === showArchived),
+    () => search(org, bySeq, query).filter((th) => archived(th, hours) === showArchived),
     [org, bySeq, query, hours, showArchived],
   );
   const tabs = hours > 0 ? [false, true] : [false];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
-        <MessagesSquareIcon className="size-5 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate leading-tight font-extrabold">Threads</h2>
-          <p className="truncate text-xs text-muted-foreground">#{channel.name} · on this device</p>
-        </div>
-        <PanelButton label="Close threads" onClick={onClose}>
-          <XIcon />
-        </PanelButton>
-      </header>
+      <ThreadListHeader where={t("chat.secureThreads.where", { channel: channel.name })} onClose={onClose} />
       <div className="flex flex-col gap-2 border-b p-3">
         <label className="flex items-center gap-2 rounded-xl border bg-card px-2.5 py-1.5 focus-within:border-primary/50">
           <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value.slice(0, 100))}
-            placeholder="Search threads"
-            aria-label="Search threads"
+            placeholder={t("chat.threads.search")}
+            aria-label={t("chat.threads.search")}
             className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </label>
@@ -375,7 +376,7 @@ export function SecureThreadList({
                   />
                 )}
                 {tab ? <ArchiveIcon className="size-3.5" /> : <MessagesSquareIcon className="size-3.5" />}
-                {tab ? "Archived" : "Open"}
+                {tab ? t("chat.threads.archived") : t("chat.threads.open")}
               </button>
             ))}
           </div>
@@ -392,54 +393,56 @@ export function SecureThreadList({
             <span className="float grid size-12 place-items-center rounded-full bg-primary/10 text-primary">
               <MessagesSquareIcon className="size-6" />
             </span>
-            <p className="text-sm font-bold">{query ? "No threads say that" : showArchived ? "Nothing archived" : "No threads yet"}</p>
+            <p className="text-sm font-bold">{query ? t("chat.threads.noMatches") : showArchived ? t("chat.threads.noArchived") : t("chat.threads.none")}</p>
             <p className="text-xs text-muted-foreground">
               {query
-                ? "Only what this device can read is searched."
+                ? t("chat.secureThreads.searchNote")
                 : showArchived
-                  ? `Threads nobody replies in for ${hours >= 48 ? `${Math.round(hours / 24)} days` : `${hours} hours`} land here.`
-                  : "Hover a message and pick Reply in thread to start one."}
+                  ? hours >= 48
+                    ? t("chat.threads.archivedHintDays", { count: Math.round(hours / 24) })
+                    : t("chat.threads.archivedHintHours", { count: hours })
+                  : t("chat.threads.noneHint")}
             </p>
           </motion.div>
         )}
         <AnimatePresence initial={false}>
-          {threads.map((t, n) => {
-            const m = bySeq.get(t.parent);
+          {threads.map((th, n) => {
+            const m = bySeq.get(th.parent);
             const author = m ? userOf(m.senderId) : undefined;
-            const unread = following(noteOf(note), t.parent, items, me.id)
-              ? unreadIn(noteOf(note), t.parent, org.inThread.get(t.parent) ?? NO_ITEMS, me.id)
+            const unread = following(noteOf(note), th.parent, items, me.id)
+              ? unreadIn(noteOf(note), th.parent, org.inThread.get(th.parent) ?? NO_ITEMS, me.id)
               : 0;
             return (
               <motion.button
-                key={t.parent}
+                key={th.parent}
                 type="button"
                 layout="position"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ ...SPRING, delay: Math.min(n, 8) * 0.025 }}
-                onClick={() => onOpen(t.parent)}
+                onClick={() => onOpen(th.parent)}
                 className="flex w-full gap-2.5 rounded-xl p-2.5 text-left transition-colors hover:bg-muted/70"
               >
                 <UserAvatar user={author} className="size-8 text-xs" />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
-                    <b className="truncate text-sm">{m ? displayName(author) : "Earlier message"}</b>
+                    <b className="truncate text-sm">{m ? displayName(author) : t("chat.secureThreads.earlier")}</b>
                     {m && <span className="shrink-0 text-[0.7rem] text-muted-foreground">{ago(lang, new Date(m.at))}</span>}
                   </span>
-                  <span className="line-clamp-2 text-sm break-words text-muted-foreground">{m ? plain(lineText(m)) || "…" : "Not on this device"}</span>
+                  <span className="line-clamp-2 text-sm break-words text-muted-foreground">{m ? plain(lineText(m)) || "…" : t("chat.secureThreads.notHere")}</span>
                   <span className="mt-1 flex items-center gap-2 text-xs">
-                    <Faces instanceKey={instanceKey} ids={t.participants} size="size-4" />
+                    <Faces instanceKey={instanceKey} ids={th.participants} size="size-4" />
                     <b className="text-primary">
-                      {t.replies} {t.replies === 1 ? "reply" : "replies"}
+                      {t("chat.threads.replies", { count: th.replies })}
                     </b>
                     {unread > 0 && (
                       <span className="rounded-full bg-primary px-1.5 text-[0.65rem] font-extrabold text-primary-foreground tabular-nums">
-                        {unread > 99 ? "99+" : unread} new
+                        {unread > 99 ? t("chat.threads.newMany") : t("chat.threads.newCount", { count: unread })}
                       </span>
                     )}
-                    {t.locked && <LockIcon className="size-3 text-muted-foreground" />}
-                    {t.lastAt > 0 && <span className="truncate text-muted-foreground">last {ago(lang, new Date(t.lastAt))}</span>}
+                    {th.locked && <LockIcon className="size-3 text-muted-foreground" />}
+                    {th.lastAt > 0 && <span className="truncate text-muted-foreground">{t("chat.threads.lastAgo", { time: ago(lang, new Date(th.lastAt)) })}</span>}
                   </span>
                 </span>
               </motion.button>

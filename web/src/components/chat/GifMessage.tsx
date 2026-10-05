@@ -5,6 +5,7 @@ import type { MessageGif } from "@/gen/fuwa/v1/types_pb";
 import { run } from "@/fuwa/actions";
 import { isSaved, providerName, saveGif, unsaveGif, useSavedGifs } from "@/fuwa/gifs";
 import { GifImage } from "@/components/chat/GifImage";
+import { useI18n } from "@/i18n/react";
 import { reduceMotion, usePrefs } from "@/lib/prefs";
 import { toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ export function fitGif(width: number, height: number, maxW = MAX_W, maxH = MAX_H
  * it's pointed at or tapped.
  */
 export function GifMessage({ gif, instanceKey, animate }: { gif: MessageGif | undefined; instanceKey: string; animate: boolean }) {
+  const { t } = useI18n();
   const still = usePrefs(reduceMotion);
   const [hover, setHover] = useState(false);
   const [tapped, setTapped] = useState(false);
@@ -38,7 +40,7 @@ export function GifMessage({ gif, instanceKey, animate }: { gif: MessageGif | un
 
   function toggle() {
     run(starred ? unsaveGif(instanceKey, gif!.url) : saveGif(instanceKey, gif!.url)).then(
-      () => toast(starred ? "Removed from your GIFs" : "Saved to your GIFs"),
+      () => toast(starred ? t("chat.gif.removed") : t("chat.gif.saved")),
       (err: Error) => toast(err.message),
     );
   }
@@ -55,13 +57,13 @@ export function GifMessage({ gif, instanceKey, animate }: { gif: MessageGif | un
     >
       <button
         type="button"
-        onClick={() => still && setTapped((t) => !t)}
+        onClick={() => still && setTapped((on) => !on)}
         onFocus={() => setHover(true)}
         onBlur={() => setHover(false)}
-        aria-label={gif.title || "GIF"}
+        aria-label={gif.title || t("chat.gif.gif")}
         className={cn("block size-full", still ? "cursor-pointer" : "cursor-default")}
       >
-        <GifImage src={gif.url} playing={playing} alt={gif.title || "GIF"} className="size-full object-cover" />
+        <GifImage src={gif.url} playing={playing} alt={gif.title || t("chat.gif.gif")} className="size-full object-cover" />
       </button>
       <AnimatePresence>
         {still && !playing && (
@@ -71,14 +73,14 @@ export function GifMessage({ gif, instanceKey, animate }: { gif: MessageGif | un
             exit={{ opacity: 0 }}
             className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[0.65rem] font-extrabold tracking-wide text-white"
           >
-            GIF
+            {t("chat.gif.gif")}
           </motion.span>
         )}
       </AnimatePresence>
       <button
         type="button"
         onClick={toggle}
-        aria-label={starred ? "Remove from your GIFs" : "Save to your GIFs"}
+        aria-label={starred ? t("chat.gif.remove") : t("chat.gif.save")}
         aria-pressed={starred}
         className={cn(
           "absolute top-1.5 right-1.5 grid size-8 place-items-center rounded-lg bg-black/55 text-white opacity-0 transition-[opacity,transform] duration-150 group-hover/gif:opacity-100 focus-visible:opacity-100 active:scale-90",
@@ -89,7 +91,7 @@ export function GifMessage({ gif, instanceKey, animate }: { gif: MessageGif | un
       </button>
       {credit && (
         <span className="pointer-events-none absolute right-2 bottom-1.5 text-[0.6rem] font-bold text-white/85 opacity-0 transition-opacity duration-150 [text-shadow:0_1px_2px_rgb(0_0_0/0.6)] group-hover/gif:opacity-100">
-          via {credit}
+          {t("chat.gif.via", { provider: credit })}
         </span>
       )}
     </motion.div>

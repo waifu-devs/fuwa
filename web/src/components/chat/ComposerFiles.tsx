@@ -13,13 +13,14 @@ type Where = { instanceKey: string; serverId: string; channelId: string };
 
 /** The paperclip: picks files from the device for the next message. */
 export function AttachButton({ where, disabled }: { where: Where; disabled?: boolean }) {
+  const { t } = useI18n();
   const input = useRef<HTMLInputElement>(null);
   return (
     <>
       <motion.button
         type="button"
-        aria-label="Attach files"
-        title="Attach files"
+        aria-label={t("chat.files.attach")}
+        title={t("chat.files.attach")}
         disabled={disabled}
         onClick={() => input.current?.click()}
         whileHover={{ scale: 1.12, rotate: 12 }}
@@ -44,6 +45,7 @@ export function AttachButton({ where, disabled }: { where: Where; disabled?: boo
 
 /** The files going with the next message, each with how far its upload got. */
 export function StagedTray({ where, staged }: { where: Where; staged: Staged[] }) {
+  const { t } = useI18n();
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -52,7 +54,7 @@ export function StagedTray({ where, staged }: { where: Where; staged: Staged[] }
       transition={SPRING}
       className="scroll-thin -mx-1 flex gap-2 overflow-x-auto px-1 pt-1 pb-2"
       role="list"
-      aria-label="Files to send"
+      aria-label={t("chat.files.toSend")}
     >
       <AnimatePresence initial={false} mode="popLayout">
         {staged.map((s) => (
@@ -65,6 +67,7 @@ export function StagedTray({ where, staged }: { where: Where; staged: Staged[] }
 
 function StagedCard({ where, staged }: { where: Where; staged: Staged }) {
   const lang = useI18n();
+  const { t } = lang;
   const { file, preview, sent, done, failed } = staged;
   return (
     <motion.div
@@ -78,7 +81,7 @@ function StagedCard({ where, staged }: { where: Where; staged: Staged }) {
         "group/staged relative flex h-24 w-36 shrink-0 flex-col overflow-hidden rounded-xl border bg-muted/40",
         failed && "border-destructive/60 bg-destructive/5",
       )}
-      title={failed ?? `${file.name} · ${formatBytes(lang, file.size)}`}
+      title={failed ?? t("chat.files.nameAndSize", { name: file.name, size: formatBytes(lang, file.size) })}
     >
       {preview ? (
         <img src={preview} alt="" className={cn("absolute inset-0 size-full object-cover transition-opacity duration-300", !done && "opacity-60")} />
@@ -118,7 +121,7 @@ function StagedCard({ where, staged }: { where: Where; staged: Staged }) {
         {failed && (
           <button
             type="button"
-            aria-label={`Try ${file.name} again`}
+            aria-label={t("chat.files.retry", { name: file.name })}
             onClick={() => retryFile(where.instanceKey, where.serverId, where.channelId, staged.id)}
             className="grid size-6 place-items-center rounded-full bg-card/90 text-foreground shadow-sm transition hover:rotate-45 hover:text-primary"
           >
@@ -127,7 +130,7 @@ function StagedCard({ where, staged }: { where: Where; staged: Staged }) {
         )}
         <button
           type="button"
-          aria-label={`Remove ${file.name}`}
+          aria-label={t("chat.files.remove", { name: file.name })}
           onClick={() => removeFile(where.channelId, staged.id)}
           className="grid size-6 place-items-center rounded-full bg-card/90 text-foreground shadow-sm transition hover:rotate-90 hover:text-destructive"
         >
@@ -147,7 +150,7 @@ export function DropOverlay({
   where,
   channelName,
   onFiles,
-  note = "Up to 10 files with your next message.",
+  note,
 }: {
   where?: Where;
   /** The channel they'll go to, or (starting with "@") the person. */
@@ -156,6 +159,7 @@ export function DropOverlay({
   onFiles?: (files: File[]) => void;
   note?: string;
 }) {
+  const { t } = useI18n();
   const [over, setOver] = useState(false);
   useEffect(() => {
     let depth = 0;
@@ -219,8 +223,10 @@ export function DropOverlay({
             >
               <UploadIcon className="size-7" />
             </motion.span>
-            <p className="text-lg font-extrabold">Drop to send in {channelName.startsWith("@") ? channelName : `#${channelName}`}</p>
-            <p className="text-sm text-muted-foreground">{note}</p>
+            <p className="text-lg font-extrabold">
+              {channelName.startsWith("@") ? t("chat.files.dropToPerson", { name: channelName }) : t("chat.files.dropToChannel", { channel: channelName })}
+            </p>
+            <p className="text-sm text-muted-foreground">{note ?? t("chat.files.dropNote")}</p>
           </motion.div>
         </motion.div>
       )}

@@ -30,6 +30,8 @@ pub struct ServerPatch {
     pub banner_focus: Option<(i32, i32)>,
     /// 0xRRGGBB, or -1 for none.
     pub accent_color: Option<i32>,
+    /// Recordings on the server keep cameras and shared screens too.
+    pub record_video: Option<bool>,
 }
 
 /// Someone's account by id, from a list a call sent along.
@@ -55,6 +57,7 @@ impl Core {
                 banner_focus_x: patch.banner_focus.map(|(x, _)| x),
                 banner_focus_y: patch.banner_focus.map(|(_, y)| y),
                 accent_color: patch.accent_color,
+                record_video: patch.record_video,
                 ..Default::default()
             })
         )
@@ -66,6 +69,13 @@ impl Core {
             }
         });
         Ok(server)
+    }
+
+    /// Whether the instance lets servers keep video in their recordings.
+    pub async fn recording_video_allowed(&self, key: &str) -> Result<bool, Problem> {
+        let api = self.api(key).ok_or_else(missing)?;
+        let res = rpc!(api.calls(), get_call_settings(pb::GetCallSettingsRequest {})).await?;
+        Ok(res.recording_video)
     }
 
     /// The server's invites, and who made them.
