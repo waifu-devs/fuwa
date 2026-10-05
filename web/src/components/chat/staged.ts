@@ -5,6 +5,7 @@ import { runCancelable, uploadAttachment } from "@/fuwa/actions";
 import { cantAdd, localLook, MAX_FILES, type FileLook } from "@/lib/attachments";
 import { reportError, reportTiming } from "@/lib/reports";
 import { toast } from "@/lib/ui";
+import { i18n } from "@/i18n/i18n";
 
 /**
  * Files picked for the next message in each channel. Each starts uploading
@@ -94,7 +95,7 @@ function start(key: string, serverId: string, channelId: string, staged: Staged)
     (err: Error) => {
       if (!(byChannel.get(channelId) ?? NONE).some((s) => s.id === staged.id)) return;
       reportError("upload_failed", "attachment");
-      const message = err.message || "the upload didn't go through";
+      const message = err.message || i18n().t("system.upload.failed");
       patch(channelId, staged.id, { failed: message.replace(/^./, (c) => c.toUpperCase()) });
     },
   );
@@ -104,7 +105,7 @@ function start(key: string, serverId: string, channelId: string, staged: Staged)
 export function addFiles(key: string, serverId: string, channelId: string, files: File[]) {
   if (!files.length) return;
   const already = (byChannel.get(channelId) ?? NONE).length;
-  const why = cantAdd(already, files.length);
+  const why = cantAdd(i18n().t, already, files.length);
   if (why) toast(why);
   const room = Math.max(0, MAX_FILES - already);
   for (const file of files.slice(0, room)) {

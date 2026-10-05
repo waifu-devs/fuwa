@@ -42,6 +42,7 @@ import { arranged } from "@/lib/arrange";
 import { fromItems, sameRail, toItems, type RailLayout } from "@/lib/rail";
 import type { SetServerArrangementRequest } from "@/gen/fuwa/v1/account_pb";
 import { accessOf, canSee, sortRoles } from "@/lib/permissions";
+import { i18n } from "@/i18n/i18n";
 import { makeApi } from "./client";
 import { call, FuwaError, toFuwaError } from "./errors";
 import { accountKey, instanceKey, normalizeUrl } from "./saved";
@@ -104,7 +105,7 @@ export const probe = (input: string) =>
   Effect.gen(function* () {
     const url = yield* Effect.try({
       try: () => normalizeUrl(input),
-      catch: () => toFuwaError(new Error("that doesn't look like an address")),
+      catch: () => toFuwaError(new Error(i18n().t("system.signIn.badAddress"))),
     });
     const { node } = yield* call((signal) => makeApi(url, () => null).node.getNode({}, { signal }));
     return { url, node: node! };
@@ -143,7 +144,7 @@ export const signUp = (url: string, username: string, password: string, displayN
 export const startLinkedSignIn = (url: string, next: string | null) =>
   Effect.gen(function* () {
     if (!canReturnTo(window.location.origin)) {
-      return yield* Effect.fail(toFuwaError(new Error("signing in with waifu.dev needs this page on an https address")));
+      return yield* Effect.fail(toFuwaError(new Error(i18n().t("system.signIn.linkedNeedsHttps"))));
     }
     const secret = newSecret();
     const secretHash = yield* Effect.promise(() => sha256Hex(secret));
@@ -151,7 +152,7 @@ export const startLinkedSignIn = (url: string, next: string | null) =>
       makeApi(url, () => null).auth.startLinkedSignIn({ returnOrigin: window.location.origin, secretHash }, { signal }),
     );
     if (!savePending(res.state, { url, secret, next, startedAt: Date.now() })) {
-      return yield* Effect.fail(toFuwaError(new Error("this browser won't keep the sign-in while you visit waifu.dev")));
+      return yield* Effect.fail(toFuwaError(new Error(i18n().t("system.signIn.linkedNotKept"))));
     }
     window.location.assign(res.authorizeUrl);
     return true;
@@ -178,7 +179,7 @@ export const linkedSignInOrigin = (url: string, state: string) =>
 /** Keeps a sign-in in this tab, then sends the browser to the provider. */
 function leaveFor(authorizeUrl: string, state: string, pending: PendingSso) {
   if (!savePendingSso(state, pending)) {
-    return Effect.fail(toFuwaError(new Error("this browser won't keep the sign-in while you visit the provider")));
+    return Effect.fail(toFuwaError(new Error(i18n().t("system.signIn.ssoNotKept"))));
   }
   window.location.assign(authorizeUrl);
   return Effect.succeed(true);
@@ -246,7 +247,7 @@ export const updateServerSso = (
 export const startServerSso = (key: string, serverId: string, opts: { join?: boolean; inviteCode?: string; next?: string | null } = {}) =>
   Effect.gen(function* () {
     if (!canReturnTo(window.location.origin)) {
-      return yield* Effect.fail(toFuwaError(new Error("single sign-on needs this page on an https address")));
+      return yield* Effect.fail(toFuwaError(new Error(i18n().t("system.signIn.ssoNeedsHttps"))));
     }
     const { secret, secretHash } = yield* ssoSecret;
     const res = yield* call((signal) =>
@@ -381,10 +382,10 @@ const upload = (key: string, purpose: MediaPurpose, file: Blob, progress?: (sent
           progress?.(1);
           return resume(Effect.void);
         }
-        const message = xhr.responseText.trim() || "the upload didn't go through";
+        const message = xhr.responseText.trim() || i18n().t("system.upload.failed");
         resume(Effect.fail(new FuwaError({ code: PUT_FAILURES[xhr.status] ?? Code.Unavailable, message })));
       };
-      xhr.onerror = () => resume(Effect.fail(new FuwaError({ code: Code.Unavailable, message: "can't reach this server right now" })));
+      xhr.onerror = () => resume(Effect.fail(new FuwaError({ code: Code.Unavailable, message: i18n().t("system.connection.unreachable") })));
       xhr.send(file);
       return Effect.sync(() => xhr.abort());
     });
@@ -1688,7 +1689,7 @@ export const testWebhook = (url: string, content: string) =>
   Effect.tryPromise({
     try: async () => {
       const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content }) });
-      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { message?: string } | null)?.message ?? `the webhook answered ${res.status}`);
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { message?: string } | null)?.message ?? i18n().t("system.webhook.answered", { status: String(res.status) }));
       return true;
     },
     catch: (err) => toFuwaError(err),

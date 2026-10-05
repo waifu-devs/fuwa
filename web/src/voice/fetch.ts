@@ -2,6 +2,7 @@
  * Fetching a voice message's file, wherever it's kept: never more than a
  * long voice message can be, nor more than the message says it is.
  */
+import { i18n } from "@/i18n/i18n";
 import { shownPicture } from "@/lib/shown";
 import type { Loader } from "./player";
 
@@ -20,14 +21,14 @@ export async function readExactly(body: ReadableStream<Uint8Array>, size: number
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (at + value.length > size) throw new Error("this voice message isn't the one that was sent");
+      if (at + value.length > size) throw new Error(i18n().t("system.voice.notTheOne"));
       out.set(value, at);
       at += value.length;
     }
   } finally {
     void reader.cancel().catch(() => {});
   }
-  if (at !== size) throw new Error("this voice message isn't the one that was sent");
+  if (at !== size) throw new Error(i18n().t("system.voice.notTheOne"));
   return out;
 }
 
@@ -39,11 +40,11 @@ export async function readExactly(body: ReadableStream<Uint8Array>, size: number
 export function attachmentLoader(url: string, size: number): Loader {
   return async () => {
     const from = shownPicture(url);
-    if (!from) throw new Error("this voice message isn't on a fuwa instance");
-    if (!(size > 0) || size > MAX_VOICE_BYTES) throw new Error("this voice message is too big to play here");
+    if (!from) throw new Error(i18n().t("system.voice.notOnInstance"));
+    if (!(size > 0) || size > MAX_VOICE_BYTES) throw new Error(i18n().t("system.voice.tooBig"));
     const res = await fetch(from, { credentials: "omit", referrerPolicy: "no-referrer" });
-    if (res.status === 404) throw new Error("this voice message was deleted");
-    if (!res.ok || !res.body) throw new Error("this voice message couldn't be fetched");
+    if (res.status === 404) throw new Error(i18n().t("system.voice.deleted"));
+    if (!res.ok || !res.body) throw new Error(i18n().t("system.voice.cantFetch"));
     return readExactly(res.body, size);
   };
 }

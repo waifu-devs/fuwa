@@ -4,6 +4,7 @@ import { Code } from "@connectrpc/connect";
 import type { Api } from "@/fuwa/client";
 import { toFuwaError } from "@/fuwa/errors";
 import { updateDms, type BackupState } from "@/fuwa/store";
+import { i18n } from "@/i18n/i18n";
 import { reportError, reportTiming } from "@/lib/reports";
 import {
   BackupDeviceSchema,
@@ -312,11 +313,11 @@ export class BackupSync {
    */
   async restore(text: string) {
     const key = await parseRecoveryKey(text);
-    if (!key) throw new BackupError("That isn't a recovery key. Check for a typo: it's 56 letters and digits.");
+    if (!key) throw new BackupError(i18n().t("system.backup.notAKey"));
     const keys = await deriveKeys(key);
     const { backup } = await this.api.dms.getBackup({}, CALL);
-    if (!backup) throw new BackupError("Your account has no message backup any more.");
-    if (!sameBytes(backup.keyCheck, keys.check)) throw new BackupError("That's not this backup's recovery key.");
+    if (!backup) throw new BackupError(i18n().t("system.backup.gone"));
+    if (!sameBytes(backup.keyCheck, keys.check)) throw new BackupError(i18n().t("system.backup.wrongKey"));
     this.show({ status: "restoring", restored: 0, total: Number(backup.parts), problem: null });
     const began = performance.now();
     const touched = new Set<string>();
@@ -370,7 +371,7 @@ export class BackupSync {
       backup,
       "on",
       lost
-        ? `${lost} part${lost === 1 ? "" : "s"} of the backup ${missing ? "didn't come back from the instance or " : ""}couldn't be read, so some messages, edits or deletions may be missing here.`
+        ? i18n().t(missing ? "system.backup.lostMissing" : "system.backup.lostUnreadable", { count: lost })
         : null,
     );
     await this.refresh([...touched]);

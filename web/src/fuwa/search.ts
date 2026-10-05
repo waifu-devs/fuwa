@@ -2,6 +2,7 @@ import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { useSyncExternalStore } from "react";
 import { SearchHas, type SearchResult } from "@/gen/fuwa/v1/search_pb";
 import { ChannelType, type Channel, type Member, type User } from "@/gen/fuwa/v1/types_pb";
+import { i18n } from "@/i18n/i18n";
 import { memberName } from "@/lib/format";
 import { reportUsage } from "@/lib/reports";
 import { hasValue, parseQuery, rememberSearch, timeRange, type Filter } from "@/lib/search-query";
@@ -112,10 +113,11 @@ const HAS: Record<string, SearchHas> = {
 
 /** Why a filter can't be used, in words. */
 function problem(f: Filter): string {
-  if (f.key === "from" || f.key === "mentions") return `No member here is called ${f.value}`;
-  if (f.key === "in") return `There's no channel here called #${f.value.replace(/^#/, "")}`;
-  if (f.key === "has") return `has: takes link, embed, file, picture, video, sound or everyone`;
-  return `${f.key}: takes a date like 2026-10-04, today or yesterday`;
+  const { t } = i18n();
+  if (f.key === "from" || f.key === "mentions") return t("system.search.noMember", { name: f.value });
+  if (f.key === "in") return t("system.search.noChannel", { channel: f.value.replace(/^#/, "") });
+  if (f.key === "has") return t("system.search.hasTakes");
+  return t("system.search.dateTakes", { filter: f.key });
 }
 
 let inFlight: AbortController | null = null;

@@ -1,3 +1,4 @@
+import { i18n } from "@/i18n/i18n";
 import { getPrefs } from "@/lib/prefs";
 import { reportError, reportUsage } from "@/lib/reports";
 import captureUrl from "./capture.worklet.ts?worker&url";
@@ -221,7 +222,7 @@ export class Recorder {
     if (this.encoder.state !== "closed") this.encoder.close();
     if (this.failed) {
       reportError("voice_encode", "voice.record");
-      throw new Error("the recording couldn't be saved");
+      throw new Error(i18n().t("system.voice.notSaved"));
     }
     const durationMs = Math.round(this.elapsedMs);
     return {

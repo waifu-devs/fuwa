@@ -18,6 +18,7 @@ pub mod config;
 pub mod dms;
 pub mod emoji;
 pub mod friends;
+pub mod gifs;
 pub mod history;
 pub mod i18n;
 pub mod instance_admin;
@@ -477,7 +478,10 @@ impl Core {
         if let Some(engine) = self.engines.lock().remove(key) {
             engine.stop();
         }
-        self.set_prefs(|p| p.forget_searches(key));
+        self.set_prefs(|p| {
+            p.forget_searches(key);
+            p.recent_gifs.remove(key);
+        });
         self.shared.update(|s| {
             s.instances.remove(key);
             s.order.retain(|k| k != key);
@@ -600,7 +604,10 @@ impl Core {
         let me = self.shared.read(|s| s.instance(key).and_then(|i| i.me.clone()));
         let _ = rpc!(api.auth(), sign_out(pb::SignOutRequest {})).await;
         voice_notes::forget_opened();
-        self.set_prefs(|p| p.forget_searches(key));
+        self.set_prefs(|p| {
+            p.forget_searches(key);
+            p.recent_gifs.remove(key);
+        });
         let url = api.url.clone();
         self.add_instance(&url, None);
         if let Some(me) = me {

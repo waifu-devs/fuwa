@@ -1,3 +1,4 @@
+import type { I18n } from "@/i18n/i18n";
 import { sanitizeBackdrop, type Backdrop } from "@/lib/backdrop";
 import { shaderProblem } from "@/lib/effects/custom";
 import { deriveTokens, HEX, RADIUS_MAX, RADIUS_MIN, SEEDS, TOKENS, type Theme, type ThemeSeeds, type ThemeTokens } from "@/lib/themes";
@@ -154,38 +155,38 @@ export function pictureFromDataUrl(value: unknown): Blob | null {
  * waifu.dev's ({ tokens, radius } or { variant: { tokens, radius } }), so a
  * theme copied from the site works too.
  */
-export function parseThemeFile(json: string): Imported {
+export function parseThemeFile(t: I18n["t"], json: string): Imported {
   let data: unknown;
   try {
     data = JSON.parse(json);
   } catch {
-    throw new ThemeFileError("That isn't a theme file (it isn't JSON).");
+    throw new ThemeFileError(t("system.themeFile.notJson"));
   }
-  if (!data || typeof data !== "object" || Array.isArray(data)) throw new ThemeFileError("That isn't a theme file.");
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new ThemeFileError(t("system.themeFile.notTheme"));
   const d = data as Record<string, unknown>;
   const notes: string[] = [];
   if (d.format === FORMAT && typeof d.version === "number" && d.version > VERSION) {
-    notes.push("This theme was made by a newer fuwa; some of it may not show here.");
+    notes.push(t("system.themeFile.newer"));
   }
   const variant = (d.variant && typeof d.variant === "object" ? d.variant : d) as Record<string, unknown>;
   const colors = readColors(d.colors ?? variant.tokens);
-  if (!colors) throw new ThemeFileError("That theme file has no colors fuwa can read. Colors are #rrggbb.");
+  if (!colors) throw new ThemeFileError(t("system.themeFile.noColors"));
 
   let backdrop: Backdrop | null = null;
   let picture: Blob | null = null;
   if (d.backdrop && typeof d.backdrop === "object") {
     const b = d.backdrop as Record<string, unknown>;
     backdrop = sanitizeBackdrop({ ...b, image: "" });
-    if (backdrop.shader && shaderProblem(backdrop.shader.code)) {
-      notes.push(`Its shader "${backdrop.shader.name}" has a problem fuwa won't run, so it shows its fallback until it's fixed.`);
+    if (backdrop.shader && shaderProblem(t, backdrop.shader.code)) {
+      notes.push(t("system.themeFile.shaderProblem", { shader: backdrop.shader.name }));
     }
     if (b.image) {
       picture = pictureFromDataUrl(b.image);
       if (!picture) {
         notes.push(
           typeof b.image === "string" && /^https?:/i.test(b.image)
-            ? "Its background was a link, which fuwa doesn't load; pick a picture for it instead."
-            : "Its background picture couldn't be read, so it's left out.",
+            ? t("system.themeFile.backgroundLink")
+            : t("system.themeFile.backgroundUnreadable"),
         );
       }
     }
@@ -193,7 +194,7 @@ export function parseThemeFile(json: string): Imported {
 
   const theme: CustomTheme = {
     id: newThemeId(),
-    name: text(d.name, NAME_MAX) || "Imported theme",
+    name: text(d.name, NAME_MAX) || t("system.themeFile.importedName"),
     description: text(d.description, DESCRIPTION_MAX) || null,
     builtin: false,
     variant: { tokens: colors, radius: radius(variant.radius ?? d.radius) },

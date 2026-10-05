@@ -23,7 +23,7 @@ test("a damaged page is refused", () => {
   const file = writeOggOpus([{ data: packet(1, 80), samples: 960 }], 1, 312);
   file[file.length - 3] ^= 0xff;
   assert.throws(() => readOggOpus(file), /damaged/);
-  assert.throws(() => readOggOpus(new TextEncoder().encode("<html>not ogg</html>")), /not an Ogg/);
+  assert.throws(() => readOggOpus(new TextEncoder().encode("<html>not ogg</html>")), /notOgg/);
 });
 
 test("waveforms fold levels into bytes and stretch back to any width", () => {

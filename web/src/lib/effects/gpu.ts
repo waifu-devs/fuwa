@@ -3,6 +3,7 @@ import type { ShaderEffect } from "@/lib/backdrop";
 import { fullSource, shaderId, shaderLine, shaderProblem } from "@/lib/effects/custom";
 import { RESOLUTION, SHADERS } from "@/lib/effects/shaders";
 import { setShaderStatus, shaderStatus, startTrying } from "@/lib/effects/status";
+import { i18n } from "@/i18n/i18n";
 
 /**
  * Draws a shader effect into a canvas with vgpu (WebGPU). This module is
@@ -71,7 +72,7 @@ export type Diagnostic = { message: string; line: number | null; column: number 
  * compiles, else its errors at the shader's own lines. Null without WebGPU.
  */
 export async function checkShader(code: string): Promise<Diagnostic[] | null> {
-  const problem = shaderProblem(code);
+  const problem = shaderProblem(i18n().t, code);
   if (problem) return [{ message: problem, line: null, column: null }];
   const device = await gpu();
   if (!device) return null;
@@ -85,7 +86,7 @@ export async function checkShader(code: string): Promise<Diagnostic[] | null> {
         return { message: m.message, line, column: line === null ? null : m.linePos };
       });
   } catch (err) {
-    return [{ message: (err as Error).message || "It doesn't compile.", line: null, column: null }];
+    return [{ message: (err as Error).message || i18n().t("system.shader.doesNotCompile"), line: null, column: null }];
   }
 }
 
@@ -233,7 +234,7 @@ export async function createPainter(canvas: HTMLCanvasElement, onLost: () => voi
     custom = null;
     const known = shaderStatus(id);
     if (known && known.state !== "running") return onTrouble(id);
-    const problem = shaderProblem(code);
+    const problem = shaderProblem(i18n().t, code);
     if (problem) return trouble(id, { state: "broken", message: problem, line: null });
     const mine = { id, code, fx: null as Effect | null, ready: false, scale: CUSTOM_SCALES[0]!, pointer: /\bfuwa\s*\.\s*pointer\b/.test(code), slow: 0 };
     custom = mine;
@@ -244,7 +245,7 @@ export async function createPainter(canvas: HTMLCanvasElement, onLost: () => voi
     } catch {
       const errors = await checkShader(code);
       const first = errors?.[0];
-      return mine === custom && trouble(id, { state: "broken", message: first?.message ?? "It doesn't compile here.", line: first?.line ?? null });
+      return mine === custom && trouble(id, { state: "broken", message: first?.message ?? i18n().t("system.shader.doesNotCompileHere"), line: first?.line ?? null });
     }
     if (mine !== custom || disposed) return;
     mine.fx = fx;
@@ -308,7 +309,7 @@ export async function createPainter(canvas: HTMLCanvasElement, onLost: () => voi
   const stopErrors = device.onError(() => {
     stopLoop();
     if (disposed) return;
-    if (custom) return trouble(custom.id, { state: "broken", message: "The GPU rejected it while drawing.", line: null });
+    if (custom) return trouble(custom.id, { state: "broken", message: i18n().t("system.shader.gpuRejected"), line: null });
     onLost();
   });
 

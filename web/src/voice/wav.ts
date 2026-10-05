@@ -1,3 +1,4 @@
+import { i18n, inWords } from "@/i18n/i18n";
 import { readOggOpus } from "./ogg";
 
 /**
@@ -19,8 +20,13 @@ export function playsOgg(): boolean {
 const MAX_FRAMES = 15 * 60 * 48_000;
 
 export async function oggToWav(ogg: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
-  if (typeof AudioDecoder === "undefined") throw new Error("this browser can't play voice messages");
-  const file = readOggOpus(ogg);
+  if (typeof AudioDecoder === "undefined") throw new Error(i18n().t("system.voice.cantPlayHere"));
+  let file: ReturnType<typeof readOggOpus>;
+  try {
+    file = readOggOpus(ogg);
+  } catch (err) {
+    throw inWords(err);
+  }
   const channels = Math.max(1, Math.min(2, file.channels));
   const limit = Math.min(MAX_FRAMES, file.samples > 0 ? file.preSkip + file.samples : MAX_FRAMES);
   // Recordings here are 20 ms packets, so the stated length never needs
@@ -58,7 +64,7 @@ export async function oggToWav(ogg: Uint8Array): Promise<Uint8Array<ArrayBuffer>
   }
   await decoder.flush();
   decoder.close();
-  if (failed) throw new Error("that voice message couldn't be played");
+  if (failed) throw new Error(i18n().t("system.voice.cantPlayThat"));
   // Drop the pre-skip, and anything past the stated length.
   const all = concat(pcm);
   const start = Math.min(all.length, file.preSkip * channels);

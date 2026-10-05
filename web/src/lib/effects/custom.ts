@@ -1,4 +1,5 @@
 import type { ShaderEffect } from "@/lib/backdrop";
+import type { I18n, Key } from "../../i18n/i18n.ts";
 
 /**
  * Custom shaders: effects people write themselves, in WGSL, kept in a
@@ -136,16 +137,16 @@ export function stripComments(code: string): string {
  * the rules that keep it to the app's inputs; everything else is the
  * compiler's to say.
  */
-export function shaderProblem(code: string): string | null {
-  if (!code.trim()) return "The shader is empty.";
-  if (bytes(code) > MAX_SHADER_BYTES) return `Shaders can be at most ${MAX_SHADER_BYTES / 1024} KB.`;
+export function shaderProblem(t: I18n["t"], code: string): string | null {
+  if (!code.trim()) return t("system.shader.empty");
+  if (bytes(code) > MAX_SHADER_BYTES) return t("system.shader.tooBig", { kb: MAX_SHADER_BYTES / 1024 });
   // Links, even in comments: there's nothing for a shader to point at (and in code, `//` would start a comment anyway).
-  if (/[a-z][a-z0-9+.-]*:\/\//i.test(code)) return "Shaders can't have links, even in comments. Everything they draw comes from the inputs fuwa gives them.";
+  if (/[a-z][a-z0-9+.-]*:\/\//i.test(code)) return t("system.shader.links");
   const live = stripComments(code);
-  if (live.includes("@")) return "Shaders can't use attributes (@…): fuwa gives every input, so there's nothing to bind.";
+  if (live.includes("@")) return t("system.shader.attributes");
   // Reserved words in WGSL, so anywhere they appear outside a comment they're the directives.
-  if (/\b(enable|requires|diagnostic)\b/.test(live)) return "Shaders can't turn on extensions.";
-  if (!/\bfn\s+shade\s*\(/.test(live)) return "Define fn shade(uv: vec2f) -> vec4f: it's what fuwa calls for every pixel.";
+  if (/\b(enable|requires|diagnostic)\b/.test(live)) return t("system.shader.extensions");
+  if (!/\bfn\s+shade\s*\(/.test(live)) return t("system.shader.noShade");
   return null;
 }
 
@@ -178,11 +179,11 @@ export function shaderId(code: string): string {
 // ───────────────────────── Starters ─────────────────────────
 
 /** Shaders to start from, each a small lesson in the inputs. */
-export const STARTERS: { id: string; name: string; hint: string; shader: CustomShader }[] = [
+export const STARTERS: { id: string; name: string; hint: Key; shader: CustomShader }[] = [
   {
     id: "glow",
     name: "Glow",
-    hint: "A soft light that follows your pointer.",
+    hint: "appsettings.shader.starter.glow",
     shader: {
       name: "Glow",
       fallback: "aurora",
@@ -201,7 +202,7 @@ fn shade(uv: vec2f) -> vec4f {
   {
     id: "plasma",
     name: "Plasma",
-    hint: "Melting colors, like a lava lamp.",
+    hint: "appsettings.shader.starter.plasma",
     shader: {
       name: "Plasma",
       fallback: "aurora",
@@ -221,7 +222,7 @@ fn shade(uv: vec2f) -> vec4f {
   {
     id: "ripples",
     name: "Ripples",
-    hint: "Rings spreading from the pointer.",
+    hint: "appsettings.shader.starter.ripples",
     shader: {
       name: "Ripples",
       fallback: "waves",
@@ -240,7 +241,7 @@ fn shade(uv: vec2f) -> vec4f {
   {
     id: "clouds",
     name: "Clouds",
-    hint: "Drifting clouds, with fbm noise.",
+    hint: "appsettings.shader.starter.clouds",
     shader: {
       name: "Clouds",
       fallback: "aurora",
