@@ -29,6 +29,7 @@ pub mod permissions;
 pub mod polls;
 pub mod presence;
 pub mod reports;
+pub mod search;
 pub mod secrets;
 pub mod server_admin;
 pub mod shared;
@@ -466,6 +467,7 @@ impl Core {
         if let Some(engine) = self.engines.lock().remove(key) {
             engine.stop();
         }
+        self.set_prefs(|p| p.forget_searches(key));
         self.shared.update(|s| {
             s.instances.remove(key);
             s.order.retain(|k| k != key);
@@ -588,6 +590,7 @@ impl Core {
         let me = self.shared.read(|s| s.instance(key).and_then(|i| i.me.clone()));
         let _ = rpc!(api.auth(), sign_out(pb::SignOutRequest {})).await;
         voice_notes::forget_opened();
+        self.set_prefs(|p| p.forget_searches(key));
         let url = api.url.clone();
         self.add_instance(&url, None);
         if let Some(me) = me {

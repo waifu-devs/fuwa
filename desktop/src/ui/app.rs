@@ -276,6 +276,8 @@ pub struct FuwaApp {
     pub voice: crate::ui::voice_notes::VoiceState,
     /// Files picked to go with the next message.
     pub files: crate::ui::attachments::Files,
+    /// Searching the server on screen: the header's field and the results beside the chat.
+    pub search: crate::ui::search::Search,
     /// The timestamp picker, while it's open, and the style picked last.
     pub time_picker: Option<crate::ui::timestamps::TimePicker>,
     pub time_style: crate::core::timestamps::Style,
@@ -331,6 +333,7 @@ impl FuwaApp {
         let dialog_input = cx.new(|cx| InputState::new(window, cx));
         let emoji_query = cx.new(|cx| InputState::new(window, cx).placeholder("Find an emoji"));
         let scroller = cx.new(|cx| MessageScrollerState::new(0, cx));
+        let search = crate::ui::search::Search::new(window, cx);
         let mut subscriptions = vec![
             cx.subscribe_in(&composer, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
                 match event {
@@ -348,6 +351,15 @@ impl FuwaApp {
                 if let InputEvent::PressEnter { shift: false, .. } = event {
                     this.save_edit(window, cx);
                 }
+            }),
+            cx.subscribe_in(&search.field, window, |this: &mut Self, _, event: &InputEvent, _, cx| match event {
+                InputEvent::Change => {
+                    this.search.active = None;
+                    this.search.hushed = false;
+                    cx.notify();
+                }
+                InputEvent::Focus | InputEvent::Blur => cx.notify(),
+                _ => {}
             }),
             cx.subscribe_in(&emoji_query, window, |this: &mut Self, _, event: &InputEvent, _, cx| {
                 if let InputEvent::Change = event {
@@ -464,6 +476,7 @@ impl FuwaApp {
             polls: Default::default(),
             voice: Default::default(),
             files: Default::default(),
+            search,
             time_picker: None,
             time_style: crate::core::timestamps::Style::Relative,
             time_ticking: false,
@@ -715,6 +728,7 @@ impl FuwaApp {
         self.stop_voice();
         self.time_picker = None;
         self.forget_files_elsewhere();
+        self.search_after_move(window, cx);
         self.maybe_welcome(cx);
         let target = self.target();
         let id = target.as_ref().map(Target::id);

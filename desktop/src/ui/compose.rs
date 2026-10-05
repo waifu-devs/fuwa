@@ -14,6 +14,9 @@ impl FuwaApp {
     pub(crate) fn intercept(&mut self, key: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let m = &key.modifiers;
         let bare = !(m.shift || m.control || m.alt || m.platform || m.function);
+        if self.search_keys(key, window, cx) {
+            return true;
+        }
         if key.key == "escape" && self.close_answer_picker(cx) {
             return true;
         }

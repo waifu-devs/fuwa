@@ -10,6 +10,7 @@ use fuwa_desktop::core::dms::{Content, DmStatus, now_ms};
 use fuwa_desktop::core::moderation::{Action, timed_out_until};
 use fuwa_desktop::core::polls;
 use fuwa_desktop::core::reports;
+use fuwa_desktop::core::search;
 use fuwa_desktop::core::shared;
 use fuwa_desktop::core::store::{Connection, Focus, Store};
 use fuwa_desktop::core::updates;
@@ -45,6 +46,7 @@ fn start_instance(dir: &std::path::Path) -> Instance {
         })
         .unwrap();
         let app = App::open(config).await.unwrap();
+        fuwa_server::api::spawn_search_indexer(app.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let router = app.router();
@@ -428,6 +430,41 @@ fn two_people_talk_in_a_server_and_in_private() {
         assert!(!files.path().join("away.txt").exists());
     }
     assert_eq!(got[1].filename, "notes.txt");
+
+    // Bob finds Alice's files by a word in a file's name, sees where it
+    // matched, and opens the message from the result.
+    let alice_name = alice.shared.read(|s| s.instance(&key).unwrap().me.clone().unwrap().username);
+    let query = format!("from:{alice_name} notes has:file");
+    let request = bob
+        .shared
+        .read(|s| search::request_for(s.instance(&key).unwrap(), &server.id, &query, search::today()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(request.query, "notes");
+    assert_eq!(request.has, vec![pb::SearchHas::File as i32]);
+    let mut found = None;
+    for _ in 0..100 {
+        let (core, key, request) = (bob.clone(), key.clone(), request.clone());
+        let page = wait(&bob, async move { core.search_page(&key, request, "").await }).unwrap();
+        if let Some(hit) = page.results.into_iter().find(|r| r.message.as_ref().is_some_and(|m| m.content == "files!"))
+        {
+            found = Some(hit);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let hit = found.expect("the search finds the message");
+    let message = hit.message.unwrap();
+    {
+        let (core, key, sid, cid, id) =
+            (bob.clone(), key.clone(), server.id.clone(), general.clone(), message.id.clone());
+        assert!(wait(&bob, async move { core.find_message(&key, &sid, &cid, &id).await }));
+    }
+    // A name that's no one here says so, and nothing is asked of the instance.
+    let nobody = bob
+        .shared
+        .read(|s| search::request_for(s.instance(&key).unwrap(), &server.id, "from:nobody-here cake", search::today()));
+    assert_eq!(nobody, Err("No member here is called nobody-here".into()));
 
     // Alice asks a question; Bob votes, Alice sees the count live and who
     // voted, then ends it. Bob's own pick stays with him.

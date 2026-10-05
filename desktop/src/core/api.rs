@@ -113,6 +113,7 @@ clients! {
     dms => "DirectMessageService" pb::direct_message_service_client::DirectMessageServiceClient<Transport>,
     secure => "SecureChannelService" pb::secure_channel_service_client::SecureChannelServiceClient<Transport>,
     media => "MediaService" pb::media_service_client::MediaServiceClient<Transport>,
+    search => "SearchService" pb::search_service_client::SearchServiceClient<Transport>,
     join => "JoinService" pb::join_service_client::JoinServiceClient<Transport>,
     calls => "CallService" pb::call_service_client::CallServiceClient<Transport>,
     sso => "SsoService" pb::sso_service_client::SsoServiceClient<Transport>,

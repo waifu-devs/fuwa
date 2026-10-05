@@ -175,6 +175,8 @@ pub struct Prefs {
     pub skin_tone: u8,
     /// The app's language as a shipped locale code (`core::i18n`); none follows the computer's.
     pub language: Option<String>,
+    /// Searches made lately, newest first, by `instance/account/server` (see `search::place`).
+    pub recent_searches: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// Which messages notify you, where a server's settings leave it to this computer.
@@ -213,6 +215,7 @@ impl Default for Prefs {
             recent_emoji: Vec::new(),
             skin_tone: 0,
             language: None,
+            recent_searches: Default::default(),
         }
     }
 }
@@ -227,6 +230,29 @@ pub fn load_prefs(paths: &Paths) -> Prefs {
 }
 
 impl Prefs {
+    /// Remembers a search made in one server (or, with `forget`, takes it off the list).
+    pub fn remember_search(&mut self, place: &str, query: &str, forget: bool) {
+        let q = query.trim();
+        if q.is_empty() {
+            return;
+        }
+        let list = self.recent_searches.entry(place.to_owned()).or_default();
+        list.retain(|x| x != q);
+        if !forget {
+            list.insert(0, q.to_owned());
+            list.truncate(crate::core::search::MAX_RECENT);
+        }
+        if list.is_empty() {
+            self.recent_searches.remove(place);
+        }
+    }
+
+    /// Forgets every search made on an instance, whoever made them (signing out).
+    pub fn forget_searches(&mut self, key: &str) {
+        let prefix = format!("{key}/");
+        self.recent_searches.retain(|place, _| !place.starts_with(&prefix));
+    }
+
     /// Settings from an older app, or edited by hand, made into ones this app can show.
     pub fn tidy(&mut self) {
         // Before themes, the choice was light, dark, or the system's.
@@ -240,6 +266,10 @@ impl Prefs {
         self.keybinds.retain(|_, combo| combo.as_deref().is_none_or(keybinds::valid));
         self.custom_keybinds = keybinds::tidy_custom(std::mem::take(&mut self.custom_keybinds));
         self.recent_emoji.truncate(MAX_RECENT_EMOJI);
+        for list in self.recent_searches.values_mut() {
+            list.truncate(crate::core::search::MAX_RECENT);
+        }
+        self.recent_searches.retain(|_, list| !list.is_empty());
         if self.skin_tone > 5 {
             self.skin_tone = 0;
         }
