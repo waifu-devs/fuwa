@@ -1,0 +1,56 @@
+{
+  "strip.label": "Happening now",
+  "strip.sample": "Sample",
+  "strip.sampleTitle": "Made up on this device to show the idea; the server doesn't have this yet.",
+  "strip.options": "Tile options",
+  "strip.hide": "Hide this one",
+  "strip.quiet": "No live tiles in this server",
+  "strip.off": "Turn live tiles off",
+  "menu.show": "Live tiles",
+  "voice.title": {
+    "one": "{count} person in {channel}",
+    "other": "{count} people in {channel}"
+  },
+  "voice.since": "Talking since {time}",
+  "voice.video": "Cameras on",
+  "voice.screen": "Sharing a screen",
+  "voice.join": "Join",
+  "poll.title": "Poll in #{channel}",
+  "poll.closesMinutes": {
+    "one": "Closes in {count} minute",
+    "other": "Closes in {count} minutes"
+  },
+  "poll.closesHours": {
+    "one": "Closes in {count} hour",
+    "other": "Closes in {count} hours"
+  },
+  "poll.noEnd": "Open until it's ended",
+  "poll.voters": {
+    "one": "{count} voted",
+    "other": "{count} voted"
+  },
+  "poll.vote": "Vote",
+  "thread.title": "A thread you follow",
+  "thread.unread": {
+    "one": "{count} new reply",
+    "other": "{count} new replies"
+  },
+  "thread.open": "Open",
+  "shared.title": "Busy in #{channel}",
+  "shared.text": {
+    "one": "{count} new message from {servers} servers",
+    "other": "{count} new messages from {servers} servers"
+  },
+  "shared.open": "Catch up",
+  "event.sampleTitle": "Movie night",
+  "event.startsIn": {
+    "one": "Starts in {count} minute",
+    "other": "Starts in {count} minutes"
+  },
+  "event.now": "Happening now",
+  "event.going": {
+    "one": "{count} going",
+    "other": "{count} going"
+  },
+  "event.open": "See"
+}

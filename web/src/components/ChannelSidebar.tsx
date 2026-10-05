@@ -21,6 +21,7 @@ import { UserPanel } from "@/components/UserPanel";
 import { CallPanel } from "@/components/calls/CallPanel";
 import { SharedBadge } from "@/components/chat/Shared";
 import { VoiceUsers } from "@/components/calls/VoiceUsers";
+import { LiveTiles, LiveTilesGroup, LiveTilesMenuItem } from "@/components/LiveTiles";
 import { joinCall } from "@/calls/engine";
 import { useContextMenu } from "@/components/ContextMenu";
 import { categoryMenu, channelMenu, type ChannelMenuActions } from "@/components/menus/channel";
@@ -227,6 +228,7 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
             </DropdownMenuItem>
           )}
           <ServerNotificationItems instanceKey={instanceKey} serverId={serverId} />
+          <LiveTilesMenuItem serverId={serverId} />
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => openSettings("server-profiles", serverId)}>
             <IdCardIcon /> Edit server profile
@@ -298,7 +300,9 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
             </motion.button>
           )}
         </AnimatePresence>
-        {!synced && !channels?.length ? (
+        <LiveTilesGroup>
+          <LiveTiles instanceKey={instanceKey} serverId={serverId} />
+          {!synced && !channels?.length ? (
           <div className="flex flex-col gap-2 px-2">
             {[70, 55, 80, 45].map((w, n) => (
               <div key={n} className="shimmer h-5 rounded-md" style={{ width: `${w}%` }} />
@@ -347,7 +351,8 @@ export function ChannelSidebar({ instanceKey, serverId }: { instanceKey: string;
               })}
             </AnimatePresence>
           </ul>
-        )}
+          )}
+        </LiveTilesGroup>
       </div>
       <CallPanel />
       <UserPanel instanceKey={instanceKey} />

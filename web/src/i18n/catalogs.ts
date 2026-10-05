@@ -10,6 +10,7 @@ import englishJoin from "../../../locales/en/join.json";
 import englishServersettings from "../../../locales/en/serversettings.json";
 import englishSettings from "../../../locales/en/settings.json";
 import englishShell from "../../../locales/en/shell.json";
+import englishTiles from "../../../locales/en/tiles.json";
 
 /**
  * The languages this build ships: every folder under locales/ with a meta.json.
@@ -23,7 +24,7 @@ const files = import.meta.glob<Namespace>(["../../../locales/*/*.json", "!../../
 
 const codeOf = (path: string) => path.split("/").at(-2)!;
 
-export const ENGLISH = { accountsettings: englishAccountsettings, appsettings: englishAppsettings, chattools: englishChattools, common: englishCommon, connect: englishConnect, "dms-calls": englishDmsCalls, instancesettings: englishInstancesettings, join: englishJoin, serversettings: englishServersettings, settings: englishSettings, shell: englishShell } as const;
+export const ENGLISH = { accountsettings: englishAccountsettings, appsettings: englishAppsettings, chattools: englishChattools, common: englishCommon, connect: englishConnect, "dms-calls": englishDmsCalls, instancesettings: englishInstancesettings, join: englishJoin, serversettings: englishServersettings, settings: englishSettings, shell: englishShell, tiles: englishTiles } as const;
 export type Namespaces = typeof ENGLISH;
 export const english: Catalog = flatten(ENGLISH);
 
