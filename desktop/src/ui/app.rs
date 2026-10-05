@@ -141,6 +141,19 @@ pub enum Dialog {
         host: String,
         code: String,
     },
+    /// Making a poll in a channel (the editor's state is in `polls`).
+    Poll {
+        key: String,
+        server: String,
+        channel: String,
+    },
+    /// Who voted for each answer of a public poll.
+    PollVoters {
+        key: String,
+        server: String,
+        channel: String,
+        message: String,
+    },
     /// Time out, kick or ban someone, with a reason for the audit log.
     Moderate {
         key: String,
@@ -247,6 +260,8 @@ pub struct FuwaApp {
     pub editing: Option<String>,
     /// The message whose author (from another server) we're asking whether to keep out.
     pub keeping_out: Option<String>,
+    /// Votes on their way, peeks, polls being ended, and the poll editor.
+    pub polls: crate::ui::polls::PollState,
     pub edit_box: Entity<TextareaState>,
     pub picker: Option<Picker>,
     /// Where the @ list was closed with Escape, so it stays closed for that mention.
@@ -427,6 +442,7 @@ impl FuwaApp {
             focus: cx.focus_handle(),
             editing: None,
             keeping_out: None,
+            polls: Default::default(),
             edit_box,
             picker: None,
             picker_dismissed: None,
@@ -1208,6 +1224,8 @@ impl FuwaApp {
         if let Some(Dialog::AllowGame { key, .. }) = self.dialog.take() {
             self.core.answer_game(&key, None);
         }
+        self.polls.editor = None;
+        self.polls.voters = None;
         cx.notify();
     }
 
@@ -1352,7 +1370,8 @@ impl FuwaApp {
                     cx.notify();
                 }
             }
-            Dialog::Welcome { .. } | Dialog::Secure { .. } => self.close_dialog(cx),
+            Dialog::Welcome { .. } | Dialog::Secure { .. } | Dialog::PollVoters { .. } => self.close_dialog(cx),
+            Dialog::Poll { .. } => self.send_poll(cx),
             Dialog::Moderate { key, server, user_id, action } => {
                 let reason: String = value.chars().take(512).collect();
                 self.moderate(key, server, user_id, action, reason, cx);

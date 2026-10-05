@@ -25,6 +25,7 @@ pub mod linked;
 pub mod moderation;
 pub mod notifications;
 pub mod permissions;
+pub mod polls;
 pub mod presence;
 pub mod reports;
 pub mod secrets;

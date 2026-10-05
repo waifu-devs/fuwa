@@ -83,6 +83,12 @@ impl FuwaApp {
         if let Dialog::Secure { key, server, channel } = &dialog {
             return Some(self.render_secure(key, server, channel, window, cx));
         }
+        if let Dialog::Poll { .. } = &dialog {
+            return Some(self.render_poll_editor(window, cx));
+        }
+        if let Dialog::PollVoters { key, server, channel, message } = &dialog {
+            return Some(self.render_voters(key, server, channel, message, cx));
+        }
         let busy = self.dialog_busy;
         let field = || Input::new(&self.dialog_input).large();
         let sso_label = match &dialog {
@@ -371,7 +377,11 @@ impl FuwaApp {
                 div().into_any_element(),
                 Some("Allow"),
             ),
-            Dialog::Profile { .. } | Dialog::Welcome { .. } | Dialog::Secure { .. } => unreachable!("drawn on its own"),
+            Dialog::Profile { .. }
+            | Dialog::Welcome { .. }
+            | Dialog::Secure { .. }
+            | Dialog::Poll { .. }
+            | Dialog::PollVoters { .. } => unreachable!("drawn on its own"),
         };
         let danger = matches!(
             dialog,
@@ -458,6 +468,8 @@ impl FuwaApp {
             Dialog::Moderate { .. } => "moderate",
             Dialog::SsoJoin { .. } => "sso",
             Dialog::AllowGame { .. } => "game",
+            Dialog::Poll { .. } => "poll",
+            Dialog::PollVoters { .. } => "voters",
         };
         Some(
             motion::fade_in(

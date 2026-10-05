@@ -26,6 +26,7 @@ mod notify;
 pub(crate) mod overlay;
 pub mod perf;
 mod png;
+mod polls;
 mod rail;
 mod secure;
 mod server_settings;
