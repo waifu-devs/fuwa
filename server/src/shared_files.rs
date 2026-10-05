@@ -691,10 +691,14 @@ mod tests {
         let query = format!("home={}&id=m1&size=10&until=5&name={}", encode(&wanted.home), encode(&wanted.name));
         let read = Wanted::read(&query).unwrap();
         assert_eq!(read, wanted);
-        assert_eq!(read.signature(&key), wanted.signature(&key));
-        let bigger = Wanted { size: 11, ..Wanted::read(&query).unwrap() };
-        assert_ne!(bigger.signature(&key), wanted.signature(&key));
-        let later = Wanted { until: 6, ..Wanted::read(&query).unwrap() };
-        assert_ne!(later.signature(&key), wanted.signature(&key));
+        for changed in [
+            Wanted { home: "01H@elsewhere.example".into(), ..Wanted::read(&query).unwrap() },
+            Wanted { media_id: "m2".into(), ..Wanted::read(&query).unwrap() },
+            Wanted { size: 11, ..Wanted::read(&query).unwrap() },
+            Wanted { name: "a b&c.gif".into(), ..Wanted::read(&query).unwrap() },
+            Wanted { until: 6, ..Wanted::read(&query).unwrap() },
+        ] {
+            assert_ne!(changed.signature(&key), wanted.signature(&key), "{changed:?}");
+        }
     }
 }

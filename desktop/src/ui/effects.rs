@@ -368,13 +368,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn noise_stays_in_range_and_is_the_same_every_time() {
+    fn noise_stays_in_range_and_meets_the_hash_at_whole_points() {
         for k in 0..500 {
             let (x, y) = (k as f32 * 0.37 - 40.0, k as f32 * 1.13);
             let n = noise(x, y);
             assert!((0.0..=1.0).contains(&n), "{n}");
             assert!((0.0..1.0).contains(&hash(x, y)));
-            assert_eq!(n, noise(x, y));
+            let (ix, iy) = (x.floor(), y.floor());
+            assert_eq!(noise(ix, iy), hash(ix, iy));
         }
     }
 
