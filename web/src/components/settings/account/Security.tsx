@@ -21,13 +21,17 @@ import { Count, SPRING } from "@/components/motion";
 import { PasswordInput, Row, useShake } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { type Key, T, useI18n } from "@/i18n/react";
 import { usePrefs } from "@/lib/prefs";
 import { copy, toast } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
 type Status = { enabled: boolean; backupCodesLeft: number };
 
-const STEPS = ["Confirm it's you", "Scan", "Enter a code", "Save backup codes"];
+/** How many backup codes the instance hands out at a time. */
+const BACKUP_CODES = 10;
+
+const STEPS: Key[] = ["accountsettings.security.stepConfirm", "accountsettings.security.stepScan", "accountsettings.security.stepCode", "accountsettings.security.stepSave"];
 
 /**
  * Two-step sign-in for an account with a password: after the password, a
@@ -36,11 +40,12 @@ const STEPS = ["Confirm it's you", "Scan", "Enter a code", "Save backup codes"];
  * whole thing turned off with the password and a code.
  */
 export function Security({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [setup, setSetup] = useState(false);
-  const where = inst?.node?.name ?? "this instance";
+  const where = inst?.node?.name ?? t("settings.nav.thisInstance");
 
   const load = useCallback(() => {
     run(getTwoFactor(instanceKey)).then(
@@ -58,7 +63,7 @@ export function Security({ instanceKey }: { instanceKey: string }) {
       <div className="flex flex-col items-start gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 p-4">
         <p className="text-sm font-bold text-destructive first-letter:uppercase">{error}</p>
         <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={load}>
-          Try again
+          {t("accountsettings.shared.tryAgain")}
         </Button>
       </div>
     ) : (
@@ -98,13 +103,11 @@ export function Security({ instanceKey }: { instanceKey: string }) {
                 <ShieldIcon className="size-7" />
               </motion.span>
               <div className="min-w-0 flex-1">
-                <p className="text-lg font-extrabold">Two-step sign-in is off</p>
-                <p className="text-sm text-muted-foreground">
-                  Ask for a code from an authenticator app after your password, so a leaked password alone can't get into your account on {where}.
-                </p>
+                <p className="text-lg font-extrabold">{t("accountsettings.security.off")}</p>
+                <p className="text-sm text-muted-foreground">{t("accountsettings.security.offHint", { instance: where })}</p>
               </div>
               <Button type="button" className="btn shrink-0 rounded-xl px-5 font-bold" onClick={() => setSetup(true)}>
-                Turn on
+                {t("accountsettings.security.turnOn")}
               </Button>
             </div>
           </div>
@@ -117,6 +120,7 @@ export function Security({ instanceKey }: { instanceKey: string }) {
 // ───────────────────────── Setting it up ─────────────────────────
 
 function SetUp({ instanceKey, where, onCancel, onDone }: { instanceKey: string; where: string; onCancel: () => void; onDone: (left: number) => void }) {
+  const { t } = useI18n();
   const [step, setStep] = useState(0);
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
@@ -151,16 +155,20 @@ function SetUp({ instanceKey, where, onCancel, onDone }: { instanceKey: string; 
         {step === 0 && (
           <motion.form key="password" onSubmit={confirm} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={SPRING} className="max-w-md">
             <motion.div animate={shake}>
-              <Row label="Your password" htmlFor="two-step-password" hint={start.error ? <span className="font-bold text-destructive first-letter:uppercase">{start.error}</span> : `The one you sign in to ${where} with.`}>
+              <Row
+                label={t("accountsettings.shared.yourPassword")}
+                htmlFor="two-step-password"
+                hint={start.error ? <span className="font-bold text-destructive first-letter:uppercase">{start.error}</span> : t("accountsettings.security.passwordHint", { instance: where })}
+              >
                 <PasswordInput id="two-step-password" autoComplete="current-password" value={password} onChange={setPassword} show={show} onShow={setShow} />
               </Row>
             </motion.div>
             <div className="flex gap-2">
               <Button type="button" variant="ghost" className="rounded-xl" onClick={onCancel}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button type="submit" className="btn rounded-xl px-5 font-bold" disabled={start.pending}>
-                {start.pending ? "Checking…" : "Continue"}
+                {start.pending ? t("accountsettings.shared.checking") : t("common.continue")}
               </Button>
             </div>
           </motion.form>
@@ -173,27 +181,27 @@ function SetUp({ instanceKey, where, onCancel, onDone }: { instanceKey: string; 
               </Secret>
               <div className="flex min-w-0 flex-1 flex-col gap-4">
                 <div>
-                  <p className="font-extrabold">Scan this with your authenticator app</p>
-                  <p className="text-sm text-muted-foreground">Any app that makes six-digit codes works, like 1Password, Bitwarden, Google Authenticator or Aegis.</p>
+                  <p className="font-extrabold">{t("accountsettings.security.scan")}</p>
+                  <p className="text-sm text-muted-foreground">{t("accountsettings.security.scanHint")}</p>
                 </div>
                 <div>
-                  <p className="mb-1.5 text-xs font-bold text-muted-foreground">Or type this key in</p>
+                  <p className="mb-1.5 text-xs font-bold text-muted-foreground">{t("accountsettings.security.typeKey")}</p>
                   <SecretKey secret={secret.secret} />
                 </div>
                 <a
                   href={secret.uri}
                   className="inline-flex items-center gap-2 self-start rounded-xl border px-3 py-2 text-sm font-bold transition hover:border-primary/40 hover:bg-muted md:hidden"
                 >
-                  <SmartphoneIcon className="size-4" /> Open in an app on this phone
+                  <SmartphoneIcon className="size-4" /> {t("accountsettings.security.openApp")}
                 </a>
               </div>
             </div>
             <div className="flex gap-2">
               <Button type="button" variant="ghost" className="rounded-xl" onClick={onCancel}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button type="button" className="btn rounded-xl px-5 font-bold" onClick={() => setStep(2)}>
-                I've added it
+                {t("accountsettings.security.added")}
               </Button>
             </div>
           </motion.div>
@@ -201,10 +209,10 @@ function SetUp({ instanceKey, where, onCancel, onDone }: { instanceKey: string; 
         {step === 2 && (
           <motion.div key="code" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={SPRING} className="flex flex-col gap-4">
             <div>
-              <p className="font-extrabold">Type the code your app shows</p>
-              <p className="text-sm text-muted-foreground">It changes every 30 seconds; any current one works.</p>
+              <p className="font-extrabold">{t("accountsettings.security.typeCode")}</p>
+              <p className="text-sm text-muted-foreground">{t("accountsettings.security.typeCodeHint")}</p>
             </div>
-            <CodeInput id="two-step-enable" label="Code from your app" onComplete={(code) => void verify(code)} disabled={enable.pending} shake={shakeCode} />
+            <CodeInput id="two-step-enable" label={t("accountsettings.security.codeLabel")} onComplete={(code) => void verify(code)} disabled={enable.pending} shake={shakeCode} />
             <AnimatePresence initial={false}>
               {enable.error && (
                 <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden text-sm font-bold text-destructive first-letter:uppercase">
@@ -214,7 +222,7 @@ function SetUp({ instanceKey, where, onCancel, onDone }: { instanceKey: string; 
             </AnimatePresence>
             <div className="flex gap-2">
               <Button type="button" variant="ghost" className="rounded-xl" onClick={() => setStep(1)}>
-                Back
+                {t("common.back")}
               </Button>
             </div>
           </motion.div>
@@ -231,14 +239,14 @@ function SetUp({ instanceKey, where, onCancel, onDone }: { instanceKey: string; 
                 <ShieldCheckIcon className="size-6" />
               </motion.span>
               <div>
-                <p className="font-extrabold">Two-step sign-in is on</p>
-                <p className="text-sm text-muted-foreground">Keep these somewhere safe. Each one signs you in once if your phone isn't around.</p>
+                <p className="font-extrabold">{t("accountsettings.security.on")}</p>
+                <p className="text-sm text-muted-foreground">{t("accountsettings.security.onSetupHint")}</p>
               </div>
             </div>
             <BackupCodes codes={codes} where={where} />
             <div>
               <Button type="button" className="btn rounded-xl px-5 font-bold" onClick={() => onDone(codes.length)}>
-                I've saved them
+                {t("accountsettings.security.savedThem")}
               </Button>
             </div>
           </motion.div>
@@ -250,8 +258,9 @@ function SetUp({ instanceKey, where, onCancel, onDone }: { instanceKey: string; 
 
 /** Where setting up has got to, as a row of dots joined by a filling line. */
 function Steps({ step }: { step: number }) {
+  const { t } = useI18n();
   return (
-    <ol className="flex items-center gap-2" aria-label="Steps">
+    <ol className="flex items-center gap-2" aria-label={t("accountsettings.security.steps")}>
       {STEPS.map((label, n) => (
         <li key={label} className={cn("flex items-center gap-2", n < STEPS.length - 1 && "flex-1")} aria-current={n === step ? "step" : undefined}>
           <span className="flex items-center gap-2">
@@ -273,7 +282,7 @@ function Steps({ step }: { step: number }) {
                 )}
               </AnimatePresence>
             </motion.span>
-            <span className={cn("hidden text-xs font-bold whitespace-nowrap lg:inline", n === step ? "text-foreground" : "text-muted-foreground")}>{label}</span>
+            <span className={cn("hidden text-xs font-bold whitespace-nowrap lg:inline", n === step ? "text-foreground" : "text-muted-foreground")}>{t(label)}</span>
           </span>
           {n < STEPS.length - 1 && (
             <span className="h-0.5 min-w-4 flex-1 overflow-hidden rounded-full bg-muted">
@@ -288,6 +297,7 @@ function Steps({ step }: { step: number }) {
 
 /** Something only you should see; behind a veil while streamer mode is on. */
 function Secret({ uri, children }: { uri: string; children: ReactNode }) {
+  const { t } = useI18n();
   const streaming = usePrefs((p) => p.streamer);
   const [revealed, setRevealed] = useState(false);
   const hidden = streaming && !revealed;
@@ -306,8 +316,8 @@ function Secret({ uri, children }: { uri: string; children: ReactNode }) {
             className="absolute inset-0 flex flex-col items-center justify-center gap-1 rounded-2xl bg-background/60 p-3 text-center text-xs font-bold backdrop-blur-sm"
           >
             <EyeIcon className="size-5" />
-            Hidden by streamer mode
-            <span className="font-normal text-muted-foreground">Show it anyway</span>
+            {t("accountsettings.security.hidden")}
+            <span className="font-normal text-muted-foreground">{t("accountsettings.security.showAnyway")}</span>
           </motion.button>
         )}
       </AnimatePresence>
@@ -317,6 +327,7 @@ function Secret({ uri, children }: { uri: string; children: ReactNode }) {
 
 /** A QR code drawn as soft dots with rounded corner marks, popping in as a wave. */
 function QrCode({ text }: { text: string }) {
+  const { t } = useI18n();
   const qr = useMemo(() => encode(text, { ecc: "M", border: 0 }), [text]);
   const n = qr.size;
   const finder = (x: number, y: number) => (
@@ -328,7 +339,7 @@ function QrCode({ text }: { text: string }) {
   const inFinder = (x: number, y: number) => (x < 7 && y < 7) || (x >= n - 7 && y < 7) || (x < 7 && y >= n - 7);
   return (
     <div className="rounded-2xl bg-white p-3 shadow-lg ring-1 ring-black/5">
-      <svg viewBox={`-1 -1 ${n + 2} ${n + 2}`} className="size-44 sm:size-48" role="img" aria-label="QR code for your authenticator app">
+      <svg viewBox={`-1 -1 ${n + 2} ${n + 2}`} className="size-44 sm:size-48" role="img" aria-label={t("accountsettings.security.qr")}>
         {qr.data.flatMap((row, y) =>
           row.map((dark, x) =>
             dark && !inFinder(x, y) ? (
@@ -346,6 +357,7 @@ function QrCode({ text }: { text: string }) {
 
 /** The setup key in groups of four, with a copy button. */
 function SecretKey({ secret }: { secret: string }) {
+  const { t } = useI18n();
   const streaming = usePrefs((p) => p.streamer);
   const groups = secret.match(/.{1,4}/g) ?? [];
   return (
@@ -353,7 +365,7 @@ function SecretKey({ secret }: { secret: string }) {
       <code className={cn("min-w-0 flex-1 rounded-xl bg-muted px-3 py-2 font-mono text-sm font-bold tracking-wider break-all transition-[filter] duration-300", streaming && "blur-sm select-none")}>
         {groups.join(" ")}
       </code>
-      <Button type="button" variant="outline" size="icon" className="shrink-0 rounded-xl" aria-label="Copy the key" onClick={() => copy(secret, "the key")}>
+      <Button type="button" variant="outline" size="icon" className="shrink-0 rounded-xl" aria-label={t("accountsettings.security.copyKey")} onClick={() => copy(secret, "the key")}>
         <CopyIcon className="size-4" />
       </Button>
     </div>
@@ -362,14 +374,15 @@ function SecretKey({ secret }: { secret: string }) {
 
 /** Backup codes in a grid, to copy or download. */
 function BackupCodes({ codes, where }: { codes: string[]; where: string }) {
+  const { t } = useI18n();
   const streaming = usePrefs((p) => p.streamer);
   function download() {
-    const text = `Backup codes for your fuwa account on ${where}\nEach one works once.\n\n${codes.join("\n")}\n`;
+    const text = `${t("accountsettings.security.codesFileTitle", { instance: where })}\n${t("accountsettings.security.codesFileNote")}\n\n${codes.join("\n")}\n`;
     const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
     const a = Object.assign(document.createElement("a"), { href: url, download: `fuwa-backup-codes-${where.replace(/[^\w.-]+/g, "-").toLowerCase()}.txt` });
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    toast("Downloaded your backup codes");
+    toast(t("accountsettings.security.codesDownloaded"));
   }
   return (
     <div className="rounded-2xl border bg-card p-4">
@@ -388,10 +401,10 @@ function BackupCodes({ codes, where }: { codes: string[]; where: string }) {
       </ul>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => copy(codes.join("\n"), "your backup codes")}>
-          <CopyIcon className="size-4" /> Copy all
+          <CopyIcon className="size-4" /> {t("accountsettings.security.copyAll")}
         </Button>
         <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={download}>
-          <DownloadIcon className="size-4" /> Download
+          <DownloadIcon className="size-4" /> {t("accountsettings.shared.download")}
         </Button>
       </div>
     </div>
@@ -401,6 +414,7 @@ function BackupCodes({ codes, where }: { codes: string[]; where: string }) {
 // ───────────────────────── Once it's on ─────────────────────────
 
 function TurnedOn({ instanceKey, where, status, onChange }: { instanceKey: string; where: string; status: Status; onChange: (s: Status) => void }) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<"idle" | "codes" | "off">("idle");
   const [codes, setCodes] = useState<string[] | null>(null);
   const low = status.backupCodesLeft <= 3;
@@ -418,8 +432,8 @@ function TurnedOn({ instanceKey, where, status, onChange }: { instanceKey: strin
             <ShieldCheckIcon className="size-7" />
           </motion.span>
           <div className="min-w-0">
-            <p className="text-lg font-extrabold">Two-step sign-in is on</p>
-            <p className="text-sm text-muted-foreground">Signing in to {where} asks for a code from your authenticator app after your password.</p>
+            <p className="text-lg font-extrabold">{t("accountsettings.security.on")}</p>
+            <p className="text-sm text-muted-foreground">{t("accountsettings.security.onHint", { instance: where })}</p>
           </div>
         </div>
       </div>
@@ -427,29 +441,38 @@ function TurnedOn({ instanceKey, where, status, onChange }: { instanceKey: strin
       <div className="flex flex-col">
         <Row
           id="backup-codes"
-          label="Backup codes"
+          label={t("settings.nav.backupCodes")}
           hint={
             <>
-              <span className={cn("font-bold tabular-nums", low ? "text-destructive" : "text-foreground")}>
-                <Count value={status.backupCodesLeft} />
-              </span>{" "}
-              of 10 left.{low ? " Make new ones before you run out." : " Each one signs you in once without your app."}
+              <T
+                k="accountsettings.security.codesLeft"
+                values={{
+                  count: (
+                    <span className={cn("font-bold tabular-nums", low ? "text-destructive" : "text-foreground")}>
+                      <Count value={status.backupCodesLeft} />
+                    </span>
+                  ),
+                  total: BACKUP_CODES,
+                }}
+                count={status.backupCodesLeft}
+              />{" "}
+              {low ? t("accountsettings.security.codesLow") : t("accountsettings.security.codesEach")}
             </>
           }
         >
           <AnimatePresence mode="wait" initial={false}>
             {codes ? (
               <motion.div key="codes" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={SPRING} className="flex flex-col gap-3">
-                <p className="text-sm text-muted-foreground">Your old codes stopped working. Here are the new ones:</p>
+                <p className="text-sm text-muted-foreground">{t("accountsettings.security.oldCodes")}</p>
                 <BackupCodes codes={codes} where={where} />
                 <Button type="button" variant="outline" size="sm" className="self-start rounded-xl" onClick={() => setCodes(null)}>
-                  Done
+                  {t("accountsettings.shared.done")}
                 </Button>
               </motion.div>
             ) : mode === "codes" ? (
               <Confirm
                 key="confirm-codes"
-                action="New codes"
+                action={t("accountsettings.security.newCodes")}
                 withCode={false}
                 onCancel={() => setMode("idle")}
                 onConfirm={async (password) => {
@@ -462,31 +485,31 @@ function TurnedOn({ instanceKey, where, status, onChange }: { instanceKey: strin
             ) : (
               <motion.div key="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <Button type="button" variant="outline" className="group rounded-xl" onClick={() => setMode("codes")}>
-                  <RefreshCwIcon className="size-4 transition-transform duration-500 group-hover:rotate-180" /> Make new backup codes
+                  <RefreshCwIcon className="size-4 transition-transform duration-500 group-hover:rotate-180" /> {t("accountsettings.security.makeNewCodes")}
                 </Button>
               </motion.div>
             )}
           </AnimatePresence>
         </Row>
-        <Row id="turn-off-two-step" label="Turn off two-step sign-in" hint="Your password alone will be enough to sign in again.">
+        <Row id="turn-off-two-step" label={t("accountsettings.security.turnOffTitle")} hint={t("accountsettings.security.turnOffHint")}>
           <AnimatePresence mode="wait" initial={false}>
             {mode === "off" ? (
               <Confirm
                 key="confirm-off"
-                action="Turn off"
+                action={t("accountsettings.shared.turnOff")}
                 danger
                 withCode
                 onCancel={() => setMode("idle")}
                 onConfirm={async (password, code) => {
                   await run(disableTwoFactor(instanceKey, password, code));
-                  toast("Two-step sign-in is off");
+                  toast(t("accountsettings.security.off"));
                   onChange({ enabled: false, backupCodesLeft: 0 });
                 }}
               />
             ) : (
               <motion.div key="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <Button type="button" variant="outline" className="rounded-xl border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => setMode("off")}>
-                  <ShieldOffIcon className="size-4" /> Turn off
+                  <ShieldOffIcon className="size-4" /> {t("accountsettings.shared.turnOff")}
                 </Button>
               </motion.div>
             )}
@@ -511,6 +534,7 @@ function Confirm({
   onCancel: () => void;
   onConfirm: (password: string, code: string) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [show, setShow] = useState(false);
@@ -546,14 +570,14 @@ function Confirm({
       <motion.div animate={shake} className="flex flex-col gap-3">
         <label className="flex flex-col gap-1.5">
           <span className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
-            <KeyRoundIcon className="size-3.5" /> Your password
+            <KeyRoundIcon className="size-3.5" /> {t("accountsettings.shared.yourPassword")}
           </span>
           <PasswordInput id={`confirm-${action}`} autoComplete="current-password" value={password} onChange={setPassword} show={show} onShow={setShow} />
         </label>
         {withCode && (
           <label className="flex flex-col gap-1.5">
             <span className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
-              <SmartphoneIcon className="size-3.5" /> A code from your app, or a backup code
+              <SmartphoneIcon className="size-3.5" /> {t("accountsettings.shared.codeOrBackup")}
             </span>
             <Input
               value={code}
@@ -576,10 +600,10 @@ function Confirm({
       </AnimatePresence>
       <div className="flex gap-2">
         <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={onCancel} disabled={pending}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="submit" size="sm" variant={danger ? "destructive" : "default"} className={cn("rounded-xl font-bold", !danger && "btn")} disabled={pending}>
-          {pending ? "Checking…" : action}
+          {pending ? t("accountsettings.shared.checking") : action}
         </Button>
       </div>
     </motion.form>

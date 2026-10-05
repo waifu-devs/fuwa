@@ -8,6 +8,7 @@ import type { FuwaError } from "@/fuwa/errors";
 import { useInstance } from "@/fuwa/hooks";
 import { Count, SPRING } from "@/components/motion";
 import { Button } from "@/components/ui/button";
+import { T, useI18n } from "@/i18n/react";
 import { MessageBackup } from "./MessageBackup";
 import { activeAgo, describeDevice, deviceName, type DeviceKind } from "@/lib/devices";
 import { useNow } from "@/lib/notifications";
@@ -23,6 +24,7 @@ const day = (d: Date) => d.toLocaleDateString(undefined, { year: "numeric", mont
  * used first. Sign out one you don't recognise, or all but this one.
  */
 export function Devices({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +32,7 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
   const [confirm, setConfirm] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const now = useNow(60_000);
-  const where = inst?.node?.name ?? "this instance";
+  const where = inst?.node?.name ?? t("settings.nav.thisInstance");
 
   const load = useCallback(() => {
     run(listSessions(instanceKey)).then(
@@ -51,7 +53,7 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
     try {
       await run(revokeSession(instanceKey, id));
       setSessions((s) => s?.filter((x) => x.id !== id) ?? null);
-      toast("Signed out that device");
+      toast(t("accountsettings.devices.signedOutOne"));
     } catch (err) {
       toast((err as FuwaError).message);
     } finally {
@@ -68,7 +70,7 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
     try {
       const n = await run(revokeOtherSessions(instanceKey));
       setSessions((s) => s?.filter((x) => x.current) ?? null);
-      toast(n === 1 ? "Signed out 1 device" : `Signed out ${n} devices`);
+      toast(t("accountsettings.devices.signedOutCount", { count: n }));
     } catch (err) {
       toast((err as FuwaError).message);
     } finally {
@@ -82,7 +84,7 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
       <div className="flex flex-col items-start gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 p-4">
         <p className="text-sm font-bold text-destructive first-letter:uppercase">{error}</p>
         <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={load}>
-          Try again
+          {t("accountsettings.shared.tryAgain")}
         </Button>
       </div>
     );
@@ -91,7 +93,7 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
   return (
     <div className="flex flex-col gap-8">
       <section>
-        <h3 className="mb-3 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">This device</h3>
+        <h3 className="mb-3 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{t("accountsettings.devices.thisDevice")}</h3>
         {current ? (
           <DeviceRow session={current} now={now} here />
         ) : (
@@ -102,7 +104,11 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
       <section>
         <div className="mb-3 flex items-center justify-between gap-3">
           <h3 className="text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">
-            Other devices {sessions && <span className="tabular-nums">(<Count value={others.length} />)</span>}
+            {sessions ? (
+              <T k="accountsettings.devices.othersCount" values={{ count: <Count value={others.length} /> }} count={others.length} />
+            ) : (
+              t("accountsettings.devices.others")
+            )}
           </h3>
         </div>
         {!sessions ? (
@@ -127,12 +133,12 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
                       variant="ghost"
                       size="sm"
                       disabled={leaving.has(s.id)}
-                      aria-label={`Sign out ${deviceName(describeDevice(s.userAgent))}`}
+                      aria-label={t("accountsettings.devices.signOutDevice", { device: deviceName(describeDevice(s.userAgent)) })}
                       onClick={() => void signOut(s.id)}
                       className="group shrink-0 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     >
                       <LogOutIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
-                      <span className="hidden sm:inline">{leaving.has(s.id) ? "Signing out…" : "Sign out"}</span>
+                      <span className="hidden sm:inline">{leaving.has(s.id) ? t("accountsettings.shared.signingOut") : t("accountsettings.shared.signOut")}</span>
                     </Button>
                   </DeviceRow>
                 </motion.li>
@@ -156,8 +162,8 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
                     <ShieldCheckIcon className="size-5" />
                   </motion.span>
                   <span>
-                    <span className="block text-sm font-bold">Only this device</span>
-                    <span className="block text-sm text-muted-foreground">Nothing else is signed in to your account on {where}.</span>
+                    <span className="block text-sm font-bold">{t("accountsettings.devices.onlyThis")}</span>
+                    <span className="block text-sm text-muted-foreground">{t("accountsettings.devices.onlyThisHint", { instance: where })}</span>
                   </span>
                 </motion.li>
               )}
@@ -177,23 +183,23 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
           >
             <div className="flex flex-wrap items-center gap-3 rounded-2xl border p-4">
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold">Sign out all other devices</p>
-                <p className="text-sm text-muted-foreground">They'll have to sign in again. This one stays signed in.</p>
+                <p className="text-sm font-bold">{t("accountsettings.devices.signOutAll")}</p>
+                <p className="text-sm text-muted-foreground">{t("accountsettings.devices.signOutAllHint")}</p>
               </div>
               <AnimatePresence mode="popLayout" initial={false}>
                 {confirm ? (
                   <motion.div key="confirm" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={SPRING} className="flex gap-2">
                     <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={() => setConfirm(false)} disabled={signingOut}>
-                      Cancel
+                      {t("common.cancel")}
                     </Button>
                     <Button type="button" variant="destructive" size="sm" className="rounded-xl font-bold" onClick={() => void signOutOthers()} disabled={signingOut}>
-                      {signingOut ? "Signing out…" : `Sign out ${others.length}`}
+                      {signingOut ? t("accountsettings.shared.signingOut") : t("accountsettings.devices.signOutCount", { count: others.length })}
                     </Button>
                   </motion.div>
                 ) : (
                   <motion.div key="ask" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} transition={SPRING}>
                     <Button type="button" variant="outline" size="sm" className="rounded-xl border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => setConfirm(true)}>
-                      <LogOutIcon className="size-4" /> Sign out all
+                      <LogOutIcon className="size-4" /> {t("accountsettings.devices.signOutAllButton")}
                     </Button>
                   </motion.div>
                 )}
@@ -209,6 +215,7 @@ export function Devices({ instanceKey }: { instanceKey: string }) {
 }
 
 function DeviceRow({ session, now, here = false, children }: { session: Session; now: number; here?: boolean; children?: ReactNode }) {
+  const { t } = useI18n();
   const device = describeDevice(session.userAgent);
   const Icon = ICONS[device.kind];
   const created = session.createdAt ? timestampDate(session.createdAt) : null;
@@ -226,8 +233,8 @@ function DeviceRow({ session, now, here = false, children }: { session: Session;
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-bold">{deviceName(device)}</p>
         <p className="truncate text-xs text-muted-foreground">
-          {here ? "You're using it now" : active ? activeAgo(active, now) : "Not used yet"}
-          {created && ` · Signed in ${day(created)}`}
+          {here ? t("accountsettings.devices.usingNow") : active ? activeAgo(active, now) : t("accountsettings.devices.notUsed")}
+          {created && ` · ${t("accountsettings.devices.signedIn", { date: day(created) })}`}
         </p>
       </div>
       {children}

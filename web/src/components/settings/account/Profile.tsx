@@ -12,10 +12,11 @@ import { PictureField } from "@/components/PictureField";
 import { Private } from "@/components/Private";
 import { ProfileCard } from "@/components/ProfileCard";
 import { Chips, Row, Segmented, Warn } from "@/components/settings/account/common";
-import { EffectPicker } from "@/components/settings/account/EffectPicker";
+import { EffectAbout, EffectPicker } from "@/components/settings/account/EffectPicker";
 import { SaveBar, WithPreview } from "@/components/settings/controls";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { type I18n, useI18n } from "@/i18n/react";
 import { builtinEffect } from "@/lib/effects/profile";
 import { colorCss, shownStatus } from "@/lib/format";
 import { reportUsage } from "@/lib/reports";
@@ -29,12 +30,12 @@ const BIO_MAX = 2000;
 /** When a status clears by itself. "keep" leaves the time it already has. */
 type Clear = "keep" | "never" | "30m" | "1h" | "4h" | "today";
 
-const CLEAR: { value: Exclude<Clear, "keep">; label: string }[] = [
-  { value: "never", label: "Don't clear" },
-  { value: "30m", label: "30 minutes" },
-  { value: "1h", label: "1 hour" },
-  { value: "4h", label: "4 hours" },
-  { value: "today", label: "Today" },
+const clearOptions = (t: I18n["t"]): { value: Exclude<Clear, "keep">; label: string }[] => [
+  { value: "never", label: t("accountsettings.profile.clearNever") },
+  { value: "30m", label: t("accountsettings.profile.clearMinutes", { count: 30 }) },
+  { value: "1h", label: t("accountsettings.profile.clearHours", { count: 1 }) },
+  { value: "4h", label: t("accountsettings.profile.clearHours", { count: 4 }) },
+  { value: "today", label: t("accountsettings.profile.clearToday") },
 ];
 
 function clearsAt(clear: Clear, now = new Date()): Date | null {
@@ -81,6 +82,7 @@ const isUrl = (value: string) => !value.trim() || /^https?:\/\/\S+$/i.test(value
  * effect.
  */
 export function Profile({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const me = inst?.me;
   const profile = useFuwa((s) => (me ? s.instances[instanceKey]?.profiles[me.id] : undefined));
@@ -122,12 +124,13 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
   const keptUntil = me.statusExpiresAt ? timestampDate(me.statusExpiresAt) : null;
 
   const problem = !draft.displayName.trim()
-    ? "Your display name can't be empty."
+    ? t("accountsettings.profile.nameEmpty")
     : !isUrl(draft.avatarUrl)
-      ? "The avatar link needs to start with https://"
+      ? t("accountsettings.profile.avatarLink")
       : !isUrl(draft.bannerUrl)
-        ? "The banner link needs to start with https://"
+        ? t("accountsettings.profile.bannerLink")
         : null;
+  const effect = builtinEffect(draft.effect);
 
   async function submit(e?: FormEvent) {
     e?.preventDefault();
@@ -171,7 +174,12 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
     <form onSubmit={submit}>
       <WithPreview preview={preview}>
         <div className="flex flex-col">
-          <Row id="display-name" label="Display name" htmlFor="profile-name" hint={!draft.displayName.trim() ? <Warn>Pick a name people will see.</Warn> : "What people see next to your messages."}>
+          <Row
+            id="display-name"
+            label={t("settings.nav.displayName")}
+            htmlFor="profile-name"
+            hint={!draft.displayName.trim() ? <Warn>{t("accountsettings.profile.pickName")}</Warn> : t("accountsettings.profile.nameHint")}
+          >
             <Input
               id="profile-name"
               maxLength={NAME_MAX}
@@ -181,18 +189,22 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
               className="h-11 rounded-xl"
             />
           </Row>
-          <Row id="pronouns" label="Pronouns" htmlFor="profile-pronouns" hint="Shown beside your username on your card.">
+          <Row id="pronouns" label={t("settings.nav.pronouns")} htmlFor="profile-pronouns" hint={t("accountsettings.profile.pronounsHint")}>
             <Input
               id="profile-pronouns"
               maxLength={PRONOUNS_MAX}
               value={draft.pronouns}
               disabled={!ready}
-              placeholder="Add your pronouns"
+              placeholder={t("accountsettings.profile.pronounsPlaceholder")}
               onChange={(e) => set({ pronouns: e.target.value })}
               className="h-11 max-w-xs rounded-xl"
             />
           </Row>
-          <Row id="avatar" label="Avatar" hint={isUrl(draft.avatarUrl) ? "Drop a picture on it or pick one. GIFs keep moving. Without one you get your initial on your own color." : <Warn>Links start with https://</Warn>}>
+          <Row
+            id="avatar"
+            label={t("settings.nav.avatar")}
+            hint={isUrl(draft.avatarUrl) ? t("accountsettings.profile.avatarHint") : <Warn>{t("accountsettings.profile.linkHttps")}</Warn>}
+          >
             <PictureField
               id="profile-avatar"
               instanceKey={instanceKey}
@@ -202,7 +214,11 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
               fallback={<UserAvatar user={{ ...me, avatarUrl: "" }} className="size-full text-3xl" />}
             />
           </Row>
-          <Row id="banner" label="Banner" hint={isUrl(draft.bannerUrl) ? "A wide picture for the top of your card. Without one it's your profile color." : <Warn>Links start with https://</Warn>}>
+          <Row
+            id="banner"
+            label={t("settings.nav.banner")}
+            hint={isUrl(draft.bannerUrl) ? t("accountsettings.profile.bannerHint") : <Warn>{t("accountsettings.profile.linkHttps")}</Warn>}
+          >
             <PictureField
               id="profile-banner"
               instanceKey={instanceKey}
@@ -218,25 +234,25 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
               }
             />
           </Row>
-          <Row id="profile-color" label="Profile color" hint="Colors your card's banner when there's no picture.">
+          <Row id="profile-color" label={t("settings.nav.profileColor")} hint={t("accountsettings.profile.colorHint")}>
             <ColorPicker value={draft.accent} userId={me.id} disabled={!ready} onChange={(accent) => set({ accent })} />
           </Row>
           {effectsOn && (
             <Row
               id="profile-effect"
-              label="Profile effect"
-              hint={builtinEffect(draft.effect)?.description ?? "Plays over your card when people open it. Hovering the card plays it again."}
+              label={t("settings.nav.profileEffect")}
+              hint={effect ? <EffectAbout effect={effect} /> : t("accountsettings.profile.effectHint")}
             >
               <EffectPicker value={draft.effect} userId={me.id} accent={draft.accent} disabled={!ready} onChange={(effect) => set({ effect })} />
             </Row>
           )}
-          <Row id="status" label="Custom status" htmlFor="profile-status" hint="Under your name in member lists, on every server here.">
+          <Row id="status" label={t("settings.nav.status")} htmlFor="profile-status" hint={t("accountsettings.profile.statusHint")}>
             <div className="relative">
               <Input
                 id="profile-status"
                 maxLength={STATUS_MAX}
                 value={draft.status}
-                placeholder="What are you up to?"
+                placeholder={t("accountsettings.profile.statusPlaceholder")}
                 onChange={(e) => set({ status: e.target.value })}
                 className="h-11 rounded-xl pr-11"
               />
@@ -249,7 +265,7 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
                     exit={{ scale: 0, opacity: 0 }}
                     transition={SPRING}
                     onClick={() => set({ status: "" })}
-                    aria-label="Clear status"
+                    aria-label={t("accountsettings.profile.clearStatus")}
                     className="absolute top-1/2 right-1.5 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
                   >
                     <XIcon className="size-4" />
@@ -260,15 +276,15 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
             <AnimatePresence initial={false}>
               {draft.status.trim() && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING} className="overflow-hidden">
-                  <p className="pt-1 pb-2 text-xs font-bold text-muted-foreground">Clear after</p>
+                  <p className="pt-1 pb-2 text-xs font-bold text-muted-foreground">{t("accountsettings.profile.clearAfter")}</p>
                   <Chips
                     value={draft.clear}
                     onChange={(clear) => set({ clear })}
                     options={[
                       ...(keptUntil && base.clear === "keep"
-                        ? [{ value: "keep" as Clear, label: `At ${at(keptUntil)}` }]
+                        ? [{ value: "keep" as Clear, label: t("accountsettings.profile.clearAt", { time: at(keptUntil) }) }]
                         : []),
-                      ...CLEAR,
+                      ...clearOptions(t),
                     ]}
                   />
                 </motion.div>
@@ -277,11 +293,17 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
           </Row>
           <Row
             id="about-me"
-            label="About me"
+            label={t("settings.nav.aboutMe")}
             htmlFor="profile-bio"
             hint={
               <span className="flex flex-wrap items-center justify-between gap-2">
-                <span>Markdown works: **bold**, *italics*, `code`, lists and links.</span>
+                <span>
+                  {t("accountsettings.profile.markdown", {
+                    bold: `**${t("accountsettings.profile.bold")}**`,
+                    italics: `*${t("accountsettings.profile.italics")}*`,
+                    code: `\`${t("accountsettings.profile.code")}\``,
+                  })}
+                </span>
                 <span className={cn("font-bold tabular-nums transition-colors", draft.bio.length > BIO_MAX * 0.9 ? "text-amber-500" : "text-muted-foreground")}>
                   <Count value={draft.bio.length} /> / {BIO_MAX}
                 </span>
@@ -289,13 +311,13 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
             }
           >
             <Segmented
-              label="About me"
+              label={t("settings.nav.aboutMe")}
               value={bioTab}
               onChange={setBioTab}
               className="self-start"
               options={[
-                { value: "write", label: "Write", icon: <PencilLineIcon className="size-3.5" /> },
-                { value: "preview", label: "Preview", icon: <EyeIcon className="size-3.5" /> },
+                { value: "write", label: t("accountsettings.profile.write"), icon: <PencilLineIcon className="size-3.5" /> },
+                { value: "preview", label: t("accountsettings.profile.preview"), icon: <EyeIcon className="size-3.5" /> },
               ]}
             />
             <AnimatePresence mode="wait" initial={false}>
@@ -306,7 +328,7 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
                     maxLength={BIO_MAX}
                     value={draft.bio}
                     disabled={!ready}
-                    placeholder="Say a little about yourself"
+                    placeholder={t("accountsettings.profile.bioPlaceholder")}
                     onChange={(e) => set({ bio: e.target.value })}
                     className="min-h-32 rounded-xl"
                   />
@@ -320,12 +342,12 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
                   transition={{ duration: 0.15 }}
                   className="min-h-32 rounded-xl border bg-muted/40 px-3 py-2"
                 >
-                  {draft.bio.trim() ? <Markdown className="text-sm">{draft.bio}</Markdown> : <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>}
+                  {draft.bio.trim() ? <Markdown className="text-sm">{draft.bio}</Markdown> : <p className="text-sm text-muted-foreground">{t("accountsettings.profile.nothingToPreview")}</p>}
                 </motion.div>
               )}
             </AnimatePresence>
           </Row>
-          <Row id="username" label="Username" hint="Set when the account was made.">
+          <Row id="username" label={t("accountsettings.profile.username")} hint={t("accountsettings.profile.usernameHint")}>
             <p className="text-sm font-bold">
               @<Private text={me.username} kind="name" />
             </p>
@@ -348,10 +370,11 @@ export function Profile({ instanceKey }: { instanceKey: string }) {
 
 /** Swatches for the profile color: fuwa's pick for you, a palette, and any color at all. */
 function ColorPicker({ value, userId, onChange, disabled }: { value: number; userId: string; onChange: (value: number) => void; disabled?: boolean }) {
+  const { t } = useI18n();
   const custom = value >= 0 && !COLORS.includes(value);
   return (
-    <div role="radiogroup" aria-label="Profile color" className={cn("flex flex-wrap gap-2", disabled && "pointer-events-none opacity-50")}>
-      <Swatch label="Auto: fuwa picks from your account" active={value < 0} onClick={() => onChange(-1)} style={hue(userId)} className="server-gradient">
+    <div role="radiogroup" aria-label={t("settings.nav.profileColor")} className={cn("flex flex-wrap gap-2", disabled && "pointer-events-none opacity-50")}>
+      <Swatch label={t("accountsettings.profile.colorAuto")} active={value < 0} onClick={() => onChange(-1)} style={hue(userId)} className="server-gradient">
         <SparklesIcon className="size-4 text-white drop-shadow" />
       </Swatch>
       {COLORS.map((color) => (
@@ -360,14 +383,14 @@ function ColorPicker({ value, userId, onChange, disabled }: { value: number; use
       <motion.label
         whileHover={{ y: -2 }}
         whileTap={{ scale: 0.9 }}
-        title="Any color"
+        title={t("accountsettings.profile.anyColor")}
         className={cn("relative grid size-9 cursor-pointer place-items-center rounded-full ring-offset-2 ring-offset-background transition-shadow", custom && "ring-2 ring-primary")}
         style={custom ? { backgroundColor: colorCss(value) } : { background: "conic-gradient(from 90deg, #f87171, #fbbf24, #a3e635, #22d3ee, #818cf8, #f472b6, #f87171)" }}
       >
         <PipetteIcon className="size-4 text-white drop-shadow" />
         <input
           type="color"
-          aria-label="Any color"
+          aria-label={t("accountsettings.profile.anyColor")}
           value={value >= 0 ? colorCss(value) : "#ff6b9d"}
           onChange={(e) => onChange(parseInt(e.target.value.slice(1), 16))}
           className="absolute inset-0 cursor-pointer opacity-0"

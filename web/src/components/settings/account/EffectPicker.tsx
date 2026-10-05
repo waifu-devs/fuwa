@@ -3,9 +3,23 @@ import { motion } from "motion/react";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { hue } from "@/components/Icons";
 import { ProfileEffect } from "@/components/ProfileEffect";
-import { BUILTIN_EFFECTS } from "@/lib/effects/profile";
+import { type I18n, useI18n } from "@/i18n/react";
+import { BUILTIN_EFFECTS, type ProfileEffectSpec } from "@/lib/effects/profile";
+import { effectKeys } from "@/lib/effects/text";
 import { colorCss, hueOf } from "@/lib/format";
 import { cn } from "@/lib/utils";
+
+/** A built-in effect's name and line in the app's language; any other effect keeps its own. */
+function effectText(t: I18n["t"], effect: ProfileEffectSpec): { name: string; description: string } {
+  const keys = effectKeys(effect.id);
+  return keys ? { name: t(keys.name), description: t(keys.about) } : effect;
+}
+
+/** An effect's one line, as the picker's tiles say it. */
+export function EffectAbout({ effect }: { effect: ProfileEffectSpec }) {
+  const { t } = useI18n();
+  return <>{effectText(t, effect).description}</>;
+}
 
 /**
  * Picks a profile effect: None, then a tile for each effect fuwa ships with.
@@ -26,17 +40,18 @@ export function EffectPicker({
   accent: number;
   disabled?: boolean;
 }) {
+  const { t } = useI18n();
   const color = accent < 0 ? `hsl(${hueOf(userId)} 85% 72%)` : colorCss(accent);
   const banner: CSSProperties = accent < 0 ? hue(userId) : { backgroundColor: colorCss(accent) };
   return (
-    <div role="radiogroup" aria-label="Profile effect" className={cn("grid grid-cols-3 gap-2 sm:grid-cols-5", disabled && "pointer-events-none opacity-50")}>
-      <Tile label="None" active={value === ""} onClick={() => onChange("")} banner={banner} plain={accent < 0}>
+    <div role="radiogroup" aria-label={t("settings.nav.profileEffect")} className={cn("grid grid-cols-3 gap-2 sm:grid-cols-5", disabled && "pointer-events-none opacity-50")}>
+      <Tile label={t("accountsettings.effects.none")} active={value === ""} onClick={() => onChange("")} banner={banner} plain={accent < 0}>
         <span className="absolute inset-x-0 top-[28%] bottom-0 grid place-items-center bg-card/70">
           <BanIcon className="size-6 text-muted-foreground transition-transform duration-300 group-hover:rotate-90" />
         </span>
       </Tile>
       {BUILTIN_EFFECTS.map((effect) => (
-        <Tile key={effect.id} label={effect.name} title={effect.description} active={value === effect.id} onClick={() => onChange(effect.id)} banner={banner} plain={accent < 0}>
+        <Tile key={effect.id} label={effectText(t, effect).name} title={effectText(t, effect).description} active={value === effect.id} onClick={() => onChange(effect.id)} banner={banner} plain={accent < 0}>
           {(lively) => <ProfileEffect effect={effect.id} seed={userId} color={color} play={lively} measure={false} replayOnHover={false} />}
         </Tile>
       ))}

@@ -13,6 +13,7 @@ import { PasswordInput, useShake } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { T, useI18n } from "@/i18n/react";
 import { formatBytes } from "@/lib/format";
 import { Switch } from "@/components/ui/switch";
 import { savePresenceSettings, usePresenceSettings } from "@/fuwa/presence";
@@ -26,8 +27,9 @@ import { cn } from "@/lib/utils";
  * account", so conversations still read.
  */
 export function Privacy({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
-  const where = inst?.node?.name ?? "this instance";
+  const where = inst?.node?.name ?? t("settings.nav.thisInstance");
   const [deleting, setDeleting] = useState(false);
   if (!inst?.me) return null;
   const owned = inst.servers.filter((s) => s.ownerId === inst.me!.id);
@@ -49,13 +51,11 @@ export function Privacy({ instanceKey }: { instanceKey: string }) {
             <Trash2Icon className="size-6" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="font-extrabold">Delete your account</p>
-            <p className="text-sm text-muted-foreground">
-              Your account on {where} goes for good: profile, settings and devices. Messages you sent stay in their servers, from "Deleted account".
-            </p>
+            <p className="font-extrabold">{t("settings.nav.deleteAccount")}</p>
+            <p className="text-sm text-muted-foreground">{t("accountsettings.privacy.deleteHint", { instance: where })}</p>
           </div>
           <Button type="button" variant="destructive" className="shrink-0 rounded-xl font-bold" onClick={() => setDeleting(true)} disabled={owned.length > 0}>
-            Delete account
+            {t("accountsettings.privacy.deleteButton")}
           </Button>
         </div>
         <AnimatePresence initial={false}>
@@ -63,7 +63,7 @@ export function Privacy({ instanceKey }: { instanceKey: string }) {
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
               <div className="mt-4 rounded-2xl bg-background/60 p-3">
                 <p className="mb-2 flex items-center gap-1.5 text-sm font-bold">
-                  <CrownIcon className="size-4 text-amber-400" /> You own {owned.length === 1 ? "a server" : `${owned.length} servers`}. Delete {owned.length === 1 ? "it" : "them"} first.
+                  <CrownIcon className="size-4 text-amber-400" /> {t("accountsettings.privacy.owned", { count: owned.length })}
                 </p>
                 <ul className="flex flex-wrap gap-2">
                   {owned.map((s) => (
@@ -85,6 +85,7 @@ export function Privacy({ instanceKey }: { instanceKey: string }) {
 }
 
 function Export({ instanceKey, where }: { instanceKey: string; where: string }) {
+  const { t } = useI18n();
   const [state, setState] = useState<"idle" | "working" | "done">("idle");
   const [bytes, setBytes] = useState(0);
   const [file, setFile] = useState<{ url: string; name: string } | null>(null);
@@ -134,22 +135,20 @@ function Export({ instanceKey, where }: { instanceKey: string; where: string }) 
           </AnimatePresence>
         </span>
         <div className="min-w-0 flex-1">
-          <p className="font-extrabold">Download your data</p>
-          <p className="text-sm text-muted-foreground">
-            Everything {where} keeps about you, as one JSON file: your account, profile, settings, devices, servers, and every message you've sent.
-          </p>
+          <p className="font-extrabold">{t("settings.nav.export")}</p>
+          <p className="text-sm text-muted-foreground">{t("accountsettings.privacy.exportHint", { instance: where })}</p>
         </div>
         <AnimatePresence mode="popLayout" initial={false}>
           {state === "done" && file ? (
             <motion.div key="again" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} transition={SPRING}>
               <Button type="button" variant="outline" className="shrink-0 rounded-xl" onClick={() => save(file.url, file.name)}>
-                <DownloadIcon className="size-4" /> Save again
+                <DownloadIcon className="size-4" /> {t("accountsettings.privacy.saveAgain")}
               </Button>
             </motion.div>
           ) : (
             <motion.div key="start" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} transition={SPRING}>
               <Button type="button" className="btn shrink-0 rounded-xl px-5 font-bold" onClick={() => void start()} disabled={state === "working"}>
-                <DownloadIcon className="size-4" /> {state === "working" ? "Gathering…" : "Download"}
+                <DownloadIcon className="size-4" /> {state === "working" ? t("accountsettings.privacy.gathering") : t("accountsettings.shared.download")}
               </Button>
             </motion.div>
           )}
@@ -172,7 +171,7 @@ function Export({ instanceKey, where }: { instanceKey: string; where: string }) 
                 )}
               </div>
               <span className="w-28 text-right text-xs font-bold text-muted-foreground tabular-nums">
-                {state === "done" ? `Ready, ${formatBytes(bytes)}` : formatBytes(bytes)}
+                {state === "done" ? t("accountsettings.privacy.ready", { size: formatBytes(bytes) }) : formatBytes(bytes)}
               </span>
             </div>
           </motion.div>
@@ -183,6 +182,7 @@ function Export({ instanceKey, where }: { instanceKey: string; where: string }) 
 }
 
 function DeleteDialog({ instanceKey, where, open, onOpenChange }: { instanceKey: string; where: string; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const me = inst?.me;
   const standalone = hasPassword(me ?? undefined);
@@ -217,7 +217,7 @@ function DeleteDialog({ instanceKey, where, open, onOpenChange }: { instanceKey:
       await run(deleteAccount(instanceKey, standalone ? { password, code: code.trim() } : { username: username.trim() }));
       onOpenChange(false);
       closeSettings();
-      toast(`Your account on ${where} is gone`);
+      toast(t("accountsettings.privacy.gone", { instance: where }));
       void navigate({ to: "/" });
     } catch (err) {
       setError((err as FuwaError).message);
@@ -230,10 +230,10 @@ function DeleteDialog({ instanceKey, where, open, onOpenChange }: { instanceKey:
   return (
     <Dialog open={open} onOpenChange={(next) => !pending && onOpenChange(next)}>
       <DialogContent>
-        <DialogHeader title="Delete your account?" description={`This can't be undone. Once it's gone, ${where} leaves your list on this device too.`} />
+        <DialogHeader title={t("accountsettings.privacy.dialogTitle")} description={t("accountsettings.privacy.dialogHint", { instance: where })} />
         <form onSubmit={submit} className="flex flex-col gap-4">
           <ul className="flex flex-col gap-2 rounded-2xl bg-muted/60 p-3 text-sm">
-            {["Your profile, settings and devices are deleted.", 'Your messages stay, from "Deleted account".', "You leave every server you're in."].map((line, n) => (
+            {[t("accountsettings.privacy.lineProfile"), t("accountsettings.privacy.lineMessages"), t("accountsettings.privacy.lineServers")].map((line, n) => (
               <motion.li key={line} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ ...SPRING, delay: 0.1 + n * 0.05 }} className="flex gap-2">
                 <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
                 {line}
@@ -244,13 +244,13 @@ function DeleteDialog({ instanceKey, where, open, onOpenChange }: { instanceKey:
             {standalone ? (
               <>
                 <label className="flex flex-col gap-1.5">
-                  <span className="text-xs font-bold text-muted-foreground">Your password</span>
+                  <span className="text-xs font-bold text-muted-foreground">{t("accountsettings.shared.yourPassword")}</span>
                   <PasswordInput id="delete-password" autoComplete="current-password" value={password} onChange={setPassword} show={show} onShow={setShow} />
                 </label>
                 <AnimatePresence initial={false}>
                   {twoStep && (
                     <motion.label initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex flex-col gap-1.5 overflow-hidden">
-                      <span className="text-xs font-bold text-muted-foreground">A code from your app, or a backup code</span>
+                      <span className="text-xs font-bold text-muted-foreground">{t("accountsettings.shared.codeOrBackup")}</span>
                       <Input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" maxLength={16} spellCheck={false} placeholder="123456" className="h-11 rounded-xl font-mono tracking-wider" />
                     </motion.label>
                   )}
@@ -259,7 +259,7 @@ function DeleteDialog({ instanceKey, where, open, onOpenChange }: { instanceKey:
             ) : (
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-bold text-muted-foreground">
-                  Type your username, <Private text={me.username} kind="name" className="font-mono text-foreground" />, to confirm
+                  <T k="accountsettings.privacy.typeUsername" values={{ username: <Private text={me.username} kind="name" className="font-mono text-foreground" /> }} />
                 </span>
                 <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" spellCheck={false} className="h-11 rounded-xl" />
               </label>
@@ -274,10 +274,10 @@ function DeleteDialog({ instanceKey, where, open, onOpenChange }: { instanceKey:
           </AnimatePresence>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" className="rounded-xl" onClick={() => onOpenChange(false)} disabled={pending}>
-              Keep my account
+              {t("accountsettings.privacy.keep")}
             </Button>
             <Button type="submit" variant="destructive" className={cn("rounded-xl font-bold transition-opacity", !ready && "opacity-60")} disabled={pending}>
-              {pending ? "Deleting…" : "Delete forever"}
+              {pending ? t("accountsettings.privacy.deleting") : t("accountsettings.privacy.deleteForever")}
             </Button>
           </div>
         </form>
@@ -292,13 +292,14 @@ function DeleteDialog({ instanceKey, where, open, onOpenChange }: { instanceKey:
  * until you turn it on; your status dot shows either way.
  */
 function ActivitySharing({ instanceKey, where }: { instanceKey: string; where: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const settings = usePresenceSettings(instanceKey);
   const allowed = inst?.node?.richPresence ?? false;
   if (!settings || !inst) return null;
   const hidden = new Set(settings.hiddenServerIds);
   const save = (change: Parameters<typeof savePresenceSettings>[2]) =>
-    savePresenceSettings(instanceKey, engine(instanceKey).api, change).catch((err: FuwaError) => toast(`Couldn't save that: ${err.message}`));
+    savePresenceSettings(instanceKey, engine(instanceKey).api, change).catch((err: FuwaError) => toast(t("accountsettings.privacy.saveFailed", { error: err.message })));
   return (
     <motion.section
       data-setting="activity-sharing"
@@ -312,25 +313,21 @@ function ActivitySharing({ instanceKey, where }: { instanceKey: string; where: s
           <GamepadIcon className="size-6" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="font-extrabold">Show what I'm doing</p>
-          <p className="text-sm text-muted-foreground">
-            {allowed
-              ? "Games and apps the desktop app sees, shown to people who share a server with you. Nothing is kept: it's gone when you stop."
-              : `${where} doesn't show what people are doing. Your status still shows.`}
-          </p>
+          <p className="font-extrabold">{t("settings.nav.activity")}</p>
+          <p className="text-sm text-muted-foreground">{allowed ? t("accountsettings.privacy.activityHint") : t("accountsettings.privacy.activityOff", { instance: where })}</p>
         </div>
         <Switch
           className="mt-1 shrink-0"
           checked={settings.showActivity && allowed}
           disabled={!allowed}
-          aria-label="Show what I'm doing"
+          aria-label={t("settings.nav.activity")}
           onCheckedChange={(on) => void save((s) => ({ ...s, showActivity: on }))}
         />
       </div>
       <AnimatePresence initial={false}>
         {settings.showActivity && allowed && inst.servers.length > 0 && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={SPRING}>
-            <p className="mt-5 mb-2 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">Share my activity here</p>
+            <p className="mt-5 mb-2 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{t("accountsettings.privacy.shareHere")}</p>
             <ul className="flex flex-col gap-1">
               {inst.servers.map((server) => (
                 <li key={server.id}>
@@ -339,7 +336,7 @@ function ActivitySharing({ instanceKey, where }: { instanceKey: string; where: s
                     <span className="min-w-0 flex-1 truncate text-sm font-bold">{server.name}</span>
                     <Switch
                       checked={!hidden.has(server.id)}
-                      aria-label={`Share my activity in ${server.name}`}
+                      aria-label={t("accountsettings.privacy.shareIn", { server: server.name })}
                       onCheckedChange={(on) =>
                         void save((s) => ({
                           ...s,

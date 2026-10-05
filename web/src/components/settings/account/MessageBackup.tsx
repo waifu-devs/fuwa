@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { dmEngine } from "@/e2ee/engine";
 import { toFuwaError } from "@/fuwa/errors";
 import { useFuwa } from "@/fuwa/store";
+import { useI18n } from "@/i18n/react";
 import { activeAgo } from "@/lib/devices";
 import { formatBytes } from "@/lib/format";
 import { useNow } from "@/lib/notifications";
@@ -21,6 +22,7 @@ const problemOf = (err: unknown) => (err instanceof Error && err.name === "Error
  * device or browser can read what came before it.
  */
 export function MessageBackup({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const backup = useFuwa((s) => s.instances[instanceKey]?.dms.backup);
   const dmsReady = useFuwa((s) => s.instances[instanceKey]?.dms.status === "ready");
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
@@ -56,32 +58,30 @@ export function MessageBackup({ instanceKey }: { instanceKey: string }) {
     body = <div className="shimmer h-24 rounded-2xl" />;
   } else if (backup.status === "off") {
     body = (
-      <Card icon={<HistoryIcon className="size-5" />} title="Message backup is off" tone="muted">
-        <p className="text-sm text-muted-foreground">
-          A new device or browser starts with none of your earlier direct messages or secure channel messages. Back them up, locked with a recovery key that only you hold.
-        </p>
+      <Card icon={<HistoryIcon className="size-5" />} title={t("accountsettings.backup.off")} tone="muted">
+        <p className="text-sm text-muted-foreground">{t("accountsettings.backup.offHint")}</p>
         <div className="mt-3">
           <Button type="button" size="sm" className="rounded-xl font-bold" disabled={busy || !engine} onClick={() => void create(false)}>
-            <KeyRoundIcon className="size-4" /> {busy ? "Setting up…" : "Set up backup"}
+            <KeyRoundIcon className="size-4" /> {busy ? t("accountsettings.backup.settingUp") : t("accountsettings.backup.setUp")}
           </Button>
         </div>
       </Card>
     );
   } else if (backup.status === "locked") {
     body = (
-      <Card icon={<LockKeyholeIcon className="size-5" />} title="Bring your earlier messages here" tone="primary">
-        <p className="text-sm text-muted-foreground">Your account has a message backup. Enter its recovery key to read it on this device.</p>
+      <Card icon={<LockKeyholeIcon className="size-5" />} title={t("accountsettings.backup.locked")} tone="primary">
+        <p className="text-sm text-muted-foreground">{t("accountsettings.backup.lockedHint")}</p>
         <RestoreForm busy={busy} onRestore={(text) => act(async () => engine && (await engine.backup.restore(text)))} />
         <Ask
           open={asking === "replace"}
-          question="Lost the key? Starting over deletes the backup, for every device, and backs up what this device has with a new key."
-          confirm="Start over"
+          question={t("accountsettings.backup.lostAsk")}
+          confirm={t("accountsettings.backup.startOver")}
           busy={busy}
           onCancel={() => setAsking(null)}
           onConfirm={() => void create(true)}
         >
           <button type="button" className="mt-2 text-xs font-bold text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={() => setAsking("replace")}>
-            Lost your recovery key?
+            {t("accountsettings.backup.lost")}
           </button>
         </Ask>
       </Card>
@@ -89,23 +89,25 @@ export function MessageBackup({ instanceKey }: { instanceKey: string }) {
   } else if (backup.status === "restoring") {
     const share = backup.total ? Math.min(1, backup.restored / backup.total) : 0;
     body = (
-      <Card icon={<HistoryIcon className="size-5 animate-spin [animation-duration:2.5s]" />} title="Restoring your messages…" tone="primary">
+      <Card icon={<HistoryIcon className="size-5 animate-spin [animation-duration:2.5s]" />} title={t("accountsettings.backup.restoring")} tone="primary">
         <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted">
           <motion.div className="h-full origin-left rounded-full bg-primary" initial={{ scaleX: 0 }} animate={{ scaleX: share }} transition={SPRING} />
         </div>
         <p className="mt-2 text-xs text-muted-foreground tabular-nums">
-          {backup.restored} of {backup.total} parts
+          {t("accountsettings.backup.parts", { restored: backup.restored, count: backup.total })}
         </p>
       </Card>
     );
   } else {
     const share = backup.maxSize ? Math.min(1, backup.size / backup.maxSize) : 0;
     const full = backup.status === "full";
+    const saved = backup.updatedAt > 0 ? activeAgo(new Date(backup.updatedAt), now) : null;
     body = (
-      <Card icon={<CheckIcon className="size-5" />} title={full ? "Message backup is full" : "Message backup is on"} tone={full ? "warn" : "ok"}>
+      <Card icon={<CheckIcon className="size-5" />} title={full ? t("accountsettings.backup.full") : t("accountsettings.backup.on")} tone={full ? "warn" : "ok"}>
         <p className="text-sm text-muted-foreground">
-          What this device reads in direct messages and secure channels is backed up, encrypted with your recovery key.
-          {backup.updatedAt > 0 && ` Last saved ${activeAgo(new Date(backup.updatedAt), now).replace(/^Active now$/, "just now").replace(/^Active /, "")}.`}
+          {t("accountsettings.backup.onHint")}
+          {saved &&
+            ` ${saved === "Active now" ? t("accountsettings.backup.lastSavedNow") : t("accountsettings.backup.lastSaved", { when: saved.replace(/^Active /, "") })}`}
         </p>
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
           <motion.div
@@ -116,23 +118,21 @@ export function MessageBackup({ instanceKey }: { instanceKey: string }) {
           />
         </div>
         <p className="mt-1.5 text-xs text-muted-foreground tabular-nums">
-          {formatBytes(backup.size)} of {formatBytes(backup.maxSize)}
+          {t("accountsettings.backup.size", { used: formatBytes(backup.size), total: formatBytes(backup.maxSize) })}
         </p>
         <Ask
           open={asking !== null}
           question={
-            asking === "off"
-              ? "Turn off message backup? It's deleted for every device. What each device keeps stays on it."
-              : "Make a new recovery key? The backup starts over from what this device has, and the old key stops working."
+            asking === "off" ? t("accountsettings.backup.offAsk") : t("accountsettings.backup.newKeyAsk")
           }
-          confirm={asking === "off" ? "Turn off" : "Start over"}
+          confirm={asking === "off" ? t("accountsettings.shared.turnOff") : t("accountsettings.backup.startOver")}
           busy={busy}
           onCancel={() => setAsking(null)}
           onConfirm={() => void (asking === "off" ? act(async () => engine && (await engine.backup.remove())) : create(true))}
         >
           <div className="mt-3 flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" className="rounded-xl" disabled={busy} onClick={() => setAsking("replace")}>
-              <RotateCcwIcon className="size-4" /> {full ? "Start over from this device" : "New recovery key"}
+              <RotateCcwIcon className="size-4" /> {full ? t("accountsettings.backup.startOverHere") : t("accountsettings.backup.newKey")}
             </Button>
             <Button
               type="button"
@@ -142,7 +142,7 @@ export function MessageBackup({ instanceKey }: { instanceKey: string }) {
               disabled={busy}
               onClick={() => setAsking("off")}
             >
-              Turn off
+              {t("accountsettings.shared.turnOff")}
             </Button>
           </div>
         </Ask>
@@ -152,7 +152,7 @@ export function MessageBackup({ instanceKey }: { instanceKey: string }) {
 
   return (
     <section>
-      <h3 className="mb-3 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">Message backup</h3>
+      <h3 className="mb-3 text-[0.7rem] font-extrabold tracking-wide text-muted-foreground uppercase">{t("accountsettings.backup.title")}</h3>
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.div
           key={recoveryKey ? "key" : backup.status === "full" ? "on" : backup.status}
@@ -213,6 +213,7 @@ function Ask({
   onConfirm: () => void;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   return (
     <AnimatePresence mode="popLayout" initial={false}>
       {open ? (
@@ -220,10 +221,10 @@ function Ask({
           <p className="text-sm">{question}</p>
           <div className="mt-2 flex gap-2">
             <Button type="button" variant="ghost" size="sm" className="rounded-xl" disabled={busy} onClick={onCancel}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="button" variant="destructive" size="sm" className="rounded-xl font-bold" disabled={busy} onClick={onConfirm}>
-              {busy ? "Working…" : confirm}
+              {busy ? t("accountsettings.shared.working") : confirm}
             </Button>
           </div>
         </motion.div>
@@ -237,6 +238,7 @@ function Ask({
 }
 
 function RestoreForm({ busy, onRestore }: { busy: boolean; onRestore: (text: string) => Promise<void> }) {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -248,19 +250,20 @@ function RestoreForm({ busy, onRestore }: { busy: boolean; onRestore: (text: str
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="XXXX-XXXX-XXXX-…"
-        aria-label="Recovery key"
+        aria-label={t("accountsettings.backup.recoveryKey")}
         autoComplete="off"
         spellCheck={false}
         className="min-w-0 flex-1 rounded-xl font-mono text-xs tracking-wide uppercase"
       />
       <Button type="submit" size="sm" className="rounded-xl font-bold" disabled={busy || !text.trim()}>
-        {busy ? "Restoring…" : "Restore"}
+        {busy ? t("accountsettings.backup.restoringShort") : t("accountsettings.backup.restore")}
       </Button>
     </form>
   );
 }
 
 function KeyPanel({ recoveryKey, onDone }: { recoveryKey: string; onDone: () => void }) {
+  const { t } = useI18n();
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -270,11 +273,11 @@ function KeyPanel({ recoveryKey, onDone }: { recoveryKey: string; onDone: () => 
       setSaved(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
-      toast("Couldn't copy it; select it and copy it yourself.");
+      toast(t("accountsettings.backup.copyFailed"));
     }
   };
   const download = () => {
-    const text = `fuwa message backup recovery key\n\n${recoveryKey}\n\nKeep this somewhere safe. Anyone with it and your account can read your backed-up messages; nobody can get it back for you if it's lost.\n`;
+    const text = `${t("accountsettings.backup.fileTitle")}\n\n${recoveryKey}\n\n${t("accountsettings.backup.fileNote")}\n`;
     const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
     const a = document.createElement("a");
     a.href = url;
@@ -285,10 +288,8 @@ function KeyPanel({ recoveryKey, onDone }: { recoveryKey: string; onDone: () => 
   };
   return (
     <div className="rounded-2xl border border-primary/40 bg-primary/5 p-4">
-      <p className="text-sm font-bold">Save your recovery key</p>
-      <p className="mt-1 text-sm text-muted-foreground">
-        You'll need it to read your backup on a new device. It isn't kept anywhere but here, so if it's lost, nobody can get it back. Keep it in a password manager or somewhere only you can reach.
-      </p>
+      <p className="text-sm font-bold">{t("accountsettings.backup.save")}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{t("accountsettings.backup.saveHint")}</p>
       <motion.code
         initial={{ opacity: 0, filter: "blur(6px)" }}
         animate={{ opacity: 1, filter: "blur(0px)" }}
@@ -299,13 +300,13 @@ function KeyPanel({ recoveryKey, onDone }: { recoveryKey: string; onDone: () => 
       </motion.code>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => void copy()}>
-          {copied ? <CheckIcon className="size-4 text-emerald-500" /> : <CopyIcon className="size-4" />} {copied ? "Copied" : "Copy"}
+          {copied ? <CheckIcon className="size-4 text-emerald-500" /> : <CopyIcon className="size-4" />} {copied ? t("accountsettings.shared.copied") : t("accountsettings.shared.copy")}
         </Button>
         <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={download}>
-          <DownloadIcon className="size-4" /> Download
+          <DownloadIcon className="size-4" /> {t("accountsettings.shared.download")}
         </Button>
         <Button type="button" size="sm" className="ml-auto rounded-xl font-bold" disabled={!saved} onClick={onDone}>
-          I saved it
+          {t("accountsettings.shared.savedIt")}
         </Button>
       </div>
     </div>

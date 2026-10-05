@@ -7,6 +7,7 @@ import { useAction, useInstance } from "@/fuwa/hooks";
 import { SPRING, SwapText } from "@/components/motion";
 import { PASSWORD_MAX, PasswordInput, Row, Warn } from "@/components/settings/account/common";
 import { Button } from "@/components/ui/button";
+import { type Key, useI18n } from "@/i18n/react";
 import { issuerName, WAIFU_DEV_ISSUER } from "@/lib/linked";
 import { cn } from "@/lib/utils";
 
@@ -17,14 +18,15 @@ export const hasPassword = (user: User | undefined) => !!user && user.kind === A
 
 /** For a linked account, which has no password here: where its sign-in lives instead. */
 export function LinkedSignIn({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const issuer = inst?.node?.auth?.linkedIssuer || WAIFU_DEV_ISSUER;
   const name = issuerName(issuer);
-  const where = inst?.node?.name ?? "this instance";
+  const where = inst?.node?.name ?? t("settings.nav.thisInstance");
   const lines = [
-    { icon: ShieldCheckIcon, text: `Your password and two-step sign-in live with ${name}, so there's nothing to set up here.` },
-    { icon: MonitorSmartphoneIcon, text: `Signing out of ${name} doesn't sign you out of ${where}. Devices shows where you're signed in.` },
-    { icon: UserPenIcon, text: `Your name and picture here started from ${name}, and they're yours to change.` },
+    { icon: ShieldCheckIcon, text: t("accountsettings.linked.passwordLives", { issuer: name }) },
+    { icon: MonitorSmartphoneIcon, text: t("accountsettings.linked.signOut", { issuer: name, instance: where }) },
+    { icon: UserPenIcon, text: t("accountsettings.linked.picture", { issuer: name }) },
   ];
   return (
     <div className="flex flex-col gap-5">
@@ -38,8 +40,8 @@ export function LinkedSignIn({ instanceKey }: { instanceKey: string }) {
           <Flower2Icon className="size-6 transition-transform duration-700 group-hover:rotate-[144deg]" />
         </span>
         <div className="min-w-0">
-          <p className="font-extrabold">Linked to {name}</p>
-          <p className="text-sm text-muted-foreground">You sign in with your {name} account. There's no password here.</p>
+          <p className="font-extrabold">{t("accountsettings.linked.title", { issuer: name })}</p>
+          <p className="text-sm text-muted-foreground">{t("accountsettings.linked.hint", { issuer: name })}</p>
         </div>
       </motion.div>
       <ul className="flex flex-col gap-2.5">
@@ -62,7 +64,7 @@ export function LinkedSignIn({ instanceKey }: { instanceKey: string }) {
           rel="noreferrer"
           className="group inline-flex items-center gap-1.5 self-start text-sm font-bold text-primary underline-offset-4 hover:underline"
         >
-          Your waifu.dev settings <ExternalLinkIcon className="size-3.5 transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+          {t("accountsettings.linked.settings")} <ExternalLinkIcon className="size-3.5 transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
         </a>
       )}
     </div>
@@ -82,15 +84,16 @@ function strength(password: string) {
   return Math.min(4, Math.max(1, kinds - 1 + long));
 }
 
-const STRENGTH = [
-  { label: "Too short", tone: "bg-muted-foreground/40" },
-  { label: "Weak", tone: "bg-destructive" },
-  { label: "Fair", tone: "bg-amber-500" },
-  { label: "Good", tone: "bg-emerald-500" },
-  { label: "Strong", tone: "bg-emerald-500" },
+const STRENGTH: { label: Key; tone: string }[] = [
+  { label: "accountsettings.password.tooShort", tone: "bg-muted-foreground/40" },
+  { label: "accountsettings.password.weak", tone: "bg-destructive" },
+  { label: "accountsettings.password.fair", tone: "bg-amber-500" },
+  { label: "accountsettings.password.good", tone: "bg-emerald-500" },
+  { label: "accountsettings.password.strong", tone: "bg-emerald-500" },
 ];
 
 export function Password({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -99,7 +102,7 @@ export function Password({ instanceKey }: { instanceKey: string }) {
   const [done, setDone] = useState(false);
   const change = useAction(changePassword);
   const shake = useAnimationControls();
-  const where = inst?.node?.name ?? "this instance";
+  const where = inst?.node?.name ?? t("settings.nav.thisInstance");
 
   const tooShort = next.length > 0 && next.length < MIN;
   const mismatch = confirm.length > 0 && confirm !== next;
@@ -143,22 +146,30 @@ export function Password({ instanceKey }: { instanceKey: string }) {
           >
             <CheckIcon className="size-7" strokeWidth={3} />
           </motion.span>
-          <p className="text-lg font-extrabold">Password changed</p>
-          <p className="max-w-sm text-sm text-muted-foreground">Every other device signed in to {where} was signed out. This one stays signed in.</p>
+          <p className="text-lg font-extrabold">{t("accountsettings.password.changed")}</p>
+          <p className="max-w-sm text-sm text-muted-foreground">{t("accountsettings.password.changedHint", { instance: where })}</p>
           <Button type="button" variant="outline" className="mt-2 rounded-xl" onClick={() => setDone(false)}>
-            Done
+            {t("accountsettings.shared.done")}
           </Button>
         </motion.div>
       ) : (
         <motion.form key="form" onSubmit={submit} animate={shake} className="flex max-w-md flex-col">
-          <Row id="current-password" label="Current password" htmlFor="current-password">
+          <Row id="current-password" label={t("accountsettings.password.current")} htmlFor="current-password">
             <PasswordInput id="current-password" autoComplete="current-password" value={current} onChange={setCurrent} show={show} onShow={setShow} />
           </Row>
           <Row
             id="new-password"
-            label="New password"
+            label={t("accountsettings.password.new")}
             htmlFor="new-password"
-            hint={same ? <Warn>That's the password you have now.</Warn> : tooShort ? <Warn>At least {MIN} characters.</Warn> : `${MIN} to ${MAX} characters. Changing it signs out your other devices.`}
+            hint={
+              same ? (
+                <Warn>{t("accountsettings.password.same")}</Warn>
+              ) : tooShort ? (
+                <Warn>{t("accountsettings.password.min", { count: MIN })}</Warn>
+              ) : (
+                t("accountsettings.password.range", { min: MIN, max: MAX })
+              )
+            }
           >
             <PasswordInput id="new-password" autoComplete="new-password" value={next} onChange={setNext} show={show} onShow={setShow} />
             <div className="flex items-center gap-3" aria-live="polite">
@@ -175,11 +186,11 @@ export function Password({ instanceKey }: { instanceKey: string }) {
                 ))}
               </div>
               <span className="w-16 text-right text-xs font-bold text-muted-foreground">
-                <SwapText>{next ? STRENGTH[level]!.label : " "}</SwapText>
+                <SwapText>{next ? t(STRENGTH[level]!.label) : " "}</SwapText>
               </span>
             </div>
           </Row>
-          <Row id="confirm-password" label="Type it again" htmlFor="confirm-password" hint={mismatch ? <Warn>The two don't match yet.</Warn> : undefined}>
+          <Row id="confirm-password" label={t("accountsettings.password.again")} htmlFor="confirm-password" hint={mismatch ? <Warn>{t("accountsettings.password.mismatch")}</Warn> : undefined}>
             <div className="relative">
               <PasswordInput id="confirm-password" autoComplete="new-password" value={confirm} onChange={setConfirm} show={show} onShow={setShow} />
               <AnimatePresence>
@@ -210,7 +221,7 @@ export function Password({ instanceKey }: { instanceKey: string }) {
             )}
           </AnimatePresence>
           <Button type="submit" className="btn self-start rounded-xl px-5 font-bold" disabled={change.pending || !ready}>
-            <KeyRoundIcon /> {change.pending ? "Changing…" : "Change password"}
+            <KeyRoundIcon /> {change.pending ? t("accountsettings.password.changing") : t("accountsettings.password.change")}
           </Button>
         </motion.form>
       )}
@@ -221,28 +232,29 @@ export function Password({ instanceKey }: { instanceKey: string }) {
 // ───────────────────────── Signing out ─────────────────────────
 
 export function Session({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const leave = useAction(signOut);
   const drop = useAction(forget);
-  const where = inst?.node?.name ?? "this instance";
+  const where = inst?.node?.name ?? t("settings.nav.thisInstance");
   return (
     <div className="flex flex-col gap-3">
       <div data-setting="sign-out" className="flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold">Sign out of {where}</p>
-          <p className="text-xs text-muted-foreground">It stays in your list, so signing back in is one step.</p>
+          <p className="text-sm font-bold">{t("accountsettings.session.signOutOf", { instance: where })}</p>
+          <p className="text-xs text-muted-foreground">{t("accountsettings.session.signOutHint")}</p>
         </div>
         <Button variant="outline" className="group rounded-xl" disabled={leave.pending} onClick={() => leave.go(instanceKey)}>
-          <LogOutIcon className="transition-transform group-hover:translate-x-0.5" /> Sign out
+          <LogOutIcon className="transition-transform group-hover:translate-x-0.5" /> {t("accountsettings.shared.signOut")}
         </Button>
       </div>
       <div data-setting="remove-instance" className="flex flex-col gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 p-4 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-destructive">Remove from this browser</p>
-          <p className="text-xs text-muted-foreground">Signs out and takes {where} off your server list here. Your account stays on the instance.</p>
+          <p className="text-sm font-bold text-destructive">{t("accountsettings.session.remove")}</p>
+          <p className="text-xs text-muted-foreground">{t("accountsettings.session.removeHint", { instance: where })}</p>
         </div>
         <Button variant="destructive" className="rounded-xl" disabled={drop.pending} onClick={() => drop.go(instanceKey)}>
-          Remove
+          {t("accountsettings.session.removeButton")}
         </Button>
       </div>
     </div>
