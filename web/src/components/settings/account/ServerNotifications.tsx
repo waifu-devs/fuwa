@@ -13,18 +13,22 @@ import { Segmented } from "@/components/settings/account/common";
 import { Toggle } from "@/components/settings/controls";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { type I18n, useI18n } from "@/i18n/react";
 import { isMuted, LEVELS, MUTE_FOR, mutedLabel, useNow } from "@/lib/notifications";
 import { toast, useUi } from "@/lib/ui";
 import { cn } from "@/lib/utils";
 
-const LEVEL_OPTIONS = [{ value: NotificationLevel.UNSPECIFIED, label: "Default" }, ...LEVELS.map((l) => ({ value: l.value, label: l.short }))];
+const levelOptions = (t: I18n["t"]) => [
+  { value: NotificationLevel.UNSPECIFIED, label: t("accountsettings.serverNotifications.default") },
+  ...LEVELS.map((l) => ({ value: l.value, label: l.short as string })),
+];
 
 /** Your level for a server, or on Default, what the server's owners picked for everyone. */
-function levelLabel(level: NotificationLevel | undefined, serverDefault: NotificationLevel) {
+function levelLabel(t: I18n["t"], level: NotificationLevel | undefined, serverDefault: NotificationLevel) {
   const own = LEVELS.find((l) => l.value === level)?.label;
   if (own) return own;
   const set = LEVELS.find((l) => l.value === serverDefault)?.label;
-  return set ? `Default: ${set.toLowerCase()}` : "Default";
+  return set ? t("accountsettings.serverNotifications.defaultIs", { level: set.toLowerCase() }) : t("accountsettings.serverNotifications.default");
 }
 
 /** Saves a change and says so if it didn't go through. */
@@ -38,6 +42,7 @@ function change(key: string, serverId: string, channelId: string, patch: Notific
  * device's own Notifications settings.
  */
 export function ServerNotifications({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const target = useUi((u) => u.settingsTarget);
   const servers = inst?.servers ?? [];
@@ -51,15 +56,15 @@ export function ServerNotifications({ instanceKey }: { instanceKey: string }) {
     return (
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={SPRING} className="flex flex-col items-center gap-2 rounded-3xl border border-dashed px-6 py-12 text-center">
         <ServerGlyph className="size-8 text-muted-foreground" />
-        <p className="font-extrabold">No servers yet</p>
-        <p className="max-w-sm text-sm text-muted-foreground">Once you join a server you can choose how it notifies you here.</p>
+        <p className="font-extrabold">{t("accountsettings.shared.noServers")}</p>
+        <p className="max-w-sm text-sm text-muted-foreground">{t("accountsettings.serverNotifications.noServersHint")}</p>
       </motion.div>
     );
   }
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted-foreground">These follow your account to every device. Anything on Default goes by this device's Notifications settings.</p>
+      <p className="text-sm text-muted-foreground">{t("accountsettings.serverNotifications.intro")}</p>
       {servers.map((server, n) => (
         <ServerCard
           key={server.id}
@@ -90,6 +95,7 @@ function ServerCard({
   highlight: boolean;
   delay: number;
 }) {
+  const { t } = useI18n();
   const now = useNow();
   const settings = useFuwa((s) => s.instances[instanceKey]?.notifications[notificationKey(server.id)]);
   const muted = isMuted(settings, now);
@@ -132,7 +138,7 @@ function ServerCard({
               ) : (
                 <motion.span key={settings?.level ?? 0} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="flex items-center gap-1">
                   <BellIcon className="size-3.5" />
-                  {levelLabel(settings?.level, server.defaultNotifications)}
+                  {levelLabel(t, settings?.level, server.defaultNotifications)}
                 </motion.span>
               )}
             </AnimatePresence>
@@ -152,6 +158,7 @@ function ServerCard({
 }
 
 function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey: string; server: Server; settings: NotificationSettings | undefined; muted: boolean; now: number }) {
+  const { t } = useI18n();
   const channels = useFuwa((s) => s.instances[instanceKey]?.channels[server.id]);
   const all = useFuwa((s) => s.instances[instanceKey]?.notifications);
   const [added, setAdded] = useState<string[]>([]);
@@ -163,12 +170,12 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
     <div className="flex flex-col gap-5 border-t p-4">
       <MuteControl muted={muted} label={mutedLabel(settings, now)} what="server" onMute={(mutedUntil) => change(instanceKey, server.id, "", { mutedUntil })} />
       <div className="flex flex-col gap-2">
-        <p className="text-sm font-bold">Notify me about</p>
+        <p className="text-sm font-bold">{t("appsettings.notifications.notifyFor")}</p>
         <Segmented
-          label="Notify me about"
+          label={t("appsettings.notifications.notifyFor")}
           value={settings?.level ?? NotificationLevel.UNSPECIFIED}
           onChange={(level) => change(instanceKey, server.id, "", { level })}
-          options={LEVEL_OPTIONS}
+          options={levelOptions(t)}
           className="w-full max-w-md"
         />
         <AnimatePresence initial={false}>
@@ -179,28 +186,28 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
               exit={{ opacity: 0, height: 0 }}
               className="overflow-hidden text-xs text-muted-foreground"
             >
-              This server's owners set Default to only @mentions for everyone. Pick All messages to hear about the rest.
+              {t("accountsettings.serverNotifications.mentionsDefault")}
             </motion.p>
           )}
         </AnimatePresence>
       </div>
       <Toggle
-        label="Suppress @everyone and @here"
-        hint="They won't count as mentions of you in this server."
+        label={t("accountsettings.serverNotifications.suppress")}
+        hint={t("accountsettings.serverNotifications.suppressHint")}
         checked={!!settings?.suppressEveryone}
         onChange={(suppressEveryone) => change(instanceKey, server.id, "", { suppressEveryone })}
       />
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-bold">Channels</p>
+          <p className="text-sm font-bold">{t("accountsettings.serverNotifications.channels")}</p>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button type="button" variant="outline" size="sm" className="rounded-xl" disabled={!rest.length}>
-                <PlusIcon className="size-4" /> Add a channel
+                <PlusIcon className="size-4" /> {t("accountsettings.serverNotifications.addChannel")}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="max-h-72 w-56 overflow-y-auto">
-              <DropdownMenuLabel>Set a channel apart</DropdownMenuLabel>
+              <DropdownMenuLabel>{t("accountsettings.serverNotifications.setApart")}</DropdownMenuLabel>
               {rest.map((c) => {
                 const Icon = CHANNEL_ICON[c.type] ?? HashIcon;
                 return (
@@ -235,7 +242,7 @@ function ServerBody({ instanceKey, server, settings, muted, now }: { instanceKey
             ))}
             {withSettings.length === 0 && (
               <motion.li key="none" layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="rounded-xl border border-dashed px-3 py-2.5 text-sm text-muted-foreground">
-                Every channel follows the server. Add one to set it apart.
+                {t("accountsettings.serverNotifications.noChannels")}
               </motion.li>
             )}
           </AnimatePresence>
@@ -260,6 +267,7 @@ function ChannelRow({
   onChange: (patch: NotificationPatch) => void;
   onRemove: () => void;
 }) {
+  const { t } = useI18n();
   const settings = useFuwa((s) => s.instances[instanceKey]?.notifications[notificationKey(serverId, channel.id)]);
   const muted = isMuted(settings, now);
   const Icon = CHANNEL_ICON[channel.type] ?? HashIcon;
@@ -271,8 +279,8 @@ function ChannelRow({
         <button
           type="button"
           onClick={onRemove}
-          aria-label={`Stop setting ${channel.name} apart`}
-          title="Follow the server again"
+          aria-label={t("accountsettings.serverNotifications.stopSetApart", { channel: channel.name })}
+          title={t("accountsettings.serverNotifications.followServer")}
           className="grid size-7 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90"
         >
           <XIcon className="size-4" />
@@ -280,10 +288,10 @@ function ChannelRow({
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Segmented
-          label={`Notify me about #${channel.name}`}
+          label={t("accountsettings.serverNotifications.notifyForChannel", { channel: channel.name })}
           value={settings?.level ?? NotificationLevel.UNSPECIFIED}
           onChange={(level) => onChange({ level })}
-          options={LEVEL_OPTIONS}
+          options={levelOptions(t)}
           className="w-full text-xs sm:w-auto sm:min-w-0 sm:flex-1 [&_button]:px-2"
         />
         <MuteControl compact muted={muted} label={mutedLabel(settings, now)} what="channel" onMute={(mutedUntil) => onChange({ mutedUntil })} />
@@ -306,25 +314,30 @@ function MuteControl({
   onMute: (until: Date | null | false) => void;
   compact?: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <div className={cn("flex items-center gap-3", !compact && "justify-between")}>
       {!compact && (
         <span className="min-w-0">
-          <span className="block text-sm font-bold">Mute {what}</span>
-          <span className="block text-xs text-muted-foreground">No sounds, notifications or unread badges{what === "server" ? " from any of its channels" : ""}.</span>
+          <span className="block text-sm font-bold">
+            {what === "server" ? t("accountsettings.serverNotifications.muteServer") : t("accountsettings.serverNotifications.muteChannel")}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {what === "server" ? t("accountsettings.serverNotifications.muteServerHint") : t("accountsettings.serverNotifications.muteChannelHint")}
+          </span>
         </span>
       )}
       <AnimatePresence mode="popLayout" initial={false}>
         {muted ? (
           <motion.div key="muted" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} transition={SPRING}>
-            <Button type="button" variant="outline" size="sm" onClick={() => onMute(false)} className="group rounded-xl border-amber-500/40 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400" title="Unmute">
+            <Button type="button" variant="outline" size="sm" onClick={() => onMute(false)} className="group rounded-xl border-amber-500/40 text-amber-600 hover:bg-amber-500/10 dark:text-amber-400" title={t("accountsettings.serverNotifications.unmute")}>
               <BellOffIcon className="size-4 group-hover:hidden" />
               <BellIcon className="hidden size-4 group-hover:block" />
               {/* Both labels share one grid cell, so the button keeps its width and never shrinks out from under the pointer. */}
               <span className="grid text-center">
                 <span className="transition-opacity [grid-area:1/1] group-hover:opacity-0">{label}</span>
                 <span aria-hidden className="opacity-0 transition-opacity [grid-area:1/1] group-hover:opacity-100">
-                  Unmute
+                  {t("accountsettings.serverNotifications.unmute")}
                 </span>
               </span>
             </Button>
@@ -334,7 +347,7 @@ function MuteControl({
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="outline" size="sm" className="group rounded-xl">
-                  <BellOffIcon className="size-4 transition-transform group-hover:-rotate-12" /> Mute
+                  <BellOffIcon className="size-4 transition-transform group-hover:-rotate-12" /> {t("accountsettings.serverNotifications.mute")}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">

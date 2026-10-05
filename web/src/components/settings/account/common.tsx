@@ -4,6 +4,7 @@ import { useId, type ReactNode } from "react";
 import { SPRING } from "@/components/motion";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useI18n } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 
 export const PASSWORD_MAX = 256;
@@ -41,6 +42,7 @@ export function PasswordInput({
   onShow: (show: boolean) => void;
   autoComplete: string;
 }) {
+  const { t } = useI18n();
   return (
     <div className="relative">
       <Input
@@ -56,7 +58,7 @@ export function PasswordInput({
       <button
         type="button"
         onClick={() => onShow(!show)}
-        aria-label={show ? "Hide passwords" : "Show passwords"}
+        aria-label={show ? t("accountsettings.shared.hidePasswords") : t("accountsettings.shared.showPasswords")}
         aria-pressed={show}
         className="absolute top-1/2 right-1.5 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-90"
       >

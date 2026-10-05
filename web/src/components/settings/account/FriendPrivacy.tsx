@@ -6,18 +6,34 @@ import type { FuwaError } from "@/fuwa/errors";
 import { saveFriendSettings } from "@/fuwa/friends";
 import { useFuwa } from "@/fuwa/store";
 import { Choice, Setting, Toggle, type ChoiceOption } from "@/components/settings/controls";
+import { type I18n, useI18n } from "@/i18n/react";
 import { toast } from "@/lib/ui";
 
-const REQUESTS: ChoiceOption<FriendRequestsFrom>[] = [
-  { value: FriendRequestsFrom.UNSPECIFIED, label: "Everyone", hint: "Anyone on this instance", icon: <EarthIcon className="size-4" /> },
-  { value: FriendRequestsFrom.SHARED_SERVERS, label: "Server friends", hint: "People in a server with you", icon: <ServerIcon className="size-4" /> },
-  { value: FriendRequestsFrom.NOBODY, label: "Nobody", hint: "You can still send them", icon: <BanIcon className="size-4" /> },
+const requests = (t: I18n["t"]): ChoiceOption<FriendRequestsFrom>[] => [
+  { value: FriendRequestsFrom.UNSPECIFIED, label: t("accountsettings.friends.everyone"), hint: t("accountsettings.friends.everyoneHint"), icon: <EarthIcon className="size-4" /> },
+  {
+    value: FriendRequestsFrom.SHARED_SERVERS,
+    label: t("accountsettings.friends.serverFriends"),
+    hint: t("accountsettings.friends.serverFriendsHint"),
+    icon: <ServerIcon className="size-4" />,
+  },
+  { value: FriendRequestsFrom.NOBODY, label: t("accountsettings.friends.nobody"), hint: t("accountsettings.friends.nobodyHint"), icon: <BanIcon className="size-4" /> },
 ];
 
-const MESSAGES: ChoiceOption<DirectMessagesFrom>[] = [
-  { value: DirectMessagesFrom.UNSPECIFIED, label: "Everyone", hint: "Friends and people in a server with you", icon: <UsersIcon className="size-4" /> },
-  { value: DirectMessagesFrom.FRIENDS, label: "Friends only", hint: "Only friends can start one", icon: <HeartIcon className="size-4" /> },
-  { value: DirectMessagesFrom.NOBODY, label: "Nobody new", hint: "Conversations you have keep going", icon: <MessageCircleOffIcon className="size-4" /> },
+const messages = (t: I18n["t"]): ChoiceOption<DirectMessagesFrom>[] => [
+  {
+    value: DirectMessagesFrom.UNSPECIFIED,
+    label: t("accountsettings.friends.everyone"),
+    hint: t("accountsettings.friends.messagesEveryoneHint"),
+    icon: <UsersIcon className="size-4" />,
+  },
+  { value: DirectMessagesFrom.FRIENDS, label: t("accountsettings.friends.friendsOnly"), hint: t("accountsettings.friends.friendsOnlyHint"), icon: <HeartIcon className="size-4" /> },
+  {
+    value: DirectMessagesFrom.NOBODY,
+    label: t("accountsettings.friends.nobodyNew"),
+    hint: t("accountsettings.friends.nobodyNewHint"),
+    icon: <MessageCircleOffIcon className="size-4" />,
+  },
 ];
 
 /**
@@ -27,9 +43,10 @@ const MESSAGES: ChoiceOption<DirectMessagesFrom>[] = [
  * friends list) stops them whatever these say.
  */
 export function FriendPrivacy({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const settings = useFuwa((s) => s.instances[instanceKey]?.friends.settings);
   const status = useFuwa((s) => s.instances[instanceKey]?.friends.status ?? "off");
-  if (status === "unsupported") return <p className="text-sm text-muted-foreground">This instance runs a version of fuwa from before friends.</p>;
+  if (status === "unsupported") return <p className="text-sm text-muted-foreground">{t("accountsettings.friends.unsupported")}</p>;
   const current = settings ?? create(FriendSettingsSchema);
   const save = (patch: Partial<FriendSettings>) =>
     run(saveFriendSettings(instanceKey, create(FriendSettingsSchema, { ...current, ...patch }))).catch((err: FuwaError) => toast(err.message));
@@ -38,43 +55,43 @@ export function FriendPrivacy({ instanceKey }: { instanceKey: string }) {
     <div>
       <Setting
         id="friend-requests"
-        title="Who can send you friend requests"
-        hint="Requests from anyone else never reach you; they're told you aren't taking them."
+        title={t("settings.nav.friendRequests")}
+        hint={t("accountsettings.friends.requestsHint")}
         changed={current.requestsFrom !== FriendRequestsFrom.UNSPECIFIED}
-        defaultLabel="Everyone"
+        defaultLabel={t("accountsettings.friends.everyone")}
         onReset={() => void save({ requestsFrom: FriendRequestsFrom.UNSPECIFIED })}
       >
-        <Choice value={current.requestsFrom} options={REQUESTS} onChange={(requestsFrom) => void save({ requestsFrom })} />
+        <Choice value={current.requestsFrom} options={requests(t)} onChange={(requestsFrom) => void save({ requestsFrom })} />
       </Setting>
       <Setting
         id="direct-messages"
-        title="Who can start a conversation with you"
-        hint="Direct messages stay end-to-end encrypted whoever sends them."
+        title={t("settings.nav.directMessages")}
+        hint={t("accountsettings.friends.messagesHint")}
         changed={current.directMessagesFrom !== DirectMessagesFrom.UNSPECIFIED}
-        defaultLabel="Everyone"
+        defaultLabel={t("accountsettings.friends.everyone")}
         onReset={() => void save({ directMessagesFrom: DirectMessagesFrom.UNSPECIFIED })}
         delay={0.04}
       >
-        <Choice value={current.directMessagesFrom} options={MESSAGES} onChange={(directMessagesFrom) => void save({ directMessagesFrom })} />
+        <Choice value={current.directMessagesFrom} options={messages(t)} onChange={(directMessagesFrom) => void save({ directMessagesFrom })} />
       </Setting>
       <Setting
         id="friends-see"
-        title="What your friends see"
+        title={t("settings.nav.friendsSee")}
         changed={current.hideOnline || current.hideMutualFriends}
-        defaultLabel="Both shown"
+        defaultLabel={t("accountsettings.friends.bothShown")}
         onReset={() => void save({ hideOnline: false, hideMutualFriends: false })}
         delay={0.08}
       >
         <div className="flex flex-col gap-4">
           <Toggle
-            label="Show when I'm online"
-            hint="Friends see a green dot while you have fuwa open. Nobody else ever does."
+            label={t("accountsettings.friends.showOnline")}
+            hint={t("accountsettings.friends.showOnlineHint")}
             checked={!current.hideOnline}
             onChange={(on) => void save({ hideOnline: !on })}
           />
           <Toggle
-            label="Show mutual friends"
-            hint="On profiles, only when you, they and the friend you share all allow it."
+            label={t("accountsettings.friends.showMutual")}
+            hint={t("accountsettings.friends.showMutualHint")}
             checked={!current.hideMutualFriends}
             onChange={(on) => void save({ hideMutualFriends: !on })}
           />

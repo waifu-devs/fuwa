@@ -10,6 +10,7 @@ import { ProfileCard } from "@/components/ProfileCard";
 import { Row } from "@/components/settings/account/common";
 import { SaveBar, WithPreview } from "@/components/settings/controls";
 import { Input } from "@/components/ui/input";
+import { T, useI18n } from "@/i18n/react";
 import { displayName } from "@/lib/format";
 import { useUi } from "@/lib/ui";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,7 @@ const NICKNAME_MAX = 32;
  * there, and see the card people in that server will open.
  */
 export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const target = useUi((u) => u.settingsTarget);
   const servers = inst?.servers ?? [];
@@ -44,8 +46,8 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
     return (
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={SPRING} className="flex flex-col items-center gap-2 rounded-3xl border border-dashed px-6 py-12 text-center">
         <ServerGlyph className="size-8 text-muted-foreground" />
-        <p className="font-extrabold">No servers yet</p>
-        <p className="max-w-sm text-sm text-muted-foreground">Once you join a server you can have a different name in it here.</p>
+        <p className="font-extrabold">{t("accountsettings.shared.noServers")}</p>
+        <p className="max-w-sm text-sm text-muted-foreground">{t("accountsettings.serverProfiles.noServersHint")}</p>
       </motion.div>
     );
   }
@@ -72,8 +74,8 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
     <form onSubmit={submit}>
       <WithPreview preview={<ProfileCard editing me user={me} profile={profile} member={member ? { ...member, nickname: value.trim() } : undefined} />}>
         <div className="flex flex-col">
-          <Row id="server" label="Server">
-            <div role="radiogroup" aria-label="Server" className="flex flex-wrap gap-2">
+          <Row id="server" label={t("accountsettings.serverProfiles.server")}>
+            <div role="radiogroup" aria-label={t("accountsettings.serverProfiles.server")} className="flex flex-wrap gap-2">
               {servers.map((s) => {
                 const active = s.id === serverId;
                 return (
@@ -83,7 +85,7 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
                     role="radio"
                     aria-checked={active}
                     disabled={changed > 0 && !active}
-                    title={changed > 0 && !active ? "Save or discard first" : s.name}
+                    title={changed > 0 && !active ? t("accountsettings.serverProfiles.saveFirst") : s.name}
                     whileHover={{ y: -2 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => pick(s.id)}
@@ -102,12 +104,16 @@ export function ServerProfiles({ instanceKey }: { instanceKey: string }) {
           </Row>
           <Row
             id="nickname"
-            label="Nickname"
+            label={t("settings.nav.nickname")}
             htmlFor="server-nickname"
             hint={
-              <>
-                Only in <SwapText className="font-bold text-foreground">{server?.name ?? "this server"}</SwapText>. Leave it empty to go by {displayName(me)}.
-              </>
+              <T
+                k="accountsettings.serverProfiles.nicknameHint"
+                values={{
+                  server: <SwapText className="font-bold text-foreground">{server?.name ?? t("accountsettings.serverProfiles.thisServer")}</SwapText>,
+                  name: displayName(me),
+                }}
+              />
             }
           >
             <AnimatePresence mode="wait" initial={false}>

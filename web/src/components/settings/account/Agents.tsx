@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { T, useI18n } from "@/i18n/react";
 import { ago, displayName, toDate } from "@/lib/format";
 import { accessOf, has } from "@/lib/permissions";
 import { Permission } from "@/gen/fuwa/v1/types_pb";
@@ -61,6 +62,7 @@ function managedServers(key: string): Server[] {
  * into the servers you (or, when it's public, anyone managing one) add it to.
  */
 export function Agents({ instanceKey }: { instanceKey: string }) {
+  const { t } = useI18n();
   const inst = useInstance(instanceKey);
   const creation = inst?.node?.agentCreation ?? AgentCreation.EVERYONE;
   const allowed = creation === AgentCreation.EVERYONE || (creation === AgentCreation.ADMINS && !!inst?.admin);
@@ -99,21 +101,19 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
             />
           </motion.span>
           <div className="min-w-0 flex-1 basis-60">
-            <p className="font-extrabold">Agents</p>
-            <p className="text-sm text-muted-foreground">
-              Accounts your programs drive: bots, assistants, integrations. Each one signs in with a token and talks in the servers it's added to.
-            </p>
+            <p className="font-extrabold">{t("settings.nav.agents")}</p>
+            <p className="text-sm text-muted-foreground">{t("accountsettings.agents.intro")}</p>
           </div>
           <Button type="button" className="btn rounded-xl font-bold" disabled={!allowed || !agents} onClick={() => setMaking((m) => !m)}>
             <motion.span animate={{ rotate: making ? 45 : 0 }} transition={SPRING} className="flex">
               <PlusIcon />
             </motion.span>
-            New agent
+            {t("accountsettings.agents.new")}
           </Button>
         </div>
         {!allowed && (
           <p className="relative mt-3 text-sm font-bold text-muted-foreground">
-            {creation === AgentCreation.ADMINS ? "Only this instance's admins can make agents." : "This instance doesn't allow making agents."}
+            {creation === AgentCreation.ADMINS ? t("accountsettings.agents.adminsOnly") : t("accountsettings.agents.notAllowed")}
           </p>
         )}
       </div>
@@ -146,8 +146,8 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
             <motion.span animate={{ y: [0, -6, 0], rotate: [0, -8, 8, 0] }} transition={{ duration: 2.4, repeat: Infinity, repeatDelay: 0.8 }} className="text-4xl">
               🤖
             </motion.span>
-            <p className="font-bold">No agents yet</p>
-            <p className="text-sm text-muted-foreground">Make one, give its token to your program, and add it to a server.</p>
+            <p className="font-bold">{t("accountsettings.agents.none")}</p>
+            <p className="text-sm text-muted-foreground">{t("accountsettings.agents.noneHint")}</p>
           </motion.div>
         )
       ) : (
@@ -174,7 +174,7 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
       <div className="rounded-2xl border">
         <button type="button" onClick={() => setHowTo((h) => !h)} className="flex w-full items-center gap-2 p-3 text-left text-sm font-bold">
           <TerminalIcon className="size-4 text-primary" />
-          <span className="flex-1">How agents connect</span>
+          <span className="flex-1">{t("accountsettings.agents.howTo")}</span>
           <ChevronDownIcon className={cn("size-4 text-muted-foreground transition-transform duration-300", howTo && "rotate-180")} />
         </button>
         <AnimatePresence initial={false}>
@@ -182,15 +182,17 @@ export function Agents({ instanceKey }: { instanceKey: string }) {
             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden">
               <div className="flex flex-col gap-2 px-3 pb-3 text-sm text-muted-foreground">
                 <p>
-                  An agent uses the same API as the fuwa apps (gRPC, or gRPC-Web from a browser), with its token as a bearer token. It follows its servers with{" "}
-                  <code>EventService/Subscribe</code> and talks with <code>MessageService/SendMessage</code>.
+                  <T
+                    k="accountsettings.agents.howToApi"
+                    values={{ subscribe: <code>EventService/Subscribe</code>, send: <code>MessageService/SendMessage</code> }}
+                  />
                 </p>
                 <pre className="overflow-x-auto rounded-xl bg-muted p-3 font-mono text-xs leading-relaxed text-foreground">
                   {`grpcurl -H 'authorization: Bearer <token>' \\\n  -d '{"server_id": "…", "channel_id": "…", "content": "Hello! 🤖"}' \\\n  `}
                   <Private text={(inst?.url ?? "https://fuwa.example").replace(/^https?:\/\//, "")} />
                   {`:443 fuwa.v1.MessageService/SendMessage`}
                 </pre>
-                <p>Agents can't own servers or use direct messages, and they don't need to agree to a server's rules: whoever adds one answers for it.</p>
+                <p>{t("accountsettings.agents.howToRules")}</p>
               </div>
             </motion.div>
           )}
@@ -224,6 +226,7 @@ function Circuit() {
 
 /** Picking an agent's username and name. */
 function NewAgent({ instanceKey, onCancel, onMade }: { instanceKey: string; onCancel: () => void; onMade: (agent: Agent, token: string) => void }) {
+  const { t } = useI18n();
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [edited, setEdited] = useState(false);
@@ -263,11 +266,11 @@ function NewAgent({ instanceKey, onCancel, onMade }: { instanceKey: string; onCa
       <motion.div animate={shake} className="flex flex-col gap-3 rounded-2xl border border-primary/40 bg-background/60 p-4 shadow-lg shadow-primary/5">
         <div className="flex flex-wrap gap-3">
           <label className="flex min-w-0 flex-1 basis-48 flex-col gap-1">
-            <span className="text-xs font-bold text-muted-foreground uppercase">Name</span>
-            <Input autoFocus value={displayName} maxLength={64} placeholder="Helper Bot" onChange={(e) => setDisplayName(e.target.value)} className="h-10 rounded-xl font-bold" />
+            <span className="text-xs font-bold text-muted-foreground uppercase">{t("accountsettings.agents.name")}</span>
+            <Input autoFocus value={displayName} maxLength={64} placeholder={t("accountsettings.agents.namePlaceholder")} onChange={(e) => setDisplayName(e.target.value)} className="h-10 rounded-xl font-bold" />
           </label>
           <label className="flex min-w-0 flex-1 basis-48 flex-col gap-1">
-            <span className="text-xs font-bold text-muted-foreground uppercase">Username</span>
+            <span className="text-xs font-bold text-muted-foreground uppercase">{t("accountsettings.agents.username")}</span>
             <span className="relative">
               <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground">@</span>
               <Input
@@ -284,13 +287,13 @@ function NewAgent({ instanceKey, onCancel, onMade }: { instanceKey: string; onCa
             </span>
           </label>
         </div>
-        <p className="text-xs text-muted-foreground">Usernames are 2 to 32 of a-z, 0-9, _ and ., like a person's. People add an agent to a server by it.</p>
+        <p className="text-xs text-muted-foreground">{t("accountsettings.agents.usernameRule")}</p>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" className="rounded-xl" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="submit" className="btn rounded-xl font-bold" disabled={busy}>
-            {busy ? <LoaderCircleIcon className="animate-spin" /> : <BotIcon />} Make agent
+            {busy ? <LoaderCircleIcon className="animate-spin" /> : <BotIcon />} {t("accountsettings.agents.make")}
           </Button>
         </div>
       </motion.div>
@@ -300,6 +303,7 @@ function NewAgent({ instanceKey, onCancel, onMade }: { instanceKey: string; onCa
 
 /** A token on screen: shown once, copied, then put away. Streamer mode keeps it blurred. */
 function TokenReveal({ token, onDone }: { token: string; onDone: () => void }) {
+  const { t } = useI18n();
   const streaming = usePrefs(hidesPersonal);
   const [shown, setShown] = useState(!streaming);
   const [copied, setCopied] = useState(false);
@@ -313,7 +317,7 @@ function TokenReveal({ token, onDone }: { token: string; onDone: () => void }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1400);
       },
-      () => toast("Couldn't copy the token"),
+      () => toast(t("accountsettings.agents.copyFailed")),
     );
   }
 
@@ -333,7 +337,7 @@ function TokenReveal({ token, onDone }: { token: string; onDone: () => void }) {
         className="pointer-events-none absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-amber-300/30 to-transparent"
       />
       <p className="relative flex items-center gap-1.5 text-sm font-extrabold text-amber-600 dark:text-amber-400">
-        <KeyRoundIcon className="size-4" /> Copy the token now: it won't be shown again.
+        <KeyRoundIcon className="size-4" /> {t("accountsettings.agents.copyNow")}
       </p>
       <div className="relative flex items-center gap-1 rounded-xl border bg-background/70 p-1 pl-3">
         <AnimatePresence mode="wait" initial={false}>
@@ -348,21 +352,21 @@ function TokenReveal({ token, onDone }: { token: string; onDone: () => void }) {
             {shown ? token : "•".repeat(32)}
           </motion.code>
         </AnimatePresence>
-        <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 rounded-lg" aria-label={shown ? "Hide the token" : "Show the token"} onClick={() => setShown((s) => !s)}>
+        <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 rounded-lg" aria-label={shown ? t("accountsettings.agents.hideToken") : t("accountsettings.agents.showToken")} onClick={() => setShown((s) => !s)}>
           {shown ? <EyeOffIcon /> : <EyeIcon />}
         </Button>
         <Button type="button" size="sm" className="btn h-8 shrink-0 rounded-lg px-3 font-bold" onClick={copy}>
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.span key={copied ? "done" : "copy"} initial={{ y: 12, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -12, opacity: 0 }} transition={SPRING} className="flex items-center gap-1.5">
-              {copied ? <CheckIcon strokeWidth={3} /> : <CopyIcon />} {copied ? "Copied" : "Copy"}
+              {copied ? <CheckIcon strokeWidth={3} /> : <CopyIcon />} {copied ? t("accountsettings.shared.copied") : t("accountsettings.shared.copy")}
             </motion.span>
           </AnimatePresence>
         </Button>
       </div>
       <div className="relative flex items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">Anyone with it can act as the agent. Keep it with your program, never in a public repository.</p>
+        <p className="text-xs text-muted-foreground">{t("accountsettings.agents.tokenWarning")}</p>
         <Button type="button" size="sm" variant="ghost" className="h-7 shrink-0 rounded-lg text-xs font-bold" onClick={onDone}>
-          I saved it
+          {t("accountsettings.shared.savedIt")}
         </Button>
       </div>
     </motion.div>
@@ -391,6 +395,7 @@ function AgentCard({
   onTokenSeen: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useI18n();
   const user = a.user!;
   const [name, setName] = useState(user.displayName);
   const [bio, setBio] = useState(a.bio);
@@ -477,7 +482,7 @@ function AgentCard({
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 exit={{ scale: 0 }}
-                title="Used its token in the last few minutes"
+                title={t("accountsettings.agents.recentlyUsed")}
                 className="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-background bg-emerald-500"
               />
             )}
@@ -487,10 +492,11 @@ function AgentCard({
           <span className="flex items-center gap-1.5">
             <span className="truncate font-bold">{displayName(user)}</span>
             <AppBadge agent />
-            {a.public && <span className="rounded-full bg-muted px-1.5 py-px text-[0.6rem] font-bold text-muted-foreground uppercase">Public</span>}
+            {a.public && <span className="rounded-full bg-muted px-1.5 py-px text-[0.6rem] font-bold text-muted-foreground uppercase">{t("accountsettings.agents.public")}</span>}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
-            @{user.username} · <Count value={a.servers} /> {a.servers === 1 ? "server" : "servers"} · {a.lastActiveAt ? `active ${ago(toDate(a.lastActiveAt))}` : "never signed in"}
+            @{user.username} · <T k="accountsettings.agents.servers" values={{ count: <Count value={a.servers} /> }} count={a.servers} /> ·{" "}
+            {a.lastActiveAt ? t("accountsettings.agents.active", { when: ago(toDate(a.lastActiveAt)) }) : t("accountsettings.agents.neverSignedIn")}
           </span>
         </span>
         {busy === "save" && <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />}
@@ -514,7 +520,7 @@ function AgentCard({
                 />
                 <div className="flex min-w-0 flex-1 basis-56 flex-col gap-3">
                   <label className="flex flex-col gap-1">
-                    <span className="text-xs font-bold text-muted-foreground uppercase">Name</span>
+                    <span className="text-xs font-bold text-muted-foreground uppercase">{t("accountsettings.agents.name")}</span>
                     <motion.span animate={shake}>
                       <Input
                         value={name}
@@ -531,7 +537,7 @@ function AgentCard({
                   </label>
                   <label className="flex flex-col gap-1">
                     <span className="flex items-center justify-between text-xs font-bold text-muted-foreground uppercase">
-                      About
+                      {t("accountsettings.agents.about")}
                       <span className={cn("tabular-nums normal-case", bio.length > BIO_MAX * 0.9 && "text-amber-500")}>
                         <Count value={bio.length} /> / {BIO_MAX}
                       </span>
@@ -539,7 +545,7 @@ function AgentCard({
                     <Textarea
                       value={bio}
                       maxLength={BIO_MAX}
-                      placeholder="What it does, in Markdown"
+                      placeholder={t("accountsettings.agents.bioPlaceholder")}
                       onChange={(e) => setBio(e.target.value)}
                       onBlur={() => bio !== a.bio && void save({ bio })}
                       className="min-h-20 rounded-xl"
@@ -551,8 +557,8 @@ function AgentCard({
               <Toggle
                 checked={a.public}
                 onChange={(pub) => void save({ public: pub })}
-                label="Public"
-                hint="Anyone who manages a server can add it there. Off, only you can."
+                label={t("accountsettings.agents.public")}
+                hint={t("accountsettings.agents.publicHint")}
               />
 
               <div className="flex flex-wrap items-center gap-2">
@@ -569,14 +575,14 @@ function AgentCard({
                           className="flex items-center gap-1.5"
                         >
                           {added ? <CheckIcon strokeWidth={3} /> : busy === "add" ? <LoaderCircleIcon className="animate-spin" /> : <ServerIcon />}
-                          {added ? "Added" : "Add to a server"}
+                          {added ? t("accountsettings.agents.added") : t("accountsettings.agents.addToServer")}
                         </motion.span>
                       </AnimatePresence>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="max-h-72 w-64 overflow-y-auto">
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">Servers you manage</DropdownMenuLabel>
-                    {servers.length === 0 && <p className="px-2 py-1.5 text-sm text-muted-foreground">None yet: you need Manage server.</p>}
+                    <DropdownMenuLabel className="text-xs text-muted-foreground">{t("accountsettings.agents.managed")}</DropdownMenuLabel>
+                    {servers.length === 0 && <p className="px-2 py-1.5 text-sm text-muted-foreground">{t("accountsettings.agents.noManaged")}</p>}
                     {servers.map((s) => {
                       const here = inServer(s);
                       return (
@@ -593,27 +599,27 @@ function AgentCard({
                     <motion.span key="confirm" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} transition={SPRING} className="flex items-center gap-1">
                       <span className="flex items-center gap-1 px-1 text-xs font-bold">
                         <TriangleAlertIcon className="size-3.5 text-amber-500" />
-                        {confirm === "reset" ? "The old token stops working." : "It leaves every server; its messages stay."}
+                        {confirm === "reset" ? t("accountsettings.agents.resetWarning") : t("accountsettings.agents.deleteWarning")}
                       </span>
                       <Button type="button" size="sm" variant="destructive" className="h-8 rounded-full px-3 text-xs font-bold" onClick={() => void (confirm === "reset" ? reset() : remove())}>
-                        {confirm === "reset" ? "New token" : "Delete"}
+                        {confirm === "reset" ? t("accountsettings.agents.newToken") : t("accountsettings.agents.delete")}
                       </Button>
-                      <Button type="button" size="icon" variant="ghost" aria-label="Never mind" className="size-8 rounded-full" onClick={() => setConfirm(null)}>
+                      <Button type="button" size="icon" variant="ghost" aria-label={t("accountsettings.agents.neverMind")} className="size-8 rounded-full" onClick={() => setConfirm(null)}>
                         <XIcon />
                       </Button>
                     </motion.span>
                   ) : (
                     <motion.span key="actions" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={SPRING} className="flex gap-2">
                       <Button type="button" variant="ghost" size="sm" className="rounded-xl" disabled={!!busy} onClick={() => setConfirm("reset")}>
-                        <RefreshCwIcon className={cn(busy === "reset" && "animate-spin")} /> New token
+                        <RefreshCwIcon className={cn(busy === "reset" && "animate-spin")} /> {t("accountsettings.agents.newToken")}
                       </Button>
                       <Button type="button" variant="ghost" size="sm" className="rounded-xl text-destructive hover:text-destructive" onClick={() => setConfirm("delete")}>
-                        <Trash2Icon /> Delete
+                        <Trash2Icon /> {t("accountsettings.agents.delete")}
                       </Button>
                     </motion.span>
                   )}
                 </AnimatePresence>
-                <span className="ml-auto text-xs text-muted-foreground">Made {ago(toDate(a.createdAt))}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{t("accountsettings.agents.made", { when: ago(toDate(a.createdAt)) })}</span>
               </div>
             </div>
           </motion.div>
