@@ -803,7 +803,7 @@ async fn pins_name_records_and_never_their_content() {
         .unwrap();
     juan.device.process(&cid, &commit.data, true, &allowed).unwrap();
     let mut sent = Vec::new();
-    for text in ["one", "two", "three"] {
+    for text in ["one", "two", "three", "four"] {
         let sealed = juan.device.encrypt(&cid, text.as_bytes()).unwrap();
         let record = dms
             .post_message(authed(
@@ -871,6 +871,10 @@ async fn pins_name_records_and_never_their_content() {
     dms.pin_record(authed(&juan.token, pin_request(&cid, sent[1], true))).await.unwrap();
     dms.pin_record(authed(&juan.token, pin_request(&cid, sent[0], false))).await.unwrap();
     assert_eq!(pinned(&mut dms, &juan, &cid).await, [sent[1]]);
+    assert_eq!(pinned(&mut dms, &mika, &cid).await, [sent[0]]);
+    // The cap counts the pins each sees: Mika's hidden one leaves Juan room.
+    dms.pin_record(authed(&juan.token, pin_request(&cid, sent[3], true))).await.unwrap();
+    assert_eq!(pinned(&mut dms, &juan, &cid).await, [sent[3], sent[1]]);
     assert_eq!(pinned(&mut dms, &mika, &cid).await, [sent[0]]);
     let heard = tokio::time::timeout(std::time::Duration::from_secs(1), watch.next()).await;
     assert!(heard.is_err(), "Mika heard of Juan's pins: {heard:?}");

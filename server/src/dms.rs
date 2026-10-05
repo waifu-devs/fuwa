@@ -1040,7 +1040,8 @@ impl DmDb {
 
     /// Pins or unpins a live message record for `caller`, telling whoever
     /// the pin is shown to. Pinning one that's pinned already, or unpinning
-    /// one that isn't, changes nothing. At most `cap` pins in a conversation.
+    /// one that isn't, changes nothing. At most `cap` pins in a conversation
+    /// that the caller sees.
     ///
     /// `blocker` is set when the other person blocked the caller: then what
     /// the caller does never reaches them. A pin the caller makes is hidden
@@ -1124,8 +1125,9 @@ impl DmDb {
                     if let Some(cap) = cap {
                         let count = query_one(
                             conn,
-                            "SELECT count(*) FROM pins WHERE conversation_id = ?1",
-                            [conversation_id],
+                            "SELECT count(*) FROM pins
+                             WHERE conversation_id = ?1 AND (hidden_from IS NULL OR hidden_from != ?2)",
+                            (conversation_id, caller),
                             |r| r.get::<i64>(0),
                         )
                         .await?
